@@ -1,16 +1,16 @@
 use crate::components::icons::BookmarkIcon;
 use crate::stores::webbookmarks::{
-    delete_webbookmark, get_display_hashtags, get_domain, get_image, get_published_at,
-    get_title, get_url, is_archived, is_favorite, toggle_favorite,
+    delete_webbookmark, get_display_hashtags, get_domain, get_image, get_published_at, get_title,
+    get_url, is_archived, is_favorite, toggle_favorite,
 };
 use crate::utils::format_relative_time_or;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::consume_toast;
 #[cfg(not(feature = "web"))]
 use dioxus_primitives::toast::ToastOptions;
+use nostr_sdk::Event as NostrEvent;
 #[cfg(not(feature = "web"))]
 use std::time::Duration;
-use nostr_sdk::Event as NostrEvent;
 #[cfg(not(feature = "web"))]
 use url::Url;
 
@@ -26,10 +26,7 @@ fn redact_url_for_log(url: &str) -> String {
         .unwrap_or_else(|| "invalid-url".to_string())
 }
 #[component]
-pub fn WebBookmarkCard(
-    event: NostrEvent,
-    on_edit: Option<EventHandler<NostrEvent>>,
-) -> Element {
+pub fn WebBookmarkCard(event: NostrEvent, on_edit: Option<EventHandler<NostrEvent>>) -> Element {
     let url = get_url(&event);
     let title = get_title(&event);
     let description = if event.content.is_empty() {
@@ -47,24 +44,19 @@ pub fn WebBookmarkCard(
     let mut show_actions = use_signal(|| false);
     let toast = consume_toast();
     let domain = url.as_ref().map(|u| get_domain(u)).unwrap_or_default();
-    let full_url = url
-        .as_ref()
-        .map(|u| {
-            if u.starts_with("http://") || u.starts_with("https://") {
-                u.clone()
-            } else {
-                format!("https://{}", u)
-            }
-        });
+    let full_url = url.as_ref().map(|u| {
+        if u.starts_with("http://") || u.starts_with("https://") {
+            u.clone()
+        } else {
+            format!("https://{}", u)
+        }
+    });
     let display_title = title
         .or_else(|| url.clone())
         .unwrap_or_else(|| "Untitled Bookmark".to_string());
     let timestamp_str = published_at
         .map(|ts| format_relative_time_or(ts.as_secs(), "Unknown"))
-        .unwrap_or_else(|| format_relative_time_or(
-            event.created_at.as_secs(),
-            "Unknown",
-        ));
+        .unwrap_or_else(|| format_relative_time_or(event.created_at.as_secs(), "Unknown"));
     let handle_delete = {
         let event_clone = event.clone();
         let mut deleting = deleting;

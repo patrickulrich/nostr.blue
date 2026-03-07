@@ -12,8 +12,12 @@ use crate::utils::{build_thread_tree, event::is_voice_message};
 
 async fn fetch_main_note(event_id: EventId) -> std::result::Result<NostrEvent, String> {
     let filter = Filter::new().id(event_id);
-    let events = nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await?;
-    events.into_iter().next().ok_or("Event not found".to_string())
+    let events =
+        nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await?;
+    events
+        .into_iter()
+        .next()
+        .ok_or("Event not found".to_string())
 }
 
 /// Extract parent event IDs from note tags (NIP-10 lowercase 'e' and NIP-22 uppercase 'E')
@@ -53,12 +57,20 @@ async fn fetch_parents_by_ids(
 async fn fetch_replies(event_id: EventId) -> std::result::Result<Vec<NostrEvent>, String> {
     let event_id_hex = event_id.to_hex();
     let filter_lower = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::VoiceMessage, Kind::VoiceMessageReply])
+        .kinds(vec![
+            Kind::TextNote,
+            Kind::VoiceMessage,
+            Kind::VoiceMessageReply,
+        ])
         .event(event_id)
         .limit(100);
     let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
     let filter_upper = Filter::new()
-        .kinds(vec![Kind::VoiceMessage, Kind::VoiceMessageReply, Kind::Comment])
+        .kinds(vec![
+            Kind::VoiceMessage,
+            Kind::VoiceMessageReply,
+            Kind::Comment,
+        ])
         .custom_tag(upper_e_tag, event_id_hex)
         .limit(100);
     let mut all_replies = Vec::new();
@@ -107,18 +119,18 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
             error.set(None);
             crate::stores::profiles::PROFILE_CACHE.write().clear();
 
-            let event_id =
-                match EventId::from_bech32(&note_id_str).or_else(|_| EventId::from_hex(&note_id_str))
-                {
-                    Ok(id) => id,
-                    Err(e) => {
-                        error.set(Some(format!("Invalid note ID: {}", e)));
-                        loading.set(false);
-                        loading_parents.set(false);
-                        loading_replies.set(false);
-                        return;
-                    }
-                };
+            let event_id = match EventId::from_bech32(&note_id_str)
+                .or_else(|_| EventId::from_hex(&note_id_str))
+            {
+                Ok(id) => id,
+                Err(e) => {
+                    error.set(Some(format!("Invalid note ID: {}", e)));
+                    loading.set(false);
+                    loading_parents.set(false);
+                    loading_replies.set(false);
+                    return;
+                }
+            };
 
             let note_result = fetch_main_note(event_id).await;
             let parent_ids = match &note_result {

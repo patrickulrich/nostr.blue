@@ -2,12 +2,12 @@
 //!
 //! Dioxus GlobalSignal definitions for client state management.
 //! Following Dioxus patterns with section headers and doc comments.
+use super::contacts::EnrichedContact;
+use crate::stores::signer::SignerType;
 use dioxus::prelude::*;
 use nostr_sdk::Client;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use super::contacts::EnrichedContact;
-use crate::stores::signer::SignerType;
 /// Global Nostr client instance (None until initialized)
 pub static NOSTR_CLIENT: GlobalSignal<Option<Arc<Client>>> = Signal::global(|| None);
 /// Whether the client has finished initializing

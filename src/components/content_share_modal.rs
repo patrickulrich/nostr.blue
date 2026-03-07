@@ -1,6 +1,6 @@
 use crate::components::icons::{
-    ArrowLeftIcon, BarChartIcon, BookOpenIcon, CameraIcon, CheckIcon, CopyIcon,
-    Link2Icon, MessageCircleIcon, MusicIcon, RssIcon, SendIcon, ShareIcon,
+    ArrowLeftIcon, BarChartIcon, BookOpenIcon, CameraIcon, CheckIcon, CopyIcon, Link2Icon,
+    MessageCircleIcon, MusicIcon, RssIcon, SendIcon, ShareIcon,
 };
 use crate::components::{EmojiPicker, GifPicker, MediaUploader, PollCreatorModal};
 use crate::stores::nostr_client::HAS_SIGNER;
@@ -93,9 +93,7 @@ pub fn ContentShareModal(
     /// Handler to close the modal
     on_close: EventHandler<()>,
 ) -> Element {
-    let modal_id = use_signal(|| {
-        CONTENT_SHARE_MODAL_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
-    });
+    let modal_id = use_signal(|| CONTENT_SHARE_MODAL_ID_COUNTER.fetch_add(1, Ordering::Relaxed));
     let mut share_mode = use_signal(|| ShareMode::Main);
     let mut copied = use_signal(|| false);
     let mut nostr_text = use_signal(String::new);
@@ -114,13 +112,9 @@ pub fn ContentShareModal(
             if let Some(window) = web_sys::window() {
                 if let Some(document) = window.document() {
                     if let Some(element) = document.get_element_by_id(textarea_id) {
-                        if let Some(textarea) = element
-                            .dyn_ref::<web_sys::HtmlTextAreaElement>()
-                        {
-                            return textarea
-                                .selection_start()
-                                .unwrap_or(Some(0))
-                                .unwrap_or(0) as usize;
+                        if let Some(textarea) = element.dyn_ref::<web_sys::HtmlTextAreaElement>() {
+                            return textarea.selection_start().unwrap_or(Some(0)).unwrap_or(0)
+                                as usize;
                         }
                     }
                 }
@@ -150,7 +144,10 @@ pub fn ContentShareModal(
             let safe_pos = if current.is_char_boundary(pos) {
                 pos
             } else {
-                (0..=pos).rev().find(|&i| current.is_char_boundary(i)).unwrap_or(0)
+                (0..=pos)
+                    .rev()
+                    .find(|&i| current.is_char_boundary(i))
+                    .unwrap_or(0)
             };
             if safe_pos > 0 {
                 if let Some(prev_char) = current[..safe_pos].chars().last() {
@@ -175,7 +172,10 @@ pub fn ContentShareModal(
             let safe_pos = if current.is_char_boundary(pos) {
                 pos
             } else {
-                (0..=pos).rev().find(|&i| current.is_char_boundary(i)).unwrap_or(0)
+                (0..=pos)
+                    .rev()
+                    .find(|&i| current.is_char_boundary(i))
+                    .unwrap_or(0)
             };
             current.insert_str(safe_pos, &text);
             nostr_text.set(current);
@@ -227,8 +227,9 @@ pub fn ContentShareModal(
     let handle_share_to_nostr = move |_| {
         if !*HAS_SIGNER.read() {
             log::error!("Attempted to share to Nostr without a signer");
-            nostr_error
-                .set(Some("No signer available. Please log in first.".to_string()));
+            nostr_error.set(Some(
+                "No signer available. Please log in first.".to_string(),
+            ));
             return;
         }
         let text = nostr_text.read().trim().to_string();
@@ -241,8 +242,7 @@ pub fn ContentShareModal(
                 Some(c) => c,
                 None => {
                     log::error!("Client not initialized");
-                    nostr_error
-                        .set(Some("Failed to initialize Nostr client".to_string()));
+                    nostr_error.set(Some("Failed to initialize Nostr client".to_string()));
                     is_publishing.set(false);
                     return;
                 }
@@ -280,13 +280,10 @@ pub fn ContentShareModal(
                     Ok(pubkey) => pubkey.to_hex(),
                     Err(_) => {
                         log::error!("Invalid recipient pubkey: {}", manual_recipient);
-                        dm_error
-                            .set(
-                                Some(
-                                    "Invalid recipient. Please enter a valid npub, hex, or nostr: URI."
-                                        .to_string(),
-                                ),
-                            );
+                        dm_error.set(Some(
+                            "Invalid recipient. Please enter a valid npub, hex, or nostr: URI."
+                                .to_string(),
+                        ));
                         is_publishing.set(false);
                         return;
                     }

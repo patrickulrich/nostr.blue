@@ -13,11 +13,10 @@ pub fn PollOptionList(
     let add_option = move |_| {
         let mut current = options.read().clone();
         if current.len() < 10 {
-            current
-                .push(PollOptionData {
-                    id: generate_option_id(),
-                    text: String::new(),
-                });
+            current.push(PollOptionData {
+                id: generate_option_id(),
+                text: String::new(),
+            });
             on_change.call(current);
         }
     };

@@ -2,12 +2,8 @@
 //!
 //! Modal for entering password to decrypt encrypted private keys or
 //! to set a password for migrating unencrypted keys.
-use crate::components::dialog::{
-    DialogContent, DialogDescription, DialogRoot, DialogTitle,
-};
-use crate::stores::auth_store::{
-    cancel_password_prompt, restore_with_password, PASSWORD_PROMPT,
-};
+use crate::components::dialog::{DialogContent, DialogDescription, DialogRoot, DialogTitle};
+use crate::stores::auth_store::{cancel_password_prompt, restore_with_password, PASSWORD_PROMPT};
 use dioxus::prelude::*;
 /// Password entry modal for NIP-49 encrypted key decryption
 #[component]
@@ -32,9 +28,7 @@ pub fn PasswordModal() -> Element {
         if is_migration {
             let confirm = confirm_password.read().clone();
             if pwd != confirm {
-                PASSWORD_PROMPT.write().error = Some(
-                    "Passwords do not match".to_string(),
-                );
+                PASSWORD_PROMPT.write().error = Some("Passwords do not match".to_string());
                 return;
             }
             if let Some(err) = crate::utils::nip49::validate_password(&pwd) {

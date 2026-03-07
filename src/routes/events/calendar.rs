@@ -1,11 +1,8 @@
 //! Calendar Page
 //!
 //! NIP-52 Calendar Events with Day/Week/Month views
-use dioxus::prelude::*;
-use std::collections::HashSet;
 use crate::components::{
-    CalendarView, CalendarViewMode, CalendarViewSkeleton, ClientInitializing,
-    MiniCalendar,
+    CalendarView, CalendarViewMode, CalendarViewSkeleton, ClientInitializing, MiniCalendar,
 };
 use crate::routes::Route;
 use crate::stores::calendar_store::UnifiedEvent;
@@ -13,6 +10,8 @@ use crate::stores::{auth_store, calendar_store, nostr_client};
 use crate::utils::date_helpers::{get_event_date, get_today};
 use crate::utils::ics::{download_ics, export_events_to_ics};
 use crate::utils::nip52::CalendarEvent;
+use dioxus::prelude::*;
+use std::collections::HashSet;
 /// Calendar page component
 #[component]
 pub fn Calendar() -> Element {
@@ -44,9 +43,7 @@ pub fn Calendar() -> Element {
             .cloned()
             .collect::<Vec<_>>()
     });
-    let all_day_count = use_memo(move || {
-        events.read().iter().filter(|e| e.is_all_day()).count()
-    });
+    let all_day_count = use_memo(move || events.read().iter().filter(|e| e.is_all_day()).count());
     let timed_count = use_memo(move || {
         events
             .read()
@@ -54,11 +51,14 @@ pub fn Calendar() -> Element {
             .filter(|e| !e.is_all_day() && !e.is_livestream())
             .count()
     });
-    let livestream_count = use_memo(move || {
-        events.read().iter().filter(|e| e.is_livestream()).count()
-    });
+    let livestream_count =
+        use_memo(move || events.read().iter().filter(|e| e.is_livestream()).count());
     let filtered_event_dates = use_memo(move || {
-        filtered_events.read().iter().map(get_event_date).collect::<HashSet<String>>()
+        filtered_events
+            .read()
+            .iter()
+            .map(get_event_date)
+            .collect::<HashSet<String>>()
     });
     let is_logged_in = auth_store::get_pubkey().is_some();
     use_effect(move || {

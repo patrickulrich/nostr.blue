@@ -1,14 +1,14 @@
-use std::collections::HashSet;
-use std::rc::Rc;
-use std::time::Duration;
-use dioxus::prelude::*;
-use nostr_sdk::{Event as NostrEvent, Filter, Kind, Timestamp};
 use crate::components::{ClientInitializing, NoteCard};
 use crate::error::NostrBlueError;
 use crate::hooks::{use_infinite_scroll, use_mute_block_cache};
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, notifications as notif_store, profiles};
 use crate::utils::bolt11::parse_bolt11_amount;
+use dioxus::prelude::*;
+use nostr_sdk::{Event as NostrEvent, Filter, Kind, Timestamp};
+use std::collections::HashSet;
+use std::rc::Rc;
+use std::time::Duration;
 #[derive(Clone, Debug, PartialEq)]
 #[allow(dead_code)]
 enum NotificationType {
@@ -88,9 +88,13 @@ pub fn Notifications() -> Element {
                 | Some(auth_store::LoginMethod::RemoteSigner)
         ) || {
             #[cfg(feature = "mobile")]
-            { matches!(login_method, Some(auth_store::LoginMethod::AndroidSigner)) }
+            {
+                matches!(login_method, Some(auth_store::LoginMethod::AndroidSigner))
+            }
             #[cfg(not(feature = "mobile"))]
-            { false }
+            {
+                false
+            }
         };
         if requires_signer && !has_signer {
             log::debug!("Waiting for signer restoration before loading notifications...");
@@ -108,8 +112,10 @@ pub fn Notifications() -> Element {
 
             // Wait for relays before fetching (NIP-46 timing)
             nostr_client::wait_for_user_relays(
-                Duration::from_secs(5), "notifications_initial_load"
-            ).await;
+                Duration::from_secs(5),
+                "notifications_initial_load",
+            )
+            .await;
 
             // Abort if user changed during relay wait
             if auth_store::get_pubkey() != initial_pubkey {
@@ -210,11 +216,8 @@ pub fn Notifications() -> Element {
 
         spawn(async move {
             // Get existing IDs to avoid duplicates when loading more
-            let existing_ids: HashSet<nostr_sdk::EventId> = notifications
-                .peek()
-                .iter()
-                .map(get_event_id)
-                .collect();
+            let existing_ids: HashSet<nostr_sdk::EventId> =
+                notifications.peek().iter().map(get_event_id).collect();
             let mut seen_ids = existing_ids.clone();
             let initial_count = seen_ids.len();
 
@@ -449,32 +452,25 @@ fn render_notification(
 #[component]
 fn ReactionNotification(
     event: NostrEvent,
-    #[props(default = None)]
-    cached_muted_posts: Option<Rc<HashSet<String>>>,
-    #[props(default = None)]
-    cached_blocked_users: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
 ) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let mut reacted_post = use_signal(|| None::<NostrEvent>);
     let mut loading = use_signal(|| true);
     let reactor_pubkey = event.pubkey.to_string();
-    let custom_emoji_url = if event.content.starts_with(':')
-        && event.content.ends_with(':')
-    {
+    let custom_emoji_url = if event.content.starts_with(':') && event.content.ends_with(':') {
         let shortcode = event.content.trim_matches(':');
-        event
-            .tags
-            .iter()
-            .find_map(|tag| {
-                let slice = tag.as_slice();
-                if slice.first().map(|k| k == "emoji").unwrap_or(false)
-                    && slice.get(1).map(|s| s == shortcode).unwrap_or(false)
-                {
-                    slice.get(2).cloned()
-                } else {
-                    None
-                }
-            })
+        event.tags.iter().find_map(|tag| {
+            let slice = tag.as_slice();
+            if slice.first().map(|k| k == "emoji").unwrap_or(false)
+                && slice.get(1).map(|s| s == shortcode).unwrap_or(false)
+            {
+                slice.get(2).cloned()
+            } else {
+                None
+            }
+        })
     } else {
         None
     };
@@ -490,9 +486,9 @@ fn ReactionNotification(
         .iter()
         .find(|tag| {
             tag.kind()
-                == nostr_sdk::TagKind::SingleLetter(
-                    nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::E),
-                )
+                == nostr_sdk::TagKind::SingleLetter(nostr_sdk::SingleLetterTag::lowercase(
+                    nostr_sdk::Alphabet::E,
+                ))
         })
         .and_then(|tag| tag.content())
         .map(|s| s.to_string());
@@ -514,11 +510,8 @@ fn ReactionNotification(
             if let Some(eid) = event_id {
                 if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
                     let filter = Filter::new().id(event_id).limit(1);
-                    match nostr_client::fetch_events_aggregated(
-                        filter,
-                        Duration::from_secs(10),
-                    )
-                    .await
+                    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+                        .await
                     {
                         Ok(events) => {
                             if let Some(original_event) = events.into_iter().next() {
@@ -609,10 +602,8 @@ fn ReactionNotification(
 #[component]
 fn RepostNotification(
     event: NostrEvent,
-    #[props(default = None)]
-    cached_muted_posts: Option<Rc<HashSet<String>>>,
-    #[props(default = None)]
-    cached_blocked_users: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
 ) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let mut reposted_post = use_signal(|| None::<NostrEvent>);
@@ -623,9 +614,9 @@ fn RepostNotification(
         .iter()
         .find(|tag| {
             tag.kind()
-                == nostr_sdk::TagKind::SingleLetter(
-                    nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::E),
-                )
+                == nostr_sdk::TagKind::SingleLetter(nostr_sdk::SingleLetterTag::lowercase(
+                    nostr_sdk::Alphabet::E,
+                ))
         })
         .and_then(|tag| tag.content())
         .map(|s| s.to_string());
@@ -647,11 +638,8 @@ fn RepostNotification(
             if let Some(eid) = event_id {
                 if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
                     let filter = Filter::new().id(event_id).limit(1);
-                    match nostr_client::fetch_events_aggregated(
-                        filter,
-                        Duration::from_secs(10),
-                    )
-                    .await
+                    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+                        .await
                     {
                         Ok(events) => {
                             if let Some(original_event) = events.into_iter().next() {
@@ -734,25 +722,22 @@ fn RepostNotification(
 #[component]
 fn ZapNotification(
     event: NostrEvent,
-    #[props(default = None)]
-    cached_muted_posts: Option<Rc<HashSet<String>>>,
-    #[props(default = None)]
-    cached_blocked_users: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
 ) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let mut zapped_post = use_signal(|| None::<NostrEvent>);
     let mut loading = use_signal(|| true);
-    let zapper_pubkey = extract_zapper_pubkey(&event)
-        .unwrap_or_else(|| event.pubkey.to_string());
+    let zapper_pubkey = extract_zapper_pubkey(&event).unwrap_or_else(|| event.pubkey.to_string());
     let zap_amount_sats = extract_zap_amount(&event);
     let zapped_event_id = event
         .tags
         .iter()
         .find(|tag| {
             tag.kind()
-                == nostr_sdk::TagKind::SingleLetter(
-                    nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::E),
-                )
+                == nostr_sdk::TagKind::SingleLetter(nostr_sdk::SingleLetterTag::lowercase(
+                    nostr_sdk::Alphabet::E,
+                ))
         })
         .and_then(|tag| tag.content())
         .map(|s| s.to_string());
@@ -774,11 +759,8 @@ fn ZapNotification(
             if let Some(eid) = event_id {
                 if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
                     let filter = Filter::new().id(event_id).limit(1);
-                    match nostr_client::fetch_events_aggregated(
-                        filter,
-                        Duration::from_secs(10),
-                    )
-                    .await
+                    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+                        .await
                     {
                         Ok(events) => {
                             if let Some(original_event) = events.into_iter().next() {
@@ -866,21 +848,15 @@ fn ZapNotification(
 /// Helper to extract the actual zapper's pubkey from a zap receipt event (kind 9735)
 /// The event.pubkey is the Lightning node's pubkey, the actual zapper is in the description
 fn extract_zapper_pubkey(event: &NostrEvent) -> Option<String> {
-    if let Some(description_tag) = event
-        .tags
-        .iter()
-        .find(|tag| {
-            tag.as_slice().first().map(|k| k == "description").unwrap_or(false)
-        })
-    {
+    if let Some(description_tag) = event.tags.iter().find(|tag| {
+        tag.as_slice()
+            .first()
+            .map(|k| k == "description")
+            .unwrap_or(false)
+    }) {
         if let Some(description) = description_tag.as_slice().get(1) {
-            if let Ok(zap_request) = serde_json::from_str::<
-                serde_json::Value,
-            >(description) {
-                if let Some(pubkey_str) = zap_request
-                    .get("pubkey")
-                    .and_then(|p| p.as_str())
-                {
+            if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(description) {
+                if let Some(pubkey_str) = zap_request.get("pubkey").and_then(|p| p.as_str()) {
                     return Some(pubkey_str.to_string());
                 }
             }
@@ -890,30 +866,25 @@ fn extract_zapper_pubkey(event: &NostrEvent) -> Option<String> {
 }
 /// Helper to extract zap amount in sats from a zap receipt event (kind 9735)
 fn extract_zap_amount(event: &NostrEvent) -> Option<u64> {
-    if let Some(bolt11_tag) = event
-        .tags
-        .iter()
-        .find(|tag| { tag.as_slice().first().map(|k| k == "bolt11").unwrap_or(false) })
-    {
+    if let Some(bolt11_tag) = event.tags.iter().find(|tag| {
+        tag.as_slice()
+            .first()
+            .map(|k| k == "bolt11")
+            .unwrap_or(false)
+    }) {
         if let Some(bolt11) = bolt11_tag.as_slice().get(1) {
             return parse_bolt11_amount(bolt11);
         }
     }
-    if let Some(description_tag) = event
-        .tags
-        .iter()
-        .find(|tag| {
-            tag.as_slice().first().map(|k| k == "description").unwrap_or(false)
-        })
-    {
+    if let Some(description_tag) = event.tags.iter().find(|tag| {
+        tag.as_slice()
+            .first()
+            .map(|k| k == "description")
+            .unwrap_or(false)
+    }) {
         if let Some(description) = description_tag.as_slice().get(1) {
-            if let Ok(zap_request) = serde_json::from_str::<
-                serde_json::Value,
-            >(description) {
-                if let Some(amount_msat) = zap_request
-                    .get("amount")
-                    .and_then(|a| a.as_u64())
-                {
+            if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(description) {
+                if let Some(amount_msat) = zap_request.get("amount").and_then(|a| a.as_u64()) {
                     return Some(amount_msat / 1000);
                 }
             }
@@ -998,7 +969,12 @@ where
         .map_err(|e| NostrBlueError::Other(format!("Invalid pubkey: {}", e)))?;
 
     let mut filter = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Reaction, Kind::ZapReceipt])
+        .kinds(vec![
+            Kind::TextNote,
+            Kind::Repost,
+            Kind::Reaction,
+            Kind::ZapReceipt,
+        ])
         .pubkey(pubkey)
         .limit(100);
 
@@ -1009,17 +985,14 @@ where
     let mut count = 0;
     let pubkey_for_classify = pubkey_str.clone();
 
-    let stream_result = nostr_client::stream_events_immediate(
-        filter,
-        Duration::from_secs(10),
-        |event| {
+    let stream_result =
+        nostr_client::stream_events_immediate(filter, Duration::from_secs(10), |event| {
             if let Some(notif) = classify_notification(&event, &pubkey_for_classify) {
                 on_notification(notif);
                 count += 1;
             }
-        },
-    )
-    .await;
+        })
+        .await;
 
     if let Err(e) = stream_result {
         log::error!("Failed to stream notifications: {:?}", e);
@@ -1031,9 +1004,7 @@ where
 }
 
 #[allow(dead_code)]
-async fn load_notifications(
-    until: Option<u64>,
-) -> Result<Vec<NotificationType>, NostrBlueError> {
+async fn load_notifications(until: Option<u64>) -> Result<Vec<NotificationType>, NostrBlueError> {
     let client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
@@ -1041,12 +1012,21 @@ async fn load_notifications(
         .clone();
     nostr_client::ensure_relays_ready(&client).await;
     let pubkey_str = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
-    log::info!("Loading notifications for {} (until: {:?})", pubkey_str, until);
+    log::info!(
+        "Loading notifications for {} (until: {:?})",
+        pubkey_str,
+        until
+    );
     let pubkey = nostr_sdk::PublicKey::parse(&pubkey_str)
         .map_err(|e| NostrBlueError::Other(format!("Invalid pubkey: {}", e)))?;
     let mut all_notifications = Vec::new();
     let mut filter = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Reaction, Kind::ZapReceipt])
+        .kinds(vec![
+            Kind::TextNote,
+            Kind::Repost,
+            Kind::Reaction,
+            Kind::ZapReceipt,
+        ])
         .pubkey(pubkey)
         .limit(100);
     if let Some(until_ts) = until {
@@ -1110,15 +1090,12 @@ async fn prefetch_notification_authors(notifications: &[NotificationType]) {
     if notifications.is_empty() {
         return;
     }
-    let pubkeys = profile_prefetch::extract_pubkeys(
-        notifications,
-        |notif| match notif {
-            NotificationType::Mention(e) => e.pubkey,
-            NotificationType::Reply(e) => e.pubkey,
-            NotificationType::Reaction(e) => e.pubkey,
-            NotificationType::Repost(e) => e.pubkey,
-            NotificationType::Zap(e) => e.pubkey,
-        },
-    );
+    let pubkeys = profile_prefetch::extract_pubkeys(notifications, |notif| match notif {
+        NotificationType::Mention(e) => e.pubkey,
+        NotificationType::Reply(e) => e.pubkey,
+        NotificationType::Reaction(e) => e.pubkey,
+        NotificationType::Repost(e) => e.pubkey,
+        NotificationType::Zap(e) => e.pubkey,
+    });
     profile_prefetch::prefetch_pubkeys(pubkeys).await;
 }

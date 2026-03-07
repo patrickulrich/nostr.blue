@@ -5,12 +5,8 @@ use nostr::nips::nip73::ExternalContentId;
 use std::borrow::Cow;
 
 /// Create a new topic post (kind 1111 with NIP-73 hashtag external content)
-pub async fn create_topic_post(
-    topic: &str,
-    content: &str,
-) -> std::result::Result<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+pub async fn create_topic_post(topic: &str, content: &str) -> std::result::Result<String, String> {
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -26,7 +22,11 @@ pub async fn create_topic_post(
         .await
         .map_err(|e| format!("Failed to publish topic post: {}", e))?;
 
-    log::info!("Topic post published in #{}: {}", topic, output.id().to_hex());
+    log::info!(
+        "Topic post published in #{}: {}",
+        topic,
+        output.id().to_hex()
+    );
     Ok(output.id().to_hex())
 }
 
@@ -35,16 +35,15 @@ pub async fn reply_to_topic_post(
     parent: &TopicPost,
     content: &str,
 ) -> std::result::Result<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
 
-    let parent_id = EventId::from_hex(&parent.id)
-        .map_err(|e| format!("Invalid parent event ID: {}", e))?;
-    let parent_pk = PublicKey::from_hex(&parent.pubkey)
-        .map_err(|e| format!("Invalid parent pubkey: {}", e))?;
+    let parent_id =
+        EventId::from_hex(&parent.id).map_err(|e| format!("Invalid parent event ID: {}", e))?;
+    let parent_pk =
+        PublicKey::from_hex(&parent.pubkey).map_err(|e| format!("Invalid parent pubkey: {}", e))?;
 
     // Parent event as comment_to (generates lowercase e/k/p tags)
     let comment_to = CommentTarget::event(parent_id, Kind::Comment, Some(parent_pk), None);
@@ -69,16 +68,13 @@ pub async fn vote_on_post(
     post: &TopicPost,
     direction: VoteDirection,
 ) -> std::result::Result<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
 
-    let event_id = EventId::from_hex(&post.id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
-    let pubkey = PublicKey::from_hex(&post.pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let event_id = EventId::from_hex(&post.id).map_err(|e| format!("Invalid event ID: {}", e))?;
+    let pubkey = PublicKey::from_hex(&post.pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     let target = ReactionTarget {
         event_id,
@@ -146,8 +142,7 @@ pub async fn unsubscribe_from_topic(topic: &str) -> std::result::Result<(), Stri
 
 /// Publish a kind 10073 replaceable event with the given topic subscriptions
 pub async fn update_subscriptions(topics: &[String]) -> std::result::Result<(), String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -163,8 +158,7 @@ pub async fn update_subscriptions(topics: &[String]) -> std::result::Result<(), 
         })
         .collect();
 
-    let builder = EventBuilder::new(Kind::Custom(KIND_TOPIC_SUBSCRIPTION), "")
-        .tags(tags);
+    let builder = EventBuilder::new(Kind::Custom(KIND_TOPIC_SUBSCRIPTION), "").tags(tags);
 
     client
         .send_event_builder(builder)

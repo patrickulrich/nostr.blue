@@ -1,3 +1,7 @@
+use crate::services::profile_search::{
+    get_contact_pubkeys, search_cached_profiles, search_profiles, ProfileSearchResult,
+};
+use crate::utils::is_valid_http_url;
 use dioxus::prelude::Event as DioxusEvent;
 use dioxus::prelude::*;
 use dioxus_core::Task;
@@ -5,10 +9,6 @@ use nostr_sdk::prelude::*;
 use std::rc::Rc;
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
-use crate::services::profile_search::{
-    get_contact_pubkeys, search_cached_profiles, search_profiles, ProfileSearchResult,
-};
-use crate::utils::is_valid_http_url;
 /// Groups autocomplete-related signals to reduce parameter count in helper functions
 #[derive(Clone, Copy)]
 struct AutocompleteState {
@@ -68,9 +68,7 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
     let mut show_below = use_signal(|| true);
     #[allow(unused_mut)]
     let mut is_mobile = use_signal(|| false);
-    let textarea_id = use_signal(|| Rc::new(
-        format!("mention-textarea-{}", uuid::Uuid::new_v4()),
-    ));
+    let textarea_id = use_signal(|| Rc::new(format!("mention-textarea-{}", uuid::Uuid::new_v4())));
     let mut contact_pubkeys = use_signal(Vec::<PublicKey>::new);
     use_effect(move || {
         spawn(async move {
@@ -120,12 +118,10 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
                     #[cfg(feature = "web")]
                     {
                         use dioxus::document;
-                        let _ = document::eval(
-                            &format!(
-                                r#"document.getElementById('mention-option-{}')?.scrollIntoView({{ block: 'nearest', behavior: 'smooth' }})"#,
-                                new_index,
-                            ),
-                        );
+                        let _ = document::eval(&format!(
+                            r#"document.getElementById('mention-option-{}')?.scrollIntoView({{ block: 'nearest', behavior: 'smooth' }})"#,
+                            new_index,
+                        ));
                     }
                 }
             }
@@ -138,12 +134,10 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
                     #[cfg(feature = "web")]
                     {
                         use dioxus::document;
-                        let _ = document::eval(
-                            &format!(
-                                r#"document.getElementById('mention-option-{}')?.scrollIntoView({{ block: 'nearest', behavior: 'smooth' }})"#,
-                                new_index,
-                            ),
-                        );
+                        let _ = document::eval(&format!(
+                            r#"document.getElementById('mention-option-{}')?.scrollIntoView({{ block: 'nearest', behavior: 'smooth' }})"#,
+                            new_index,
+                        ));
                     }
                 }
             }
@@ -256,16 +250,13 @@ fn detect_mention(
         state.show.set(true);
         state.selected_index.set(0);
         let contacts = contact_pubkeys.read().clone();
-        let cached_results = search_cached_profiles(
-            &query,
-            10,
-            &contacts,
-            thread_pubkeys,
-        );
+        let cached_results = search_cached_profiles(&query, 10, &contacts, thread_pubkeys);
         state.results.set(cached_results.clone());
         log::debug!(
             "Autocomplete search for '{}': found {} results ({} thread participants)",
-            query, cached_results.len(), thread_pubkeys.len()
+            query,
+            cached_results.len(),
+            thread_pubkeys.len()
         );
         if query.len() >= 3 && cached_results.len() < 5 {
             state.is_searching.set(true);
@@ -288,7 +279,8 @@ fn detect_mention(
                         } else {
                             log::debug!(
                                 "Ignoring stale search results for '{}' (current query: '{}')",
-                                query_snapshot, query_signal.read()
+                                query_snapshot,
+                                query_signal.read()
                             );
                         }
                     }
@@ -324,8 +316,7 @@ fn insert_mention(
     on_input: EventHandler<String>,
     mention_start_pos: usize,
     query_len: usize,
-    #[allow(unused_variables)]
-    textarea_id: String,
+    #[allow(unused_variables)] textarea_id: String,
     mut show_autocomplete: Signal<bool>,
     external_cursor_position: Option<Signal<usize>>,
 ) {
@@ -335,9 +326,9 @@ fn insert_mention(
             "wss://nos.lol",
             "wss://relay.snort.social",
         ]
-            .iter()
-            .filter_map(|r| nostr_sdk::RelayUrl::parse(r).ok())
-            .collect();
+        .iter()
+        .filter_map(|r| nostr_sdk::RelayUrl::parse(r).ok())
+        .collect();
         let nprofile = nips::nip19::Nip19Profile::new(profile.pubkey, relay_hints);
         let mention = match nprofile.to_bech32() {
             Ok(bech32) => format!("nostr:{}", bech32),
@@ -352,7 +343,8 @@ fn insert_mention(
         {
             log::warn!(
                 "Mention start position {} is invalid for content of length {}",
-                mention_start_pos, current_content.len()
+                mention_start_pos,
+                current_content.len()
             );
             show_autocomplete.set(false);
             return;
@@ -380,18 +372,11 @@ fn insert_mention(
             if let Some(window) = web_sys::window() {
                 if let Some(document) = window.document() {
                     if let Some(element) = document.get_element_by_id(&textarea_id) {
-                        if let Ok(textarea) = element
-                            .dyn_into::<web_sys::HtmlTextAreaElement>()
-                        {
-                            let new_cursor_utf16_pos = utf8_to_utf16_index(
-                                &new_content,
-                                new_cursor_byte_pos,
-                            ) as u32;
+                        if let Ok(textarea) = element.dyn_into::<web_sys::HtmlTextAreaElement>() {
+                            let new_cursor_utf16_pos =
+                                utf8_to_utf16_index(&new_content, new_cursor_byte_pos) as u32;
                             let _ = textarea
-                                .set_selection_range(
-                                    new_cursor_utf16_pos,
-                                    new_cursor_utf16_pos,
-                                );
+                                .set_selection_range(new_cursor_utf16_pos, new_cursor_utf16_pos);
                             let _ = textarea.focus();
                         }
                     }
@@ -436,11 +421,8 @@ fn get_cursor_position(textarea_id: &str) -> usize {
         if let Some(window) = web_sys::window() {
             if let Some(document) = window.document() {
                 if let Some(element) = document.get_element_by_id(textarea_id) {
-                    if let Ok(textarea) = element
-                        .dyn_into::<web_sys::HtmlTextAreaElement>()
-                    {
-                        return textarea.selection_start().unwrap_or(None).unwrap_or(0)
-                            as usize;
+                    if let Ok(textarea) = element.dyn_into::<web_sys::HtmlTextAreaElement>() {
+                        return textarea.selection_start().unwrap_or(None).unwrap_or(0) as usize;
                     }
                 }
             }
@@ -480,19 +462,14 @@ fn update_dropdown_position(
                     let dropdown_height = if is_mobile_view { 200.0 } else { 300.0 };
                     if bottom_space >= dropdown_height {
                         show_below.set(true);
-                        dropdown_top
-                            .set(rect.bottom() + window.scroll_y().unwrap_or(0.0));
+                        dropdown_top.set(rect.bottom() + window.scroll_y().unwrap_or(0.0));
                     } else if top_space >= dropdown_height {
                         show_below.set(false);
                         dropdown_top
-                            .set(
-                                rect.top() + window.scroll_y().unwrap_or(0.0)
-                                    - dropdown_height,
-                            );
+                            .set(rect.top() + window.scroll_y().unwrap_or(0.0) - dropdown_height);
                     } else {
                         show_below.set(true);
-                        dropdown_top
-                            .set(rect.bottom() + window.scroll_y().unwrap_or(0.0));
+                        dropdown_top.set(rect.bottom() + window.scroll_y().unwrap_or(0.0));
                     }
                     dropdown_left.set(rect.left() + window.scroll_x().unwrap_or(0.0));
                 }

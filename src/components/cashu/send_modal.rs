@@ -108,22 +108,15 @@ pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
             }
             if is_p2pk {
                 if recipient.is_empty() {
-                    error_message
-                        .set(
-                            Some(
-                                "Please enter a recipient npub or public key".to_string(),
-                            ),
-                        );
+                    error_message.set(Some(
+                        "Please enter a recipient npub or public key".to_string(),
+                    ));
                     return;
                 }
                 if PublicKey::parse(&recipient).is_err() {
-                    error_message
-                        .set(
-                            Some(
-                                "Invalid pubkey format. Use npub1... or 64-char hex"
-                                    .to_string(),
-                            ),
-                        );
+                    error_message.set(Some(
+                        "Invalid pubkey format. Use npub1... or 64-char hex".to_string(),
+                    ));
                     return;
                 }
             }

@@ -157,13 +157,7 @@ pub async fn fetch_podcast_feed(url: &str) -> Result<RssPodcast, String> {
         .await
         .map_err(|e| format!("Failed to fetch RSS feed from {}: {}", fetch_url, e))?;
     if !response.status().is_success() {
-        return Err(
-            format!(
-                "HTTP {} from {}",
-                response.status(),
-                fetch_url,
-            ),
-        );
+        return Err(format!("HTTP {} from {}", response.status(), fetch_url,));
     }
     let xml = response
         .text()
@@ -264,9 +258,8 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
                             for attr in e.attributes().flatten() {
                                 let key = String::from_utf8_lossy(attr.key.as_ref());
                                 if key == "url" {
-                                    ep.chapters_url = Some(
-                                        String::from_utf8_lossy(&attr.value).to_string(),
-                                    );
+                                    ep.chapters_url =
+                                        Some(String::from_utf8_lossy(&attr.value).to_string());
                                 }
                             }
                         }
@@ -390,15 +383,13 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
                 let text = String::from_utf8_lossy(e.as_ref()).to_string();
                 if in_item {
                     if let Some(ref mut ep) = current_episode {
-                        if current_element == "description"
-                            || current_element == "content:encoded"
+                        if current_element == "description" || current_element == "content:encoded"
                         {
                             ep.description = Some(text);
                         }
                     }
                 } else if in_channel
-                    && (current_element == "description"
-                        || current_element == "content:encoded")
+                    && (current_element == "description" || current_element == "content:encoded")
                 {
                     podcast.description = Some(text);
                 }
@@ -450,7 +441,10 @@ pub async fn fetch_transcript(transcript: &TranscriptRef) -> Result<String, Stri
     if !response.status().is_success() {
         return Err(format!("HTTP {}", response.status()));
     }
-    response.text().await.map_err(|e| format!("Failed to read transcript: {}", e))
+    response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read transcript: {}", e))
 }
 /// Parse duration string to seconds
 /// Supports formats: "HH:MM:SS", "MM:SS", "SS", or numeric seconds
@@ -592,9 +586,7 @@ fn parse_trailer_element(e: &quick_xml::events::BytesStart<'_>) -> TrailerInfo {
     }
     trailer
 }
-fn parse_alternate_enclosure_element(
-    e: &quick_xml::events::BytesStart<'_>,
-) -> AlternateEnclosure {
+fn parse_alternate_enclosure_element(e: &quick_xml::events::BytesStart<'_>) -> AlternateEnclosure {
     let mut enclosure = AlternateEnclosure {
         url: String::new(),
         enclosure_type: "audio/mpeg".to_string(),

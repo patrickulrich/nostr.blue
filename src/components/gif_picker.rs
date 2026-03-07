@@ -1,8 +1,7 @@
 use crate::components::gif_upload_modal::GifUploadModal;
 use crate::stores::gif_store::{
-    add_recent_gif, load_initial_gifs, load_more_gifs, search_gifs,
-    GifResultsStoreStoreExt, RecentGifsStoreStoreExt, GIF_LOADING, GIF_RESULTS,
-    RECENT_GIFS,
+    add_recent_gif, load_initial_gifs, load_more_gifs, search_gifs, GifResultsStoreStoreExt,
+    RecentGifsStoreStoreExt, GIF_LOADING, GIF_RESULTS, RECENT_GIFS,
 };
 use dioxus::prelude::*;
 #[derive(Props, Clone, PartialEq)]

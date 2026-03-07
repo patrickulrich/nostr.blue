@@ -65,12 +65,18 @@ pub fn ZapDistribution(
     // Manage selected pubkeys for the user picker
     let selected_pubkeys = use_signal({
         let deduped_splits = deduped_splits.clone();
-        move || deduped_splits.iter().map(|(pk, _)| pk.clone()).collect::<Vec<String>>()
+        move || {
+            deduped_splits
+                .iter()
+                .map(|(pk, _)| pk.clone())
+                .collect::<Vec<String>>()
+        }
     });
 
     // Pure allocation: largest-remainder method to avoid rounding loss
     let compute_allocations = {
-        let weight_map: std::collections::HashMap<String, u64> = deduped_splits.iter().cloned().collect();
+        let weight_map: std::collections::HashMap<String, u64> =
+            deduped_splits.iter().cloned().collect();
         move |pubkeys: &[String], amount: u64| -> Vec<(String, u64, u64)> {
             let weights: Vec<u64> = pubkeys
                 .iter()
@@ -138,19 +144,31 @@ pub fn ZapDistribution(
     let preset_amounts = [100u64, 500, 1000, 5000, 10000, 50000];
 
     let handle_send = move |_| {
-        if *is_sending.peek() { return; }
+        if *is_sending.peek() {
+            return;
+        }
         // Resolve lud16 from profile cache at send time
         let recips = recipients.read().clone();
         let sendable: Vec<(ZapRecipient, String)> = recips
             .into_iter()
-            .filter(|r| r.amount > 0 && r.status != PaymentStatus::Success && !matches!(r.status, PaymentStatus::Timeout(_)))
+            .filter(|r| {
+                r.amount > 0
+                    && r.status != PaymentStatus::Success
+                    && !matches!(r.status, PaymentStatus::Timeout(_))
+            })
             .filter_map(|r| {
-                let lud16 = PROFILE_CACHE.read().peek(&r.pubkey).and_then(|p| p.lud16.clone())?;
+                let lud16 = PROFILE_CACHE
+                    .read()
+                    .peek(&r.pubkey)
+                    .and_then(|p| p.lud16.clone())?;
                 Some((r, lud16))
             })
             .collect();
         if sendable.is_empty() {
-            toast.warning("No recipients with Lightning addresses found".to_string(), ToastOptions::new());
+            toast.warning(
+                "No recipients with Lightning addresses found".to_string(),
+                ToastOptions::new(),
+            );
             return;
         }
         is_sending.set(true);
@@ -172,10 +190,14 @@ pub fn ZapDistribution(
                 let invoice_result = match select(
                     Box::pin(lnurl::get_invoice_from_lud16(lud16, recip.amount, None)),
                     Box::pin(crate::platform::timer::sleep_ms(30_000)),
-                ).await {
+                )
+                .await
+                {
                     Either::Left((Ok(inv), _)) => Ok(inv),
                     Either::Left((Err(e), _)) => Err(PaymentStatus::Failed(format!("{}", e))),
-                    Either::Right(_) => Err(PaymentStatus::Failed("Invoice request timed out after 30s".to_string())),
+                    Either::Right(_) => Err(PaymentStatus::Failed(
+                        "Invoice request timed out after 30s".to_string(),
+                    )),
                 };
                 match invoice_result {
                     Ok(invoice) => {
@@ -183,26 +205,36 @@ pub fn ZapDistribution(
                         match select(
                             Box::pin(nwc_store::pay_invoice(invoice)),
                             Box::pin(crate::platform::timer::sleep_ms(30_000)),
-                        ).await {
+                        )
+                        .await
+                        {
                             Either::Left((Ok(_), _)) => {
                                 success_count += 1;
                                 let mut recips = recipients.write();
-                                if let Some(r) = recips.iter_mut().find(|r| r.pubkey == recip.pubkey) {
+                                if let Some(r) =
+                                    recips.iter_mut().find(|r| r.pubkey == recip.pubkey)
+                                {
                                     r.status = PaymentStatus::Success;
                                 }
                             }
                             Either::Left((Err(e), _)) => {
                                 fail_count += 1;
                                 let mut recips = recipients.write();
-                                if let Some(r) = recips.iter_mut().find(|r| r.pubkey == recip.pubkey) {
+                                if let Some(r) =
+                                    recips.iter_mut().find(|r| r.pubkey == recip.pubkey)
+                                {
                                     r.status = PaymentStatus::Failed(e);
                                 }
                             }
                             Either::Right(_) => {
                                 fail_count += 1;
                                 let mut recips = recipients.write();
-                                if let Some(r) = recips.iter_mut().find(|r| r.pubkey == recip.pubkey) {
-                                    r.status = PaymentStatus::Timeout("Payment timed out after 30s".to_string());
+                                if let Some(r) =
+                                    recips.iter_mut().find(|r| r.pubkey == recip.pubkey)
+                                {
+                                    r.status = PaymentStatus::Timeout(
+                                        "Payment timed out after 30s".to_string(),
+                                    );
                                 }
                             }
                         }
@@ -218,9 +250,15 @@ pub fn ZapDistribution(
             }
             is_sending.set(false);
             if fail_count == 0 {
-                toast.success(format!("Zapped {} recipients!", success_count), ToastOptions::new());
+                toast.success(
+                    format!("Zapped {} recipients!", success_count),
+                    ToastOptions::new(),
+                );
             } else {
-                toast.warning(format!("{} sent, {} failed", success_count, fail_count), ToastOptions::new());
+                toast.warning(
+                    format!("{} sent, {} failed", success_count, fail_count),
+                    ToastOptions::new(),
+                );
             }
         });
     };

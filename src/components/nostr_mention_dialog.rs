@@ -2,19 +2,17 @@
 //!
 //! A dialog for searching and inserting Nostr references (npub, note, naddr).
 //! Provides tabbed interface for searching users, notes, and articles.
-use dioxus::prelude::*;
-use dioxus_core::Task;
-use nostr_sdk::prelude::*;
 use crate::components::icons::SearchIcon;
 use crate::components::modal::{Modal, ModalHeader};
-use crate::services::content_search::{
-    search_articles, search_text_notes, ContentSearchResult,
-};
+use crate::services::content_search::{search_articles, search_text_notes, ContentSearchResult};
 use crate::services::profile_search::{
     get_contact_pubkeys, search_cached_profiles, search_profiles,
 };
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::format_time_ago;
+use dioxus::prelude::*;
+use dioxus_core::Task;
+use nostr_sdk::prelude::*;
 /// Selection result from the mention dialog
 #[derive(Clone, Debug)]
 pub struct MentionSelection {
@@ -229,13 +227,11 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
             .unwrap_or_else(|_| profile.pubkey.to_hex());
         let uri = format!("nostr:{}", npub);
         let display_text = profile.get_display_name();
-        props
-            .on_select
-            .call(MentionSelection {
-                uri,
-                display_text,
-                mention_type: MentionType::User,
-            });
+        props.on_select.call(MentionSelection {
+            uri,
+            display_text,
+            mention_type: MentionType::User,
+        });
         open.set(false);
     };
     let mut handle_note_select = move |result: ContentSearchResult| {
@@ -245,14 +241,16 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
             .unwrap_or_else(|_| result.event.id.to_hex());
         let uri = format!("nostr:{}", nevent);
         let display_text = result.event.content.chars().take(50).collect::<String>()
-            + if result.event.content.len() > 50 { "..." } else { "" };
-        props
-            .on_select
-            .call(MentionSelection {
-                uri,
-                display_text,
-                mention_type: MentionType::Note,
-            });
+            + if result.event.content.len() > 50 {
+                "..."
+            } else {
+                ""
+            };
+        props.on_select.call(MentionSelection {
+            uri,
+            display_text,
+            mention_type: MentionType::Note,
+        });
         open.set(false);
     };
     let mut handle_article_select = move |result: ContentSearchResult| {
@@ -264,8 +262,8 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
             .and_then(|t| t.content())
             .map(String::from)
             .unwrap_or_default();
-        let coordinate = Coordinate::new(Kind::from(30023), result.event.pubkey)
-            .identifier(d_tag.clone());
+        let coordinate =
+            Coordinate::new(Kind::from(30023), result.event.pubkey).identifier(d_tag.clone());
         let naddr = Nip19Coordinate::new(coordinate, vec![])
             .to_bech32()
             .unwrap_or_else(|_| result.event.id.to_hex());
@@ -278,13 +276,11 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
             .and_then(|t| t.content())
             .map(String::from)
             .unwrap_or_else(|| "Untitled".to_string());
-        props
-            .on_select
-            .call(MentionSelection {
-                uri,
-                display_text: title,
-                mention_type: MentionType::Article,
-            });
+        props.on_select.call(MentionSelection {
+            uri,
+            display_text: title,
+            mention_type: MentionType::Article,
+        });
         open.set(false);
     };
     let close_modal = move |_| {

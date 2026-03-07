@@ -180,7 +180,11 @@ fn TranscriptView(props: TranscriptViewProps) -> Element {
             .map(|(idx, _)| idx)
             .collect()
     };
-    let match_count = if search_text.is_empty() { 0 } else { filtered_indices.len() };
+    let match_count = if search_text.is_empty() {
+        0
+    } else {
+        filtered_indices.len()
+    };
     use_effect(move || {
         let auto_scroll = *auto_scroll_enabled.read();
         let current = *current_idx_signal.read();
@@ -188,9 +192,8 @@ fn TranscriptView(props: TranscriptViewProps) -> Element {
         if auto_scroll && current != previous {
             *prev_idx.borrow_mut() = current;
             if let Some(idx) = current {
-                let _ = document::eval(
-                    &format!(
-                        r#"
+                let _ = document::eval(&format!(
+                    r#"
                     (function() {{
                         const el = document.querySelector('[data-cue-index="{}"]');
                         if (el) {{
@@ -198,9 +201,8 @@ fn TranscriptView(props: TranscriptViewProps) -> Element {
                         }}
                     }})();
                     "#,
-                        idx,
-                    ),
-                );
+                    idx,
+                ));
             }
         }
     });
@@ -209,7 +211,11 @@ fn TranscriptView(props: TranscriptViewProps) -> Element {
             div { class: "text-center py-4 text-muted-foreground text-sm", "Transcript is empty." }
         };
     }
-    let max_height = if props.compact { "max-h-48" } else { "max-h-96" };
+    let max_height = if props.compact {
+        "max-h-48"
+    } else {
+        "max-h-96"
+    };
     rsx! {
         div { class: "space-y-2",
             div { class: "flex items-center justify-between gap-2",
@@ -524,9 +530,8 @@ fn parse_vtt(content: &str) -> Vec<TranscriptCue> {
             let parts: Vec<&str> = line.split("-->").collect();
             if parts.len() >= 2 {
                 let start_time = parse_vtt_timestamp(parts[0].trim());
-                let end_time = parse_vtt_timestamp(
-                    parts[1].split_whitespace().next().unwrap_or(""),
-                );
+                let end_time =
+                    parse_vtt_timestamp(parts[1].split_whitespace().next().unwrap_or(""));
                 let mut text_lines = Vec::new();
                 i += 1;
                 while i < lines.len() && !lines[i].trim().is_empty() {

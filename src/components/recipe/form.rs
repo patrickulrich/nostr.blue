@@ -1,9 +1,9 @@
 //! Recipe Form Component
 //! Complete form for creating or editing recipes
-use crate::components::media_uploader::MediaUploader;
 use super::directions_editor::RecipeDirectionsEditor;
 use super::ingredients_editor::RecipeIngredientsEditor;
 use super::tag_selector::RecipeTagSelector;
+use crate::components::media_uploader::MediaUploader;
 use crate::stores::recipe_store::CachedRecipe;
 use dioxus::prelude::*;
 /// Form data for recipe creation/editing
@@ -30,7 +30,9 @@ impl RecipeFormData {
             title: recipe.metadata.title.clone(),
             summary: recipe.metadata.summary.clone().unwrap_or_default(),
             image_urls: recipe.metadata.images.clone(),
-            chef_notes: parsed.and_then(|p| p.chef_notes.clone()).unwrap_or_default(),
+            chef_notes: parsed
+                .and_then(|p| p.chef_notes.clone())
+                .unwrap_or_default(),
             prep_time: parsed
                 .and_then(|p| p.details.prep_time.clone())
                 .unwrap_or_default(),
@@ -64,7 +66,11 @@ impl RecipeFormData {
         if self.directions.iter().all(|d| d.trim().is_empty()) {
             errors.push("At least one direction step is required".to_string());
         }
-        if errors.is_empty() { Ok(()) } else { Err(errors) }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
     /// Get non-empty ingredients
     pub fn clean_ingredients(&self) -> Vec<String> {
@@ -91,24 +97,18 @@ impl RecipeFormData {
             content.push_str("\n\n");
         }
         let has_details = !self.prep_time.trim().is_empty()
-            || !self.cook_time.trim().is_empty() || !self.servings.trim().is_empty();
+            || !self.cook_time.trim().is_empty()
+            || !self.servings.trim().is_empty();
         if has_details {
             content.push_str("## Details\n\n");
             if !self.prep_time.trim().is_empty() {
-                content
-                    .push_str(
-                        &format!("- ⏲️ Prep time: {}\n", self.prep_time.trim()),
-                    );
+                content.push_str(&format!("- ⏲️ Prep time: {}\n", self.prep_time.trim()));
             }
             if !self.cook_time.trim().is_empty() {
-                content
-                    .push_str(&format!("- 🍳 Cook time: {}\n", self.cook_time.trim()));
+                content.push_str(&format!("- 🍳 Cook time: {}\n", self.cook_time.trim()));
             }
             if !self.servings.trim().is_empty() {
-                content
-                    .push_str(
-                        &format!("- 🍽️ Servings: {}\n", self.servings.trim()),
-                    );
+                content.push_str(&format!("- 🍽️ Servings: {}\n", self.servings.trim()));
             }
             content.push('\n');
         }

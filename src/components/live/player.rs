@@ -63,7 +63,11 @@ fn build_native_setup_script(
         stream_url = stream_url_json,
         autoplay = autoplay_str,
         detach_block = detach_block,
-        log_msg = if detach_first { "re-attached" } else { "attached" },
+        log_msg = if detach_first {
+            "re-attached"
+        } else {
+            "attached"
+        },
         error_label = if detach_first { "Retry" } else { "Setup" }
     )
 }
@@ -109,8 +113,7 @@ pub struct LiveStreamPlayerProps {
     pub autoplay: bool,
 }
 #[cfg(feature = "web")]
-#[wasm_bindgen(
-    inline_js = r#"
+#[wasm_bindgen(inline_js = r#"
 // Store for Video.js player instances
 window.videojsPlayers = window.videojsPlayers || new Map();
 
@@ -240,8 +243,7 @@ export function destroyVideoJsPlayer(videoId) {
         window.videojsPlayers.delete(videoId);
     }
 }
-"#
-)]
+"#)]
 extern "C" {
     #[wasm_bindgen(catch, js_name = "initVideoJsPlayer")]
     async fn init_video_js_player(
@@ -276,106 +278,105 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
     let video_id_str = video_id.clone();
     let stream_url_for_effect = stream_url.clone();
     let video_id_for_rsx = video_id.clone();
-    use_effect(use_reactive((&stream_url_for_effect, &autoplay), move |(stream_url_prop, autoplay_prop)| {
-        let video_id = video_id_str.clone();
-        let _stream_url = stream_url_prop.clone();
-        let url_valid = validate_stream_url(&_stream_url);
-        let gen = init_gen.with_mut(|g| { *g = g.wrapping_add(1); *g });
-        error.set(None);
-        loading.set(url_valid);
-        if url_valid {
-            cleanup_guard.set(None);
-            mounted.set(true);
-            #[cfg(feature = "web")]
-            {
-                let stream_url = _stream_url;
-                spawn(async move {
-                    crate::platform::timer::sleep_ms(300).await;
-                    if !*mounted.peek() {
-                        return;
-                    }
-                    match init_video_js_player(&video_id, &stream_url, autoplay_prop).await {
-                        Ok(_) => {
-                            if *init_gen.peek() == gen {
-                                loading.set(false);
-                                error.set(None);
-                                cleanup_guard
-                                    .set(
-                                        Some(CleanupGuard {
-                                            video_id: video_id.clone(),
-                                        }),
-                                    );
-                            }
+    use_effect(use_reactive(
+        (&stream_url_for_effect, &autoplay),
+        move |(stream_url_prop, autoplay_prop)| {
+            let video_id = video_id_str.clone();
+            let _stream_url = stream_url_prop.clone();
+            let url_valid = validate_stream_url(&_stream_url);
+            let gen = init_gen.with_mut(|g| {
+                *g = g.wrapping_add(1);
+                *g
+            });
+            error.set(None);
+            loading.set(url_valid);
+            if url_valid {
+                cleanup_guard.set(None);
+                mounted.set(true);
+                #[cfg(feature = "web")]
+                {
+                    let stream_url = _stream_url;
+                    spawn(async move {
+                        crate::platform::timer::sleep_ms(300).await;
+                        if !*mounted.peek() {
+                            return;
                         }
-                        Err(e) => {
-                            if *init_gen.peek() == gen {
-                                let error_msg = format!("Failed to load stream: {:?}", e);
-                                log::error!("{}", error_msg);
-                                error.set(Some(error_msg));
-                                loading.set(false);
-                            }
-                        }
-                    }
-                });
-            }
-            #[cfg(feature = "native")]
-            {
-                let stream_url = _stream_url;
-                spawn(async move {
-                    crate::platform::timer::sleep_ms(300).await;
-                    if !*mounted.peek() {
-                        return;
-                    }
-
-                    if let Err(e) = ensure_hls_manager().await {
-                        log::error!("[Live] {}", e);
-                        if *init_gen.peek() == gen {
-                            error.set(Some(format!("Failed to load HLS support: {}", e)));
-                            loading.set(false);
-                        }
-                        return;
-                    }
-
-                    // Set up the video element via eval
-                    let setup_script =
-                        build_native_setup_script(&video_id, &stream_url, autoplay_prop, false);
-
-                    if *init_gen.peek() != gen {
-                        return;
-                    }
-                    match document::eval(&setup_script).await {
-                        Ok(val) => {
-                            if *init_gen.peek() == gen {
-                                let result = val
-                                    .as_str()
-                                    .unwrap_or("error:Unexpected eval result type");
-                                if let Some(err_msg) = result.strip_prefix("error:") {
-                                    error.set(Some(err_msg.to_string()));
-                                } else if result == "cancelled" {
-                                    error.set(Some("Stream setup was cancelled".to_string()));
-                                } else {
+                        match init_video_js_player(&video_id, &stream_url, autoplay_prop).await {
+                            Ok(_) => {
+                                if *init_gen.peek() == gen {
+                                    loading.set(false);
                                     error.set(None);
+                                    cleanup_guard.set(Some(CleanupGuard {
+                                        video_id: video_id.clone(),
+                                    }));
                                 }
-                                loading.set(false);
+                            }
+                            Err(e) => {
+                                if *init_gen.peek() == gen {
+                                    let error_msg = format!("Failed to load stream: {:?}", e);
+                                    log::error!("{}", error_msg);
+                                    error.set(Some(error_msg));
+                                    loading.set(false);
+                                }
                             }
                         }
-                        Err(e) => {
+                    });
+                }
+                #[cfg(feature = "native")]
+                {
+                    let stream_url = _stream_url;
+                    spawn(async move {
+                        crate::platform::timer::sleep_ms(300).await;
+                        if !*mounted.peek() {
+                            return;
+                        }
+
+                        if let Err(e) = ensure_hls_manager().await {
+                            log::error!("[Live] {}", e);
                             if *init_gen.peek() == gen {
-                                error.set(Some(format!(
-                                    "Failed to setup stream: {:?}",
-                                    e
-                                )));
+                                error.set(Some(format!("Failed to load HLS support: {}", e)));
                                 loading.set(false);
                             }
+                            return;
                         }
-                    }
-                });
+
+                        // Set up the video element via eval
+                        let setup_script =
+                            build_native_setup_script(&video_id, &stream_url, autoplay_prop, false);
+
+                        if *init_gen.peek() != gen {
+                            return;
+                        }
+                        match document::eval(&setup_script).await {
+                            Ok(val) => {
+                                if *init_gen.peek() == gen {
+                                    let result =
+                                        val.as_str().unwrap_or("error:Unexpected eval result type");
+                                    if let Some(err_msg) = result.strip_prefix("error:") {
+                                        error.set(Some(err_msg.to_string()));
+                                    } else if result == "cancelled" {
+                                        error.set(Some("Stream setup was cancelled".to_string()));
+                                    } else {
+                                        error.set(None);
+                                    }
+                                    loading.set(false);
+                                }
+                            }
+                            Err(e) => {
+                                if *init_gen.peek() == gen {
+                                    error.set(Some(format!("Failed to setup stream: {:?}", e)));
+                                    loading.set(false);
+                                }
+                            }
+                        }
+                    });
+                }
+            } else {
+                error.set(Some("Invalid stream URL".to_string()));
+                loading.set(false);
             }
-        } else {
-            error.set(Some("Invalid stream URL".to_string()));
-            loading.set(false);
-        }
-    }));
+        },
+    ));
     // Cleanup HLS on unmount for native platforms.
     // Can't use struct Drop (document::eval becomes NoOp there).
     // use_drop runs while the Dioxus runtime is still active.
@@ -383,8 +384,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
     {
         let video_id_for_cleanup = video_id.clone();
         use_drop(move || {
-            let video_id_json =
-                serde_json::to_string(&video_id_for_cleanup).unwrap_or_default();
+            let video_id_json = serde_json::to_string(&video_id_for_cleanup).unwrap_or_default();
             spawn(async move {
                 let _ = document::eval(&format!(
                     "if (window.hlsManager) {{ window.hlsManager.detach({}); }}",
@@ -395,15 +395,15 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
         });
     }
     let handle_retry = move |_| {
-        if *loading.peek() { return; } // Guard: already loading
+        if *loading.peek() {
+            return;
+        } // Guard: already loading
         let gen = init_gen.with_mut(|g| {
             *g = g.wrapping_add(1);
             *g
         });
-        if *init_gen.peek() == gen {
-            error.set(None);
-            loading.set(true);
-        }
+        error.set(None);
+        loading.set(true);
         let _video_id = video_id.clone();
         let _stream_url = stream_url.clone();
         #[cfg(feature = "web")]
@@ -417,8 +417,9 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                         if *init_gen.peek() == gen {
                             loading.set(false);
                             error.set(None);
-                            cleanup_guard
-                                .set(Some(CleanupGuard { video_id: video_id.clone() }));
+                            cleanup_guard.set(Some(CleanupGuard {
+                                video_id: video_id.clone(),
+                            }));
                         }
                     }
                     Err(e) => {
@@ -454,9 +455,8 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                 match document::eval(&setup_script).await {
                     Ok(val) => {
                         if *init_gen.peek() == gen {
-                            let result = val
-                                .as_str()
-                                .unwrap_or("error:Unexpected eval result type");
+                            let result =
+                                val.as_str().unwrap_or("error:Unexpected eval result type");
                             if let Some(err_msg) = result.strip_prefix("error:") {
                                 error.set(Some(err_msg.to_string()));
                             } else if result == "cancelled" {
@@ -469,10 +469,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                     }
                     Err(e) => {
                         if *init_gen.peek() == gen {
-                            error.set(Some(format!(
-                                "Failed to setup stream: {:?}",
-                                e
-                            )));
+                            error.set(Some(format!("Failed to setup stream: {:?}", e)));
                             loading.set(false);
                         }
                     }

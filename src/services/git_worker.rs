@@ -70,8 +70,8 @@ impl GitWorkerManager {
                 });
             })()
         "#;
-        let promise = js_sys::eval(script)
-            .map_err(|e| format!("Failed to init git worker: {:?}", e))?;
+        let promise =
+            js_sys::eval(script).map_err(|e| format!("Failed to init git worker: {:?}", e))?;
         let promise = js_sys::Promise::from(promise);
         wasm_bindgen_futures::JsFuture::from(promise)
             .await
@@ -82,7 +82,10 @@ impl GitWorkerManager {
     /// Check if git worker is initialized and ready
     pub fn is_initialized() -> bool {
         let script = "window.gitWorkerManager && window.gitWorkerManager.ready === true";
-        js_sys::eval(script).ok().and_then(|v| v.as_bool()).unwrap_or(false)
+        js_sys::eval(script)
+            .ok()
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
     }
     /// Clone a repository (shallow by default)
     pub async fn clone_repo(url: &str, dir: &str, depth: u32) -> Result<(), String> {
@@ -90,9 +93,7 @@ impl GitWorkerManager {
         let dir_escaped = dir.replace('\\', "\\\\").replace('\'', "\\'");
         let script = format!(
             "window.gitWorkerManager.call('clone', {{ url: '{}', dir: '{}', depth: {} }})",
-            url_escaped,
-            dir_escaped,
-            depth,
+            url_escaped, dir_escaped, depth,
         );
         Self::call_worker(&script).await?;
         Ok(())
@@ -108,31 +109,24 @@ impl GitWorkerManager {
         let ref_escaped = git_ref.replace('\\', "\\\\").replace('\'', "\\'");
         let script = format!(
             "window.gitWorkerManager.call('listFiles', {{ dir: '{}', path: '{}', ref: '{}' }})",
-            dir_escaped,
-            path_escaped,
-            ref_escaped,
+            dir_escaped, path_escaped, ref_escaped,
         );
         let result = Self::call_worker(&script).await?;
-        serde_wasm_bindgen::from_value(result)
-            .map_err(|e| format!("Parse error: {:?}", e))
+        serde_wasm_bindgen::from_value(result).map_err(|e| format!("Parse error: {:?}", e))
     }
     /// Read file content at a given ref
-    pub async fn read_file(
-        dir: &str,
-        filepath: &str,
-        git_ref: &str,
-    ) -> Result<String, String> {
+    pub async fn read_file(dir: &str, filepath: &str, git_ref: &str) -> Result<String, String> {
         let dir_escaped = dir.replace('\\', "\\\\").replace('\'', "\\'");
         let filepath_escaped = filepath.replace('\\', "\\\\").replace('\'', "\\'");
         let ref_escaped = git_ref.replace('\\', "\\\\").replace('\'', "\\'");
         let script = format!(
             "window.gitWorkerManager.call('readFile', {{ dir: '{}', filepath: '{}', ref: '{}' }})",
-            dir_escaped,
-            filepath_escaped,
-            ref_escaped,
+            dir_escaped, filepath_escaped, ref_escaped,
         );
         let result = Self::call_worker(&script).await?;
-        result.as_string().ok_or_else(|| "Expected string result".to_string())
+        result
+            .as_string()
+            .ok_or_else(|| "Expected string result".to_string())
     }
     /// List branches
     pub async fn get_branches(dir: &str) -> Result<Vec<String>, String> {
@@ -142,8 +136,7 @@ impl GitWorkerManager {
             dir_escaped,
         );
         let result = Self::call_worker(&script).await?;
-        serde_wasm_bindgen::from_value(result)
-            .map_err(|e| format!("Parse error: {:?}", e))
+        serde_wasm_bindgen::from_value(result).map_err(|e| format!("Parse error: {:?}", e))
     }
     /// Check if repo exists in cache
     pub async fn repo_exists(dir: &str) -> bool {
@@ -162,56 +155,40 @@ impl GitWorkerManager {
         }
     }
     /// Get commit log
-    pub async fn get_log(
-        dir: &str,
-        git_ref: &str,
-        depth: u32,
-    ) -> Result<Vec<CommitEntry>, String> {
+    pub async fn get_log(dir: &str, git_ref: &str, depth: u32) -> Result<Vec<CommitEntry>, String> {
         let dir_escaped = dir.replace('\\', "\\\\").replace('\'', "\\'");
         let ref_escaped = git_ref.replace('\\', "\\\\").replace('\'', "\\'");
         let script = format!(
             "window.gitWorkerManager.call('log', {{ dir: '{}', ref: '{}', depth: {} }})",
-            dir_escaped,
-            ref_escaped,
-            depth,
+            dir_escaped, ref_escaped, depth,
         );
         let result = Self::call_worker(&script).await?;
-        serde_wasm_bindgen::from_value(result)
-            .map_err(|e| format!("Parse error: {:?}", e))
+        serde_wasm_bindgen::from_value(result).map_err(|e| format!("Parse error: {:?}", e))
     }
     /// List all file paths recursively (flat list for fuzzy finder)
-    pub async fn list_all_paths(
-        dir: &str,
-        git_ref: &str,
-    ) -> Result<Vec<String>, String> {
+    pub async fn list_all_paths(dir: &str, git_ref: &str) -> Result<Vec<String>, String> {
         let dir_escaped = dir.replace('\\', "\\\\").replace('\'', "\\'");
         let ref_escaped = git_ref.replace('\\', "\\\\").replace('\'', "\\'");
         let script = format!(
             "window.gitWorkerManager.call('listAllPaths', {{ dir: '{}', ref: '{}' }})",
-            dir_escaped,
-            ref_escaped,
+            dir_escaped, ref_escaped,
         );
         let result = Self::call_worker(&script).await?;
-        serde_wasm_bindgen::from_value(result)
-            .map_err(|e| format!("Parse error: {:?}", e))
+        serde_wasm_bindgen::from_value(result).map_err(|e| format!("Parse error: {:?}", e))
     }
     /// Compare two refs and generate unified diff
-    pub async fn diff_refs(
-        dir: &str,
-        base: &str,
-        head: &str,
-    ) -> Result<String, String> {
+    pub async fn diff_refs(dir: &str, base: &str, head: &str) -> Result<String, String> {
         let dir_escaped = dir.replace('\\', "\\\\").replace('\'', "\\'");
         let base_escaped = base.replace('\\', "\\\\").replace('\'', "\\'");
         let head_escaped = head.replace('\\', "\\\\").replace('\'', "\\'");
         let script = format!(
             "window.gitWorkerManager.call('diff', {{ dir: '{}', base: '{}', head: '{}' }})",
-            dir_escaped,
-            base_escaped,
-            head_escaped,
+            dir_escaped, base_escaped, head_escaped,
         );
         let result = Self::call_worker(&script).await?;
-        result.as_string().ok_or_else(|| "Expected string result".to_string())
+        result
+            .as_string()
+            .ok_or_else(|| "Expected string result".to_string())
     }
     /// Internal: call worker and await result
     async fn call_worker(script: &str) -> Result<JsValue, String> {
@@ -242,8 +219,7 @@ impl GitWorkerManager {
             return;
         }
         let servers = grasp_servers::get_grasp_servers();
-        let servers_json = serde_json::to_string(&servers)
-            .unwrap_or_else(|_| "[]".to_string());
+        let servers_json = serde_json::to_string(&servers).unwrap_or_else(|_| "[]".to_string());
         let script = format!(
             "window.gitWorkerManager.worker.postMessage({{ type: 'updateGraspServers', servers: {} }})",
             servers_json,

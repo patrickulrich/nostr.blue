@@ -65,11 +65,7 @@ pub fn Photos() -> Element {
             }
             let pubkey_str = auth_store::get_pubkey().unwrap_or_default();
             let cache_key = match current_feed_type {
-                FeedType::Following => {
-                    FeedCacheKey::Photos {
-                        pubkey: pubkey_str,
-                    }
-                }
+                FeedType::Following => FeedCacheKey::Photos { pubkey: pubkey_str },
                 FeedType::Global => FeedCacheKey::PhotosGlobal,
             };
             let cached_items = feed_cache::load_cached_feed(&cache_key, 100)
@@ -81,10 +77,8 @@ pub fn Photos() -> Element {
             }
             if !cached_items.is_empty() {
                 log::info!("Loaded {} photos from cache", cached_items.len());
-                let cached_events: Vec<Event> = cached_items
-                    .iter()
-                    .map(|i| i.event().clone())
-                    .collect();
+                let cached_events: Vec<Event> =
+                    cached_items.iter().map(|i| i.event().clone()).collect();
                 if let Some(oldest_event) = cached_events.last() {
                     oldest_timestamp.set(Some(oldest_event.created_at.as_secs()));
                 }
@@ -117,11 +111,8 @@ pub fn Photos() -> Element {
                         .collect();
                     let cache_key_for_store = effective_cache_key;
                     spawn(async move {
-                        let _ = feed_cache::store_feed_items(
-                                &cache_key_for_store,
-                                &feed_items,
-                            )
-                            .await;
+                        let _ =
+                            feed_cache::store_feed_items(&cache_key_for_store, &feed_items).await;
                         let _ = feed_cache::run_eviction_if_needed().await;
                     });
                     if let Some(last_event) = photo_events.last() {
@@ -154,21 +145,19 @@ pub fn Photos() -> Element {
         loading.set(true);
         spawn(async move {
             let result = match current_feed_type {
-                FeedType::Following => {
-                    match load_following_photos(Some(until)).await {
-                        Ok((events, did_fallback)) => {
-                            if did_fallback {
-                                log::info!(
+                FeedType::Following => match load_following_photos(Some(until)).await {
+                    Ok((events, did_fallback)) => {
+                        if did_fallback {
+                            log::info!(
                                     "Pagination fallback detected, returning empty to preserve feed type"
                                 );
-                                Ok(Vec::new())
-                            } else {
-                                Ok(events)
-                            }
+                            Ok(Vec::new())
+                        } else {
+                            Ok(events)
                         }
-                        Err(e) => Err(e),
                     }
-                }
+                    Err(e) => Err(e),
+                },
                 FeedType::Global => load_global_photos(Some(until)).await,
             };
             match result {
@@ -179,10 +168,8 @@ pub fn Photos() -> Element {
                         return;
                     }
                     let current = events.read().clone();
-                    let existing_ids: std::collections::HashSet<_> = current
-                        .iter()
-                        .map(|e| e.id)
-                        .collect();
+                    let existing_ids: std::collections::HashSet<_> =
+                        current.iter().map(|e| e.id).collect();
                     let unique_events: Vec<_> = new_events
                         .iter()
                         .filter(|e| !existing_ids.contains(&e.id))
@@ -335,15 +322,20 @@ pub fn Photos() -> Element {
 }
 /// Load following photos feed (NIP-68 kind 20 events from followed users)
 /// Returns (events, did_fallback) where did_fallback indicates if we fell back to global.
-async fn load_following_photos(
-    until: Option<u64>,
-) -> Result<(Vec<Event>, bool), String> {
+async fn load_following_photos(until: Option<u64>) -> Result<(Vec<Event>, bool), String> {
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    log::info!("Loading following photos feed for {} (until: {:?})", pubkey_str, until);
+    log::info!(
+        "Loading following photos feed for {} (until: {:?})",
+        pubkey_str,
+        until
+    );
     let contacts = match nostr_client::fetch_contacts(pubkey_str.clone()).await {
         Ok(contacts) => contacts,
         Err(e) => {
-            log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
+            log::warn!(
+                "Failed to fetch contacts: {}, falling back to global feed",
+                e
+            );
             let global = load_global_photos(until).await?;
             return Ok((global, true));
         }
@@ -365,23 +357,23 @@ async fn load_following_photos(
         let global = load_global_photos(until).await?;
         return Ok((global, true));
     }
-    let mut filter = Filter::new().kind(Kind::Custom(20)).authors(authors).limit(50);
+    let mut filter = Filter::new()
+        .kind(Kind::Custom(20))
+        .authors(authors)
+        .limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts.saturating_sub(1)));
     }
     log::info!(
-        "Fetching photo events from {} followed accounts", filter.authors.as_ref().map(|
-        a | a.len()).unwrap_or(0)
+        "Fetching photo events from {} followed accounts",
+        filter.authors.as_ref().map(|a| a.len()).unwrap_or(0)
     );
     let mut events = Vec::new();
-    let stream_result = nostr_client::stream_events_immediate(
-        filter,
-        Duration::from_secs(10),
-        |event| {
+    let stream_result =
+        nostr_client::stream_events_immediate(filter, Duration::from_secs(10), |event| {
             events.push(event);
-        },
-    )
-    .await;
+        })
+        .await;
     match stream_result {
         Ok(_) => {
             log::info!("Loaded {} photo events from following", events.len());
@@ -397,7 +389,8 @@ async fn load_following_photos(
         }
         Err(e) => {
             log::error!(
-                "Failed to fetch following photos: {}, falling back to global", e
+                "Failed to fetch following photos: {}, falling back to global",
+                e
             );
             let global = load_global_photos(until).await?;
             Ok((global, true))
@@ -415,13 +408,9 @@ async fn load_global_photos(until: Option<u64>) -> Result<Vec<Event>, String> {
     }
     log::info!("Fetching global photo events with filter: {:?}", filter);
     let mut events = Vec::new();
-    nostr_client::stream_events_immediate(
-        filter,
-        Duration::from_secs(10),
-        |event| {
-            events.push(event);
-        },
-    )
+    nostr_client::stream_events_immediate(filter, Duration::from_secs(10), |event| {
+        events.push(event);
+    })
     .await
     .map_err(|e| format!("Failed to load photos: {}", e))?;
     log::info!("Loaded {} global photo events", events.len());

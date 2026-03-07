@@ -1,13 +1,13 @@
 //! GIF Upload Modal Component
 //!
 //! Modal dialog for uploading GIFs to Nostr via NIP-96 or Blossom.
+use crate::stores::{blossom_store, gif_store, nip96_store};
+use crate::utils::format::display_server_url;
 use dioxus::prelude::*;
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 #[cfg(feature = "web")]
 use web_sys::HtmlInputElement;
-use crate::stores::{blossom_store, gif_store, nip96_store};
-use crate::utils::format::display_server_url;
 #[derive(Props, Clone, PartialEq)]
 pub struct GifUploadModalProps {
     /// Signal to control modal visibility
@@ -25,9 +25,7 @@ enum UploadServer {
 #[component]
 pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     let mut show = props.show;
-    let mut selected_file = use_signal(|| {
-        None::<(String, Vec<u8>, String, Option<String>)>
-    });
+    let mut selected_file = use_signal(|| None::<(String, Vec<u8>, String, Option<String>)>);
     let mut caption = use_signal(String::new);
     let mut upload_server = use_signal(|| UploadServer::NostrBuild);
     let mut selected_blossom_server = use_signal(blossom_store::get_primary_server);
@@ -69,33 +67,22 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                     if *upload_session_token.read() != session_token {
                         return;
                     }
-                    if data.len() < 6
-                        || (&data[0..6] != b"GIF87a" && &data[0..6] != b"GIF89a")
-                    {
-                        error
-                            .set(
-                                Some(
-                                    "Invalid GIF file. Please select a valid GIF.".to_string(),
-                                ),
-                            );
+                    if data.len() < 6 || (&data[0..6] != b"GIF87a" && &data[0..6] != b"GIF89a") {
+                        error.set(Some(
+                            "Invalid GIF file. Please select a valid GIF.".to_string(),
+                        ));
                         return;
                     }
-                    if !mime_type.contains("gif")
-                        && !filename.to_lowercase().ends_with(".gif")
-                    {
+                    if !mime_type.contains("gif") && !filename.to_lowercase().ends_with(".gif") {
                         error.set(Some("Please select a GIF file".to_string()));
                         return;
                     }
                     if data.len() > 21 * 1024 * 1024 {
-                        error
-                            .set(
-                                Some("File too large. Maximum size is 21MB".to_string()),
-                            );
+                        error.set(Some("File too large. Maximum size is 21MB".to_string()));
                         return;
                     }
                     #[cfg(feature = "web")]
-                    if let Some((_, _, _, Some(old_url))) = selected_file.read().as_ref()
-                    {
+                    if let Some((_, _, _, Some(old_url))) = selected_file.read().as_ref() {
                         let _ = web_sys::Url::revoke_object_url(old_url);
                     }
                     let preview_url = create_object_url(&data, &mime_type);
@@ -115,6 +102,9 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     let handle_upload = {
         let on_upload = props.on_upload;
         move |_| {
+            if *uploading.peek() {
+                return;
+            }
             let file_data = selected_file.read().clone();
             let caption_text = caption.read().clone();
             let server = upload_server.read().clone();
@@ -139,32 +129,28 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                 hasher.update(&data);
                 let file_hash = hex::encode(hasher.finalize());
                 let upload_result = match server {
-                    UploadServer::NostrBuild => {
-                        nip96_store::upload_to_nip96(
-                                data,
-                                mime_type.clone(),
-                                caption_text.clone(),
-                                caption_text.clone(),
-                            )
-                            .await
-                            .map(|metadata| {
-                                (
-                                    metadata.url,
-                                    metadata.original_hash.unwrap_or(file_hash.clone()),
-                                    metadata.dimensions,
-                                )
-                            })
-                    }
-                    UploadServer::Blossom => {
-                        blossom_store::upload_image(
-                                data,
-                                mime_type.clone(),
-                                100,
-                                Some(blossom_server.clone()),
-                            )
-                            .await
-                            .map(|url| (url, file_hash.clone(), None))
-                    }
+                    UploadServer::NostrBuild => nip96_store::upload_to_nip96(
+                        data,
+                        mime_type.clone(),
+                        caption_text.clone(),
+                        caption_text.clone(),
+                    )
+                    .await
+                    .map(|metadata| {
+                        (
+                            metadata.url,
+                            metadata.original_hash.unwrap_or(file_hash.clone()),
+                            metadata.dimensions,
+                        )
+                    }),
+                    UploadServer::Blossom => blossom_store::upload_image(
+                        data,
+                        mime_type.clone(),
+                        100,
+                        Some(blossom_server.clone()),
+                    )
+                    .await
+                    .map(|url| (url, file_hash.clone(), None)),
                 };
                 match upload_result {
                     Ok((url, hash, dimensions)) => {
@@ -173,14 +159,14 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                         }
                         log::info!("File uploaded successfully: {}", url);
                         match gif_store::publish_gif_event(
-                                url.clone(),
-                                "image/gif".to_string(),
-                                hash,
-                                caption_text.clone(),
-                                Some(file_size),
-                                dimensions,
-                            )
-                            .await
+                            url.clone(),
+                            "image/gif".to_string(),
+                            hash,
+                            caption_text.clone(),
+                            Some(file_size),
+                            dimensions,
+                        )
+                        .await
                         {
                             Ok(event_id) => {
                                 if *upload_session_token.read() != session_token {
@@ -215,9 +201,8 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                         return;
                                     }
                                     #[cfg(feature = "web")]
-                                    if let Some((_, _, _, Some(url))) = selected_file
-                                        .read()
-                                        .as_ref()
+                                    if let Some((_, _, _, Some(url))) =
+                                        selected_file.read().as_ref()
                                     {
                                         let _ = web_sys::Url::revoke_object_url(url);
                                     }
@@ -234,12 +219,10 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                     return;
                                 }
                                 log::error!("Failed to publish GIF event: {}", e);
-                                error
-                                    .set(
-                                        Some(
-                                            format!("Upload succeeded but failed to publish: {}", e),
-                                        ),
-                                    );
+                                error.set(Some(format!(
+                                    "Upload succeeded but failed to publish: {}",
+                                    e
+                                )));
                                 uploading.set(false);
                             }
                         }
@@ -257,6 +240,10 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
         }
     };
     let handle_clear = move |_| {
+        upload_session_token.with_mut(|token| *token = token.wrapping_add(1));
+        uploading.set(false);
+        current_upload_id.set(None);
+        success.set(false);
         #[cfg(feature = "web")]
         if let Some((_, _, _, Some(url))) = selected_file.read().as_ref() {
             let _ = web_sys::Url::revoke_object_url(url);
@@ -492,9 +479,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
 }
 /// Read file as bytes from file input
 #[cfg(feature = "web")]
-async fn read_file_as_bytes(
-    input_id: &str,
-) -> Result<(String, Vec<u8>, String), String> {
+async fn read_file_as_bytes(input_id: &str) -> Result<(String, Vec<u8>, String), String> {
     use js_sys::{ArrayBuffer, Uint8Array};
     use wasm_bindgen_futures::JsFuture;
     use web_sys::window;
@@ -510,10 +495,10 @@ async fn read_file_as_bytes(
     let filename = file.name();
     let mime_type = file.type_();
     let promise = file.array_buffer();
-    let array_buffer = JsFuture::from(promise).await.map_err(|_| "Failed to read file")?;
-    let array_buffer: ArrayBuffer = array_buffer
-        .dyn_into()
-        .map_err(|_| "Not an ArrayBuffer")?;
+    let array_buffer = JsFuture::from(promise)
+        .await
+        .map_err(|_| "Failed to read file")?;
+    let array_buffer: ArrayBuffer = array_buffer.dyn_into().map_err(|_| "Not an ArrayBuffer")?;
     let uint8_array = Uint8Array::new(&array_buffer);
     let bytes = uint8_array.to_vec();
     Ok((filename, bytes, mime_type))
@@ -521,9 +506,7 @@ async fn read_file_as_bytes(
 
 /// Read file as bytes - native stub
 #[cfg(not(feature = "web"))]
-async fn read_file_as_bytes(
-    _input_id: &str,
-) -> Result<(String, Vec<u8>, String), String> {
+async fn read_file_as_bytes(_input_id: &str) -> Result<(String, Vec<u8>, String), String> {
     Err("File reading from HTML input not supported on native".to_string())
 }
 /// Clear file input element
@@ -563,11 +546,8 @@ fn create_object_url(data: &[u8], mime_type: &str) -> Option<String> {
     blob_parts.push(&uint8_array);
     let blob_options = BlobPropertyBag::new();
     blob_options.set_type(mime_type);
-    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(
-            &blob_parts,
-            &blob_options,
-        )
-        .ok()?;
+    let blob =
+        web_sys::Blob::new_with_u8_array_sequence_and_options(&blob_parts, &blob_options).ok()?;
     web_sys::Url::create_object_url_with_blob(&blob).ok()
 }
 

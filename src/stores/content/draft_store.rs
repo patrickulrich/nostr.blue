@@ -3,13 +3,11 @@
 //!
 //! This module provides draft management for articles using NIP-37 compliant
 //! encrypted draft storage. Drafts are published to private relays (Kind 10013).
+use crate::stores::nostr_client;
 use dioxus::prelude::*;
-use nostr_sdk::{
-    Alphabet, EventBuilder, Filter, Kind, SingleLetterTag, Tag, TagKind, Timestamp,
-};
+use nostr_sdk::{Alphabet, EventBuilder, Filter, Kind, SingleLetterTag, Tag, TagKind, Timestamp};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use crate::stores::nostr_client;
 /// Kind 31234 - Draft Wraps (NIP-37)
 pub const KIND_DRAFT: u16 = 31234;
 /// Kind 10013 - Relay List for Private Content (NIP-37)
@@ -75,14 +73,17 @@ impl ArticleDraft {
     }
     /// Parse from unsigned event JSON (after decryption)
     pub fn from_unsigned_event_json(json: &str) -> Result<Self, String> {
-        let value: serde_json::Value = serde_json::from_str(json)
-            .map_err(|e| format!("Failed to parse draft JSON: {}", e))?;
+        let value: serde_json::Value =
+            serde_json::from_str(json).map_err(|e| format!("Failed to parse draft JSON: {}", e))?;
         let content = value
             .get("content")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let created_at = value.get("created_at").and_then(|v| v.as_u64()).unwrap_or(0);
+        let created_at = value
+            .get("created_at")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         let tags = value
             .get("tags")
             .and_then(|v| v.as_array())
@@ -152,7 +153,10 @@ pub async fn get_private_relays() -> Result<Vec<String>, String> {
         }
     }
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
+    let signer = client
+        .signer()
+        .await
+        .map_err(|e| format!("No signer: {}", e))?;
     let pubkey = nostr_client::get_cached_pubkey()?;
     let filter = Filter::new()
         .author(pubkey)
@@ -190,7 +194,10 @@ pub async fn get_private_relays() -> Result<Vec<String>, String> {
 /// Set and publish Kind 10013 private relay list
 pub async fn set_private_relays(relays: Vec<String>) -> Result<String, String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
+    let signer = client
+        .signer()
+        .await
+        .map_err(|e| format!("No signer: {}", e))?;
     let pubkey = nostr_client::get_cached_pubkey()?;
     let tag_arrays: Vec<Vec<String>> = relays
         .iter()
@@ -225,7 +232,10 @@ pub async fn ensure_private_relays() -> Result<Vec<String>, String> {
 }
 /// Get default private relays
 pub fn default_private_relays() -> Vec<String> {
-    DEFAULT_PRIVATE_RELAYS.iter().map(|s| s.to_string()).collect()
+    DEFAULT_PRIVATE_RELAYS
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
 }
 /// Save a draft as Kind 31234 (encrypted, to private relays)
 pub async fn save_draft(draft: &ArticleDraft) -> Result<String, String> {
@@ -233,7 +243,10 @@ pub async fn save_draft(draft: &ArticleDraft) -> Result<String, String> {
         return Err("Draft has no content to save".to_string());
     }
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
+    let signer = client
+        .signer()
+        .await
+        .map_err(|e| format!("No signer: {}", e))?;
     let pubkey = nostr_client::get_cached_pubkey()?;
     let private_relays = ensure_private_relays().await?;
     if private_relays.is_empty() {
@@ -244,11 +257,14 @@ pub async fn save_draft(draft: &ArticleDraft) -> Result<String, String> {
         .nip44_encrypt(&pubkey, &unsigned_json)
         .await
         .map_err(|e| format!("Failed to encrypt draft: {}", e))?;
-    let expiration = Timestamp::now()
-        + Duration::from_secs(DEFAULT_DRAFT_EXPIRATION_DAYS * 24 * 60 * 60);
+    let expiration =
+        Timestamp::now() + Duration::from_secs(DEFAULT_DRAFT_EXPIRATION_DAYS * 24 * 60 * 60);
     let tags = vec![
         Tag::identifier(&draft.identifier),
-        Tag::custom(TagKind::Custom("k".into()), vec![KIND_LONG_FORM.to_string()]),
+        Tag::custom(
+            TagKind::Custom("k".into()),
+            vec![KIND_LONG_FORM.to_string()],
+        ),
         Tag::expiration(expiration),
     ];
     let builder = EventBuilder::new(Kind::from(KIND_DRAFT), encrypted).tags(tags);
@@ -256,21 +272,23 @@ pub async fn save_draft(draft: &ArticleDraft) -> Result<String, String> {
         .sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign draft event: {}", e))?;
-    let result = nostr_client::send_presigned_event_to_relays(
-            event.clone(),
-            private_relays,
-        )
-        .await?;
+    let result =
+        nostr_client::send_presigned_event_to_relays(event.clone(), private_relays).await?;
     log::info!(
-        "Draft saved: {} ({}/{} relays succeeded)", result.event_id, result
-        .success_count(), result.total_attempted()
+        "Draft saved: {} ({}/{} relays succeeded)",
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
     );
     Ok(result.event_id)
 }
 /// Load all drafts for the current user
 pub async fn load_drafts() -> Result<Vec<LoadedDraft>, String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
+    let signer = client
+        .signer()
+        .await
+        .map_err(|e| format!("No signer: {}", e))?;
     let pubkey = nostr_client::get_cached_pubkey()?;
     let private_relays = get_private_relays()
         .await
@@ -283,7 +301,10 @@ pub async fn load_drafts() -> Result<Vec<LoadedDraft>, String> {
     let filter = Filter::new()
         .author(pubkey)
         .kind(Kind::from(KIND_DRAFT))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::K), KIND_LONG_FORM.to_string());
+        .custom_tag(
+            SingleLetterTag::lowercase(Alphabet::K),
+            KIND_LONG_FORM.to_string(),
+        );
     let events = client
         .fetch_events(filter, Duration::from_secs(10))
         .await
@@ -300,24 +321,21 @@ pub async fn load_drafts() -> Result<Vec<LoadedDraft>, String> {
             .and_then(|t| t.content().map(|s| s.to_string()))
             .unwrap_or_default();
         match signer.nip44_decrypt(&event.pubkey, &event.content).await {
-            Ok(decrypted) => {
-                match ArticleDraft::from_unsigned_event_json(&decrypted) {
-                    Ok(mut draft) => {
-                        if draft.identifier.is_empty() {
-                            draft.identifier = identifier.clone();
-                        }
-                        drafts
-                            .push(LoadedDraft {
-                                draft,
-                                event_id: event.id.to_hex(),
-                                identifier,
-                            });
+            Ok(decrypted) => match ArticleDraft::from_unsigned_event_json(&decrypted) {
+                Ok(mut draft) => {
+                    if draft.identifier.is_empty() {
+                        draft.identifier = identifier.clone();
                     }
-                    Err(e) => {
-                        log::warn!("Failed to parse draft {}: {}", event.id.to_hex(), e);
-                    }
+                    drafts.push(LoadedDraft {
+                        draft,
+                        event_id: event.id.to_hex(),
+                        identifier,
+                    });
                 }
-            }
+                Err(e) => {
+                    log::warn!("Failed to parse draft {}: {}", event.id.to_hex(), e);
+                }
+            },
             Err(e) => {
                 log::warn!("Failed to decrypt draft {}: {}", event.id.to_hex(), e);
             }
@@ -332,7 +350,10 @@ pub async fn load_drafts() -> Result<Vec<LoadedDraft>, String> {
 #[allow(dead_code)]
 pub async fn load_draft(identifier: &str) -> Result<Option<ArticleDraft>, String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
+    let signer = client
+        .signer()
+        .await
+        .map_err(|e| format!("No signer: {}", e))?;
     let pubkey = nostr_client::get_cached_pubkey()?;
     let private_relays = get_private_relays()
         .await
@@ -372,7 +393,10 @@ pub async fn delete_draft(identifier: &str) -> Result<(), String> {
         .unwrap_or_else(|_| default_private_relays());
     let tags = vec![
         Tag::identifier(identifier),
-        Tag::custom(TagKind::Custom("k".into()), vec![KIND_LONG_FORM.to_string()]),
+        Tag::custom(
+            TagKind::Custom("k".into()),
+            vec![KIND_LONG_FORM.to_string()],
+        ),
     ];
     let builder = EventBuilder::new(Kind::from(KIND_DRAFT), "").tags(tags);
     let event = client

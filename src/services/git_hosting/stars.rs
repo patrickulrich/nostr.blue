@@ -2,13 +2,13 @@
 //!
 //! Handles repository stars using Kind 7 (Reaction) events.
 #![allow(dead_code)]
-use dioxus::signals::ReadableExt;
-use nostr_sdk::prelude::*;
-use std::time::Duration;
 use crate::error::NostrBlueError;
 use crate::stores::auth_store;
 use crate::stores::code_store::{is_repo_starred, star_repo, unstar_repo, STARRED_REPOS};
 use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
+use dioxus::signals::ReadableExt;
+use nostr_sdk::prelude::*;
+use std::time::Duration;
 /// Default timeout for fetching events
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 /// Star a repository (publish reaction event)
@@ -26,8 +26,8 @@ pub async fn publish_star(coordinate: &Coordinate) -> Result<EventId, NostrBlueE
     if is_repo_starred(&coord_str) {
         return Err("Already starred".into());
     }
-    let builder = EventBuilder::new(Kind::Reaction, "+")
-        .tag(Tag::coordinate(coordinate.clone(), None));
+    let builder =
+        EventBuilder::new(Kind::Reaction, "+").tag(Tag::coordinate(coordinate.clone(), None));
     let output = client
         .send_event_builder(builder)
         .await
@@ -51,13 +51,15 @@ pub async fn remove_star(coordinate: &Coordinate) -> Result<(), NostrBlueError> 
     if !is_repo_starred(&coord_str) {
         return Err("Not starred".into());
     }
-    let my_pubkey_str = auth_store::get_pubkey()
-        .ok_or("Not logged in")?;
+    let my_pubkey_str = auth_store::get_pubkey().ok_or("Not logged in")?;
     let my_pubkey = PublicKey::parse(&my_pubkey_str)?;
     let filter = Filter::new()
         .kind(Kind::Reaction)
         .author(my_pubkey)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), coordinate.to_string());
+        .custom_tag(
+            SingleLetterTag::lowercase(Alphabet::A),
+            coordinate.to_string(),
+        );
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
         .map_err(|e| format!("Failed to fetch star: {}", e))?;
@@ -75,9 +77,10 @@ pub async fn remove_star(coordinate: &Coordinate) -> Result<(), NostrBlueError> 
 }
 /// Fetch star count for a repository
 pub async fn fetch_star_count(coordinate: &Coordinate) -> Result<u32, NostrBlueError> {
-    let filter = Filter::new()
-        .kind(Kind::Reaction)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), coordinate.to_string());
+    let filter = Filter::new().kind(Kind::Reaction).custom_tag(
+        SingleLetterTag::lowercase(Alphabet::A),
+        coordinate.to_string(),
+    );
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
         .map_err(|e| format!("Failed to fetch stars: {}", e))?;
@@ -110,11 +113,16 @@ pub async fn check_user_star(coordinate: &Coordinate) -> Result<bool, NostrBlueE
     let filter = Filter::new()
         .kind(Kind::Reaction)
         .author(my_pubkey)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), coordinate.to_string());
+        .custom_tag(
+            SingleLetterTag::lowercase(Alphabet::A),
+            coordinate.to_string(),
+        );
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
         .map_err(|e| format!("Failed to check star: {}", e))?;
-    let is_starred = events.iter().any(|e| e.content == "+" || e.content.is_empty());
+    let is_starred = events
+        .iter()
+        .any(|e| e.content == "+" || e.content.is_empty());
     if is_starred {
         star_repo(&coord_str);
     }
@@ -127,7 +135,10 @@ pub async fn load_user_stars() -> Result<(), NostrBlueError> {
         None => return Err("Not logged in".into()),
     };
     let my_pubkey = PublicKey::parse(&my_pubkey_str)?;
-    let filter = Filter::new().kind(Kind::Reaction).author(my_pubkey).limit(500);
+    let filter = Filter::new()
+        .kind(Kind::Reaction)
+        .author(my_pubkey)
+        .limit(500);
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
         .map_err(|e| format!("Failed to fetch stars: {}", e))?;
@@ -138,9 +149,7 @@ pub async fn load_user_stars() -> Result<(), NostrBlueError> {
             continue;
         }
         for tag in event.tags.iter() {
-            if let Some(TagStandard::Coordinate { coordinate, .. }) = tag
-                .as_standardized()
-            {
+            if let Some(TagStandard::Coordinate { coordinate, .. }) = tag.as_standardized() {
                 if coordinate.kind == Kind::GitRepoAnnouncement {
                     let coord_str = format!(
                         "{}:{}:{}",

@@ -17,25 +17,24 @@ pub fn VoiceReplyComposer(
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut selected_server = use_signal(blossom_store::get_primary_server);
     let has_signer = *HAS_SIGNER.read();
-    let can_publish = audio_data.read().is_some() && !*is_publishing.read()
-        && has_signer;
+    let can_publish = audio_data.read().is_some() && !*is_publishing.read() && has_signer;
     let author_pubkey = reply_to.pubkey.to_hex();
     let short_author = truncate_pubkey(&author_pubkey);
     let reply_content = reply_to.content.clone();
     let reply_tags: Vec<_> = reply_to.tags.iter().cloned().collect();
     let reply_event = reply_to.clone();
-    let handle_recording_complete = move |
-        (bytes, duration, waveform, mime_type): (Vec<u8>, f64, Vec<u8>, String)|
-    {
-        log::info!(
-            "Voice reply recording complete: {} bytes, duration: {}s, MIME: {}", bytes
-            .len(), duration, mime_type
-        );
-        audio_data.set(Some((bytes, duration, waveform, mime_type)));
-    };
+    let handle_recording_complete =
+        move |(bytes, duration, waveform, mime_type): (Vec<u8>, f64, Vec<u8>, String)| {
+            log::info!(
+                "Voice reply recording complete: {} bytes, duration: {}s, MIME: {}",
+                bytes.len(),
+                duration,
+                mime_type
+            );
+            audio_data.set(Some((bytes, duration, waveform, mime_type)));
+        };
     let handle_publish = move |_| {
-        let Some((bytes, duration, waveform, mime_type)) = audio_data.read().clone()
-        else {
+        let Some((bytes, duration, waveform, mime_type)) = audio_data.read().clone() else {
             return;
         };
         if !can_publish {
@@ -45,47 +44,39 @@ pub fn VoiceReplyComposer(
         error_message.set(None);
         let event_for_reply = reply_event.clone();
         let server_url = selected_server.read().clone();
-        let parent_root = event_for_reply
-            .tags
-            .iter()
-            .find_map(|tag| {
-                let tag_vec = tag.clone().to_vec();
-                if tag_vec.len() >= 4 && tag_vec[0] == "e" && tag_vec[3] == "root" {
-                    Some(tag_vec[1].clone())
-                } else {
-                    None
-                }
-            });
+        let parent_root = event_for_reply.tags.iter().find_map(|tag| {
+            let tag_vec = tag.clone().to_vec();
+            if tag_vec.len() >= 4 && tag_vec[0] == "e" && tag_vec[3] == "root" {
+                Some(tag_vec[1].clone())
+            } else {
+                None
+            }
+        });
         let thread_root_id = if let Some(root_id) = parent_root {
             root_id
         } else {
             event_for_reply.id.to_hex()
         };
         spawn(async move {
-            match blossom_store::upload_audio(bytes, mime_type.clone(), Some(server_url))
-                .await
-            {
+            match blossom_store::upload_audio(bytes, mime_type.clone(), Some(server_url)).await {
                 Ok(audio_url) => {
                     log::info!("Voice reply audio uploaded successfully: {}", audio_url);
                     match crate::stores::nostr_client::publish_voice_message_reply(
-                            audio_url,
-                            duration,
-                            waveform,
-                            event_for_reply,
-                            Some(mime_type),
-                        )
-                        .await
+                        audio_url,
+                        duration,
+                        waveform,
+                        event_for_reply,
+                        Some(mime_type),
+                    )
+                    .await
                     {
                         Ok(event_id) => {
-                            log::info!(
-                                "Voice reply published successfully: {}", event_id
-                            );
-                            if let Ok(root_event_id) = EventId::from_hex(
-                                &thread_root_id,
-                            ) {
+                            log::info!("Voice reply published successfully: {}", event_id);
+                            if let Ok(root_event_id) = EventId::from_hex(&thread_root_id) {
                                 invalidate_thread_tree_cache(&root_event_id);
                                 log::debug!(
-                                    "Invalidated thread tree cache for root: {}", thread_root_id
+                                    "Invalidated thread tree cache for root: {}",
+                                    thread_root_id
                                 );
                             }
                             audio_data.set(None);

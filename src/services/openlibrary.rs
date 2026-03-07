@@ -128,7 +128,12 @@ impl CoverSize {
 /// This is a direct URL construction - no API call needed.
 /// Returns a URL that may return a 1x1 pixel image if cover doesn't exist.
 pub fn get_cover_url(isbn: &str, size: CoverSize) -> String {
-    format!("{}/isbn/{}-{}.jpg", COVERS_BASE_URL, clean_isbn(isbn), size.as_str())
+    format!(
+        "{}/isbn/{}-{}.jpg",
+        COVERS_BASE_URL,
+        clean_isbn(isbn),
+        size.as_str()
+    )
 }
 /// Fetch book metadata by ISBN
 pub async fn get_book_by_isbn(isbn: &str) -> Result<Book, String> {
@@ -136,11 +141,12 @@ pub async fn get_book_by_isbn(isbn: &str) -> Result<Book, String> {
     let bibkey = format!("ISBN:{}", clean);
     let url = format!(
         "{}/api/books?bibkeys={}&format=json&jscmd=data",
-        API_BASE_URL,
-        bibkey,
+        API_BASE_URL, bibkey,
     );
     let response = http_client()
-        .map_err(|e| format!("HTTP client init failed: {}", e))?.get(&url).send()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(&url)
+        .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
     if !response.status().is_success() {
@@ -175,42 +181,37 @@ fn convert_book_data(data: &BookApiData, isbn: &str) -> Book {
                     .collect()
             })
             .unwrap_or_default(),
-        publishers: data
-            .publishers
-            .as_ref()
-            .map(|pubs| {
-                pubs.iter().map(|p| Publisher { name: p.name.clone() }).collect()
-            }),
+        publishers: data.publishers.as_ref().map(|pubs| {
+            pubs.iter()
+                .map(|p| Publisher {
+                    name: p.name.clone(),
+                })
+                .collect()
+        }),
         publish_date: data.publish_date.clone(),
         number_of_pages: data.number_of_pages,
-        cover: data
-            .cover
-            .as_ref()
-            .map(|c| CoverUrls {
-                small: c.small.clone(),
-                medium: c.medium.clone(),
-                large: c.large.clone(),
-            }),
+        cover: data.cover.as_ref().map(|c| CoverUrls {
+            small: c.small.clone(),
+            medium: c.medium.clone(),
+            large: c.large.clone(),
+        }),
         url: data.url.clone(),
         key: data.key.clone(),
-        subjects: data
-            .subjects
-            .as_ref()
-            .map(|subs| {
-                subs.iter()
-                    .map(|s| Subject {
-                        name: s.name.clone(),
-                        url: s.url.clone(),
-                    })
-                    .collect()
-            }),
+        subjects: data.subjects.as_ref().map(|subs| {
+            subs.iter()
+                .map(|s| Subject {
+                    name: s.name.clone(),
+                    url: s.url.clone(),
+                })
+                .collect()
+        }),
         isbn_10: data.identifiers.isbn_10.clone(),
-        isbn_13: data
-            .identifiers
-            .isbn_13
-            .clone()
-            .or_else(|| {
-                if isbn.len() == 13 { Some(vec![isbn.to_string()]) } else { None }
-            }),
+        isbn_13: data.identifiers.isbn_13.clone().or_else(|| {
+            if isbn.len() == 13 {
+                Some(vec![isbn.to_string()])
+            } else {
+                None
+            }
+        }),
     }
 }

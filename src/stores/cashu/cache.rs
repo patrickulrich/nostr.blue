@@ -111,9 +111,7 @@ impl MintCacheEntry {
     }
 }
 /// Global metadata cache for all mints
-pub static MINT_CACHE: GlobalSignal<MintMetadataCache> = GlobalSignal::new(
-    MintMetadataCache::new,
-);
+pub static MINT_CACHE: GlobalSignal<MintMetadataCache> = GlobalSignal::new(MintMetadataCache::new);
 /// Metadata cache managing multiple mints
 #[derive(Debug, Clone, Default)]
 pub struct MintMetadataCache {
@@ -172,7 +170,9 @@ impl MintMetadataCache {
     }
     /// Check if mint info is cached and valid
     pub fn has_valid_info(&self, mint_url: &str) -> bool {
-        self.get_mint(mint_url).map(|e| e.is_info_valid(self.ttl_secs)).unwrap_or(false)
+        self.get_mint(mint_url)
+            .map(|e| e.is_info_valid(self.ttl_secs))
+            .unwrap_or(false)
     }
     /// Check if keysets are cached and valid
     pub fn has_valid_keysets(&self, mint_url: &str) -> bool {
@@ -182,10 +182,13 @@ impl MintMetadataCache {
     }
     /// Get cached mint info if valid
     pub fn get_info(&self, mint_url: &str) -> Option<&CachedMintInfo> {
-        self.get_mint(mint_url)
-            .and_then(|e| {
-                if e.is_info_valid(self.ttl_secs) { e.info.as_ref() } else { None }
-            })
+        self.get_mint(mint_url).and_then(|e| {
+            if e.is_info_valid(self.ttl_secs) {
+                e.info.as_ref()
+            } else {
+                None
+            }
+        })
     }
     /// Invalidate cache for a mint
     pub fn invalidate_mint(&mut self, mint_url: &str) {
@@ -225,12 +228,18 @@ pub struct CacheStats {
 /// Parse mint info from JSON response into cached format
 pub fn parse_mint_info_to_cache(json: &serde_json::Value) -> CachedMintInfo {
     CachedMintInfo {
-        name: json.get("name").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        name: json
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
         description: json
             .get("description")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
-        pubkey: json.get("pubkey").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        pubkey: json
+            .get("pubkey")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
         nuts: json
             .get("nuts")
             .and_then(|v| v.as_object())
@@ -239,8 +248,14 @@ pub fn parse_mint_info_to_cache(json: &serde_json::Value) -> CachedMintInfo {
         contact: json
             .get("contact")
             .and_then(|v| serde_json::from_value(v.clone()).ok()),
-        motd: json.get("motd").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        icon_url: json.get("icon_url").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        motd: json
+            .get("motd")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        icon_url: json
+            .get("icon_url")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
         cached_at: now_secs(),
     }
 }
@@ -277,7 +292,9 @@ pub fn parse_keys_to_cache(keyset_id: &str, json: &serde_json::Value) -> CachedK
     let keys_obj = json
         .get("keys")
         .or_else(|| {
-            json.get("keysets").and_then(|ks| ks.get(0)).and_then(|k| k.get("keys"))
+            json.get("keysets")
+                .and_then(|ks| ks.get(0))
+                .and_then(|k| k.get("keys"))
         })
         .and_then(|v| v.as_object());
     let keys = keys_obj
@@ -346,9 +363,7 @@ pub fn get_cached_keyset_fee(mint_url: &str, keyset_id: &str) -> Option<u64> {
 ///
 /// Caches responses from various mint endpoints to reduce network calls
 /// and improve performance. Respects Cache-Control headers from mint.
-pub static RESPONSE_CACHE: GlobalSignal<ResponseCache> = GlobalSignal::new(
-    ResponseCache::new,
-);
+pub static RESPONSE_CACHE: GlobalSignal<ResponseCache> = GlobalSignal::new(ResponseCache::new);
 /// Cached API response
 #[derive(Debug, Clone)]
 pub struct CachedResponse {
@@ -376,30 +391,25 @@ pub struct ResponseCache {
 impl ResponseCache {
     /// Create a new empty response cache
     pub fn new() -> Self {
-        Self { responses: HashMap::new() }
+        Self {
+            responses: HashMap::new(),
+        }
     }
     /// Get a cached response if valid
     pub fn get(&self, url: &str) -> Option<&CachedResponse> {
         self.responses.get(url).filter(|r| r.is_valid())
     }
     /// Store a response in the cache
-    pub fn store(
-        &mut self,
-        url: String,
-        body: String,
-        ttl_secs: u64,
-        etag: Option<String>,
-    ) {
-        self.responses
-            .insert(
-                url,
-                CachedResponse {
-                    body,
-                    cached_at: now_secs(),
-                    ttl_secs,
-                    etag,
-                },
-            );
+    pub fn store(&mut self, url: String, body: String, ttl_secs: u64, etag: Option<String>) {
+        self.responses.insert(
+            url,
+            CachedResponse {
+                body,
+                cached_at: now_secs(),
+                ttl_secs,
+                etag,
+            },
+        );
     }
     /// Remove a cached response
     pub fn invalidate(&mut self, url: &str) {
@@ -434,26 +444,23 @@ pub mod ttls {
 /// - Cache-forbidden directives present (no-cache, no-store, private)
 /// - max-age not found or invalid
 pub fn parse_cache_control(header: Option<&str>) -> Option<u64> {
-    header
-        .and_then(|h| {
-            let lower = h.to_lowercase();
-            if lower.contains("no-cache") || lower.contains("no-store")
-                || lower.contains("private")
-            {
-                return None;
-            }
-            for part in lower.split(',') {
-                let part = part.trim();
-                if let Some(rest) = part.strip_prefix("max-age") {
-                    let rest = rest.trim_start_matches(['=', ' ', '"']);
-                    let rest = rest.trim_end_matches('"');
-                    if let Ok(val) = rest.parse::<u64>() {
-                        return Some(val);
-                    }
+    header.and_then(|h| {
+        let lower = h.to_lowercase();
+        if lower.contains("no-cache") || lower.contains("no-store") || lower.contains("private") {
+            return None;
+        }
+        for part in lower.split(',') {
+            let part = part.trim();
+            if let Some(rest) = part.strip_prefix("max-age") {
+                let rest = rest.trim_start_matches(['=', ' ', '"']);
+                let rest = rest.trim_end_matches('"');
+                if let Ok(val) = rest.parse::<u64>() {
+                    return Some(val);
                 }
             }
-            None
-        })
+        }
+        None
+    })
 }
 /// Cached fetch with NUT-19 support
 ///
@@ -500,9 +507,7 @@ pub async fn cached_fetch(url: &str, default_ttl: u64) -> Result<String, String>
     Ok(body)
 }
 /// Fetch mint info with caching
-pub async fn cached_fetch_mint_info(
-    mint_url: &str,
-) -> Result<serde_json::Value, String> {
+pub async fn cached_fetch_mint_info(mint_url: &str) -> Result<serde_json::Value, String> {
     let normalized = normalize_mint_url(mint_url);
     let url = format!("{}/v1/info", normalized);
     let body = cached_fetch(&url, ttls::MINT_INFO).await?;

@@ -185,8 +185,9 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
     let client = nostr_client::get_client().ok_or("Nostr client not initialized")?;
     let one_week_ago = Timestamp::now() - Duration::from_secs(7 * 24 * 60 * 60);
     log::info!(
-        "Fetching vote events (kind {}) since {}", KIND_MUSIC_VOTE, one_week_ago
-        .as_secs()
+        "Fetching vote events (kind {}) since {}",
+        KIND_MUSIC_VOTE,
+        one_week_ago.as_secs()
     );
     let filter = Filter::new()
         .kind(Kind::from(KIND_MUSIC_VOTE))
@@ -300,41 +301,39 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
     let mut sorted_votes: Vec<VoteData> = vote_map.into_values().collect();
     sorted_votes.sort_by(|a, b| b.votes.cmp(&a.votes));
     let top_10 = sorted_votes.into_iter().take(10).collect::<Vec<_>>();
-    log::info!("Top {} tracks identified, resolving for playback...", top_10.len());
+    log::info!(
+        "Top {} tracks identified, resolving for playback...",
+        top_10.len()
+    );
     let api = WavlakeAPI::new();
     let mut entries = Vec::new();
     for (index, vote_data) in top_10.into_iter().enumerate() {
         let music_track = match &vote_data.track_ref {
-            TrackRef::Wavlake(track_id) => {
-                match api.get_track(track_id).await {
-                    Ok(wt) => Some(MusicTrack::from(wt)),
-                    Err(e) => {
-                        log::warn!("Failed to fetch Wavlake track {}: {}", track_id, e);
-                        create_fallback_track(
-                            &vote_data,
-                            TrackSource::Wavlake {
-                                artist_id: String::new(),
-                                album_id: String::new(),
-                            },
-                        )
-                    }
+            TrackRef::Wavlake(track_id) => match api.get_track(track_id).await {
+                Ok(wt) => Some(MusicTrack::from(wt)),
+                Err(e) => {
+                    log::warn!("Failed to fetch Wavlake track {}: {}", track_id, e);
+                    create_fallback_track(
+                        &vote_data,
+                        TrackSource::Wavlake {
+                            artist_id: String::new(),
+                            album_id: String::new(),
+                        },
+                    )
                 }
-            }
+            },
             TrackRef::Nostr(coordinate) => {
                 let parts: Vec<&str> = coordinate.split(':').collect();
                 if parts.len() >= 3 {
                     let pubkey = parts[1].to_string();
                     let d_tag = parts[2..].join(":");
                     match crate::stores::nostr_music::fetch_nostr_track_by_coordinate(
-                            &pubkey,
-                            &d_tag,
-                        )
-                        .await
+                        &pubkey, &d_tag,
+                    )
+                    .await
                     {
                         Ok(Some(nostr_track)) => {
-                            log::info!(
-                                "Successfully fetched Nostr track: {}", coordinate
-                            );
+                            log::info!("Successfully fetched Nostr track: {}", coordinate);
                             Some(MusicTrack::from(nostr_track))
                         }
                         Ok(None) => {
@@ -349,9 +348,7 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
                             )
                         }
                         Err(e) => {
-                            log::warn!(
-                                "Failed to fetch Nostr track {}: {}", coordinate, e
-                            );
+                            log::warn!("Failed to fetch Nostr track {}: {}", coordinate, e);
                             create_fallback_track(
                                 &vote_data,
                                 TrackSource::Nostr {
@@ -368,12 +365,11 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
                 }
             }
         };
-        entries
-            .push(LeaderboardEntry {
-                rank: index + 1,
-                vote_data,
-                music_track,
-            });
+        entries.push(LeaderboardEntry {
+            rank: index + 1,
+            vote_data,
+            music_track,
+        });
     }
     Ok(entries)
 }
@@ -381,9 +377,6 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
 ///
 /// Returns None because fallback tracks don't have a playable media_url.
 /// This prevents the Play button from rendering for tracks that can't be played.
-fn create_fallback_track(
-    _vote_data: &VoteData,
-    _source: TrackSource,
-) -> Option<MusicTrack> {
+fn create_fallback_track(_vote_data: &VoteData, _source: TrackSource) -> Option<MusicTrack> {
     None
 }

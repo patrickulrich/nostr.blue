@@ -145,13 +145,19 @@ impl Nip55Signer {
             let package = match call_static_string("pollPackageResult") {
                 Some(p) => p,
                 None => {
-                    return IntentPollResult::Error("No package name returned from signer".to_string());
+                    return IntentPollResult::Error(
+                        "No package name returned from signer".to_string(),
+                    );
                 }
             };
             match PublicKey::parse(&pubkey_hex) {
                 Ok(pubkey) => IntentPollResult::Ready { pubkey, package },
                 Err(e) => {
-                    log::error!("NIP-55: failed to parse Intent pubkey '{}': {}", pubkey_hex, e);
+                    log::error!(
+                        "NIP-55: failed to parse Intent pubkey '{}': {}",
+                        pubkey_hex,
+                        e
+                    );
                     IntentPollResult::Error(format!("Invalid pubkey from signer: {}", e))
                 }
             }
@@ -177,28 +183,34 @@ impl NostrSigner for Nip55Signer {
         SignerBackend::Custom("nip55".into())
     }
 
-    fn get_public_key(&self) -> Pin<Box<dyn std::future::Future<Output = Result<PublicKey, SignerError>> + Send + '_>> {
+    fn get_public_key(
+        &self,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<PublicKey, SignerError>> + Send + '_>>
+    {
         let pk = self.public_key;
         Box::pin(async move { Ok(pk) })
     }
 
-    fn sign_event(&self, unsigned: UnsignedEvent) -> Pin<Box<dyn std::future::Future<Output = Result<Event, SignerError>> + Send + '_>> {
+    fn sign_event(
+        &self,
+        unsigned: UnsignedEvent,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<Event, SignerError>> + Send + '_>> {
         let package = self.signer_package.clone();
         let current_user = self.public_key.to_hex();
 
         Box::pin(async move {
-            let event_json = serde_json::to_string(&unsigned)
-                .map_err(SignerError::backend)?;
+            let event_json = serde_json::to_string(&unsigned).map_err(SignerError::backend)?;
 
             let signed_json = call_content_resolver(
                 "signEventViaContentResolver",
                 &[&event_json, &current_user],
                 &package,
             )
-            .ok_or_else(|| SignerError::from("NIP-55 signer rejected sign_event or not pre-approved"))?;
+            .ok_or_else(|| {
+                SignerError::from("NIP-55 signer rejected sign_event or not pre-approved")
+            })?;
 
-            let event: Event = serde_json::from_str(&signed_json)
-                .map_err(SignerError::backend)?;
+            let event: Event = serde_json::from_str(&signed_json).map_err(SignerError::backend)?;
 
             if event.pubkey.to_hex() != current_user {
                 return Err(SignerError::from("signer pubkey mismatch"));
@@ -214,7 +226,9 @@ impl NostrSigner for Nip55Signer {
                 return Err(SignerError::from("signed event payload mismatch: content"));
             }
             if event.created_at != unsigned.created_at {
-                return Err(SignerError::from("signed event payload mismatch: created_at"));
+                return Err(SignerError::from(
+                    "signed event payload mismatch: created_at",
+                ));
             }
 
             Ok(event)
@@ -236,7 +250,9 @@ impl NostrSigner for Nip55Signer {
                 &[content, &pubkey_hex, &current_user],
                 &package,
             )
-            .ok_or_else(|| SignerError::from("NIP-55 signer rejected nip04_encrypt or not pre-approved"))
+            .ok_or_else(|| {
+                SignerError::from("NIP-55 signer rejected nip04_encrypt or not pre-approved")
+            })
         })
     }
 
@@ -255,7 +271,9 @@ impl NostrSigner for Nip55Signer {
                 &[encrypted_content, &pubkey_hex, &current_user],
                 &package,
             )
-            .ok_or_else(|| SignerError::from("NIP-55 signer rejected nip04_decrypt or not pre-approved"))
+            .ok_or_else(|| {
+                SignerError::from("NIP-55 signer rejected nip04_decrypt or not pre-approved")
+            })
         })
     }
 
@@ -274,7 +292,9 @@ impl NostrSigner for Nip55Signer {
                 &[content, &pubkey_hex, &current_user],
                 &package,
             )
-            .ok_or_else(|| SignerError::from("NIP-55 signer rejected nip44_encrypt or not pre-approved"))
+            .ok_or_else(|| {
+                SignerError::from("NIP-55 signer rejected nip44_encrypt or not pre-approved")
+            })
         })
     }
 
@@ -293,7 +313,9 @@ impl NostrSigner for Nip55Signer {
                 &[payload, &pubkey_hex, &current_user],
                 &package,
             )
-            .ok_or_else(|| SignerError::from("NIP-55 signer rejected nip44_decrypt or not pre-approved"))
+            .ok_or_else(|| {
+                SignerError::from("NIP-55 signer rejected nip44_decrypt or not pre-approved")
+            })
         })
     }
 }
@@ -321,9 +343,12 @@ fn find_app_class<'a>(
             return None;
         }
     };
-    let class_loader = match env
-        .call_method(&context_class, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])
-    {
+    let class_loader = match env.call_method(
+        &context_class,
+        "getClassLoader",
+        "()Ljava/lang/ClassLoader;",
+        &[],
+    ) {
         Ok(v) => match v.l() {
             Ok(l) => l,
             Err(e) => {
@@ -353,7 +378,11 @@ fn find_app_class<'a>(
         Ok(v) => match v.l() {
             Ok(l) => l,
             Err(e) => {
-                log::error!("NIP-55 JNI: loadClass .l() failed for '{}': {}", class_name, e);
+                log::error!(
+                    "NIP-55 JNI: loadClass .l() failed for '{}': {}",
+                    class_name,
+                    e
+                );
                 return None;
             }
         },
@@ -374,14 +403,22 @@ fn call_static_string(method_name: &str) -> Option<String> {
     let vm = match unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) } {
         Ok(v) => v,
         Err(e) => {
-            log::error!("NIP-55 JNI: JavaVM::from_raw failed in {}: {}", method_name, e);
+            log::error!(
+                "NIP-55 JNI: JavaVM::from_raw failed in {}: {}",
+                method_name,
+                e
+            );
             return None;
         }
     };
     let mut env = match vm.attach_current_thread() {
         Ok(e) => e,
         Err(e) => {
-            log::error!("NIP-55 JNI: attach_current_thread failed in {}: {}", method_name, e);
+            log::error!(
+                "NIP-55 JNI: attach_current_thread failed in {}: {}",
+                method_name,
+                e
+            );
             return None;
         }
     };
@@ -431,14 +468,22 @@ fn call_content_resolver_simple(method_name: &str, signer_package: &str) -> Opti
     let vm = match unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) } {
         Ok(v) => v,
         Err(e) => {
-            log::error!("NIP-55 JNI: JavaVM::from_raw failed in {}: {}", method_name, e);
+            log::error!(
+                "NIP-55 JNI: JavaVM::from_raw failed in {}: {}",
+                method_name,
+                e
+            );
             return None;
         }
     };
     let mut env = match vm.attach_current_thread() {
         Ok(e) => e,
         Err(e) => {
-            log::error!("NIP-55 JNI: attach_current_thread failed in {}: {}", method_name, e);
+            log::error!(
+                "NIP-55 JNI: attach_current_thread failed in {}: {}",
+                method_name,
+                e
+            );
             return None;
         }
     };
@@ -450,7 +495,12 @@ fn call_content_resolver_simple(method_name: &str, signer_package: &str) -> Opti
     let j_signer_package = match env.new_string(signer_package) {
         Ok(s) => s,
         Err(e) => {
-            log::error!("NIP-55 JNI: new_string('{}') failed in {}: {}", signer_package, method_name, e);
+            log::error!(
+                "NIP-55 JNI: new_string('{}') failed in {}: {}",
+                signer_package,
+                method_name,
+                e
+            );
             return None;
         }
     };
@@ -459,10 +509,7 @@ fn call_content_resolver_simple(method_name: &str, signer_package: &str) -> Opti
         class,
         method_name,
         "(Landroid/content/Context;Ljava/lang/String;)Ljava/lang/String;",
-        &[
-            JValue::Object(&context),
-            JValue::Object(&j_signer_package),
-        ],
+        &[JValue::Object(&context), JValue::Object(&j_signer_package)],
     ) {
         Ok(v) => match v.l() {
             Ok(l) => l,
@@ -499,14 +546,22 @@ fn call_static_bool(method_name: &str) -> Option<bool> {
     let vm = match unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) } {
         Ok(v) => v,
         Err(e) => {
-            log::error!("NIP-55 JNI: JavaVM::from_raw failed in {}: {}", method_name, e);
+            log::error!(
+                "NIP-55 JNI: JavaVM::from_raw failed in {}: {}",
+                method_name,
+                e
+            );
             return None;
         }
     };
     let mut env = match vm.attach_current_thread() {
         Ok(e) => e,
         Err(e) => {
-            log::error!("NIP-55 JNI: attach_current_thread failed in {}: {}", method_name, e);
+            log::error!(
+                "NIP-55 JNI: attach_current_thread failed in {}: {}",
+                method_name,
+                e
+            );
             return None;
         }
     };
@@ -543,14 +598,22 @@ fn call_static_void(method_name: &str) {
     let vm = match unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) } {
         Ok(v) => v,
         Err(e) => {
-            log::error!("NIP-55 JNI: JavaVM::from_raw failed in {}: {}", method_name, e);
+            log::error!(
+                "NIP-55 JNI: JavaVM::from_raw failed in {}: {}",
+                method_name,
+                e
+            );
             return;
         }
     };
     let mut env = match vm.attach_current_thread() {
         Ok(e) => e,
         Err(e) => {
-            log::error!("NIP-55 JNI: attach_current_thread failed in {}: {}", method_name, e);
+            log::error!(
+                "NIP-55 JNI: attach_current_thread failed in {}: {}",
+                method_name,
+                e
+            );
             return;
         }
     };
@@ -579,25 +642,29 @@ fn call_static_void(method_name: &str) {
 ///
 /// For sign_event: args = [eventJson, currentUser]
 /// For encrypt/decrypt: args = [content, pubkey, currentUser]
-fn call_content_resolver(
-    method_name: &str,
-    args: &[&str],
-    signer_package: &str,
-) -> Option<String> {
+fn call_content_resolver(method_name: &str, args: &[&str], signer_package: &str) -> Option<String> {
     use jni::objects::{JObject, JValue};
 
     let ctx = ndk_context::android_context();
     let vm = match unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) } {
         Ok(v) => v,
         Err(e) => {
-            log::error!("NIP-55 JNI: JavaVM::from_raw failed in {}: {}", method_name, e);
+            log::error!(
+                "NIP-55 JNI: JavaVM::from_raw failed in {}: {}",
+                method_name,
+                e
+            );
             return None;
         }
     };
     let mut env = match vm.attach_current_thread() {
         Ok(e) => e,
         Err(e) => {
-            log::error!("NIP-55 JNI: attach_current_thread failed in {}: {}", method_name, e);
+            log::error!(
+                "NIP-55 JNI: attach_current_thread failed in {}: {}",
+                method_name,
+                e
+            );
             return None;
         }
     };
@@ -609,7 +676,11 @@ fn call_content_resolver(
     let j_signer_package = match env.new_string(signer_package) {
         Ok(s) => s,
         Err(e) => {
-            log::error!("NIP-55 JNI: new_string signer_package failed in {}: {}", method_name, e);
+            log::error!(
+                "NIP-55 JNI: new_string signer_package failed in {}: {}",
+                method_name,
+                e
+            );
             return None;
         }
     };
@@ -621,14 +692,22 @@ fn call_content_resolver(
             let j_arg0 = match env.new_string(args[0]) {
                 Ok(s) => s,
                 Err(e) => {
-                    log::error!("NIP-55 JNI: new_string arg0 failed in {}: {}", method_name, e);
+                    log::error!(
+                        "NIP-55 JNI: new_string arg0 failed in {}: {}",
+                        method_name,
+                        e
+                    );
                     return None;
                 }
             };
             let j_arg1 = match env.new_string(args[1]) {
                 Ok(s) => s,
                 Err(e) => {
-                    log::error!("NIP-55 JNI: new_string arg1 failed in {}: {}", method_name, e);
+                    log::error!(
+                        "NIP-55 JNI: new_string arg1 failed in {}: {}",
+                        method_name,
+                        e
+                    );
                     return None;
                 }
             };
@@ -675,21 +754,33 @@ fn call_content_resolver(
             let j_arg0 = match env.new_string(args[0]) {
                 Ok(s) => s,
                 Err(e) => {
-                    log::error!("NIP-55 JNI: new_string arg0 failed in {}: {}", method_name, e);
+                    log::error!(
+                        "NIP-55 JNI: new_string arg0 failed in {}: {}",
+                        method_name,
+                        e
+                    );
                     return None;
                 }
             };
             let j_arg1 = match env.new_string(args[1]) {
                 Ok(s) => s,
                 Err(e) => {
-                    log::error!("NIP-55 JNI: new_string arg1 failed in {}: {}", method_name, e);
+                    log::error!(
+                        "NIP-55 JNI: new_string arg1 failed in {}: {}",
+                        method_name,
+                        e
+                    );
                     return None;
                 }
             };
             let j_arg2 = match env.new_string(args[2]) {
                 Ok(s) => s,
                 Err(e) => {
-                    log::error!("NIP-55 JNI: new_string arg2 failed in {}: {}", method_name, e);
+                    log::error!(
+                        "NIP-55 JNI: new_string arg2 failed in {}: {}",
+                        method_name,
+                        e
+                    );
                     return None;
                 }
             };
@@ -733,7 +824,11 @@ fn call_content_resolver(
             ret
         }
         _ => {
-            log::error!("NIP-55 JNI: unexpected arg count {} for {}", args.len(), method_name);
+            log::error!(
+                "NIP-55 JNI: unexpected arg count {} for {}",
+                args.len(),
+                method_name
+            );
             None
         }
     }

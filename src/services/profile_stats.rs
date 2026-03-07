@@ -44,10 +44,11 @@ pub async fn fetch_profile_stats(pubkey: &str) -> Result<ProfileStats, String> {
         return Err(format!("API returned status: {}", resp.status()));
     }
     let json = JsFuture::from(
-            resp.json().map_err(|e| format!("Failed to get JSON: {:?}", e))?,
-        )
-        .await
-        .map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
+        resp.json()
+            .map_err(|e| format!("Failed to get JSON: {:?}", e))?,
+    )
+    .await
+    .map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
     let response: NostrBandStatsResponse = serde_wasm_bindgen::from_value(json)
         .map_err(|e| format!("Failed to deserialize: {:?}", e))?;
     response
@@ -60,5 +61,8 @@ pub async fn fetch_profile_stats(pubkey: &str) -> Result<ProfileStats, String> {
 /// Fetch profile statistics (native stub - uses reqwest in future)
 #[cfg(not(feature = "web"))]
 pub async fn fetch_profile_stats(pubkey: &str) -> Result<ProfileStats, String> {
-    Err(format!("Profile stats not yet supported on native for pubkey: {}", pubkey))
+    Err(format!(
+        "Profile stats not yet supported on native for pubkey: {}",
+        pubkey
+    ))
 }

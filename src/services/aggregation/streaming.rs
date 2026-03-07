@@ -5,8 +5,7 @@ use crate::stores::signer::SIGNER_INFO;
 use dioxus::prelude::{ReadableExt, Signal, WritableExt};
 use instant::{Duration, Instant};
 use nostr_sdk::{
-    Event, EventId, Filter, Kind, RelayPoolNotification, SubscriptionId, TagStandard,
-    Timestamp,
+    Event, EventId, Filter, Kind, RelayPoolNotification, SubscriptionId, TagStandard, Timestamp,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -33,15 +32,12 @@ impl InteractionStreamHandle {
         if let Some(task) = self.task.take() {
             task.cancel();
             log::debug!(
-                "Cancelled interaction stream task for {:?}", self.subscription_id
+                "Cancelled interaction stream task for {:?}",
+                self.subscription_id
             );
         }
         if let Some(client) = crate::stores::nostr_client::get_client() {
-            crate::stores::subscription_manager::unsubscribe(
-                    &client,
-                    &self.subscription_id,
-                )
-                .await;
+            crate::stores::subscription_manager::unsubscribe(&client, &self.subscription_id).await;
         }
     }
 }
@@ -66,12 +62,10 @@ pub fn increment_cached_counts(
     zap_amount: Option<u64>,
     repost_event_id: Option<&str>,
 ) -> Option<InteractionCounts> {
-    let mut cache = get_counts_cache()
-        .lock()
-        .unwrap_or_else(|poisoned| {
-            log::warn!("Counts cache mutex was poisoned, recovering");
-            poisoned.into_inner()
-        });
+    let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+        log::warn!("Counts cache mutex was poisoned, recovering");
+        poisoned.into_inner()
+    });
     let cache_ttl = cache.ttl;
     if let Some(cached) = cache.cache.get_mut(event_id) {
         if cached.cached_at.elapsed() > cache_ttl {
@@ -179,7 +173,12 @@ pub async fn stream_interaction_counts(
     let client = get_client().ok_or("Client not initialized")?;
     let tracked_ids: HashSet<String> = event_ids.iter().map(|id| id.to_hex()).collect();
     let filter = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::Reaction, Kind::Repost, Kind::ZapReceipt])
+        .kinds(vec![
+            Kind::TextNote,
+            Kind::Reaction,
+            Kind::Repost,
+            Kind::ZapReceipt,
+        ])
         .events(event_ids)
         .since(Timestamp::now());
     let mut attempts = 0;
@@ -196,14 +195,14 @@ pub async fn stream_interaction_counts(
         }
         attempts += 1;
         log::debug!(
-            "Waiting for relay connections (attempt {}/{})", attempts, MAX_ATTEMPTS
+            "Waiting for relay connections (attempt {}/{})",
+            attempts,
+            MAX_ATTEMPTS
         );
         crate::platform::timer::sleep_ms(500).await;
     };
     if connected_urls.is_empty() {
-        return Err(
-            "No connected relays for interaction streaming after retries".to_string(),
-        );
+        return Err("No connected relays for interaction streaming after retries".to_string());
     }
     log::info!(
         "Fast interaction streaming: subscribing to {} connected relays (bypassing gossip)",
@@ -218,7 +217,8 @@ pub async fn stream_interaction_counts(
         .map(|output| output.val)
         .map_err(|e| format!("Failed to subscribe: {}", e))?;
     log::info!(
-        "Started interaction stream subscription {:?} for {} events", subscription_id,
+        "Started interaction stream subscription {:?} for {} events",
+        subscription_id,
         tracked_ids.len()
     );
     let current_user_pk: Option<nostr_sdk::PublicKey> = SIGNER_INFO
@@ -245,20 +245,23 @@ pub async fn stream_interaction_counts(
                         subscription_id: event_sub_id,
                         event,
                         ..
-                    } = notification {
+                    } = notification
+                    {
                         if event_sub_id != *sub_id {
                             return Ok(false);
                         }
-                        let referenced_id = match extract_referenced_event_for_streaming(
-                            &event,
-                            &tracked_ids,
-                        ) {
-                            Some(id) => id,
-                            None => return Ok(false),
-                        };
+                        let referenced_id =
+                            match extract_referenced_event_for_streaming(&event, &tracked_ids) {
+                                Some(id) => id,
+                                None => return Ok(false),
+                            };
                         let is_current_user = if event.kind == Kind::ZapReceipt {
                             super::counting::extract_zap_sender(&event)
-                                .map(|sender| current_user_pk.map(|pk| sender == pk.to_hex()).unwrap_or(false))
+                                .map(|sender| {
+                                    current_user_pk
+                                        .map(|pk| sender == pk.to_hex())
+                                        .unwrap_or(false)
+                                })
                                 .unwrap_or(false)
                         } else {
                             current_user_pk
@@ -292,9 +295,9 @@ pub async fn stream_interaction_counts(
                                 .write()
                                 .insert(referenced_id.clone(), updated_counts);
                             log::debug!(
-                                "Streamed interaction update for {}: kind={}", &
-                                referenced_id[..8.min(referenced_id.len())], event.kind
-                                .as_u16()
+                                "Streamed interaction update for {}: kind={}",
+                                &referenced_id[..8.min(referenced_id.len())],
+                                event.kind.as_u16()
                             );
                         }
                     }

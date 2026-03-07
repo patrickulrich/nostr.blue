@@ -1,18 +1,22 @@
 //! Bible Chapter Reading View
 //! Displays a chapter with verse selection and highlighting
-use std::collections::HashMap;
-use dioxus::prelude::*;
 use crate::components::content_share_modal::{ContentShareModal, ContentType};
 use crate::components::HighlightModal;
 use crate::services::bible_api::verse_to_plain_text;
 use crate::stores::auth_store;
 use crate::stores::bible_store::{self, ChapterContent, VerseContent};
+use dioxus::prelude::*;
+use std::collections::HashMap;
 /// Build a HashMap mapping verse numbers to plain text for efficient lookup
 fn build_verse_text_map(content: &[ChapterContent]) -> HashMap<u32, String> {
     content
         .iter()
         .filter_map(|c| {
-            if let ChapterContent::Verse { number, content: verse_content } = c {
+            if let ChapterContent::Verse {
+                number,
+                content: verse_content,
+            } = c
+            {
                 Some((*number, verse_to_plain_text(verse_content)))
             } else {
                 None
@@ -131,20 +135,13 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                 } else {
                     format!(
                         "{} {}:{}-{} ({})",
-                        book_name,
-                        chapter,
-                        first,
-                        last,
-                        translation,
+                        book_name, chapter, first, last, translation,
                     )
                 };
-                let full_text = format!(
-                    "{}\n\u{2014} {}",
-                    text_parts.join(" "),
-                    reference,
-                );
+                let full_text = format!("{}\n\u{2014} {}", text_parts.join(" "), reference,);
                 spawn(async move {
-                    if let Err(e) = crate::platform::clipboard::copy_to_clipboard(&full_text).await {
+                    if let Err(e) = crate::platform::clipboard::copy_to_clipboard(&full_text).await
+                    {
                         log::error!("Clipboard write failed: {:?}", e);
                         return;
                     }
@@ -177,11 +174,7 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                 } else {
                     format!(
                         "{} {}:{}-{} ({})",
-                        book_name,
-                        chapter,
-                        first,
-                        last,
-                        translation,
+                        book_name, chapter, first, last, translation,
                     )
                 };
                 let verse_text = text_parts.join(" ");

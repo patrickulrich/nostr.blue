@@ -8,9 +8,9 @@ use nostr_sdk::prelude::*;
 
 use crate::components::ClientInitializing;
 use crate::routes::Route;
-use crate::stores::{auth_store, nostr_client, packs_store, profiles};
-use crate::stores::packs_store::PackMember;
 use crate::services::search::profile_search;
+use crate::stores::packs_store::PackMember;
+use crate::stores::{auth_store, nostr_client, packs_store, profiles};
 use crate::utils::truncate_pubkey;
 use crate::utils::validation::is_valid_http_url;
 
@@ -63,12 +63,9 @@ pub fn PackNew() -> Element {
                                 match packs_store::fetch_pack_by_naddr(&naddr).await {
                                     Ok(Some(pack)) => {
                                         name.set(pack.name.clone());
-                                        description.set(
-                                            pack.description.clone().unwrap_or_default(),
-                                        );
-                                        image_url.set(
-                                            pack.image_url.clone().unwrap_or_default(),
-                                        );
+                                        description
+                                            .set(pack.description.clone().unwrap_or_default());
+                                        image_url.set(pack.image_url.clone().unwrap_or_default());
                                         members.set(pack.members.clone());
                                         edit_d_tag.set(Some(pack.d_tag.clone()));
 
@@ -125,9 +122,7 @@ pub fn PackNew() -> Element {
         };
     }
 
-    let can_publish = !name.read().is_empty()
-        && !members.read().is_empty()
-        && !*publishing.read();
+    let can_publish = !name.read().is_empty() && !members.read().is_empty() && !*publishing.read();
 
     rsx! {
         div { class: "min-h-screen",

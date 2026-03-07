@@ -17,20 +17,25 @@ pub async fn publish_pinboard(
         Tag::custom(TagKind::Custom("title".into()), vec![input.title.clone()]),
     ];
     if let Some(ref desc) = input.description {
-        tags.push(
-            Tag::custom(TagKind::Custom("description".into()), vec![desc.clone()]),
-        );
+        tags.push(Tag::custom(
+            TagKind::Custom("description".into()),
+            vec![desc.clone()],
+        ));
     }
     if let Some(ref img) = input.image {
-        tags.push(Tag::custom(TagKind::Custom("image".into()), vec![img.clone()]));
+        tags.push(Tag::custom(
+            TagKind::Custom("image".into()),
+            vec![img.clone()],
+        ));
     }
     for tag in &input.tags {
         tags.push(Tag::hashtag(tag));
     }
     if input.collaborative {
-        tags.push(
-            Tag::custom(TagKind::Custom("collaborative".into()), Vec::<String>::new()),
-        );
+        tags.push(Tag::custom(
+            TagKind::Custom("collaborative".into()),
+            Vec::<String>::new(),
+        ));
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_PINBOARD), "").tags(tags);
     let output = client
@@ -47,8 +52,7 @@ pub async fn publish_pinboard(
         .get_public_key()
         .await
         .map_err(|e| format!("Failed to get pubkey: {}", e))?;
-    let naddr = nostr_client::make_naddr_with_hints(KIND_PINBOARD, &pubkey, &d_tag)
-        .await?;
+    let naddr = nostr_client::make_naddr_with_hints(KIND_PINBOARD, &pubkey, &d_tag).await?;
     Ok(naddr)
 }
 
@@ -66,21 +70,17 @@ pub async fn publish_pin(input: PinInput) -> std::result::Result<String, String>
             Coordinate::parse(board_addr).ok()
         };
         if let Some(coord) = coord_opt {
-            tags.push(
-                Tag::from_standardized(TagStandard::Coordinate {
-                    coordinate: coord,
-                    relay_url: None,
-                    uppercase: true,
-                }),
-            );
+            tags.push(Tag::from_standardized(TagStandard::Coordinate {
+                coordinate: coord,
+                relay_url: None,
+                uppercase: true,
+            }));
         } else {
             log::warn!("Failed to parse board address: {}", board_addr);
-            tags.push(
-                Tag::custom(
-                    TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::A)),
-                    vec![board_addr.clone()],
-                ),
-            );
+            tags.push(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::A)),
+                vec![board_addr.clone()],
+            ));
         }
     }
     match &input.reference {
@@ -89,46 +89,47 @@ pub async fn publish_pin(input: PinInput) -> std::result::Result<String, String>
             if let Some(relay) = relay_hint {
                 vals.push(relay.clone());
             }
-            tags.push(
-                Tag::custom(
-                    TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
-                    vals,
-                ),
-            );
+            tags.push(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
+                vals,
+            ));
         }
-        PinReference::Coordinate { address, relay_hint } => {
+        PinReference::Coordinate {
+            address,
+            relay_hint,
+        } => {
             let mut vals = vec![address.clone()];
             if let Some(relay) = relay_hint {
                 vals.push(relay.clone());
             }
-            tags.push(
-                Tag::custom(
-                    TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
-                    vals,
-                ),
-            );
+            tags.push(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
+                vals,
+            ));
         }
         PinReference::External { content, hint } => {
-            tags.push(
-                Tag::from_standardized(TagStandard::ExternalContent {
-                    content: content.clone(),
-                    hint: hint.as_ref().and_then(|h| Url::parse(h).ok()),
-                    uppercase: false,
-                }),
-            );
-            tags.push(
-                Tag::from_standardized(TagStandard::Nip73Kind {
-                    kind: content.kind(),
-                    uppercase: false,
-                }),
-            );
+            tags.push(Tag::from_standardized(TagStandard::ExternalContent {
+                content: content.clone(),
+                hint: hint.as_ref().and_then(|h| Url::parse(h).ok()),
+                uppercase: false,
+            }));
+            tags.push(Tag::from_standardized(TagStandard::Nip73Kind {
+                kind: content.kind(),
+                uppercase: false,
+            }));
         }
     }
     if let Some(ref title) = input.title {
-        tags.push(Tag::custom(TagKind::Custom("title".into()), vec![title.clone()]));
+        tags.push(Tag::custom(
+            TagKind::Custom("title".into()),
+            vec![title.clone()],
+        ));
     }
     if let Some(ref image) = input.image {
-        tags.push(Tag::custom(TagKind::Custom("image".into()), vec![image.clone()]));
+        tags.push(Tag::custom(
+            TagKind::Custom("image".into()),
+            vec![image.clone()],
+        ));
     }
     for tag in &input.tags {
         tags.push(Tag::hashtag(tag));
@@ -149,8 +150,8 @@ pub async fn delete_pin(pin_event_id: &str) -> std::result::Result<(), String> {
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached. Cannot delete pin.".to_string());
     }
-    let event_id = EventId::from_hex(pin_event_id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
+    let event_id =
+        EventId::from_hex(pin_event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
     let deletion_request = EventDeletionRequest::new().id(event_id);
     let builder = EventBuilder::delete(deletion_request);
     client
@@ -172,8 +173,8 @@ pub async fn delete_pinboard(board: &Pinboard) -> std::result::Result<String, St
     if board.pubkey != current_pubkey {
         return Err("You can only delete your own pinboards".to_string());
     }
-    let coord = Coordinate::new(Kind::Custom(KIND_PINBOARD), board.event.pubkey)
-        .identifier(&board.d_tag);
+    let coord =
+        Coordinate::new(Kind::Custom(KIND_PINBOARD), board.event.pubkey).identifier(&board.d_tag);
     let deletion_request = EventDeletionRequest::new().coordinate(coord);
     let builder = EventBuilder::delete(deletion_request);
     let output = client
@@ -193,7 +194,9 @@ pub async fn update_pinboard_metadata(
     image: Option<String>,
     tags: Option<Vec<String>>,
 ) -> std::result::Result<String, String> {
-    let board = fetch_pinboard_by_naddr(naddr).await?.ok_or("Pinboard not found")?;
+    let board = fetch_pinboard_by_naddr(naddr)
+        .await?
+        .ok_or("Pinboard not found")?;
     let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
     if board.pubkey != current_pubkey {
         return Err("You can only edit your own pinboards".to_string());
@@ -250,10 +253,8 @@ pub async fn toggle_pinboard_reaction(
 
 /// Get a shareable naddr with relay hints for a pinboard
 /// Per NIP-19, relay hints help other clients locate the event
-pub async fn get_shareable_naddr(
-    board: &Pinboard,
-) -> std::result::Result<String, String> {
-    let pubkey = nostr::PublicKey::from_hex(&board.pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+pub async fn get_shareable_naddr(board: &Pinboard) -> std::result::Result<String, String> {
+    let pubkey =
+        nostr::PublicKey::from_hex(&board.pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     nostr_client::make_naddr_with_hints(KIND_PINBOARD, &pubkey, &board.d_tag).await
 }

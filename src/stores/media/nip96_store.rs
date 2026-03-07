@@ -11,6 +11,8 @@
 //! ## References
 //! - NIP-96: https://github.com/nostr-protocol/nips/blob/master/96.md
 //! - NIP-98: https://github.com/nostr-protocol/nips/blob/master/98.md
+#[cfg(feature = "web")]
+use crate::utils::nip98 as nip98_utils;
 use dioxus::prelude::*;
 #[cfg(feature = "web")]
 use nostr_sdk::nips::nip98;
@@ -21,8 +23,6 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 #[cfg(feature = "web")]
 use web_sys::{FormData, Request, RequestInit, Response};
-#[cfg(feature = "web")]
-use crate::utils::nip98 as nip98_utils;
 type Result<T, E> = std::result::Result<T, E>;
 /// Default NIP-96 server (nostr.build)
 #[allow(dead_code)]
@@ -134,7 +134,11 @@ pub async fn upload_to_nip96(
     caption: String,
     alt: String,
 ) -> Result<UploadedFileMetadata, String> {
-    log::info!("Starting NIP-96 upload: {} bytes, type: {}", file_data.len(), mime_type);
+    log::info!(
+        "Starting NIP-96 upload: {} bytes, type: {}",
+        file_data.len(),
+        mime_type
+    );
     *NIP96_UPLOAD_PROGRESS.write() = Some(0.0);
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
@@ -146,11 +150,11 @@ pub async fn upload_to_nip96(
     let payload_hash = nostr_sdk::hashes::sha256::Hash::from_slice(&file_hash)
         .map_err(|e| format!("Hash conversion error: {}", e))?;
     let auth_result = match nip98_utils::create_auth_header_with_payload(
-            NOSTR_BUILD_API_URL,
-            nip98::HttpMethod::POST,
-            payload_hash,
-        )
-        .await
+        NOSTR_BUILD_API_URL,
+        nip98::HttpMethod::POST,
+        payload_hash,
+    )
+    .await
     {
         Ok(auth) => auth,
         Err(e) => {
@@ -161,14 +165,14 @@ pub async fn upload_to_nip96(
     log::info!("NIP-98 auth created");
     *NIP96_UPLOAD_PROGRESS.write() = Some(30.0);
     let metadata = match upload_with_fetch(
-            file_data,
-            mime_type,
-            caption,
-            alt,
-            auth_result.header,
-            &auth_result.signed_url,
-        )
-        .await
+        file_data,
+        mime_type,
+        caption,
+        alt,
+        auth_result.header,
+        &auth_result.signed_url,
+    )
+    .await
     {
         Ok(m) => m,
         Err(e) => {
@@ -212,17 +216,13 @@ async fn upload_with_fetch(
     upload_url: &str,
 ) -> Result<UploadedFileMetadata, String> {
     let window = web_sys::window().ok_or("No window object")?;
-    let form_data = FormData::new()
-        .map_err(|e| format!("Failed to create FormData: {:?}", e))?;
+    let form_data = FormData::new().map_err(|e| format!("Failed to create FormData: {:?}", e))?;
     let uint8_array = js_sys::Uint8Array::from(file_data.as_slice());
     let blob_parts = js_sys::Array::new();
     blob_parts.push(&uint8_array);
     let blob_options = web_sys::BlobPropertyBag::new();
     blob_options.set_type(&mime_type);
-    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(
-            &blob_parts,
-            &blob_options,
-        )
+    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&blob_parts, &blob_options)
         .map_err(|e| format!("Failed to create Blob: {:?}", e))?;
     form_data
         .append_with_blob_and_filename("file", &blob, "upload.gif")
@@ -263,30 +263,35 @@ async fn upload_with_fetch(
         if let Ok(text_promise) = response.text() {
             if let Ok(body_js) = JsFuture::from(text_promise).await {
                 if let Some(body) = body_js.as_string() {
-                    log::error!(
-                        "Upload failed: {} {} - body: {}", status, status_text, body
-                    );
-                    return Err(
-                        format!("Upload failed: {} {} - {}", status, status_text, body),
-                    );
+                    log::error!("Upload failed: {} {} - body: {}", status, status_text, body);
+                    return Err(format!(
+                        "Upload failed: {} {} - {}",
+                        status, status_text, body
+                    ));
                 }
             }
         }
         return Err(format!("Upload failed: {} {}", status, status_text));
     }
     let json_value = JsFuture::from(
-            response.json().map_err(|e| format!("Failed to get JSON: {:?}", e))?,
-        )
-        .await
-        .map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
+        response
+            .json()
+            .map_err(|e| format!("Failed to get JSON: {:?}", e))?,
+    )
+    .await
+    .map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
     let upload_response: Nip96UploadResponse = serde_wasm_bindgen::from_value(json_value)
         .map_err(|e| format!("Failed to deserialize response: {}", e))?;
     *NIP96_UPLOAD_PROGRESS.write() = Some(90.0);
     if upload_response.status != "success" {
-        let msg = upload_response.message.unwrap_or_else(|| "Unknown error".to_string());
+        let msg = upload_response
+            .message
+            .unwrap_or_else(|| "Unknown error".to_string());
         return Err(format!("Upload failed: {}", msg));
     }
-    let nip94_event = upload_response.nip94_event.ok_or("No nip94_event in response")?;
+    let nip94_event = upload_response
+        .nip94_event
+        .ok_or("No nip94_event in response")?;
     let metadata = UploadedFileMetadata::from_tags(&nip94_event.tags)
         .ok_or("Failed to parse file metadata from response")?;
     Ok(metadata)

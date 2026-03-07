@@ -20,10 +20,8 @@ const INTERACTIVE_ELEMENT_SELECTOR: &str =
 #[component]
 pub fn TopicPostCard(
     post: TopicPost,
-    #[props(default)]
-    vote_counts: Option<VoteCounts>,
-    #[props(default = false)]
-    show_topic_badge: bool,
+    #[props(default)] vote_counts: Option<VoteCounts>,
+    #[props(default = false)] show_topic_badge: bool,
 ) -> Element {
     let profile = get_cached_profile(&post.pubkey);
     let author_name = profile

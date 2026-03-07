@@ -3,11 +3,11 @@
 //! Functions for managing proof states, proof-to-event mapping,
 //! and transaction lifecycle.
 #![allow(dead_code)]
-use dioxus::prelude::*;
-use std::sync::atomic::Ordering;
 use super::signals::*;
 use super::types::*;
 use super::utils::mint_matches;
+use dioxus::prelude::*;
+use std::sync::atomic::Ordering;
 /// Cross-platform timestamp helper (aligned with nostr SDK pattern)
 /// Returns current time in seconds since Unix epoch
 pub fn now_secs() -> u64 {
@@ -53,7 +53,10 @@ pub fn rebuild_proof_event_map() {
         map
     };
     *PROOF_EVENT_MAP.write() = new_map;
-    log::debug!("Rebuilt proof-event map with {} entries", PROOF_EVENT_MAP.read().len());
+    log::debug!(
+        "Rebuilt proof-event map with {} entries",
+        PROOF_EVENT_MAP.read().len()
+    );
 }
 /// Move proofs to Reserved state (before sending ecash via PreparedSend)
 pub fn move_proofs_to_reserved(proof_secrets: &[String], tx_id: u64) {
@@ -70,7 +73,11 @@ pub fn move_proofs_to_reserved(proof_secrets: &[String], tx_id: u64) {
             }
         }
     }
-    log::debug!("Marked {} proofs as Reserved for tx {}", proof_secrets.len(), tx_id);
+    log::debug!(
+        "Marked {} proofs as Reserved for tx {}",
+        proof_secrets.len(),
+        tx_id
+    );
 }
 /// Move proofs to Spent state
 pub fn move_proofs_to_spent(proof_secrets: &[String]) {
@@ -106,10 +113,7 @@ pub fn revert_proofs_to_spendable(proof_secrets: &[String]) {
     log::debug!("Reverted {} proofs to Unspent", proof_secrets.len());
 }
 /// Get proofs by secret for a specific mint
-pub fn get_proofs_by_secrets(
-    mint_url: &str,
-    proof_secrets: &[String],
-) -> Vec<ProofData> {
+pub fn get_proofs_by_secrets(mint_url: &str, proof_secrets: &[String]) -> Vec<ProofData> {
     let store = WALLET_TOKENS.read();
     let data = store.data();
     let tokens = data.read();
@@ -172,7 +176,9 @@ pub fn register_proofs_pending_at_mint(proof_secrets: &[String]) {
         }
     }
     log::debug!(
-        "Registered {} proofs as pending at mint (ts={})", proof_secrets.len(), now
+        "Registered {} proofs as pending at mint (ts={})",
+        proof_secrets.len(),
+        now
     );
     super::signals::schedule_persist_pending_secrets();
 }
@@ -184,7 +190,10 @@ pub fn remove_from_pending_at_mint(proof_secrets: &[String]) {
             pending.remove(secret);
         }
     }
-    log::debug!("Removed {} proofs from pending at mint", proof_secrets.len());
+    log::debug!(
+        "Removed {} proofs from pending at mint",
+        proof_secrets.len()
+    );
     super::signals::schedule_persist_pending_secrets();
 }
 /// Check if a proof is pending at the mint level
@@ -226,7 +235,8 @@ pub fn cleanup_old_pending_at_mint() {
     let after_count = PENDING_BY_MINT_SECRETS.read().len();
     if before_count != after_count {
         log::info!(
-            "Cleaned up {} stale pending-at-mint proofs", before_count - after_count
+            "Cleaned up {} stale pending-at-mint proofs",
+            before_count - after_count
         );
     }
 }
@@ -254,14 +264,12 @@ pub fn create_transaction(
         expires_at: None,
         created_at: now,
         updated_at: now,
-        history: vec![
-            TransactionStatusUpdate {
-                status: TransactionStatus::Draft,
-                timestamp: now,
-                message: None,
-                fee_paid: None,
-            },
-        ],
+        history: vec![TransactionStatusUpdate {
+            status: TransactionStatus::Draft,
+            timestamp: now,
+            message: None,
+            fee_paid: None,
+        }],
     };
     ACTIVE_TRANSACTIONS.write().push(tx);
     log::debug!("Created transaction {} with status Draft", id);
@@ -279,19 +287,22 @@ pub fn update_transaction_status(
         let now = chrono::Utc::now().timestamp() as u64;
         tx.status = status.clone();
         tx.updated_at = now;
-        tx.history
-            .push(TransactionStatusUpdate {
-                status,
-                timestamp: now,
-                message,
-                fee_paid,
-            });
+        tx.history.push(TransactionStatusUpdate {
+            status,
+            timestamp: now,
+            message,
+            fee_paid,
+        });
         log::debug!("Updated transaction {} status to {:?}", tx_id, tx.status);
     }
 }
 /// Get transaction by ID
 pub fn get_transaction(tx_id: u64) -> Option<ActiveTransaction> {
-    ACTIVE_TRANSACTIONS.read().iter().find(|t| t.id == tx_id).cloned()
+    ACTIVE_TRANSACTIONS
+        .read()
+        .iter()
+        .find(|t| t.id == tx_id)
+        .cloned()
 }
 /// Get all pending transactions
 pub fn get_pending_transactions() -> Vec<ActiveTransaction> {
@@ -301,9 +312,7 @@ pub fn get_pending_transactions() -> Vec<ActiveTransaction> {
         .filter(|t| {
             matches!(
                 t.status,
-                TransactionStatus::Draft
-                | TransactionStatus::Prepared
-                | TransactionStatus::Pending
+                TransactionStatus::Draft | TransactionStatus::Prepared | TransactionStatus::Pending
             )
         })
         .cloned()
@@ -312,16 +321,12 @@ pub fn get_pending_transactions() -> Vec<ActiveTransaction> {
 /// Remove completed/reverted transactions older than 1 hour (cleanup)
 pub fn cleanup_old_transactions() {
     let one_hour_ago = chrono::Utc::now().timestamp() as u64 - 3600;
-    ACTIVE_TRANSACTIONS
-        .write()
-        .retain(|tx| {
-            matches!(
-                tx.status,
-                TransactionStatus::Draft
-                | TransactionStatus::Prepared
-                | TransactionStatus::Pending
-            ) || tx.updated_at > one_hour_ago
-        });
+    ACTIVE_TRANSACTIONS.write().retain(|tx| {
+        matches!(
+            tx.status,
+            TransactionStatus::Draft | TransactionStatus::Prepared | TransactionStatus::Pending
+        ) || tx.updated_at > one_hour_ago
+    });
 }
 /// Convert ProofData to CDK Proof
 pub fn proof_data_to_cdk_proof(data: &ProofData) -> Result<cdk::nuts::Proof, String> {
@@ -330,13 +335,10 @@ pub fn proof_data_to_cdk_proof(data: &ProofData) -> Result<cdk::nuts::Proof, Str
     use std::str::FromStr;
     let keyset_id = cdk::nuts::Id::from_str(&data.id)
         .map_err(|e| format!("Invalid keyset ID '{}': {}", data.id, e))?;
-    let secret = Secret::from_str(&data.secret)
-        .map_err(|e| format!("Invalid secret: {}", e))?;
+    let secret = Secret::from_str(&data.secret).map_err(|e| format!("Invalid secret: {}", e))?;
     let c = PublicKey::from_hex(&data.c).map_err(|e| format!("Invalid C point: {}", e))?;
     let witness = if let Some(ref w) = data.witness {
-        Some(
-            serde_json::from_str(w).map_err(|e| format!("Invalid witness JSON: {}", e))?,
-        )
+        Some(serde_json::from_str(w).map_err(|e| format!("Invalid witness JSON: {}", e))?)
     } else {
         None
     };
@@ -360,15 +362,15 @@ pub fn proof_data_to_cdk_proof(data: &ProofData) -> Result<cdk::nuts::Proof, Str
 }
 /// Convert CDK Proof to ProofData
 pub fn cdk_proof_to_proof_data(proof: &cdk::nuts::Proof) -> ProofData {
-    let witness = proof.witness.as_ref().and_then(|w| serde_json::to_string(w).ok());
-    let dleq = proof
-        .dleq
+    let witness = proof
+        .witness
         .as_ref()
-        .map(|d| DleqData {
-            e: d.e.to_string(),
-            s: d.s.to_string(),
-            r: d.r.to_string(),
-        });
+        .and_then(|w| serde_json::to_string(w).ok());
+    let dleq = proof.dleq.as_ref().map(|d| DleqData {
+        e: d.e.to_string(),
+        s: d.s.to_string(),
+        r: d.r.to_string(),
+    });
     ProofData {
         id: proof.keyset_id.to_string(),
         amount: u64::from(proof.amount),
@@ -405,13 +407,10 @@ pub fn select_proofs_for_amount(
         .try_fold(0u64, |acc, amt| acc.checked_add(amt))
         .ok_or("Total available balance overflow")?;
     if total_available < target_amount {
-        return Err(
-            format!(
-                "Insufficient funds: available={}, required={}",
-                total_available,
-                target_amount,
-            ),
-        );
+        return Err(format!(
+            "Insufficient funds: available={}, required={}",
+            total_available, target_amount,
+        ));
     }
     let mut sorted_proofs: Vec<ProofData> = proofs
         .iter()
@@ -455,13 +454,10 @@ pub fn select_proofs_for_amount(
         target_amount
     };
     if selected_amount < total_needed {
-        return Err(
-            format!(
-                "Could not select enough proofs: selected={}, needed={}",
-                selected_amount,
-                total_needed,
-            ),
-        );
+        return Err(format!(
+            "Could not select enough proofs: selected={}, needed={}",
+            selected_amount, total_needed,
+        ));
     }
     Ok((selected, final_fee))
 }
@@ -503,13 +499,10 @@ pub fn select_proofs_prefer_inactive(
         selected_amount += proof.amount;
     }
     if selected_amount < target_amount {
-        return Err(
-            format!(
-                "Insufficient funds: selected={}, required={}",
-                selected_amount,
-                target_amount,
-            ),
-        );
+        return Err(format!(
+            "Insufficient funds: selected={}, required={}",
+            selected_amount, target_amount,
+        ));
     }
     Ok(selected)
 }

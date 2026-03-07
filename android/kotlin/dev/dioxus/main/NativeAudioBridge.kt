@@ -369,7 +369,16 @@ object NativeAudioBridge {
                 .setUsage(AudioAttributes.USAGE_MEDIA)
                 .build()
         )
-        player.setDataSource(item.mediaUrl)
+        try {
+            player.setDataSource(item.mediaUrl)
+        } catch (e: Exception) {
+            Log.e(AUDIO_TAG, "Failed to load media URL: ${item.mediaUrl}", e)
+            lastError.set("Failed to load: ${e.message}")
+            isPreparing = false
+            updatePlaybackState(false, PlaybackState.STATE_ERROR)
+            updateNotification()
+            return
+        }
         updatePlaybackState(false, PlaybackState.STATE_BUFFERING)
         updateMetadata(item)
         updateNotification()

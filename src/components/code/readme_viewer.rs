@@ -13,8 +13,7 @@ use wasm_bindgen::prelude::*;
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
 #[cfg(feature = "web")]
-#[wasm_bindgen(
-    inline_js = r#"
+#[wasm_bindgen(inline_js = r#"
 export function initMermaidDiagrams(rootId) {
     const root = rootId ? document.getElementById(rootId) : document;
     if (!root) return;
@@ -134,8 +133,7 @@ export function injectCodeBlockCopyButtons(rootId) {
         pre.appendChild(btn);
     });
 }
-"#
-)]
+"#)]
 extern "C" {
     fn initMermaidDiagrams(root_id: &str);
     fn injectCodeBlockCopyButtons(root_id: &str);
@@ -143,16 +141,13 @@ extern "C" {
 /// README viewer with loading/error states
 #[component]
 pub fn ReadmeViewer(
-    #[props(default = None)]
-    content: Option<String>,
-    #[props(default = false)]
-    loading: bool,
-    #[props(default = None)]
-    error: Option<String>,
-    #[props(default = "README.md".to_string())]
-    filename: String,
+    #[props(default = None)] content: Option<String>,
+    #[props(default = false)] loading: bool,
+    #[props(default = None)] error: Option<String>,
+    #[props(default = "README.md".to_string())] filename: String,
 ) -> Element {
-    let viewer_id = use_hook(|| format!("readme-viewer-{}", COUNTER.fetch_add(1, Ordering::Relaxed)));
+    let viewer_id =
+        use_hook(|| format!("readme-viewer-{}", COUNTER.fetch_add(1, Ordering::Relaxed)));
     // Initialize mermaid.js after the README HTML is rendered into the DOM.
     // Call initMermaidDiagrams whenever content is present; the JS function
     // already no-ops if there are no .mermaid nodes in the DOM.

@@ -38,23 +38,23 @@
 //! }
 //! ```
 #![allow(unused_imports)]
+use crate::services::admission_policy::NostrBlueAdmissionPolicy;
+use crate::stores::pinned_notes;
+use crate::stores::relay;
+use crate::stores::signer::SignerType;
 use dioxus::prelude::*;
 use dioxus_core::spawn_forever;
 use futures::future::join_all;
 use nostr::Url;
+#[cfg(target_arch = "wasm32")]
+use nostr_indexeddb::WebDatabase;
+#[cfg(feature = "native")]
+use nostr_ndb::NdbDatabase;
 use nostr_sdk::prelude::*;
 use nostr_sdk::Client;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
-#[cfg(target_arch = "wasm32")]
-use nostr_indexeddb::WebDatabase;
-#[cfg(feature = "native")]
-use nostr_ndb::NdbDatabase;
-use crate::stores::pinned_notes;
-use crate::stores::relay;
-use crate::stores::signer::SignerType;
-use crate::services::admission_policy::NostrBlueAdmissionPolicy;
 mod articles;
 mod contacts;
 mod custom_nips;
@@ -71,21 +71,11 @@ mod reposts;
 mod signals;
 mod streaming;
 mod types;
-pub use error::Error;
-pub use types::PublishResult;
-pub use signals::{
-    invalidate_contacts_cache, invalidate_mute_block_cache, CLIENT_INITIALIZED,
-    CURRENT_SIGNER, HAS_SIGNER, MUTE_BLOCK_INVALIDATE, NOSTR_CLIENT,
-};
-pub use fetching::{
-    fetch_events_aggregated, fetch_events_aggregated_outbox,
-    fetch_events_from_connected_relays, fetch_events_from_relays,
-    fetch_profile_events_db, fetch_profile_events_from_relays,
-};
-pub use streaming::{
-    stream_events_batched, stream_events_collected,
-    stream_events_from_connected_relays_batched, stream_events_immediate,
-    stream_events_with_callback, stream_video_events_from_connected_relays_batched,
+pub use crate::stores::relay::display::RelayDisplayInfo;
+pub use crate::stores::relay::pool::DEFAULT_RELAYS;
+pub use crate::stores::relay::{
+    wait_for_user_relays, RelayInfo, RelayPoolStoreStoreExt, RelayStatus, RELAY_CONNECTED,
+    RELAY_POOL, USER_RELAYS_APPLIED,
 };
 pub use articles::{
     fetch_articles, fetch_event_by_coordinate, fetch_event_by_coordinate_with_relays,
@@ -95,40 +85,48 @@ pub use contacts::{
     fetch_contacts, follow_user, follow_users_batch, is_following, publish_contacts,
     publish_contacts_tracked, unfollow_user,
 };
-pub use muting::{
-    block_user, get_blocked_users, get_mute_list_data, get_muted_posts, is_post_muted,
-    is_post_muted_cached, is_user_blocked, is_user_blocked_cached, mute_post,
-    report_post, unblock_user, unmute_post, MuteListData,
-};
-pub use notes::{publish_note, publish_note_tracked};
-pub use profile::{
-    publish_metadata, publish_metadata_tracked, update_profile_banner,
-    update_profile_picture,
-};
-pub use reactions::{publish_reaction, publish_reaction_tracked};
-pub use reposts::{delete_repost, publish_repost, publish_repost_tracked};
 pub use custom_nips::{
-    fetch_custom_nip_by_naddr, fetch_custom_nips, generate_custom_nip_naddr,
-    publish_custom_nip, publish_custom_nip_tracked, search_custom_nips, KIND_CUSTOM_NIP,
+    fetch_custom_nip_by_naddr, fetch_custom_nips, generate_custom_nip_naddr, publish_custom_nip,
+    publish_custom_nip_tracked, search_custom_nips, KIND_CUSTOM_NIP,
+};
+pub use error::Error;
+pub use fetching::{
+    fetch_events_aggregated, fetch_events_aggregated_outbox, fetch_events_from_connected_relays,
+    fetch_events_from_relays, fetch_profile_events_db, fetch_profile_events_from_relays,
 };
 pub use media::{
     publish_picture, publish_picture_tracked, publish_video, publish_video_tracked,
-    publish_voice_message, publish_voice_message_reply,
-    publish_voice_message_reply_tracked, publish_voice_message_tracked,
+    publish_voice_message, publish_voice_message_reply, publish_voice_message_reply_tracked,
+    publish_voice_message_tracked,
 };
+pub use muting::{
+    block_user, get_blocked_users, get_mute_list_data, get_muted_posts, is_post_muted,
+    is_post_muted_cached, is_user_blocked, is_user_blocked_cached, mute_post, report_post,
+    unblock_user, unmute_post, MuteListData,
+};
+pub use notes::{publish_note, publish_note_tracked};
 pub use polls::{
     get_cached_pubkey, publish_poll, publish_poll_tracked, publish_poll_vote,
     publish_poll_vote_tracked,
 };
+pub use profile::{
+    publish_metadata, publish_metadata_tracked, update_profile_banner, update_profile_picture,
+};
+pub use reactions::{publish_reaction, publish_reaction_tracked};
 pub use relay_publishing::{
     publish_note_to_relays, publish_reaction_to_relays, send_presigned_event_to_relays,
 };
-pub use crate::stores::relay::display::RelayDisplayInfo;
-pub use crate::stores::relay::pool::DEFAULT_RELAYS;
-pub use crate::stores::relay::{
-    RelayInfo, RelayPoolStoreStoreExt, RelayStatus, RELAY_CONNECTED, RELAY_POOL,
-    USER_RELAYS_APPLIED, wait_for_user_relays,
+pub use reposts::{delete_repost, publish_repost, publish_repost_tracked};
+pub use signals::{
+    invalidate_contacts_cache, invalidate_mute_block_cache, CLIENT_INITIALIZED, CURRENT_SIGNER,
+    HAS_SIGNER, MUTE_BLOCK_INVALIDATE, NOSTR_CLIENT,
 };
+pub use streaming::{
+    stream_events_batched, stream_events_collected, stream_events_from_connected_relays_batched,
+    stream_events_immediate, stream_events_with_callback,
+    stream_video_events_from_connected_relays_batched,
+};
+pub use types::PublishResult;
 /// Cross-platform async sleep helper (Dioxus pattern: compile-time cfg)
 pub async fn platform_sleep_ms(ms: u64) {
     #[cfg(target_arch = "wasm32")]
@@ -156,12 +154,10 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
         .reconnect(true);
     #[cfg(target_arch = "wasm32")]
     let client = {
-        let database = WebDatabase::open("nostr-blue-db")
-            .await
-            .map_err(|e| {
-                log::error!("Failed to open IndexedDB: {}", e);
-                format!("Failed to open IndexedDB: {}", e)
-            })?;
+        let database = WebDatabase::open("nostr-blue-db").await.map_err(|e| {
+            log::error!("Failed to open IndexedDB: {}", e);
+            format!("Failed to open IndexedDB: {}", e)
+        })?;
         log::info!("IndexedDB opened successfully");
         let gossip = nostr_gossip_memory::store::NostrGossipMemory::bounded(
             NonZeroUsize::new(10_000).expect("10_000 is non-zero"),
@@ -183,8 +179,8 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
         std::fs::create_dir_all(&db_path)
             .map_err(|e| format!("Failed to create NDB dir: {}", e))?;
         let db_path_str = db_path.to_string_lossy().to_string();
-        let database = NdbDatabase::open(&db_path_str)
-            .map_err(|e| format!("Failed to open NDB: {}", e))?;
+        let database =
+            NdbDatabase::open(&db_path_str).map_err(|e| format!("Failed to open NDB: {}", e))?;
         let gossip = nostr_gossip_memory::store::NostrGossipMemory::bounded(
             NonZeroUsize::new(10_000).expect("10_000 is non-zero"),
         );
@@ -205,25 +201,23 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
     let relay_futures: Vec<_> = DEFAULT_RELAYS
         .iter()
         .filter_map(|relay_url| {
-            Url::parse(relay_url)
-                .ok()
-                .map(|url| {
-                    let opts = relay_opts.clone();
-                    let pool = client.pool();
-                    let url_str = relay_url.to_string();
-                    async move {
-                        match pool.add_relay(url, opts).await {
-                            Ok(_) => {
-                                log::debug!("Added relay with opts: {}", url_str);
-                                RelayInfo::new(url_str, RelayStatus::Connecting)
-                            }
-                            Err(e) => {
-                                log::error!("Failed to add relay {}: {}", url_str, e);
-                                RelayInfo::new(url_str, RelayStatus::Disconnected)
-                            }
+            Url::parse(relay_url).ok().map(|url| {
+                let opts = relay_opts.clone();
+                let pool = client.pool();
+                let url_str = relay_url.to_string();
+                async move {
+                    match pool.add_relay(url, opts).await {
+                        Ok(_) => {
+                            log::debug!("Added relay with opts: {}", url_str);
+                            RelayInfo::new(url_str, RelayStatus::Connecting)
+                        }
+                        Err(e) => {
+                            log::error!("Failed to add relay {}: {}", url_str, e);
+                            RelayInfo::new(url_str, RelayStatus::Disconnected)
                         }
                     }
-                })
+                }
+            })
         })
         .collect();
     let relay_infos: Vec<RelayInfo> = join_all(relay_futures).await;

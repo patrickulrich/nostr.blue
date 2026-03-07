@@ -99,10 +99,7 @@ pub struct AddressStats {
     pub tx_count: u64,
 }
 /// Fetch transaction details
-pub async fn get_transaction(
-    endpoint: &str,
-    txid: &str,
-) -> Result<BitcoinTransaction, String> {
+pub async fn get_transaction(endpoint: &str, txid: &str) -> Result<BitcoinTransaction, String> {
     let url = format!("{}/tx/{}", endpoint.trim_end_matches('/'), txid);
     let response = http_client()
         .map_err(|e| format!("HTTP client init failed: {}", e))?
@@ -119,10 +116,7 @@ pub async fn get_transaction(
         .map_err(|e| format!("Failed to parse response: {}", e))
 }
 /// Fetch address information
-pub async fn get_address(
-    endpoint: &str,
-    address: &str,
-) -> Result<BitcoinAddress, String> {
+pub async fn get_address(endpoint: &str, address: &str) -> Result<BitcoinAddress, String> {
     let url = format!("{}/address/{}", endpoint.trim_end_matches('/'), address);
     let response = http_client()
         .map_err(|e| format!("HTTP client init failed: {}", e))?

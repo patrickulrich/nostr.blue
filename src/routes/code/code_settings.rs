@@ -3,6 +3,7 @@
 //! User-specific settings for the code section: git identity,
 //! default branch preference, editor preferences, and notification toggles.
 use crate::components::code::SshKeyManager;
+use crate::platform::storage;
 use crate::routes::Route;
 use crate::stores::auth_store;
 use crate::stores::nwc_store::{self, ConnectionStatus};
@@ -10,9 +11,8 @@ use crate::stores::profiles::PROFILE_CACHE;
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
-use std::time::Duration;
-use crate::platform::storage;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 const CODE_SETTINGS_KEY: &str = "nostrblue_code_settings";
 

@@ -2,8 +2,8 @@
 //!
 //! Sidebar widget that categorizes repository relays into GRASP servers
 //! (Git Repositories Announced on Servers with Protocol) vs plain relays.
-use dioxus::prelude::*;
 use crate::stores::grasp_servers::is_grasp_server;
+use dioxus::prelude::*;
 
 /// Extract domain from a relay URL (e.g., "wss://relay.example.com" -> "relay.example.com")
 /// Handles IPv6 addresses in brackets (e.g., "wss://[::1]:8080" -> "[::1]")
@@ -39,8 +39,9 @@ pub fn RelayDisplay(relays: Vec<String>) -> Element {
         return rsx! {};
     }
 
-    let (grasp_relays, plain_relays): (Vec<&String>, Vec<&String>) =
-        relays.iter().partition(|r| is_grasp_server(&extract_domain(r).to_lowercase()));
+    let (grasp_relays, plain_relays): (Vec<&String>, Vec<&String>) = relays
+        .iter()
+        .partition(|r| is_grasp_server(&extract_domain(r).to_lowercase()));
 
     rsx! {
         div { class: "bg-card border border-border rounded-lg p-4",

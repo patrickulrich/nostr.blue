@@ -1,8 +1,8 @@
 //! Wiki Content Component
 //! Renders wiki page content with wikilinks (NIP-54 Kind 30818)
 use crate::components::icons::{
-    AlertTriangleIcon, ArrowLeftIcon, CheckIcon, CopyIcon, ExternalLinkIcon,
-    PenSquareIcon, Repeat2Icon,
+    AlertTriangleIcon, ArrowLeftIcon, CheckIcon, CopyIcon, ExternalLinkIcon, PenSquareIcon,
+    Repeat2Icon,
 };
 use crate::components::{AsciiDocContent, CitationMetadata};
 use crate::routes::Route;
@@ -136,11 +136,7 @@ pub fn WikiPageContent(
 }
 /// Wiki page outline (table of contents)
 #[component]
-pub fn WikiOutline(
-    content: String,
-    #[props(default = String::new())]
-    class: String,
-) -> Element {
+pub fn WikiOutline(content: String, #[props(default = String::new())] class: String) -> Element {
     let headings = use_memo(move || extract_headings(&content));
     if headings.read().is_empty() {
         return rsx! {};
@@ -168,8 +164,7 @@ pub fn WikiOutline(
 #[component]
 pub fn WikiForwardLinks(
     links: Vec<String>,
-    #[props(default = String::new())]
-    class: String,
+    #[props(default = String::new())] class: String,
 ) -> Element {
     if links.is_empty() {
         return rsx! {};
@@ -198,10 +193,8 @@ pub fn WikiForwardLinks(
 #[component]
 pub fn WikiPageNotFound(
     identifier: String,
-    #[props(default = false)]
-    can_create: bool,
-    #[props(default = None)]
-    on_create: Option<EventHandler<String>>,
+    #[props(default = false)] can_create: bool,
+    #[props(default = None)] on_create: Option<EventHandler<String>>,
 ) -> Element {
     rsx! {
         div { class: "flex flex-col items-center justify-center py-16 px-4 text-center",
@@ -253,7 +246,10 @@ fn extract_headings(content: &str) -> Vec<(usize, String, String)> {
         .captures_iter(content)
         .map(|cap| {
             let level = cap.get(1).map(|m| m.as_str().len()).unwrap_or(1);
-            let text = cap.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
+            let text = cap
+                .get(2)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default();
             let id = slug_from_text(&text);
             (level, text, id)
         })

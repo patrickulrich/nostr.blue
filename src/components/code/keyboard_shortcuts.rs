@@ -36,7 +36,9 @@ pub fn CodeKeyboardShortcuts() -> Element {
     #[cfg(feature = "web")]
     use_effect(move || {
         {
-            let Some(window) = web_sys::window() else { return; };
+            let Some(window) = web_sys::window() else {
+                return;
+            };
 
             let closure = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
                 // Check if target is input/textarea/select - skip shortcuts if so
@@ -97,15 +99,19 @@ pub fn CodeKeyboardShortcuts() -> Element {
                     pending_g.set(true);
 
                     // Reset after 1 second timeout, storing the ID for cleanup
-                    let Some(window_clone) = web_sys::window() else { return; };
+                    let Some(window_clone) = web_sys::window() else {
+                        return;
+                    };
                     let callback = Closure::wrap(Box::new(move || {
                         pending_g.set(false);
                         timeout_id.set(None);
                     }) as Box<dyn FnMut()>);
-                    if let Ok(id) = window_clone.set_timeout_with_callback_and_timeout_and_arguments_0(
-                        callback.into_js_value().as_ref().unchecked_ref(),
-                        1000
-                    ) {
+                    if let Ok(id) = window_clone
+                        .set_timeout_with_callback_and_timeout_and_arguments_0(
+                            callback.into_js_value().as_ref().unchecked_ref(),
+                            1000,
+                        )
+                    {
                         timeout_id.set(Some(id));
                     }
                     return;
@@ -145,8 +151,11 @@ pub fn CodeKeyboardShortcuts() -> Element {
                 }
             }) as Box<dyn FnMut(_)>);
 
-            let js_fn: js_sys::Function = closure.as_ref().unchecked_ref::<js_sys::Function>().clone();
-            window.add_event_listener_with_callback("keydown", &js_fn).ok();
+            let js_fn: js_sys::Function =
+                closure.as_ref().unchecked_ref::<js_sys::Function>().clone();
+            window
+                .add_event_listener_with_callback("keydown", &js_fn)
+                .ok();
             cleanup_fn.set(Some(js_fn));
             closure.forget();
         }
@@ -154,14 +163,12 @@ pub fn CodeKeyboardShortcuts() -> Element {
 
     #[cfg(feature = "web")]
     use_drop(move || {
-        {
-            if let Some(window) = web_sys::window() {
-                if let Some(js_fn) = cleanup_fn.peek().as_ref() {
-                    let _ = window.remove_event_listener_with_callback("keydown", js_fn);
-                }
-                if let Some(id) = *timeout_id.peek() {
-                    window.clear_timeout_with_handle(id);
-                }
+        if let Some(window) = web_sys::window() {
+            if let Some(js_fn) = cleanup_fn.peek().as_ref() {
+                let _ = window.remove_event_listener_with_callback("keydown", js_fn);
+            }
+            if let Some(id) = *timeout_id.peek() {
+                window.clear_timeout_with_handle(id);
             }
         }
     });

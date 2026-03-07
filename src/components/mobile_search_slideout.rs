@@ -13,10 +13,7 @@ use crate::services::profile_search::{
 };
 
 #[component]
-pub fn MobileSearchSlideout(
-    show: Signal<bool>,
-    on_close: EventHandler<()>,
-) -> Element {
+pub fn MobileSearchSlideout(show: Signal<bool>, on_close: EventHandler<()>) -> Element {
     let mut query = use_signal(String::new);
     let mut show_dropdown = use_signal(|| false);
     let mut search_results = use_signal(Vec::<ProfileSearchResult>::new);

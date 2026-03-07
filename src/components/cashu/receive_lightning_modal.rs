@@ -78,7 +78,8 @@ async fn poll_mint_quote_http(
                         if !*is_polling.read() || quote_info.read().is_none() {
                             break;
                         }
-                        success_message.set(Some(format!("Successfully received {} sats!", amount)));
+                        success_message
+                            .set(Some(format!("Successfully received {} sats!", amount)));
                         quote_info.set(None);
                         is_polling.set(false);
                         mint_status.set(None);
@@ -169,11 +170,11 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
                 let quote_info_clone = quote_info;
                 spawn(async move {
                     let ws_result = cashu_ws::subscribe_to_quote(
-                            mint_url.clone(),
-                            quote_id.clone(),
-                            cashu_ws::SubscriptionKind::Bolt11MintQuote,
-                        )
-                        .await;
+                        mint_url.clone(),
+                        quote_id.clone(),
+                        cashu_ws::SubscriptionKind::Bolt11MintQuote,
+                    )
+                    .await;
                     match ws_result {
                         Ok(mut rx) => {
                             log::info!("Using WebSocket for quote status updates");
@@ -181,17 +182,14 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
                             let timeout_secs = 600;
                             let start = instant::Instant::now();
                             loop {
-                                if !*is_polling_clone.read()
-                                    || quote_info_clone.read().is_none()
-                                {
+                                if !*is_polling_clone.read() || quote_info_clone.read().is_none() {
                                     log::info!("WebSocket polling cancelled");
                                     break;
                                 }
                                 if start.elapsed().as_secs() > timeout_secs {
-                                    error_message
-                                        .set(
-                                            Some("Invoice expired. Please try again.".to_string()),
-                                        );
+                                    error_message.set(Some(
+                                        "Invoice expired. Please try again.".to_string(),
+                                    ));
                                     is_polling.set(false);
                                     quote_info.set(None);
                                     break;
@@ -338,9 +336,7 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
                             }
                         }
                         Err(e) => {
-                            log::warn!(
-                                "WebSocket not available ({}), using HTTP polling", e
-                            );
+                            log::warn!("WebSocket not available ({}), using HTTP polling", e);
                             poll_mint_quote_http(
                                 mint_url,
                                 quote_id,

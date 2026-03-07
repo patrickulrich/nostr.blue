@@ -86,11 +86,7 @@ pub fn get_branches(repo_path: &str) -> Result<Vec<String>, String> {
 }
 
 /// Get commit log for a given ref.
-pub fn get_log(
-    repo_path: &str,
-    git_ref: &str,
-    count: u32,
-) -> Result<Vec<CommitEntry>, String> {
+pub fn get_log(repo_path: &str, git_ref: &str, count: u32) -> Result<Vec<CommitEntry>, String> {
     let repo = Repository::open(repo_path).map_err(|e| e.to_string())?;
     let obj = repo.revparse_single(git_ref).map_err(|e| e.to_string())?;
     let commit = obj.peel_to_commit().map_err(|e| e.to_string())?;

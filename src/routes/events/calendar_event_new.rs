@@ -125,13 +125,9 @@ pub fn CalendarEventNew() -> Element {
         let pk = match nostr_sdk::prelude::PublicKey::parse(&input) {
             Ok(pk) => pk,
             Err(_) => {
-                error_message
-                    .set(
-                        Some(
-                            "Invalid pubkey. Use hex, npub, or nostr:npub format"
-                                .to_string(),
-                        ),
-                    );
+                error_message.set(Some(
+                    "Invalid pubkey. Use hex, npub, or nostr:npub format".to_string(),
+                ));
                 return;
             }
         };
@@ -183,15 +179,10 @@ pub fn CalendarEventNew() -> Element {
                     if let Some(file) = files.get(0) {
                         let size = file.size() as u64;
                         if size > MAX_ICS_FILE_SIZE {
-                            error_message
-                                .set(
-                                    Some(
-                                        format!(
-                                            "ICS file too large ({:.1} MB). Maximum size is 1 MB.",
-                                            size as f64 / 1_048_576.0,
-                                        ),
-                                    ),
-                                );
+                            error_message.set(Some(format!(
+                                "ICS file too large ({:.1} MB). Maximum size is 1 MB.",
+                                size as f64 / 1_048_576.0,
+                            )));
                             clear_file_input("ics-file-input");
                             return;
                         }
@@ -218,7 +209,9 @@ pub fn CalendarEventNew() -> Element {
         }
         #[cfg(not(feature = "web"))]
         {
-            error_message.set(Some("ICS upload is not supported on this platform".to_string()));
+            error_message.set(Some(
+                "ICS upload is not supported on this platform".to_string(),
+            ));
         }
     };
     let mut apply_ics_event = move |evt: &IcsEvent| {
@@ -249,7 +242,10 @@ pub fn CalendarEventNew() -> Element {
                     start_date.set(date);
                     start_time.set(time);
                 }
-                IcsDateTime::DateTimeWithTz { timestamp: ts, timezone: tz } => {
+                IcsDateTime::DateTimeWithTz {
+                    timestamp: ts,
+                    timezone: tz,
+                } => {
                     event_type.set(EventType::TimeBased);
                     let (date, time) = timestamp_to_date_time_in_tz(*ts, tz);
                     start_date.set(date);
@@ -269,7 +265,10 @@ pub fn CalendarEventNew() -> Element {
                     end_date.set(date);
                     end_time.set(time);
                 }
-                IcsDateTime::DateTimeWithTz { timestamp: ts, timezone: tz } => {
+                IcsDateTime::DateTimeWithTz {
+                    timestamp: ts,
+                    timezone: tz,
+                } => {
                     let (date, time) = timestamp_to_date_time_in_tz(*ts, tz);
                     end_date.set(date);
                     end_time.set(time);
@@ -341,60 +340,66 @@ pub fn CalendarEventNew() -> Element {
                         None
                     };
                     calendar_store::publish_date_event(
-                            &title_val,
-                            &start_date_val,
-                            end_date_opt,
-                            if summary_val.is_empty() {
-                                None
-                            } else {
-                                Some(&summary_val)
-                            },
-                            if content_val.is_empty() {
-                                None
-                            } else {
-                                Some(&content_val)
-                            },
-                            if image_val.is_empty() { None } else { Some(&image_val) },
-                            &all_locations,
-                            &hashtags,
-                            &participants_val,
-                        )
-                        .await
+                        &title_val,
+                        &start_date_val,
+                        end_date_opt,
+                        if summary_val.is_empty() {
+                            None
+                        } else {
+                            Some(&summary_val)
+                        },
+                        if content_val.is_empty() {
+                            None
+                        } else {
+                            Some(&content_val)
+                        },
+                        if image_val.is_empty() {
+                            None
+                        } else {
+                            Some(&image_val)
+                        },
+                        &all_locations,
+                        &hashtags,
+                        &participants_val,
+                    )
+                    .await
                 }
                 EventType::TimeBased => {
-                    let start_ts = parse_datetime_to_timestamp(
-                        &start_date_val,
-                        &start_time_val,
-                    );
-                    let end_ts = parse_datetime_to_timestamp(
-                        &end_date_val,
-                        &end_time_val,
-                    );
+                    let start_ts = parse_datetime_to_timestamp(&start_date_val, &start_time_val);
+                    let end_ts = parse_datetime_to_timestamp(&end_date_val, &end_time_val);
                     calendar_store::publish_time_event(
-                            &title_val,
-                            start_ts,
-                            if end_ts > start_ts { Some(end_ts) } else { None },
-                            if summary_val.is_empty() {
-                                None
-                            } else {
-                                Some(&summary_val)
-                            },
-                            if content_val.is_empty() {
-                                None
-                            } else {
-                                Some(&content_val)
-                            },
-                            if image_val.is_empty() { None } else { Some(&image_val) },
-                            &all_locations,
-                            &hashtags,
-                            &participants_val,
-                            if timezone_val.is_empty() {
-                                None
-                            } else {
-                                Some(&timezone_val)
-                            },
-                        )
-                        .await
+                        &title_val,
+                        start_ts,
+                        if end_ts > start_ts {
+                            Some(end_ts)
+                        } else {
+                            None
+                        },
+                        if summary_val.is_empty() {
+                            None
+                        } else {
+                            Some(&summary_val)
+                        },
+                        if content_val.is_empty() {
+                            None
+                        } else {
+                            Some(&content_val)
+                        },
+                        if image_val.is_empty() {
+                            None
+                        } else {
+                            Some(&image_val)
+                        },
+                        &all_locations,
+                        &hashtags,
+                        &participants_val,
+                        if timezone_val.is_empty() {
+                            None
+                        } else {
+                            Some(&timezone_val)
+                        },
+                    )
+                    .await
                 }
             };
             match result {
@@ -931,10 +936,8 @@ pub fn CalendarEventNew() -> Element {
 }
 #[cfg(feature = "web")]
 fn get_local_timezone() -> String {
-    let formatter = js_sys::Intl::DateTimeFormat::new(
-        &js_sys::Array::new(),
-        &js_sys::Object::new(),
-    );
+    let formatter =
+        js_sys::Intl::DateTimeFormat::new(&js_sys::Array::new(), &js_sys::Object::new());
     let resolved = formatter.resolved_options();
     js_sys::Reflect::get(&resolved, &"timeZone".into())
         .ok()
@@ -1004,11 +1007,19 @@ fn parse_datetime_to_timestamp(date: &str, time: &str) -> u64 {
         _ => return 0,
     };
     // Accurate days since Unix epoch using Hinnant's civil calendar algorithm
-    let (y, m) = if month <= 2 { (year - 1, month + 9) } else { (year, month - 3) };
+    let (y, m) = if month <= 2 {
+        (year - 1, month + 9)
+    } else {
+        (year, month - 3)
+    };
     let era_days = 365 * y + y / 4 - y / 100 + y / 400 + (m * 153 + 2) / 5 + day - 1;
     let days = era_days - 719468; // days_from_civil(1970, 1, 1) = 719468
     let total_secs = days * 86400 + hours * 3600 + minutes * 60;
-    if total_secs < 0 { 0u64 } else { total_secs as u64 }
+    if total_secs < 0 {
+        0u64
+    } else {
+        total_secs as u64
+    }
 }
 /// Convert Unix timestamp to date (YYYY-MM-DD) and time (HH:MM) strings in local time
 #[cfg(feature = "web")]
@@ -1036,34 +1047,60 @@ fn timestamp_to_date_time(ts: u64) -> (String, String) {
     let mut y = 1970i32;
     let mut d = days as i32;
     loop {
-        let days_in_year = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
-        if d < days_in_year { break; }
+        let days_in_year = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) {
+            366
+        } else {
+            365
+        };
+        if d < days_in_year {
+            break;
+        }
         d -= days_in_year;
         y += 1;
     }
     let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
-    let days_in_months = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let days_in_months = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut m = 0u32;
     for dim in &days_in_months {
-        if d < *dim { break; }
+        if d < *dim {
+            break;
+        }
         d -= dim;
         m += 1;
     }
-    (format!("{:04}-{:02}-{:02}", y, m + 1, d + 1), format!("{:02}:{:02}", hours, minutes))
+    (
+        format!("{:04}-{:02}-{:02}", y, m + 1, d + 1),
+        format!("{:02}:{:02}", hours, minutes),
+    )
 }
 /// Convert Unix timestamp to date (YYYY-MM-DD) and time (HH:MM) strings in a specific timezone
 /// Uses JavaScript's Intl.DateTimeFormat for proper timezone handling
 #[cfg(feature = "web")]
 fn timestamp_to_date_time_in_tz(ts: u64, tz: &str) -> (String, String) {
     use wasm_bindgen::JsValue;
-    if tz.is_empty() || tz.len() > 64
+    if tz.is_empty()
+        || tz.len() > 64
         || !tz
             .chars()
-            .all(|c| {
-                c.is_ascii_alphanumeric() || c == '/' || c == '_' || c == '-' || c == '+'
-            })
+            .all(|c| c.is_ascii_alphanumeric() || c == '/' || c == '_' || c == '-' || c == '+')
     {
-        log::debug!("Invalid timezone format: {}, falling back to local time", tz);
+        log::debug!(
+            "Invalid timezone format: {}, falling back to local time",
+            tz
+        );
         return timestamp_to_date_time(ts);
     }
     let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
@@ -1127,14 +1164,21 @@ fn timestamp_to_date_time_in_tz(ts: u64, tz: &str) -> (String, String) {
         }
     }
     if !year.is_empty() && !month.is_empty() && !day.is_empty() {
-        return (format!("{}-{}-{}", year, month, day), format!("{}:{}", hour, minute));
+        return (
+            format!("{}-{}-{}", year, month, day),
+            format!("{}:{}", hour, minute),
+        );
     }
     timestamp_to_date_time(ts)
 }
 
 #[cfg(not(feature = "web"))]
 fn timestamp_to_date_time_in_tz(ts: u64, tz: &str) -> (String, String) {
-    log::debug!("Timezone '{}' ignored on native, using UTC for ts={}", tz, ts);
+    log::debug!(
+        "Timezone '{}' ignored on native, using UTC for ts={}",
+        tz,
+        ts
+    );
     timestamp_to_date_time(ts)
 }
 
@@ -1143,8 +1187,7 @@ fn timestamp_to_date_time_in_tz(ts: u64, tz: &str) -> (String, String) {
 fn format_ics_datetime(dt: &IcsDateTime) -> String {
     match dt {
         IcsDateTime::Date(d) => d.clone(),
-        IcsDateTime::DateTime(ts)
-        | IcsDateTime::DateTimeWithTz { timestamp: ts, .. } => {
+        IcsDateTime::DateTime(ts) | IcsDateTime::DateTimeWithTz { timestamp: ts, .. } => {
             let date = js_sys::Date::new(&(*ts as f64 * 1000.0).into());
             format!(
                 "{:04}-{:02}-{:02} {:02}:{:02}",
@@ -1162,8 +1205,7 @@ fn format_ics_datetime(dt: &IcsDateTime) -> String {
 fn format_ics_datetime(dt: &IcsDateTime) -> String {
     match dt {
         IcsDateTime::Date(d) => d.clone(),
-        IcsDateTime::DateTime(ts)
-        | IcsDateTime::DateTimeWithTz { timestamp: ts, .. } => {
+        IcsDateTime::DateTime(ts) | IcsDateTime::DateTimeWithTz { timestamp: ts, .. } => {
             let (date_str, time_str) = timestamp_to_date_time(*ts);
             format!("{} {} UTC", date_str, time_str)
         }
@@ -1185,8 +1227,12 @@ async fn read_ics_file_content(element_id: &str) -> Result<String, String> {
     let file_list = input.files().ok_or("No files")?;
     let file = file_list.get(0).ok_or("No file selected")?;
     let promise = file.text();
-    let result = JsFuture::from(promise).await.map_err(|_| "Failed to read file")?;
-    result.as_string().ok_or("Could not convert to string".to_string())
+    let result = JsFuture::from(promise)
+        .await
+        .map_err(|_| "Failed to read file")?;
+    result
+        .as_string()
+        .ok_or("Could not convert to string".to_string())
 }
 /// Clear file input value to allow re-selecting the same file
 #[cfg(feature = "web")]

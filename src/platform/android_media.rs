@@ -40,7 +40,12 @@ fn find_app_class<'a>(
 ) -> Option<JClass<'a>> {
     let context_class = env.get_object_class(context).ok()?;
     let class_loader = env
-        .call_method(&context_class, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])
+        .call_method(
+            &context_class,
+            "getClassLoader",
+            "()Ljava/lang/ClassLoader;",
+            &[],
+        )
         .ok()?
         .l()
         .ok()?;
@@ -72,7 +77,9 @@ where
 }
 
 fn extract_string(env: &mut jni::JNIEnv<'_>, result: JObject<'_>) -> Result<String, String> {
-    let result = env.get_string((&result).into()).map_err(|e| e.to_string())?;
+    let result = env
+        .get_string((&result).into())
+        .map_err(|e| e.to_string())?;
     Ok(result.to_string_lossy().into_owned())
 }
 
@@ -82,6 +89,11 @@ fn expect_ok(result: String) -> Result<(), String> {
     } else {
         Ok(())
     }
+}
+
+fn expect_ok_string(result: String) -> Result<String, String> {
+    expect_ok(result.clone())?;
+    Ok(result)
 }
 
 fn call_context_only(method_name: &str) -> Result<String, String> {
@@ -100,7 +112,11 @@ fn call_context_only(method_name: &str) -> Result<String, String> {
     })
 }
 
-pub fn set_queue(queue: &[MusicTrack], current_index: usize, play_when_ready: bool) -> Result<(), String> {
+pub fn set_queue(
+    queue: &[MusicTrack],
+    current_index: usize,
+    play_when_ready: bool,
+) -> Result<(), String> {
     let queue_json = serde_json::to_string(queue).map_err(|e| e.to_string())?;
     let result = with_activity_class(|env, context, class| {
         let j_queue = env.new_string(queue_json).map_err(|e| e.to_string())?;
@@ -203,6 +219,6 @@ pub fn seek_to(position_seconds: f64) -> Result<(), String> {
 }
 
 pub fn snapshot() -> Result<AndroidPlaybackSnapshot, String> {
-    let json = call_context_only("getNativePlaybackSnapshot")?;
+    let json = expect_ok_string(call_context_only("getNativePlaybackSnapshot")?)?;
     serde_json::from_str(&json).map_err(|e| e.to_string())
 }

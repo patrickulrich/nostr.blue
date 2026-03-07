@@ -136,12 +136,11 @@ impl<T: Clone + 'static> TimedSerializer<T> {
     {
         *self.pending_data.borrow_mut() = Some(data.clone());
         let pending_data = Rc::clone(&self.pending_data);
-        self.debouncer
-            .debounce(move || {
-                if let Some(data) = pending_data.borrow_mut().take() {
-                    save_fn(data);
-                }
-            });
+        self.debouncer.debounce(move || {
+            if let Some(data) = pending_data.borrow_mut().take() {
+                save_fn(data);
+            }
+        });
     }
     /// Immediately flush any pending save
     pub fn flush<F>(&self, save_fn: F)
@@ -224,13 +223,9 @@ mod tests {
         let serializer = TimedSerializer::<String>::new();
         let called = Arc::new(Mutex::new(false));
         let called_clone = Arc::clone(&called);
-        serializer
-            .save(
-                "test".to_string(),
-                move |_data| {
-                    *called_clone.lock().unwrap() = true;
-                },
-            );
+        serializer.save("test".to_string(), move |_data| {
+            *called_clone.lock().unwrap() = true;
+        });
         assert!(serializer.pending_data.borrow().is_some());
     }
     #[cfg(all(feature = "web", target_arch = "wasm32"))]

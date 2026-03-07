@@ -1,8 +1,8 @@
 //! Recipe Card Component
 //! Displays a recipe in a grid card format with image, title, and author
 //! Standard recipe card (160x237px)
-use crate::components::content_menu::{ContentMenu, ContentMenuType};
 use super::tag_chip::RecipeTagChipSmall;
+use crate::components::content_menu::{ContentMenu, ContentMenuType};
 use crate::hooks::use_author_metadata;
 use crate::routes::Route;
 use crate::stores::recipe_store::CachedRecipe;

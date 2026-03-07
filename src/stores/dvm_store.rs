@@ -16,7 +16,8 @@ pub const KIND_CONTENT_DISCOVERY_RESULT: u16 = 6300;
 /// NIP-89 Handler information / DVM announcement
 pub const KIND_APP_HANDLER: u16 = 31990;
 /// Default content discovery DVM
-pub const DEFAULT_CONTENT_DVM: &str = "0d9ec486275b70f0c4faec277fc4c63b9f14cb1ca1ec029f7d76210e957e5257";
+pub const DEFAULT_CONTENT_DVM: &str =
+    "0d9ec486275b70f0c4faec277fc4c63b9f14cb1ca1ec029f7d76210e957e5257";
 /// Relays known to have DVM providers
 const DVM_RELAYS: &[&str] = &[
     "wss://relay.damus.io",
@@ -40,18 +41,15 @@ impl DvmProvider {
         if event.kind.as_u16() != KIND_APP_HANDLER {
             return None;
         }
-        let has_content_discovery = event
-            .tags
-            .iter()
-            .any(|tag| {
-                let slice = tag.as_slice();
-                slice.len() >= 2 && slice[0] == "k" && slice[1] == "5300"
-            });
+        let has_content_discovery = event.tags.iter().any(|tag| {
+            let slice = tag.as_slice();
+            slice.len() >= 2 && slice[0] == "k" && slice[1] == "5300"
+        });
         if !has_content_discovery {
             return None;
         }
-        let metadata: serde_json::Value = serde_json::from_str(&event.content)
-            .unwrap_or(serde_json::Value::Null);
+        let metadata: serde_json::Value =
+            serde_json::from_str(&event.content).unwrap_or(serde_json::Value::Null);
         Some(Self {
             pubkey: event.pubkey,
             event_id: event.id,
@@ -60,7 +58,10 @@ impl DvmProvider {
                 .and_then(|v| v.as_str())
                 .unwrap_or("Unknown DVM")
                 .to_string(),
-            about: metadata.get("about").and_then(|v| v.as_str()).map(String::from),
+            about: metadata
+                .get("about")
+                .and_then(|v| v.as_str())
+                .map(String::from),
             picture: metadata
                 .get("picture")
                 .or_else(|| metadata.get("image"))
@@ -76,9 +77,7 @@ impl DvmProvider {
     }
 }
 /// Selected DVM provider pubkey (None = use default)
-pub static SELECTED_DVM_PROVIDER: GlobalSignal<Option<PublicKey>> = Signal::global(|| {
-    None
-});
+pub static SELECTED_DVM_PROVIDER: GlobalSignal<Option<PublicKey>> = Signal::global(|| None);
 /// Available content discovery DVM providers
 pub static DVM_PROVIDERS: GlobalSignal<Vec<DvmProvider>> = Signal::global(Vec::new);
 /// Current feed events from DVM response
@@ -94,12 +93,9 @@ pub static DVM_LAST_REQUEST_ID: GlobalSignal<Option<EventId>> = Signal::global(|
 /// Get the effective DVM provider pubkey (selected or default)
 #[allow(dead_code)]
 pub fn get_effective_provider() -> PublicKey {
-    SELECTED_DVM_PROVIDER
-        .read()
-        .unwrap_or_else(|| {
-            PublicKey::from_hex(DEFAULT_CONTENT_DVM)
-                .expect("Invalid DEFAULT_CONTENT_DVM constant")
-        })
+    SELECTED_DVM_PROVIDER.read().unwrap_or_else(|| {
+        PublicKey::from_hex(DEFAULT_CONTENT_DVM).expect("Invalid DEFAULT_CONTENT_DVM constant")
+    })
 }
 /// Discover content discovery DVM providers (kind 31990 with #k=5300)
 pub async fn discover_content_dvms() -> Result<Vec<DvmProvider>, String> {
@@ -110,11 +106,10 @@ pub async fn discover_content_dvms() -> Result<Vec<DvmProvider>, String> {
         }
         *loading = true;
     }
-    let client = nostr_client::get_client()
-        .ok_or_else(|| {
-            *DVM_PROVIDERS_LOADING.write() = false;
-            "Client not initialized".to_string()
-        })?;
+    let client = nostr_client::get_client().ok_or_else(|| {
+        *DVM_PROVIDERS_LOADING.write() = false;
+        "Client not initialized".to_string()
+    })?;
     for relay_url in DVM_RELAYS {
         if let Ok(url) = nostr_sdk::RelayUrl::parse(relay_url) {
             let _ = client.add_relay(url).await;
@@ -136,7 +131,10 @@ pub async fn discover_content_dvms() -> Result<Vec<DvmProvider>, String> {
             *DVM_PROVIDERS_LOADING.write() = false;
             format!("Failed to fetch DVMs: {}", e)
         })?;
-    log::info!("Fetched {} potential content discovery DVM events", events.len());
+    log::info!(
+        "Fetched {} potential content discovery DVM events",
+        events.len()
+    );
     let mut providers: Vec<DvmProvider> = events
         .into_iter()
         .filter_map(|event| DvmProvider::from_event(&event))
@@ -150,36 +148,34 @@ pub async fn discover_content_dvms() -> Result<Vec<DvmProvider>, String> {
     Ok(providers)
 }
 /// Request content feed from DVM (kind 5300 → 6300)
-pub async fn request_content_feed(
-    provider: Option<PublicKey>,
-) -> Result<Vec<Event>, String> {
+pub async fn request_content_feed(provider: Option<PublicKey>) -> Result<Vec<Event>, String> {
     *DVM_FEED_LOADING.write() = true;
     *DVM_FEED_ERROR.write() = None;
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let target_pubkey = provider
-        .unwrap_or_else(|| {
-            PublicKey::from_hex(DEFAULT_CONTENT_DVM)
-                .expect("Invalid DEFAULT_CONTENT_DVM constant")
-        });
-    log::info!("Requesting content discovery from DVM: {}", target_pubkey.to_hex());
+    let target_pubkey = provider.unwrap_or_else(|| {
+        PublicKey::from_hex(DEFAULT_CONTENT_DVM).expect("Invalid DEFAULT_CONTENT_DVM constant")
+    });
+    log::info!(
+        "Requesting content discovery from DVM: {}",
+        target_pubkey.to_hex()
+    );
     let tags = vec![Tag::public_key(target_pubkey)];
-    let builder = nostr_sdk::EventBuilder::new(Kind::from(KIND_CONTENT_DISCOVERY), "")
-        .tags(tags);
+    let builder = nostr_sdk::EventBuilder::new(Kind::from(KIND_CONTENT_DISCOVERY), "").tags(tags);
     if !*nostr_client::HAS_SIGNER.read() {
         log::info!("No signer available, fetching recent DVM results instead");
         return fetch_recent_dvm_results(target_pubkey).await;
     }
-    let output = client
-        .send_event_builder(builder)
-        .await
-        .map_err(|e| {
-            *DVM_FEED_EVENTS.write() = Vec::new();
-            *DVM_FEED_LOADING.write() = false;
-            *DVM_FEED_ERROR.write() = Some(format!("Failed to submit job: {}", e));
-            format!("Failed to submit job: {}", e)
-        })?;
+    let output = client.send_event_builder(builder).await.map_err(|e| {
+        *DVM_FEED_EVENTS.write() = Vec::new();
+        *DVM_FEED_LOADING.write() = false;
+        *DVM_FEED_ERROR.write() = Some(format!("Failed to submit job: {}", e));
+        format!("Failed to submit job: {}", e)
+    })?;
     let request_id = *output.id();
-    log::info!("Content discovery request submitted: {}", request_id.to_hex());
+    log::info!(
+        "Content discovery request submitted: {}",
+        request_id.to_hex()
+    );
     *DVM_LAST_REQUEST_ID.write() = Some(request_id);
     let response_filter = Filter::new()
         .kind(Kind::from(KIND_CONTENT_DISCOVERY_RESULT))
@@ -209,18 +205,21 @@ pub async fn request_content_feed(
                 return Ok(feed_events);
             }
         }
-        log::debug!("Waiting for DVM response... attempt {}/{}", attempts, max_attempts);
+        log::debug!(
+            "Waiting for DVM response... attempt {}/{}",
+            attempts,
+            max_attempts
+        );
     }
 }
 /// Fetch recent results from a DVM (fallback when not signed in)
 async fn fetch_recent_dvm_results(dvm_pubkey: PublicKey) -> Result<Vec<Event>, String> {
-    let client = nostr_client::get_client()
-        .ok_or_else(|| {
-            *DVM_FEED_EVENTS.write() = Vec::new();
-            *DVM_FEED_LOADING.write() = false;
-            *DVM_FEED_ERROR.write() = Some("Client not initialized".to_string());
-            "Client not initialized".to_string()
-        })?;
+    let client = nostr_client::get_client().ok_or_else(|| {
+        *DVM_FEED_EVENTS.write() = Vec::new();
+        *DVM_FEED_LOADING.write() = false;
+        *DVM_FEED_ERROR.write() = Some("Client not initialized".to_string());
+        "Client not initialized".to_string()
+    })?;
     let filter = Filter::new()
         .kind(Kind::from(KIND_CONTENT_DISCOVERY_RESULT))
         .author(dvm_pubkey)
@@ -231,9 +230,7 @@ async fn fetch_recent_dvm_results(dvm_pubkey: PublicKey) -> Result<Vec<Event>, S
         .map_err(|e| {
             *DVM_FEED_EVENTS.write() = Vec::new();
             *DVM_FEED_LOADING.write() = false;
-            *DVM_FEED_ERROR.write() = Some(
-                format!("Failed to fetch DVM results: {}", e),
-            );
+            *DVM_FEED_ERROR.write() = Some(format!("Failed to fetch DVM results: {}", e));
             format!("Failed to fetch DVM results: {}", e)
         })?;
     if let Some(response) = responses.into_iter().next() {
@@ -252,17 +249,13 @@ async fn parse_feed_response(
     response: &Event,
     client: &nostr_sdk::Client,
 ) -> Result<Vec<Event>, String> {
-    let json_tags: Vec<Vec<String>> = serde_json::from_str(&response.content)
-        .unwrap_or_else(|_| {
+    let json_tags: Vec<Vec<String>> =
+        serde_json::from_str(&response.content).unwrap_or_else(|_| {
             response
                 .tags
                 .iter()
                 .filter_map(|tag| {
-                    let parts: Vec<String> = tag
-                        .as_slice()
-                        .iter()
-                        .map(|s| s.to_string())
-                        .collect();
+                    let parts: Vec<String> = tag.as_slice().iter().map(|s| s.to_string()).collect();
                     if parts.first().map(|s| s.as_str()) == Some("e") {
                         Some(parts)
                     } else {
@@ -292,7 +285,10 @@ async fn parse_feed_response(
         .map_err(|e| format!("Failed to fetch feed events: {}", e))?;
     let mut event_vec: Vec<Event> = events.into_iter().collect();
     event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    log::info!("Fetched {} feed events from DVM recommendation", event_vec.len());
+    log::info!(
+        "Fetched {} feed events from DVM recommendation",
+        event_vec.len()
+    );
     Ok(event_vec)
 }
 /// Set selected DVM provider

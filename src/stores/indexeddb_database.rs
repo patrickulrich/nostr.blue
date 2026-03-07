@@ -48,8 +48,8 @@ mod native_stub {
     use cdk_common::database::{self, WalletDatabase};
     use cdk_common::mint_url::MintUrl;
     use cdk_common::nuts::{
-        CurrencyUnit, Id, KeySet, KeySetInfo, Keys, MintInfo,
-        PublicKey as CashuPublicKey, SpendingConditions, State,
+        CurrencyUnit, Id, KeySet, KeySetInfo, Keys, MintInfo, PublicKey as CashuPublicKey,
+        SpendingConditions, State,
     };
     use cdk_common::wallet::{
         MeltQuote, MintQuote, Transaction, TransactionDirection, TransactionId,
@@ -67,223 +67,160 @@ mod native_stub {
             database::Error::Database(Box::new(std::io::Error::other(msg)))
         }
         pub async fn new() -> Result<Self, database::Error> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         pub async fn add_pending_event(
             &self,
             _event: &PendingNostrEvent,
         ) -> Result<(), database::Error> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        pub async fn remove_pending_event(
-            &self,
-            _event_id: &str,
-        ) -> Result<(), database::Error> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+        pub async fn remove_pending_event(&self, _event_id: &str) -> Result<(), database::Error> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         pub async fn get_all_pending_events(
             &self,
         ) -> Result<Vec<PendingNostrEvent>, database::Error> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         pub async fn update_pending_event(
             &self,
             _event: &PendingNostrEvent,
         ) -> Result<(), database::Error> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        pub async fn load_sync_state(
-            &self,
-        ) -> Result<Option<SyncState>, database::Error> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+        pub async fn load_sync_state(&self) -> Result<Option<SyncState>, database::Error> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        pub async fn save_sync_state(
-            &self,
-            _state: &SyncState,
-        ) -> Result<(), database::Error> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+        pub async fn save_sync_state(&self, _state: &SyncState) -> Result<(), database::Error> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         pub async fn clear_sync_state(&self) -> Result<(), database::Error> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         pub async fn save_order(
             &self,
             _order: &crate::utils::nip99::ShopOrder,
         ) -> Result<(), database::Error> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         pub async fn get_order(
             &self,
             _order_id: &str,
         ) -> Result<Option<crate::utils::nip99::ShopOrder>, database::Error> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         pub async fn get_all_orders(
             &self,
         ) -> Result<Vec<crate::utils::nip99::ShopOrder>, database::Error> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         pub async fn update_order(
             &self,
             _order: &crate::utils::nip99::ShopOrder,
         ) -> Result<(), database::Error> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        pub async fn delete_order(
-            &self,
-            _order_id: &str,
-        ) -> Result<(), database::Error> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+        pub async fn delete_order(&self, _order_id: &str) -> Result<(), database::Error> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         pub async fn save_pending_mint_secrets(
             &self,
             _secrets: &std::collections::HashMap<String, u64>,
         ) -> Result<(), database::Error> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         pub async fn load_pending_mint_secrets(
             &self,
         ) -> Result<Option<std::collections::HashMap<String, u64>>, database::Error> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         pub async fn clear_pending_mint_secrets(&self) -> Result<(), database::Error> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         pub async fn save_in_flight_melt_requests(
             &self,
             _requests: &[crate::stores::cashu::types::InFlightMeltRequest],
         ) -> Result<(), database::Error> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         pub async fn load_in_flight_melt_requests(
             &self,
-        ) -> Result<
-            Option<Vec<crate::stores::cashu::types::InFlightMeltRequest>>,
-            database::Error,
-        > {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+        ) -> Result<Option<Vec<crate::stores::cashu::types::InFlightMeltRequest>>, database::Error>
+        {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        pub async fn clear_in_flight_melt_requests(
-            &self,
-        ) -> Result<(), database::Error> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+        pub async fn clear_in_flight_melt_requests(&self) -> Result<(), database::Error> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         pub async fn save_nutzap_settings(
             &self,
             _settings: &crate::stores::cashu::nutzap::NutzapInfo,
         ) -> Result<(), database::Error> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         pub async fn load_nutzap_settings(
             &self,
         ) -> Result<Option<crate::stores::cashu::nutzap::NutzapInfo>, database::Error> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         pub async fn save_pending_nutzaps(
             &self,
             _nutzaps: &[crate::stores::cashu::nutzap::PendingNutzap],
         ) -> Result<(), database::Error> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         pub async fn load_pending_nutzaps(
             &self,
-        ) -> Result<
-            Option<Vec<crate::stores::cashu::nutzap::PendingNutzap>>,
-            database::Error,
-        > {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+        ) -> Result<Option<Vec<crate::stores::cashu::nutzap::PendingNutzap>>, database::Error>
+        {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
     }
     #[async_trait::async_trait]
@@ -294,184 +231,128 @@ mod native_stub {
             _mint_url: MintUrl,
             _mint_info: Option<MintInfo>,
         ) -> Result<(), Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn remove_mint(&self, _mint_url: MintUrl) -> Result<(), Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        async fn get_mint(
-            &self,
-            _mint_url: MintUrl,
-        ) -> Result<Option<MintInfo>, Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+        async fn get_mint(&self, _mint_url: MintUrl) -> Result<Option<MintInfo>, Self::Err> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        async fn get_mints(
-            &self,
-        ) -> Result<HashMap<MintUrl, Option<MintInfo>>, Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+        async fn get_mints(&self) -> Result<HashMap<MintUrl, Option<MintInfo>>, Self::Err> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn update_mint_url(
             &self,
             _old_mint_url: MintUrl,
             _new_mint_url: MintUrl,
         ) -> Result<(), Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn add_mint_keysets(
             &self,
             _mint_url: MintUrl,
             _keysets: Vec<KeySetInfo>,
         ) -> Result<(), Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn get_mint_keysets(
             &self,
             _mint_url: MintUrl,
         ) -> Result<Option<Vec<KeySetInfo>>, Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        async fn get_keyset_by_id(
-            &self,
-            _keyset_id: &Id,
-        ) -> Result<Option<KeySetInfo>, Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+        async fn get_keyset_by_id(&self, _keyset_id: &Id) -> Result<Option<KeySetInfo>, Self::Err> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn add_mint_quote(&self, _quote: MintQuote) -> Result<(), Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        async fn get_mint_quote(
-            &self,
-            _quote_id: &str,
-        ) -> Result<Option<MintQuote>, Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+        async fn get_mint_quote(&self, _quote_id: &str) -> Result<Option<MintQuote>, Self::Err> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn get_mint_quotes(&self) -> Result<Vec<MintQuote>, Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn remove_mint_quote(&self, _quote_id: &str) -> Result<(), Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn add_melt_quote(&self, _quote: MeltQuote) -> Result<(), Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        async fn get_melt_quote(
-            &self,
-            _quote_id: &str,
-        ) -> Result<Option<MeltQuote>, Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+        async fn get_melt_quote(&self, _quote_id: &str) -> Result<Option<MeltQuote>, Self::Err> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn get_melt_quotes(&self) -> Result<Vec<MeltQuote>, Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn remove_melt_quote(&self, _quote_id: &str) -> Result<(), Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn add_keys(&self, _keys: KeySet) -> Result<(), Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn get_keys(&self, _keyset_id: &Id) -> Result<Option<Keys>, Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn remove_keys(&self, _keyset_id: &Id) -> Result<(), Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn increment_keyset_counter(
             &self,
             _keyset_id: &Id,
             _count: u32,
         ) -> Result<u32, Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn update_proofs(
             &self,
             _added: Vec<ProofInfo>,
             _removed_ys: Vec<CashuPublicKey>,
         ) -> Result<(), Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn get_proofs(
             &self,
@@ -480,42 +361,31 @@ mod native_stub {
             _state: Option<Vec<State>>,
             _spending_conditions: Option<Vec<SpendingConditions>>,
         ) -> Result<Vec<ProofInfo>, Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn update_proofs_state(
             &self,
             _ys: Vec<CashuPublicKey>,
             _state: State,
         ) -> Result<(), Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
-        async fn add_transaction(
-            &self,
-            _transaction: Transaction,
-        ) -> Result<(), Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+        async fn add_transaction(&self, _transaction: Transaction) -> Result<(), Self::Err> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn get_transaction(
             &self,
             _transaction_id: TransactionId,
         ) -> Result<Option<Transaction>, Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn list_transactions(
             &self,
@@ -523,21 +393,17 @@ mod native_stub {
             _direction: Option<TransactionDirection>,
             _unit: Option<CurrencyUnit>,
         ) -> Result<Vec<Transaction>, Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn remove_transaction(
             &self,
             _transaction_id: TransactionId,
         ) -> Result<(), Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
         async fn get_balance(
             &self,
@@ -545,16 +411,12 @@ mod native_stub {
             _unit: Option<CurrencyUnit>,
             _state: Option<Vec<State>>,
         ) -> Result<u64, Self::Err> {
-            Err(
-                Self::make_error(
-                    "IndexedDB is only available on wasm32 targets".to_string(),
-                ),
-            )
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
         }
     }
 }
-#[cfg(not(target_arch = "wasm32"))]
-pub use native_stub::IndexedDbDatabase;
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 use cdk_common::common::ProofInfo;
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
@@ -567,13 +429,13 @@ use cdk_common::nuts::{
     SpendingConditions, State,
 };
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
-use cdk_common::wallet::{
-    MeltQuote, MintQuote, Transaction, TransactionDirection, TransactionId,
-};
+use cdk_common::wallet::{MeltQuote, MintQuote, Transaction, TransactionDirection, TransactionId};
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 use indexed_db_futures::prelude::*;
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 use indexed_db_futures::IdbQuerySource;
+#[cfg(not(target_arch = "wasm32"))]
+pub use native_stub::IndexedDbDatabase;
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 use serde::{Deserialize, Serialize};
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
@@ -644,62 +506,59 @@ impl IndexedDbDatabase {
     pub async fn new() -> Result<Self, database::Error> {
         let mut db_req: OpenDbRequest = IdbDatabase::open_u32(DB_NAME, DB_VERSION)
             .map_err(|e| Self::make_error(format!("Failed to open database: {:?}", e)))?;
-        db_req
-            .set_on_upgrade_needed(
-                Some(|evt: &IdbVersionChangeEvent| {
-                    log::info!("IndexedDB upgrade needed, creating object stores");
-                    let db = evt.db();
-                    if !db.object_store_names().any(|n| n == STORE_MINTS) {
-                        db.create_object_store(STORE_MINTS)?;
-                    }
-                    if !db.object_store_names().any(|n| n == STORE_KEYSETS) {
-                        db.create_object_store(STORE_KEYSETS)?;
-                    }
-                    if !db.object_store_names().any(|n| n == STORE_KEYSET_BY_ID) {
-                        db.create_object_store(STORE_KEYSET_BY_ID)?;
-                    }
-                    if !db.object_store_names().any(|n| n == STORE_KEYS) {
-                        db.create_object_store(STORE_KEYS)?;
-                    }
-                    if !db.object_store_names().any(|n| n == STORE_MINT_QUOTES) {
-                        db.create_object_store(STORE_MINT_QUOTES)?;
-                    }
-                    if !db.object_store_names().any(|n| n == STORE_MELT_QUOTES) {
-                        db.create_object_store(STORE_MELT_QUOTES)?;
-                    }
-                    if !db.object_store_names().any(|n| n == STORE_PROOFS) {
-                        db.create_object_store(STORE_PROOFS)?;
-                    }
-                    if !db.object_store_names().any(|n| n == STORE_TRANSACTIONS) {
-                        db.create_object_store(STORE_TRANSACTIONS)?;
-                    }
-                    if !db.object_store_names().any(|n| n == STORE_KEYSET_COUNTERS) {
-                        db.create_object_store(STORE_KEYSET_COUNTERS)?;
-                    }
-                    if !db.object_store_names().any(|n| n == STORE_PENDING_EVENTS) {
-                        db.create_object_store(STORE_PENDING_EVENTS)?;
-                    }
-                    if !db.object_store_names().any(|n| n == STORE_SYNC_STATE) {
-                        db.create_object_store(STORE_SYNC_STATE)?;
-                    }
-                    if !db.object_store_names().any(|n| n == STORE_SHOP_ORDERS) {
-                        db.create_object_store(STORE_SHOP_ORDERS)?;
-                    }
-                    if !db.object_store_names().any(|n| n == STORE_PENDING_SECRETS) {
-                        db.create_object_store(STORE_PENDING_SECRETS)?;
-                    }
-                    if !db.object_store_names().any(|n| n == STORE_IN_FLIGHT_MELTS) {
-                        db.create_object_store(STORE_IN_FLIGHT_MELTS)?;
-                    }
-                    if !db.object_store_names().any(|n| n == STORE_NUTZAP_SETTINGS) {
-                        db.create_object_store(STORE_NUTZAP_SETTINGS)?;
-                    }
-                    if !db.object_store_names().any(|n| n == STORE_PENDING_NUTZAPS) {
-                        db.create_object_store(STORE_PENDING_NUTZAPS)?;
-                    }
-                    Ok(())
-                }),
-            );
+        db_req.set_on_upgrade_needed(Some(|evt: &IdbVersionChangeEvent| {
+            log::info!("IndexedDB upgrade needed, creating object stores");
+            let db = evt.db();
+            if !db.object_store_names().any(|n| n == STORE_MINTS) {
+                db.create_object_store(STORE_MINTS)?;
+            }
+            if !db.object_store_names().any(|n| n == STORE_KEYSETS) {
+                db.create_object_store(STORE_KEYSETS)?;
+            }
+            if !db.object_store_names().any(|n| n == STORE_KEYSET_BY_ID) {
+                db.create_object_store(STORE_KEYSET_BY_ID)?;
+            }
+            if !db.object_store_names().any(|n| n == STORE_KEYS) {
+                db.create_object_store(STORE_KEYS)?;
+            }
+            if !db.object_store_names().any(|n| n == STORE_MINT_QUOTES) {
+                db.create_object_store(STORE_MINT_QUOTES)?;
+            }
+            if !db.object_store_names().any(|n| n == STORE_MELT_QUOTES) {
+                db.create_object_store(STORE_MELT_QUOTES)?;
+            }
+            if !db.object_store_names().any(|n| n == STORE_PROOFS) {
+                db.create_object_store(STORE_PROOFS)?;
+            }
+            if !db.object_store_names().any(|n| n == STORE_TRANSACTIONS) {
+                db.create_object_store(STORE_TRANSACTIONS)?;
+            }
+            if !db.object_store_names().any(|n| n == STORE_KEYSET_COUNTERS) {
+                db.create_object_store(STORE_KEYSET_COUNTERS)?;
+            }
+            if !db.object_store_names().any(|n| n == STORE_PENDING_EVENTS) {
+                db.create_object_store(STORE_PENDING_EVENTS)?;
+            }
+            if !db.object_store_names().any(|n| n == STORE_SYNC_STATE) {
+                db.create_object_store(STORE_SYNC_STATE)?;
+            }
+            if !db.object_store_names().any(|n| n == STORE_SHOP_ORDERS) {
+                db.create_object_store(STORE_SHOP_ORDERS)?;
+            }
+            if !db.object_store_names().any(|n| n == STORE_PENDING_SECRETS) {
+                db.create_object_store(STORE_PENDING_SECRETS)?;
+            }
+            if !db.object_store_names().any(|n| n == STORE_IN_FLIGHT_MELTS) {
+                db.create_object_store(STORE_IN_FLIGHT_MELTS)?;
+            }
+            if !db.object_store_names().any(|n| n == STORE_NUTZAP_SETTINGS) {
+                db.create_object_store(STORE_NUTZAP_SETTINGS)?;
+            }
+            if !db.object_store_names().any(|n| n == STORE_PENDING_NUTZAPS) {
+                db.create_object_store(STORE_PENDING_NUTZAPS)?;
+            }
+            Ok(())
+        }));
         let db: IdbDatabase = db_req
             .into_future()
             .await
@@ -708,11 +567,7 @@ impl IndexedDbDatabase {
         Ok(Self { db: Rc::new(db) })
     }
     /// Helper: Get a value from a store with JSON deserialization
-    async fn get_value<T>(
-        &self,
-        store_name: &str,
-        key: &str,
-    ) -> Result<Option<T>, database::Error>
+    async fn get_value<T>(&self, store_name: &str, key: &str) -> Result<Option<T>, database::Error>
     where
         T: for<'de> Deserialize<'de>,
     {
@@ -737,9 +592,7 @@ impl IndexedDbDatabase {
             .as_string()
             .ok_or_else(|| Self::make_error("Value is not a string".to_string()))?;
         let deserialized: T = serde_json::from_str(&json_str)
-            .map_err(|e| Self::make_error(
-                format!("JSON deserialization error: {}", e),
-            ))?;
+            .map_err(|e| Self::make_error(format!("JSON deserialization error: {}", e)))?;
         Ok(Some(deserialized))
     }
     /// Helper: Put a value into a store with JSON serialization
@@ -768,17 +621,11 @@ impl IndexedDbDatabase {
             .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
         tx.await
             .into_result()
-            .map_err(|e| Self::make_error(
-                format!("Transaction commit error: {:?}", e),
-            ))?;
+            .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
         Ok(())
     }
     /// Helper: Delete a value from a store
-    async fn delete_value(
-        &self,
-        store_name: &str,
-        key: &str,
-    ) -> Result<(), database::Error> {
+    async fn delete_value(&self, store_name: &str, key: &str) -> Result<(), database::Error> {
         let tx = self
             .db
             .transaction_on_one_with_mode(store_name, IdbTransactionMode::Readwrite)
@@ -792,16 +639,11 @@ impl IndexedDbDatabase {
             .map_err(|e| Self::make_error(format!("Delete error: {:?}", e)))?;
         tx.await
             .into_result()
-            .map_err(|e| Self::make_error(
-                format!("Transaction commit error: {:?}", e),
-            ))?;
+            .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
         Ok(())
     }
     /// Helper: Get all values from a store
-    async fn get_all_values<T>(
-        &self,
-        store_name: &str,
-    ) -> Result<Vec<T>, database::Error>
+    async fn get_all_values<T>(&self, store_name: &str) -> Result<Vec<T>, database::Error>
     where
         T: for<'de> Deserialize<'de>,
     {
@@ -821,12 +663,9 @@ impl IndexedDbDatabase {
         for js_val in js_values_array.into_iter() {
             if !js_val.is_undefined() && !js_val.is_null() {
                 if let Some(json_str) = js_val.as_string() {
-                    let deserialized: T = serde_json::from_str(&json_str)
-                        .map_err(|e| {
-                            Self::make_error(
-                                format!("JSON deserialization error: {}", e),
-                            )
-                        })?;
+                    let deserialized: T = serde_json::from_str(&json_str).map_err(|e| {
+                        Self::make_error(format!("JSON deserialization error: {}", e))
+                    })?;
                     results.push(deserialized);
                 }
             }
@@ -852,30 +691,19 @@ impl IndexedDbDatabase {
             .get_all_keys()
             .map_err(|e| Self::make_error(format!("Get all keys error: {:?}", e)))?
             .await
-            .map_err(|e| Self::make_error(
-                format!("Get all keys await error: {:?}", e),
-            ))?;
+            .map_err(|e| Self::make_error(format!("Get all keys await error: {:?}", e)))?;
         let js_values_array = store
             .get_all()
             .map_err(|e| Self::make_error(format!("Get all error: {:?}", e)))?
             .await
             .map_err(|e| Self::make_error(format!("Get all await error: {:?}", e)))?;
         let mut results = Vec::new();
-        for (key_js, val_js) in js_keys_array
-            .into_iter()
-            .zip(js_values_array.into_iter())
-        {
+        for (key_js, val_js) in js_keys_array.into_iter().zip(js_values_array.into_iter()) {
             if !val_js.is_undefined() && !val_js.is_null() {
-                if let (Some(key_str), Some(json_str)) = (
-                    key_js.as_string(),
-                    val_js.as_string(),
-                ) {
-                    let deserialized: T = serde_json::from_str(&json_str)
-                        .map_err(|e| {
-                            Self::make_error(
-                                format!("JSON deserialization error: {}", e),
-                            )
-                        })?;
+                if let (Some(key_str), Some(json_str)) = (key_js.as_string(), val_js.as_string()) {
+                    let deserialized: T = serde_json::from_str(&json_str).map_err(|e| {
+                        Self::make_error(format!("JSON deserialization error: {}", e))
+                    })?;
                     results.push((key_str, deserialized));
                 }
             }
@@ -896,10 +724,7 @@ impl IndexedDbDatabase {
     pub async fn get_pending_event(
         &self,
         event_id: &str,
-    ) -> Result<
-        Option<crate::stores::cashu::types::PendingNostrEvent>,
-        database::Error,
-    > {
+    ) -> Result<Option<crate::stores::cashu::types::PendingNostrEvent>, database::Error> {
         self.get_value(STORE_PENDING_EVENTS, event_id).await
     }
     /// Get all pending events
@@ -911,10 +736,7 @@ impl IndexedDbDatabase {
     }
     /// Remove a pending event
     #[allow(dead_code)]
-    pub async fn remove_pending_event(
-        &self,
-        event_id: &str,
-    ) -> Result<(), database::Error> {
+    pub async fn remove_pending_event(&self, event_id: &str) -> Result<(), database::Error> {
         self.delete_value(STORE_PENDING_EVENTS, event_id).await
     }
     /// Update a pending event (for retry count increments)
@@ -986,7 +808,8 @@ impl IndexedDbDatabase {
         &self,
         secrets: &std::collections::HashMap<String, u64>,
     ) -> Result<(), database::Error> {
-        self.put_value(STORE_PENDING_SECRETS, "current", secrets).await
+        self.put_value(STORE_PENDING_SECRETS, "current", secrets)
+            .await
     }
     /// Load pending mint secrets
     ///
@@ -1010,7 +833,8 @@ impl IndexedDbDatabase {
         &self,
         requests: &[crate::stores::cashu::types::InFlightMeltRequest],
     ) -> Result<(), database::Error> {
-        self.put_value(STORE_IN_FLIGHT_MELTS, "current", requests).await
+        self.put_value(STORE_IN_FLIGHT_MELTS, "current", requests)
+            .await
     }
     /// Load in-flight melt requests for crash recovery
     ///
@@ -1018,10 +842,8 @@ impl IndexedDbDatabase {
     /// or None if no data exists.
     pub async fn load_in_flight_melt_requests(
         &self,
-    ) -> Result<
-        Option<Vec<crate::stores::cashu::types::InFlightMeltRequest>>,
-        database::Error,
-    > {
+    ) -> Result<Option<Vec<crate::stores::cashu::types::InFlightMeltRequest>>, database::Error>
+    {
         self.get_value(STORE_IN_FLIGHT_MELTS, "current").await
     }
     /// Clear in-flight melt requests after recovery is complete
@@ -1037,7 +859,8 @@ impl IndexedDbDatabase {
         &self,
         settings: &crate::stores::cashu::nutzap::NutzapInfo,
     ) -> Result<(), database::Error> {
-        self.put_value(STORE_NUTZAP_SETTINGS, "current", settings).await
+        self.put_value(STORE_NUTZAP_SETTINGS, "current", settings)
+            .await
     }
     /// Load nutzap settings
     ///
@@ -1054,17 +877,15 @@ impl IndexedDbDatabase {
         &self,
         nutzaps: &[crate::stores::cashu::nutzap::PendingNutzap],
     ) -> Result<(), database::Error> {
-        self.put_value(STORE_PENDING_NUTZAPS, "current", nutzaps).await
+        self.put_value(STORE_PENDING_NUTZAPS, "current", nutzaps)
+            .await
     }
     /// Load pending nutzaps
     ///
     /// Returns the list of pending nutzaps, or None if none exist.
     pub async fn load_pending_nutzaps(
         &self,
-    ) -> Result<
-        Option<Vec<crate::stores::cashu::nutzap::PendingNutzap>>,
-        database::Error,
-    > {
+    ) -> Result<Option<Vec<crate::stores::cashu::nutzap::PendingNutzap>>, database::Error> {
         self.get_value(STORE_PENDING_NUTZAPS, "current").await
     }
 }
@@ -1091,7 +912,9 @@ impl WalletDatabase for IndexedDbDatabase {
             .map(|opt| opt.flatten())
     }
     async fn get_mints(&self) -> Result<HashMap<MintUrl, Option<MintInfo>>, Self::Err> {
-        let key_values = self.get_all_key_values::<Option<MintInfo>>(STORE_MINTS).await?;
+        let key_values = self
+            .get_all_key_values::<Option<MintInfo>>(STORE_MINTS)
+            .await?;
         let mut result = HashMap::new();
         for (key_str, mint_info) in key_values {
             match MintUrl::from_str(&key_str) {
@@ -1111,7 +934,11 @@ impl WalletDatabase for IndexedDbDatabase {
         old_mint_url: MintUrl,
         new_mint_url: MintUrl,
     ) -> Result<(), Self::Err> {
-        log::info!("Migrating mint URL from {} to {}", old_mint_url, new_mint_url);
+        log::info!(
+            "Migrating mint URL from {} to {}",
+            old_mint_url,
+            new_mint_url
+        );
         let tx = self
             .db
             .transaction_on_multi_with_mode(
@@ -1139,15 +966,11 @@ impl WalletDatabase for IndexedDbDatabase {
                 .map_err(|e| Self::make_error(format!("Get await error: {:?}", e)))?
                 .is_some()
             {
-                return Err(
-                    Self::make_error(
-                        format!(
-                            "Cannot migrate: destination mint URL {} already exists in STORE_MINTS. \
+                return Err(Self::make_error(format!(
+                    "Cannot migrate: destination mint URL {} already exists in STORE_MINTS. \
                     This would overwrite existing mint data.",
-                            new_url_str,
-                        ),
-                    ),
-                );
+                    new_url_str,
+                )));
             }
             let keysets_store = tx
                 .object_store(STORE_KEYSETS)
@@ -1159,15 +982,11 @@ impl WalletDatabase for IndexedDbDatabase {
                 .map_err(|e| Self::make_error(format!("Get await error: {:?}", e)))?
                 .is_some()
             {
-                return Err(
-                    Self::make_error(
-                        format!(
-                            "Cannot migrate: destination mint URL {} already exists in STORE_KEYSETS. \
+                return Err(Self::make_error(format!(
+                    "Cannot migrate: destination mint URL {} already exists in STORE_KEYSETS. \
                     This would overwrite existing keyset data.",
-                            new_url_str,
-                        ),
-                    ),
-                );
+                    new_url_str,
+                )));
             }
             log::debug!(
                 "Destination mint URL validation passed - no existing data will be overwritten"
@@ -1230,36 +1049,26 @@ impl WalletDatabase for IndexedDbDatabase {
                 .map_err(|e| Self::make_error(format!("Get all keys error: {:?}", e)))?;
             let all_keys = get_all_keys_request
                 .await
-                .map_err(|e| Self::make_error(
-                    format!("Get all keys await error: {:?}", e),
-                ))?;
+                .map_err(|e| Self::make_error(format!("Get all keys await error: {:?}", e)))?;
             let mut migrated_count = 0;
             for (i, value) in all_values.iter().enumerate() {
                 let key = all_keys.get(i as u32);
                 if !key.is_undefined() && !key.is_null() {
                     let json_str = value
                         .as_string()
-                        .ok_or_else(|| Self::make_error(
-                            "Value is not a string".to_string(),
-                        ))?;
-                    let proof_info: ProofInfo = serde_json::from_str(&json_str)
-                        .map_err(|e| {
-                            Self::make_error(
-                                format!("JSON deserialization error: {}", e),
-                            )
-                        })?;
+                        .ok_or_else(|| Self::make_error("Value is not a string".to_string()))?;
+                    let proof_info: ProofInfo = serde_json::from_str(&json_str).map_err(|e| {
+                        Self::make_error(format!("JSON deserialization error: {}", e))
+                    })?;
                     if proof_info.mint_url == old_mint_url {
                         let mut updated_proof = proof_info;
                         updated_proof.mint_url = new_mint_url.clone();
-                        let json = serde_json::to_string(&updated_proof)
-                            .map_err(|e| {
-                                Self::make_error(format!("JSON serialization error: {}", e))
-                            })?;
+                        let json = serde_json::to_string(&updated_proof).map_err(|e| {
+                            Self::make_error(format!("JSON serialization error: {}", e))
+                        })?;
                         store
                             .put_key_val(&key, &JsValue::from_str(&json))
-                            .map_err(|e| Self::make_error(
-                                format!("Put error: {:?}", e),
-                            ))?;
+                            .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
                         migrated_count += 1;
                     }
                 }
@@ -1281,36 +1090,26 @@ impl WalletDatabase for IndexedDbDatabase {
                 .map_err(|e| Self::make_error(format!("Get all keys error: {:?}", e)))?;
             let all_keys = get_all_keys_request
                 .await
-                .map_err(|e| Self::make_error(
-                    format!("Get all keys await error: {:?}", e),
-                ))?;
+                .map_err(|e| Self::make_error(format!("Get all keys await error: {:?}", e)))?;
             let mut migrated_count = 0;
             for (i, value) in all_values.iter().enumerate() {
                 let key = all_keys.get(i as u32);
                 if !key.is_undefined() && !key.is_null() {
                     let json_str = value
                         .as_string()
-                        .ok_or_else(|| Self::make_error(
-                            "Value is not a string".to_string(),
-                        ))?;
-                    let mint_quote: MintQuote = serde_json::from_str(&json_str)
-                        .map_err(|e| {
-                            Self::make_error(
-                                format!("JSON deserialization error: {}", e),
-                            )
-                        })?;
+                        .ok_or_else(|| Self::make_error("Value is not a string".to_string()))?;
+                    let mint_quote: MintQuote = serde_json::from_str(&json_str).map_err(|e| {
+                        Self::make_error(format!("JSON deserialization error: {}", e))
+                    })?;
                     if mint_quote.mint_url == old_mint_url {
                         let mut updated_quote = mint_quote;
                         updated_quote.mint_url = new_mint_url.clone();
-                        let json = serde_json::to_string(&updated_quote)
-                            .map_err(|e| {
-                                Self::make_error(format!("JSON serialization error: {}", e))
-                            })?;
+                        let json = serde_json::to_string(&updated_quote).map_err(|e| {
+                            Self::make_error(format!("JSON serialization error: {}", e))
+                        })?;
                         store
                             .put_key_val(&key, &JsValue::from_str(&json))
-                            .map_err(|e| Self::make_error(
-                                format!("Put error: {:?}", e),
-                            ))?;
+                            .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
                         migrated_count += 1;
                     }
                 }
@@ -1332,36 +1131,27 @@ impl WalletDatabase for IndexedDbDatabase {
                 .map_err(|e| Self::make_error(format!("Get all keys error: {:?}", e)))?;
             let all_keys = get_all_keys_request
                 .await
-                .map_err(|e| Self::make_error(
-                    format!("Get all keys await error: {:?}", e),
-                ))?;
+                .map_err(|e| Self::make_error(format!("Get all keys await error: {:?}", e)))?;
             let mut migrated_count = 0;
             for (i, value) in all_values.iter().enumerate() {
                 let key = all_keys.get(i as u32);
                 if !key.is_undefined() && !key.is_null() {
                     let json_str = value
                         .as_string()
-                        .ok_or_else(|| Self::make_error(
-                            "Value is not a string".to_string(),
-                        ))?;
-                    let transaction: Transaction = serde_json::from_str(&json_str)
-                        .map_err(|e| {
-                            Self::make_error(
-                                format!("JSON deserialization error: {}", e),
-                            )
+                        .ok_or_else(|| Self::make_error("Value is not a string".to_string()))?;
+                    let transaction: Transaction =
+                        serde_json::from_str(&json_str).map_err(|e| {
+                            Self::make_error(format!("JSON deserialization error: {}", e))
                         })?;
                     if transaction.mint_url == old_mint_url {
                         let mut updated_tx = transaction;
                         updated_tx.mint_url = new_mint_url.clone();
-                        let json = serde_json::to_string(&updated_tx)
-                            .map_err(|e| {
-                                Self::make_error(format!("JSON serialization error: {}", e))
-                            })?;
+                        let json = serde_json::to_string(&updated_tx).map_err(|e| {
+                            Self::make_error(format!("JSON serialization error: {}", e))
+                        })?;
                         store
                             .put_key_val(&key, &JsValue::from_str(&json))
-                            .map_err(|e| Self::make_error(
-                                format!("Put error: {:?}", e),
-                            ))?;
+                            .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
                         migrated_count += 1;
                     }
                 }
@@ -1370,11 +1160,11 @@ impl WalletDatabase for IndexedDbDatabase {
         }
         tx.await
             .into_result()
-            .map_err(|e| Self::make_error(
-                format!("Transaction commit error: {:?}", e),
-            ))?;
+            .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
         log::info!(
-            "Successfully migrated all data from {} to {}", old_mint_url, new_mint_url
+            "Successfully migrated all data from {} to {}",
+            old_mint_url,
+            new_mint_url
         );
         Ok(())
     }
@@ -1407,9 +1197,7 @@ impl WalletDatabase for IndexedDbDatabase {
         for keyset in keysets {
             let keyset_key = keyset.id.to_string();
             let keyset_json = serde_json::to_string(&keyset)
-                .map_err(|e| Self::make_error(
-                    format!("JSON serialization error: {}", e),
-                ))?;
+                .map_err(|e| Self::make_error(format!("JSON serialization error: {}", e)))?;
             let js_keyset_key = JsValue::from_str(&keyset_key);
             let js_keyset_value = JsValue::from_str(&keyset_json);
             keyset_by_id_store
@@ -1418,9 +1206,7 @@ impl WalletDatabase for IndexedDbDatabase {
         }
         tx.await
             .into_result()
-            .map_err(|e| Self::make_error(
-                format!("Transaction commit error: {:?}", e),
-            ))?;
+            .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
         Ok(())
     }
     async fn get_mint_keysets(
@@ -1430,10 +1216,7 @@ impl WalletDatabase for IndexedDbDatabase {
         let key = mint_url.to_string();
         self.get_value(STORE_KEYSETS, &key).await
     }
-    async fn get_keyset_by_id(
-        &self,
-        keyset_id: &Id,
-    ) -> Result<Option<KeySetInfo>, Self::Err> {
+    async fn get_keyset_by_id(&self, keyset_id: &Id) -> Result<Option<KeySetInfo>, Self::Err> {
         let key = keyset_id.to_string();
         self.get_value(STORE_KEYSET_BY_ID, &key).await
     }
@@ -1442,10 +1225,7 @@ impl WalletDatabase for IndexedDbDatabase {
         log::debug!("Storing mint quote: {}", key);
         self.put_value(STORE_MINT_QUOTES, &key, &quote).await
     }
-    async fn get_mint_quote(
-        &self,
-        quote_id: &str,
-    ) -> Result<Option<MintQuote>, Self::Err> {
+    async fn get_mint_quote(&self, quote_id: &str) -> Result<Option<MintQuote>, Self::Err> {
         self.get_value(STORE_MINT_QUOTES, quote_id).await
     }
     async fn get_mint_quotes(&self) -> Result<Vec<MintQuote>, Self::Err> {
@@ -1460,10 +1240,7 @@ impl WalletDatabase for IndexedDbDatabase {
         log::debug!("Storing melt quote: {}", key);
         self.put_value(STORE_MELT_QUOTES, &key, &quote).await
     }
-    async fn get_melt_quote(
-        &self,
-        quote_id: &str,
-    ) -> Result<Option<MeltQuote>, Self::Err> {
+    async fn get_melt_quote(&self, quote_id: &str) -> Result<Option<MeltQuote>, Self::Err> {
         self.get_value(STORE_MELT_QUOTES, quote_id).await
     }
     async fn get_melt_quotes(&self) -> Result<Vec<MeltQuote>, Self::Err> {
@@ -1485,18 +1262,15 @@ impl WalletDatabase for IndexedDbDatabase {
         let key = id.to_string();
         self.delete_value(STORE_KEYS, &key).await
     }
-    async fn increment_keyset_counter(
-        &self,
-        keyset_id: &Id,
-        count: u32,
-    ) -> Result<u32, Self::Err> {
-        log::debug!("Incrementing counter for keyset: {} by {}", keyset_id, count);
+    async fn increment_keyset_counter(&self, keyset_id: &Id, count: u32) -> Result<u32, Self::Err> {
+        log::debug!(
+            "Incrementing counter for keyset: {} by {}",
+            keyset_id,
+            count
+        );
         let tx = self
             .db
-            .transaction_on_one_with_mode(
-                STORE_KEYSET_COUNTERS,
-                IdbTransactionMode::Readwrite,
-            )
+            .transaction_on_one_with_mode(STORE_KEYSET_COUNTERS, IdbTransactionMode::Readwrite)
             .map_err(|e| Self::make_error(format!("Transaction error: {:?}", e)))?;
         let store = tx
             .object_store(STORE_KEYSET_COUNTERS)
@@ -1519,11 +1293,12 @@ impl WalletDatabase for IndexedDbDatabase {
             .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
         tx.await
             .into_result()
-            .map_err(|e| Self::make_error(
-                format!("Transaction commit error: {:?}", e),
-            ))?;
+            .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
         log::info!(
-            "Counter for keyset {} incremented: {} → {}", keyset_id, current, new_value
+            "Counter for keyset {} incremented: {} → {}",
+            keyset_id,
+            current,
+            new_value
         );
         Ok(new_value)
     }
@@ -1542,9 +1317,7 @@ impl WalletDatabase for IndexedDbDatabase {
         for proof_info in added {
             let key = proof_info.y.to_string();
             let json_str = serde_json::to_string(&proof_info)
-                .map_err(|e| Self::make_error(
-                    format!("JSON serialization error: {}", e),
-                ))?;
+                .map_err(|e| Self::make_error(format!("JSON serialization error: {}", e)))?;
             let js_key = JsValue::from_str(&key);
             let js_value = JsValue::from_str(&json_str);
             store
@@ -1560,9 +1333,7 @@ impl WalletDatabase for IndexedDbDatabase {
         }
         tx.await
             .into_result()
-            .map_err(|e| Self::make_error(
-                format!("Transaction commit error: {:?}", e),
-            ))?;
+            .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
         Ok(())
     }
     async fn get_proofs(
@@ -1641,18 +1412,12 @@ impl WalletDatabase for IndexedDbDatabase {
             if let Some(value) = value_opt {
                 let json_str = value
                     .as_string()
-                    .ok_or_else(|| Self::make_error(
-                        "Value is not a string".to_string(),
-                    ))?;
+                    .ok_or_else(|| Self::make_error("Value is not a string".to_string()))?;
                 let mut proof_info: ProofInfo = serde_json::from_str(&json_str)
-                    .map_err(|e| Self::make_error(
-                        format!("JSON deserialization error: {}", e),
-                    ))?;
+                    .map_err(|e| Self::make_error(format!("JSON deserialization error: {}", e)))?;
                 proof_info.state = state;
                 let updated_json = serde_json::to_string(&proof_info)
-                    .map_err(|e| Self::make_error(
-                        format!("JSON serialization error: {}", e),
-                    ))?;
+                    .map_err(|e| Self::make_error(format!("JSON serialization error: {}", e)))?;
                 let js_value = JsValue::from_str(&updated_json);
                 store
                     .put_key_val(&js_key, &js_value)
@@ -1661,9 +1426,7 @@ impl WalletDatabase for IndexedDbDatabase {
         }
         tx.await
             .into_result()
-            .map_err(|e| Self::make_error(
-                format!("Transaction commit error: {:?}", e),
-            ))?;
+            .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
         Ok(())
     }
     async fn add_transaction(&self, transaction: Transaction) -> Result<(), Self::Err> {
@@ -1683,9 +1446,7 @@ impl WalletDatabase for IndexedDbDatabase {
         direction: Option<TransactionDirection>,
         unit: Option<CurrencyUnit>,
     ) -> Result<Vec<Transaction>, Self::Err> {
-        let all_transactions: Vec<Transaction> = self
-            .get_all_values(STORE_TRANSACTIONS)
-            .await?;
+        let all_transactions: Vec<Transaction> = self.get_all_values(STORE_TRANSACTIONS).await?;
         let filtered: Vec<Transaction> = all_transactions
             .into_iter()
             .filter(|transaction| {
@@ -1709,10 +1470,7 @@ impl WalletDatabase for IndexedDbDatabase {
             .collect();
         Ok(filtered)
     }
-    async fn remove_transaction(
-        &self,
-        transaction_id: TransactionId,
-    ) -> Result<(), Self::Err> {
+    async fn remove_transaction(&self, transaction_id: TransactionId) -> Result<(), Self::Err> {
         let key = transaction_id.to_string();
         self.delete_value(STORE_TRANSACTIONS, &key).await
     }
@@ -1722,16 +1480,10 @@ impl IndexedDbDatabase {
     /// Get current counter value for a keyset (NUT-13)
     ///
     /// Returns 0 if no counter exists for this keyset.
-    pub async fn get_keyset_counter(
-        &self,
-        keyset_id: &Id,
-    ) -> Result<u32, database::Error> {
+    pub async fn get_keyset_counter(&self, keyset_id: &Id) -> Result<u32, database::Error> {
         let tx = self
             .db
-            .transaction_on_one_with_mode(
-                STORE_KEYSET_COUNTERS,
-                IdbTransactionMode::Readonly,
-            )
+            .transaction_on_one_with_mode(STORE_KEYSET_COUNTERS, IdbTransactionMode::Readonly)
             .map_err(|e| Self::make_error(format!("Transaction error: {:?}", e)))?;
         let store = tx
             .object_store(STORE_KEYSET_COUNTERS)
@@ -1759,10 +1511,7 @@ impl IndexedDbDatabase {
     ) -> Result<(), database::Error> {
         let tx = self
             .db
-            .transaction_on_one_with_mode(
-                STORE_KEYSET_COUNTERS,
-                IdbTransactionMode::Readwrite,
-            )
+            .transaction_on_one_with_mode(STORE_KEYSET_COUNTERS, IdbTransactionMode::Readwrite)
             .map_err(|e| Self::make_error(format!("Transaction error: {:?}", e)))?;
         let store = tx
             .object_store(STORE_KEYSET_COUNTERS)
@@ -1774,24 +1523,17 @@ impl IndexedDbDatabase {
             .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
         tx.await
             .into_result()
-            .map_err(|e| Self::make_error(
-                format!("Transaction commit error: {:?}", e),
-            ))?;
+            .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
         log::info!("Counter for keyset {} set to {}", keyset_id, value);
         Ok(())
     }
     /// Get all keyset counters (for backup)
     ///
     /// Returns a map of keyset_id -> counter value.
-    pub async fn get_all_keyset_counters(
-        &self,
-    ) -> Result<HashMap<String, u32>, database::Error> {
+    pub async fn get_all_keyset_counters(&self) -> Result<HashMap<String, u32>, database::Error> {
         let tx = self
             .db
-            .transaction_on_one_with_mode(
-                STORE_KEYSET_COUNTERS,
-                IdbTransactionMode::Readonly,
-            )
+            .transaction_on_one_with_mode(STORE_KEYSET_COUNTERS, IdbTransactionMode::Readonly)
             .map_err(|e| Self::make_error(format!("Transaction error: {:?}", e)))?;
         let store = tx
             .object_store(STORE_KEYSET_COUNTERS)
@@ -1800,9 +1542,7 @@ impl IndexedDbDatabase {
             .get_all_keys()
             .map_err(|e| Self::make_error(format!("Get all keys error: {:?}", e)))?
             .await
-            .map_err(|e| Self::make_error(
-                format!("Get all keys await error: {:?}", e),
-            ))?;
+            .map_err(|e| Self::make_error(format!("Get all keys await error: {:?}", e)))?;
         let values = store
             .get_all()
             .map_err(|e| Self::make_error(format!("Get all error: {:?}", e)))?
@@ -1827,10 +1567,7 @@ impl IndexedDbDatabase {
     ) -> Result<(), database::Error> {
         let tx = self
             .db
-            .transaction_on_one_with_mode(
-                STORE_KEYSET_COUNTERS,
-                IdbTransactionMode::Readwrite,
-            )
+            .transaction_on_one_with_mode(STORE_KEYSET_COUNTERS, IdbTransactionMode::Readwrite)
             .map_err(|e| Self::make_error(format!("Transaction error: {:?}", e)))?;
         let store = tx
             .object_store(STORE_KEYSET_COUNTERS)
@@ -1844,9 +1581,7 @@ impl IndexedDbDatabase {
         }
         tx.await
             .into_result()
-            .map_err(|e| Self::make_error(
-                format!("Transaction commit error: {:?}", e),
-            ))?;
+            .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
         log::info!("Restored {} keyset counters", counters.len());
         Ok(())
     }

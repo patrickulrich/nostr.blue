@@ -6,12 +6,12 @@
 //! - Rollback on failure
 //! - NIP-25 compliant toggle (+ to like, - to unlike)
 //! - NIP-30 custom emoji reactions
-use dioxus::prelude::*;
-use nostr_sdk::{Filter, Kind};
-use std::time::Duration;
 use crate::services::aggregation::{invalidate_interaction_counts, InteractionCounts};
 use crate::stores::nostr_client::{get_client, publish_reaction_tracked, HAS_SIGNER};
 use crate::stores::signer::SIGNER_INFO;
+use dioxus::prelude::*;
+use nostr_sdk::{Filter, Kind};
+use std::time::Duration;
 /// Maximum reactions to fetch per event
 const MAX_REACTIONS_FETCH: usize = 500;
 /// State of the reaction action
@@ -111,178 +111,148 @@ pub fn use_reaction(
 ) -> UseReaction {
     let precomputed_count = precomputed_counts.map(|c| c.likes);
     let precomputed_is_liked = precomputed_counts.and_then(|c| c.user_liked);
-    let precomputed_user_reaction = precomputed_counts
-        .and_then(|c| {
-            c.user_reaction
-                .as_ref()
-                .map(|r| {
-                    if r == "+" {
-                        ReactionEmoji::Like
-                    } else if r == "-" {
-                        ReactionEmoji::Unlike
-                    } else if r.starts_with(':') && r.ends_with(':') && r.len() > 2 {
-                        let shortcode = r[1..r.len() - 1].to_string();
-                        if let Some(url) = c.user_reaction_url.as_ref() {
-                            ReactionEmoji::Custom {
-                                shortcode,
-                                url: url.clone(),
-                            }
-                        } else {
-                            ReactionEmoji::Standard(r.clone())
-                        }
-                    } else {
-                        ReactionEmoji::Standard(r.clone())
+    let precomputed_user_reaction = precomputed_counts.and_then(|c| {
+        c.user_reaction.as_ref().map(|r| {
+            if r == "+" {
+                ReactionEmoji::Like
+            } else if r == "-" {
+                ReactionEmoji::Unlike
+            } else if r.starts_with(':') && r.ends_with(':') && r.len() > 2 {
+                let shortcode = r[1..r.len() - 1].to_string();
+                if let Some(url) = c.user_reaction_url.as_ref() {
+                    ReactionEmoji::Custom {
+                        shortcode,
+                        url: url.clone(),
                     }
-                })
-        });
+                } else {
+                    ReactionEmoji::Standard(r.clone())
+                }
+            } else {
+                ReactionEmoji::Standard(r.clone())
+            }
+        })
+    });
     let mut is_liked = use_signal(|| precomputed_is_liked.unwrap_or(false));
     let mut like_count = use_signal(|| precomputed_count.unwrap_or(0));
     let mut state = use_signal(|| ReactionState::Idle);
-    let mut user_reaction: Signal<Option<ReactionEmoji>> = use_signal(|| {
-        precomputed_user_reaction.clone()
-    });
-    use_effect(
-        use_reactive(
-            &(
-                precomputed_count,
-                precomputed_is_liked,
-                precomputed_user_reaction.clone(),
-            ),
-            move |(count_opt, liked_opt, reaction_opt)| {
-                if let Some(count) = count_opt {
-                    let current = *like_count.peek();
-                    if count > current || (count > 0 && current == 0) {
-                        like_count.set(count);
-                    }
-                }
-                if let Some(liked) = liked_opt {
-                    is_liked.set(liked);
-                }
-                if let Some(reaction) = reaction_opt {
-                    user_reaction.set(Some(reaction.clone()));
-                }
-            },
+    let mut user_reaction: Signal<Option<ReactionEmoji>> =
+        use_signal(|| precomputed_user_reaction.clone());
+    use_effect(use_reactive(
+        &(
+            precomputed_count,
+            precomputed_is_liked,
+            precomputed_user_reaction.clone(),
         ),
-    );
+        move |(count_opt, liked_opt, reaction_opt)| {
+            if let Some(count) = count_opt {
+                let current = *like_count.peek();
+                if count > current || (count > 0 && current == 0) {
+                    like_count.set(count);
+                }
+            }
+            if let Some(liked) = liked_opt {
+                is_liked.set(liked);
+            }
+            if let Some(reaction) = reaction_opt {
+                user_reaction.set(Some(reaction.clone()));
+            }
+        },
+    ));
     let event_id_fetch = event_id.clone();
     let has_batch_data = precomputed_counts.is_some();
     let mut has_precomputed_data = use_signal(|| has_batch_data);
-    use_effect(
-        use_reactive(
-            &has_batch_data,
-            move |has_data| {
-                if has_data {
-                    has_precomputed_data.set(true);
-                }
-            },
-        ),
-    );
-    use_effect(
-        use_reactive(
-            &event_id_fetch,
-            move |event_id_for_fetch| {
-                if *has_precomputed_data.peek() {
-                    return;
-                }
-                spawn(async move {
-                    let client = match get_client() {
-                        Some(c) => c,
-                        None => return,
-                    };
-                    let event_id_parsed = match nostr_sdk::EventId::from_hex(
-                        &event_id_for_fetch,
-                    ) {
-                        Ok(id) => id,
-                        Err(_) => return,
-                    };
-                    let filter = Filter::new()
-                        .kind(Kind::Reaction)
-                        .event(event_id_parsed)
-                        .limit(MAX_REACTIONS_FETCH);
-                    if let Ok(reactions) = client
-                        .fetch_events(filter, Duration::from_secs(5))
-                        .await
-                    {
-                        let current_user_pk: Option<nostr_sdk::PublicKey> = SIGNER_INFO
-                            .read()
-                            .as_ref()
-                            .and_then(|info| {
-                                nostr_sdk::PublicKey::from_hex(&info.public_key).ok()
-                            });
-                        let mut positive_count = 0usize;
-                        let mut user_liked = false;
-                        let mut user_unliked = false;
-                        let mut user_emoji: Option<ReactionEmoji> = None;
-                        let mut reactions_vec: Vec<_> = reactions.iter().collect();
-                        reactions_vec.sort_by_key(|r| r.created_at);
-                        for reaction in reactions_vec.iter() {
-                            let content = reaction.content.trim();
-                            let is_from_user = current_user_pk
-                                .map(|pk| reaction.pubkey == pk)
-                                .unwrap_or(false);
-                            if content == "-" {
-                                if is_from_user {
-                                    user_unliked = true;
-                                    user_emoji = None;
+    use_effect(use_reactive(&has_batch_data, move |has_data| {
+        if has_data {
+            has_precomputed_data.set(true);
+        }
+    }));
+    use_effect(use_reactive(&event_id_fetch, move |event_id_for_fetch| {
+        if *has_precomputed_data.peek() {
+            return;
+        }
+        spawn(async move {
+            let client = match get_client() {
+                Some(c) => c,
+                None => return,
+            };
+            let event_id_parsed = match nostr_sdk::EventId::from_hex(&event_id_for_fetch) {
+                Ok(id) => id,
+                Err(_) => return,
+            };
+            let filter = Filter::new()
+                .kind(Kind::Reaction)
+                .event(event_id_parsed)
+                .limit(MAX_REACTIONS_FETCH);
+            if let Ok(reactions) = client.fetch_events(filter, Duration::from_secs(5)).await {
+                let current_user_pk: Option<nostr_sdk::PublicKey> = SIGNER_INFO
+                    .read()
+                    .as_ref()
+                    .and_then(|info| nostr_sdk::PublicKey::from_hex(&info.public_key).ok());
+                let mut positive_count = 0usize;
+                let mut user_liked = false;
+                let mut user_unliked = false;
+                let mut user_emoji: Option<ReactionEmoji> = None;
+                let mut reactions_vec: Vec<_> = reactions.iter().collect();
+                reactions_vec.sort_by_key(|r| r.created_at);
+                for reaction in reactions_vec.iter() {
+                    let content = reaction.content.trim();
+                    let is_from_user = current_user_pk
+                        .map(|pk| reaction.pubkey == pk)
+                        .unwrap_or(false);
+                    if content == "-" {
+                        if is_from_user {
+                            user_unliked = true;
+                            user_emoji = None;
+                        }
+                    } else {
+                        positive_count += 1;
+                        if is_from_user {
+                            user_liked = true;
+                            user_unliked = false;
+                            if content == "+" {
+                                user_emoji = Some(ReactionEmoji::Like);
+                            } else if content.starts_with(':')
+                                && content.ends_with(':')
+                                && content.len() > 2
+                            {
+                                let shortcode = &content[1..content.len() - 1];
+                                let emoji_url = reaction.tags.iter().find_map(|tag| {
+                                    let tag_slice = tag.as_slice();
+                                    if tag_slice.len() >= 3
+                                        && tag_slice.first().map(|s| s.as_str()) == Some("emoji")
+                                        && tag_slice.get(1).map(|s| s.as_str()) == Some(shortcode)
+                                    {
+                                        tag_slice.get(2).map(|s| s.to_string())
+                                    } else {
+                                        None
+                                    }
+                                });
+                                if let Some(url) = emoji_url {
+                                    user_emoji = Some(ReactionEmoji::Custom {
+                                        shortcode: shortcode.to_string(),
+                                        url,
+                                    });
+                                } else {
+                                    user_emoji = Some(ReactionEmoji::Standard(content.to_string()));
                                 }
                             } else {
-                                positive_count += 1;
-                                if is_from_user {
-                                    user_liked = true;
-                                    user_unliked = false;
-                                    if content == "+" {
-                                        user_emoji = Some(ReactionEmoji::Like);
-                                    } else if content.starts_with(':') && content.ends_with(':')
-                                        && content.len() > 2
-                                    {
-                                        let shortcode = &content[1..content.len() - 1];
-                                        let emoji_url = reaction
-                                            .tags
-                                            .iter()
-                                            .find_map(|tag| {
-                                                let tag_slice = tag.as_slice();
-                                                if tag_slice.len() >= 3
-                                                    && tag_slice.first().map(|s| s.as_str()) == Some("emoji")
-                                                    && tag_slice.get(1).map(|s| s.as_str()) == Some(shortcode)
-                                                {
-                                                    tag_slice.get(2).map(|s| s.to_string())
-                                                } else {
-                                                    None
-                                                }
-                                            });
-                                        if let Some(url) = emoji_url {
-                                            user_emoji = Some(ReactionEmoji::Custom {
-                                                shortcode: shortcode.to_string(),
-                                                url,
-                                            });
-                                        } else {
-                                            user_emoji = Some(
-                                                ReactionEmoji::Standard(content.to_string()),
-                                            );
-                                        }
-                                    } else {
-                                        user_emoji = Some(
-                                            ReactionEmoji::Standard(content.to_string()),
-                                        );
-                                    }
-                                }
+                                user_emoji = Some(ReactionEmoji::Standard(content.to_string()));
                             }
                         }
-                        let final_liked = user_liked && !user_unliked;
-                        let current_count = *like_count.peek();
-                        if positive_count > current_count {
-                            like_count.set(positive_count);
-                        }
-                        if !*has_precomputed_data.peek() {
-                            is_liked.set(final_liked);
-                            user_reaction
-                                .set(if final_liked { user_emoji } else { None });
-                        }
                     }
-                });
-            },
-        ),
-    );
+                }
+                let final_liked = user_liked && !user_unliked;
+                let current_count = *like_count.peek();
+                if positive_count > current_count {
+                    like_count.set(positive_count);
+                }
+                if !*has_precomputed_data.peek() {
+                    is_liked.set(final_liked);
+                    user_reaction.set(if final_liked { user_emoji } else { None });
+                }
+            }
+        });
+    }));
     let event_id_handler = event_id.clone();
     let event_author_handler = event_author.clone();
     let toggle_like = use_callback(move |_: ()| {
@@ -311,18 +281,21 @@ pub fn use_reaction(
         let content_str = content.to_string();
         spawn(async move {
             match publish_reaction_tracked(
-                    event_id_clone.clone(),
-                    event_author_clone,
-                    content_str,
-                    None,
-                )
-                .await
+                event_id_clone.clone(),
+                event_author_clone,
+                content_str,
+                None,
+            )
+            .await
             {
                 Ok(result) => {
                     log::info!(
-                        "{} event {}, reaction ID: {} ({}/{} relays)", if was_liked {
-                        "Unliked" } else { "Liked" }, event_id_clone, result.event_id,
-                        result.success_count(), result.total_attempted()
+                        "{} event {}, reaction ID: {} ({}/{} relays)",
+                        if was_liked { "Unliked" } else { "Liked" },
+                        event_id_clone,
+                        result.event_id,
+                        result.success_count(),
+                        result.total_attempted()
                     );
                     if result.has_failures() {
                         for (relay, error) in &result.failed_relays {
@@ -336,22 +309,18 @@ pub fn use_reaction(
                 }
                 Err(e) => {
                     log::error!(
-                        "Failed to {} event: {}", if was_liked { "unlike" } else { "like"
-                        }, e
+                        "Failed to {} event: {}",
+                        if was_liked { "unlike" } else { "like" },
+                        e
                     );
                     is_liked.set(was_liked);
                     like_count.set(prev_count);
                     user_reaction.set(prev_reaction);
-                    state
-                        .set(
-                            ReactionState::Error(
-                                format!(
-                                    "Failed to {}: {}",
-                                    if was_liked { "unlike" } else { "like" },
-                                    e,
-                                ),
-                            ),
-                        );
+                    state.set(ReactionState::Error(format!(
+                        "Failed to {}: {}",
+                        if was_liked { "unlike" } else { "like" },
+                        e,
+                    )));
                 }
             }
         });
@@ -391,17 +360,20 @@ pub fn use_reaction(
         let event_author_clone = event_author_react.clone();
         spawn(async move {
             match publish_reaction_tracked(
-                    event_id_clone.clone(),
-                    event_author_clone,
-                    content.clone(),
-                    emoji_tag,
-                )
-                .await
+                event_id_clone.clone(),
+                event_author_clone,
+                content.clone(),
+                emoji_tag,
+            )
+            .await
             {
                 Ok(result) => {
                     log::info!(
                         "Reacted to event {} with '{}', reaction ID: {} ({}/{} relays)",
-                        event_id_clone, content, result.event_id, result.success_count(),
+                        event_id_clone,
+                        content,
+                        result.event_id,
+                        result.success_count(),
                         result.total_attempted()
                     );
                     if result.has_failures() {

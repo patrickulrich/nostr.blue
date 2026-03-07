@@ -2,12 +2,12 @@
 //!
 //! Utilities for fetching metadata (title, image, description) from URLs and Nostr events
 //! for pin creation previews.
+use crate::stores::nostr_client;
+use crate::utils::url_metadata::fetch_url_metadata;
 use nostr_sdk::prelude::*;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::time::Duration;
-use crate::stores::nostr_client;
-use crate::utils::url_metadata::fetch_url_metadata;
 /// Unified metadata result for pin previews
 #[derive(Clone, Debug, Default)]
 pub struct PinPreviewMetadata {
@@ -31,28 +31,23 @@ pub async fn fetch_url_preview(url: &str) -> Result<PinPreviewMetadata, String> 
     })
 }
 /// Fetch metadata for a Nostr event by ID (note1, nevent1, or hex)
-pub async fn fetch_event_preview(
-    event_id_str: &str,
-) -> Result<PinPreviewMetadata, String> {
+pub async fn fetch_event_preview(event_id_str: &str) -> Result<PinPreviewMetadata, String> {
     let event_id = parse_event_id(event_id_str)?;
     let filter = Filter::new().id(event_id).limit(1);
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await?;
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
     let event = events.first().ok_or("Event not found on relays")?;
     Ok(extract_event_metadata(event))
 }
 /// Fetch metadata for an addressable event (naddr1)
 pub async fn fetch_address_preview(naddr: &str) -> Result<PinPreviewMetadata, String> {
     let normalized = naddr.trim().strip_prefix("nostr:").unwrap_or(naddr.trim());
-    let coord = Coordinate::from_bech32(normalized)
-        .map_err(|e| format!("Invalid naddr: {}", e))?;
+    let coord = Coordinate::from_bech32(normalized).map_err(|e| format!("Invalid naddr: {}", e))?;
     let filter = Filter::new()
         .kind(coord.kind)
         .author(coord.public_key)
         .identifier(&coord.identifier)
         .limit(1);
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await?;
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
     let event = events.first().ok_or("Event not found on relays")?;
     Ok(extract_addressable_metadata(event, coord.kind.as_u16()))
 }
@@ -61,8 +56,7 @@ fn parse_event_id(input: &str) -> Result<EventId, String> {
     let trimmed = input.trim();
     let normalized = trimmed.strip_prefix("nostr:").unwrap_or(trimmed);
     if normalized.starts_with("nevent1") {
-        let nip19 = Nip19::from_bech32(normalized)
-            .map_err(|e| format!("Invalid nevent: {}", e))?;
+        let nip19 = Nip19::from_bech32(normalized).map_err(|e| format!("Invalid nevent: {}", e))?;
         match nip19 {
             Nip19::Event(nip19_event) => Ok(nip19_event.event_id),
             _ => Err("Not an event reference".to_string()),
@@ -79,8 +73,8 @@ fn extract_event_metadata(event: &Event) -> PinPreviewMetadata {
     if (30000..40000).contains(&kind) {
         return extract_addressable_metadata(event, kind);
     }
-    let image = extract_imeta_image(event)
-        .or_else(|| extract_first_image_from_content(&event.content));
+    let image =
+        extract_imeta_image(event).or_else(|| extract_first_image_from_content(&event.content));
     let title = event
         .content
         .lines()
@@ -95,7 +89,10 @@ fn extract_event_metadata(event: &Event) -> PinPreviewMetadata {
         })
         .filter(|s| !s.is_empty());
     let description = if event.content.len() > 500 {
-        Some(format!("{}...", &event.content.chars().take(500).collect::<String>()))
+        Some(format!(
+            "{}...",
+            &event.content.chars().take(500).collect::<String>()
+        ))
     } else {
         Some(event.content.clone())
     };
@@ -107,7 +104,7 @@ fn extract_event_metadata(event: &Event) -> PinPreviewMetadata {
         21 | 22 => "Video",
         _ => "Event",
     }
-        .to_string();
+    .to_string();
     PinPreviewMetadata {
         title,
         description,
@@ -122,35 +119,33 @@ fn extract_addressable_metadata(event: &Event, kind: u16) -> PinPreviewMetadata 
         .or_else(|| extract_imeta_image(event))
         .or_else(|| extract_first_image_from_content(&event.content));
     let summary = extract_tag_value(&event.tags, "summary");
-    let description = summary
-        .or_else(|| {
-            if event.content.len() > 500 {
-                Some(
-                    format!(
-                        "{}...",
-                        &event.content.chars().take(500).collect::<String>(),
-                    ),
-                )
-            } else if !event.content.is_empty() {
-                Some(event.content.clone())
-            } else {
-                None
-            }
-        });
+    let description = summary.or_else(|| {
+        if event.content.len() > 500 {
+            Some(format!(
+                "{}...",
+                &event.content.chars().take(500).collect::<String>(),
+            ))
+        } else if !event.content.is_empty() {
+            Some(event.content.clone())
+        } else {
+            None
+        }
+    });
     let source_type = match kind {
         30023 => {
-            let is_recipe = event
-                .tags
-                .iter()
-                .any(|t| {
-                    let slice = t.as_slice();
-                    slice.first().map(|s| s.as_str()) == Some("t")
-                        && slice
-                            .get(1)
-                            .map(|s| s.to_lowercase().contains("nostrcooking"))
-                            .unwrap_or(false)
-                });
-            if is_recipe { "Recipe" } else { "Article" }
+            let is_recipe = event.tags.iter().any(|t| {
+                let slice = t.as_slice();
+                slice.first().map(|s| s.as_str()) == Some("t")
+                    && slice
+                        .get(1)
+                        .map(|s| s.to_lowercase().contains("nostrcooking"))
+                        .unwrap_or(false)
+            });
+            if is_recipe {
+                "Recipe"
+            } else {
+                "Article"
+            }
         }
         30078 => "Recipe",
         30067 => "Pinboard",
@@ -166,7 +161,7 @@ fn extract_addressable_metadata(event: &Event, kind: u16) -> PinPreviewMetadata 
         30030..=30033 => "Citation",
         _ => "Event",
     }
-        .to_string();
+    .to_string();
     PinPreviewMetadata {
         title,
         description,
@@ -192,11 +187,11 @@ fn extract_imeta_image(event: &Event) -> Option<String> {
 }
 /// Extract first image URL from note content using regex
 fn extract_first_image_from_content(content: &str) -> Option<String> {
-    static URL_REGEX: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"https?://[^\s\)\]]+").unwrap()
-    });
+    static URL_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"https?://[^\s\)\]]+").unwrap());
     for mat in URL_REGEX.find_iter(content) {
-        let url = mat.as_str().trim_end_matches(['.', ',', ')', ']', '>', '"', '\'']);
+        let url = mat
+            .as_str()
+            .trim_end_matches(['.', ',', ')', ']', '>', '"', '\'']);
         if is_image_url(url) {
             return Some(url.to_string());
         }
@@ -206,7 +201,9 @@ fn extract_first_image_from_content(content: &str) -> Option<String> {
 /// Check if a URL points to an image based on extension
 fn is_image_url(url: &str) -> bool {
     let lower = url.to_lowercase();
-    let extensions = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".avif"];
+    let extensions = [
+        ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".avif",
+    ];
     extensions
         .iter()
         .any(|ext| lower.ends_with(ext) || lower.contains(&format!("{ext}?")))

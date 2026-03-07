@@ -87,8 +87,7 @@ pub fn FileTreeEntry(
     entry: FileEntry,
     naddr: String,
     git_ref: String,
-    #[props(default = 0)]
-    depth: usize,
+    #[props(default = 0)] depth: usize,
 ) -> Element {
     let indent_class = get_indent_class(depth);
     let is_dir = entry.is_directory();
@@ -152,8 +151,7 @@ pub fn CodeFileTree(
     entries: Vec<FileEntry>,
     naddr: String,
     git_ref: String,
-    #[props(default = "".to_string())]
-    current_path: String,
+    #[props(default = "".to_string())] current_path: String,
 ) -> Element {
     if entries.is_empty() {
         return rsx! {

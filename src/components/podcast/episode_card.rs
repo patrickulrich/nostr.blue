@@ -12,9 +12,7 @@ use crate::services::podcast_index::{Episode as PodcastIndexEpisode, PodcastFeed
 use crate::services::podcast_rss::{format_duration, RssEpisode, RssPodcast};
 use crate::stores::music_player::{self, MusicTrack};
 use crate::stores::nostr_music::TrackSource;
-use crate::utils::podcast::{
-    Person, PodcastEpisode, Soundbite, TranscriptRef, ValueBlock,
-};
+use crate::utils::podcast::{Person, PodcastEpisode, Soundbite, TranscriptRef, ValueBlock};
 /// Unified podcast episode for display
 #[derive(Clone, Debug, PartialEq)]
 pub struct DisplayEpisode {
@@ -130,18 +128,13 @@ impl DisplayEpisode {
         }
     }
     /// Create from Podcast Index API episode
-    pub fn from_podcast_index_episode(
-        episode: &PodcastIndexEpisode,
-        feed: &PodcastFeed,
-    ) -> Self {
+    pub fn from_podcast_index_episode(episode: &PodcastIndexEpisode, feed: &PodcastFeed) -> Self {
         let created_at = episode.date_published.unwrap_or(0) as u64;
-        let pub_date = episode
-            .date_published
-            .map(|ts| {
-                chrono::DateTime::from_timestamp(ts, 0)
-                    .map(|dt| dt.format("%b %d, %Y").to_string())
-                    .unwrap_or_else(|| "Unknown date".to_string())
-            });
+        let pub_date = episode.date_published.map(|ts| {
+            chrono::DateTime::from_timestamp(ts, 0)
+                .map(|dt| dt.format("%b %d, %Y").to_string())
+                .unwrap_or_else(|| "Unknown date".to_string())
+        });
         let transcripts: Vec<TranscriptRef> = episode
             .transcripts
             .iter()
@@ -190,40 +183,36 @@ impl DisplayEpisode {
                 episode_guid: episode.id.to_string(),
                 podcast_title: feed.title.clone(),
             },
-            value: episode
-                .value
-                .as_ref()
-                .or(feed.value.as_ref())
-                .map(|v| {
-                    let model = v.model.as_ref();
-                    crate::utils::podcast::ValueBlock {
-                        value_type: model
-                            .and_then(|m| m.model_type.clone())
-                            .unwrap_or_else(|| "lightning".to_string()),
-                        method: model
-                            .and_then(|m| m.method.clone())
-                            .unwrap_or_else(|| "keysend".to_string()),
-                        suggested: model
-                            .and_then(|m| m.suggested.as_ref())
-                            .and_then(|s| s.parse().ok()),
-                        recipients: v
-                            .destinations
-                            .iter()
-                            .map(|d| crate::utils::podcast::ValueRecipient {
-                                name: d.name.clone(),
-                                recipient_type: d
-                                    .dest_type
-                                    .clone()
-                                    .unwrap_or_else(|| "node".to_string()),
-                                address: d.address.clone().unwrap_or_default(),
-                                custom_key: None,
-                                custom_value: None,
-                                split: d.split.unwrap_or(100),
-                                fee: None,
-                            })
-                            .collect(),
-                    }
-                }),
+            value: episode.value.as_ref().or(feed.value.as_ref()).map(|v| {
+                let model = v.model.as_ref();
+                crate::utils::podcast::ValueBlock {
+                    value_type: model
+                        .and_then(|m| m.model_type.clone())
+                        .unwrap_or_else(|| "lightning".to_string()),
+                    method: model
+                        .and_then(|m| m.method.clone())
+                        .unwrap_or_else(|| "keysend".to_string()),
+                    suggested: model
+                        .and_then(|m| m.suggested.as_ref())
+                        .and_then(|s| s.parse().ok()),
+                    recipients: v
+                        .destinations
+                        .iter()
+                        .map(|d| crate::utils::podcast::ValueRecipient {
+                            name: d.name.clone(),
+                            recipient_type: d
+                                .dest_type
+                                .clone()
+                                .unwrap_or_else(|| "node".to_string()),
+                            address: d.address.clone().unwrap_or_default(),
+                            custom_key: None,
+                            custom_value: None,
+                            split: d.split.unwrap_or(100),
+                            fee: None,
+                        })
+                        .collect(),
+                }
+            }),
             transcripts,
             soundbites,
             persons: Vec::new(),
@@ -270,8 +259,8 @@ impl DisplayEpisode {
             TrackSource::NostrPodcast { pubkey, .. } => {
                 use nostr::prelude::*;
                 if let Ok(pk) = PublicKey::from_hex(pubkey) {
-                    let coord = Coordinate::new(Kind::from(30078), pk)
-                        .identifier(PODCAST_METADATA_D_TAG);
+                    let coord =
+                        Coordinate::new(Kind::from(30078), pk).identifier(PODCAST_METADATA_D_TAG);
                     let nip19_coord = Nip19Coordinate::new(coord, vec![]);
                     if let Ok(naddr) = nip19_coord.to_bech32() {
                         return Some(Route::PodcastNostrDetail { naddr });
@@ -280,10 +269,9 @@ impl DisplayEpisode {
                 None
             }
             TrackSource::RssPodcast { podcast_id, .. } => {
-                podcast_id
-                    .map(|id| Route::PodcastRssFeedDetail {
-                        podcast_id: id.to_string(),
-                    })
+                podcast_id.map(|id| Route::PodcastRssFeedDetail {
+                    podcast_id: id.to_string(),
+                })
             }
             _ => None,
         }
@@ -297,20 +285,19 @@ impl DisplayEpisode {
                     let coord = Coordinate::new(Kind::from(30054), pk).identifier(d_tag);
                     let nip19_coord = Nip19Coordinate::new(coord, vec![]);
                     if let Ok(naddr) = nip19_coord.to_bech32() {
-                        return Some(Route::PodcastNostrEpisodeDetail {
-                            naddr,
-                        });
+                        return Some(Route::PodcastNostrEpisodeDetail { naddr });
                     }
                 }
                 None
             }
-            TrackSource::RssPodcast { podcast_id, episode_guid, .. } => {
-                podcast_id
-                    .map(|id| Route::PodcastRssEpisodeDetail {
-                        podcast_id: id.to_string(),
-                        episode_id: urlencoding::encode(episode_guid).to_string(),
-                    })
-            }
+            TrackSource::RssPodcast {
+                podcast_id,
+                episode_guid,
+                ..
+            } => podcast_id.map(|id| Route::PodcastRssEpisodeDetail {
+                podcast_id: id.to_string(),
+                episode_id: urlencoding::encode(episode_guid).to_string(),
+            }),
             _ => None,
         }
     }
@@ -363,7 +350,10 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
         .clone()
         .or(episode.podcast_image.clone())
         .unwrap_or_else(|| {
-            format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", episode.id)
+            format!(
+                "https://api.dicebear.com/7.x/shapes/svg?seed={}",
+                episode.id
+            )
         });
     let episode_label = match (episode.season, episode.episode_number) {
         (Some(s), Some(e)) => Some(format!("S{}E{}", s, e)),
@@ -480,7 +470,7 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
                         move |_| {
                             let track = episode.to_music_track();
                             let playlist_vec = playlist.as_ref().map(|rc| (**rc).clone());
-                            music_player::play_track(track, playlist_vec, None);
+                            music_player::play_or_toggle_track(track, playlist_vec, None);
                         }
                     },
                     dangerous_inner_html: if *is_playing.read() { icons::PAUSE } else { icons::PLAY },
@@ -526,7 +516,12 @@ pub fn PodcastEpisodeCardSkeleton() -> Element {
 fn strip_html(html: &str) -> String {
     use ammonia::Builder;
     use std::collections::HashSet;
-    Builder::new().tags(HashSet::new()).clean(html).to_string().trim().to_string()
+    Builder::new()
+        .tags(HashSet::new())
+        .clean(html)
+        .to_string()
+        .trim()
+        .to_string()
 }
 /// Format date string for display
 fn format_date(date_str: &str) -> String {

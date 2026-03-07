@@ -9,8 +9,7 @@ pub async fn create_community(
     rules: Option<&str>,
     moderators: Vec<String>,
 ) -> std::result::Result<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -19,7 +18,10 @@ pub async fn create_community(
         Tag::custom(TagKind::Custom("name".into()), vec![name]),
     ];
     if let Some(desc) = description {
-        tags.push(Tag::custom(TagKind::Custom("description".into()), vec![desc]));
+        tags.push(Tag::custom(
+            TagKind::Custom("description".into()),
+            vec![desc],
+        ));
     }
     if let Some(img) = image {
         tags.push(Tag::custom(TagKind::Custom("image".into()), vec![img]));
@@ -28,15 +30,12 @@ pub async fn create_community(
         tags.push(Tag::custom(TagKind::Custom("rules".into()), vec![r]));
     }
     for mod_pubkey in moderators {
-        tags.push(
-            Tag::custom(
-                TagKind::p(),
-                vec![mod_pubkey, "".to_string(), "moderator".to_string()],
-            ),
-        );
+        tags.push(Tag::custom(
+            TagKind::p(),
+            vec![mod_pubkey, "".to_string(), "moderator".to_string()],
+        ));
     }
-    let builder = EventBuilder::new(Kind::Custom(KIND_COMMUNITY_DEFINITION), "")
-        .tags(tags);
+    let builder = EventBuilder::new(Kind::Custom(KIND_COMMUNITY_DEFINITION), "").tags(tags);
     let output = client
         .send_event_builder(builder)
         .await
@@ -50,16 +49,15 @@ pub async fn post_to_community(
     community: &Community,
     content: &str,
 ) -> std::result::Result<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
     let coord = Coordinate::new(
-            Kind::Custom(KIND_COMMUNITY_DEFINITION),
-            PublicKey::from_hex(&community.pubkey).map_err(|e| e.to_string())?,
-        )
-        .identifier(&community.d_tag);
+        Kind::Custom(KIND_COMMUNITY_DEFINITION),
+        PublicKey::from_hex(&community.pubkey).map_err(|e| e.to_string())?,
+    )
+    .identifier(&community.d_tag);
     let target = CommentTarget::coordinate(Cow::Owned(coord), None);
     let builder = EventBuilder::comment(content, target, None);
     let output = client
@@ -76,27 +74,21 @@ pub async fn reply_to_post(
     parent_post: &CommunityPost,
     content: &str,
 ) -> std::result::Result<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
     let community_coord = Coordinate::new(
-            Kind::Custom(KIND_COMMUNITY_DEFINITION),
-            PublicKey::from_hex(&community.pubkey).map_err(|e| e.to_string())?,
-        )
-        .identifier(&community.d_tag);
+        Kind::Custom(KIND_COMMUNITY_DEFINITION),
+        PublicKey::from_hex(&community.pubkey).map_err(|e| e.to_string())?,
+    )
+    .identifier(&community.d_tag);
     let parent_id = EventId::from_hex(&parent_post.id)
         .map_err(|e| format!("Invalid parent event ID: {}", e))?;
     let parent_pubkey = PublicKey::from_hex(&parent_post.pubkey)
         .map_err(|e| format!("Invalid parent pubkey: {}", e))?;
     let root_target = CommentTarget::coordinate(Cow::Owned(community_coord), None);
-    let parent_target = CommentTarget::event(
-        parent_id,
-        Kind::Comment,
-        Some(parent_pubkey),
-        None,
-    );
+    let parent_target = CommentTarget::event(parent_id, Kind::Comment, Some(parent_pubkey), None);
     let builder = EventBuilder::comment(content, parent_target, Some(root_target));
     let output = client
         .send_event_builder(builder)
@@ -111,8 +103,7 @@ pub async fn approve_post(
     community: &Community,
     post: &CommunityPost,
 ) -> std::result::Result<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -122,10 +113,10 @@ pub async fn approve_post(
     }
     let post_json = serde_json::to_string(&post.event).unwrap_or_default();
     let coord = Coordinate::new(
-            Kind::Custom(KIND_COMMUNITY_DEFINITION),
-            PublicKey::from_hex(&community.pubkey).map_err(|e| e.to_string())?,
-        )
-        .identifier(&community.d_tag);
+        Kind::Custom(KIND_COMMUNITY_DEFINITION),
+        PublicKey::from_hex(&community.pubkey).map_err(|e| e.to_string())?,
+    )
+    .identifier(&community.d_tag);
     let tags: Vec<Tag> = vec![
         Tag::coordinate(coord, None),
         Tag::event(EventId::from_hex(&post.id).map_err(|e| e.to_string())?),
@@ -147,8 +138,7 @@ pub async fn remove_post(
     post: &CommunityPost,
     reason: Option<&str>,
 ) -> std::result::Result<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -158,10 +148,10 @@ pub async fn remove_post(
     }
     let content = reason.unwrap_or("");
     let coord = Coordinate::new(
-            Kind::Custom(KIND_COMMUNITY_DEFINITION),
-            PublicKey::from_hex(&community.pubkey).map_err(|e| e.to_string())?,
-        )
-        .identifier(&community.d_tag);
+        Kind::Custom(KIND_COMMUNITY_DEFINITION),
+        PublicKey::from_hex(&community.pubkey).map_err(|e| e.to_string())?,
+    )
+    .identifier(&community.d_tag);
     let tags: Vec<Tag> = vec![
         Tag::coordinate(coord, None),
         Tag::event(EventId::from_hex(&post.id).map_err(|e| e.to_string())?),
@@ -182,8 +172,7 @@ pub async fn update_approved_members(
     community: &Community,
     members: Vec<String>,
 ) -> std::result::Result<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -217,17 +206,14 @@ pub async fn submit_join_request(
     community: &Community,
     reason: Option<&str>,
 ) -> std::result::Result<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
     let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
     let status = get_membership_status(&current_pubkey, community);
     match status {
-        MembershipStatus::Owner
-        | MembershipStatus::Moderator
-        | MembershipStatus::Member => {
+        MembershipStatus::Owner | MembershipStatus::Moderator | MembershipStatus::Member => {
             return Err("You are already a member of this community".to_string());
         }
         MembershipStatus::Pending { .. } => {
@@ -239,16 +225,14 @@ pub async fn submit_join_request(
         _ => {}
     }
     let coord = Coordinate::new(
-            Kind::Custom(KIND_COMMUNITY_DEFINITION),
-            PublicKey::from_hex(&community.pubkey).map_err(|e| e.to_string())?,
-        )
-        .identifier(&community.d_tag);
+        Kind::Custom(KIND_COMMUNITY_DEFINITION),
+        PublicKey::from_hex(&community.pubkey).map_err(|e| e.to_string())?,
+    )
+    .identifier(&community.d_tag);
     let content = reason.unwrap_or("");
     let tags: Vec<Tag> = vec![
         Tag::coordinate(coord, None),
-        Tag::public_key(
-            PublicKey::from_hex(&community.pubkey).map_err(|e| e.to_string())?,
-        ),
+        Tag::public_key(PublicKey::from_hex(&community.pubkey).map_err(|e| e.to_string())?),
     ];
     let builder = EventBuilder::new(Kind::Custom(KIND_JOIN_REQUEST), content).tags(tags);
     let output = client
@@ -264,7 +248,9 @@ pub async fn submit_join_request(
         created_at: crate::platform::timestamp::now_secs(),
         event: None,
     };
-    USER_PENDING_REQUESTS.write().insert(community.a_tag.clone(), request);
+    USER_PENDING_REQUESTS
+        .write()
+        .insert(community.a_tag.clone(), request);
     log::info!("Join request submitted: {}", request_id);
     Ok(request_id)
 }
@@ -287,11 +273,17 @@ pub async fn approve_join_request(
         members.push(request.user_pubkey.clone());
     }
     let result = update_approved_members(community, members).await?;
-    if let Some(requests) = PENDING_JOIN_REQUESTS_CACHE.write().get_mut(&community.a_tag)
+    if let Some(requests) = PENDING_JOIN_REQUESTS_CACHE
+        .write()
+        .get_mut(&community.a_tag)
     {
         requests.retain(|r| r.id != request.id);
     }
-    log::info!("Approved join request {} for user {}", request.id, request.user_pubkey);
+    log::info!(
+        "Approved join request {} for user {}",
+        request.id,
+        request.user_pubkey
+    );
     Ok(result)
 }
 
@@ -301,8 +293,7 @@ pub async fn decline_join_request(
     user_pubkey: &str,
     reason: Option<&str>,
 ) -> std::result::Result<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -328,8 +319,7 @@ pub async fn decline_join_request(
         }
     }
     let content = reason.unwrap_or("");
-    let builder = EventBuilder::new(Kind::Custom(KIND_DECLINED_MEMBERS), content)
-        .tags(tags);
+    let builder = EventBuilder::new(Kind::Custom(KIND_DECLINED_MEMBERS), content).tags(tags);
     let output = client
         .send_event_builder(builder)
         .await
@@ -337,7 +327,9 @@ pub async fn decline_join_request(
     DECLINED_MEMBERS_CACHE
         .write()
         .insert(community.a_tag.clone(), declined.into_iter().collect());
-    if let Some(requests) = PENDING_JOIN_REQUESTS_CACHE.write().get_mut(&community.a_tag)
+    if let Some(requests) = PENDING_JOIN_REQUESTS_CACHE
+        .write()
+        .get_mut(&community.a_tag)
     {
         requests.retain(|r| r.user_pubkey != user_pubkey);
     }

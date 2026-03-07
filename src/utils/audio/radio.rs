@@ -5,10 +5,10 @@
 //!
 //! Radio stations contain stream URLs, metadata, and genre tags
 //! for live internet radio playback.
+use crate::stores::nostr_client;
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use crate::stores::nostr_client;
 /// Radio station definition event kind (addressable)
 pub const KIND_RADIO_STATION: u16 = 31237;
 /// Stream format/codec for radio streams
@@ -134,7 +134,11 @@ impl RadioStream {
     }
     /// Get bitrate (convenience accessor)
     pub fn bitrate(&self) -> Option<u32> {
-        if self.quality.bitrate > 0 { Some(self.quality.bitrate) } else { None }
+        if self.quality.bitrate > 0 {
+            Some(self.quality.bitrate)
+        } else {
+            None
+        }
     }
     /// Create a stream with a specific bitrate (for testing)
     #[cfg(test)]
@@ -219,19 +223,16 @@ impl RadioStation {
     /// Uses wavefunc-compatible tag format
     pub fn from_event(event: &Event) -> Result<Self, String> {
         if event.kind.as_u16() != KIND_RADIO_STATION {
-            return Err(
-                format!(
-                    "Expected kind {}, got {}",
-                    KIND_RADIO_STATION,
-                    event.kind.as_u16(),
-                ),
-            );
+            return Err(format!(
+                "Expected kind {}, got {}",
+                KIND_RADIO_STATION,
+                event.kind.as_u16(),
+            ));
         }
         let pubkey = event.pubkey.to_hex();
-        let d_tag = get_tag_value(event, "d")
-            .ok_or("Missing required 'd' tag (station ID)")?;
-        let name = get_tag_value(event, "name")
-            .ok_or("Missing required 'name' tag (station name)")?;
+        let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag (station ID)")?;
+        let name =
+            get_tag_value(event, "name").ok_or("Missing required 'name' tag (station name)")?;
         let coordinate = format!("{}:{}:{}", KIND_RADIO_STATION, pubkey, d_tag);
         let naddr = build_station_naddr(&pubkey, &d_tag);
         let mut streams: Vec<RadioStream> = event
@@ -245,9 +246,7 @@ impl RadioStation {
                 let is_primary = slice.iter().any(|s| s == "primary");
                 let quality = slice
                     .get(3)
-                    .and_then(|quality_str| {
-                        serde_json::from_str::<StreamQuality>(quality_str).ok()
-                    })
+                    .and_then(|quality_str| serde_json::from_str::<StreamQuality>(quality_str).ok())
                     .unwrap_or_default();
                 Some(RadioStream::new(url, format_str, quality, is_primary))
             })
@@ -257,15 +256,11 @@ impl RadioStation {
                 streams = content
                     .streams
                     .into_iter()
-                    .map(|s| RadioStream::new(
-                        s.url,
-                        Some(s.format.as_str()),
-                        s.quality,
-                        s.primary,
-                    ))
+                    .map(|s| RadioStream::new(s.url, Some(s.format.as_str()), s.quality, s.primary))
                     .collect();
                 log::debug!(
-                    "Parsed {} streams from event content for station {}", streams.len(),
+                    "Parsed {} streams from event content for station {}",
+                    streams.len(),
                     name
                 );
             }
@@ -313,12 +308,13 @@ pub async fn fetch_radio_stations(
     genre: Option<&str>,
     limit: usize,
 ) -> Result<Vec<RadioStation>, String> {
-    let mut filter = Filter::new().kind(Kind::Custom(KIND_RADIO_STATION)).limit(limit);
+    let mut filter = Filter::new()
+        .kind(Kind::Custom(KIND_RADIO_STATION))
+        .limit(limit);
     if let Some(g) = genre {
         filter = filter.hashtag(g.to_lowercase());
     }
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await?;
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
     let stations: Vec<RadioStation> = events
         .iter()
         .filter_map(|e| RadioStation::from_event(e).ok())
@@ -334,8 +330,7 @@ pub async fn fetch_station_by_naddr(naddr: &str) -> Result<RadioStation, String>
         .author(pk)
         .identifier(&d_tag)
         .limit(1);
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await?;
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
     events
         .into_iter()
         .filter_map(|e| RadioStation::from_event(&e).ok())
@@ -346,10 +341,7 @@ pub async fn fetch_station_by_naddr(naddr: &str) -> Result<RadioStation, String>
 ///
 /// Searches station names, descriptions, and tags across relays that support NIP-50.
 /// Falls back to client-side filtering if needed.
-pub async fn search_radio_stations(
-    query: &str,
-    limit: usize,
-) -> Result<Vec<RadioStation>, String> {
+pub async fn search_radio_stations(query: &str, limit: usize) -> Result<Vec<RadioStation>, String> {
     if query.is_empty() {
         return Ok(Vec::new());
     }
@@ -366,44 +358,43 @@ pub async fn search_radio_stations(
                 .filter_map(|e| RadioStation::from_event(e).ok())
                 .collect();
             let query_lower = query.to_lowercase();
-            stations
-                .sort_by(|a, b| {
-                    let a_name_match = a.name.to_lowercase().contains(&query_lower);
-                    let b_name_match = b.name.to_lowercase().contains(&query_lower);
-                    match (a_name_match, b_name_match) {
-                        (true, false) => std::cmp::Ordering::Less,
-                        (false, true) => std::cmp::Ordering::Greater,
-                        _ => b.created_at.cmp(&a.created_at),
-                    }
-                });
-            log::debug!("Search for '{}' returned {} stations", query, stations.len());
+            stations.sort_by(|a, b| {
+                let a_name_match = a.name.to_lowercase().contains(&query_lower);
+                let b_name_match = b.name.to_lowercase().contains(&query_lower);
+                match (a_name_match, b_name_match) {
+                    (true, false) => std::cmp::Ordering::Less,
+                    (false, true) => std::cmp::Ordering::Greater,
+                    _ => b.created_at.cmp(&a.created_at),
+                }
+            });
+            log::debug!(
+                "Search for '{}' returned {} stations",
+                query,
+                stations.len()
+            );
             Ok(stations)
         }
         Err(e) => {
             log::warn!("NIP-50 search failed: {}, trying fallback", e);
-            let filter = Filter::new().kind(Kind::Custom(KIND_RADIO_STATION)).limit(200);
-            let events = nostr_client::fetch_events_aggregated(
-                    filter,
-                    Duration::from_secs(10),
-                )
-                .await?;
+            let filter = Filter::new()
+                .kind(Kind::Custom(KIND_RADIO_STATION))
+                .limit(200);
+            let events =
+                nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
             let query_lower = query.to_lowercase();
             let mut stations: Vec<RadioStation> = events
                 .iter()
                 .filter_map(|e| RadioStation::from_event(e).ok())
                 .filter(|s| {
                     s.name.to_lowercase().contains(&query_lower)
-                        || s
-                            .description
+                        || s.description
                             .as_ref()
                             .map(|d| d.to_lowercase().contains(&query_lower))
                             .unwrap_or(false)
-                        || s
-                            .genres
+                        || s.genres
                             .iter()
                             .any(|g| g.to_lowercase().contains(&query_lower))
-                        || s
-                            .location
+                        || s.location
                             .as_ref()
                             .map(|l| l.to_lowercase().contains(&query_lower))
                             .unwrap_or(false)
@@ -426,23 +417,19 @@ fn get_tag_value(event: &Event, tag_name: &str) -> Option<String> {
 /// Build a NIP-19 naddr for a radio station
 pub fn build_station_naddr(pubkey: &str, d_tag: &str) -> Option<String> {
     let pk = PublicKey::from_hex(pubkey).ok()?;
-    let coordinate = Coordinate::new(Kind::Custom(KIND_RADIO_STATION), pk)
-        .identifier(d_tag);
+    let coordinate = Coordinate::new(Kind::Custom(KIND_RADIO_STATION), pk).identifier(d_tag);
     let nip19 = Nip19Coordinate::new(coordinate, vec![]);
     nip19.to_bech32().ok()
 }
 /// Parse a station naddr back to (pubkey, d_tag)
 pub fn parse_station_naddr(naddr: &str) -> Result<(String, String), String> {
-    let nip19 = Nip19Coordinate::from_bech32(naddr)
-        .map_err(|e| format!("Invalid naddr: {}", e))?;
+    let nip19 = Nip19Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
     if nip19.coordinate.kind.as_u16() != KIND_RADIO_STATION {
-        return Err(
-            format!(
-                "Expected kind {}, got {}",
-                KIND_RADIO_STATION,
-                nip19.coordinate.kind.as_u16(),
-            ),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_RADIO_STATION,
+            nip19.coordinate.kind.as_u16(),
+        ));
     }
     let pubkey = nip19.coordinate.public_key.to_hex();
     let d_tag = nip19.coordinate.identifier.clone();
@@ -472,14 +459,13 @@ pub fn stream_score(stream: &RadioStream) -> u32 {
     if stream.is_primary {
         score += SCORE_PRIMARY;
     }
-    score
-        += match stream.format {
-            StreamFormat::Hls => SCORE_HLS,
-            StreamFormat::Aac => SCORE_AAC,
-            StreamFormat::Mp3 => SCORE_MP3,
-            StreamFormat::Ogg => SCORE_OGG,
-            StreamFormat::Unknown => SCORE_UNKNOWN,
-        };
+    score += match stream.format {
+        StreamFormat::Hls => SCORE_HLS,
+        StreamFormat::Aac => SCORE_AAC,
+        StreamFormat::Mp3 => SCORE_MP3,
+        StreamFormat::Ogg => SCORE_OGG,
+        StreamFormat::Unknown => SCORE_UNKNOWN,
+    };
     score += stream.quality.bitrate.min(320) / 6;
     score
 }
@@ -513,7 +499,10 @@ mod tests {
         assert_eq!(StreamFormat::from_mime("audio/mpeg"), StreamFormat::Mp3);
         assert_eq!(StreamFormat::from_mime("audio/aac"), StreamFormat::Aac);
         assert_eq!(StreamFormat::from_mime("audio/ogg"), StreamFormat::Ogg);
-        assert_eq!(StreamFormat::from_mime("unknown/type"), StreamFormat::Unknown);
+        assert_eq!(
+            StreamFormat::from_mime("unknown/type"),
+            StreamFormat::Unknown
+        );
     }
     #[test]
     fn test_stream_format_from_url() {

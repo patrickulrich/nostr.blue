@@ -7,12 +7,9 @@ use dioxus::prelude::*;
 /// Composer for creating new topic posts or replies
 #[component]
 pub fn TopicPostComposer(
-    #[props(default)]
-    topic: Option<String>,
-    #[props(default)]
-    reply_to: Option<TopicPost>,
-    #[props(default)]
-    on_success: Option<EventHandler<String>>,
+    #[props(default)] topic: Option<String>,
+    #[props(default)] reply_to: Option<TopicPost>,
+    #[props(default)] on_success: Option<EventHandler<String>>,
 ) -> Element {
     let has_signer = *HAS_SIGNER.read();
     let mut content = use_signal(String::new);

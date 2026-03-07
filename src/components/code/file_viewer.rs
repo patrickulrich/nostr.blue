@@ -342,26 +342,32 @@ pub fn RawFileButton(content: String, filename: String) -> Element {
             } else {
                 "flex items-center gap-1 px-3 py-1.5 text-sm bg-muted hover:bg-accent rounded transition"
             },
-            title: "",
+            title: "Download raw file",
             onclick: {
                 let content = content.clone();
                 let filename = filename.clone();
                 move |_| {
-                    save_error.set(false);
-                    match crate::platform::download::save_file(
-                        &filename,
-                        &content,
-                        "text/plain;charset=utf-8",
-                    ) {
-                        Ok(()) => save_error.set(false),
-                        Err(e) if e.contains("Save cancelled") => {
-                            save_error.set(false);
+                    let filename = filename.clone();
+                    let content = content.clone();
+                    spawn(async move {
+                        save_error.set(false);
+                        match crate::platform::download::save_file(
+                            &filename,
+                            &content,
+                            "text/plain;charset=utf-8",
+                        ) {
+                            Ok(()) => save_error.set(false),
+                            Err(e) if e.contains("Save cancelled") => {
+                                save_error.set(false);
+                            }
+                            Err(e) => {
+                                log::error!("Download failed for '{}': {}", filename, e);
+                                save_error.set(true);
+                                crate::platform::timer::sleep_ms(2000).await;
+                                save_error.set(false);
+                            }
                         }
-                        Err(e) => {
-                            log::error!("Download failed for '{}': {}", filename, e);
-                            save_error.set(true);
-                        }
-                    }
+                    });
                 }
             },
             svg {

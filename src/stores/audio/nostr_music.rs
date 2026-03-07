@@ -3,8 +3,8 @@ use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 use lru::LruCache;
 use nostr_sdk::{
-    Alphabet, Event, EventBuilder, Filter, FromBech32, Kind, PublicKey, SingleLetterTag,
-    Tag, TagKind,
+    Alphabet, Event, EventBuilder, Filter, FromBech32, Kind, PublicKey, SingleLetterTag, Tag,
+    TagKind,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -165,11 +165,11 @@ const TRACK_CACHE_CAPACITY: usize = 2000;
 /// Maximum playlists in cache
 const PLAYLIST_CACHE_CAPACITY: usize = 500;
 /// Global LRU cache for nostr tracks (coordinate -> CachedTrack)
-pub static NOSTR_TRACK_CACHE: GlobalSignal<LruCache<String, CachedTrack>> = Signal::global(||
-LruCache::new(NonZeroUsize::new(TRACK_CACHE_CAPACITY).unwrap()));
+pub static NOSTR_TRACK_CACHE: GlobalSignal<LruCache<String, CachedTrack>> =
+    Signal::global(|| LruCache::new(NonZeroUsize::new(TRACK_CACHE_CAPACITY).unwrap()));
 /// Global LRU cache for nostr playlists (coordinate -> NostrPlaylist)
-pub static NOSTR_PLAYLIST_CACHE: GlobalSignal<LruCache<String, NostrPlaylist>> = Signal::global(||
-LruCache::new(NonZeroUsize::new(PLAYLIST_CACHE_CAPACITY).unwrap()));
+pub static NOSTR_PLAYLIST_CACHE: GlobalSignal<LruCache<String, NostrPlaylist>> =
+    Signal::global(|| LruCache::new(NonZeroUsize::new(PLAYLIST_CACHE_CAPACITY).unwrap()));
 /// Filter for music feed source selection
 #[derive(Clone, Debug, PartialEq, Default)]
 #[allow(dead_code)]
@@ -228,10 +228,13 @@ pub fn parse_playlist_event(event: &Event) -> Result<NostrPlaylist, String> {
     let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
     let title = get_tag_value(event, "title").ok_or("Missing required 'title' tag")?;
     let coordinate = format!("{}:{}:{}", KIND_PLAYLIST, pubkey, d_tag);
-    let description = get_tag_value(event, "description")
-        .or_else(|| {
-            if !event.content.is_empty() { Some(event.content.clone()) } else { None }
-        });
+    let description = get_tag_value(event, "description").or_else(|| {
+        if !event.content.is_empty() {
+            Some(event.content.clone())
+        } else {
+            None
+        }
+    });
     let image = get_tag_value(event, "image");
     let gradient = event
         .tags
@@ -254,7 +257,9 @@ pub fn parse_playlist_event(event: &Event) -> Result<NostrPlaylist, String> {
         .filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("t"))
         .filter_map(|t| t.as_slice().get(1).map(|s| s.to_string()))
         .collect();
-    let is_public = get_tag_value(event, "public").map(|v| v == "true").unwrap_or(false);
+    let is_public = get_tag_value(event, "public")
+        .map(|v| v == "true")
+        .unwrap_or(false);
     let is_collaborative = get_tag_value(event, "collaborative")
         .map(|v| v == "true")
         .unwrap_or(false);
@@ -289,7 +294,9 @@ pub async fn fetch_nostr_tracks(
     genre: Option<&str>,
 ) -> Result<Vec<NostrTrack>, String> {
     let _client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let mut nostr_filter = Filter::new().kind(Kind::from(KIND_MUSIC_TRACK)).limit(limit);
+    let mut nostr_filter = Filter::new()
+        .kind(Kind::from(KIND_MUSIC_TRACK))
+        .limit(limit);
     if let Some(g) = genre {
         nostr_filter = nostr_filter.hashtag(g.to_lowercase());
     }
@@ -307,10 +314,7 @@ pub async fn fetch_nostr_tracks(
             .collect();
         nostr_filter = nostr_filter.authors(authors);
     }
-    let events = nostr_client::fetch_events_aggregated(
-            nostr_filter,
-            Duration::from_secs(10),
-        )
+    let events = nostr_client::fetch_events_aggregated(nostr_filter, Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch tracks: {}", e))?;
     let mut tracks: Vec<NostrTrack> = events
@@ -319,15 +323,13 @@ pub async fn fetch_nostr_tracks(
         .collect();
     tracks.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     for track in &tracks {
-        NOSTR_TRACK_CACHE
-            .write()
-            .put(
-                track.coordinate.clone(),
-                CachedTrack {
-                    track: track.clone(),
-                    fetched_at: Utc::now(),
-                },
-            );
+        NOSTR_TRACK_CACHE.write().put(
+            track.coordinate.clone(),
+            CachedTrack {
+                track: track.clone(),
+                fetched_at: Utc::now(),
+            },
+        );
     }
     Ok(tracks)
 }
@@ -343,8 +345,7 @@ pub async fn fetch_nostr_track_by_coordinate(
             return Ok(Some(cached.track.clone()));
         }
     }
-    let public_key = PublicKey::from_hex(pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let public_key = PublicKey::from_hex(pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = Filter::new()
         .kind(Kind::from(KIND_MUSIC_TRACK))
         .author(public_key)
@@ -355,15 +356,13 @@ pub async fn fetch_nostr_track_by_coordinate(
         .map_err(|e| format!("Failed to fetch track: {}", e))?;
     if let Some(event) = events.into_iter().next() {
         let track = parse_track_event(&event)?;
-        NOSTR_TRACK_CACHE
-            .write()
-            .put(
-                track.coordinate.clone(),
-                CachedTrack {
-                    track: track.clone(),
-                    fetched_at: Utc::now(),
-                },
-            );
+        NOSTR_TRACK_CACHE.write().put(
+            track.coordinate.clone(),
+            CachedTrack {
+                track: track.clone(),
+                fetched_at: Utc::now(),
+            },
+        );
         Ok(Some(track))
     } else {
         Ok(None)
@@ -381,18 +380,13 @@ pub async fn fetch_track_zap_totals(
     let _client = nostr_client::get_client().ok_or("Client not initialized")?;
     let mut filter = Filter::new().kind(Kind::ZapReceipt);
     if let Some(days) = since_days {
-        let since = nostr_sdk::Timestamp::now()
-            - Duration::from_secs(days as u64 * 24 * 60 * 60);
+        let since = nostr_sdk::Timestamp::now() - Duration::from_secs(days as u64 * 24 * 60 * 60);
         filter = filter.since(since);
     }
     for coord in &track_coordinates {
-        filter = filter
-            .custom_tag(SingleLetterTag::lowercase(Alphabet::A), coord.clone());
+        filter = filter.custom_tag(SingleLetterTag::lowercase(Alphabet::A), coord.clone());
     }
-    let zap_events = nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(10),
-        )
+    let zap_events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch zap receipts: {}", e))?;
     let mut totals: HashMap<String, u64> = HashMap::new();
@@ -446,11 +440,10 @@ fn parse_bolt11_amount(bolt11: &str) -> Option<u64> {
 /// 1. Fetches recent Kind 36787 tracks from relays
 /// 2. Batch fetches artist profiles for the tracks
 /// 3. Filters client-side by title or artist name match
-pub async fn search_nostr_tracks(
-    query: &str,
-    limit: usize,
-) -> Result<Vec<NostrTrack>, String> {
-    let filter = Filter::new().kind(Kind::from(KIND_MUSIC_TRACK)).limit(limit);
+pub async fn search_nostr_tracks(query: &str, limit: usize) -> Result<Vec<NostrTrack>, String> {
+    let filter = Filter::new()
+        .kind(Kind::from(KIND_MUSIC_TRACK))
+        .limit(limit);
     let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch tracks: {}", e))?;
@@ -468,30 +461,35 @@ pub async fn search_nostr_tracks(
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
-    let profiles_map = profiles::fetch_profiles_batch(pubkeys).await.unwrap_or_default();
+    let profiles_map = profiles::fetch_profiles_batch(pubkeys)
+        .await
+        .unwrap_or_default();
     let query_lower = query.to_lowercase();
-    tracks
-        .retain(|track| {
-            if track.title.to_lowercase().contains(&query_lower) {
-                return true;
-            }
-            if track.genres.iter().any(|g| g.to_lowercase().contains(&query_lower)) {
-                return true;
-            }
-            if let Some(profile) = profiles_map.get(&track.pubkey) {
-                if let Some(name) = &profile.display_name {
-                    if name.to_lowercase().contains(&query_lower) {
-                        return true;
-                    }
-                }
-                if let Some(name) = &profile.name {
-                    if name.to_lowercase().contains(&query_lower) {
-                        return true;
-                    }
+    tracks.retain(|track| {
+        if track.title.to_lowercase().contains(&query_lower) {
+            return true;
+        }
+        if track
+            .genres
+            .iter()
+            .any(|g| g.to_lowercase().contains(&query_lower))
+        {
+            return true;
+        }
+        if let Some(profile) = profiles_map.get(&track.pubkey) {
+            if let Some(name) = &profile.display_name {
+                if name.to_lowercase().contains(&query_lower) {
+                    return true;
                 }
             }
-            false
-        });
+            if let Some(name) = &profile.name {
+                if name.to_lowercase().contains(&query_lower) {
+                    return true;
+                }
+            }
+        }
+        false
+    });
     tracks.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     Ok(tracks)
 }
@@ -514,7 +512,9 @@ pub async fn search_nostr_artists(
     if pubkeys.is_empty() {
         return Ok(Vec::new());
     }
-    let profiles_map = profiles::fetch_profiles_batch(pubkeys).await.unwrap_or_default();
+    let profiles_map = profiles::fetch_profiles_batch(pubkeys)
+        .await
+        .unwrap_or_default();
     let query_lower = query.to_lowercase();
     let results: Vec<(String, profiles::Profile)> = profiles_map
         .into_iter()
@@ -538,12 +538,8 @@ pub async fn search_nostr_artists(
     Ok(results)
 }
 /// Fetch all tracks by a specific pubkey (for artist page)
-pub async fn fetch_artist_tracks(
-    pubkey: &str,
-    limit: usize,
-) -> Result<Vec<NostrTrack>, String> {
-    let public_key = PublicKey::from_hex(pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+pub async fn fetch_artist_tracks(pubkey: &str, limit: usize) -> Result<Vec<NostrTrack>, String> {
+    let public_key = PublicKey::from_hex(pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = Filter::new()
         .kind(Kind::from(KIND_MUSIC_TRACK))
         .author(public_key)
@@ -557,15 +553,13 @@ pub async fn fetch_artist_tracks(
         .collect();
     tracks.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     for track in &tracks {
-        NOSTR_TRACK_CACHE
-            .write()
-            .put(
-                track.coordinate.clone(),
-                CachedTrack {
-                    track: track.clone(),
-                    fetched_at: Utc::now(),
-                },
-            );
+        NOSTR_TRACK_CACHE.write().put(
+            track.coordinate.clone(),
+            CachedTrack {
+                track: track.clone(),
+                fetched_at: Utc::now(),
+            },
+        );
     }
     Ok(tracks)
 }
@@ -590,7 +584,9 @@ pub async fn fetch_playlists(
         .collect();
     playlists.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     for playlist in &playlists {
-        NOSTR_PLAYLIST_CACHE.write().put(playlist.coordinate.clone(), playlist.clone());
+        NOSTR_PLAYLIST_CACHE
+            .write()
+            .put(playlist.coordinate.clone(), playlist.clone());
     }
     Ok(playlists)
 }
@@ -612,16 +608,16 @@ pub async fn fetch_playlist_by_coordinate(
         .map_err(|e| format!("Failed to fetch playlist: {}", e))?;
     if let Some(event) = events.into_iter().next() {
         let playlist = parse_playlist_event(&event)?;
-        NOSTR_PLAYLIST_CACHE.write().put(playlist.coordinate.clone(), playlist.clone());
+        NOSTR_PLAYLIST_CACHE
+            .write()
+            .put(playlist.coordinate.clone(), playlist.clone());
         Ok(Some(playlist))
     } else {
         Ok(None)
     }
 }
 /// Resolve playlist tracks from track references
-pub async fn resolve_playlist_tracks(
-    playlist: &NostrPlaylist,
-) -> Result<Vec<NostrTrack>, String> {
+pub async fn resolve_playlist_tracks(playlist: &NostrPlaylist) -> Result<Vec<NostrTrack>, String> {
     if playlist.track_refs.is_empty() {
         return Ok(Vec::new());
     }
@@ -644,9 +640,7 @@ pub async fn resolve_playlist_tracks(
             if parts.len() >= 3 {
                 let pubkey = parts[1];
                 let d_tag = parts[2];
-                if let Ok(Some(track)) = fetch_nostr_track_by_coordinate(pubkey, d_tag)
-                    .await
-                {
+                if let Ok(Some(track)) = fetch_nostr_track_by_coordinate(pubkey, d_tag).await {
                     for (ref_key, track_opt) in &mut tracks {
                         if ref_key == track_ref {
                             *track_opt = Some(track.clone());
@@ -657,7 +651,10 @@ pub async fn resolve_playlist_tracks(
             }
         }
     }
-    Ok(tracks.into_iter().filter_map(|(_, track_opt)| track_opt).collect())
+    Ok(tracks
+        .into_iter()
+        .filter_map(|(_, track_opt)| track_opt)
+        .collect())
 }
 /// Publish a new music track (Kind 36787)
 #[allow(clippy::too_many_arguments)]
@@ -687,17 +684,19 @@ pub async fn publish_track(
         tags.push(Tag::custom(TagKind::Custom("gradient".into()), vec![grad]));
     }
     if let Some(dur) = duration {
-        tags.push(
-            Tag::custom(TagKind::Custom("duration".into()), vec![dur.to_string()]),
-        );
+        tags.push(Tag::custom(
+            TagKind::Custom("duration".into()),
+            vec![dur.to_string()],
+        ));
     }
     for genre in genres {
         tags.push(Tag::hashtag(genre));
     }
     if ai_generated {
-        tags.push(
-            Tag::custom(TagKind::Custom("ai-generated".into()), vec!["true".to_string()]),
-        );
+        tags.push(Tag::custom(
+            TagKind::Custom("ai-generated".into()),
+            vec!["true".to_string()],
+        ));
     }
     let builder = EventBuilder::new(Kind::from(KIND_MUSIC_TRACK), "").tags(tags);
     let output = client
@@ -727,7 +726,10 @@ pub async fn publish_playlist(
         Tag::custom(TagKind::Custom("title".into()), vec![title]),
     ];
     if let Some(desc) = description {
-        tags.push(Tag::custom(TagKind::Custom("description".into()), vec![desc]));
+        tags.push(Tag::custom(
+            TagKind::Custom("description".into()),
+            vec![desc],
+        ));
     }
     if let Some(img) = image {
         tags.push(Tag::custom(TagKind::Custom("image".into()), vec![img]));
@@ -739,17 +741,16 @@ pub async fn publish_playlist(
         tags.push(Tag::hashtag(category));
     }
     if is_public {
-        tags.push(
-            Tag::custom(TagKind::Custom("public".into()), vec!["true".to_string()]),
-        );
+        tags.push(Tag::custom(
+            TagKind::Custom("public".into()),
+            vec!["true".to_string()],
+        ));
     }
     if is_collaborative {
-        tags.push(
-            Tag::custom(
-                TagKind::Custom("collaborative".into()),
-                vec!["true".to_string()],
-            ),
-        );
+        tags.push(Tag::custom(
+            TagKind::Custom("collaborative".into()),
+            vec!["true".to_string()],
+        ));
     }
     let builder = EventBuilder::new(Kind::from(KIND_PLAYLIST), "").tags(tags);
     let output = client

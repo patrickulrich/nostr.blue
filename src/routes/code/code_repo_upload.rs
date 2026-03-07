@@ -4,8 +4,8 @@
 //! Supports drag-and-drop, multiple files, and any file type.
 use crate::components::icons;
 use crate::routes::Route;
-use crate::stores::{auth_store, blossom_store, nostr_client};
 use crate::services::git_hosting::fetch_repository;
+use crate::stores::{auth_store, blossom_store, nostr_client};
 use crate::utils::clipboard::copy_to_clipboard;
 use crate::utils::format::display_server_url;
 use crate::utils::nip34::Repository;
@@ -73,7 +73,9 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
         let n = naddr.clone();
         spawn(async move {
             let result = fetch_repository(&n).await;
-            if *request_gen.peek() != gen { return; }
+            if *request_gen.peek() != gen {
+                return;
+            }
             repo_result.set(Some(result));
         });
     }));
@@ -156,7 +158,13 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
                 .await
                 {
                     Ok(url) => {
-                        log::info!("Uploaded file {}/{}: {} -> {}", i + 1, total, file.name, url);
+                        log::info!(
+                            "Uploaded file {}/{}: {} -> {}",
+                            i + 1,
+                            total,
+                            file.name,
+                            url
+                        );
                         results.push(UploadResult {
                             id: file.id,
                             name: file.name.clone(),
@@ -667,9 +675,8 @@ async fn read_files_from_input(input_id: &str) -> Result<Vec<SelectedFile>, Stri
         let array_buffer = JsFuture::from(promise)
             .await
             .map_err(|_| format!("Failed to read file: {}", name))?;
-        let array_buffer: ArrayBuffer = array_buffer
-            .dyn_into()
-            .map_err(|_| "Not an ArrayBuffer")?;
+        let array_buffer: ArrayBuffer =
+            array_buffer.dyn_into().map_err(|_| "Not an ArrayBuffer")?;
         let uint8_array = Uint8Array::new(&array_buffer);
         let bytes = uint8_array.to_vec();
 

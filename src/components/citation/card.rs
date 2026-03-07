@@ -23,38 +23,30 @@ impl CitationStyle {
 /// Get styling for a citation type
 pub fn get_citation_style(citation_type: &CitationType) -> CitationStyle {
     match citation_type {
-        CitationType::Internal => {
-            CitationStyle {
-                emoji: "📌",
-                label: "Nostr",
-                bg_class: "bg-purple-500/20",
-                text_class: "text-purple-600 dark:text-purple-400",
-            }
-        }
-        CitationType::ExternalWeb => {
-            CitationStyle {
-                emoji: "🌐",
-                label: "Web",
-                bg_class: "bg-blue-500/20",
-                text_class: "text-blue-600 dark:text-blue-400",
-            }
-        }
-        CitationType::Hardcopy => {
-            CitationStyle {
-                emoji: "📖",
-                label: "Book",
-                bg_class: "bg-amber-500/20",
-                text_class: "text-amber-600 dark:text-amber-400",
-            }
-        }
-        CitationType::Prompt => {
-            CitationStyle {
-                emoji: "🤖",
-                label: "AI",
-                bg_class: "bg-emerald-500/20",
-                text_class: "text-emerald-600 dark:text-emerald-400",
-            }
-        }
+        CitationType::Internal => CitationStyle {
+            emoji: "📌",
+            label: "Nostr",
+            bg_class: "bg-purple-500/20",
+            text_class: "text-purple-600 dark:text-purple-400",
+        },
+        CitationType::ExternalWeb => CitationStyle {
+            emoji: "🌐",
+            label: "Web",
+            bg_class: "bg-blue-500/20",
+            text_class: "text-blue-600 dark:text-blue-400",
+        },
+        CitationType::Hardcopy => CitationStyle {
+            emoji: "📖",
+            label: "Book",
+            bg_class: "bg-amber-500/20",
+            text_class: "text-amber-600 dark:text-amber-400",
+        },
+        CitationType::Prompt => CitationStyle {
+            emoji: "🤖",
+            label: "AI",
+            bg_class: "bg-emerald-500/20",
+            text_class: "text-emerald-600 dark:text-emerald-400",
+        },
     }
 }
 /// Citation type badge component
@@ -176,12 +168,10 @@ pub fn CitationCardCompact(
     let citation_type = citation.citation.citation_type();
     let short_display = citation.citation.short_display();
     let secondary_info = match &citation.citation {
-        Citation::ExternalWeb(c) => {
-            Url::parse(&c.url)
-                .or_else(|_| Url::parse(&format!("https://{}", c.url)))
-                .ok()
-                .and_then(|u| u.host_str().map(|h| h.to_string()))
-        }
+        Citation::ExternalWeb(c) => Url::parse(&c.url)
+            .or_else(|_| Url::parse(&format!("https://{}", c.url)))
+            .ok()
+            .and_then(|u| u.host_str().map(|h| h.to_string())),
         Citation::Hardcopy(c) => c.published_by.clone(),
         Citation::Prompt(c) => Some(c.llm.clone()),
         Citation::Internal(_) => Some("Nostr".to_string()),

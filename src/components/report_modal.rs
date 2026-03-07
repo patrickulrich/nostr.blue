@@ -39,21 +39,14 @@ pub fn ReportModal(props: ReportModalProps) -> Element {
             } else {
                 Some(report_details)
             };
-            match nostr_client::report_post(
-                    event_id,
-                    author_pubkey,
-                    report_type,
-                    details_opt,
-                )
-                .await
+            match nostr_client::report_post(event_id, author_pubkey, report_type, details_opt).await
             {
                 Ok(_) => {
                     log::info!("Post reported successfully");
                     success.set(true);
                     loading.set(false);
                     spawn(async move {
-                        crate::platform::timer::sleep(std::time::Duration::from_secs(2))
-                            .await;
+                        crate::platform::timer::sleep(std::time::Duration::from_secs(2)).await;
                         on_close.call(());
                     });
                 }

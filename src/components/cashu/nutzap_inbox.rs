@@ -23,8 +23,7 @@ pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {
             match cashu::fetch_pending_nutzaps().await {
                 Ok(count) => {
                     if count > 0 {
-                        success_message
-                            .set(Some(format!("Found {} new nutzaps", count)));
+                        success_message.set(Some(format!("Found {} new nutzaps", count)));
                     } else {
                         success_message.set(Some("No new nutzaps found".to_string()));
                     }
@@ -44,8 +43,7 @@ pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {
         spawn(async move {
             match cashu::redeem_nutzap(&event_id_clone).await {
                 Ok(result) => {
-                    success_message
-                        .set(Some(format!("Redeemed {} sats!", result.amount)));
+                    success_message.set(Some(format!("Redeemed {} sats!", result.amount)));
                 }
                 Err(e) => {
                     error_message.set(Some(format!("Redemption failed: {}", e)));
@@ -92,30 +90,19 @@ pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {
                 crate::platform::timer::sleep_ms(100).await;
             }
             if error_count == 0 {
-                success_message
-                    .set(
-                        Some(
-                            format!(
-                                "Redeemed {} nutzaps ({} sats total)",
-                                success_count,
-                                total_redeemed,
-                            ),
-                        ),
-                    );
+                success_message.set(Some(format!(
+                    "Redeemed {} nutzaps ({} sats total)",
+                    success_count, total_redeemed,
+                )));
             } else {
                 // Use error_message for partial failures
-                error_message
-                    .set(
-                        Some(
-                            format!(
-                                "Redeemed {}/{} nutzaps ({} sats). {} failed.",
-                                success_count,
-                                success_count + error_count,
-                                total_redeemed,
-                                error_count,
-                            ),
-                        ),
-                    );
+                error_message.set(Some(format!(
+                    "Redeemed {}/{} nutzaps ({} sats). {} failed.",
+                    success_count,
+                    success_count + error_count,
+                    total_redeemed,
+                    error_count,
+                )));
             }
             is_redeeming_all.set(false);
         });

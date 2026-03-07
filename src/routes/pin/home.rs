@@ -1,15 +1,15 @@
 //! Pinboards Explore Page
 //! Browse and discover pinboards with masonry layout
-use dioxus::prelude::*;
-use nostr_sdk::prelude::NostrDatabaseExt;
-use nostr_sdk::PublicKey;
-use std::time::Duration;
 use crate::components::{BoardSlideover, PinBoardMosaicGrid, ZapModal};
 use crate::routes::Route;
 use crate::stores::auth_store;
 use crate::stores::nostr_client::{self, get_client, HAS_SIGNER};
 use crate::stores::pin_boards_store::{self, Pinboard};
 use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
+use nostr_sdk::prelude::NostrDatabaseExt;
+use nostr_sdk::PublicKey;
+use std::time::Duration;
 /// Number of boards to fetch per page
 const PAGE_SIZE: usize = 30;
 #[component]
@@ -99,11 +99,10 @@ pub fn PinBoardsHome() -> Element {
             search_loading.set(false);
             return;
         }
-        let version = search_version
-            .with_mut(|v| {
-                *v = v.wrapping_add(1);
-                *v
-            });
+        let version = search_version.with_mut(|v| {
+            *v = v.wrapping_add(1);
+            *v
+        });
         search_loading.set(true);
         spawn(async move {
             crate::platform::timer::sleep_ms(300).await;
@@ -116,11 +115,12 @@ pub fn PinBoardsHome() -> Element {
                 .into_iter()
                 .filter(|b| {
                     b.title.to_lowercase().contains(&query_lower)
-                        || b
-                            .description
+                        || b.description
                             .as_ref()
                             .is_some_and(|d| d.to_lowercase().contains(&query_lower))
-                        || b.tags.iter().any(|t| t.to_lowercase().contains(&query_lower))
+                        || b.tags
+                            .iter()
+                            .any(|t| t.to_lowercase().contains(&query_lower))
                 })
                 .collect();
             if *search_version.peek() == version {
@@ -141,7 +141,9 @@ pub fn PinBoardsHome() -> Element {
             boards
                 .into_iter()
                 .filter(|b| {
-                    b.tags.iter().any(|t| t.to_lowercase() == tag.to_lowercase())
+                    b.tags
+                        .iter()
+                        .any(|t| t.to_lowercase() == tag.to_lowercase())
                 })
                 .collect()
         } else {
@@ -166,24 +168,26 @@ pub fn PinBoardsHome() -> Element {
         spawn(async move {
             match PublicKey::from_hex(&pubkey_str) {
                 Ok(pubkey) => {
-                if let Some(client) = get_client() {
-                    let metadata = if let Ok(Some(m)) = client.database().metadata(pubkey).await {
-                        Some(m)
-                    } else if let Ok(Some(m)) = client
-                        .fetch_metadata(pubkey, Duration::from_secs(5))
-                        .await
-                    {
-                        Some(m)
-                    } else {
-                        None
-                    };
-                    if let Some(m) = metadata {
-                        // Only set if board hasn't changed
-                        if zap_board.read().as_ref().map(|b| b.pubkey.as_str()) == Some(pubkey_str.as_str()) {
-                            zap_author_metadata.set(Some(m));
+                    if let Some(client) = get_client() {
+                        let metadata = if let Ok(Some(m)) = client.database().metadata(pubkey).await
+                        {
+                            Some(m)
+                        } else if let Ok(Some(m)) =
+                            client.fetch_metadata(pubkey, Duration::from_secs(5)).await
+                        {
+                            Some(m)
+                        } else {
+                            None
+                        };
+                        if let Some(m) = metadata {
+                            // Only set if board hasn't changed
+                            if zap_board.read().as_ref().map(|b| b.pubkey.as_str())
+                                == Some(pubkey_str.as_str())
+                            {
+                                zap_author_metadata.set(Some(m));
+                            }
                         }
                     }
-                }
                 }
                 Err(e) => {
                     log::warn!("Pin board zap: invalid pubkey '{}': {}", pubkey_str, e);
@@ -192,9 +196,7 @@ pub fn PinBoardsHome() -> Element {
         });
     };
     #[allow(clippy::type_complexity)]
-    let zap_modal_data: Option<
-        (String, String, Option<String>, Option<String>, String),
-    > = {
+    let zap_modal_data: Option<(String, String, Option<String>, Option<String>, String)> = {
         if *show_zap_modal.read() {
             if let Some(ref board) = *zap_board.read() {
                 let metadata_opt = zap_author_metadata.read().clone();

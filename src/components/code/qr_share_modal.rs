@@ -1,19 +1,15 @@
 //! QR Share Modal Component
 //!
 //! Displays a QR code for sharing repository via Nostr or web URL.
+use crate::utils::clipboard::copy_to_clipboard;
 use dioxus::prelude::*;
+use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use qrcode::render::svg;
 use qrcode::QrCode;
-use crate::utils::clipboard::copy_to_clipboard;
-use dioxus_primitives::toast::{consume_toast, ToastOptions};
 
 /// QR Share modal with Nostr and web URL tabs
 #[component]
-pub fn QrShareModal(
-    naddr: String,
-    repo_name: String,
-    on_close: EventHandler<()>,
-) -> Element {
+pub fn QrShareModal(naddr: String, repo_name: String, on_close: EventHandler<()>) -> Element {
     let toast = consume_toast();
     let mut active_tab = use_signal(|| "nostr");
 
@@ -38,15 +34,13 @@ pub fn QrShareModal(
         web_url.clone()
     };
 
-    let qr_svg = QrCode::new(&current_url)
-        .ok()
-        .map(|code| {
-            code.render::<svg::Color>()
-                .min_dimensions(200, 200)
-                .dark_color(svg::Color("#000000"))
-                .light_color(svg::Color("#ffffff"))
-                .build()
-        });
+    let qr_svg = QrCode::new(&current_url).ok().map(|code| {
+        code.render::<svg::Color>()
+            .min_dimensions(200, 200)
+            .dark_color(svg::Color("#000000"))
+            .light_color(svg::Color("#ffffff"))
+            .build()
+    });
 
     rsx! {
         // Backdrop

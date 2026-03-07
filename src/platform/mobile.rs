@@ -87,7 +87,9 @@ pub fn download_file(filename: &str, content: &[u8], mime_type: &str) -> Result<
         .l()
         .map_err(|e| e.to_string())?;
 
-    let result_str = env.get_string((&result).into()).map_err(|e| e.to_string())?;
+    let result_str = env
+        .get_string((&result).into())
+        .map_err(|e| e.to_string())?;
     let result_str = result_str.to_string_lossy();
 
     if result_str.starts_with("error:") {
@@ -104,7 +106,8 @@ fn call_static_string_method(
 ) -> Result<String, String> {
     use jni::objects::JValue;
 
-    let context = unsafe { jni::objects::JObject::from_raw(ndk_context::android_context().context().cast()) };
+    let context =
+        unsafe { jni::objects::JObject::from_raw(ndk_context::android_context().context().cast()) };
 
     let result = env
         .call_static_method(
@@ -117,7 +120,9 @@ fn call_static_string_method(
         .l()
         .map_err(|e| e.to_string())?;
 
-    let result_str = env.get_string((&result).into()).map_err(|e| e.to_string())?;
+    let result_str = env
+        .get_string((&result).into())
+        .map_err(|e| e.to_string())?;
     Ok(result_str.to_string_lossy().into_owned())
 }
 

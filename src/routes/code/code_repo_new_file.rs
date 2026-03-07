@@ -36,7 +36,10 @@ fn validate_file_path(path: &str) -> Option<String> {
     if path.chars().any(|c| c.is_whitespace()) {
         return Some("Path must not contain whitespace".to_string());
     }
-    if path.split('/').any(|segment| segment == ".." || segment == ".") {
+    if path
+        .split('/')
+        .any(|segment| segment == ".." || segment == ".")
+    {
         return Some("Path must not contain . or .. segments".to_string());
     }
     if path.contains('\\') {
@@ -56,7 +59,12 @@ fn filename_from_path(path: &str) -> &str {
 }
 
 /// Build a unified diff for a new file creation.
-fn build_new_file_diff(path: &str, content: &str, author_pubkey: &str, commit_message: &str) -> String {
+fn build_new_file_diff(
+    path: &str,
+    content: &str,
+    author_pubkey: &str,
+    commit_message: &str,
+) -> String {
     let lines: Vec<&str> = content.lines().collect();
     let line_count = if content.is_empty() { 0 } else { lines.len() };
 
@@ -143,7 +151,9 @@ pub fn CodeRepoNewFile(naddr: String) -> Element {
     // Handle form submission
     let naddr_for_submit = naddr.clone();
     let handle_submit = move |_| {
-        if *submitting.peek() { return; }
+        if *submitting.peek() {
+            return;
+        }
         let path = file_path.read().clone();
         let content = file_content.read().clone();
         let msg = commit_message.read().clone();
@@ -230,7 +240,14 @@ pub fn CodeRepoNewFile(naddr: String) -> Element {
         };
     }
 
-    let can_submit = !current_path.is_empty() && path_error.read().is_none() && !*submitting.read() && repo_result.read().as_ref().map(|r| r.is_ok()).unwrap_or(false);
+    let can_submit = !current_path.is_empty()
+        && path_error.read().is_none()
+        && !*submitting.read()
+        && repo_result
+            .read()
+            .as_ref()
+            .map(|r| r.is_ok())
+            .unwrap_or(false);
 
     rsx! {
         div { class: "min-h-screen",
@@ -495,17 +512,13 @@ async fn submit_new_file(
         .map_err(|e| format!("Failed to get public key: {}", e))?;
 
     // Build the unified diff content
-    let diff_content =
-        build_new_file_diff(path, content, &pubkey.to_hex(), commit_message);
+    let diff_content = build_new_file_diff(path, content, &pubkey.to_hex(), commit_message);
 
     // Build and publish the GitPatch event
     let builder = EventBuilder::new(Kind::GitPatch, &diff_content)
         .tag(Tag::coordinate(coordinate.clone(), None))
         .tag(Tag::public_key(coordinate.public_key))
-        .tag(Tag::custom(
-            TagKind::Subject,
-            [commit_message],
-        ))
+        .tag(Tag::custom(TagKind::Subject, [commit_message]))
         .tag(Tag::hashtag("new-file"));
 
     client

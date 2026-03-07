@@ -1,5 +1,5 @@
-use crate::components::icons::MoreHorizontalIcon;
 use crate::components::board::item_selector::PinToBoardModal;
+use crate::components::icons::MoreHorizontalIcon;
 use crate::components::{AddToListModal, ReportModal};
 use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::stores::pin_boards_store::{PinContentType, PinReference};
@@ -45,34 +45,24 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
     let event_id_pin = event_id.clone();
     let event_id_pin_check = event_id.clone();
     let event_id_pin_board = event_id.clone();
-    use_effect(
-        use_reactive(
-            &author_pubkey_follow_check,
-            move |pubkey| {
-                spawn(async move {
-                    match nostr_client::is_following(pubkey).await {
-                        Ok(following) => {
-                            is_following.set(following);
-                            is_loading_follow_state.set(false);
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to check follow status: {}", e);
-                            is_loading_follow_state.set(false);
-                        }
-                    }
-                });
-            },
-        ),
-    );
-    use_effect(
-        use_reactive(
-            &event_id_pin_check,
-            move |eid| {
-                let pinned = pinned_notes::is_pinned(&eid);
-                is_pinned.set(pinned);
-            },
-        ),
-    );
+    use_effect(use_reactive(&author_pubkey_follow_check, move |pubkey| {
+        spawn(async move {
+            match nostr_client::is_following(pubkey).await {
+                Ok(following) => {
+                    is_following.set(following);
+                    is_loading_follow_state.set(false);
+                }
+                Err(e) => {
+                    log::warn!("Failed to check follow status: {}", e);
+                    is_loading_follow_state.set(false);
+                }
+            }
+        });
+    }));
+    use_effect(use_reactive(&event_id_pin_check, move |eid| {
+        let pinned = pinned_notes::is_pinned(&eid);
+        is_pinned.set(pinned);
+    }));
     rsx! {
         div { class: "relative",
             button {

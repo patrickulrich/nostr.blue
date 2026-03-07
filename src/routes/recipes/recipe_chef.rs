@@ -27,9 +27,7 @@ pub fn RecipeChef(npub: String) -> Element {
         }
         None
     });
-    let chef_metadata = use_author_metadata(
-        pubkey_hex.read().clone().unwrap_or_default(),
-    );
+    let chef_metadata = use_author_metadata(pubkey_hex.read().clone().unwrap_or_default());
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
@@ -98,7 +96,10 @@ pub fn RecipeChef(npub: String) -> Element {
                 .map(|pk| truncate_pubkey(&pk))
                 .unwrap_or_else(|| "Unknown Chef".to_string())
         });
-    let profile_picture = chef_metadata.read().as_ref().and_then(|m| m.picture.clone());
+    let profile_picture = chef_metadata
+        .read()
+        .as_ref()
+        .and_then(|m| m.picture.clone());
     let bio = chef_metadata.read().as_ref().and_then(|m| m.about.clone());
     let avatar_letter = display_name
         .chars()
@@ -107,7 +108,11 @@ pub fn RecipeChef(npub: String) -> Element {
         .to_uppercase()
         .to_string();
     let chef_recipe_count = recipes.read().len();
-    let chef_recipe_text = if chef_recipe_count == 1 { "recipe" } else { "recipes" };
+    let chef_recipe_text = if chef_recipe_count == 1 {
+        "recipe"
+    } else {
+        "recipes"
+    };
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",

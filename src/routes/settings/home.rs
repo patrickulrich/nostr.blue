@@ -1,12 +1,12 @@
 use crate::components::{NwcSetupModal, ReactionDefaultsModal};
+use crate::platform::storage;
 use crate::routes::Route;
 use crate::stores::blossom_store::BlossomServersStoreStoreExt;
 use crate::stores::{
-    auth_store, blossom_store, nostr_client, nwc_store, reactions_store, relay,
-    settings_store, theme_store,
+    auth_store, blossom_store, nostr_client, nwc_store, reactions_store, relay, settings_store,
+    theme_store,
 };
 use dioxus::prelude::*;
-use crate::platform::storage;
 use nostr_sdk::ToBech32;
 #[component]
 pub fn Settings() -> Element {
@@ -39,8 +39,9 @@ pub fn Settings() -> Element {
             return;
         }
         if !server_url.starts_with("https://") && !server_url.starts_with("http://") {
-            server_error
-                .set(Some("Server URL must start with http:// or https://".to_string()));
+            server_error.set(Some(
+                "Server URL must start with http:// or https://".to_string(),
+            ));
             return;
         }
         blossom_store::add_server(server_url);
@@ -55,8 +56,7 @@ pub fn Settings() -> Element {
             blossom_save_status.set(Some("Publishing...".to_string()));
             match blossom_store::publish_user_servers().await {
                 Ok(_) => {
-                    blossom_save_status
-                        .set(Some("✅ Blossom servers published!".to_string()));
+                    blossom_save_status.set(Some("✅ Blossom servers published!".to_string()));
                     crate::platform::timer::sleep_ms(3000).await;
                     blossom_save_status.set(None);
                 }

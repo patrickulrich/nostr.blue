@@ -309,32 +309,24 @@ impl ResolvedCitation {
     pub fn from_citation(identifier: String, citation: &Citation) -> Self {
         let base = citation.base();
         let (url, published_on, published_by, doi, page_range, llm) = match citation {
-            Citation::Internal(c) => {
-                (None, c.published_on.clone(), None, None, None, None)
-            }
-            Citation::ExternalWeb(c) => {
-                (
-                    Some(c.url.clone()),
-                    c.published_on.clone(),
-                    c.published_by.clone(),
-                    None,
-                    None,
-                    None,
-                )
-            }
-            Citation::Hardcopy(c) => {
-                (
-                    None,
-                    c.published_on.clone(),
-                    c.published_by.clone(),
-                    c.doi.clone(),
-                    c.page_range.clone(),
-                    None,
-                )
-            }
-            Citation::Prompt(c) => {
-                (c.url.clone(), None, None, None, None, Some(c.llm.clone()))
-            }
+            Citation::Internal(c) => (None, c.published_on.clone(), None, None, None, None),
+            Citation::ExternalWeb(c) => (
+                Some(c.url.clone()),
+                c.published_on.clone(),
+                c.published_by.clone(),
+                None,
+                None,
+                None,
+            ),
+            Citation::Hardcopy(c) => (
+                None,
+                c.published_on.clone(),
+                c.published_by.clone(),
+                c.doi.clone(),
+                c.page_range.clone(),
+                None,
+            ),
+            Citation::Prompt(c) => (c.url.clone(), None, None, None, None, Some(c.llm.clone())),
         };
         ResolvedCitation {
             identifier,
@@ -390,14 +382,20 @@ impl ResolvedCitation {
         if let Some(ref llm) = self.llm {
             parts.push(format!("AI: {}", llm));
         }
-        if parts.is_empty() { self.identifier.clone() } else { parts.join(". ") }
+        if parts.is_empty() {
+            self.identifier.clone()
+        } else {
+            parts.join(". ")
+        }
     }
     fn extract_year(&self) -> Option<String> {
-        self.published_on
-            .as_ref()
-            .and_then(|date| {
-                if date.len() >= 4 { Some(date[..4].to_string()) } else { None }
-            })
+        self.published_on.as_ref().and_then(|date| {
+            if date.len() >= 4 {
+                Some(date[..4].to_string())
+            } else {
+                None
+            }
+        })
     }
 }
 /// Truncate text with ellipsis
@@ -584,7 +582,11 @@ pub fn generate_footnotes_html_with_data(
     for (i, citation) in footnotes.iter().enumerate() {
         let citation_data = resolved.get(&citation.identifier);
         let is_resolved = citation_data.is_some();
-        let resolved_class = if is_resolved { "" } else { " citation-unresolved" };
+        let resolved_class = if is_resolved {
+            ""
+        } else {
+            " citation-unresolved"
+        };
         let content = citation_data
             .map(|c| c.bibliographic_entry())
             .unwrap_or_else(|| citation.identifier.clone());
@@ -650,7 +652,11 @@ pub fn generate_endnotes_html_with_data(
     for (i, citation) in endnotes.iter().enumerate() {
         let citation_data = resolved.get(&citation.identifier);
         let is_resolved = citation_data.is_some();
-        let resolved_class = if is_resolved { "" } else { " citation-unresolved" };
+        let resolved_class = if is_resolved {
+            ""
+        } else {
+            " citation-unresolved"
+        };
         let content = citation_data
             .map(|c| c.bibliographic_entry())
             .unwrap_or_else(|| citation.identifier.clone());
@@ -688,13 +694,14 @@ pub fn generate_endnotes_html_with_data(
 /// Parse an internal citation from a Kind 30 event
 pub fn parse_internal_citation(event: &Event) -> Result<InternalCitation, String> {
     if event.kind.as_u16() != KIND_INTERNAL_REF {
-        return Err(
-            format!("Expected kind {}, got {}", KIND_INTERNAL_REF, event.kind.as_u16()),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_INTERNAL_REF,
+            event.kind.as_u16()
+        ));
     }
     let base = parse_citation_base(event)?;
-    let coordinate = get_tag_value(event, "c")
-        .ok_or("Missing required 'c' tag (coordinate)")?;
+    let coordinate = get_tag_value(event, "c").ok_or("Missing required 'c' tag (coordinate)")?;
     Ok(InternalCitation {
         base,
         coordinate,
@@ -704,13 +711,13 @@ pub fn parse_internal_citation(event: &Event) -> Result<InternalCitation, String
     })
 }
 /// Parse an external web citation from a Kind 31 event
-pub fn parse_external_web_citation(
-    event: &Event,
-) -> Result<ExternalWebCitation, String> {
+pub fn parse_external_web_citation(event: &Event) -> Result<ExternalWebCitation, String> {
     if event.kind.as_u16() != KIND_EXTERNAL_WEB {
-        return Err(
-            format!("Expected kind {}, got {}", KIND_EXTERNAL_WEB, event.kind.as_u16()),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_EXTERNAL_WEB,
+            event.kind.as_u16()
+        ));
     }
     let base = parse_citation_base(event)?;
     let url = get_tag_value(event, "u").ok_or("Missing required 'u' tag (URL)")?;
@@ -728,9 +735,11 @@ pub fn parse_external_web_citation(
 /// Parse a hardcopy citation from a Kind 32 event
 pub fn parse_hardcopy_citation(event: &Event) -> Result<HardcopyCitation, String> {
     if event.kind.as_u16() != KIND_HARDCOPY {
-        return Err(
-            format!("Expected kind {}, got {}", KIND_HARDCOPY, event.kind.as_u16()),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_HARDCOPY,
+            event.kind.as_u16()
+        ));
     }
     let base = parse_citation_base(event)?;
     let published_in = get_tag_with_optional_second(event, "published_in");
@@ -751,9 +760,11 @@ pub fn parse_hardcopy_citation(event: &Event) -> Result<HardcopyCitation, String
 /// Parse a prompt citation from a Kind 33 event
 pub fn parse_prompt_citation(event: &Event) -> Result<PromptCitation, String> {
     if event.kind.as_u16() != KIND_PROMPT {
-        return Err(
-            format!("Expected kind {}, got {}", KIND_PROMPT, event.kind.as_u16()),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_PROMPT,
+            event.kind.as_u16()
+        ));
     }
     let base = parse_citation_base(event)?;
     let llm = get_tag_value(event, "llm").ok_or("Missing required 'llm' tag")?;
@@ -767,13 +778,11 @@ pub fn parse_prompt_citation(event: &Event) -> Result<PromptCitation, String> {
 /// Parse any citation from an event
 pub fn parse_citation(event: &Event) -> Result<Citation, String> {
     let kind = event.kind.as_u16();
-    let citation_type = CitationType::from_kind(kind)
-        .ok_or_else(|| format!("Unknown citation kind: {}", kind))?;
+    let citation_type =
+        CitationType::from_kind(kind).ok_or_else(|| format!("Unknown citation kind: {}", kind))?;
     match citation_type {
         CitationType::Internal => Ok(Citation::Internal(parse_internal_citation(event)?)),
-        CitationType::ExternalWeb => {
-            Ok(Citation::ExternalWeb(parse_external_web_citation(event)?))
-        }
+        CitationType::ExternalWeb => Ok(Citation::ExternalWeb(parse_external_web_citation(event)?)),
         CitationType::Hardcopy => Ok(Citation::Hardcopy(parse_hardcopy_citation(event)?)),
         CitationType::Prompt => Ok(Citation::Prompt(parse_prompt_citation(event)?)),
     }
@@ -802,14 +811,12 @@ fn parse_citation_base(event: &Event) -> Result<CitationBase, String> {
 #[allow(dead_code)]
 pub fn citations_filter(author: &PublicKey, limit: usize) -> Filter {
     Filter::new()
-        .kinds(
-            vec![
-                Kind::Custom(KIND_INTERNAL_REF),
-                Kind::Custom(KIND_EXTERNAL_WEB),
-                Kind::Custom(KIND_HARDCOPY),
-                Kind::Custom(KIND_PROMPT),
-            ],
-        )
+        .kinds(vec![
+            Kind::Custom(KIND_INTERNAL_REF),
+            Kind::Custom(KIND_EXTERNAL_WEB),
+            Kind::Custom(KIND_HARDCOPY),
+            Kind::Custom(KIND_PROMPT),
+        ])
         .author(*author)
         .limit(limit)
 }
@@ -819,7 +826,9 @@ pub fn citations_filter(author: &PublicKey, limit: usize) -> Filter {
 /// `citation_store::fetch_citations_by_type()` instead.
 #[allow(dead_code)]
 pub fn citation_type_filter(citation_type: CitationType, limit: usize) -> Filter {
-    Filter::new().kind(Kind::Custom(citation_type.kind())).limit(limit)
+    Filter::new()
+        .kind(Kind::Custom(citation_type.kind()))
+        .limit(limit)
 }
 /// Get first value of a tag by name
 fn get_tag_value(event: &Event, tag_name: &str) -> Option<String> {
@@ -830,10 +839,7 @@ fn get_tag_value(event: &Event, tag_name: &str) -> Option<String> {
         .and_then(|t| t.as_slice().get(1).map(|s| s.to_string()))
 }
 /// Get tag with optional second value (e.g., published_in: journal, volume)
-fn get_tag_with_optional_second(
-    event: &Event,
-    tag_name: &str,
-) -> Option<(String, Option<String>)> {
+fn get_tag_with_optional_second(event: &Event, tag_name: &str) -> Option<(String, Option<String>)> {
     event
         .tags
         .iter()
@@ -858,7 +864,8 @@ mod tests {
     }
     #[test]
     fn test_extract_multiple_citations() {
-        let content = "First citation::inline::nevent1abc and second citation::foot::naddr1xyz here.";
+        let content =
+            "First citation::inline::nevent1abc and second citation::foot::naddr1xyz here.";
         let citations = extract_citations(content);
         assert_eq!(citations.len(), 2);
         assert_eq!(citations[0].style, CitationStyle::Inline);

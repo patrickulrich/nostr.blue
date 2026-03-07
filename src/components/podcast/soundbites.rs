@@ -89,8 +89,7 @@ fn SoundbiteCard(props: SoundbiteCardProps) -> Element {
             is_playing.set(true);
             let duration = sb.duration;
             spawn(async move {
-                crate::platform::timer::sleep_ms(safe_duration_millis(duration))
-                    .await;
+                crate::platform::timer::sleep_ms(safe_duration_millis(duration)).await;
                 is_playing.set(false);
             });
         }
@@ -213,7 +212,10 @@ fn SoundbiteGridCard(props: SoundbiteGridCardProps) -> Element {
     let mut is_playing = use_signal(|| false);
     let item = &props.item;
     let soundbite = &item.soundbite;
-    let title = soundbite.title.clone().unwrap_or_else(|| "Clip".to_string());
+    let title = soundbite
+        .title
+        .clone()
+        .unwrap_or_else(|| "Clip".to_string());
     let duration_str = format!("{}s", soundbite.duration as u32);
     let handle_play = {
         let sb = soundbite.clone();
@@ -222,8 +224,7 @@ fn SoundbiteGridCard(props: SoundbiteGridCardProps) -> Element {
             is_playing.set(true);
             let duration = sb.duration;
             spawn(async move {
-                crate::platform::timer::sleep_ms(safe_duration_millis(duration))
-                    .await;
+                crate::platform::timer::sleep_ms(safe_duration_millis(duration)).await;
                 is_playing.set(false);
             });
         }
@@ -272,7 +273,10 @@ fn SoundbiteGridCard(props: SoundbiteGridCardProps) -> Element {
 }
 /// Share a soundbite (Web Share API or clipboard)
 fn share_soundbite(soundbite: &Soundbite, episode_title: Option<&str>) {
-    let title = soundbite.title.clone().unwrap_or_else(|| "Podcast clip".to_string());
+    let title = soundbite
+        .title
+        .clone()
+        .unwrap_or_else(|| "Podcast clip".to_string());
     let text = if let Some(ep) = episode_title {
         format!("{} - {}", title, ep)
     } else {
@@ -308,7 +312,10 @@ pub struct FeaturedSoundbiteProps {
 pub fn FeaturedSoundbite(props: FeaturedSoundbiteProps) -> Element {
     let mut is_playing = use_signal(|| false);
     let soundbite = props.soundbite.clone();
-    let title = soundbite.title.clone().unwrap_or_else(|| "Featured Clip".to_string());
+    let title = soundbite
+        .title
+        .clone()
+        .unwrap_or_else(|| "Featured Clip".to_string());
     let duration_str = format!("{} seconds", soundbite.duration as u32);
     let handle_play = {
         let sb = soundbite.clone();
@@ -322,8 +329,7 @@ pub fn FeaturedSoundbite(props: FeaturedSoundbiteProps) -> Element {
             is_playing.set(true);
             let duration = sb.duration;
             spawn(async move {
-                crate::platform::timer::sleep_ms(safe_duration_millis(duration))
-                    .await;
+                crate::platform::timer::sleep_ms(safe_duration_millis(duration)).await;
                 is_playing.set(false);
             });
         }

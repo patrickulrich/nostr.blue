@@ -65,101 +65,90 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut session_token = use_signal(|| 0u64);
     let is_editing = props.citation_to_edit.is_some();
-    use_effect(
-        use_reactive(
-            (&*props.show.read(), &props.citation_to_edit),
-            move |(is_shown, citation)| {
-                if is_shown {
-                    // Clear all fields first to prevent stale data when switching tabs
-                    title.set(String::new());
-                    author.set(String::new());
-                    cited_text.set(String::new());
-                    coordinate.set(String::new());
-                    url.set(String::new());
-                    page_range.set(String::new());
-                    publisher.set(String::new());
-                    doi.set(String::new());
-                    llm.set(String::new());
-                    conversation_summary.set(String::new());
-                    prompt_url.set(String::new());
+    use_effect(use_reactive(
+        (&*props.show.read(), &props.citation_to_edit),
+        move |(is_shown, citation)| {
+            if is_shown {
+                // Clear all fields first to prevent stale data when switching tabs
+                title.set(String::new());
+                author.set(String::new());
+                cited_text.set(String::new());
+                coordinate.set(String::new());
+                url.set(String::new());
+                page_range.set(String::new());
+                publisher.set(String::new());
+                doi.set(String::new());
+                llm.set(String::new());
+                conversation_summary.set(String::new());
+                prompt_url.set(String::new());
 
-                    if let Some(ref cached) = citation {
-                        // Populate fields for the specific citation type being edited
-                        match &cached.citation {
-                            Citation::Internal(c) => {
-                                active_tab.set(CitationEditorTab::Internal);
-                                coordinate.set(c.coordinate.clone());
-                                title.set(c.base.title.clone());
-                                author.set(c.base.author.clone());
-                                cited_text.set(c.base.content.clone());
-                            }
-                            Citation::ExternalWeb(c) => {
-                                active_tab.set(CitationEditorTab::External);
-                                url.set(c.url.clone());
-                                title.set(c.base.title.clone());
-                                author.set(c.base.author.clone());
-                                cited_text.set(c.base.content.clone());
-                            }
-                            Citation::Hardcopy(c) => {
-                                active_tab.set(CitationEditorTab::Hardcopy);
-                                title.set(c.base.title.clone());
-                                author.set(c.base.author.clone());
-                                cited_text.set(c.base.content.clone());
-                                page_range.set(c.page_range.clone().unwrap_or_default());
-                                publisher.set(c.published_by.clone().unwrap_or_default());
-                                doi.set(c.doi.clone().unwrap_or_default());
-                            }
-                            Citation::Prompt(c) => {
-                                active_tab.set(CitationEditorTab::Prompt);
-                                llm.set(c.llm.clone());
-                                title.set(c.base.title.clone());
-                                author.set(c.base.author.clone());
-                                cited_text.set(c.base.content.clone());
-                                conversation_summary
-                                    .set(c.base.summary.clone().unwrap_or_default());
-                                prompt_url.set(c.url.clone().unwrap_or_default());
-                            }
+                if let Some(ref cached) = citation {
+                    // Populate fields for the specific citation type being edited
+                    match &cached.citation {
+                        Citation::Internal(c) => {
+                            active_tab.set(CitationEditorTab::Internal);
+                            coordinate.set(c.coordinate.clone());
+                            title.set(c.base.title.clone());
+                            author.set(c.base.author.clone());
+                            cited_text.set(c.base.content.clone());
                         }
-                    } else {
-                        active_tab.set(CitationEditorTab::Internal);
+                        Citation::ExternalWeb(c) => {
+                            active_tab.set(CitationEditorTab::External);
+                            url.set(c.url.clone());
+                            title.set(c.base.title.clone());
+                            author.set(c.base.author.clone());
+                            cited_text.set(c.base.content.clone());
+                        }
+                        Citation::Hardcopy(c) => {
+                            active_tab.set(CitationEditorTab::Hardcopy);
+                            title.set(c.base.title.clone());
+                            author.set(c.base.author.clone());
+                            cited_text.set(c.base.content.clone());
+                            page_range.set(c.page_range.clone().unwrap_or_default());
+                            publisher.set(c.published_by.clone().unwrap_or_default());
+                            doi.set(c.doi.clone().unwrap_or_default());
+                        }
+                        Citation::Prompt(c) => {
+                            active_tab.set(CitationEditorTab::Prompt);
+                            llm.set(c.llm.clone());
+                            title.set(c.base.title.clone());
+                            author.set(c.base.author.clone());
+                            cited_text.set(c.base.content.clone());
+                            conversation_summary.set(c.base.summary.clone().unwrap_or_default());
+                            prompt_url.set(c.url.clone().unwrap_or_default());
+                        }
                     }
-                    error.set(None);
+                } else {
+                    active_tab.set(CitationEditorTab::Internal);
                 }
-            },
-        ),
-    );
-    use_effect(
-        use_reactive(
-            &*props.show.read(),
-            move |is_shown| {
-                if is_shown {
-                    let new_token = *session_token.peek() + 1;
-                    session_token.set(new_token);
-                    saving.set(false);
-                }
-            },
-        ),
-    );
+                error.set(None);
+            }
+        },
+    ));
+    use_effect(use_reactive(&*props.show.read(), move |is_shown| {
+        if is_shown {
+            let new_token = *session_token.peek() + 1;
+            session_token.set(new_token);
+            saving.set(false);
+        }
+    }));
     let close_modal = move |_| {
         props.show.set(false);
     };
     let is_valid = use_memo(move || {
         let has_cited_text = !cited_text.read().trim().is_empty();
         match *active_tab.read() {
-            CitationEditorTab::Internal => {
-                has_cited_text && !coordinate.read().trim().is_empty()
-            }
-            CitationEditorTab::External => {
-                has_cited_text && is_valid_http_url(url.read().trim())
-            }
+            CitationEditorTab::Internal => has_cited_text && !coordinate.read().trim().is_empty(),
+            CitationEditorTab::External => has_cited_text && is_valid_http_url(url.read().trim()),
             CitationEditorTab::Hardcopy => {
-                has_cited_text && !title.read().trim().is_empty()
+                has_cited_text
+                    && !title.read().trim().is_empty()
                     && !author.read().trim().is_empty()
             }
             CitationEditorTab::Prompt => {
                 let prompt_url_str = prompt_url.read();
-                let prompt_url_valid = prompt_url_str.trim().is_empty()
-                    || is_valid_http_url(prompt_url_str.trim());
+                let prompt_url_valid =
+                    prompt_url_str.trim().is_empty() || is_valid_http_url(prompt_url_str.trim());
                 has_cited_text && !llm.read().trim().is_empty() && prompt_url_valid
             }
         }
@@ -194,63 +183,91 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
             let result = match current_tab {
                 CitationEditorTab::Internal => {
                     publish_internal_citation(
-                            &coordinate_val,
-                            &cited_text_val,
-                            if title_val.is_empty() { None } else { Some(&title_val) },
-                            if author_val.is_empty() { None } else { Some(&author_val) },
-                            existing_d_tag.as_deref(),
-                        )
-                        .await
+                        &coordinate_val,
+                        &cited_text_val,
+                        if title_val.is_empty() {
+                            None
+                        } else {
+                            Some(&title_val)
+                        },
+                        if author_val.is_empty() {
+                            None
+                        } else {
+                            Some(&author_val)
+                        },
+                        existing_d_tag.as_deref(),
+                    )
+                    .await
                 }
                 CitationEditorTab::External => {
                     publish_external_citation(
-                            &url_val,
-                            &cited_text_val,
-                            if title_val.is_empty() { None } else { Some(&title_val) },
-                            if author_val.is_empty() { None } else { Some(&author_val) },
-                            existing_d_tag.as_deref(),
-                        )
-                        .await
+                        &url_val,
+                        &cited_text_val,
+                        if title_val.is_empty() {
+                            None
+                        } else {
+                            Some(&title_val)
+                        },
+                        if author_val.is_empty() {
+                            None
+                        } else {
+                            Some(&author_val)
+                        },
+                        existing_d_tag.as_deref(),
+                    )
+                    .await
                 }
                 CitationEditorTab::Hardcopy => {
                     publish_hardcopy_citation(
-                            &title_val,
-                            &author_val,
-                            &cited_text_val,
-                            if page_range_val.is_empty() {
-                                None
-                            } else {
-                                Some(&page_range_val)
-                            },
-                            if publisher_val.is_empty() {
-                                None
-                            } else {
-                                Some(&publisher_val)
-                            },
-                            if doi_val.is_empty() { None } else { Some(&doi_val) },
-                            existing_d_tag.as_deref(),
-                        )
-                        .await
+                        &title_val,
+                        &author_val,
+                        &cited_text_val,
+                        if page_range_val.is_empty() {
+                            None
+                        } else {
+                            Some(&page_range_val)
+                        },
+                        if publisher_val.is_empty() {
+                            None
+                        } else {
+                            Some(&publisher_val)
+                        },
+                        if doi_val.is_empty() {
+                            None
+                        } else {
+                            Some(&doi_val)
+                        },
+                        existing_d_tag.as_deref(),
+                    )
+                    .await
                 }
                 CitationEditorTab::Prompt => {
                     publish_prompt_citation(
-                            &llm_val,
-                            &cited_text_val,
-                            if summary_val.is_empty() {
-                                None
-                            } else {
-                                Some(&summary_val)
-                            },
-                            if prompt_url_val.is_empty() {
-                                None
-                            } else {
-                                Some(&prompt_url_val)
-                            },
-                            if title_val.is_empty() { None } else { Some(&title_val) },
-                            if author_val.is_empty() { None } else { Some(&author_val) },
-                            existing_d_tag.as_deref(),
-                        )
-                        .await
+                        &llm_val,
+                        &cited_text_val,
+                        if summary_val.is_empty() {
+                            None
+                        } else {
+                            Some(&summary_val)
+                        },
+                        if prompt_url_val.is_empty() {
+                            None
+                        } else {
+                            Some(&prompt_url_val)
+                        },
+                        if title_val.is_empty() {
+                            None
+                        } else {
+                            Some(&title_val)
+                        },
+                        if author_val.is_empty() {
+                            None
+                        } else {
+                            Some(&author_val)
+                        },
+                        existing_d_tag.as_deref(),
+                    )
+                    .await
                 }
             };
             if *session_token.read() != my_token {

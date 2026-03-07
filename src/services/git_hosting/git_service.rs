@@ -29,7 +29,11 @@ fn redact_url_for_log(url: &str) -> String {
                     let host_start = at_pos + 1;
                     if let Some(colon_pos) = url[host_start..].find(':') {
                         let host = &url[host_start..host_start + colon_pos];
-                        return format!("**REDACTED**@{}:{}", host, &url[host_start + colon_pos + 1..]);
+                        return format!(
+                            "**REDACTED**@{}:{}",
+                            host,
+                            &url[host_start + colon_pos + 1..]
+                        );
                     }
                 }
             }
@@ -58,24 +62,36 @@ impl GitService {
     /// Initialize the git worker (call once on app startup)
     pub async fn init() -> Result<(), String> {
         #[cfg(feature = "web")]
-        { GitWorkerManager::init().await }
+        {
+            GitWorkerManager::init().await
+        }
         #[cfg(not(feature = "web"))]
-        { Ok(()) }
+        {
+            Ok(())
+        }
     }
     /// Check if git worker is initialized
     pub fn is_initialized() -> bool {
         #[cfg(feature = "web")]
-        { GitWorkerManager::is_initialized() }
+        {
+            GitWorkerManager::is_initialized()
+        }
         #[cfg(not(feature = "web"))]
-        { true }
+        {
+            true
+        }
     }
     /// Get the directory path for a repository
     fn get_dir(repo: &Repository) -> String {
         let id: String = repo.naddr.chars().take(24).collect();
         #[cfg(feature = "web")]
-        { format!("/repos/{}", id) }
+        {
+            format!("/repos/{}", id)
+        }
         #[cfg(not(feature = "web"))]
-        { format!("nostr-blue/repos/{}", id) }
+        {
+            format!("nostr-blue/repos/{}", id)
+        }
     }
 
     #[cfg(not(feature = "web"))]
@@ -110,8 +126,8 @@ impl GitService {
     /// If already cloned, returns immediately. Otherwise clones first.
     pub async fn ensure_cloned(&self, repo: &Repository) -> Result<String, String> {
         let dir = Self::get_dir(repo);
-        let clone_url = Self::select_clone_url(repo)
-            .ok_or_else(|| "No clone URL available".to_string())?;
+        let clone_url =
+            Self::select_clone_url(repo).ok_or_else(|| "No clone URL available".to_string())?;
         #[cfg(feature = "web")]
         {
             if GitWorkerManager::repo_exists(&dir).await {
@@ -155,7 +171,9 @@ impl GitService {
         let dir = self.ensure_cloned(repo).await?;
         let git_ref_str = git_ref.unwrap_or("HEAD").to_string();
         #[cfg(feature = "web")]
-        { GitWorkerManager::list_files(&dir, path, &git_ref_str).await }
+        {
+            GitWorkerManager::list_files(&dir, path, &git_ref_str).await
+        }
         #[cfg(not(feature = "web"))]
         {
             let path = path.to_string();
@@ -177,7 +195,9 @@ impl GitService {
         let dir = self.ensure_cloned(repo).await?;
         let git_ref_str = git_ref.unwrap_or("HEAD").to_string();
         #[cfg(feature = "web")]
-        { GitWorkerManager::read_file(&dir, filepath, &git_ref_str).await }
+        {
+            GitWorkerManager::read_file(&dir, filepath, &git_ref_str).await
+        }
         #[cfg(not(feature = "web"))]
         {
             let filepath = filepath.to_string();
@@ -193,7 +213,9 @@ impl GitService {
     pub async fn get_branches(&self, repo: &Repository) -> Result<Vec<String>, String> {
         let dir = self.ensure_cloned(repo).await?;
         #[cfg(feature = "web")]
-        { GitWorkerManager::get_branches(&dir).await }
+        {
+            GitWorkerManager::get_branches(&dir).await
+        }
         #[cfg(not(feature = "web"))]
         {
             let dir_clone = Self::native_path(&dir);
@@ -214,7 +236,9 @@ impl GitService {
         let dir = self.ensure_cloned(repo).await?;
         let git_ref_str = git_ref.unwrap_or("HEAD").to_string();
         #[cfg(feature = "web")]
-        { GitWorkerManager::get_log(&dir, &git_ref_str, count).await }
+        {
+            GitWorkerManager::get_log(&dir, &git_ref_str, count).await
+        }
         #[cfg(not(feature = "web"))]
         {
             let dir_clone = Self::native_path(&dir);
@@ -234,7 +258,9 @@ impl GitService {
         let dir = self.ensure_cloned(repo).await?;
         let git_ref_str = git_ref.unwrap_or("HEAD").to_string();
         #[cfg(feature = "web")]
-        { GitWorkerManager::list_all_paths(&dir, &git_ref_str).await }
+        {
+            GitWorkerManager::list_all_paths(&dir, &git_ref_str).await
+        }
         #[cfg(not(feature = "web"))]
         {
             let dir_clone = Self::native_path(&dir);

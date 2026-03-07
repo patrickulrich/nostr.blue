@@ -1,7 +1,6 @@
 //! Event Detail Page
 //!
 //! Display detailed view of a calendar event or live activity
-use dioxus::prelude::*;
 use crate::components::ClientInitializing;
 use crate::routes::Route;
 use crate::stores::calendar_store::{CalendarEventComment, UnifiedEvent};
@@ -10,6 +9,7 @@ use crate::utils::ics::{download_ics, export_event_to_ics};
 use crate::utils::nip52::{is_online_location, RsvpStatus};
 use crate::utils::nip53::{LiveActivityEvent, RoomPresence};
 use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
 #[component]
 pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
     let mut event = use_signal(|| None::<UnifiedEvent>);
@@ -35,7 +35,8 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         log::info!(
             "[CalendarEventDetail] Effect triggered, client_initialized={}, naddr={}",
-            client_initialized, naddr_clone
+            client_initialized,
+            naddr_clone
         );
         if !client_initialized {
             log::info!("[CalendarEventDetail] Client not initialized, waiting...");
@@ -43,7 +44,8 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
         }
         spawn(async move {
             log::info!(
-                "[CalendarEventDetail] Starting fetch for naddr: {}", naddr_clone
+                "[CalendarEventDetail] Starting fetch for naddr: {}",
+                naddr_clone
             );
             loading.set(true);
             error.set(None);
@@ -56,9 +58,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                     let coord = unified_event.coordinate().to_string();
                     event.set(Some(unified_event.clone()));
                     if unified_event.is_calendar_event() {
-                        if let Ok(rsvps) = calendar_store::fetch_event_rsvps(&coord)
-                            .await
-                        {
+                        if let Ok(rsvps) = calendar_store::fetch_event_rsvps(&coord).await {
                             rsvp_count.set(rsvps.len());
                         }
                         if let Some(my_rsvp) = calendar_store::get_my_rsvp(&coord) {
@@ -72,27 +72,22 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                             }
                             Err(e) => {
                                 log::error!("Failed to fetch comments: {}", e);
-                                comment_error
-                                    .set(Some("Failed to load comments".to_string()));
+                                comment_error.set(Some("Failed to load comments".to_string()));
                             }
                         }
                         comments_loading.set(false);
                     } else {
-                        if let Ok(presence) = calendar_store::fetch_room_presence(
-                                &coord,
-                                300,
-                            )
-                            .await
+                        if let Ok(presence) = calendar_store::fetch_room_presence(&coord, 300).await
                         {
                             log::info!(
-                                "[CalendarEventDetail] Found {} users present", presence
-                                .len()
+                                "[CalendarEventDetail] Found {} users present",
+                                presence.len()
                             );
                             room_presence.set(presence);
                         }
-                        if let UnifiedEvent::Live(
-                            LiveActivityEvent::Meeting(ref meeting),
-                        ) = unified_event {
+                        if let UnifiedEvent::Live(LiveActivityEvent::Meeting(ref meeting)) =
+                            unified_event
+                        {
                             if let Some(ref space_coord) = meeting.space_coordinate {
                                 log::info!(
                                     "[CalendarEventDetail] Fetching parent space: {}",
@@ -106,10 +101,12 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                             .identifier(parts[2]);
                                         let nip19 = Nip19Coordinate::new(coordinate, vec![]);
                                         if let Ok(naddr_str) = nip19.to_bech32() {
-                                            if let Ok(
-                                                Some(UnifiedEvent::Live(LiveActivityEvent::Space(space))),
-                                            ) = calendar_store::fetch_unified_event_by_naddr(&naddr_str)
-                                                .await
+                                            if let Ok(Some(UnifiedEvent::Live(
+                                                LiveActivityEvent::Space(space),
+                                            ))) = calendar_store::fetch_unified_event_by_naddr(
+                                                &naddr_str,
+                                            )
+                                            .await
                                             {
                                                 log::info!(
                                                     "[CalendarEventDetail] Found parent space service_url: {}",
@@ -190,16 +187,10 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                             comments.set(event_comments);
                         }
                         Err(e) => {
-                            log::warn!(
-                                "Comment posted but failed to refresh comments: {}", e
-                            );
+                            log::warn!("Comment posted but failed to refresh comments: {}", e);
                             if let Some(my_pubkey) = auth_store::get_pubkey() {
                                 let now = crate::platform::timestamp::now_secs();
-                                let temp_id = format!(
-                                    "temp-{}-{}",
-                                    now,
-                                    uuid::Uuid::new_v4(),
-                                );
+                                let temp_id = format!("temp-{}-{}", now, uuid::Uuid::new_v4(),);
                                 let sanitized_content = ammonia::clean(&content);
                                 let optimistic_comment = CalendarEventComment {
                                     event_id: temp_id,
@@ -841,13 +832,7 @@ fn format_event_datetime(event: &UnifiedEvent) -> String {
         };
         format!(
             "{}, {} {}, {} at {}:{:02} {}",
-            weekday_str,
-            month_str,
-            day,
-            year,
-            hour_12,
-            minutes,
-            am_pm,
+            weekday_str, month_str, day, year, hour_12, minutes, am_pm,
         )
     }
 }
@@ -867,17 +852,51 @@ fn format_event_datetime(event: &UnifiedEvent) -> String {
     let mut y = 1970u64;
     let mut d = days;
     loop {
-        let days_in_year = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
-        if d < days_in_year { break; }
+        let days_in_year = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) {
+            366
+        } else {
+            365
+        };
+        if d < days_in_year {
+            break;
+        }
         d -= days_in_year;
         y += 1;
     }
     let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
-    let days_in_months: [u64; 12] = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    let month_names = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+    let days_in_months: [u64; 12] = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    let month_names = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ];
     let mut m = 0usize;
     for dim in &days_in_months {
-        if d < *dim { break; }
+        if d < *dim {
+            break;
+        }
         d -= dim;
         m += 1;
     }
@@ -885,8 +904,22 @@ fn format_event_datetime(event: &UnifiedEvent) -> String {
         format!("{} {}, {}", month_names[m], d + 1, y)
     } else {
         let am_pm = if hours >= 12 { "PM" } else { "AM" };
-        let hour_12 = if hours == 0 { 12 } else if hours > 12 { hours - 12 } else { hours };
-        format!("{} {}, {} at {}:{:02} {} UTC", month_names[m], d + 1, y, hour_12, minutes, am_pm)
+        let hour_12 = if hours == 0 {
+            12
+        } else if hours > 12 {
+            hours - 12
+        } else {
+            hours
+        };
+        format!(
+            "{} {}, {} at {}:{:02} {} UTC",
+            month_names[m],
+            d + 1,
+            y,
+            hour_12,
+            minutes,
+            am_pm
+        )
     }
 }
 
@@ -950,11 +983,13 @@ fn get_detail_event_status(event: &UnifiedEvent) -> DetailEventStatus {
         return DetailEventStatus::None;
     }
     if event.is_calendar_event() {
-        let end_ts = event
-            .end_timestamp()
-            .unwrap_or_else(|| {
-                if event.is_all_day() { start_ts + 86400 } else { start_ts }
-            });
+        let end_ts = event.end_timestamp().unwrap_or_else(|| {
+            if event.is_all_day() {
+                start_ts + 86400
+            } else {
+                start_ts
+            }
+        });
         if end_ts <= now_secs {
             DetailEventStatus::Ended
         } else if start_ts > now_secs {

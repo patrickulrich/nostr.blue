@@ -1,6 +1,6 @@
 pub mod podcasts;
-pub use podcasts::podcast_rss;
 pub use podcasts::podcast_index;
+pub use podcasts::podcast_rss;
 
 pub mod search;
 pub use search::content_search;
@@ -10,8 +10,8 @@ pub use search::trending;
 
 pub mod payments;
 pub use payments::btc_price;
-pub use payments::mempool;
 pub use payments::lnurl;
+pub use payments::mempool;
 
 #[cfg(all(feature = "web", feature = "desktop"))]
 compile_error!("Cannot enable both 'web' and 'desktop' features");

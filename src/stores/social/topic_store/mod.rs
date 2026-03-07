@@ -90,24 +90,20 @@ pub struct ScoredPost {
 // --- Global Caches ---
 
 /// Topic posts cache (keyed by event_id)
-pub static TOPIC_POSTS_CACHE: GlobalSignal<LruCache<String, TopicPost>> = GlobalSignal::new(||
-    LruCache::new(NonZeroUsize::new(TOPIC_POSTS_CACHE_SIZE).unwrap())
-);
+pub static TOPIC_POSTS_CACHE: GlobalSignal<LruCache<String, TopicPost>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(TOPIC_POSTS_CACHE_SIZE).unwrap()));
 
 /// Vote counts cache (keyed by event_id)
-pub static TOPIC_VOTES_CACHE: GlobalSignal<LruCache<String, VoteCounts>> = GlobalSignal::new(||
-    LruCache::new(NonZeroUsize::new(TOPIC_VOTES_CACHE_SIZE).unwrap())
-);
+pub static TOPIC_VOTES_CACHE: GlobalSignal<LruCache<String, VoteCounts>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(TOPIC_VOTES_CACHE_SIZE).unwrap()));
 
 /// User's subscribed topics (keyed by topic name)
-pub static SUBSCRIBED_TOPICS: GlobalSignal<LruCache<String, bool>> = GlobalSignal::new(||
-    LruCache::new(NonZeroUsize::new(SUBSCRIBED_TOPICS_CACHE_SIZE).unwrap())
-);
+pub static SUBSCRIBED_TOPICS: GlobalSignal<LruCache<String, bool>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(SUBSCRIBED_TOPICS_CACHE_SIZE).unwrap()));
 
 /// Discovered topics with metadata
-pub static DISCOVERED_TOPICS: GlobalSignal<LruCache<String, TopicInfo>> = GlobalSignal::new(||
-    LruCache::new(NonZeroUsize::new(DISCOVERED_TOPICS_CACHE_SIZE).unwrap())
-);
+pub static DISCOVERED_TOPICS: GlobalSignal<LruCache<String, TopicInfo>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(DISCOVERED_TOPICS_CACHE_SIZE).unwrap()));
 
 /// Loading states
 pub static LOADING_TOPIC_POSTS: GlobalSignal<bool> = GlobalSignal::new(|| false);
@@ -139,7 +135,11 @@ pub fn cache_votes(event_id: &str, counts: VoteCounts) {
 }
 
 pub fn is_topic_subscribed(topic: &str) -> bool {
-    SUBSCRIBED_TOPICS.read().peek(topic).copied().unwrap_or(false)
+    SUBSCRIBED_TOPICS
+        .read()
+        .peek(topic)
+        .copied()
+        .unwrap_or(false)
 }
 
 pub fn get_subscribed_topic_names() -> Vec<String> {
@@ -166,9 +166,7 @@ pub fn parse_topic_post(event: &NostrEvent) -> Option<TopicPost> {
     let parent_id = event
         .tags
         .iter()
-        .find(|t| {
-            t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E))
-        })
+        .find(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)))
         .and_then(|t| t.content())
         .map(|s| s.to_string());
 
@@ -325,9 +323,7 @@ pub fn subscriptions_filter(pubkey: PublicKey) -> Filter {
 
 /// Filter for votes on specific events
 pub fn votes_filter(event_ids: Vec<EventId>) -> Filter {
-    Filter::new()
-        .kind(Kind::Reaction)
-        .events(event_ids)
+    Filter::new().kind(Kind::Reaction).events(event_ids)
 }
 
 /// Filter for replies to a specific post
@@ -344,7 +340,10 @@ pub fn post_replies_filter(post_id: &str, limit: usize) -> Filter {
 pub fn build_topic_thread_tree(posts: Vec<TopicPost>) -> Vec<Rc<TopicThread>> {
     let mut children_map: HashMap<Option<String>, Vec<TopicPost>> = HashMap::new();
     for post in posts {
-        children_map.entry(post.parent_id.clone()).or_default().push(post);
+        children_map
+            .entry(post.parent_id.clone())
+            .or_default()
+            .push(post);
     }
     // Sort children by created_at ascending (oldest first)
     for posts_vec in children_map.values_mut() {
@@ -364,16 +363,13 @@ pub fn build_topic_thread_tree(posts: Vec<TopicPost>) -> Vec<Rc<TopicThread>> {
             .map(|posts| {
                 posts
                     .iter()
-                    .map(|post| Rc::new(TopicThread {
-                        post: post.clone(),
-                        replies: build_tree(
-                            Some(post.id.clone()),
-                            map,
-                            depth + 1,
-                            max_depth,
-                        ),
-                        depth,
-                    }))
+                    .map(|post| {
+                        Rc::new(TopicThread {
+                            post: post.clone(),
+                            replies: build_tree(Some(post.id.clone()), map, depth + 1, max_depth),
+                            depth,
+                        })
+                    })
                     .collect()
             })
             .unwrap_or_default()
@@ -387,10 +383,7 @@ pub fn build_topic_thread_tree(posts: Vec<TopicPost>) -> Vec<Rc<TopicThread>> {
 /// Flatten a thread tree to a list with depth info
 pub fn flatten_topic_thread_tree(tree: Vec<Rc<TopicThread>>) -> Vec<(TopicPost, usize)> {
     let mut result = Vec::new();
-    fn flatten_recursive(
-        threads: &[Rc<TopicThread>],
-        result: &mut Vec<(TopicPost, usize)>,
-    ) {
+    fn flatten_recursive(threads: &[Rc<TopicThread>], result: &mut Vec<(TopicPost, usize)>) {
         for thread in threads {
             result.push((thread.post.clone(), thread.depth));
             flatten_recursive(&thread.replies, result);

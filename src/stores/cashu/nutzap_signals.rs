@@ -1,17 +1,16 @@
 //! Nutzap global signals (NIP-61)
 //!
 //! Global signal definitions for nutzap state management.
+use super::nutzap::{NutzapInfo, PendingNutzap};
 use dioxus::prelude::*;
 use std::collections::HashMap;
-use super::nutzap::{NutzapInfo, PendingNutzap};
 /// My own nutzap info (kind:10019 data)
 /// Contains P2PK pubkey, accepted mints, and delivery relays
 pub static MY_NUTZAP_INFO: GlobalSignal<Option<NutzapInfo>> = Signal::global(|| None);
 /// Cache of other users' nutzap info (pubkey -> NutzapInfo)
 /// Used to look up recipient's accepted mints and P2PK pubkey
-pub static NUTZAP_INFO_CACHE: GlobalSignal<HashMap<String, NutzapInfo>> = Signal::global(
-    HashMap::new,
-);
+pub static NUTZAP_INFO_CACHE: GlobalSignal<HashMap<String, NutzapInfo>> =
+    Signal::global(HashMap::new);
 /// Pending nutzaps awaiting redemption
 pub static PENDING_NUTZAPS: GlobalSignal<Vec<PendingNutzap>> = Signal::global(Vec::new);
 /// Load nutzap auto-redeem setting from localStorage (Dioxus pattern - closure runs once on first access)
@@ -19,9 +18,7 @@ fn load_nutzap_auto_redeem() -> bool {
     crate::platform::storage::get("nostr_nutzap_auto_redeem").unwrap_or(true)
 }
 /// Whether to automatically redeem incoming nutzaps
-pub static NUTZAP_AUTO_REDEEM: GlobalSignal<bool> = Signal::global(
-    load_nutzap_auto_redeem,
-);
+pub static NUTZAP_AUTO_REDEEM: GlobalSignal<bool> = Signal::global(load_nutzap_auto_redeem);
 /// Whether nutzap subscription is currently active
 pub static NUTZAP_SUBSCRIPTION_ACTIVE: GlobalSignal<bool> = Signal::global(|| false);
 /// Whether nutzap receiving is enabled (kind:10019 published)
@@ -66,10 +63,7 @@ pub fn remove_pending_nutzap(event_id: &str) {
     log::debug!("Removed pending nutzap: {}", event_id);
 }
 /// Update a pending nutzap's status
-pub fn update_pending_nutzap_status(
-    event_id: &str,
-    status: super::nutzap::NutzapStatus,
-) {
+pub fn update_pending_nutzap_status(event_id: &str, status: super::nutzap::NutzapStatus) {
     let mut pending = PENDING_NUTZAPS.write();
     if let Some(nutzap) = pending.iter_mut().find(|n| n.event_id == event_id) {
         nutzap.status = status;

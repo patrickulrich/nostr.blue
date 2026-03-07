@@ -133,7 +133,10 @@ impl Repository {
                 continue;
             }
             // Parse custom tags first
-            if tag_vec.len() >= 4 && tag_vec[0] == "e" && tag_vec.get(3).map(|s| s.as_str()) == Some("fork") {
+            if tag_vec.len() >= 4
+                && tag_vec[0] == "e"
+                && tag_vec.get(3).map(|s| s.as_str()) == Some("fork")
+            {
                 fork_of = Some(tag_vec[1].to_string());
                 continue;
             }
@@ -175,9 +178,9 @@ impl Repository {
             }
         }
         let id = id?;
-        let milestones = crate::services::git_hosting::milestones::parse_milestones(&milestone_tags);
-        let coordinate = Coordinate::new(Kind::GitRepoAnnouncement, event.pubkey)
-            .identifier(&id);
+        let milestones =
+            crate::services::git_hosting::milestones::parse_milestones(&milestone_tags);
+        let coordinate = Coordinate::new(Kind::GitRepoAnnouncement, event.pubkey).identifier(&id);
         let naddr = Nip19Coordinate::new(coordinate, vec![])
             .to_bech32()
             .unwrap_or_default();
@@ -231,7 +234,11 @@ impl Repository {
     /// Get truncated pubkey for display
     pub fn pubkey_display(&self) -> String {
         if self.pubkey.len() > 12 {
-            format!("{}...{}", &self.pubkey[..6], &self.pubkey[self.pubkey.len() - 4..])
+            format!(
+                "{}...{}",
+                &self.pubkey[..6],
+                &self.pubkey[self.pubkey.len() - 4..]
+            )
         } else {
             self.pubkey.clone()
         }
@@ -346,7 +353,11 @@ impl Issue {
     /// Get truncated pubkey for display
     pub fn pubkey_display(&self) -> String {
         if self.pubkey.len() > 12 {
-            format!("{}...{}", &self.pubkey[..6], &self.pubkey[self.pubkey.len() - 4..])
+            format!(
+                "{}...{}",
+                &self.pubkey[..6],
+                &self.pubkey[self.pubkey.len() - 4..]
+            )
         } else {
             self.pubkey.clone()
         }
@@ -432,8 +443,7 @@ impl PullRequest {
             if tag_vec.len() >= 2 && tag_vec[0] == "branch" {
                 branch_name = Some(tag_vec[1].to_string());
             }
-            if tag.kind() == TagKind::Custom(std::borrow::Cow::Borrowed("parent-commit"))
-            {
+            if tag.kind() == TagKind::Custom(std::borrow::Cow::Borrowed("parent-commit")) {
                 if let Some(hash) = tag.content() {
                     parent_commit = Some(hash.to_string());
                 }
@@ -482,7 +492,11 @@ impl PullRequest {
     /// Get truncated pubkey for display
     pub fn pubkey_display(&self) -> String {
         if self.pubkey.len() > 12 {
-            format!("{}...{}", &self.pubkey[..6], &self.pubkey[self.pubkey.len() - 4..])
+            format!(
+                "{}...{}",
+                &self.pubkey[..6],
+                &self.pubkey[self.pubkey.len() - 4..]
+            )
         } else {
             self.pubkey.clone()
         }
@@ -551,7 +565,11 @@ impl Discussion {
             .to_bech32()
             .unwrap_or_default();
         let category = hashtags.first().cloned();
-        let labels = if hashtags.len() > 1 { hashtags[1..].to_vec() } else { Vec::new() };
+        let labels = if hashtags.len() > 1 {
+            hashtags[1..].to_vec()
+        } else {
+            Vec::new()
+        };
         Some(Self {
             repository_naddr,
             content: event.content.clone(),
@@ -580,7 +598,11 @@ impl Discussion {
     /// Get truncated pubkey for display
     pub fn pubkey_display(&self) -> String {
         if self.pubkey.len() > 12 {
-            format!("{}...{}", &self.pubkey[..6], &self.pubkey[self.pubkey.len() - 4..])
+            format!(
+                "{}...{}",
+                &self.pubkey[..6],
+                &self.pubkey[self.pubkey.len() - 4..]
+            )
         } else {
             self.pubkey.clone()
         }
@@ -873,16 +895,16 @@ impl GitComment {
         let mut repository = None;
         for tag in event.tags.iter() {
             match tag.as_standardized() {
-                Some(TagStandard::Event { event_id, marker, .. }) => {
-                    match marker {
-                        Some(Marker::Root) => root_event_id = Some(event_id.to_hex()),
-                        Some(Marker::Reply) | None => {
-                            if target_event_id.is_none() {
-                                target_event_id = Some(event_id.to_hex());
-                            }
+                Some(TagStandard::Event {
+                    event_id, marker, ..
+                }) => match marker {
+                    Some(Marker::Root) => root_event_id = Some(event_id.to_hex()),
+                    Some(Marker::Reply) | None => {
+                        if target_event_id.is_none() {
+                            target_event_id = Some(event_id.to_hex());
                         }
                     }
-                }
+                },
                 Some(TagStandard::Coordinate { coordinate, .. }) => {
                     repository = Some(coordinate.clone());
                 }
@@ -890,10 +912,11 @@ impl GitComment {
             }
         }
         let target_event_id = target_event_id?;
-        let repository_naddr = repository
-            .map(|coord| {
-                Nip19Coordinate::new(coord, vec![]).to_bech32().unwrap_or_default()
-            });
+        let repository_naddr = repository.map(|coord| {
+            Nip19Coordinate::new(coord, vec![])
+                .to_bech32()
+                .unwrap_or_default()
+        });
         Some(Self {
             content: event.content.clone(),
             target_event_id,
@@ -979,7 +1002,11 @@ impl DisplaySnippet {
     /// Get truncated pubkey for display
     pub fn pubkey_display(&self) -> String {
         if self.pubkey.len() > 12 {
-            format!("{}...{}", &self.pubkey[..6], &self.pubkey[self.pubkey.len() - 4..])
+            format!(
+                "{}...{}",
+                &self.pubkey[..6],
+                &self.pubkey[self.pubkey.len() - 4..]
+            )
         } else {
             self.pubkey.clone()
         }
@@ -990,33 +1017,31 @@ impl DisplaySnippet {
             return Some(lang.as_str());
         }
         if let Some(ext) = &self.extension {
-            return Some(
-                match ext.as_str() {
-                    "rs" => "rust",
-                    "js" => "javascript",
-                    "ts" => "typescript",
-                    "py" => "python",
-                    "rb" => "ruby",
-                    "go" => "go",
-                    "java" => "java",
-                    "c" | "h" => "c",
-                    "cpp" | "hpp" | "cc" | "cxx" => "cpp",
-                    "cs" => "csharp",
-                    "swift" => "swift",
-                    "kt" => "kotlin",
-                    "php" => "php",
-                    "sh" | "bash" => "bash",
-                    "sql" => "sql",
-                    "html" => "html",
-                    "css" => "css",
-                    "json" => "json",
-                    "yaml" | "yml" => "yaml",
-                    "xml" => "xml",
-                    "md" => "markdown",
-                    "toml" => "toml",
-                    _ => ext.as_str(),
-                },
-            );
+            return Some(match ext.as_str() {
+                "rs" => "rust",
+                "js" => "javascript",
+                "ts" => "typescript",
+                "py" => "python",
+                "rb" => "ruby",
+                "go" => "go",
+                "java" => "java",
+                "c" | "h" => "c",
+                "cpp" | "hpp" | "cc" | "cxx" => "cpp",
+                "cs" => "csharp",
+                "swift" => "swift",
+                "kt" => "kotlin",
+                "php" => "php",
+                "sh" | "bash" => "bash",
+                "sql" => "sql",
+                "html" => "html",
+                "css" => "css",
+                "json" => "json",
+                "yaml" | "yml" => "yaml",
+                "xml" => "xml",
+                "md" => "markdown",
+                "toml" => "toml",
+                _ => ext.as_str(),
+            });
         }
         None
     }
@@ -1039,15 +1064,10 @@ pub fn encode_repo_naddr(
     nip19.to_bech32()
 }
 /// Decode a repository naddr bech32 to coordinate
-pub fn decode_repo_naddr(
-    naddr: &str,
-) -> Result<(Coordinate, Vec<RelayUrl>), Nip34Error> {
+pub fn decode_repo_naddr(naddr: &str) -> Result<(Coordinate, Vec<RelayUrl>), Nip34Error> {
     use nostr::nips::nip19::{FromBech32, Nip19Coordinate};
     let decoded = Nip19Coordinate::from_bech32(naddr)?;
-    let coordinate = Coordinate::new(
-            decoded.coordinate.kind,
-            decoded.coordinate.public_key,
-        )
+    let coordinate = Coordinate::new(decoded.coordinate.kind, decoded.coordinate.public_key)
         .identifier(decoded.coordinate.identifier);
     Ok((coordinate, decoded.relays))
 }
@@ -1080,7 +1100,12 @@ pub fn decode_nevent(
 ) -> Result<(EventId, Option<PublicKey>, Option<Kind>, Vec<RelayUrl>), Nip34Error> {
     use nostr::nips::nip19::{FromBech32, Nip19Event};
     let decoded = Nip19Event::from_bech32(nevent)?;
-    Ok((decoded.event_id, decoded.author, decoded.kind, decoded.relays))
+    Ok((
+        decoded.event_id,
+        decoded.author,
+        decoded.kind,
+        decoded.relays,
+    ))
 }
 /// Decode either note1 or nevent1 to EventId
 pub fn decode_event_id(bech32: &str) -> Result<EventId, Nip34Error> {
@@ -1099,7 +1124,10 @@ mod tests {
     use super::*;
     #[test]
     fn test_issue_status_from_kind() {
-        assert_eq!(IssueStatus::from_kind(Kind::GitStatusOpen), Some(IssueStatus::Open));
+        assert_eq!(
+            IssueStatus::from_kind(Kind::GitStatusOpen),
+            Some(IssueStatus::Open)
+        );
         assert_eq!(
             IssueStatus::from_kind(Kind::GitStatusApplied),
             Some(IssueStatus::Applied),

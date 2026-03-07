@@ -3,9 +3,7 @@
 use super::card::CitationCardCompact;
 use crate::components::icons::{SearchIcon, XIcon};
 use crate::stores::auth_store;
-use crate::stores::citation_store::{
-    fetch_citations_by_author, CachedCitation, USER_CITATIONS,
-};
+use crate::stores::citation_store::{fetch_citations_by_author, CachedCitation, USER_CITATIONS};
 use crate::utils::nkbip03::CitationStyle;
 use dioxus::prelude::*;
 use dioxus_core::Task;
@@ -45,38 +43,34 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
     let mut selected_style = use_signal(|| CitationStyle::End);
     let mut loading = use_signal(|| false);
     let user_pubkey = auth_store::get_pubkey();
-    use_effect(
-        use_reactive(
-            (&*props.show.read(), &user_pubkey),
-            move |(is_shown, pubkey)| {
-                if is_shown {
-                    if let Some(pk) = pubkey {
-                        loading.set(true);
-                        let pk_clone = pk.clone();
-                        spawn(async move {
-                            if let Err(e) = fetch_citations_by_author(&pk_clone, 100)
-                                .await
-                            {
-                                crate::utils::log_fetch_error("citations", e);
-                            }
-                            loading.set(false);
-                        });
-                    }
-                    selected_citation.set(None);
-                    selected_style.set(CitationStyle::End);
-                    search_query.set(String::new());
-                    search_results.set(Vec::new());
-                } else {
-                    // Cleanup on hide - reset all modal state
-                    loading.set(false);
-                    selected_citation.set(None);
-                    selected_style.set(CitationStyle::End);
-                    search_query.set(String::new());
-                    search_results.set(Vec::new());
+    use_effect(use_reactive(
+        (&*props.show.read(), &user_pubkey),
+        move |(is_shown, pubkey)| {
+            if is_shown {
+                if let Some(pk) = pubkey {
+                    loading.set(true);
+                    let pk_clone = pk.clone();
+                    spawn(async move {
+                        if let Err(e) = fetch_citations_by_author(&pk_clone, 100).await {
+                            crate::utils::log_fetch_error("citations", e);
+                        }
+                        loading.set(false);
+                    });
                 }
-            },
-        ),
-    );
+                selected_citation.set(None);
+                selected_style.set(CitationStyle::End);
+                search_query.set(String::new());
+                search_results.set(Vec::new());
+            } else {
+                // Cleanup on hide - reset all modal state
+                loading.set(false);
+                selected_citation.set(None);
+                selected_style.set(CitationStyle::End);
+                search_query.set(String::new());
+                search_results.set(Vec::new());
+            }
+        },
+    ));
     let mut handle_search = move |new_query: String| {
         search_query.set(new_query.clone());
         if let Some(task) = search_task.take() {
@@ -119,17 +113,13 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
     });
     let markup_preview = use_memo(move || {
         if let Some(ref citation) = *selected_citation.read() {
-            let identifier = citation
-                .naddr
-                .as_ref()
-                .cloned()
-                .unwrap_or_else(|| {
-                    citation
-                        .event
-                        .id
-                        .to_bech32()
-                        .unwrap_or_else(|_| citation.event.id.to_hex())
-                });
+            let identifier = citation.naddr.as_ref().cloned().unwrap_or_else(|| {
+                citation
+                    .event
+                    .id
+                    .to_bech32()
+                    .unwrap_or_else(|_| citation.event.id.to_hex())
+            });
             let style = *selected_style.read();
             format!("{}{}", style.markup_prefix(), identifier)
         } else {
@@ -152,26 +142,20 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
                 task.cancel();
             }
             is_searching.set(false);
-            let identifier = citation
-                .naddr
-                .as_ref()
-                .cloned()
-                .unwrap_or_else(|| {
-                    citation
-                        .event
-                        .id
-                        .to_bech32()
-                        .unwrap_or_else(|_| citation.event.id.to_hex())
-                });
+            let identifier = citation.naddr.as_ref().cloned().unwrap_or_else(|| {
+                citation
+                    .event
+                    .id
+                    .to_bech32()
+                    .unwrap_or_else(|_| citation.event.id.to_hex())
+            });
             let style = *selected_style.read();
             let markup = format!("{}{}", style.markup_prefix(), identifier);
-            props
-                .on_select
-                .call(CitationSelection {
-                    identifier,
-                    style,
-                    markup,
-                });
+            props.on_select.call(CitationSelection {
+                identifier,
+                style,
+                markup,
+            });
             props.show.set(false);
         }
     };

@@ -9,28 +9,48 @@ pub fn MusicPlaylistDetail(naddr: String) -> Element {
     let mut creator_name = use_signal(|| String::from("Unknown"));
     let mut loading = use_signal(|| true);
     let mut error_msg = use_signal(|| None::<String>);
-    use_effect(
-        use_reactive!(
-            | naddr | { let naddr_clone = naddr.clone(); loading.set(true); error_msg
-            .set(None); spawn(async move { let parts : Vec <& str > = naddr_clone
-            .split(':').collect(); if parts.len() < 3 { error_msg
-            .set(Some("Invalid playlist address".to_string())); loading.set(false);
-            return; } let pubkey = parts[1]; let d_tag = parts[2..].join(":"); match
-            nostr_music::fetch_playlist_by_coordinate(pubkey, & d_tag). await {
-            Ok(Some(pl)) => { playlist.set(Some(pl.clone())); if let Ok(profile) =
-            profiles::fetch_profile(pl.pubkey.clone()). await { creator_name.set(profile
-            .get_display_name()); } match nostr_music::resolve_playlist_tracks(& pl).
-            await { Ok(nostr_tracks) => { let music_tracks : Vec <
-            music_player::MusicTrack > = nostr_tracks.into_iter().map(| t | t.into())
-            .collect(); tracks.set(music_tracks); } Err(e) => {
-            log::warn!("Failed to resolve playlist tracks: {}", e); tracks
-            .set(Vec::new()); error_msg.set(Some(format!("Could not load tracks: {}",
-            e))); } } } Ok(None) => { error_msg.set(Some("Playlist not found"
-            .to_string())); } Err(e) => { error_msg
-            .set(Some(format!("Failed to load playlist: {}", e))); } } loading
-            .set(false); }); }
-        ),
-    );
+    use_effect(use_reactive!(|naddr| {
+        let naddr_clone = naddr.clone();
+        loading.set(true);
+        error_msg.set(None);
+        spawn(async move {
+            let parts: Vec<&str> = naddr_clone.split(':').collect();
+            if parts.len() < 3 {
+                error_msg.set(Some("Invalid playlist address".to_string()));
+                loading.set(false);
+                return;
+            }
+            let pubkey = parts[1];
+            let d_tag = parts[2..].join(":");
+            match nostr_music::fetch_playlist_by_coordinate(pubkey, &d_tag).await {
+                Ok(Some(pl)) => {
+                    playlist.set(Some(pl.clone()));
+                    if let Ok(profile) = profiles::fetch_profile(pl.pubkey.clone()).await {
+                        creator_name.set(profile.get_display_name());
+                    }
+                    match nostr_music::resolve_playlist_tracks(&pl).await {
+                        Ok(nostr_tracks) => {
+                            let music_tracks: Vec<music_player::MusicTrack> =
+                                nostr_tracks.into_iter().map(|t| t.into()).collect();
+                            tracks.set(music_tracks);
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to resolve playlist tracks: {}", e);
+                            tracks.set(Vec::new());
+                            error_msg.set(Some(format!("Could not load tracks: {}", e)));
+                        }
+                    }
+                }
+                Ok(None) => {
+                    error_msg.set(Some("Playlist not found".to_string()));
+                }
+                Err(e) => {
+                    error_msg.set(Some(format!("Failed to load playlist: {}", e)));
+                }
+            }
+            loading.set(false);
+        });
+    }));
     let play_playlist = move |_| {
         let playlist_tracks = tracks.read().clone();
         if let Some(first_track) = playlist_tracks.first().cloned() {

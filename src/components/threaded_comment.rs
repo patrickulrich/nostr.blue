@@ -1,6 +1,4 @@
-use crate::components::icons::{
-    BookmarkIcon, MessageCircleIcon, Repeat2Icon, ShareIcon, ZapIcon,
-};
+use crate::components::icons::{BookmarkIcon, MessageCircleIcon, Repeat2Icon, ShareIcon, ZapIcon};
 use crate::components::{ReactionButton, ReplyComposer, RichContent, ZapModal};
 use crate::hooks::{use_author_metadata, use_reaction};
 use crate::routes::Route;
@@ -96,11 +94,10 @@ pub fn ThreadedComment(
                 Some(c) => c,
                 None => return,
             };
-            let event_id_parsed =
-                match nostr_sdk::EventId::from_hex(&event_id_for_counts) {
-                    Ok(id) => id,
-                    Err(_) => return,
-                };
+            let event_id_parsed = match nostr_sdk::EventId::from_hex(&event_id_for_counts) {
+                Ok(id) => id,
+                Err(_) => return,
+            };
             let reply_filter = Filter::new()
                 .kind(Kind::TextNote)
                 .event(event_id_parsed)

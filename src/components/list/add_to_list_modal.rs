@@ -93,8 +93,7 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                         loading.set(false);
                         refresh_trigger.with_mut(|val| *val = val.wrapping_add(1));
                         spawn(async move {
-                            crate::platform::timer::sleep(std::time::Duration::from_secs(2))
-                                .await;
+                            crate::platform::timer::sleep(std::time::Duration::from_secs(2)).await;
                             on_close.call(());
                         });
                     }
@@ -123,21 +122,19 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                     }
                     let is_private = *add_as_private.read();
                     match crate::utils::list_encryption::create_people_list(
-                            list_name.clone(),
-                            None,
-                            is_private,
-                        )
-                        .await
+                        list_name.clone(),
+                        None,
+                        is_private,
+                    )
+                    .await
                     {
-                        Ok(event) => {
-                            match add_person_to_list(&event, &pubkey, is_private).await {
-                                Ok(_) => Ok(()),
-                                Err(e) => {
-                                    refresh_trigger.with_mut(|val| *val = val.wrapping_add(1));
-                                    Err(format!("List created but adding person failed: {}", e))
-                                }
+                        Ok(event) => match add_person_to_list(&event, &pubkey, is_private).await {
+                            Ok(_) => Ok(()),
+                            Err(e) => {
+                                refresh_trigger.with_mut(|val| *val = val.wrapping_add(1));
+                                Err(format!("List created but adding person failed: {}", e))
                             }
-                        }
+                        },
                         Err(e) => Err(e),
                     }
                 } else {
@@ -161,8 +158,7 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                         loading.set(false);
                         refresh_trigger.with_mut(|val| *val = val.wrapping_add(1));
                         spawn(async move {
-                            crate::platform::timer::sleep(std::time::Duration::from_secs(2))
-                                .await;
+                            crate::platform::timer::sleep(std::time::Duration::from_secs(2)).await;
                             on_close.call(());
                         });
                     }
@@ -478,12 +474,13 @@ async fn create_new_curation_list(name: String, event_id: String) -> Result<(), 
         return Err("List name cannot be empty".to_string());
     }
     if name.len() > MAX_LIST_NAME_LENGTH {
-        return Err(
-            format!("List name cannot exceed {} characters", MAX_LIST_NAME_LENGTH),
-        );
+        return Err(format!(
+            "List name cannot exceed {} characters",
+            MAX_LIST_NAME_LENGTH
+        ));
     }
-    let target_event_id = EventId::from_hex(&event_id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
+    let target_event_id =
+        EventId::from_hex(&event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
     let unique_id = Uuid::new_v4().to_string();
     let tags = vec![
         Tag::identifier(&unique_id),
@@ -498,18 +495,15 @@ async fn create_new_curation_list(name: String, event_id: String) -> Result<(), 
     log::info!("Created new curation list: {}", name);
     Ok(())
 }
-async fn add_to_existing_list(
-    list_event_id: String,
-    event_id: String,
-) -> Result<(), String> {
+async fn add_to_existing_list(list_event_id: String, event_id: String) -> Result<(), String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
-    let target_event_id = EventId::from_hex(&event_id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
-    let list_id = EventId::from_hex(&list_event_id)
-        .map_err(|e| format!("Invalid list ID: {}", e))?;
+    let target_event_id =
+        EventId::from_hex(&event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
+    let list_id =
+        EventId::from_hex(&list_event_id).map_err(|e| format!("Invalid list ID: {}", e))?;
     let list_event = {
         tokio::select! {
             result = client.database().event_by_id(& list_id) => { result.map_err(| e |
@@ -521,15 +515,13 @@ async fn add_to_existing_list(
     let existing_content = list_event.content.clone();
     let mut tags: Vec<Tag> = list_event.tags.into_iter().collect();
     let normalized_event_id = target_event_id.to_hex();
-    let already_exists = tags
-        .iter()
-        .any(|tag| {
-            tag.kind() == nostr_sdk::TagKind::e()
-                && tag
-                    .content()
-                    .map(|c| c.eq_ignore_ascii_case(&normalized_event_id))
-                    .unwrap_or(false)
-        });
+    let already_exists = tags.iter().any(|tag| {
+        tag.kind() == nostr_sdk::TagKind::e()
+            && tag
+                .content()
+                .map(|c| c.eq_ignore_ascii_case(&normalized_event_id))
+                .unwrap_or(false)
+    });
     if already_exists {
         return Err("Event is already in this list".to_string());
     }

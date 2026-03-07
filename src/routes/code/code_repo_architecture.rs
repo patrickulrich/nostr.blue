@@ -13,8 +13,7 @@ use std::collections::HashSet;
 use wasm_bindgen::prelude::*;
 
 #[cfg(feature = "web")]
-#[wasm_bindgen(
-    inline_js = r#"
+#[wasm_bindgen(inline_js = r#"
 export function initArchitectureMermaid() {
     let retries = 0;
     function tryInit() {
@@ -41,8 +40,7 @@ export function initArchitectureMermaid() {
     }
     requestAnimationFrame(tryInit);
 }
-"#
-)]
+"#)]
 extern "C" {
     fn initArchitectureMermaid();
 }
@@ -168,12 +166,12 @@ fn build_mermaid(categories: &[(String, usize)], total: usize) -> String {
     for (cat, count) in categories {
         let (label, color, _) = category_info(cat);
         let id = cat.replace(' ', "_");
-        lines.push(format!(
-            "    {}[\"{}<br/>{} files\"]",
-            id, label, count
-        ));
+        lines.push(format!("    {}[\"{}<br/>{} files\"]", id, label, count));
         lines.push(format!("    ROOT --> {}", id));
-        lines.push(format!("    style {} fill:{},stroke:{},color:#111", id, color, color));
+        lines.push(format!(
+            "    style {} fill:{},stroke:{},color:#111",
+            id, color, color
+        ));
     }
 
     lines.push("    style ROOT fill:#1e293b,stroke:#475569,color:#e2e8f0".to_string());
@@ -218,9 +216,7 @@ pub fn CodeRepoArchitecture(naddr: String) -> Element {
             repo_signal.set(Some(repo.clone()));
 
             // Try REST API first, then fall back to git worker
-            let paths = if let Ok(p) =
-                file_fetcher::fetch_all_file_paths(&repo, None).await
-            {
+            let paths = if let Ok(p) = file_fetcher::fetch_all_file_paths(&repo, None).await {
                 p
             } else {
                 if !git_service::GitService::is_initialized() {
@@ -255,12 +251,16 @@ pub fn CodeRepoArchitecture(naddr: String) -> Element {
 
     let paths = file_paths();
     let total = paths.len();
-    let mut cat_groups: std::collections::BTreeMap<String, Vec<&str>> = std::collections::BTreeMap::new();
+    let mut cat_groups: std::collections::BTreeMap<String, Vec<&str>> =
+        std::collections::BTreeMap::new();
     for p in &paths {
         let cat = classify_path(p);
         cat_groups.entry(cat.to_string()).or_default().push(p);
     }
-    let mut sorted_cats: Vec<(String, usize)> = cat_groups.iter().map(|(k, v)| (k.clone(), v.len())).collect();
+    let mut sorted_cats: Vec<(String, usize)> = cat_groups
+        .iter()
+        .map(|(k, v)| (k.clone(), v.len()))
+        .collect();
     sorted_cats.sort_by(|a, b| b.1.cmp(&a.1));
 
     let mermaid_code = if !sorted_cats.is_empty() {

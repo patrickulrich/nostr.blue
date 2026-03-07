@@ -133,17 +133,14 @@ impl WavlakeAPI {
         }
     }
     /// Search for content on Wavlake
-    pub async fn search_content(
-        &self,
-        term: &str,
-    ) -> Result<Vec<WavlakeSearchResult>, String> {
+    pub async fn search_content(&self, term: &str) -> Result<Vec<WavlakeSearchResult>, String> {
         let url = format!(
             "{}/content/search?term={}",
             self.base_url,
             urlencoding::encode(term),
         );
         let response = http_client()
-        .map_err(|e| format!("HTTP client init failed: {}", e))?
+            .map_err(|e| format!("HTTP client init failed: {}", e))?
             .get(&url)
             .send()
             .await
@@ -189,7 +186,7 @@ impl WavlakeAPI {
             .join("&");
         let url = format!("{}/content/rankings?{}", self.base_url, query_string);
         let response = http_client()
-        .map_err(|e| format!("HTTP client init failed: {}", e))?
+            .map_err(|e| format!("HTTP client init failed: {}", e))?
             .get(&url)
             .send()
             .await
@@ -197,13 +194,16 @@ impl WavlakeAPI {
         if !response.status().is_success() {
             return Err(format!("Rankings failed: HTTP {}", response.status()));
         }
-        response.json().await.map_err(|e| format!("Failed to parse rankings: {}", e))
+        response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse rankings: {}", e))
     }
     /// Get a specific track
     pub async fn get_track(&self, track_id: &str) -> Result<WavlakeTrack, String> {
         let url = format!("{}/content/track/{}", self.base_url, track_id);
         let response = http_client()
-        .map_err(|e| format!("HTTP client init failed: {}", e))?
+            .map_err(|e| format!("HTTP client init failed: {}", e))?
             .get(&url)
             .send()
             .await
@@ -215,13 +215,16 @@ impl WavlakeAPI {
             .json()
             .await
             .map_err(|e| format!("Failed to parse track: {}", e))?;
-        result.into_iter().next().ok_or_else(|| "No track found".to_string())
+        result
+            .into_iter()
+            .next()
+            .ok_or_else(|| "No track found".to_string())
     }
     /// Get an artist's information
     pub async fn get_artist(&self, artist_id: &str) -> Result<WavlakeArtist, String> {
         let url = format!("{}/content/artist/{}", self.base_url, artist_id);
         let response = http_client()
-        .map_err(|e| format!("HTTP client init failed: {}", e))?
+            .map_err(|e| format!("HTTP client init failed: {}", e))?
             .get(&url)
             .send()
             .await
@@ -229,13 +232,16 @@ impl WavlakeAPI {
         if !response.status().is_success() {
             return Err(format!("Artist fetch failed: HTTP {}", response.status()));
         }
-        response.json().await.map_err(|e| format!("Failed to parse artist: {}", e))
+        response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse artist: {}", e))
     }
     /// Get an album's information
     pub async fn get_album(&self, album_id: &str) -> Result<WavlakeAlbum, String> {
         let url = format!("{}/content/album/{}", self.base_url, album_id);
         let response = http_client()
-        .map_err(|e| format!("HTTP client init failed: {}", e))?
+            .map_err(|e| format!("HTTP client init failed: {}", e))?
             .get(&url)
             .send()
             .await
@@ -243,16 +249,16 @@ impl WavlakeAPI {
         if !response.status().is_success() {
             return Err(format!("Album fetch failed: HTTP {}", response.status()));
         }
-        response.json().await.map_err(|e| format!("Failed to parse album: {}", e))
+        response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse album: {}", e))
     }
     /// Get a playlist
-    pub async fn get_playlist(
-        &self,
-        playlist_id: &str,
-    ) -> Result<WavlakePlaylist, String> {
+    pub async fn get_playlist(&self, playlist_id: &str) -> Result<WavlakePlaylist, String> {
         let url = format!("{}/content/playlist/{}", self.base_url, playlist_id);
         let response = http_client()
-        .map_err(|e| format!("HTTP client init failed: {}", e))?
+            .map_err(|e| format!("HTTP client init failed: {}", e))?
             .get(&url)
             .send()
             .await
@@ -260,7 +266,10 @@ impl WavlakeAPI {
         if !response.status().is_success() {
             return Err(format!("Playlist fetch failed: HTTP {}", response.status()));
         }
-        response.json().await.map_err(|e| format!("Failed to parse playlist: {}", e))
+        response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse playlist: {}", e))
     }
     /// Get LNURL for lightning payments
     pub async fn get_lnurl(
@@ -271,13 +280,16 @@ impl WavlakeAPI {
         let encoded_content_id = urlencoding::encode(content_id);
         let url = if let Some(app) = app_id {
             let encoded_app_id = urlencoding::encode(app);
-            format!("{}/lnurl?contentId={}&appId={}", self.base_url, encoded_content_id, encoded_app_id)
+            format!(
+                "{}/lnurl?contentId={}&appId={}",
+                self.base_url, encoded_content_id, encoded_app_id
+            )
         } else {
             format!("{}/lnurl?contentId={}", self.base_url, encoded_content_id)
         };
         log::debug!("Requesting LNURL from: {}", url);
         let response = http_client()
-        .map_err(|e| format!("HTTP client init failed: {}", e))?
+            .map_err(|e| format!("HTTP client init failed: {}", e))?
             .get(&url)
             .send()
             .await

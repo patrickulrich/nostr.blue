@@ -9,24 +9,22 @@
 //! - Proof validation
 //! - P2PK key collection
 #![allow(dead_code)]
-use std::sync::Arc;
-use cdk::nuts::{CurrencyUnit, State};
-use cdk::Wallet;
-use cdk_common::database::WalletDatabase;
-use dioxus::prelude::*;
 use super::proofs::proof_data_to_cdk_proof;
 use super::signals::{SHARED_LOCALSTORE, WALLET_STATE, WALLET_TOKENS};
 use super::types::{ProofData, WalletTokensStoreStoreExt};
 use super::utils::{mint_matches, normalize_mint_url};
 use crate::stores::{auth_store, cashu_cdk_bridge};
+use cdk::nuts::{CurrencyUnit, State};
+use cdk::Wallet;
+use cdk_common::database::WalletDatabase;
+use dioxus::prelude::*;
+use std::sync::Arc;
 /// Get or create the shared IndexedDB localstore
 ///
 /// Uses double-checked locking to prevent race conditions where multiple
 /// concurrent calls could create duplicate IndexedDB instances.
-pub(crate) async fn get_shared_localstore() -> Result<
-    Arc<crate::stores::indexeddb_database::IndexedDbDatabase>,
-    String,
-> {
+pub(crate) async fn get_shared_localstore(
+) -> Result<Arc<crate::stores::indexeddb_database::IndexedDbDatabase>, String> {
     if let Some(store) = SHARED_LOCALSTORE.read().clone() {
         return Ok(store);
     }
@@ -128,7 +126,8 @@ pub(crate) async fn create_ephemeral_wallet(
             if skipped_count > 0 {
                 log::debug!(
                     "Skipping {} duplicate proofs, injecting {} new proofs",
-                    skipped_count, new_proofs.len()
+                    skipped_count,
+                    new_proofs.len()
                 );
             }
             let proof_infos: Vec<_> = new_proofs
@@ -193,8 +192,7 @@ pub(crate) async fn derive_wallet_seed() -> Result<[u8; 64], String> {
     Err("Seed derivation requires the \"web\" feature (NIP-07 browser extension)".to_string())
 }
 pub(crate) use super::errors::{
-    is_insufficient_funds_error_string, is_token_already_spent_error,
-    is_token_spent_error_string,
+    is_insufficient_funds_error_string, is_token_already_spent_error, is_token_spent_error_string,
 };
 /// Remove a melt quote from the database
 pub(crate) async fn remove_melt_quote_from_db(quote_id: &str) -> Result<(), String> {
@@ -215,9 +213,10 @@ pub(crate) async fn remove_melt_quote_from_db(quote_id: &str) -> Result<(), Stri
 fn validate_proof_format(proof: &cdk::nuts::Proof) -> Result<(), String> {
     let keyset_str = proof.keyset_id.to_string();
     if keyset_str.len() != 16 {
-        return Err(
-            format!("Invalid keyset_id length: expected 16, got {}", keyset_str.len()),
-        );
+        return Err(format!(
+            "Invalid keyset_id length: expected 16, got {}",
+            keyset_str.len()
+        ));
     }
     let secret_str = proof.secret.to_string();
     if secret_str.is_empty() {
@@ -225,7 +224,10 @@ fn validate_proof_format(proof: &cdk::nuts::Proof) -> Result<(), String> {
     }
     let c_hex = proof.c.to_hex();
     if c_hex.len() != 66 {
-        return Err(format!("Invalid C point length: expected 66, got {}", c_hex.len()));
+        return Err(format!(
+            "Invalid C point length: expected 66, got {}",
+            c_hex.len()
+        ));
     }
     if u64::from(proof.amount) == 0 {
         return Err("Proof amount is zero".to_string());
@@ -251,7 +253,10 @@ pub(crate) async fn validate_proofs_with_mint(
         .map_err(|e| format!("Failed to check proof states: {}", e))?;
     let spent_count = states.iter().filter(|s| s.state == State::Spent).count();
     if spent_count > 0 {
-        log::warn!("Found {} spent proofs in wallet, cleaning up...", spent_count);
+        log::warn!(
+            "Found {} spent proofs in wallet, cleaning up...",
+            spent_count
+        );
         cleanup_spent_proofs_internal(mint_url).await?;
         let fresh_proofs = {
             let store = WALLET_TOKENS.read();
@@ -266,7 +271,8 @@ pub(crate) async fn validate_proofs_with_mint(
             proofs
         };
         log::info!(
-            "After cleanup: {} proofs remaining for mint {}", fresh_proofs.len(),
+            "After cleanup: {} proofs remaining for mint {}",
+            fresh_proofs.len(),
             mint_url
         );
         return Ok(fresh_proofs);
@@ -278,9 +284,7 @@ pub(crate) async fn validate_proofs_with_mint(
 ///
 /// Checks proof states with mint and removes spent/reserved/pending proofs.
 /// Returns (count_cleaned, sats_cleaned).
-pub(crate) async fn cleanup_spent_proofs_internal(
-    mint_url: &str,
-) -> Result<(usize, u64), String> {
+pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usize, u64), String> {
     use nostr_sdk::signer::NostrSigner;
     use nostr_sdk::{EventId, Kind, PublicKey};
     log::info!("Checking for spent proofs on {}", mint_url);
@@ -296,19 +300,14 @@ pub(crate) async fn cleanup_spent_proofs_internal(
             log::info!("No proofs to check");
             return Ok((0, 0));
         }
-        let event_ids: Vec<String> = mint_tokens
-            .iter()
-            .map(|t| t.event_id.clone())
-            .collect();
+        let event_ids: Vec<String> = mint_tokens.iter().map(|t| t.event_id.clone()).collect();
         let all_proofs: Vec<ProofData> = mint_tokens
             .iter()
             .flat_map(|t| &t.proofs)
             .cloned()
             .collect();
-        let cdk_proofs: Result<Vec<_>, _> = all_proofs
-            .iter()
-            .map(proof_data_to_cdk_proof)
-            .collect();
+        let cdk_proofs: Result<Vec<_>, _> =
+            all_proofs.iter().map(proof_data_to_cdk_proof).collect();
         (cdk_proofs?, event_ids, all_proofs)
     };
     let wallet = create_ephemeral_wallet(mint_url, vec![]).await?;
@@ -352,7 +351,8 @@ pub(crate) async fn cleanup_spent_proofs_internal(
     }
     let unavailable_count = unavailable_secrets.len();
     log::info!(
-        "Found {} unavailable proofs worth {} sats, cleaning up", unavailable_count,
+        "Found {} unavailable proofs worth {} sats, cleaning up",
+        unavailable_count,
         unavailable_amount
     );
     let available_proofs: Vec<ProofData> = all_mint_proofs
@@ -363,8 +363,7 @@ pub(crate) async fn cleanup_spent_proofs_internal(
         .ok_or("No signer available")?
         .as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pubkey = PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let client = crate::stores::nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
@@ -390,15 +389,13 @@ pub(crate) async fn cleanup_spent_proofs_internal(
             .nip44_encrypt(&pubkey, &json_content)
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
-        let builder = nostr_sdk::EventBuilder::new(
-            Kind::CashuWalletUnspentProof,
-            encrypted,
-        );
+        let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
         match client.send_event_builder(builder).await {
             Ok(event_output) => {
                 new_event_id = Some(event_output.id().to_hex());
                 log::info!(
-                    "Published cleanup token event: {}", new_event_id.as_ref().unwrap()
+                    "Published cleanup token event: {}",
+                    new_event_id.as_ref().unwrap()
                 );
             }
             Err(e) => {
@@ -416,75 +413,64 @@ pub(crate) async fn cleanup_spent_proofs_internal(
             for event_id in &valid_event_ids {
                 tags.push(nostr_sdk::Tag::event(EventId::from_hex(event_id).unwrap()));
             }
-            tags.push(nostr_sdk::Tag::custom(nostr_sdk::TagKind::custom("k"), ["7375"]));
-            let deletion_builder = nostr_sdk::EventBuilder::new(
-                    Kind::from(5),
-                    "Spent proofs cleanup",
-                )
-                .tags(tags);
+            tags.push(nostr_sdk::Tag::custom(
+                nostr_sdk::TagKind::custom("k"),
+                ["7375"],
+            ));
+            let deletion_builder =
+                nostr_sdk::EventBuilder::new(Kind::from(5), "Spent proofs cleanup").tags(tags);
             match client.send_event_builder(deletion_builder.clone()).await {
                 Ok(_) => {
                     log::info!(
-                        "Published deletion event for {} token events", valid_event_ids
-                        .len()
+                        "Published deletion event for {} token events",
+                        valid_event_ids.len()
                     );
                 }
                 Err(e) => {
-                    log::warn!(
-                        "Failed to publish deletion event, queuing for retry: {}", e
-                    );
+                    log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
                     super::events::queue_event_for_retry(
-                            deletion_builder,
-                            super::types::PendingEventType::DeletionEvent,
-                            None,
-                            None,
-                        )
-                        .await;
+                        deletion_builder,
+                        super::types::PendingEventType::DeletionEvent,
+                        None,
+                        None,
+                    )
+                    .await;
                 }
             }
         }
     }
     let available_proofs_is_empty = available_proofs.is_empty();
     let tokens_to_add = if let Some(ref event_id) = new_event_id {
-        vec![
-            super::types::TokenData {
-                event_id: event_id.clone(),
-                mint: mint_url.to_string(),
-                unit: "sat".to_string(),
-                proofs: available_proofs,
-                created_at: chrono::Utc::now().timestamp() as u64,
-            },
-        ]
+        vec![super::types::TokenData {
+            event_id: event_id.clone(),
+            mint: mint_url.to_string(),
+            unit: "sat".to_string(),
+            proofs: available_proofs,
+            created_at: chrono::Utc::now().timestamp() as u64,
+        }]
     } else if !available_proofs.is_empty() {
-        let synthetic_id = format!(
-            "local_pending_{}",
-            chrono::Utc::now().timestamp_millis(),
-        );
+        let synthetic_id = format!("local_pending_{}", chrono::Utc::now().timestamp_millis(),);
         log::warn!("Publish failed, using synthetic event_id: {}", synthetic_id);
-        vec![
-            super::types::TokenData {
-                event_id: synthetic_id,
-                mint: mint_url.to_string(),
-                unit: "sat".to_string(),
-                proofs: available_proofs,
-                created_at: chrono::Utc::now().timestamp() as u64,
-            },
-        ]
+        vec![super::types::TokenData {
+            event_id: synthetic_id,
+            mint: mint_url.to_string(),
+            unit: "sat".to_string(),
+            proofs: available_proofs,
+            created_at: chrono::Utc::now().timestamp() as u64,
+        }]
     } else {
         vec![]
     };
     if new_event_id.is_some() || available_proofs_is_empty || !tokens_to_add.is_empty() {
-        if let Err(e) = super::signals::atomic_token_replace(
-            tokens_to_add,
-            &event_ids_to_delete,
-        ) {
+        if let Err(e) = super::signals::atomic_token_replace(tokens_to_add, &event_ids_to_delete) {
             log::error!("Failed atomic token replacement during cleanup: {}", e);
         } else {
             super::proofs::rebuild_proof_event_map();
         }
     }
     log::info!(
-        "Cleanup complete: removed {} proofs worth {} sats", unavailable_count,
+        "Cleanup complete: removed {} proofs worth {} sats",
+        unavailable_count,
         unavailable_amount
     );
     Ok((unavailable_count, unavailable_amount))
@@ -527,10 +513,14 @@ pub(crate) async fn collect_p2pk_signing_keys() -> Vec<cdk::nuts::SecretKey> {
     for key in &keys {
         let xonly = key.public_key().x_only_public_key();
         log::debug!(
-            "P2PK signing key x-only pubkey: {}", hex::encode(xonly.serialize())
+            "P2PK signing key x-only pubkey: {}",
+            hex::encode(xonly.serialize())
         );
     }
-    log::debug!("Collected {} unique P2PK signing keys for token receive", keys.len());
+    log::debug!(
+        "Collected {} unique P2PK signing keys for token receive",
+        keys.len()
+    );
     keys
 }
 /// Convert a Nostr public key to a CDK public key for P2PK spending conditions
@@ -554,9 +544,7 @@ pub(crate) fn nostr_pubkey_to_cdk_pubkey(
         .map_err(|e| format!("Failed to create CDK pubkey from either parity: {}", e))
 }
 /// Initialize the MultiMintWallet with all mints from the wallet event
-pub(crate) async fn init_multi_mint_wallet(
-    mints: &[nostr_sdk::Url],
-) -> Result<(), String> {
+pub(crate) async fn init_multi_mint_wallet(mints: &[nostr_sdk::Url]) -> Result<(), String> {
     log::info!("Initializing MultiMintWallet with {} mints", mints.len());
     let localstore = get_shared_localstore().await?;
     let seed = derive_wallet_seed().await?;
@@ -570,8 +558,8 @@ pub(crate) async fn init_multi_mint_wallet(
         }
     }
     log::info!(
-        "MultiMintWallet initialized with {} wallets", multi_wallet.get_wallets(). await
-        .len()
+        "MultiMintWallet initialized with {} wallets",
+        multi_wallet.get_wallets().await.len()
     );
     Ok(())
 }
@@ -610,15 +598,13 @@ pub(crate) async fn inject_nip60_proofs_to_cdk() -> Result<(), String> {
             .proofs
             .iter()
             .filter_map(|p| match proof_data_to_cdk_proof(p) {
-                Ok(cdk_proof) => {
-                    ProofInfo::new(
-                            cdk_proof,
-                            mint_url.clone(),
-                            State::Unspent,
-                            CurrencyUnit::Sat,
-                        )
-                        .ok()
-                }
+                Ok(cdk_proof) => ProofInfo::new(
+                    cdk_proof,
+                    mint_url.clone(),
+                    State::Unspent,
+                    CurrencyUnit::Sat,
+                )
+                .ok(),
                 Err(e) => {
                     log::warn!("Failed to convert proof: {}", e);
                     None
@@ -638,7 +624,8 @@ pub(crate) async fn inject_nip60_proofs_to_cdk() -> Result<(), String> {
     }
     if !failed_mints.is_empty() {
         log::warn!(
-            "Failed to inject proofs for {} mints: {:?}", failed_mints.len(),
+            "Failed to inject proofs for {} mints: {:?}",
+            failed_mints.len(),
             failed_mints
         );
     }
@@ -658,8 +645,8 @@ struct MintRecoveryState {
 }
 /// Per-mint recovery coordination - mutex ensures atomic check-and-enqueue
 /// Key is normalized mint URL
-static MINT_RECOVERY_STATE: Lazy<Mutex<HashMap<String, MintRecoveryState>>> = Lazy::new(||
-Mutex::new(HashMap::new()));
+static MINT_RECOVERY_STATE: Lazy<Mutex<HashMap<String, MintRecoveryState>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 /// CDK pattern: batch proof syncs to avoid overwhelming mint API
 const BATCH_PROOF_SIZE: usize = 100;
 /// Execute an operation with automatic proof state recovery on failure
@@ -685,7 +672,9 @@ where
         Err(err) => {
             log::error!(
                 "Operation failed with '{}', attempting to recover {} proofs for {}",
-                err, proofs.len(), mint_url
+                err,
+                proofs.len(),
+                mint_url
             );
             let normalized_mint = normalize_mint_url(mint_url);
             let proofs_to_recover = {
@@ -693,7 +682,8 @@ where
                 let state = states.entry(normalized_mint.clone()).or_default();
                 if state.in_recovery {
                     log::debug!(
-                        "Recovery in progress for {}, queuing {} proofs", mint_url,
+                        "Recovery in progress for {}, queuing {} proofs",
+                        mint_url,
                         proofs.len()
                     );
                     state.pending_proofs.extend(proofs);
@@ -706,15 +696,10 @@ where
             if let Some(proofs) = proofs_to_recover {
                 log::info!("Syncing proof states with mint {} after failure", mint_url);
                 for chunk in proofs.chunks(BATCH_PROOF_SIZE) {
-                    if let Err(sync_err) = sync_proofs_with_mint_after_failure(
-                            mint_url,
-                            chunk,
-                        )
-                        .await
+                    if let Err(sync_err) =
+                        sync_proofs_with_mint_after_failure(mint_url, chunk).await
                     {
-                        log::warn!(
-                            "Failed to sync proof states for {}: {}", mint_url, sync_err
-                        );
+                        log::warn!("Failed to sync proof states for {}: {}", mint_url, sync_err);
                     }
                 }
                 loop {
@@ -734,19 +719,13 @@ where
                         break;
                     }
                     log::info!(
-                        "Processing {} queued proofs for {}", queued_proofs.len(),
+                        "Processing {} queued proofs for {}",
+                        queued_proofs.len(),
                         mint_url
                     );
                     for chunk in queued_proofs.chunks(BATCH_PROOF_SIZE) {
-                        if let Err(e) = sync_proofs_with_mint_after_failure(
-                                mint_url,
-                                chunk,
-                            )
-                            .await
-                        {
-                            log::warn!(
-                                "Failed to sync queued proofs for {}: {}", mint_url, e
-                            );
+                        if let Err(e) = sync_proofs_with_mint_after_failure(mint_url, chunk).await {
+                            log::warn!("Failed to sync queued proofs for {}: {}", mint_url, e);
                         }
                     }
                 }
@@ -783,26 +762,24 @@ async fn sync_proofs_with_mint_after_failure(
             }
             State::Pending => {
                 pending_count += 1;
-                super::proofs::register_proofs_pending_at_mint(
-                    &[proof.secret.to_string()],
-                );
+                super::proofs::register_proofs_pending_at_mint(&[proof.secret.to_string()]);
             }
             State::Unspent => {
                 super::proofs::revert_proofs_to_spendable(&[proof.secret.to_string()]);
             }
             State::Reserved => {
                 pending_count += 1;
-                super::proofs::register_proofs_pending_at_mint(
-                    &[proof.secret.to_string()],
-                );
+                super::proofs::register_proofs_pending_at_mint(&[proof.secret.to_string()]);
             }
             _ => {}
         }
     }
     if spent_count > 0 || pending_count > 0 {
         log::info!(
-            "Recovery sync: {} spent, {} pending out of {} proofs", spent_count,
-            pending_count, proofs.len()
+            "Recovery sync: {} spent, {} pending out of {} proofs",
+            spent_count,
+            pending_count,
+            proofs.len()
         );
         let _ = cashu_cdk_bridge::sync_wallet_state().await;
     }
@@ -830,7 +807,8 @@ pub(crate) async fn try_swap_or_recover(
                 let state = states.entry(normalized_mint.clone()).or_default();
                 if state.in_recovery {
                     log::debug!(
-                        "Recovery in progress for {}, queuing {} proofs", mint_url,
+                        "Recovery in progress for {}, queuing {} proofs",
+                        mint_url,
                         proofs_clone.len()
                     );
                     state.pending_proofs.extend(proofs_clone);
@@ -868,19 +846,13 @@ pub(crate) async fn try_swap_or_recover(
                         break;
                     }
                     log::info!(
-                        "Processing {} queued proofs for {}", queued_proofs.len(),
+                        "Processing {} queued proofs for {}",
+                        queued_proofs.len(),
                         mint_url
                     );
                     for chunk in queued_proofs.chunks(BATCH_PROOF_SIZE) {
-                        if let Err(e) = sync_proofs_with_mint_after_failure(
-                                mint_url,
-                                chunk,
-                            )
-                            .await
-                        {
-                            log::warn!(
-                                "Failed to sync queued proofs for {}: {}", mint_url, e
-                            );
+                        if let Err(e) = sync_proofs_with_mint_after_failure(mint_url, chunk).await {
+                            log::warn!("Failed to sync queued proofs for {}: {}", mint_url, e);
                         }
                     }
                 }

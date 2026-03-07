@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 use dioxus::prelude::*;
 use stores::{
-    auth_store, cashu, feed_cache, music_player, nostr_client, nwc_store,
-    reactions_store, relay, settings_store, shop_store, sidebar_store, theme_store,
+    auth_store, cashu, feed_cache, music_player, nostr_client, nwc_store, reactions_store, relay,
+    settings_store, shop_store, sidebar_store, theme_store,
 };
 
 #[cfg(all(feature = "web", feature = "native"))]
@@ -20,8 +20,8 @@ mod routes;
 mod services;
 mod stores;
 mod utils;
-pub use error::{NostrBlueError, Result};
 use components::toast::ToastProvider;
+pub use error::{NostrBlueError, Result};
 fn main() {
     #[cfg(feature = "web")]
     {
@@ -56,23 +56,42 @@ fn App() -> Element {
                     futures::join!(
                         reactions_store::load_preferred_reactions(),
                         sidebar_store::load_sidebar_preferences(),
-                        nwc_store::restore_connection(), async { if let Err(e) =
-                        shop_store::init_shop_store(). await {
-                        log::warn!("Failed to initialize shop store: {}", e); } }, async
-                        { if let Err(e) = feed_cache::init_feed_cache(). await {
-                        log::warn!("Failed to initialize feed cache: {}", e); } }, async
-                        { let settings = settings_store::SETTINGS.read().clone(); if
-                        settings.cashu_wallet_auto_load { if auth_store::get_pubkey()
-                        .is_none() {
-                        log::debug!("Skipping Cashu auto-load: not authenticated");
-                        return; } match cashu::check_terms_accepted(). await { Ok(true)
-                        => { log::info!("Auto-loading Cashu wallet..."); if let Err(e) =
-                        cashu::init_wallet(). await {
-                        log::warn!("Failed to auto-load Cashu wallet: {}", e); } }
-                        Ok(false) => {
-                        log::debug!("Cashu terms not yet accepted, skipping auto-load");
-                        } Err(e) => { log::warn!("Failed to check Cashu terms: {}", e); }
-                        } } },
+                        nwc_store::restore_connection(),
+                        async {
+                            if let Err(e) = shop_store::init_shop_store().await {
+                                log::warn!("Failed to initialize shop store: {}", e);
+                            }
+                        },
+                        async {
+                            if let Err(e) = feed_cache::init_feed_cache().await {
+                                log::warn!("Failed to initialize feed cache: {}", e);
+                            }
+                        },
+                        async {
+                            let settings = settings_store::SETTINGS.read().clone();
+                            if settings.cashu_wallet_auto_load {
+                                if auth_store::get_pubkey().is_none() {
+                                    log::debug!("Skipping Cashu auto-load: not authenticated");
+                                    return;
+                                }
+                                match cashu::check_terms_accepted().await {
+                                    Ok(true) => {
+                                        log::info!("Auto-loading Cashu wallet...");
+                                        if let Err(e) = cashu::init_wallet().await {
+                                            log::warn!("Failed to auto-load Cashu wallet: {}", e);
+                                        }
+                                    }
+                                    Ok(false) => {
+                                        log::debug!(
+                                            "Cashu terms not yet accepted, skipping auto-load"
+                                        );
+                                    }
+                                    Err(e) => {
+                                        log::warn!("Failed to check Cashu terms: {}", e);
+                                    }
+                                }
+                            }
+                        },
                     );
                 }
                 Err(e) => {

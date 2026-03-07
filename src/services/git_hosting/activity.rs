@@ -74,8 +74,8 @@ impl Activity {
                 let parts: Vec<&str> = v[1].split(':').collect();
                 if parts.len() >= 3 && parts[0] == "30617" {
                     if let Ok(pk) = PublicKey::from_hex(parts[1]) {
-                        let coordinate = Coordinate::new(Kind::GitRepoAnnouncement, pk)
-                            .identifier(parts[2]);
+                        let coordinate =
+                            Coordinate::new(Kind::GitRepoAnnouncement, pk).identifier(parts[2]);
                         return Nip19Coordinate::new(coordinate, vec![])
                             .to_bech32()
                             .ok()
@@ -208,7 +208,7 @@ pub async fn fetch_user_activity(
 /// Weekly contribution data for heatmap
 #[derive(Debug, Clone, PartialEq)]
 pub struct ContributionWeek {
-    pub days: [u32; 7], // Sun=0 through Sat=6 counts
+    pub days: [u32; 7],  // Sun=0 through Sat=6 counts
     pub week_start: u64, // Unix timestamp of the Sunday starting this week
 }
 
@@ -421,9 +421,7 @@ pub async fn fetch_recent_global_activity(limit: usize) -> Result<Vec<Activity>,
 /// across the entire network.
 pub async fn fetch_platform_stats() -> Result<PlatformStats, String> {
     // Fetch counts for each category with small limits to be efficient
-    let repo_filter = Filter::new()
-        .kind(Kind::GitRepoAnnouncement)
-        .limit(1000);
+    let repo_filter = Filter::new().kind(Kind::GitRepoAnnouncement).limit(1000);
     let issue_filter = Filter::new().kind(Kind::GitIssue).limit(1000);
     let pr_filter = Filter::new().kind(Kind::GitPatch).limit(1000);
     let snippet_filter = Filter::new().kind(Kind::CodeSnippet).limit(1000);
@@ -438,10 +436,30 @@ pub async fn fetch_platform_stats() -> Result<PlatformStats, String> {
     );
 
     Ok(PlatformStats {
-        total_repos: repos.unwrap_or_else(|e| { log::warn!("Failed to fetch repos: {e}"); vec![] }).len(),
-        total_issues: issues.unwrap_or_else(|e| { log::warn!("Failed to fetch issues: {e}"); vec![] }).len(),
-        total_prs: prs.unwrap_or_else(|e| { log::warn!("Failed to fetch PRs: {e}"); vec![] }).len(),
-        total_snippets: snippets.unwrap_or_else(|e| { log::warn!("Failed to fetch snippets: {e}"); vec![] }).len(),
+        total_repos: repos
+            .unwrap_or_else(|e| {
+                log::warn!("Failed to fetch repos: {e}");
+                vec![]
+            })
+            .len(),
+        total_issues: issues
+            .unwrap_or_else(|e| {
+                log::warn!("Failed to fetch issues: {e}");
+                vec![]
+            })
+            .len(),
+        total_prs: prs
+            .unwrap_or_else(|e| {
+                log::warn!("Failed to fetch PRs: {e}");
+                vec![]
+            })
+            .len(),
+        total_snippets: snippets
+            .unwrap_or_else(|e| {
+                log::warn!("Failed to fetch snippets: {e}");
+                vec![]
+            })
+            .len(),
         approximate: true,
     })
 }

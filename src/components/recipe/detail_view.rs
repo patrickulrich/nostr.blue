@@ -48,11 +48,15 @@ pub fn RecipeDetailView(recipe: CachedRecipe) -> Element {
     let prep_time = parsed.as_ref().and_then(|p| p.details.prep_time.clone());
     let cook_time = parsed.as_ref().and_then(|p| p.details.cook_time.clone());
     let servings = parsed.as_ref().and_then(|p| p.details.servings.clone());
-    let ingredients = parsed.as_ref().map(|p| p.ingredients.clone()).unwrap_or_default();
-    let directions = parsed.as_ref().map(|p| p.directions.clone()).unwrap_or_default();
-    let additional_resources = parsed
+    let ingredients = parsed
         .as_ref()
-        .and_then(|p| p.additional_resources.clone());
+        .map(|p| p.ingredients.clone())
+        .unwrap_or_default();
+    let directions = parsed
+        .as_ref()
+        .map(|p| p.directions.clone())
+        .unwrap_or_default();
+    let additional_resources = parsed.as_ref().and_then(|p| p.additional_resources.clone());
     let display_name = author_metadata
         .read()
         .as_ref()

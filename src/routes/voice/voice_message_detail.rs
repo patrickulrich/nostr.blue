@@ -21,9 +21,7 @@ pub fn VoiceMessageDetail(voice_id: String) -> Element {
         let id = voice_id.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
-            log::info!(
-                "Waiting for client initialization before loading voice message..."
-            );
+            log::info!("Waiting for client initialization before loading voice message...");
             return;
         }
         loading.set(true);
@@ -60,10 +58,10 @@ pub fn VoiceMessageDetail(voice_id: String) -> Element {
                     .limit(500);
                 log::info!("Fetching voice and text replies");
                 if let Ok(voice_replies) = nostr_client::fetch_events_aggregated(
-                        filter_voice_replies,
-                        Duration::from_secs(10),
-                    )
-                    .await
+                    filter_voice_replies,
+                    Duration::from_secs(10),
+                )
+                .await
                 {
                     log::info!("Loaded {} voice replies", voice_replies.len());
                     all_replies.extend(voice_replies.into_iter());
@@ -71,10 +69,10 @@ pub fn VoiceMessageDetail(voice_id: String) -> Element {
                     log::warn!("Failed to fetch voice replies");
                 }
                 if let Ok(text_replies) = nostr_client::fetch_events_aggregated(
-                        filter_text_replies,
-                        Duration::from_secs(10),
-                    )
-                    .await
+                    filter_text_replies,
+                    Duration::from_secs(10),
+                )
+                .await
                 {
                     log::info!("Loaded {} text replies", text_replies.len());
                     all_replies.extend(text_replies.into_iter());
@@ -104,7 +102,10 @@ pub fn VoiceMessageDetail(voice_id: String) -> Element {
                         Ok(output) => {
                             let subscription_id = output.val;
                             reply_sub_id.set(Some(subscription_id.clone()));
-                            log::debug!("Subscribed for new replies on voice message {}", event_id.to_hex());
+                            log::debug!(
+                                "Subscribed for new replies on voice message {}",
+                                event_id.to_hex()
+                            );
 
                             spawn(async move {
                                 let mut notifications = client.notifications();
@@ -325,8 +326,8 @@ fn render_reply_node(node: &crate::utils::thread_tree::ThreadNode) -> Element {
 }
 async fn load_voice_message_by_id(voice_id: &str) -> std::result::Result<Event, String> {
     log::info!("Loading voice message by ID: {}", voice_id);
-    let event_id = EventId::parse(voice_id)
-        .map_err(|e| format!("Invalid voice message ID: {}", e))?;
+    let event_id =
+        EventId::parse(voice_id).map_err(|e| format!("Invalid voice message ID: {}", e))?;
     let filter = Filter::new()
         .id(event_id)
         .kinds(vec![Kind::VoiceMessage, Kind::VoiceMessageReply])

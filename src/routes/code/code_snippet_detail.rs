@@ -119,10 +119,8 @@ fn SnippetContent(snippet: DisplaySnippet, copied: Signal<bool>) -> Element {
             let clipboard = navigator.clipboard();
             let code_to_copy = code_for_copy.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                let _ = wasm_bindgen_futures::JsFuture::from(
-                        clipboard.write_text(&code_to_copy),
-                    )
-                    .await;
+                let _ =
+                    wasm_bindgen_futures::JsFuture::from(clipboard.write_text(&code_to_copy)).await;
             });
         }
         copied.set(true);

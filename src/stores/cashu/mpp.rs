@@ -8,10 +8,6 @@
 //! - MPP quote creation via CDK's `mpp_melt_quote()`
 //! - MPP execution via CDK's `mpp_melt()`
 //! - Mint MPP support detection with caching
-use dioxus::prelude::*;
-use nostr_sdk::signer::NostrSigner;
-use nostr_sdk::{EventId, Kind, PublicKey};
-use std::collections::HashMap;
 use super::events::queue_event_for_retry;
 use super::lightning::create_history_event_with_type;
 use super::proofs::cdk_proof_to_proof_data;
@@ -22,11 +18,14 @@ use super::types::{
 };
 use crate::stores::cashu_cdk_bridge::{sync_wallet_state, MULTI_WALLET};
 use crate::stores::{auth_store, nostr_client};
+use dioxus::prelude::*;
+use nostr_sdk::signer::NostrSigner;
+use nostr_sdk::{EventId, Kind, PublicKey};
+use std::collections::HashMap;
 /// Cache for mint MPP support: mint_url -> (timestamp_ms, supports_mpp)
 /// TTL is 5 minutes (300,000 ms)
-pub static MINT_MPP_CACHE: GlobalSignal<HashMap<String, (f64, bool)>> = Signal::global(
-    HashMap::new,
-);
+pub static MINT_MPP_CACHE: GlobalSignal<HashMap<String, (f64, bool)>> =
+    Signal::global(HashMap::new);
 pub const MINT_INFO_CACHE_TTL_MS: f64 = 300_000.0;
 /// Balance info for a single mint
 #[derive(Clone, Debug)]
@@ -70,15 +69,13 @@ pub async fn get_balances_per_mint() -> Result<Vec<MintBalance>, String> {
         .get_balances()
         .await
         .map_err(|e| format!("Failed to get balances: {}", e))?;
-    Ok(
-        balances
-            .iter()
-            .map(|(url, amount)| MintBalance {
-                mint_url: url.to_string(),
-                balance: u64::from(*amount),
-            })
-            .collect(),
-    )
+    Ok(balances
+        .iter()
+        .map(|(url, amount)| MintBalance {
+            mint_url: url.to_string(),
+            balance: u64::from(*amount),
+        })
+        .collect())
 }
 /// Calculate optimal MPP split across mints to pay an invoice
 ///
@@ -110,13 +107,10 @@ pub async fn calculate_mpp_split(
         .try_fold(0u64, |acc, v| acc.checked_add(v))
         .ok_or("Balance sum overflow in MPP split calculation")?;
     if total_available < target_amount {
-        return Err(
-            format!(
-                "Insufficient total balance: {} sats available, {} sats needed",
-                total_available,
-                target_amount,
-            ),
-        );
+        return Err(format!(
+            "Insufficient total balance: {} sats available, {} sats needed",
+            total_available, target_amount,
+        ));
     }
     let mut sorted = available;
     sorted.sort_by(|a, b| b.balance.cmp(&a.balance));
@@ -249,7 +243,9 @@ pub async fn execute_mpp_melt(
     let mut all_paid = true;
     for (url, melted) in &results {
         log::info!(
-            "MPP contribution from {}: paid={}, fee={}", url, u64::from(melted.amount),
+            "MPP contribution from {}: paid={}, fee={}",
+            url,
+            u64::from(melted.amount),
             u64::from(melted.fee_paid)
         );
         total_paid = total_paid
@@ -274,8 +270,7 @@ pub async fn execute_mpp_melt(
             .ok_or("No signer available")?
             .as_nostr_signer();
         let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-        let pubkey = PublicKey::parse(&pubkey_str)
-            .map_err(|e| format!("Invalid pubkey: {}", e))?;
+        let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
         let client = nostr_client::NOSTR_CLIENT
             .read()
             .as_ref()
@@ -294,18 +289,14 @@ pub async fn execute_mpp_melt(
             }
             if let Some(proofs) = remaining_proofs.get(&mint_url_parsed) {
                 if !proofs.is_empty() {
-                    let proof_data: Vec<ProofData> = proofs
-                        .iter()
-                        .map(cdk_proof_to_proof_data)
-                        .collect();
+                    let proof_data: Vec<ProofData> =
+                        proofs.iter().map(cdk_proof_to_proof_data).collect();
                     let extended_proofs: Vec<ExtendedCashuProof> = proof_data
                         .iter()
                         .map(|p| ExtendedCashuProof::from(p.clone()))
                         .collect();
-                    let event_ids_for_mint = event_ids_by_mint
-                        .get(mint_url)
-                        .cloned()
-                        .unwrap_or_default();
+                    let event_ids_for_mint =
+                        event_ids_by_mint.get(mint_url).cloned().unwrap_or_default();
                     let filtered_del: Vec<String> = event_ids_for_mint
                         .into_iter()
                         .filter(|id| nostr_sdk::EventId::from_hex(id).is_ok())
@@ -322,47 +313,42 @@ pub async fn execute_mpp_melt(
                         .nip44_encrypt(&pubkey, &json_content)
                         .await
                         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
-                    let builder = nostr_sdk::EventBuilder::new(
-                        Kind::CashuWalletUnspentProof,
-                        encrypted,
-                    );
+                    let builder =
+                        nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
                     match client.send_event_builder(builder.clone()).await {
                         Ok(event_output) => {
                             let real_id = event_output.id().to_hex();
-                            log::info!(
-                                "Published MPP token event for {}: {}", mint_url, real_id
-                            );
+                            log::info!("Published MPP token event for {}: {}", mint_url, real_id);
                             new_event_ids.push(real_id.clone());
-                            new_tokens
-                                .push(TokenData {
-                                    event_id: real_id,
-                                    mint: mint_url.clone(),
-                                    unit: "sat".to_string(),
-                                    proofs: proof_data,
-                                    created_at: super::proofs::now_secs(),
-                                });
+                            new_tokens.push(TokenData {
+                                event_id: real_id,
+                                mint: mint_url.clone(),
+                                unit: "sat".to_string(),
+                                proofs: proof_data,
+                                created_at: super::proofs::now_secs(),
+                            });
                         }
                         Err(e) => {
                             log::warn!(
                                 "Failed to publish MPP token event for {}, queuing for retry: {}",
-                                mint_url, e
+                                mint_url,
+                                e
                             );
                             let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
                             queue_event_for_retry(
-                                    builder,
-                                    PendingEventType::TokenEvent,
-                                    Some(pending_id.clone()),
-                                    Some(mint_url.clone()),
-                                )
-                                .await;
-                            new_tokens
-                                .push(TokenData {
-                                    event_id: pending_id,
-                                    mint: mint_url.clone(),
-                                    unit: "sat".to_string(),
-                                    proofs: proof_data,
-                                    created_at: super::proofs::now_secs(),
-                                });
+                                builder,
+                                PendingEventType::TokenEvent,
+                                Some(pending_id.clone()),
+                                Some(mint_url.clone()),
+                            )
+                            .await;
+                            new_tokens.push(TokenData {
+                                event_id: pending_id,
+                                mint: mint_url.clone(),
+                                unit: "sat".to_string(),
+                                proofs: proof_data,
+                                created_at: super::proofs::now_secs(),
+                            });
                             publish_failures += 1;
                         }
                     }
@@ -383,11 +369,13 @@ pub async fn execute_mpp_melt(
                 .read()
                 .available;
             log::info!(
-                "MPP melt: local state updated. New balance: {} sats", new_balance
+                "MPP melt: local state updated. New balance: {} sats",
+                new_balance
             );
             if publish_failures > 0 {
                 log::warn!(
-                    "MPP melt: {} token event(s) queued for retry", publish_failures
+                    "MPP melt: {} token event(s) queued for retry",
+                    publish_failures
                 );
             }
         }
@@ -399,18 +387,14 @@ pub async fn execute_mpp_melt(
             if !valid_event_ids.is_empty() {
                 let mut tags = Vec::new();
                 for event_id in &valid_event_ids {
-                    tags.push(
-                        nostr_sdk::Tag::event(EventId::from_hex(event_id).unwrap()),
-                    );
+                    tags.push(nostr_sdk::Tag::event(EventId::from_hex(event_id).unwrap()));
                 }
-                tags.push(
-                    nostr_sdk::Tag::custom(nostr_sdk::TagKind::custom("k"), ["7375"]),
-                );
-                let deletion_builder = nostr_sdk::EventBuilder::new(
-                        Kind::from(5),
-                        "MPP melted tokens",
-                    )
-                    .tags(tags);
+                tags.push(nostr_sdk::Tag::custom(
+                    nostr_sdk::TagKind::custom("k"),
+                    ["7375"],
+                ));
+                let deletion_builder =
+                    nostr_sdk::EventBuilder::new(Kind::from(5), "MPP melted tokens").tags(tags);
                 match client.send_event_builder(deletion_builder.clone()).await {
                     Ok(_) => {
                         log::info!(
@@ -424,12 +408,12 @@ pub async fn execute_mpp_melt(
                             e
                         );
                         queue_event_for_retry(
-                                deletion_builder,
-                                PendingEventType::DeletionEvent,
-                                None,
-                                None,
-                            )
-                            .await;
+                            deletion_builder,
+                            PendingEventType::DeletionEvent,
+                            None,
+                            None,
+                        )
+                        .await;
                     }
                 }
             }
@@ -440,14 +424,14 @@ pub async fn execute_mpp_melt(
             .cloned()
             .collect();
         if let Err(e) = create_history_event_with_type(
-                "out",
-                total_paid.saturating_add(total_fee),
-                new_event_ids,
-                valid_destroyed,
-                Some("mpp_lightning_melt"),
-                None,
-            )
-            .await
+            "out",
+            total_paid.saturating_add(total_fee),
+            new_event_ids,
+            valid_destroyed,
+            Some("mpp_lightning_melt"),
+            None,
+        )
+        .await
         {
             log::warn!("Failed to create MPP history event: {}", e);
         }
@@ -478,7 +462,9 @@ pub async fn mint_supports_mpp(mint_url: &str) -> bool {
         }
     }
     let supports = fetch_mint_mpp_support(mint_url).await;
-    MINT_MPP_CACHE.write().insert(mint_url.to_string(), (now, supports));
+    MINT_MPP_CACHE
+        .write()
+        .insert(mint_url.to_string(), (now, supports));
     supports
 }
 /// Internal function to fetch MPP support from network

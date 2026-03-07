@@ -90,10 +90,7 @@ impl EventFilterState {
 }
 /// Filter unified events
 /// Set `from_nip50` to true when results came from NIP-50 relay search to skip client-side search filter
-pub fn filter_events(
-    events: &[UnifiedEvent],
-    filters: &EventFilterState,
-) -> Vec<UnifiedEvent> {
+pub fn filter_events(events: &[UnifiedEvent], filters: &EventFilterState) -> Vec<UnifiedEvent> {
     filter_events_with_nip50(events, filters, false)
 }
 /// Filter unified events with option to skip search term filter for NIP-50 results
@@ -140,9 +137,7 @@ pub fn filter_events_with_nip50(
             let end_ts = event.effective_end_timestamp();
             match filters.time_filter {
                 TimeFilter::All => {
-                    if filters.hide_ended
-                        && end_ts < now_secs.saturating_sub(86400)
-                    {
+                    if filters.hide_ended && end_ts < now_secs.saturating_sub(86400) {
                         return false;
                     }
                 }
@@ -207,17 +202,18 @@ pub fn filter_events_with_nip50(
 }
 /// Sort events (events with images first, then by date, then by coordinate for stability)
 pub fn sort_events_for_display(events: &mut [UnifiedEvent]) {
-    events
-        .sort_by(|a, b| {
-            let a_has_image = a.image().is_some();
-            let b_has_image = b.image().is_some();
-            match (a_has_image, b_has_image) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                _ => a.start_timestamp().cmp(&b.start_timestamp())
-                    .then_with(|| a.coordinate().cmp(b.coordinate())),
-            }
-        });
+    events.sort_by(|a, b| {
+        let a_has_image = a.image().is_some();
+        let b_has_image = b.image().is_some();
+        match (a_has_image, b_has_image) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a
+                .start_timestamp()
+                .cmp(&b.start_timestamp())
+                .then_with(|| a.coordinate().cmp(b.coordinate())),
+        }
+    });
 }
 
 /// Build filter for calendar events (date and time-based)
@@ -242,7 +238,10 @@ pub fn calendar_events_filter_since(since: u64, limit: usize) -> Filter {
 /// Build filter for meetings (spaces and rooms)
 pub fn meetings_filter(limit: usize) -> Filter {
     Filter::new()
-        .kinds([Kind::Custom(KIND_MEETING_SPACE), Kind::Custom(KIND_MEETING_ROOM)])
+        .kinds([
+            Kind::Custom(KIND_MEETING_SPACE),
+            Kind::Custom(KIND_MEETING_ROOM),
+        ])
         .limit(limit)
 }
 /// Build filter for calendar events until a timestamp (for pagination)
@@ -258,7 +257,10 @@ pub fn calendar_events_filter_until(until: u64, limit: usize) -> Filter {
 /// Build filter for meetings until a timestamp (for pagination)
 pub fn meetings_filter_until(until: u64, limit: usize) -> Filter {
     Filter::new()
-        .kinds([Kind::Custom(KIND_MEETING_SPACE), Kind::Custom(KIND_MEETING_ROOM)])
+        .kinds([
+            Kind::Custom(KIND_MEETING_SPACE),
+            Kind::Custom(KIND_MEETING_ROOM),
+        ])
         .until(Timestamp::from(until))
         .limit(limit)
 }
@@ -270,26 +272,33 @@ pub fn rsvps_filter(event_coordinate: &str) -> Filter {
 }
 /// Build filter for user's RSVPs
 pub fn my_rsvps_filter(pubkey: PublicKey) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_CALENDAR_RSVP)).author(pubkey)
+    Filter::new()
+        .kind(Kind::Custom(KIND_CALENDAR_RSVP))
+        .author(pubkey)
 }
 /// Build filter for availability templates by author
 pub fn availability_templates_filter(pubkey: PublicKey) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_AVAILABILITY_TEMPLATE)).author(pubkey)
+    Filter::new()
+        .kind(Kind::Custom(KIND_AVAILABILITY_TEMPLATE))
+        .author(pubkey)
 }
 /// Build filter for availability blocks by author
 pub fn availability_blocks_filter(pubkey: PublicKey) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_AVAILABILITY_BLOCK)).author(pubkey)
+    Filter::new()
+        .kind(Kind::Custom(KIND_AVAILABILITY_BLOCK))
+        .author(pubkey)
 }
 /// Build filter for specific event by coordinate
-pub fn event_by_coordinate_filter(
-    pubkey: PublicKey,
-    kind: u16,
-    identifier: &str,
-) -> Filter {
-    Filter::new().kind(Kind::Custom(kind)).author(pubkey).identifier(identifier)
+pub fn event_by_coordinate_filter(pubkey: PublicKey, kind: u16, identifier: &str) -> Filter {
+    Filter::new()
+        .kind(Kind::Custom(kind))
+        .author(pubkey)
+        .identifier(identifier)
 }
 /// Build filter for calendars by author
 pub fn calendars_filter(pubkey: PublicKey) -> Filter {
     use crate::utils::nip52::KIND_CALENDAR;
-    Filter::new().kind(Kind::Custom(KIND_CALENDAR)).author(pubkey)
+    Filter::new()
+        .kind(Kind::Custom(KIND_CALENDAR))
+        .author(pubkey)
 }

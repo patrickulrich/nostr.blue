@@ -65,7 +65,6 @@ export ANDROID_HOME ANDROID_NDK_HOME ANDROID_SDK_ROOT
 # Project paths
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DX_ANDROID="$PROJECT_ROOT/target/dx/nostrblue/release/android/app"
-GENERATED_RES="$DX_ANDROID/app/src/main/res"
 ANDROID_RES_SRC="$PROJECT_ROOT/android/res"
 ANDROID_KOTLIN_SRC="$PROJECT_ROOT/android/kotlin"
 APP_ID="com.nostr.blue"

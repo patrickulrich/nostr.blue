@@ -1,13 +1,13 @@
+use crate::hooks::ReactionEmoji;
+use crate::platform::storage;
+use crate::stores::sidebar_store::Nip78LoadState;
+use crate::stores::{auth_store, nostr_client};
 /// NIP-78: Preferred Reactions Storage
 /// Stores user's preferred reaction emojis on Nostr relays using kind 30078 events
 use dioxus::prelude::*;
-use crate::platform::storage;
 use nostr_sdk::{EventBuilder, Filter, FromBech32, Kind, Tag};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use crate::hooks::ReactionEmoji;
-use crate::stores::sidebar_store::Nip78LoadState;
-use crate::stores::{auth_store, nostr_client};
 /// A user's preferred reaction - either a standard unicode emoji or a custom NIP-30 emoji
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -22,12 +22,10 @@ impl PreferredReaction {
     pub fn to_reaction_emoji(&self) -> ReactionEmoji {
         match self {
             Self::Standard { emoji } => ReactionEmoji::Standard(emoji.clone()),
-            Self::Custom { shortcode, url } => {
-                ReactionEmoji::Custom {
-                    shortcode: shortcode.clone(),
-                    url: url.clone(),
-                }
-            }
+            Self::Custom { shortcode, url } => ReactionEmoji::Custom {
+                shortcode: shortcode.clone(),
+                url: url.clone(),
+            },
         }
     }
     /// Render the emoji content (for display)
@@ -62,18 +60,7 @@ const REACTIONS_LOCAL_STORAGE_KEY: &str = "nostr_blue_reaction_prefs";
 /// Maximum number of preferred reactions
 pub const MAX_REACTIONS: usize = 10;
 /// Default emoji reactions (used when user has no custom preferences)
-const DEFAULT_EMOJIS: &[&str] = &[
-    "❤️",
-    "👍",
-    "😂",
-    "🔥",
-    "😮",
-    "😢",
-    "🎉",
-    "🤔",
-    "👀",
-    "🙏",
-];
+const DEFAULT_EMOJIS: &[&str] = &["❤️", "👍", "😂", "🔥", "😮", "😢", "🎉", "🤔", "👀", "🙏"];
 /// Create the default reactions list
 pub fn default_reactions() -> Vec<PreferredReaction> {
     DEFAULT_EMOJIS
@@ -84,13 +71,10 @@ pub fn default_reactions() -> Vec<PreferredReaction> {
         .collect()
 }
 /// Global state for preferred reactions
-pub static PREFERRED_REACTIONS: GlobalSignal<Vec<PreferredReaction>> = Signal::global(
-    default_reactions,
-);
+pub static PREFERRED_REACTIONS: GlobalSignal<Vec<PreferredReaction>> =
+    Signal::global(default_reactions);
 /// NIP-78 load state for reaction preferences
-pub static REACTIONS_STATE: GlobalSignal<Nip78LoadState> = Signal::global(
-    Nip78LoadState::default,
-);
+pub static REACTIONS_STATE: GlobalSignal<Nip78LoadState> = Signal::global(Nip78LoadState::default);
 /// Get the user's default reaction (first in the list)
 pub fn get_default_reaction() -> Option<PreferredReaction> {
     PREFERRED_REACTIONS.read().first().cloned()
@@ -113,13 +97,11 @@ pub fn init_reactions_from_cache() {
     if let Some(cached) = load_cached_reactions() {
         if !cached.reactions.is_empty() {
             log::info!(
-                "Initialized {} reactions from localStorage", cached.reactions.len()
+                "Initialized {} reactions from localStorage",
+                cached.reactions.len()
             );
-            let reactions: Vec<PreferredReaction> = cached
-                .reactions
-                .into_iter()
-                .take(MAX_REACTIONS)
-                .collect();
+            let reactions: Vec<PreferredReaction> =
+                cached.reactions.into_iter().take(MAX_REACTIONS).collect();
             *PREFERRED_REACTIONS.write() = reactions;
         }
     }
@@ -141,20 +123,24 @@ pub async fn load_preferred_reactions() {
     let mut loaded_from_cache = false;
     if let Some(cached) = load_cached_reactions() {
         if !cached.reactions.is_empty() {
-            log::info!("Loaded {} reactions from localStorage", cached.reactions.len());
-            let reactions: Vec<PreferredReaction> = cached
-                .reactions
-                .into_iter()
-                .take(MAX_REACTIONS)
-                .collect();
+            log::info!(
+                "Loaded {} reactions from localStorage",
+                cached.reactions.len()
+            );
+            let reactions: Vec<PreferredReaction> =
+                cached.reactions.into_iter().take(MAX_REACTIONS).collect();
             *PREFERRED_REACTIONS.write() = reactions;
             loaded_from_cache = true;
         }
     }
     if !auth_store::is_authenticated() {
         log::info!(
-            "Not authenticated, using {} reactions", if loaded_from_cache { "cached" }
-            else { "default" }
+            "Not authenticated, using {} reactions",
+            if loaded_from_cache {
+                "cached"
+            } else {
+                "default"
+            }
         );
         *REACTIONS_STATE.write() = Nip78LoadState::LoadedDefaults;
         return;
@@ -237,8 +223,8 @@ pub async fn load_preferred_reactions() {
                                 .take(MAX_REACTIONS)
                                 .collect();
                             log::info!(
-                                "Loaded {} preferred reactions from Nostr relays", reactions
-                                .len()
+                                "Loaded {} preferred reactions from Nostr relays",
+                                reactions.len()
                             );
                             *PREFERRED_REACTIONS.write() = reactions;
                             cache_reactions(&data);
@@ -274,10 +260,11 @@ pub async fn load_preferred_reactions() {
     }
 }
 /// Save preferred reactions to Nostr relays (NIP-78)
-pub async fn save_preferred_reactions(
-    reactions: Vec<PreferredReaction>,
-) -> Result<(), String> {
-    log::info!("Saving {} preferred reactions to Nostr (NIP-78)...", reactions.len());
+pub async fn save_preferred_reactions(reactions: Vec<PreferredReaction>) -> Result<(), String> {
+    log::info!(
+        "Saving {} preferred reactions to Nostr (NIP-78)...",
+        reactions.len()
+    );
     if !auth_store::is_authenticated() {
         return Err("Not authenticated".to_string());
     }
@@ -296,8 +283,8 @@ pub async fn save_preferred_reactions(
     };
     let content = serde_json::to_string(&data)
         .map_err(|e| format!("Failed to serialize reactions: {}", e))?;
-    let builder = EventBuilder::new(Kind::from(APP_DATA_KIND), content)
-        .tag(Tag::identifier(REACTIONS_D_TAG));
+    let builder =
+        EventBuilder::new(Kind::from(APP_DATA_KIND), content).tag(Tag::identifier(REACTIONS_D_TAG));
     let output = client
         .send_event_builder(builder)
         .await
@@ -306,8 +293,10 @@ pub async fn save_preferred_reactions(
     let failed_count = output.failed.len();
     let total = success_count + failed_count;
     log::info!(
-        "Reactions preferences saved: {} ({}/{} relays succeeded)", output.id().to_hex(),
-        success_count, total
+        "Reactions preferences saved: {} ({}/{} relays succeeded)",
+        output.id().to_hex(),
+        success_count,
+        total
     );
     if !output.failed.is_empty() {
         for (relay, error) in &output.failed {

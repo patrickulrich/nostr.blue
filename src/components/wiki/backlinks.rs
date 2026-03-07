@@ -106,10 +106,8 @@ fn BacklinkItem(page: CachedWikiPage) -> Element {
 #[component]
 pub fn WikiBacklinksCompact(
     identifier: String,
-    #[props(default = 5)]
-    limit: usize,
-    #[props(default = String::new())]
-    class: String,
+    #[props(default = 5)] limit: usize,
+    #[props(default = String::new())] class: String,
 ) -> Element {
     let mut loading = use_signal(|| true);
     let mut pages = use_signal(Vec::<CachedWikiPage>::new);
@@ -161,8 +159,7 @@ pub fn WikiBacklinksGraph(
     forward_links: Vec<String>,
     /// Backward links to center page
     backward_links: Vec<String>,
-    #[props(default = String::new())]
-    class: String,
+    #[props(default = String::new())] class: String,
 ) -> Element {
     rsx! {
         div { class: "wiki-backlinks-graph p-4 bg-card border border-border rounded-lg {class}",

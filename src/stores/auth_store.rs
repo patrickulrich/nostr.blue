@@ -1,16 +1,16 @@
+use crate::stores::nostr_client;
+use crate::stores::signer::{set_signer as store_signer, SignerType};
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use nostr::{Keys, PublicKey};
-use nostr_sdk::ToBech32;
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use std::time::Duration;
-use crate::stores::nostr_client;
-use crate::stores::signer::{set_signer as store_signer, SignerType};
 #[cfg(target_family = "wasm")]
 use nostr_browser_signer::BrowserSigner;
 use nostr_connect::client::NostrConnect;
 use nostr_sdk::nips::nip46::NostrConnectURI;
+use nostr_sdk::ToBech32;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use std::time::Duration;
 /// Authentication state
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct AuthState {
@@ -51,9 +51,8 @@ pub struct PasswordPromptState {
     pub loading: bool,
 }
 /// Global password prompt state
-pub static PASSWORD_PROMPT: GlobalSignal<PasswordPromptState> = Signal::global(
-    PasswordPromptState::default,
-);
+pub static PASSWORD_PROMPT: GlobalSignal<PasswordPromptState> =
+    Signal::global(PasswordPromptState::default);
 /// Initialize authentication from stored credentials
 /// Note: This only loads the auth state from localStorage.
 /// Actual signer restoration should be done via restore_session_async()
@@ -101,7 +100,8 @@ pub fn init_auth() {
                 }
             }
             "remote_signer" => {
-                if let Ok(stored_pubkey) = crate::platform::storage::get::<String>(STORAGE_KEY_NPUB) {
+                if let Ok(stored_pubkey) = crate::platform::storage::get::<String>(STORAGE_KEY_NPUB)
+                {
                     log::info!("Found stored remote signer session");
                     match crate::utils::nip19::normalize_pubkey(&stored_pubkey) {
                         Ok(pubkey_hex) => {
@@ -148,7 +148,9 @@ pub async fn restore_session_async() {
                 }
             }
             "private_key" => {
-                if let Ok(ncryptsec) = crate::platform::storage::get::<String>(STORAGE_KEY_NCRYPTSEC) {
+                if let Ok(ncryptsec) =
+                    crate::platform::storage::get::<String>(STORAGE_KEY_NCRYPTSEC)
+                {
                     if crate::utils::nip49::is_ncryptsec(&ncryptsec) {
                         *PASSWORD_PROMPT.write() = PasswordPromptState {
                             required: true,
@@ -167,7 +169,8 @@ pub async fn restore_session_async() {
                             log::error!("Failed to delete method: {}", e);
                         }
                     }
-                } else if let Ok(_nsec) = crate::platform::storage::get::<String>(STORAGE_KEY_NSEC) {
+                } else if let Ok(_nsec) = crate::platform::storage::get::<String>(STORAGE_KEY_NSEC)
+                {
                     *PASSWORD_PROMPT.write() = PasswordPromptState {
                         required: true,
                         ncryptsec: None,
@@ -177,9 +180,7 @@ pub async fn restore_session_async() {
                         ),
                         loading: false,
                     };
-                    log::info!(
-                        "Legacy nsec found, migration to encrypted format needed"
-                    );
+                    log::info!("Legacy nsec found, migration to encrypted format needed");
                 }
             }
             "read_only" => {
@@ -193,8 +194,11 @@ pub async fn restore_session_async() {
             #[cfg(feature = "mobile")]
             "android_signer" => {
                 if let Ok(npub) = crate::platform::storage::get::<String>(STORAGE_KEY_NPUB) {
-                    let package = crate::platform::storage::get::<String>(STORAGE_KEY_SIGNER_PACKAGE)
-                        .unwrap_or_else(|_| crate::platform::Nip55Signer::default_package().to_string());
+                    let package =
+                        crate::platform::storage::get::<String>(STORAGE_KEY_SIGNER_PACKAGE)
+                            .unwrap_or_else(|_| {
+                                crate::platform::Nip55Signer::default_package().to_string()
+                            });
                     if let Err(e) = login_with_android_signer(&npub, Some(&package)).await {
                         log::error!("Failed to restore Android signer session: {}", e);
                         clear_auth();
@@ -208,22 +212,18 @@ pub async fn restore_session_async() {
                 ) {
                     match restore_nostr_connect(&bunker_uri, &app_keys_str).await {
                         Ok(nostr_connect) => {
-                            let signer_type = SignerType::NostrConnect(
-                                Arc::new(nostr_connect),
-                            );
+                            let signer_type = SignerType::NostrConnect(Arc::new(nostr_connect));
                             match store_signer(signer_type.clone()).await {
-                                Ok(_) => {
-                                    match nostr_client::set_signer(signer_type).await {
-                                        Ok(_) => {
-                                            run_post_login_init().await;
-                                            log::info!("Successfully restored remote signer session");
-                                        }
-                                        Err(e) => {
-                                            log::error!("Failed to set remote signer on client: {}", e);
-                                            clear_auth();
-                                        }
+                                Ok(_) => match nostr_client::set_signer(signer_type).await {
+                                    Ok(_) => {
+                                        run_post_login_init().await;
+                                        log::info!("Successfully restored remote signer session");
                                     }
-                                }
+                                    Err(e) => {
+                                        log::error!("Failed to set remote signer on client: {}", e);
+                                        clear_auth();
+                                    }
+                                },
                                 Err(e) => {
                                     log::error!("Failed to restore remote signer: {}", e);
                                     clear_auth();
@@ -276,7 +276,10 @@ pub async fn login_with_nsec(nsec: &str, password: &str) -> Result<(), String> {
     crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey)?;
     crate::platform::storage::set(STORAGE_KEY_METHOD, "private_key")?;
     crate::platform::storage::delete(STORAGE_KEY_NSEC)?;
-    log::info!("Successfully logged in with encrypted key, pubkey: {}", pubkey);
+    log::info!(
+        "Successfully logged in with encrypted key, pubkey: {}",
+        pubkey
+    );
     run_post_login_init().await;
     Ok(())
 }
@@ -299,8 +302,7 @@ async fn login_with_keys_internal(keys: Keys) -> Result<(), String> {
 /// Login with public key only (read-only mode)
 pub async fn login_with_npub(npub: &str) -> Result<(), String> {
     log::info!("Logging in with public key (read-only)...");
-    let pubkey = PublicKey::parse(npub)
-        .map_err(|e| format!("Invalid public key: {}", e))?;
+    let pubkey = PublicKey::parse(npub).map_err(|e| format!("Invalid public key: {}", e))?;
     let pubkey_str = pubkey.to_string();
     nostr_client::set_read_only().await?;
     *AUTH_STATE.write() = AuthState {
@@ -337,13 +339,16 @@ pub async fn login_with_browser_extension() -> Result<(), String> {
         crate::platform::storage::set(STORAGE_KEY_METHOD, "extension")?;
         crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey_str)?;
         log::info!(
-            "Successfully logged in via browser extension with pubkey: {}", pubkey_str
+            "Successfully logged in via browser extension with pubkey: {}",
+            pubkey_str
         );
         run_post_login_init().await;
         Ok(())
     }
     #[cfg(not(target_family = "wasm"))]
-    { Err("Browser extension login is only available in browser".to_string()) }
+    {
+        Err("Browser extension login is only available in browser".to_string())
+    }
 }
 /// Deprecated: Use login_with_browser_extension instead
 #[deprecated(note = "Use login_with_browser_extension instead")]
@@ -353,8 +358,14 @@ pub async fn login_with_nip07() -> Result<(), String> {
 }
 /// Check if browser extension (NIP-07) is available
 pub fn is_browser_extension_available() -> bool {
-    #[cfg(target_family = "wasm")] { BrowserSigner::new().is_ok() }
-    #[cfg(not(target_family = "wasm"))] { false }
+    #[cfg(target_family = "wasm")]
+    {
+        BrowserSigner::new().is_ok()
+    }
+    #[cfg(not(target_family = "wasm"))]
+    {
+        false
+    }
 }
 /// Deprecated: Use is_browser_extension_available instead
 #[deprecated(note = "Use is_browser_extension_available instead")]
@@ -379,8 +390,8 @@ async fn restore_nostr_connect(
 ) -> Result<NostrConnect, String> {
     let uri = NostrConnectURI::parse(bunker_uri)
         .map_err(|e| format!("Invalid stored bunker URI: {}", e))?;
-    let app_keys = Keys::parse(app_keys_str)
-        .map_err(|e| format!("Invalid stored app keys: {}", e))?;
+    let app_keys =
+        Keys::parse(app_keys_str).map_err(|e| format!("Invalid stored app keys: {}", e))?;
     let timeout = Duration::from_secs(120);
     let nostr_connect = NostrConnect::new(uri, app_keys, timeout, None)
         .map_err(|e| format!("Failed to reconnect: {}", e))?;
@@ -404,8 +415,10 @@ async fn run_post_login_init() {
     // Critical for NIP-46 where signer restoration is slow and
     // relay application happens concurrently in set_signer()'s spawn_forever
     crate::stores::relay::wait_for_user_relays(
-        std::time::Duration::from_secs(5), "run_post_login_init"
-    ).await;
+        std::time::Duration::from_secs(5),
+        "run_post_login_init",
+    )
+    .await;
     crate::stores::notifications::start_realtime_subscription().await;
     crate::stores::relay::start_relay_list_subscription().await;
     crate::stores::emoji_store::init_emoji_fetch();
@@ -445,8 +458,8 @@ async fn run_post_login_init() {
 /// Login with NIP-46 remote signer (nostr-connect)
 pub async fn login_with_nostr_connect(bunker_uri: &str) -> Result<(), String> {
     log::info!("Logging in with remote signer (NIP-46)...");
-    let uri = NostrConnectURI::parse(bunker_uri)
-        .map_err(|e| format!("Invalid bunker URI: {}", e))?;
+    let uri =
+        NostrConnectURI::parse(bunker_uri).map_err(|e| format!("Invalid bunker URI: {}", e))?;
     let app_keys = get_or_create_app_keys()?;
     let timeout = Duration::from_secs(120);
     let nostr_connect = NostrConnect::new(uri, app_keys.clone(), timeout, None)
@@ -477,7 +490,10 @@ pub async fn login_with_nostr_connect(bunker_uri: &str) -> Result<(), String> {
         is_authenticated: true,
         login_method: Some(LoginMethod::RemoteSigner),
     };
-    log::info!("Successfully logged in via remote signer with pubkey: {}", pubkey_str);
+    log::info!(
+        "Successfully logged in via remote signer with pubkey: {}",
+        pubkey_str
+    );
     run_post_login_init().await;
     Ok(())
 }
@@ -495,7 +511,10 @@ pub fn get_keys() -> Option<Keys> {
 pub fn get_pubkey() -> Option<String> {
     let p = AUTH_STATE.read().pubkey.clone();
     if let Some(ref s) = p {
-        debug_assert!(!s.starts_with("npub"), "get_pubkey returned bech32 instead of hex");
+        debug_assert!(
+            !s.starts_with("npub"),
+            "get_pubkey returned bech32 instead of hex"
+        );
     }
     p
 }
@@ -671,24 +690,31 @@ pub enum AndroidSignerAutoResult {
 /// Check if an Android signer (NIP-55) is available
 pub fn is_android_signer_available() -> bool {
     #[cfg(feature = "mobile")]
-    { crate::platform::Nip55Signer::is_signer_installed() }
+    {
+        crate::platform::Nip55Signer::is_signer_installed()
+    }
     #[cfg(not(feature = "mobile"))]
-    { false }
+    {
+        false
+    }
 }
 /// Login with Android signer (NIP-55)
 ///
 /// `npub` can be bech32 npub or hex public key.
 /// `signer_package` overrides the default Amber package if provided.
 #[allow(dead_code)] // Called on mobile but not on desktop/WASM targets
-pub async fn login_with_android_signer(npub: &str, signer_package: Option<&str>) -> Result<(), String> {
+pub async fn login_with_android_signer(
+    npub: &str,
+    signer_package: Option<&str>,
+) -> Result<(), String> {
     #[cfg(feature = "mobile")]
     {
         use crate::platform::Nip55Signer;
 
         log::info!("Attempting Android signer login...");
 
-        let public_key = PublicKey::parse(npub)
-            .map_err(|e| format!("Invalid public key: {}", e))?;
+        let public_key =
+            PublicKey::parse(npub).map_err(|e| format!("Invalid public key: {}", e))?;
         let pubkey_hex = public_key.to_hex();
 
         let package = signer_package
@@ -711,7 +737,10 @@ pub async fn login_with_android_signer(npub: &str, signer_package: Option<&str>)
         crate::platform::storage::set(STORAGE_KEY_METHOD, "android_signer")?;
         crate::platform::storage::set(STORAGE_KEY_SIGNER_PACKAGE, &package)?;
 
-        log::info!("Successfully logged in via Android signer with pubkey: {}", pubkey_hex);
+        log::info!(
+            "Successfully logged in via Android signer with pubkey: {}",
+            pubkey_hex
+        );
         run_post_login_init().await;
         Ok(())
     }
@@ -739,7 +768,11 @@ pub async fn login_with_android_signer_auto() -> Result<AndroidSignerAutoResult,
     match Nip55Signer::poll_intent_result() {
         IntentPollResult::Ready { pubkey, package } => {
             let pubkey_hex = pubkey.to_hex();
-            log::info!("NIP-55 auto-detect: found pending result from {}: {}", package, pubkey_hex);
+            log::info!(
+                "NIP-55 auto-detect: found pending result from {}: {}",
+                package,
+                pubkey_hex
+            );
             Nip55Signer::clear_pending_result();
             login_with_android_signer(&pubkey_hex, Some(&package)).await?;
             return Ok(AndroidSignerAutoResult::LoggedIn(package));
@@ -769,7 +802,11 @@ pub async fn login_with_android_signer_auto() -> Result<AndroidSignerAutoResult,
         log::info!("NIP-55 auto-detect: trying ContentResolver for {}", package);
         if let Some(pubkey) = Nip55Signer::request_public_key(package) {
             let pubkey_hex = pubkey.to_hex();
-            log::info!("NIP-55 auto-detect: ContentResolver success from {}: {}", package, pubkey_hex);
+            log::info!(
+                "NIP-55 auto-detect: ContentResolver success from {}: {}",
+                package,
+                pubkey_hex
+            );
             login_with_android_signer(&pubkey_hex, Some(package)).await?;
             return Ok(AndroidSignerAutoResult::LoggedIn(package.clone()));
         }

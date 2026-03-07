@@ -107,9 +107,7 @@ pub fn HighlightCard(props: HighlightCardProps) -> Element {
 }
 /// Get display info for highlight source
 /// Returns (icon, display_text, optional_url)
-fn get_source_display(
-    source: &HighlightSource,
-) -> Option<(&'static str, String, Option<String>)> {
+fn get_source_display(source: &HighlightSource) -> Option<(&'static str, String, Option<String>)> {
     match source {
         HighlightSource::Url(url) => {
             let display = url
@@ -119,12 +117,14 @@ fn get_source_display(
                 .next()
                 .unwrap_or(url)
                 .to_string();
-            let href = if is_valid_http_url(url) { Some(url.clone()) } else { None };
+            let href = if is_valid_http_url(url) {
+                Some(url.clone())
+            } else {
+                None
+            };
             Some(("🔗", display, href))
         }
-        HighlightSource::Article { .. } => {
-            Some(("📄", "Nostr article".to_string(), None))
-        }
+        HighlightSource::Article { .. } => Some(("📄", "Nostr article".to_string(), None)),
         HighlightSource::Event { event_id, .. } => {
             let short_id = if event_id.len() > 12 {
                 format!("{}...", &event_id[..12])

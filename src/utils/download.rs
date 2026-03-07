@@ -11,16 +11,18 @@ use wasm_bindgen::prelude::*;
 
 // Regex patterns for AsciiDoc to Markdown conversion
 #[allow(dead_code)]
-static ASCIIDOC_HEADING: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?m)^(={1,6})\s+(.+?)(?:\s+=+)?$").expect("Invalid heading regex"));
+static ASCIIDOC_HEADING: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?m)^(={1,6})\s+(.+?)(?:\s+=+)?$").expect("Invalid heading regex")
+});
 
 #[allow(dead_code)]
 static ASCIIDOC_BOLD: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\*([^*\n]+?)\*").expect("Invalid bold regex"));
 
 #[allow(dead_code)]
-static ASCIIDOC_LINK: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"link:(https?://[^\s\[]+)\[([^\]]*)\]").expect("Invalid link regex"));
+static ASCIIDOC_LINK: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"link:(https?://[^\s\[]+)\[([^\]]*)\]").expect("Invalid link regex")
+});
 
 #[allow(dead_code)]
 static ASCIIDOC_IMAGE: LazyLock<Regex> =
@@ -33,8 +35,9 @@ static ASCIIDOC_CODE_BLOCK: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 #[allow(dead_code)]
-static WIKILINK: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]").expect("Invalid wikilink regex"));
+static WIKILINK: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]").expect("Invalid wikilink regex")
+});
 
 /// Download content as a Markdown file
 ///
@@ -168,16 +171,14 @@ pub fn download_blob(filename: &str, content: &str, mime_type: &str) {
     let options = js_sys::Object::new();
     js_sys::Reflect::set(&options, &"type".into(), &mime_type.into()).ok();
 
-    let blob = match web_sys::Blob::new_with_str_sequence_and_options(
-        &parts,
-        &options.unchecked_into(),
-    ) {
-        Ok(b) => b,
-        Err(e) => {
-            log::error!("Failed to create blob: {:?}", e);
-            return;
-        }
-    };
+    let blob =
+        match web_sys::Blob::new_with_str_sequence_and_options(&parts, &options.unchecked_into()) {
+            Ok(b) => b,
+            Err(e) => {
+                log::error!("Failed to create blob: {:?}", e);
+                return;
+            }
+        };
 
     let url = create_object_url(&blob);
 

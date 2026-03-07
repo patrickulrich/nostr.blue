@@ -11,8 +11,8 @@ use crate::stores::auth_store;
 use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::stores::pin_boards_store::{
     self, delete_pinboard, enrich_pins_metadata, fetch_pinboard_reaction_count,
-    fetch_pinboard_zap_total, fetch_pins_for_board_filtered,
-    has_user_reacted_to_pinboard, toggle_pinboard_reaction, Pin, PinMetadata, Pinboard,
+    fetch_pinboard_zap_total, fetch_pins_for_board_filtered, has_user_reacted_to_pinboard,
+    toggle_pinboard_reaction, Pin, PinMetadata, Pinboard,
 };
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
@@ -35,9 +35,7 @@ pub fn PinBoardDetail(naddr: String) -> Element {
     let mut show_share_modal = use_signal(|| false);
     let mut show_delete_confirm = use_signal(|| false);
     let mut deleting = use_signal(|| false);
-    let mut pin_to_board_request: Signal<Option<PinToBoardRequest>> = use_signal(|| {
-        None
-    });
+    let mut pin_to_board_request: Signal<Option<PinToBoardRequest>> = use_signal(|| None);
     let is_owner = use_memo(move || {
         if let Some(ref b) = *board.read() {
             if let Some(pubkey) = auth_store::get_pubkey() {
@@ -83,8 +81,7 @@ pub fn PinBoardDetail(naddr: String) -> Element {
                 let result = if is_collaborative {
                     fetch_pins_for_board_filtered(&a_tag, None, None).await
                 } else {
-                    fetch_pins_for_board_filtered(&a_tag, Some(&owner_pubkey), None)
-                        .await
+                    fetch_pins_for_board_filtered(&a_tag, Some(&owner_pubkey), None).await
                 };
                 match result {
                     Ok(fetched_pins) => {
@@ -99,21 +96,14 @@ pub fn PinBoardDetail(naddr: String) -> Element {
                 pins_loading.set(false);
             });
             spawn(async move {
-                if let Ok(count) = fetch_pinboard_reaction_count(&a_tag_for_engagement)
-                    .await
-                {
+                if let Ok(count) = fetch_pinboard_reaction_count(&a_tag_for_engagement).await {
                     reaction_count.set(count);
                 }
-                if let Ok(total) = fetch_pinboard_zap_total(&a_tag_for_engagement).await
-                {
+                if let Ok(total) = fetch_pinboard_zap_total(&a_tag_for_engagement).await {
                     zap_total_msats.set(total);
                 }
                 if *HAS_SIGNER.read() {
-                    if let Ok(reacted) = has_user_reacted_to_pinboard(
-                            &a_tag_for_engagement,
-                        )
-                        .await
-                    {
+                    if let Ok(reacted) = has_user_reacted_to_pinboard(&a_tag_for_engagement).await {
                         has_reacted.set(reacted);
                     }
                 }

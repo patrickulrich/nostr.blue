@@ -1,13 +1,13 @@
+use crate::platform::storage;
+use crate::stores::blossom_store::BlossomServersStoreStoreExt;
+use crate::stores::{auth_store, blossom_store, nostr_client, theme_store};
 /// NIP-78: Application Data Storage
 /// Stores user settings on Nostr relays using kind 30078 events
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
-use crate::platform::storage;
 use nostr_sdk::{EventBuilder, Filter, FromBech32, Kind, Tag};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use crate::stores::blossom_store::BlossomServersStoreStoreExt;
-use crate::stores::{auth_store, blossom_store, nostr_client, theme_store};
 /// localStorage key for settings cache
 const SETTINGS_LOCAL_STORAGE_KEY: &str = "nostr_blue_settings";
 /// App settings stored on Nostr via NIP-78
@@ -113,9 +113,8 @@ pub async fn load_settings() -> Result<(), String> {
                         };
                         theme_store::set_theme_internal(theme);
                         if !settings.blossom_servers.is_empty() {
-                            *blossom_store::BLOSSOM_SERVERS.read().data().write() = settings
-                                .blossom_servers
-                                .clone();
+                            *blossom_store::BLOSSOM_SERVERS.read().data().write() =
+                                settings.blossom_servers.clone();
                         }
                         cache_settings(&settings);
                         SETTINGS.write().clone_from(&settings);
@@ -135,7 +134,9 @@ pub async fn load_settings() -> Result<(), String> {
         }
         Err(e) => {
             log::warn!("Failed to fetch settings: {}", e);
-            SETTINGS_ERROR.write().clone_from(&Some(format!("Fetch error: {}", e)));
+            SETTINGS_ERROR
+                .write()
+                .clone_from(&Some(format!("Fetch error: {}", e)));
         }
     }
     SETTINGS_LOADING.write().clone_from(&false);
@@ -154,15 +155,11 @@ pub async fn save_settings(settings: &AppSettings) -> Result<(), String> {
         .ok_or("Client not initialized")?
         .clone();
     let mut settings_to_save = settings.clone();
-    settings_to_save.blossom_servers = blossom_store::BLOSSOM_SERVERS
-        .read()
-        .data()
-        .read()
-        .clone();
+    settings_to_save.blossom_servers = blossom_store::BLOSSOM_SERVERS.read().data().read().clone();
     let content = serde_json::to_string(&settings_to_save)
         .map_err(|e| format!("Failed to serialize settings: {}", e))?;
-    let builder = EventBuilder::new(Kind::from(APP_DATA_KIND), content)
-        .tag(Tag::identifier(SETTINGS_D_TAG));
+    let builder =
+        EventBuilder::new(Kind::from(APP_DATA_KIND), content).tag(Tag::identifier(SETTINGS_D_TAG));
     client
         .send_event_builder(builder)
         .await
@@ -238,7 +235,10 @@ pub async fn update_cashu_wallet_auto_load(enabled: bool) {
         w.clone()
     };
     if let Err(e) = save_settings(&settings).await {
-        log::warn!("Failed to persist Cashu wallet auto-load setting to Nostr: {}", e);
+        log::warn!(
+            "Failed to persist Cashu wallet auto-load setting to Nostr: {}",
+            e
+        );
         cache_settings(&settings);
     }
 }

@@ -46,7 +46,11 @@ pub fn MusicRadio() -> Element {
         spawn(async move {
             log::info!("Starting radio: genre={}, days={}", genre, days);
             let api = WavlakeAPI::new();
-            let genre_filter = if genre == "all" { None } else { Some(genre.as_str()) };
+            let genre_filter = if genre == "all" {
+                None
+            } else {
+                Some(genre.as_str())
+            };
             match api
                 .get_rankings("sats", Some(days), None, None, genre_filter, Some(100))
                 .await
@@ -54,10 +58,8 @@ pub fn MusicRadio() -> Element {
                 Ok(tracks) => {
                     if !tracks.is_empty() {
                         log::info!("Loaded {} tracks for radio", tracks.len());
-                        let mut music_tracks: Vec<MusicTrack> = tracks
-                            .into_iter()
-                            .map(|t| t.into())
-                            .collect();
+                        let mut music_tracks: Vec<MusicTrack> =
+                            tracks.into_iter().map(|t| t.into()).collect();
                         #[cfg(feature = "web")]
                         let seed = (js_sys::Date::now() as u64) as usize;
                         #[cfg(not(feature = "web"))]
@@ -78,11 +80,7 @@ pub fn MusicRadio() -> Element {
                             music_tracks.swap(i, j);
                         }
                         if let Some(first_track) = music_tracks.first().cloned() {
-                            music_player::play_track(
-                                first_track,
-                                Some(music_tracks),
-                                Some(0),
-                            );
+                            music_player::play_track(first_track, Some(music_tracks), Some(0));
                             radio_started.set(true);
                             loading.set(false);
                         }

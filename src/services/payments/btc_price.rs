@@ -25,7 +25,9 @@ pub async fn fetch_btc_prices() -> Result<(), String> {
         SUPPORTED_CURRENCIES,
     );
     let response = http_client()
-        .map_err(|e| format!("HTTP client init failed: {}", e))?.get(&url).send()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(&url)
+        .send()
         .await
         .map_err(|e| format!("Failed to fetch prices: {}", e))?;
     if !response.status().is_success() {
@@ -47,7 +49,10 @@ pub async fn fetch_btc_prices() -> Result<(), String> {
 /// Falls back to USD for unknown currencies
 pub fn get_btc_price(currency: &str) -> Option<f64> {
     let prices = BTC_PRICES.read();
-    prices.get(&currency.to_uppercase()).or_else(|| prices.get("USD")).copied()
+    prices
+        .get(&currency.to_uppercase())
+        .or_else(|| prices.get("USD"))
+        .copied()
 }
 /// Convert fiat amount to satoshis using cached BTC price
 /// Returns None if no price is available, amount is invalid, or result would overflow

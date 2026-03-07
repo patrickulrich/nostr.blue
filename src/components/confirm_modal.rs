@@ -15,12 +15,11 @@ pub fn ConfirmModal(
     on_cancel: EventHandler<()>,
 ) -> Element {
     let modal_id = use_signal(|| {
-        MODAL_ID_COUNTER
-            .with(|c| {
-                let id = c.get();
-                c.set(id.wrapping_add(1));
-                id
-            })
+        MODAL_ID_COUNTER.with(|c| {
+            let id = c.get();
+            c.set(id.wrapping_add(1));
+            id
+        })
     });
     let title_id = format!("modal-title-{}", modal_id());
     let message_id = format!("modal-message-{}", modal_id());

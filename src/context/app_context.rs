@@ -73,10 +73,7 @@ impl AppContext {
     /// Fetch a profile from relays (async)
     ///
     /// Checks cache first, then fetches from relays if needed
-    pub async fn fetch_profile(
-        &self,
-        pubkey: &str,
-    ) -> Result<profiles::Profile, String> {
+    pub async fn fetch_profile(&self, pubkey: &str) -> Result<profiles::Profile, String> {
         profiles::fetch_profile(pubkey.to_string()).await
     }
     /// Prefetch multiple profiles (async)

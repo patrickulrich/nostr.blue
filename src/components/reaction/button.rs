@@ -1,8 +1,8 @@
 //! Reaction button component with emoji picker
 //! Encapsulates the like button, reaction picker, and click-outside-to-close behavior
-use crate::components::icons::HeartIcon;
 use super::defaults_modal::ReactionDefaultsModal;
 use super::picker::InlineReactionPicker;
+use crate::components::icons::HeartIcon;
 use crate::hooks::{format_count, ReactionEmoji, ReactionState, UseReaction};
 use crate::stores::reactions_store::get_default_reaction;
 use dioxus::prelude::*;
@@ -21,10 +21,9 @@ fn compute_picker_position(
     viewport_width: f64,
     viewport_height: f64,
 ) -> (f64, f64, bool) {
-    let max_left = (viewport_width - PICKER_WIDTH_PX - PICKER_EDGE_PADDING_PX)
-        .max(PICKER_EDGE_PADDING_PX);
-    let left = (anchor_x - (PICKER_WIDTH_PX / 2.0))
-        .clamp(PICKER_EDGE_PADDING_PX, max_left);
+    let max_left =
+        (viewport_width - PICKER_WIDTH_PX - PICKER_EDGE_PADDING_PX).max(PICKER_EDGE_PADDING_PX);
+    let left = (anchor_x - (PICKER_WIDTH_PX / 2.0)).clamp(PICKER_EDGE_PADDING_PX, max_left);
     let top_candidate = anchor_top - PICKER_HEIGHT_PX - PICKER_GAP_PX;
     let (top, position_below) = if top_candidate >= PICKER_EDGE_PADDING_PX {
         (top_candidate, false)
@@ -61,14 +60,9 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
     let mut show_defaults_modal = use_signal(|| false);
     let mut custom_emoji_failed = use_signal(|| false);
     let user_reaction_for_effect = props.reaction.user_reaction;
-    use_effect(
-        use_reactive(
-            &*user_reaction_for_effect.read(),
-            move |_| {
-                custom_emoji_failed.set(false);
-            },
-        ),
-    );
+    use_effect(use_reactive(&*user_reaction_for_effect.read(), move |_| {
+        custom_emoji_failed.set(false);
+    }));
     let button_id = use_signal(|| format!("reaction-btn-{}", uuid::Uuid::new_v4()));
     #[allow(unused_mut, unused_variables)]
     let mut picker_top = use_signal(|| 0.0);

@@ -90,10 +90,17 @@ pub struct ChapterData {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ChapterContent {
-    Heading { content: Vec<String> },
+    Heading {
+        content: Vec<String>,
+    },
     LineBreak,
-    Verse { number: u32, content: Vec<VerseContent> },
-    HebrewSubtitle { content: Vec<VerseContent> },
+    Verse {
+        number: u32,
+        content: Vec<VerseContent>,
+    },
+    HebrewSubtitle {
+        content: Vec<VerseContent>,
+    },
 }
 /// Verse content can be plain text, formatted text, or special elements.
 ///
@@ -175,10 +182,7 @@ pub struct FootnoteVerseReference {
 }
 /// Helper to perform HTTP GET request with timeout
 /// Reduces code duplication across fetch_translations, fetch_books, fetch_chapter
-async fn fetch_with_timeout(
-    url: &str,
-    error_context: &str,
-) -> Result<reqwest::Response, String> {
+async fn fetch_with_timeout(url: &str, error_context: &str) -> Result<reqwest::Response, String> {
     #[cfg(feature = "web")]
     let response = {
         use futures::FutureExt;
@@ -290,11 +294,7 @@ pub fn format_verse_range_reference(
     } else {
         format!(
             "{} {}:{}-{} ({})",
-            book_name,
-            chapter,
-            start_verse,
-            end_verse,
-            translation,
+            book_name, chapter, start_verse, end_verse, translation,
         )
     }
 }
@@ -361,46 +361,36 @@ pub fn verse_to_plain_text(content: &[VerseContent]) -> String {
     content
         .iter()
         .filter_map(|c| c.as_text())
-        .fold(
-            String::new(),
-            |mut acc, t| {
-                if !acc.is_empty() {
-                    acc.push(' ');
-                }
-                acc.push_str(t);
-                acc
-            },
-        )
+        .fold(String::new(), |mut acc, t| {
+            if !acc.is_empty() {
+                acc.push(' ');
+            }
+            acc.push_str(t);
+            acc
+        })
 }
 /// Filter to get only English translations
 pub fn filter_english_translations(translations: &[Translation]) -> Vec<Translation> {
-    translations.iter().filter(|t| t.language == "eng").cloned().collect()
+    translations
+        .iter()
+        .filter(|t| t.language == "eng")
+        .cloned()
+        .collect()
 }
 /// Common English translations to prioritize
-pub const RECOMMENDED_TRANSLATIONS: &[&str] = &[
-    "BSB",
-    "KJV",
-    "ASV",
-    "WEB",
-    "NASB",
-    "ESV",
-    "NIV",
-];
+pub const RECOMMENDED_TRANSLATIONS: &[&str] = &["BSB", "KJV", "ASV", "WEB", "NASB", "ESV", "NIV"];
 /// Filter and sort translations, prioritizing recommended ones
-pub fn sort_translations_by_priority(
-    translations: Vec<Translation>,
-) -> Vec<Translation> {
+pub fn sort_translations_by_priority(translations: Vec<Translation>) -> Vec<Translation> {
     let mut result = translations;
-    result
-        .sort_by(|a, b| {
-            let a_priority = RECOMMENDED_TRANSLATIONS.iter().position(|&x| x == a.id);
-            let b_priority = RECOMMENDED_TRANSLATIONS.iter().position(|&x| x == b.id);
-            match (a_priority, b_priority) {
-                (Some(ap), Some(bp)) => ap.cmp(&bp),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => a.english_name.cmp(&b.english_name),
-            }
-        });
+    result.sort_by(|a, b| {
+        let a_priority = RECOMMENDED_TRANSLATIONS.iter().position(|&x| x == a.id);
+        let b_priority = RECOMMENDED_TRANSLATIONS.iter().position(|&x| x == b.id);
+        match (a_priority, b_priority) {
+            (Some(ap), Some(bp)) => ap.cmp(&bp),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => a.english_name.cmp(&b.english_name),
+        }
+    });
     result
 }

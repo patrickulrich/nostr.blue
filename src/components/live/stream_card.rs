@@ -30,8 +30,11 @@ pub struct LiveStreamMeta {
 pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
     let live_event = parse_nip53_live_event(event)?;
     log::debug!(
-        "Parsed LiveEvent: d_tag={}, title={:?}, streaming={:?}, status={:?}", live_event
-        .id, live_event.title, live_event.streaming, live_event.status
+        "Parsed LiveEvent: d_tag={}, title={:?}, streaming={:?}, status={:?}",
+        live_event.id,
+        live_event.title,
+        live_event.streaming,
+        live_event.status
     );
     let host = extract_live_event_host(event, &live_event);
     let host_pubkey = host.as_ref().map(|h| h.public_key.clone());
@@ -126,27 +129,22 @@ pub fn LiveStreamCard(event: NostrEvent) -> Element {
     let author_pubkey_display = author_pubkey.clone();
     let host_verified = stream_meta.host_verified;
     let created_at = event.created_at;
-    let coord = Coordinate::new(Kind::from(30311), event.pubkey)
-        .identifier(&stream_meta.d_tag);
+    let coord = Coordinate::new(Kind::from(30311), event.pubkey).identifier(&stream_meta.d_tag);
     let naddr = coord
         .to_bech32()
         .unwrap_or_else(|_| format!("30311:{}:{}", event.pubkey, stream_meta.d_tag));
-    let author_metadata = use_memo(move || profiles::get_profile(
-        &author_pubkey_for_fetch,
+    let author_metadata = use_memo(move || profiles::get_profile(&author_pubkey_for_fetch));
+    use_effect(use_reactive(
+        (&author_pubkey_display, &*CLIENT_INITIALIZED.read()),
+        move |(pk, client_initialized)| {
+            if !client_initialized {
+                return;
+            }
+            spawn(async move {
+                let _ = profiles::fetch_profile(pk).await;
+            });
+        },
     ));
-    use_effect(
-        use_reactive(
-            (&author_pubkey_display, &*CLIENT_INITIALIZED.read()),
-            move |(pk, client_initialized)| {
-                if !client_initialized {
-                    return;
-                }
-                spawn(async move {
-                    let _ = profiles::fetch_profile(pk).await;
-                });
-            },
-        ),
-    );
     let author_name = if let Some(ref metadata) = *author_metadata.read() {
         metadata
             .display_name

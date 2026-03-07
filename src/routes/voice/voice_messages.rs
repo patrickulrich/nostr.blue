@@ -53,11 +53,10 @@ pub fn VoiceMessages() -> Element {
         error.set(None);
         oldest_timestamp.set(None);
         has_more.set(true);
-        let next_gen = request_generation
-            .with_mut(|gen| {
-                *gen += 1;
-                *gen
-            });
+        let next_gen = request_generation.with_mut(|gen| {
+            *gen += 1;
+            *gen
+        });
         let captured_gen = next_gen;
         spawn(async move {
             let result = match current_feed_type {
@@ -222,9 +221,7 @@ pub fn VoiceMessages() -> Element {
     }
 }
 /// Load voice messages from followed users
-async fn load_following_voice_messages(
-    until: Option<u64>,
-) -> Result<Vec<Event>, String> {
+async fn load_following_voice_messages(until: Option<u64>) -> Result<Vec<Event>, String> {
     let pubkey_str = auth_store::get_pubkey()
         .ok_or("Not authenticated. Please sign in to view your following feed.")?;
     let contacts = nostr_client::fetch_contacts(pubkey_str).await?;

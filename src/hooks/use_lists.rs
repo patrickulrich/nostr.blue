@@ -1,9 +1,9 @@
-use dioxus::prelude::*;
-use nostr_sdk::{Event, Filter, Kind, PublicKey};
-use std::time::Duration;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::list_encryption::get_all_list_members_with_status;
 use crate::utils::list_kinds::{get_p_tag_count, LIST_KINDS, NAMED_PEOPLE};
+use dioxus::prelude::*;
+use nostr_sdk::{Event, Filter, Kind, PublicKey};
+use std::time::Duration;
 /// User list data structure
 #[derive(Clone, Debug, PartialEq)]
 pub struct UserList {
@@ -40,9 +40,7 @@ impl UserList {
                 event
                     .tags
                     .iter()
-                    .find(|tag| {
-                        tag.as_slice().first().map(|s| s.as_str()) == Some("title")
-                    })
+                    .find(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("title"))
                     .and_then(|tag| tag.content())
                     .map(|s| s.to_string())
             })
@@ -51,9 +49,7 @@ impl UserList {
         let description = event
             .tags
             .iter()
-            .find(|tag| {
-                tag.as_slice().first().map(|s| s.as_str()) == Some("description")
-            })
+            .find(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("description"))
             .and_then(|tag| tag.content())
             .map(|s| s.to_string())
             .unwrap_or_default();
@@ -107,9 +103,16 @@ pub fn use_user_lists() -> (
                 | Some(auth_store::LoginMethod::RemoteSigner)
         ) || {
             #[cfg(feature = "mobile")]
-            { matches!(auth.login_method, Some(auth_store::LoginMethod::AndroidSigner)) }
+            {
+                matches!(
+                    auth.login_method,
+                    Some(auth_store::LoginMethod::AndroidSigner)
+                )
+            }
             #[cfg(not(feature = "mobile"))]
-            { false }
+            {
+                false
+            }
         };
         if requires_signer && !has_signer {
             log::debug!("Waiting for signer before fetching lists...");
@@ -147,11 +150,12 @@ async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
     // Wait for user relay lists if signer is present (critical for NIP-46
     // where signer restoration triggers HAS_SIGNER before relays are applied)
     crate::stores::relay::wait_for_user_relays(
-        std::time::Duration::from_secs(5), "fetch_user_lists"
-    ).await;
+        std::time::Duration::from_secs(5),
+        "fetch_user_lists",
+    )
+    .await;
     nostr_client::ensure_relays_ready(&client).await;
-    let pubkey = PublicKey::parse(pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     log::info!("Fetching lists for {}", pubkey_str);
     let filter = Filter::new()
         .author(pubkey)
@@ -191,7 +195,9 @@ async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
                     }
                     Err(e) => {
                         log::warn!(
-                            "Failed to get members for list '{}': {}", lists[idx].name, e
+                            "Failed to get members for list '{}': {}",
+                            lists[idx].name,
+                            e
                         );
                     }
                 }

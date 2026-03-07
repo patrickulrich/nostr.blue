@@ -14,12 +14,12 @@ use nostr_sdk::prelude::*;
 use std::num::NonZeroUsize;
 use std::time::Duration;
 type StdResult<T, E> = std::result::Result<T, E>;
-use std::collections::HashMap;
 use crate::utils::nkbip03::{
-    parse_citation, Citation, CitationType, KIND_EXTERNAL_WEB, KIND_HARDCOPY,
-    KIND_INTERNAL_REF, KIND_PROMPT,
+    parse_citation, Citation, CitationType, KIND_EXTERNAL_WEB, KIND_HARDCOPY, KIND_INTERNAL_REF,
+    KIND_PROMPT,
 };
 use crate::utils::nkbip06::generate_mime_tags;
+use std::collections::HashMap;
 /// Cache sizes
 const CITATION_CACHE_SIZE: usize = 200;
 /// Cached citation with event data
@@ -45,8 +45,7 @@ pub struct CitationGroup {
 }
 impl CitationGroup {
     pub fn total_count(&self) -> usize {
-        self.internal.len() + self.external.len() + self.hardcopy.len()
-            + self.prompt.len()
+        self.internal.len() + self.external.len() + self.hardcopy.len() + self.prompt.len()
     }
     pub fn all(&self) -> Vec<CachedCitation> {
         let mut all = Vec::new();
@@ -58,12 +57,10 @@ impl CitationGroup {
     }
 }
 /// Citation cache (keyed by event ID)
-pub static CITATIONS_CACHE: GlobalSignal<LruCache<String, CachedCitation>> = GlobalSignal::new(||
-LruCache::new(NonZeroUsize::new(CITATION_CACHE_SIZE).unwrap()));
+pub static CITATIONS_CACHE: GlobalSignal<LruCache<String, CachedCitation>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(CITATION_CACHE_SIZE).unwrap()));
 /// User's citations (grouped by type)
-pub static USER_CITATIONS: GlobalSignal<CitationGroup> = GlobalSignal::new(
-    CitationGroup::default,
-);
+pub static USER_CITATIONS: GlobalSignal<CitationGroup> = GlobalSignal::new(CitationGroup::default);
 /// Loading state
 pub static LOADING_CITATIONS: GlobalSignal<bool> = GlobalSignal::new(|| false);
 /// Store initialization flag
@@ -74,7 +71,9 @@ pub fn get_cached_citation(event_id: &str) -> Option<CachedCitation> {
 }
 /// Cache a citation
 pub fn cache_citation(citation: CachedCitation) {
-    CITATIONS_CACHE.write().put(citation.event.id.to_hex(), citation);
+    CITATIONS_CACHE
+        .write()
+        .put(citation.event.id.to_hex(), citation);
 }
 /// Cache multiple citations
 pub fn cache_citations(citations: &[CachedCitation]) {
@@ -97,8 +96,13 @@ pub fn clear_cache() {
 /// Parse a citation event into a CachedCitation
 pub fn parse_citation_event(event: &NostrEvent) -> Option<CachedCitation> {
     let event_kind = event.kind.as_u16();
-    if ![KIND_INTERNAL_REF, KIND_EXTERNAL_WEB, KIND_HARDCOPY, KIND_PROMPT]
-        .contains(&event_kind)
+    if ![
+        KIND_INTERNAL_REF,
+        KIND_EXTERNAL_WEB,
+        KIND_HARDCOPY,
+        KIND_PROMPT,
+    ]
+    .contains(&event_kind)
     {
         return None;
     }
@@ -137,35 +141,58 @@ pub fn group_citations(citations: Vec<CachedCitation>) -> CitationGroup {
 /// Build filter for all citation types by author
 pub fn citations_filter(pubkey: PublicKey, limit: usize) -> Vec<Filter> {
     vec![
-        Filter::new().kind(Kind::Custom(KIND_INTERNAL_REF)).author(pubkey).limit(limit),
-        Filter::new().kind(Kind::Custom(KIND_EXTERNAL_WEB)).author(pubkey).limit(limit),
-        Filter::new().kind(Kind::Custom(KIND_HARDCOPY)).author(pubkey).limit(limit),
-        Filter::new().kind(Kind::Custom(KIND_PROMPT)).author(pubkey).limit(limit),
+        Filter::new()
+            .kind(Kind::Custom(KIND_INTERNAL_REF))
+            .author(pubkey)
+            .limit(limit),
+        Filter::new()
+            .kind(Kind::Custom(KIND_EXTERNAL_WEB))
+            .author(pubkey)
+            .limit(limit),
+        Filter::new()
+            .kind(Kind::Custom(KIND_HARDCOPY))
+            .author(pubkey)
+            .limit(limit),
+        Filter::new()
+            .kind(Kind::Custom(KIND_PROMPT))
+            .author(pubkey)
+            .limit(limit),
     ]
 }
 /// Build filter for internal citations
 pub fn internal_citations_filter(pubkey: PublicKey, limit: usize) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_INTERNAL_REF)).author(pubkey).limit(limit)
+    Filter::new()
+        .kind(Kind::Custom(KIND_INTERNAL_REF))
+        .author(pubkey)
+        .limit(limit)
 }
 /// Build filter for external web citations
 pub fn external_citations_filter(pubkey: PublicKey, limit: usize) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_EXTERNAL_WEB)).author(pubkey).limit(limit)
+    Filter::new()
+        .kind(Kind::Custom(KIND_EXTERNAL_WEB))
+        .author(pubkey)
+        .limit(limit)
 }
 /// Build filter for hardcopy citations
 pub fn hardcopy_citations_filter(pubkey: PublicKey, limit: usize) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_HARDCOPY)).author(pubkey).limit(limit)
+    Filter::new()
+        .kind(Kind::Custom(KIND_HARDCOPY))
+        .author(pubkey)
+        .limit(limit)
 }
 /// Build filter for prompt/AI citations
 pub fn prompt_citations_filter(pubkey: PublicKey, limit: usize) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_PROMPT)).author(pubkey).limit(limit)
+    Filter::new()
+        .kind(Kind::Custom(KIND_PROMPT))
+        .author(pubkey)
+        .limit(limit)
 }
 /// Build filter for a specific citation by coordinate
-pub fn citation_by_coord_filter(
-    pubkey: PublicKey,
-    kind: u16,
-    identifier: &str,
-) -> Filter {
-    Filter::new().kind(Kind::Custom(kind)).author(pubkey).identifier(identifier)
+pub fn citation_by_coord_filter(pubkey: PublicKey, kind: u16, identifier: &str) -> Filter {
+    Filter::new()
+        .kind(Kind::Custom(kind))
+        .author(pubkey)
+        .identifier(identifier)
 }
 /// Build filter for citations referencing an event
 pub fn citations_referencing_filter(event_id: &str, limit: usize) -> Filter {
@@ -179,17 +206,14 @@ pub async fn fetch_citations_by_author(
     pubkey_hex: &str,
     limit: usize,
 ) -> StdResult<CitationGroup, String> {
-    let pubkey = PublicKey::from_hex(pubkey_hex)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::from_hex(pubkey_hex).map_err(|e| format!("Invalid pubkey: {}", e))?;
     *LOADING_CITATIONS.write() = true;
     let filters = citations_filter(pubkey, limit);
     let mut all_citations = Vec::new();
     for filter in filters {
-        let result = crate::stores::nostr_client::fetch_events_aggregated(
-                filter,
-                Duration::from_secs(10),
-            )
-            .await;
+        let result =
+            crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+                .await;
         if let Ok(events) = result {
             for event in events {
                 if let Some(citation) = parse_citation_event(&event) {
@@ -212,8 +236,7 @@ pub async fn fetch_citations_by_type(
     citation_type: CitationType,
     limit: usize,
 ) -> StdResult<Vec<CachedCitation>, String> {
-    let pubkey = PublicKey::from_hex(pubkey_hex)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::from_hex(pubkey_hex).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = match citation_type {
         CitationType::Internal => internal_citations_filter(pubkey, limit),
         CitationType::ExternalWeb => external_citations_filter(pubkey, limit),
@@ -221,18 +244,13 @@ pub async fn fetch_citations_by_type(
         CitationType::Prompt => prompt_citations_filter(pubkey, limit),
     };
     *LOADING_CITATIONS.write() = true;
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await;
     *LOADING_CITATIONS.write() = false;
     match result {
         Ok(events) => {
-            let citations: Vec<CachedCitation> = events
-                .iter()
-                .filter_map(parse_citation_event)
-                .collect();
+            let citations: Vec<CachedCitation> =
+                events.iter().filter_map(parse_citation_event).collect();
             cache_citations(&citations);
             Ok(citations)
         }
@@ -240,25 +258,15 @@ pub async fn fetch_citations_by_type(
     }
 }
 /// Fetch a specific citation by naddr
-pub async fn fetch_citation_by_naddr(
-    naddr: &str,
-) -> StdResult<Option<CachedCitation>, String> {
-    let coord = Coordinate::from_bech32(naddr)
-        .map_err(|e| format!("Invalid naddr: {}", e))?;
+pub async fn fetch_citation_by_naddr(naddr: &str) -> StdResult<Option<CachedCitation>, String> {
+    let coord = Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
     let identifier = coord.identifier;
     if identifier.is_empty() {
         return Err("No identifier in naddr".to_string());
     }
-    let filter = citation_by_coord_filter(
-        coord.public_key,
-        coord.kind.as_u16(),
-        &identifier,
-    );
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await;
+    let filter = citation_by_coord_filter(coord.public_key, coord.kind.as_u16(), &identifier);
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await;
     match result {
         Ok(events) => {
             if let Some(event) = events.first() {
@@ -306,16 +314,18 @@ pub async fn fetch_citations_by_identifiers(
     }
     for (identifier, lookup) in to_fetch {
         let result = match lookup {
-            CitationLookup::EventId(event_id) => {
-                fetch_citation_by_event_id(&event_id).await
-            }
-            CitationLookup::Coordinate { pubkey, kind, d_tag } => {
+            CitationLookup::EventId(event_id) => fetch_citation_by_event_id(&event_id).await,
+            CitationLookup::Coordinate {
+                pubkey,
+                kind,
+                d_tag,
+            } => {
                 let filter = citation_by_coord_filter(pubkey, kind, &d_tag);
                 let events = crate::stores::nostr_client::fetch_events_aggregated(
-                        filter,
-                        Duration::from_secs(10),
-                    )
-                    .await;
+                    filter,
+                    Duration::from_secs(10),
+                )
+                .await;
                 match events {
                     Ok(evts) => {
                         if let Some(event) = evts.first() {
@@ -333,13 +343,21 @@ pub async fn fetch_citations_by_identifiers(
             result_map.insert(identifier, citation);
         }
     }
-    log::info!("Resolved {}/{} citations", result_map.len(), identifiers.len());
+    log::info!(
+        "Resolved {}/{} citations",
+        result_map.len(),
+        identifiers.len()
+    );
     Ok(result_map)
 }
 /// Information needed to look up a citation
 enum CitationLookup {
     EventId(EventId),
-    Coordinate { pubkey: PublicKey, kind: u16, d_tag: String },
+    Coordinate {
+        pubkey: PublicKey,
+        kind: u16,
+        d_tag: String,
+    },
 }
 /// Parse a NIP-19 identifier into lookup information
 fn parse_citation_identifier(identifier: &str) -> Option<CitationLookup> {
@@ -377,11 +395,8 @@ async fn fetch_citation_by_event_id(
         return Ok(Some(citation));
     }
     let filter = Filter::new().id(*event_id);
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await;
     match result {
         Ok(events) => {
             if let Some(event) = events.first() {
@@ -422,8 +437,7 @@ pub async fn search_citations(
             }
             Citation::Prompt(p) => {
                 p.llm.to_lowercase().contains(&query_lower)
-                    || p
-                        .base
+                    || p.base
                         .summary
                         .as_ref()
                         .map(|s| s.to_lowercase().contains(&query_lower))
@@ -443,20 +457,15 @@ pub async fn publish_internal_citation(
     author: Option<&str>,
     existing_d_tag: Option<&str>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
-    let d_tag = existing_d_tag
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| {
-            title
-                .map(crate::utils::nip54::normalize_wiki_dtag)
-                .unwrap_or_else(|| {
-                    format!("citation-{}", &cited_address[..8.min(cited_address.len())])
-                })
-        });
+    let d_tag = existing_d_tag.map(|s| s.to_string()).unwrap_or_else(|| {
+        title
+            .map(crate::utils::nip54::normalize_wiki_dtag)
+            .unwrap_or_else(|| format!("citation-{}", &cited_address[..8.min(cited_address.len())]))
+    });
     let mut tags: Vec<Tag> = vec![
         Tag::identifier(&d_tag),
         Tag::custom(TagKind::Custom("c".into()), vec![cited_address.to_string()]),
@@ -466,16 +475,21 @@ pub async fn publish_internal_citation(
         ),
     ];
     if let Some(t) = title {
-        tags.push(Tag::custom(TagKind::Custom("title".into()), vec![t.to_string()]));
+        tags.push(Tag::custom(
+            TagKind::Custom("title".into()),
+            vec![t.to_string()],
+        ));
     }
     if let Some(a) = author {
-        tags.push(Tag::custom(TagKind::Custom("author".into()), vec![a.to_string()]));
+        tags.push(Tag::custom(
+            TagKind::Custom("author".into()),
+            vec![a.to_string()],
+        ));
     }
     for mime_tag in generate_mime_tags(KIND_INTERNAL_REF) {
         tags.push(mime_tag);
     }
-    let builder = EventBuilder::new(Kind::Custom(KIND_INTERNAL_REF), cited_text)
-        .tags(tags);
+    let builder = EventBuilder::new(Kind::Custom(KIND_INTERNAL_REF), cited_text).tags(tags);
     let output = client
         .send_event_builder(builder)
         .await
@@ -492,20 +506,17 @@ pub async fn publish_external_citation(
     author: Option<&str>,
     existing_d_tag: Option<&str>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
-    let d_tag = existing_d_tag
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| {
-            title
-                .map(crate::utils::nip54::normalize_wiki_dtag)
-                .unwrap_or_else(|| {
-                    format!("web-{}", &url[..20.min(url.len())].replace([':', '/'], "-"))
-                })
-        });
+    let d_tag = existing_d_tag.map(|s| s.to_string()).unwrap_or_else(|| {
+        title
+            .map(crate::utils::nip54::normalize_wiki_dtag)
+            .unwrap_or_else(|| {
+                format!("web-{}", &url[..20.min(url.len())].replace([':', '/'], "-"))
+            })
+    });
     let mut tags: Vec<Tag> = vec![
         Tag::identifier(&d_tag),
         Tag::custom(TagKind::Custom("u".into()), vec![url.to_string()]),
@@ -515,16 +526,21 @@ pub async fn publish_external_citation(
         ),
     ];
     if let Some(t) = title {
-        tags.push(Tag::custom(TagKind::Custom("title".into()), vec![t.to_string()]));
+        tags.push(Tag::custom(
+            TagKind::Custom("title".into()),
+            vec![t.to_string()],
+        ));
     }
     if let Some(a) = author {
-        tags.push(Tag::custom(TagKind::Custom("author".into()), vec![a.to_string()]));
+        tags.push(Tag::custom(
+            TagKind::Custom("author".into()),
+            vec![a.to_string()],
+        ));
     }
     for mime_tag in generate_mime_tags(KIND_EXTERNAL_WEB) {
         tags.push(mime_tag);
     }
-    let builder = EventBuilder::new(Kind::Custom(KIND_EXTERNAL_WEB), cited_text)
-        .tags(tags);
+    let builder = EventBuilder::new(Kind::Custom(KIND_EXTERNAL_WEB), cited_text).tags(tags);
     let output = client
         .send_event_builder(builder)
         .await
@@ -543,8 +559,7 @@ pub async fn publish_hardcopy_citation(
     doi: Option<&str>,
     existing_d_tag: Option<&str>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -561,17 +576,22 @@ pub async fn publish_hardcopy_citation(
         ),
     ];
     if let Some(p) = page_range {
-        tags.push(
-            Tag::custom(TagKind::Custom("page_range".into()), vec![p.to_string()]),
-        );
+        tags.push(Tag::custom(
+            TagKind::Custom("page_range".into()),
+            vec![p.to_string()],
+        ));
     }
     if let Some(pub_) = publisher {
-        tags.push(
-            Tag::custom(TagKind::Custom("published_by".into()), vec![pub_.to_string()]),
-        );
+        tags.push(Tag::custom(
+            TagKind::Custom("published_by".into()),
+            vec![pub_.to_string()],
+        ));
     }
     if let Some(d) = doi {
-        tags.push(Tag::custom(TagKind::Custom("doi".into()), vec![d.to_string()]));
+        tags.push(Tag::custom(
+            TagKind::Custom("doi".into()),
+            vec![d.to_string()],
+        ));
     }
     for mime_tag in generate_mime_tags(KIND_HARDCOPY) {
         tags.push(mime_tag);
@@ -595,20 +615,17 @@ pub async fn publish_prompt_citation(
     author: Option<&str>,
     existing_d_tag: Option<&str>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
-    let d_tag = existing_d_tag
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| {
-            format!(
-                "prompt-{}-{}",
-                llm.to_lowercase().replace(' ', "-"),
-                Timestamp::now().as_secs(),
-            )
-        });
+    let d_tag = existing_d_tag.map(|s| s.to_string()).unwrap_or_else(|| {
+        format!(
+            "prompt-{}-{}",
+            llm.to_lowercase().replace(' ', "-"),
+            Timestamp::now().as_secs(),
+        )
+    });
     let mut tags: Vec<Tag> = vec![
         Tag::identifier(&d_tag),
         Tag::custom(TagKind::Custom("llm".into()), vec![llm.to_string()]),
@@ -618,16 +635,28 @@ pub async fn publish_prompt_citation(
         ),
     ];
     if let Some(s) = conversation_summary {
-        tags.push(Tag::custom(TagKind::Custom("summary".into()), vec![s.to_string()]));
+        tags.push(Tag::custom(
+            TagKind::Custom("summary".into()),
+            vec![s.to_string()],
+        ));
     }
     if let Some(u) = url {
-        tags.push(Tag::custom(TagKind::Custom("u".into()), vec![u.to_string()]));
+        tags.push(Tag::custom(
+            TagKind::Custom("u".into()),
+            vec![u.to_string()],
+        ));
     }
     if let Some(t) = title {
-        tags.push(Tag::custom(TagKind::Custom("title".into()), vec![t.to_string()]));
+        tags.push(Tag::custom(
+            TagKind::Custom("title".into()),
+            vec![t.to_string()],
+        ));
     }
     if let Some(a) = author {
-        tags.push(Tag::custom(TagKind::Custom("author".into()), vec![a.to_string()]));
+        tags.push(Tag::custom(
+            TagKind::Custom("author".into()),
+            vec![a.to_string()],
+        ));
     }
     for mime_tag in generate_mime_tags(KIND_PROMPT) {
         tags.push(mime_tag);
@@ -644,8 +673,7 @@ pub async fn publish_prompt_citation(
 mod tests {
     use super::*;
     use crate::utils::nkbip03::{
-        CitationBase, ExternalWebCitation, HardcopyCitation, InternalCitation,
-        PromptCitation,
+        CitationBase, ExternalWebCitation, HardcopyCitation, InternalCitation, PromptCitation,
     };
     use nostr_sdk::{EventBuilder, Keys};
     fn test_keys() -> Keys {

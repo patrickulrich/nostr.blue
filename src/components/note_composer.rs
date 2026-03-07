@@ -14,9 +14,7 @@ pub fn NoteComposer() -> Element {
     let mut show_poll_modal = use_signal(|| false);
     let mut publish_feedback = use_signal(|| Option::<(bool, String)>::None);
     let mut feedback_version = use_signal(|| 0u32);
-    let is_authenticated = use_memo(move || {
-        auth_store::AUTH_STATE.read().is_authenticated
-    });
+    let is_authenticated = use_memo(move || auth_store::AUTH_STATE.read().is_authenticated);
     let char_count = content.read().chars().count();
     let remaining = MAX_LENGTH.saturating_sub(char_count);
     let is_over_limit = char_count > MAX_LENGTH;
@@ -43,19 +41,18 @@ pub fn NoteComposer() -> Element {
                     let success_count = result.success_count();
                     let total = result.total_attempted();
                     log::info!(
-                        "Note published: {} ({}/{} relays)", result.event_id,
-                        success_count, total
+                        "Note published: {} ({}/{} relays)",
+                        result.event_id,
+                        success_count,
+                        total
                     );
                     if result.has_failures() && success_count > 0 {
                         feedback_version.set(feedback_version() + 1);
                         let current_version = feedback_version();
-                        publish_feedback
-                            .set(
-                                Some((
-                                    true,
-                                    format!("Published to {}/{} relays", success_count, total),
-                                )),
-                            );
+                        publish_feedback.set(Some((
+                            true,
+                            format!("Published to {}/{} relays", success_count, total),
+                        )));
                         content.set(String::new());
                         show_image_uploader.set(false);
                         is_publishing.set(false);
@@ -67,9 +64,7 @@ pub fn NoteComposer() -> Element {
                         feedback_version.set(feedback_version() + 1);
                         let current_version = feedback_version();
                         publish_feedback
-                            .set(
-                                Some((false, "Failed to publish to any relay".to_string())),
-                            );
+                            .set(Some((false, "Failed to publish to any relay".to_string())));
                         is_publishing.set(false);
                         crate::platform::timer::sleep_ms(3000).await;
                         if feedback_version() == current_version {

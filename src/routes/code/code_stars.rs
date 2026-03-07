@@ -4,8 +4,8 @@
 use crate::components::{icons, CodeRepoCard};
 use crate::routes::Route;
 use crate::services::git_hosting::stars::load_user_stars;
-use crate::stores::{auth_store, code_store, nostr_client};
 use crate::stores::nostr_client::fetch_events_aggregated;
+use crate::stores::{auth_store, code_store, nostr_client};
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
@@ -41,21 +41,28 @@ pub fn CodeStars() -> Element {
             // Load stars from relays into STARRED_REPOS
             if let Err(e) = load_user_stars().await {
                 log::warn!("Failed to load user stars: {}", e);
-                if *request_id.peek() != current_id { return; }
+                if *request_id.peek() != current_id {
+                    return;
+                }
                 star_load_error.set(Some(format!("Failed to load stars: {}", e)));
                 loading.set(false);
                 return;
             }
-            if *request_id.peek() != current_id { return; }
+            if *request_id.peek() != current_id {
+                return;
+            }
             // Hydrate CODE_REPOS_CACHE for starred repos
             let starred_coords: Vec<_> = code_store::STARRED_REPOS.peek().iter().cloned().collect();
             if !starred_coords.is_empty() {
-                let authors: std::collections::HashSet<PublicKey> = starred_coords.iter()
+                let authors: std::collections::HashSet<PublicKey> = starred_coords
+                    .iter()
                     .filter_map(|c| {
                         let parts: Vec<&str> = c.split(':').collect();
                         if parts.len() >= 3 && parts[0] == "30617" {
                             PublicKey::from_hex(parts[1]).ok()
-                        } else { None }
+                        } else {
+                            None
+                        }
                     })
                     .collect();
                 if !authors.is_empty() {
@@ -64,20 +71,27 @@ pub fn CodeStars() -> Element {
                         .authors(authors);
                     match fetch_events_aggregated(filter, Duration::from_secs(15)).await {
                         Ok(events) => {
-                            if *request_id.peek() != current_id { return; }
+                            if *request_id.peek() != current_id {
+                                return;
+                            }
                             code_store::cache_repo_events(&events);
                         }
                         Err(e) => {
                             log::error!("Failed to fetch starred repo events: {}", e);
-                            if *request_id.peek() != current_id { return; }
-                            star_load_error.set(Some(format!("Failed to load repository details: {}", e)));
+                            if *request_id.peek() != current_id {
+                                return;
+                            }
+                            star_load_error
+                                .set(Some(format!("Failed to load repository details: {}", e)));
                             loading.set(false);
                             return;
                         }
                     }
                 }
             }
-            if *request_id.peek() != current_id { return; }
+            if *request_id.peek() != current_id {
+                return;
+            }
             // Get Repository objects from cache
             let starred = code_store::get_starred_repos();
             repos.set(starred);

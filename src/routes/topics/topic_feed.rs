@@ -6,9 +6,8 @@ use crate::stores::auth_store;
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::profiles::prefetch_profiles;
 use crate::stores::topic_store::{
-    compute_hot_score, fetch_topic_posts, fetch_votes_batch,
-    is_topic_subscribed, subscribe_to_topic, unsubscribe_from_topic,
-    TopicPost, VoteCounts, LOADING_TOPIC_POSTS,
+    compute_hot_score, fetch_topic_posts, fetch_votes_batch, is_topic_subscribed,
+    subscribe_to_topic, unsubscribe_from_topic, TopicPost, VoteCounts, LOADING_TOPIC_POSTS,
 };
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
@@ -17,7 +16,9 @@ use std::collections::HashMap;
 #[component]
 pub fn TopicFeed(topic: String) -> Element {
     let mut topic_sig = use_signal(|| topic.clone());
-    use_effect(use_reactive!(|topic| { topic_sig.set(topic); }));
+    use_effect(use_reactive!(|topic| {
+        topic_sig.set(topic);
+    }));
 
     let mut sort_mode = use_signal(|| "new".to_string());
     let mut posts = use_signal(Vec::<TopicPost>::new);
@@ -42,8 +43,7 @@ pub fn TopicFeed(topic: String) -> Element {
                     .iter()
                     .filter_map(|p| EventId::from_hex(&p.id).ok())
                     .collect();
-                let user_pk = auth_store::get_pubkey()
-                    .and_then(|pk| PublicKey::from_hex(&pk).ok());
+                let user_pk = auth_store::get_pubkey().and_then(|pk| PublicKey::from_hex(&pk).ok());
                 if let Ok(votes) = fetch_votes_batch(event_ids, user_pk).await {
                     vote_counts.write().extend(votes);
                 }
@@ -110,8 +110,7 @@ pub fn TopicFeed(topic: String) -> Element {
                     .iter()
                     .filter_map(|p| EventId::from_hex(&p.id).ok())
                     .collect();
-                let user_pk = auth_store::get_pubkey()
-                    .and_then(|pk| PublicKey::from_hex(&pk).ok());
+                let user_pk = auth_store::get_pubkey().and_then(|pk| PublicKey::from_hex(&pk).ok());
                 if let Ok(votes) = fetch_votes_batch(event_ids, user_pk).await {
                     vote_counts.write().extend(votes);
                 }

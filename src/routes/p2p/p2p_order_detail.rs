@@ -101,11 +101,13 @@ fn OrderDetailContent(order: P2POrder) -> Element {
             format!("{:.2} - {:.2} {}", min, max, order.currency)
         }
     };
-    let premium_display = order
-        .premium
-        .map(|p| {
-            if p >= 0.0 { format!("+{:.2}%", p) } else { format!("{:.2}%", p) }
-        });
+    let premium_display = order.premium.map(|p| {
+        if p >= 0.0 {
+            format!("+{:.2}%", p)
+        } else {
+            format!("{:.2}%", p)
+        }
+    });
     let sats_display = if order.amount_sats > 0 {
         format!("{} sats", format_sats_with_separator(order.amount_sats))
     } else {

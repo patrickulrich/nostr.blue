@@ -37,22 +37,20 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
     let artist_pubkey = track.artist_npub.clone();
     let artist_is_empty = track.artist.is_empty();
     let mut artist_name = use_signal(|| track.artist.clone());
-    use_effect(
-        use_reactive(
-            (&artist_pubkey, &artist_is_empty),
-            move |(pubkey_opt, is_empty)| {
-                if let Some(pubkey) = pubkey_opt.clone() {
-                    if is_empty {
-                        spawn(async move {
-                            if let Ok(profile) = profiles::fetch_profile(pubkey).await {
-                                artist_name.set(profile.get_display_name());
-                            }
-                        });
-                    }
+    use_effect(use_reactive(
+        (&artist_pubkey, &artist_is_empty),
+        move |(pubkey_opt, is_empty)| {
+            if let Some(pubkey) = pubkey_opt.clone() {
+                if is_empty {
+                    spawn(async move {
+                        if let Ok(profile) = profiles::fetch_profile(pubkey).await {
+                            artist_name.set(profile.get_display_name());
+                        }
+                    });
                 }
-            },
-        ),
-    );
+            }
+        },
+    ));
     let playlist = props.playlist.clone();
     let handle_play = {
         let track = track.clone();
@@ -70,112 +68,92 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
             format!("{:02}:{:02}", mins, secs)
         })
         .unwrap_or_else(|| "--:--".to_string());
-    let sats_display = track
-        .msat_total
-        .map(|msats| {
-            let sats = msats / 1000;
-            if sats >= 1_000_000 {
-                format!("{}M sats", sats / 1_000_000)
-            } else if sats >= 1_000 {
-                format!("{}K sats", sats / 1_000)
-            } else {
-                format!("{} sats", sats)
-            }
-        });
-    let source_info = match &track.source {
-        TrackSource::Wavlake { .. } => {
-            ("W", "Wavlake", "bg-orange-500/20 text-orange-400")
+    let sats_display = track.msat_total.map(|msats| {
+        let sats = msats / 1000;
+        if sats >= 1_000_000 {
+            format!("{}M sats", sats / 1_000_000)
+        } else if sats >= 1_000 {
+            format!("{}K sats", sats / 1_000)
+        } else {
+            format!("{} sats", sats)
         }
+    });
+    let source_info = match &track.source {
+        TrackSource::Wavlake { .. } => ("W", "Wavlake", "bg-orange-500/20 text-orange-400"),
         TrackSource::Nostr { .. } => ("N", "Nostr", "bg-purple-500/20 text-purple-400"),
         TrackSource::NostrPodcast { .. } => {
             ("P", "Nostr Podcast", "bg-green-500/20 text-green-400")
         }
-        TrackSource::RssPodcast { .. } => {
-            ("R", "RSS Podcast", "bg-green-500/20 text-green-400")
-        }
-        TrackSource::RssMusic { .. } => {
-            ("RSS", "Podcasting 2.0 Music", "bg-orange-500/20 text-orange-400")
-        }
-        TrackSource::Radio { .. } => {
-            ("LIVE", "Internet Radio", "bg-red-500/20 text-red-400")
-        }
+        TrackSource::RssPodcast { .. } => ("R", "RSS Podcast", "bg-green-500/20 text-green-400"),
+        TrackSource::RssMusic { .. } => (
+            "RSS",
+            "Podcasting 2.0 Music",
+            "bg-orange-500/20 text-orange-400",
+        ),
+        TrackSource::Radio { .. } => ("LIVE", "Internet Radio", "bg-red-500/20 text-red-400"),
     };
     let artwork_url = track
         .album_art_url
         .clone()
-        .unwrap_or_else(|| {
-            "https://api.dicebear.com/7.x/shapes/svg?seed=music".to_string()
-        });
+        .unwrap_or_else(|| "https://api.dicebear.com/7.x/shapes/svg?seed=music".to_string());
     let (share_url, share_content_type) = match &track.source {
-        TrackSource::Wavlake { .. } => {
-            (format!("https://wavlake.com/track/{}", track.id), ContentType::MusicTrack)
-        }
-        TrackSource::Nostr { coordinate, .. } => {
-            (
-                format!("https://nostr.blue/music/track/{}", coordinate),
-                ContentType::MusicTrack,
-            )
-        }
-        TrackSource::NostrPodcast { coordinate, .. } => {
-            (
-                format!("https://nostr.blue/podcast/episode/{}", coordinate),
-                ContentType::PodcastEpisode,
-            )
-        }
-        TrackSource::RssPodcast { feed_url, episode_guid, .. } => {
-            (
-                format!(
-                    "https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
-                    urlencoding::encode(feed_url),
-                    urlencoding::encode(episode_guid),
-                ),
-                ContentType::PodcastEpisode,
-            )
-        }
-        TrackSource::RssMusic { feed_id, episode_id, .. } => {
-            (
-                format!(
-                    "https://nostr.blue/music/rss/album/{}#track-{}",
-                    feed_id,
-                    episode_id,
-                ),
-                ContentType::MusicTrack,
-            )
-        }
-        TrackSource::Radio { d_tag, .. } => {
-            (
-                format!("https://nostr.blue/radio/{}", urlencoding::encode(d_tag)),
-                ContentType::MusicTrack,
-            )
-        }
+        TrackSource::Wavlake { .. } => (
+            format!("https://wavlake.com/track/{}", track.id),
+            ContentType::MusicTrack,
+        ),
+        TrackSource::Nostr { coordinate, .. } => (
+            format!("https://nostr.blue/music/track/{}", coordinate),
+            ContentType::MusicTrack,
+        ),
+        TrackSource::NostrPodcast { coordinate, .. } => (
+            format!("https://nostr.blue/podcast/episode/{}", coordinate),
+            ContentType::PodcastEpisode,
+        ),
+        TrackSource::RssPodcast {
+            feed_url,
+            episode_guid,
+            ..
+        } => (
+            format!(
+                "https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
+                urlencoding::encode(feed_url),
+                urlencoding::encode(episode_guid),
+            ),
+            ContentType::PodcastEpisode,
+        ),
+        TrackSource::RssMusic {
+            feed_id,
+            episode_id,
+            ..
+        } => (
+            format!(
+                "https://nostr.blue/music/rss/album/{}#track-{}",
+                feed_id, episode_id,
+            ),
+            ContentType::MusicTrack,
+        ),
+        TrackSource::Radio { d_tag, .. } => (
+            format!("https://nostr.blue/radio/{}", urlencoding::encode(d_tag)),
+            ContentType::MusicTrack,
+        ),
     };
     let artist_route = match &track.source {
-        TrackSource::Wavlake { artist_id, .. } => {
-            Route::MusicArtist {
-                artist_id: artist_id.clone(),
-            }
-        }
-        TrackSource::Nostr { pubkey, .. } => {
-            Route::MusicArtist {
-                artist_id: pubkey.clone(),
-            }
-        }
-        TrackSource::NostrPodcast { pubkey, .. } => {
-            Route::Profile {
-                pubkey: pubkey.clone(),
-            }
-        }
-        TrackSource::RssPodcast { .. } => Route::Home { list: String::new() },
-        TrackSource::RssMusic { feed_id, .. } => {
-            Route::MusicRssAlbum {
-                feed_id: *feed_id,
-            }
-        }
-        TrackSource::Radio { pubkey, .. } => {
-            Route::Profile {
-                pubkey: pubkey.clone(),
-            }
-        }
+        TrackSource::Wavlake { artist_id, .. } => Route::MusicArtist {
+            artist_id: artist_id.clone(),
+        },
+        TrackSource::Nostr { pubkey, .. } => Route::MusicArtist {
+            artist_id: pubkey.clone(),
+        },
+        TrackSource::NostrPodcast { pubkey, .. } => Route::Profile {
+            pubkey: pubkey.clone(),
+        },
+        TrackSource::RssPodcast { .. } => Route::Home {
+            list: String::new(),
+        },
+        TrackSource::RssMusic { feed_id, .. } => Route::MusicRssAlbum { feed_id: *feed_id },
+        TrackSource::Radio { pubkey, .. } => Route::Profile {
+            pubkey: pubkey.clone(),
+        },
     };
     rsx! {
         div {

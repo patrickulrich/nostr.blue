@@ -1,7 +1,7 @@
 use crate::stores::cashu::{
     calculate_mpp_split, create_melt_quote, create_mpp_melt_quotes, execute_mpp_melt,
-    get_balances_per_mint, get_mints, melt_tokens, mint_supports_mpp, ws as cashu_ws,
-    MeltProgress, MeltQuoteInfo, MppQuoteInfo, MELT_PROGRESS,
+    get_balances_per_mint, get_mints, melt_tokens, mint_supports_mpp, ws as cashu_ws, MeltProgress,
+    MeltQuoteInfo, MppQuoteInfo, MELT_PROGRESS,
 };
 use crate::stores::cashu_cdk_bridge::WALLET_BALANCES;
 use crate::utils::shorten_url;
@@ -125,8 +125,7 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
                             is_creating_quote.set(false);
                         }
                         Err(e) => {
-                            error_message
-                                .set(Some(format!("Failed to create quote: {}", e)));
+                            error_message.set(Some(format!("Failed to create quote: {}", e)));
                             is_creating_quote.set(false);
                         }
                     }
@@ -147,8 +146,7 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
                             is_creating_quote.set(false);
                         }
                         Err(e) => {
-                            error_message
-                                .set(Some(format!("Failed to create MPP quotes: {}", e)));
+                            error_message.set(Some(format!("Failed to create MPP quotes: {}", e)));
                             is_creating_quote.set(false);
                         }
                     }
@@ -173,11 +171,11 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
                     melt_status.set(Some("Connecting...".to_string()));
                     spawn(async move {
                         if let Ok(mut rx) = cashu_ws::subscribe_to_quote(
-                                mint_for_ws,
-                                quote_id_for_ws,
-                                cashu_ws::SubscriptionKind::Bolt11MeltQuote,
-                            )
-                            .await
+                            mint_for_ws,
+                            quote_id_for_ws,
+                            cashu_ws::SubscriptionKind::Bolt11MeltQuote,
+                        )
+                        .await
                         {
                             if !*mounted.peek() {
                                 return;
@@ -239,10 +237,11 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
                     spawn(async move {
                         match execute_mpp_melt(contributions).await {
                             Ok(result) => {
-                                payment_result
-                                    .set(
-                                        Some((result.paid, result.preimage, result.total_fee_paid)),
-                                    );
+                                payment_result.set(Some((
+                                    result.paid,
+                                    result.preimage,
+                                    result.total_fee_paid,
+                                )));
                                 is_paying.set(false);
                                 melt_status.set(None);
                                 *MELT_PROGRESS.write() = None;
@@ -254,8 +253,7 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
                                 }
                             }
                             Err(e) => {
-                                error_message
-                                    .set(Some(format!("MPP payment failed: {}", e)));
+                                error_message.set(Some(format!("MPP payment failed: {}", e)));
                                 is_paying.set(false);
                                 melt_status.set(None);
                                 *MELT_PROGRESS.write() = None;
@@ -615,7 +613,11 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
 }
 /// Get balance for a specific mint from balances list
 fn get_mint_balance(balances: &[(String, u64)], mint_url: &str) -> u64 {
-    balances.iter().find(|(url, _)| url == mint_url).map(|(_, b)| *b).unwrap_or(0)
+    balances
+        .iter()
+        .find(|(url, _)| url == mint_url)
+        .map(|(_, b)| *b)
+        .unwrap_or(0)
 }
 /// Progress step indicator component
 #[component]

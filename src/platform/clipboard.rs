@@ -14,8 +14,7 @@ pub async fn copy_to_clipboard(text: &str) -> Result<(), String> {
     {
         let text = text.to_string();
         tokio::task::spawn_blocking(move || {
-            let mut clipboard =
-                arboard::Clipboard::new().map_err(|e| e.to_string())?;
+            let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
             clipboard.set_text(&text).map_err(|e| e.to_string())
         })
         .await

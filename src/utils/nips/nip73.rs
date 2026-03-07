@@ -2,8 +2,8 @@
 //!
 //! Utilities for extracting and displaying external content references from Nostr events.
 //! Leverages the rust-nostr SDK's built-in NIP-73 support.
-use nostr_sdk::prelude::*;
 pub use nostr::nips::nip73::ExternalContentId;
+use nostr_sdk::prelude::*;
 /// Extract external content references from an event's `i` tags
 ///
 /// Returns a vector of (ExternalContentId, Option<Url>) tuples where the URL
@@ -11,9 +11,7 @@ pub use nostr::nips::nip73::ExternalContentId;
 pub fn extract_external_content(event: &Event) -> Vec<(ExternalContentId, Option<Url>)> {
     let mut results = Vec::new();
     for tag in event.tags.iter() {
-        if let Some(TagStandard::ExternalContent { content, hint, .. }) = tag
-            .as_standardized()
-        {
+        if let Some(TagStandard::ExternalContent { content, hint, .. }) = tag.as_standardized() {
             results.push((content.clone(), hint.clone()));
         }
     }
@@ -35,7 +33,11 @@ pub fn get_display_name(content: &ExternalContentId) -> String {
             format!("Publisher: {}", truncate_id(guid))
         }
         ExternalContentId::Geohash(hash) => format!("Location: {}", hash),
-        ExternalContentId::BlockchainTransaction { chain, transaction_hash, .. } => {
+        ExternalContentId::BlockchainTransaction {
+            chain,
+            transaction_hash,
+            ..
+        } => {
             if chain == "bitcoin" {
                 format!("TX: {}", truncate_id(transaction_hash))
             } else {
@@ -57,16 +59,13 @@ pub fn get_display_name(content: &ExternalContentId) -> String {
 pub fn get_explorer_url(content: &ExternalContentId) -> Option<String> {
     match content {
         ExternalContentId::Url(url) => Some(url.to_string()),
-        ExternalContentId::Hashtag(tag) => {
-            Some(format!("/topics/t/{}", tag))
-        }
-        ExternalContentId::Book(isbn) => {
-            Some(format!("https://openlibrary.org/isbn/{}", isbn))
-        }
+        ExternalContentId::Hashtag(tag) => Some(format!("/topics/t/{}", tag)),
+        ExternalContentId::Book(isbn) => Some(format!("https://openlibrary.org/isbn/{}", isbn)),
         ExternalContentId::Paper(doi) => Some(format!("https://doi.org/{}", doi)),
-        ExternalContentId::Movie(isan) => {
-            Some(format!("https://web.isan.org/public/en/search?isan={}", isan))
-        }
+        ExternalContentId::Movie(isan) => Some(format!(
+            "https://web.isan.org/public/en/search?isan={}",
+            isan
+        )),
         ExternalContentId::PodcastFeed(guid) => {
             Some(format!("https://podcastindex.org/podcast/{}", guid))
         }
@@ -75,7 +74,11 @@ pub fn get_explorer_url(content: &ExternalContentId) -> Option<String> {
         }
         ExternalContentId::PodcastPublisher(_) => None,
         ExternalContentId::Geohash(hash) => Some(format!("https://geohash.org/{}", hash)),
-        ExternalContentId::BlockchainTransaction { chain, transaction_hash, .. } => {
+        ExternalContentId::BlockchainTransaction {
+            chain,
+            transaction_hash,
+            ..
+        } => {
             if chain == "bitcoin" {
                 Some(format!("https://mempool.space/tx/{}", transaction_hash))
             } else if chain == "ethereum" {
@@ -107,9 +110,9 @@ pub fn get_raw_identifier(content: &ExternalContentId) -> String {
         ExternalContentId::PodcastEpisode(guid) => guid.clone(),
         ExternalContentId::PodcastPublisher(guid) => guid.clone(),
         ExternalContentId::Geohash(hash) => hash.clone(),
-        ExternalContentId::BlockchainTransaction { transaction_hash, .. } => {
-            transaction_hash.clone()
-        }
+        ExternalContentId::BlockchainTransaction {
+            transaction_hash, ..
+        } => transaction_hash.clone(),
         ExternalContentId::BlockchainAddress { address, .. } => address.clone(),
     }
 }

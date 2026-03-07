@@ -29,13 +29,13 @@ pub fn PollNew() -> Element {
     let mut hashtags_input = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
-    let is_authenticated = use_memo(move || {
-        auth_store::AUTH_STATE.read().is_authenticated
-    });
+    let is_authenticated = use_memo(move || auth_store::AUTH_STATE.read().is_authenticated);
     let can_publish = use_memo(move || {
         let question = poll_question.read();
         let opts = options.read();
-        !question.trim().is_empty() && opts.len() >= 2 && opts.len() <= 10
+        !question.trim().is_empty()
+            && opts.len() >= 2
+            && opts.len() <= 10
             && opts.iter().all(|opt| !opt.text.trim().is_empty())
             && !*is_publishing.read()
     });
@@ -70,14 +70,14 @@ pub fn PollNew() -> Element {
             let hashtags: Vec<String> = extract_hashtags(&question, &hashtags_val);
             let relays = vec![];
             match nostr_client::publish_poll(
-                    question,
-                    poll_type_val,
-                    poll_options,
-                    relays,
-                    ends_at,
-                    hashtags,
-                )
-                .await
+                question,
+                poll_type_val,
+                poll_options,
+                relays,
+                ends_at,
+                hashtags,
+            )
+            .await
             {
                 Ok(event_id) => {
                     log::info!("Poll published successfully: {}", event_id);
@@ -94,10 +94,9 @@ pub fn PollNew() -> Element {
     };
     use_effect(move || {
         if !*is_authenticated.read() {
-            nav_effect
-                .push(crate::routes::Route::Home {
-                    list: String::new(),
-                });
+            nav_effect.push(crate::routes::Route::Home {
+                list: String::new(),
+            });
         }
     });
     if !*is_authenticated.read() {
@@ -303,9 +302,8 @@ pub fn PollNew() -> Element {
     }
 }
 /// Cached compiled regex for hashtag extraction
-static HASHTAG_REGEX: Lazy<regex::Regex> = Lazy::new(|| {
-    regex::Regex::new(r"#(\w+)").expect("Failed to compile hashtag regex")
-});
+static HASHTAG_REGEX: Lazy<regex::Regex> =
+    Lazy::new(|| regex::Regex::new(r"#(\w+)").expect("Failed to compile hashtag regex"));
 /// Extract hashtags from question and additional input
 fn extract_hashtags(question: &str, additional: &str) -> Vec<String> {
     use std::collections::HashSet;

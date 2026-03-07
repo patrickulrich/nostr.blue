@@ -61,10 +61,7 @@ pub fn WebBookmarkModal(
                 tags_input.set(user_tags.join(", "));
                 if let Some(published_ts) = get_published_at(evt) {
                     use chrono::DateTime;
-                    if let Some(dt) = DateTime::from_timestamp(
-                        published_ts.as_secs() as i64,
-                        0,
-                    ) {
+                    if let Some(dt) = DateTime::from_timestamp(published_ts.as_secs() as i64, 0) {
                         published_at_input.set(dt.format("%Y-%m-%d").to_string());
                     }
                 }
@@ -114,39 +111,39 @@ pub fn WebBookmarkModal(
         let new_url = evt.value().clone();
         url_input.set(new_url.clone());
         auto_fetched.set(false);
-        if mode == BookmarkModalMode::Add && !*auto_fetched.read()
+        if mode == BookmarkModalMode::Add
+            && !*auto_fetched.read()
             && !new_url.trim().is_empty()
             && new_url.contains('.')
-                && (new_url.starts_with("http") || !new_url.contains(' '))
-            {
-                spawn(async move {
-                    crate::platform::timer::sleep_ms(500).await;
-                    if url_input.read().trim() == new_url.trim() && !*auto_fetched.read()
-                    {
-                        is_fetching_metadata.set(true);
-                        error_msg.set(None);
-                        match fetch_url_metadata(new_url.clone()).await {
-                            Ok(metadata) => {
-                                if let Some(title) = metadata.title {
-                                    title_input.set(title);
-                                }
-                                if let Some(desc) = metadata.description {
-                                    description_input.set(desc);
-                                }
-                                if let Some(img) = metadata.image {
-                                    image_input.set(img);
-                                }
-                                auto_fetched.set(true);
-                                is_fetching_metadata.set(false);
+            && (new_url.starts_with("http") || !new_url.contains(' '))
+        {
+            spawn(async move {
+                crate::platform::timer::sleep_ms(500).await;
+                if url_input.read().trim() == new_url.trim() && !*auto_fetched.read() {
+                    is_fetching_metadata.set(true);
+                    error_msg.set(None);
+                    match fetch_url_metadata(new_url.clone()).await {
+                        Ok(metadata) => {
+                            if let Some(title) = metadata.title {
+                                title_input.set(title);
                             }
-                            Err(e) => {
-                                log::warn!("Auto-fetch failed: {}", e);
-                                is_fetching_metadata.set(false);
+                            if let Some(desc) = metadata.description {
+                                description_input.set(desc);
                             }
+                            if let Some(img) = metadata.image {
+                                image_input.set(img);
+                            }
+                            auto_fetched.set(true);
+                            is_fetching_metadata.set(false);
+                        }
+                        Err(e) => {
+                            log::warn!("Auto-fetch failed: {}", e);
+                            is_fetching_metadata.set(false);
                         }
                     }
-                });
-            }
+                }
+            });
+        }
     };
     let handle_save = move |_| {
         let url = url_input.read().trim().to_string();
@@ -188,33 +185,33 @@ pub fn WebBookmarkModal(
             let result = match mode {
                 BookmarkModalMode::Add => {
                     add_webbookmark(
-                            url,
-                            if title.is_empty() { None } else { Some(title) },
-                            if description.is_empty() {
-                                None
-                            } else {
-                                Some(description)
-                            },
-                            if image.is_empty() { None } else { Some(image) },
-                            published_ts,
-                            hashtags,
-                        )
-                        .await
+                        url,
+                        if title.is_empty() { None } else { Some(title) },
+                        if description.is_empty() {
+                            None
+                        } else {
+                            Some(description)
+                        },
+                        if image.is_empty() { None } else { Some(image) },
+                        published_ts,
+                        hashtags,
+                    )
+                    .await
                 }
                 BookmarkModalMode::Edit => {
                     update_webbookmark(
-                            url,
-                            if title.is_empty() { None } else { Some(title) },
-                            if description.is_empty() {
-                                None
-                            } else {
-                                Some(description)
-                            },
-                            if image.is_empty() { None } else { Some(image) },
-                            published_ts,
-                            hashtags,
-                        )
-                        .await
+                        url,
+                        if title.is_empty() { None } else { Some(title) },
+                        if description.is_empty() {
+                            None
+                        } else {
+                            Some(description)
+                        },
+                        if image.is_empty() { None } else { Some(image) },
+                        published_ts,
+                        hashtags,
+                    )
+                    .await
                 }
             };
             match result {

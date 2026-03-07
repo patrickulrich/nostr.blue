@@ -5,12 +5,10 @@ use std::rc::Rc;
 #[cfg(feature = "web")]
 type ObserverHandles = Rc<
     RefCell<
-        Option<
-            (
-                web_sys::IntersectionObserver,
-                wasm_bindgen::closure::Closure<dyn FnMut(js_sys::Array)>,
-            ),
-        >,
+        Option<(
+            web_sys::IntersectionObserver,
+            wasm_bindgen::closure::Closure<dyn FnMut(js_sys::Array)>,
+        )>,
     >,
 >;
 /// Infinite scroll hook that automatically triggers loading when sentinel element enters viewport
@@ -34,11 +32,7 @@ type ObserverHandles = Rc<
 /// // In your rsx:
 /// div { id: "{sentinel_id}", class: "h-4" }
 /// ```
-pub fn use_infinite_scroll<F>(
-    callback: F,
-    has_more: Signal<bool>,
-    loading: Signal<bool>,
-) -> String
+pub fn use_infinite_scroll<F>(callback: F, has_more: Signal<bool>, loading: Signal<bool>) -> String
 where
     F: FnMut() + 'static,
 {
@@ -53,7 +47,8 @@ where
     use_effect(move || {
         let trigger_value = *trigger.read();
         log::info!(
-            "[InfiniteScroll] Trigger effect running - trigger value: {}", trigger_value
+            "[InfiniteScroll] Trigger effect running - trigger value: {}",
+            trigger_value
         );
         if trigger_value == 0 {
             log::info!("[InfiniteScroll] Skipping first render (trigger is 0)");
@@ -62,7 +57,8 @@ where
         let is_loading = *loading.peek();
         let has_more_items = *has_more.peek();
         log::info!(
-            "[InfiniteScroll] Guard check - is_loading: {}, has_more: {}", is_loading,
+            "[InfiniteScroll] Guard check - is_loading: {}, has_more: {}",
+            is_loading,
             has_more_items
         );
         if is_loading {
@@ -78,9 +74,7 @@ where
             log::info!("[InfiniteScroll] Executing callback now");
             callback();
         } else {
-            log::warn!(
-                "[InfiniteScroll] Callback already executing, skipping this trigger"
-            );
+            log::warn!("[InfiniteScroll] Callback already executing, skipping this trigger");
         }
     });
     #[cfg(feature = "web")]
@@ -93,28 +87,21 @@ where
         impl Drop for ObserverCleanup {
             fn drop(&mut self) {
                 if Rc::strong_count(&self.handles) == 1 && !*self.cleaned.borrow() {
-                    if let Some((observer, _closure)) = self.handles.borrow_mut().take()
-                    {
+                    if let Some((observer, _closure)) = self.handles.borrow_mut().take() {
                         observer.disconnect();
                         *self.cleaned.borrow_mut() = true;
-                        log::info!(
-                            "[InfiniteScroll] Cleaned up observer and closure on unmount"
-                        );
+                        log::info!("[InfiniteScroll] Cleaned up observer and closure on unmount");
                     }
                 }
             }
         }
         let observer_handles = use_hook(|| {
-            Rc::new(
-                RefCell::new(
-                    None::<
-                        (
-                            web_sys::IntersectionObserver,
-                            wasm_bindgen::closure::Closure<dyn FnMut(js_sys::Array)>,
-                        ),
-                    >,
-                ),
-            )
+            Rc::new(RefCell::new(
+                None::<(
+                    web_sys::IntersectionObserver,
+                    wasm_bindgen::closure::Closure<dyn FnMut(js_sys::Array)>,
+                )>,
+            ))
         });
         use_hook(|| ObserverCleanup {
             handles: observer_handles.clone(),
@@ -126,9 +113,7 @@ where
             use wasm_bindgen::JsCast;
             let has_more_value = *has_more.read();
             if !has_more_value {
-                log::debug!(
-                    "[InfiniteScroll] has_more is false, skipping observer setup"
-                );
+                log::debug!("[InfiniteScroll] has_more is false, skipping observer setup");
                 if let Some((observer, _)) = observer_handles.borrow_mut().take() {
                     observer.disconnect();
                     log::debug!("[InfiniteScroll] Disconnected existing observer");
@@ -141,9 +126,7 @@ where
                 return;
             }
             observer_setup_done.set(true);
-            log::info!(
-                "[InfiniteScroll] Setting up IntersectionObserver (has_more became true)"
-            );
+            log::info!("[InfiniteScroll] Setting up IntersectionObserver (has_more became true)");
             let id = id_for_effect.clone();
             let mut trigger_clone = trigger;
             let observer_handles_clone = observer_handles.clone();
@@ -194,47 +177,46 @@ where
                         return;
                     }
                 };
-                let callback = Closure::wrap(
-                    Box::new(move |entries: js_sys::Array| {
-                        log::debug!(
-                            "[InfiniteScroll] IntersectionObserver callback fired, checking {} entries",
-                            entries.length()
-                        );
-                        for i in 0..entries.length() {
-                            if let Ok(entry) = entries
-                                .get(i)
-                                .dyn_into::<web_sys::IntersectionObserverEntry>()
-                            {
-                                let is_intersecting = entry.is_intersecting();
+                let callback = Closure::wrap(Box::new(move |entries: js_sys::Array| {
+                    log::debug!(
+                        "[InfiniteScroll] IntersectionObserver callback fired, checking {} entries",
+                        entries.length()
+                    );
+                    for i in 0..entries.length() {
+                        if let Ok(entry) = entries
+                            .get(i)
+                            .dyn_into::<web_sys::IntersectionObserverEntry>()
+                        {
+                            let is_intersecting = entry.is_intersecting();
+                            log::debug!(
+                                "[InfiniteScroll] Entry {} intersecting: {}",
+                                i,
+                                is_intersecting
+                            );
+                            if is_intersecting {
+                                let now = crate::platform::timestamp::now_millis();
+                                let last = *last_check_for_callback.peek();
                                 log::debug!(
-                                    "[InfiniteScroll] Entry {} intersecting: {}", i,
-                                    is_intersecting
+                                    "[InfiniteScroll] Debounce check - now: {}, last: {}, diff: {}",
+                                    now,
+                                    last,
+                                    now - last
                                 );
-                                if is_intersecting {
-                                    let now = crate::platform::timestamp::now_millis();
-                                    let last = *last_check_for_callback.peek();
+                                if now - last > 1000 {
+                                    last_check_for_callback.set(now);
+                                    trigger_clone.set(now);
+                                    log::info!("[InfiniteScroll] Triggered load more");
+                                } else {
                                     log::debug!(
-                                        "[InfiniteScroll] Debounce check - now: {}, last: {}, diff: {}",
-                                        now, last, now - last
-                                    );
-                                    if now - last > 1000 {
-                                        last_check_for_callback.set(now);
-                                        trigger_clone.set(now);
-                                        log::info!("[InfiniteScroll] Triggered load more");
-                                    } else {
-                                        log::debug!(
                                             "[InfiniteScroll] Debounce blocked - too soon after last trigger"
                                         );
-                                    }
-                                    break;
                                 }
+                                break;
                             }
                         }
-                    }) as Box<dyn FnMut(js_sys::Array)>,
-                );
-                log::info!(
-                    "[InfiniteScroll] Creating IntersectionObserver with 300px root margin"
-                );
+                    }
+                }) as Box<dyn FnMut(js_sys::Array)>);
+                log::info!("[InfiniteScroll] Creating IntersectionObserver with 300px root margin");
                 let options = web_sys::IntersectionObserverInit::new();
                 options.set_root_margin("300px");
                 let observer = match web_sys::IntersectionObserver::new_with_options(
@@ -242,9 +224,7 @@ where
                     &options,
                 ) {
                     Ok(obs) => {
-                        log::info!(
-                            "[InfiniteScroll] IntersectionObserver created successfully"
-                        );
+                        log::info!("[InfiniteScroll] IntersectionObserver created successfully");
                         obs
                     }
                     Err(e) => {

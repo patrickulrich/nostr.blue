@@ -1,11 +1,11 @@
 //! Reactions (kind 7)
 //!
 //! Publishing functions for reactions (NIP-25, NIP-30).
-use dioxus::prelude::ReadableExt;
-use nostr_sdk::prelude::*;
 use super::fetching::get_client;
 use super::signals::HAS_SIGNER;
 use super::types::PublishResult;
+use dioxus::prelude::ReadableExt;
+use nostr_sdk::prelude::*;
 /// Publish a reaction (kind 7 event) with relay feedback
 /// NIP-25: https://github.com/nostr-protocol/nips/blob/master/25.md
 /// NIP-30: Custom emoji support via emoji_tag parameter
@@ -24,26 +24,20 @@ pub async fn publish_reaction_tracked(
     use nostr::nips::nip25::ReactionTarget;
     use nostr::{EventId, PublicKey, Tag, Url};
     use nostr_sdk::nips::nip01::Coordinate;
-    let target_event_id = EventId::from_hex(&event_id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
-    let target_pubkey = PublicKey::parse(&event_author)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let (event_kind, event_coordinate) = match client
-        .database()
-        .event_by_id(&target_event_id)
-        .await
+    let target_event_id =
+        EventId::from_hex(&event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
+    let target_pubkey =
+        PublicKey::parse(&event_author).map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let (event_kind, event_coordinate) = match client.database().event_by_id(&target_event_id).await
     {
         Ok(Some(event)) => {
             let kind = Some(event.kind);
             let coordinate = if event.kind.is_addressable() {
-                event
-                    .tags
-                    .identifier()
-                    .map(|id| Coordinate {
-                        kind: event.kind,
-                        public_key: event.pubkey,
-                        identifier: id.to_string(),
-                    })
+                event.tags.identifier().map(|id| Coordinate {
+                    kind: event.kind,
+                    public_key: event.pubkey,
+                    identifier: id.to_string(),
+                })
             } else {
                 None
             };
@@ -70,18 +64,17 @@ pub async fn publish_reaction_tracked(
         if let Ok(parsed_url) = Url::parse(&url_str) {
             match parsed_url.scheme() {
                 "http" | "https" => {
-                    builder = builder
-                        .tag(
-                            Tag::from_standardized_without_cell(TagStandard::Emoji {
-                                shortcode,
-                                url: parsed_url,
-                            }),
-                        );
+                    builder =
+                        builder.tag(Tag::from_standardized_without_cell(TagStandard::Emoji {
+                            shortcode,
+                            url: parsed_url,
+                        }));
                     log::info!("Added custom emoji tag to reaction");
                 }
                 scheme => {
                     log::warn!(
-                        "Rejected emoji URL with invalid scheme '{}': {}", scheme,
+                        "Rejected emoji URL with invalid scheme '{}': {}",
+                        scheme,
                         url_str
                     );
                 }
@@ -96,8 +89,10 @@ pub async fn publish_reaction_tracked(
         .map_err(|e| format!("Failed to publish reaction: {}", e))?;
     let result = PublishResult::from_output(output);
     log::info!(
-        "Reaction published: {} ({}/{} relays succeeded)", result.event_id, result
-        .success_count(), result.total_attempted()
+        "Reaction published: {} ({}/{} relays succeeded)",
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
     );
     if result.has_failures() {
         for (relay, error) in &result.failed_relays {

@@ -6,8 +6,8 @@
 //! - Trending/recent podcasts from both sources
 //! - NIP-51 subscription management
 use crate::components::{
-    icons, DisplayEpisode, PodcastAddFeedModal, PodcastEpisodeCard,
-    PodcastEpisodeCardSkeleton, PodcastShow, PodcastShowCard, PodcastShowCardSkeleton,
+    icons, DisplayEpisode, PodcastAddFeedModal, PodcastEpisodeCard, PodcastEpisodeCardSkeleton,
+    PodcastShow, PodcastShowCard, PodcastShowCardSkeleton,
 };
 use crate::routes::Route;
 use crate::services::podcast_index;
@@ -486,12 +486,12 @@ struct BrowsePodcastRowProps {
 }
 #[component]
 fn BrowsePodcastRow(props: BrowsePodcastRowProps) -> Element {
-    let image = props
-        .image
-        .clone()
-        .unwrap_or_else(|| {
-            format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", props.title)
-        });
+    let image = props.image.clone().unwrap_or_else(|| {
+        format!(
+            "https://api.dicebear.com/7.x/shapes/svg?seed={}",
+            props.title
+        )
+    });
     rsx! {
         Link {
             to: props.route.clone(),
@@ -656,9 +656,7 @@ fn ApiCategoryTiles(props: ApiCategoryTilesProps) -> Element {
             .iter()
             .filter_map(|display_name| {
                 cats.iter()
-                    .find(|c| {
-                        c.name.to_lowercase().contains(&display_name.to_lowercase())
-                    })
+                    .find(|c| c.name.to_lowercase().contains(&display_name.to_lowercase()))
                     .map(|api_cat| {
                         let api_name = api_cat.name.clone();
                         let is_selected = props
@@ -772,13 +770,10 @@ fn RecentFromSubscriptions(props: RecentFromSubscriptionsProps) -> Element {
                 for ep in live_episodes {
                     if let Some(feed_id) = ep.feed_id {
                         if podcast_ids_set.contains(&feed_id) {
-                            if let Ok(feed) = podcast_index::get_podcast_by_id(feed_id)
-                                .await
-                            {
-                                all_episodes
-                                    .push(
-                                        DisplayEpisode::from_podcast_index_live_episode(&ep, &feed),
-                                    );
+                            if let Ok(feed) = podcast_index::get_podcast_by_id(feed_id).await {
+                                all_episodes.push(DisplayEpisode::from_podcast_index_live_episode(
+                                    &ep, &feed,
+                                ));
                             }
                         }
                     }
@@ -802,19 +797,13 @@ fn RecentFromSubscriptions(props: RecentFromSubscriptionsProps) -> Element {
                             log::warn!("Failed to fetch podcast: {:?}/{:?}", guid, id);
                             return None;
                         };
-                        let episodes = podcast_index::get_episodes_by_feed_id(
-                                feed.id,
-                                Some(5),
-                                None,
-                            )
-                            .await
-                            .unwrap_or_default();
+                        let episodes =
+                            podcast_index::get_episodes_by_feed_id(feed.id, Some(5), None)
+                                .await
+                                .unwrap_or_default();
                         let display_episodes: Vec<DisplayEpisode> = episodes
                             .iter()
-                            .map(|ep| DisplayEpisode::from_podcast_index_episode(
-                                ep,
-                                &feed,
-                            ))
+                            .map(|ep| DisplayEpisode::from_podcast_index_episode(ep, &feed))
                             .collect();
                         Some(display_episodes)
                     }
@@ -842,7 +831,11 @@ fn RecentFromSubscriptions(props: RecentFromSubscriptionsProps) -> Element {
                 .iter()
                 .filter_map(|coord| {
                     let parts: Vec<&str> = coord.split(':').collect();
-                    if parts.len() >= 2 { Some(parts[1].to_lowercase()) } else { None }
+                    if parts.len() >= 2 {
+                        Some(parts[1].to_lowercase())
+                    } else {
+                        None
+                    }
                 })
                 .collect();
             if subscribed_pubkeys.is_empty() {
@@ -854,13 +847,10 @@ fn RecentFromSubscriptions(props: RecentFromSubscriptionsProps) -> Element {
                 for ep in episodes {
                     let is_subscribed = match &ep.source {
                         crate::stores::nostr_music::TrackSource::NostrPodcast {
-                            pubkey,
-                            ..
-                        } => {
-                            subscribed_pubkeys
-                                .iter()
-                                .any(|sub_pk| sub_pk == &pubkey.to_lowercase())
-                        }
+                            pubkey, ..
+                        } => subscribed_pubkeys
+                            .iter()
+                            .any(|sub_pk| sub_pk == &pubkey.to_lowercase()),
                         _ => false,
                     };
                     if is_subscribed {
@@ -884,12 +874,10 @@ fn RecentFromSubscriptions(props: RecentFromSubscriptionsProps) -> Element {
                 all.extend(eps.clone());
             }
         }
-        all.sort_by(|a, b| {
-            match (a.is_live, b.is_live) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                _ => b.created_at.cmp(&a.created_at),
-            }
+        all.sort_by(|a, b| match (a.is_live, b.is_live) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => b.created_at.cmp(&a.created_at),
         });
         all
     };
@@ -899,10 +887,12 @@ fn RecentFromSubscriptions(props: RecentFromSubscriptionsProps) -> Element {
     let has_signer = nostr_client::has_signer();
     let subs_loading = *podcast_subscription::SUBSCRIPTIONS_LOADING.read();
     let subs_loaded = *podcast_subscription::SUBSCRIPTIONS_LOADED.read();
-    let is_initial_loading = !client_ready || !has_signer || !subs_loaded || subs_loading
+    let is_initial_loading = !client_ready
+        || !has_signer
+        || !subs_loaded
+        || subs_loading
         || (show_rss && *rss_loading.read() && rss_episodes.read().is_none())
-        || (show_nostr && *nostr_loading.read() && nostr_episodes.read().is_none()
-            && !show_rss);
+        || (show_nostr && *nostr_loading.read() && nostr_episodes.read().is_none() && !show_rss);
     let nostr_still_loading = show_nostr && (!client_ready || *nostr_loading.read());
     if is_initial_loading && !has_any_data {
         return rsx! {
@@ -1033,7 +1023,11 @@ struct SubscribedPodcastRowProps {
 #[derive(Clone, Debug)]
 enum SubscriptionMetadata {
     Rss(Box<podcast_index::PodcastFeed>),
-    Nostr { title: String, image: Option<String>, author: Option<String> },
+    Nostr {
+        title: String,
+        image: Option<String>,
+        author: Option<String>,
+    },
 }
 #[component]
 fn SubscribedPodcastRow(props: SubscribedPodcastRowProps) -> Element {
@@ -1056,9 +1050,7 @@ fn SubscribedPodcastRow(props: SubscribedPodcastRowProps) -> Element {
                             return Some(SubscriptionMetadata::Rss(Box::new(feed)));
                         }
                         Err(e) => {
-                            log::warn!(
-                                "Failed to fetch RSS podcast by ID {}: {}", id, e
-                            );
+                            log::warn!("Failed to fetch RSS podcast by ID {}: {}", id, e);
                         }
                     }
                 }
@@ -1068,9 +1060,7 @@ fn SubscribedPodcastRow(props: SubscribedPodcastRowProps) -> Element {
                             return Some(SubscriptionMetadata::Rss(Box::new(feed)));
                         }
                         Err(e) => {
-                            log::warn!(
-                                "Failed to fetch RSS podcast by GUID {}: {}", guid, e
-                            );
+                            log::warn!("Failed to fetch RSS podcast by GUID {}: {}", guid, e);
                             return None;
                         }
                     }
@@ -1088,7 +1078,8 @@ fn SubscribedPodcastRow(props: SubscribedPodcastRowProps) -> Element {
                         Err(_) => {
                             log::warn!(
                                 "Invalid kind in coordinate '{}': could not parse '{}'",
-                                coord, parts[0]
+                                coord,
+                                parts[0]
                             );
                             return None;
                         }
@@ -1102,16 +1093,12 @@ fn SubscribedPodcastRow(props: SubscribedPodcastRowProps) -> Element {
                             .kind(Kind::from(kind_num))
                             .custom_tag(SingleLetterTag::from_char('d').unwrap(), d_tag)
                             .limit(1);
-                        if let Ok(events) = nostr_client::fetch_events_aggregated(
-                                filter,
-                                Duration::from_secs(5),
-                            )
-                            .await
+                        if let Ok(events) =
+                            nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5))
+                                .await
                         {
                             if let Some(event) = events.into_iter().next() {
-                                if let Ok(metadata) = podcast::parse_podcast_metadata(
-                                    &event,
-                                ) {
+                                if let Ok(metadata) = podcast::parse_podcast_metadata(&event) {
                                     return Some(SubscriptionMetadata::Nostr {
                                         title: metadata.title,
                                         image: metadata.image,
@@ -1130,87 +1117,75 @@ fn SubscribedPodcastRow(props: SubscribedPodcastRowProps) -> Element {
     let data = podcast_data.read();
     let metadata = data.as_ref().and_then(|r| r.as_ref());
     let (title, image, author) = match metadata {
-        Some(SubscriptionMetadata::Rss(feed)) => {
-            (
-                feed.title.clone(),
-                feed
-                    .get_image()
-                    .map(String::from)
-                    .or_else(|| props.subscription.image.clone())
-                    .unwrap_or_else(|| {
-                        format!(
-                            "https://api.dicebear.com/7.x/shapes/svg?seed={}",
-                            feed.title,
-                        )
-                    }),
-                feed.author.clone(),
-            )
-        }
-        Some(SubscriptionMetadata::Nostr { title, image, author }) => {
-            (
-                title.clone(),
-                image
-                    .clone()
-                    .or_else(|| props.subscription.image.clone())
-                    .unwrap_or_else(|| {
-                        format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", title)
-                    }),
-                author.clone(),
-            )
-        }
-        None => {
-            let fallback_title = props
-                .subscription
-                .title
-                .clone()
-                .unwrap_or_else(|| {
-                    if let Some(id) = props.subscription.podcast_id {
-                        format!("Podcast #{}", id)
-                    } else if props.subscription.podcast_guid.is_some() {
-                        "Loading podcast...".to_string()
-                    } else {
-                        "Nostr Podcast".to_string()
-                    }
-                });
-            let fallback_image = props
-                .subscription
-                .image
-                .clone()
+        Some(SubscriptionMetadata::Rss(feed)) => (
+            feed.title.clone(),
+            feed.get_image()
+                .map(String::from)
+                .or_else(|| props.subscription.image.clone())
                 .unwrap_or_else(|| {
                     format!(
                         "https://api.dicebear.com/7.x/shapes/svg?seed={}",
-                        fallback_title,
+                        feed.title,
                     )
-                });
+                }),
+            feed.author.clone(),
+        ),
+        Some(SubscriptionMetadata::Nostr {
+            title,
+            image,
+            author,
+        }) => (
+            title.clone(),
+            image
+                .clone()
+                .or_else(|| props.subscription.image.clone())
+                .unwrap_or_else(|| {
+                    format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", title)
+                }),
+            author.clone(),
+        ),
+        None => {
+            let fallback_title = props.subscription.title.clone().unwrap_or_else(|| {
+                if let Some(id) = props.subscription.podcast_id {
+                    format!("Podcast #{}", id)
+                } else if props.subscription.podcast_guid.is_some() {
+                    "Loading podcast...".to_string()
+                } else {
+                    "Nostr Podcast".to_string()
+                }
+            });
+            let fallback_image = props.subscription.image.clone().unwrap_or_else(|| {
+                format!(
+                    "https://api.dicebear.com/7.x/shapes/svg?seed={}",
+                    fallback_title,
+                )
+            });
             (fallback_title, fallback_image, None)
         }
     };
-    let route = props
-        .subscription
-        .podcast_id
-        .map(|podcast_id| Route::PodcastRssFeedDetail {
-            podcast_id: podcast_id.to_string(),
-        })
-        .or_else(|| {
-            if let Some(SubscriptionMetadata::Rss(ref feed)) = metadata {
-                Some(Route::PodcastRssFeedDetail {
-                    podcast_id: feed.id.to_string(),
-                })
-            } else {
-                None
-            }
-        })
-        .or_else(|| {
-            props
-                .subscription
-                .nostr_coordinate
-                .as_ref()
-                .map(|coord| {
+    let route =
+        props
+            .subscription
+            .podcast_id
+            .map(|podcast_id| Route::PodcastRssFeedDetail {
+                podcast_id: podcast_id.to_string(),
+            })
+            .or_else(|| {
+                if let Some(SubscriptionMetadata::Rss(ref feed)) = metadata {
+                    Some(Route::PodcastRssFeedDetail {
+                        podcast_id: feed.id.to_string(),
+                    })
+                } else {
+                    None
+                }
+            })
+            .or_else(|| {
+                props.subscription.nostr_coordinate.as_ref().map(|coord| {
                     Route::PodcastNostrDetail {
                         naddr: coord.clone(),
                     }
                 })
-        });
+            });
     let is_loading = data.is_none();
     if let Some(route) = route {
         rsx! {
@@ -1300,9 +1275,7 @@ fn PodcastSearchResults(props: PodcastSearchResultsProps) -> Element {
             }
             match podcast_index::search_podcasts(&q, Some(20)).await {
                 Ok(feeds) => {
-                    log::info!(
-                        "API search for '{}' returned {} results", q, feeds.len()
-                    );
+                    log::info!("API search for '{}' returned {} results", q, feeds.len());
                     Ok(feeds)
                 }
                 Err(e) => {
@@ -1457,12 +1430,12 @@ struct SearchResultRowProps {
 }
 #[component]
 fn SearchResultRow(props: SearchResultRowProps) -> Element {
-    let image = props
-        .image
-        .clone()
-        .unwrap_or_else(|| {
-            format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", props.title)
-        });
+    let image = props.image.clone().unwrap_or_else(|| {
+        format!(
+            "https://api.dicebear.com/7.x/shapes/svg?seed={}",
+            props.title
+        )
+    });
     rsx! {
         Link {
             to: props.route.clone(),
@@ -1543,9 +1516,7 @@ fn NostrPodcastShows(props: NostrPodcastShowsProps) -> Element {
             }
         });
     });
-    if !*nostr_client::CLIENT_INITIALIZED.read()
-        || (*loading.read() && shows.read().is_none())
-    {
+    if !*nostr_client::CLIENT_INITIALIZED.read() || (*loading.read() && shows.read().is_none()) {
         return rsx! {
             div { class: "space-y-1",
                 for i in 0..5 {
@@ -1622,9 +1593,7 @@ fn RecentNostrEpisodes(props: RecentNostrEpisodesProps) -> Element {
             }
         });
     });
-    if !*nostr_client::CLIENT_INITIALIZED.read()
-        || (*loading.read() && episodes.read().is_none())
-    {
+    if !*nostr_client::CLIENT_INITIALIZED.read() || (*loading.read() && episodes.read().is_none()) {
         return rsx! {
             div { class: "space-y-1",
                 for i in 0..5 {
@@ -1722,32 +1691,24 @@ fn RecentEpisodesMerged(props: RecentEpisodesMergedProps) -> Element {
                                 log::warn!("Failed to fetch podcast: {:?}/{:?}", guid, id);
                                 return None;
                             };
-                            let episodes = podcast_index::get_episodes_by_feed_id(
-                                    feed.id,
-                                    Some(5),
-                                    None,
-                                )
-                                .await
-                                .unwrap_or_default();
+                            let episodes =
+                                podcast_index::get_episodes_by_feed_id(feed.id, Some(5), None)
+                                    .await
+                                    .unwrap_or_default();
                             let display_episodes: Vec<DisplayEpisode> = episodes
                                 .iter()
-                                .map(|ep| DisplayEpisode::from_podcast_index_episode(
-                                    ep,
-                                    &feed,
-                                ))
+                                .map(|ep| DisplayEpisode::from_podcast_index_episode(ep, &feed))
                                 .collect();
                             Some(display_episodes)
                         }
                     })
                     .collect();
                 let results = futures::future::join_all(fetch_futures).await;
-                let all_episodes: Vec<DisplayEpisode> = results
-                    .into_iter()
-                    .flatten()
-                    .flatten()
-                    .collect();
+                let all_episodes: Vec<DisplayEpisode> =
+                    results.into_iter().flatten().flatten().collect();
                 log::info!(
-                    "Fetched {} RSS episodes from subscriptions", all_episodes.len()
+                    "Fetched {} RSS episodes from subscriptions",
+                    all_episodes.len()
                 );
                 rss_episodes.set(Some(all_episodes));
                 rss_loading.set(false);
@@ -1800,8 +1761,7 @@ fn RecentEpisodesMerged(props: RecentEpisodesMergedProps) -> Element {
     let is_initial_loading = match props.platform.as_str() {
         "rss" => *rss_loading.read() && !has_rss_data,
         "nostr" => {
-            !*nostr_client::CLIENT_INITIALIZED.read()
-                || (*nostr_loading.read() && !has_nostr_data)
+            !*nostr_client::CLIENT_INITIALIZED.read() || (*nostr_loading.read() && !has_nostr_data)
         }
         _ => *rss_loading.read() && !has_any_data,
     };
@@ -1902,9 +1862,7 @@ struct SubscribedFeedCardProps {
 }
 #[component]
 fn SubscribedFeedCard(props: SubscribedFeedCardProps) -> Element {
-    let mut podcast_info = use_signal(|| {
-        None::<(String, Option<String>, Option<String>)>
-    });
+    let mut podcast_info = use_signal(|| None::<(String, Option<String>, Option<String>)>);
     let mut is_loading = use_signal(|| true);
     let mut is_removing = use_signal(|| false);
     let podcast_id = props.podcast_id.clone();
@@ -1918,11 +1876,8 @@ fn SubscribedFeedCard(props: SubscribedFeedCardProps) -> Element {
                         podcast_info.set(Some((feed.title, feed.author, image)));
                     }
                     Err(e) => {
-                        log::warn!(
-                            "Failed to fetch podcast info for ID {}: {}", id_str, e
-                        );
-                        podcast_info
-                            .set(Some((format!("Podcast #{}", id_str), None, None)));
+                        log::warn!("Failed to fetch podcast info for ID {}: {}", id_str, e);
+                        podcast_info.set(Some((format!("Podcast #{}", id_str), None, None)));
                     }
                 }
             } else {
@@ -2013,8 +1968,7 @@ async fn fetch_nostr_podcast_shows() -> std::result::Result<Vec<PodcastShow>, St
         .custom_tag(SingleLetterTag::from_char('d').unwrap(), "podcast-metadata")
         .limit(50);
     log::info!("Fetching podcast metadata events (Kind 30078, d=podcast-metadata)...");
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await?;
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
     log::info!("Received {} Kind 30078 events", events.len());
     let mut shows = Vec::new();
     for event in events.iter() {
@@ -2046,18 +2000,19 @@ async fn infer_shows_from_episodes() -> std::result::Result<Vec<PodcastShow>, St
     let filter = Filter::new()
         .kind(Kind::from(podcast::KIND_PODCAST_EPISODE))
         .limit(100);
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await?;
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
     log::info!("Inferring shows from {} episode events", events.len());
     let mut shows_by_pubkey: HashMap<String, (String, u64, Option<String>)> = HashMap::new();
     for event in events.iter() {
         if let Ok(episode) = podcast::parse_podcast_episode(event) {
             let pubkey = episode.pubkey.clone();
-            let entry = shows_by_pubkey
-                .entry(pubkey.clone())
-                .or_insert_with(|| {
-                    (episode.title.clone(), episode.created_at, episode.image.clone())
-                });
+            let entry = shows_by_pubkey.entry(pubkey.clone()).or_insert_with(|| {
+                (
+                    episode.title.clone(),
+                    episode.created_at,
+                    episode.image.clone(),
+                )
+            });
             if episode.created_at > entry.1 {
                 entry.0 = episode.title.clone();
                 entry.1 = episode.created_at;
@@ -2073,16 +2028,14 @@ async fn infer_shows_from_episodes() -> std::result::Result<Vec<PodcastShow>, St
         .filter_map(|(pubkey, (_title, _created_at, image))| {
             use nostr::prelude::*;
             let pk = PublicKey::from_hex(&pubkey).ok()?;
-            let coord = Coordinate::new(Kind::from(30078), pk)
-                .identifier("podcast-metadata");
+            let coord = Coordinate::new(Kind::from(30078), pk).identifier("podcast-metadata");
             let nip19_coord = Nip19Coordinate::new(coord, vec![]);
             let naddr = nip19_coord.to_bech32().ok()?;
             Some(PodcastShow {
                 id: format!("inferred:{}", pubkey),
                 title: format!("Podcast by {}", truncate_pubkey(&pubkey)),
                 description: Some(
-                    "Podcast discovered from episodes. Metadata not yet published."
-                        .to_string(),
+                    "Podcast discovered from episodes. Metadata not yet published.".to_string(),
                 ),
                 author: Some(pubkey.clone()),
                 image,
@@ -2101,14 +2054,12 @@ async fn infer_shows_from_episodes() -> std::result::Result<Vec<PodcastShow>, St
     Ok(shows)
 }
 /// Fetch recent Nostr podcast episodes (Kind 30054)
-async fn fetch_recent_nostr_episodes() -> std::result::Result<
-    Vec<DisplayEpisode>,
-    String,
-> {
-    let filter = Filter::new().kind(Kind::from(podcast::KIND_PODCAST_EPISODE)).limit(50);
+async fn fetch_recent_nostr_episodes() -> std::result::Result<Vec<DisplayEpisode>, String> {
+    let filter = Filter::new()
+        .kind(Kind::from(podcast::KIND_PODCAST_EPISODE))
+        .limit(50);
     log::info!("Fetching podcast episodes (Kind 30054)...");
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await?;
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
     log::info!("Received {} Kind 30054 events", events.len());
     let mut episodes = Vec::new();
     let mut parse_errors = 0;
@@ -2116,11 +2067,7 @@ async fn fetch_recent_nostr_episodes() -> std::result::Result<
         match podcast::parse_podcast_episode(event) {
             Ok(episode) => {
                 log::debug!("Parsed episode: {}", episode.title);
-                let display = DisplayEpisode::from_nostr_episode(
-                    &episode,
-                    "Nostr Podcast",
-                    None,
-                );
+                let display = DisplayEpisode::from_nostr_episode(&episode, "Nostr Podcast", None);
                 episodes.push(display);
             }
             Err(e) => {
@@ -2131,7 +2078,9 @@ async fn fetch_recent_nostr_episodes() -> std::result::Result<
     }
     if parse_errors > 0 {
         log::info!(
-            "Parsed {} episodes, {} parse failures", episodes.len(), parse_errors
+            "Parsed {} episodes, {} parse failures",
+            episodes.len(),
+            parse_errors
         );
     } else {
         log::info!("Parsed {} episodes", episodes.len());
@@ -2140,9 +2089,7 @@ async fn fetch_recent_nostr_episodes() -> std::result::Result<
     Ok(episodes)
 }
 /// Search Nostr podcasts by query using NIP-50 relay-side search
-async fn search_nostr_podcasts(
-    query: &str,
-) -> std::result::Result<Vec<PodcastShow>, String> {
+async fn search_nostr_podcasts(query: &str) -> std::result::Result<Vec<PodcastShow>, String> {
     use nostr_sdk::SingleLetterTag;
     let filter = Filter::new()
         .kind(Kind::from(podcast::KIND_APP_DATA))
@@ -2150,8 +2097,7 @@ async fn search_nostr_podcasts(
         .search(query)
         .limit(50);
     log::info!("NIP-50 search for podcasts: '{}'", query);
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await?;
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
     log::info!("NIP-50 search returned {} events", events.len());
     let mut shows = Vec::new();
     for event in events.iter() {

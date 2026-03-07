@@ -670,10 +670,7 @@ pub(super) fn YouTubeRenderer(video_id: String) -> Element {
     let mut is_visible = use_signal(|| false);
     let mut tried_fallback = use_signal(|| false);
     let video_id_for_fallback = video_id.clone();
-    let thumbnail_url = format!(
-        "https://img.youtube.com/vi/{}/maxresdefault.jpg",
-        video_id,
-    );
+    let thumbnail_url = format!("https://img.youtube.com/vi/{}/maxresdefault.jpg", video_id,);
     let fallback_url = format!("https://img.youtube.com/vi/{}/hqdefault.jpg", video_id);
     let embed_url = format!("https://www.youtube.com/embed/{}?autoplay=1", video_id);
     rsx! {
@@ -741,8 +738,7 @@ pub(super) fn SpotifyRenderer(content_type: String, content_id: String) -> Eleme
     let mut is_visible = use_signal(|| false);
     let embed_url = format!(
         "https://open.spotify.com/embed/{}/{}?utm_source=generator&theme=0",
-        content_type,
-        content_id,
+        content_type, content_id,
     );
     let height = match content_type.as_str() {
         "track" => "152",
@@ -1118,18 +1114,15 @@ pub(super) fn ZapStreamRenderer(naddr: String) -> Element {
         spawn(async move {
             match Nip19::from_bech32(&naddr_clone) {
                 Ok(Nip19::Coordinate(coord)) => {
-                    let relay_hints: Vec<String> = coord
-                        .relays
-                        .iter()
-                        .map(|r| r.to_string())
-                        .collect();
+                    let relay_hints: Vec<String> =
+                        coord.relays.iter().map(|r| r.to_string()).collect();
                     match nostr_client::fetch_event_by_coordinate_with_relays(
-                            coord.kind.as_u16(),
-                            coord.public_key.to_hex(),
-                            coord.identifier.clone(),
-                            relay_hints,
-                        )
-                        .await
+                        coord.kind.as_u16(),
+                        coord.public_key.to_hex(),
+                        coord.identifier.clone(),
+                        relay_hints,
+                    )
+                    .await
                     {
                         Ok(Some(e)) => {
                             event.set(Some(e));
@@ -1190,18 +1183,15 @@ pub(super) fn ZapCookingRecipeRenderer(naddr: String) -> Element {
         spawn(async move {
             match Nip19::from_bech32(&naddr_clone) {
                 Ok(Nip19::Coordinate(coord)) => {
-                    let relay_hints: Vec<String> = coord
-                        .relays
-                        .iter()
-                        .map(|r| r.to_string())
-                        .collect();
+                    let relay_hints: Vec<String> =
+                        coord.relays.iter().map(|r| r.to_string()).collect();
                     match nostr_client::fetch_event_by_coordinate_with_relays(
-                            coord.kind.as_u16(),
-                            coord.public_key.to_hex(),
-                            coord.identifier.clone(),
-                            relay_hints,
-                        )
-                        .await
+                        coord.kind.as_u16(),
+                        coord.public_key.to_hex(),
+                        coord.identifier.clone(),
+                        relay_hints,
+                    )
+                    .await
                     {
                         Ok(Some(e)) => {
                             event.set(Some(e));
@@ -1283,10 +1273,7 @@ pub(super) fn ZapCookingRecipeRenderer(naddr: String) -> Element {
 pub(super) fn IsbnRenderer(isbn: String) -> Element {
     use crate::services::openlibrary::CoverSize;
     let clean_isbn = crate::services::openlibrary::clean_isbn(&isbn);
-    let cover_url = crate::services::openlibrary::get_cover_url(
-        &clean_isbn,
-        CoverSize::Small,
-    );
+    let cover_url = crate::services::openlibrary::get_cover_url(&clean_isbn, CoverSize::Small);
     let openlibrary_url = format!("https://openlibrary.org/isbn/{}", clean_isbn);
     rsx! {
         a {
@@ -1367,7 +1354,10 @@ pub(super) fn PodcastFeedRenderer(guid: String) -> Element {
             }
         }
         Some(Err(_)) => {
-            let podcast_index_url = format!("https://podcastindex.org/podcast/{}", urlencoding::encode(&guid));
+            let podcast_index_url = format!(
+                "https://podcastindex.org/podcast/{}",
+                urlencoding::encode(&guid)
+            );
             rsx! {
                 a {
                     href: "{podcast_index_url}",
@@ -1503,18 +1493,19 @@ pub(super) fn PodcastEpisodeRenderer(guid: String) -> Element {
                         return;
                     }
                 };
-                let duration = ep
-                    .duration
-                    .map(|d| { if d > u32::MAX as u64 { u32::MAX } else { d as u32 } });
+                let duration = ep.duration.map(|d| {
+                    if d > u32::MAX as u64 {
+                        u32::MAX
+                    } else {
+                        d as u32
+                    }
+                });
                 let track = MusicTrack {
                     id: format!("pi-ep-{}", ep.id),
                     title: ep.title.clone(),
-                    artist: ep
-                        .feed_title
-                        .clone()
-                        .unwrap_or_else(|| {
-                            pod.as_ref().map(|p| p.title.clone()).unwrap_or_default()
-                        }),
+                    artist: ep.feed_title.clone().unwrap_or_else(|| {
+                        pod.as_ref().map(|p| p.title.clone()).unwrap_or_default()
+                    }),
                     artist_npub: None,
                     artist_id: None,
                     artist_art_url: None,
@@ -1540,13 +1531,11 @@ pub(super) fn PodcastEpisodeRenderer(guid: String) -> Element {
                 music_player::play_track(track, None, None);
             };
             let has_v4v = episode.value.is_some();
-            let duration_str = episode
-                .duration
-                .map(|d| {
-                    let mins = d / 60;
-                    let secs = d % 60;
-                    format!("{:02}:{:02}", mins, secs)
-                });
+            let duration_str = episode.duration.map(|d| {
+                let mins = d / 60;
+                let secs = d % 60;
+                format!("{:02}:{:02}", mins, secs)
+            });
             let safe_desc = episode.description.as_ref().map(|d| sanitize_html(d));
             rsx! {
                 div {
@@ -1604,7 +1593,9 @@ pub(super) fn PodcastEpisodeRenderer(guid: String) -> Element {
 #[component]
 pub(super) fn BitcoinTxRenderer(txid: String) -> Element {
     let mempool_endpoint = crate::stores::settings_store::get_mempool_endpoint();
-    let base_url = mempool_endpoint.trim_end_matches("/api").trim_end_matches('/');
+    let base_url = mempool_endpoint
+        .trim_end_matches("/api")
+        .trim_end_matches('/');
     let tx_url = format!("{}/tx/{}", base_url, txid);
     let truncated = crate::services::mempool::truncate_bitcoin_id(&txid);
     rsx! {
@@ -1623,7 +1614,9 @@ pub(super) fn BitcoinTxRenderer(txid: String) -> Element {
 #[component]
 pub(super) fn BitcoinAddressRenderer(address: String) -> Element {
     let mempool_endpoint = crate::stores::settings_store::get_mempool_endpoint();
-    let base_url = mempool_endpoint.trim_end_matches("/api").trim_end_matches('/');
+    let base_url = mempool_endpoint
+        .trim_end_matches("/api")
+        .trim_end_matches('/');
     let addr_url = format!("{}/address/{}", base_url, address);
     let truncated = crate::services::mempool::truncate_bitcoin_id(&address);
     rsx! {

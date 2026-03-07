@@ -40,16 +40,11 @@ pub fn PinnedNoteCard(props: PinnedNoteCardProps) -> Element {
     let content = event.content.clone();
     let created_at = event.created_at;
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
-    use_effect(
-        use_reactive(
-            &author_pubkey,
-            move |pubkey| {
-                if let Some(metadata) = profiles::get_profile(&pubkey) {
-                    author_metadata.set(Some(metadata));
-                }
-            },
-        ),
-    );
+    use_effect(use_reactive(&author_pubkey, move |pubkey| {
+        if let Some(metadata) = profiles::get_profile(&pubkey) {
+            author_metadata.set(Some(metadata));
+        }
+    }));
     let author_avatar = author_metadata
         .read()
         .as_ref()

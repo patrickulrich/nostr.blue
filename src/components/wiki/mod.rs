@@ -8,5 +8,7 @@ pub mod content;
 pub mod download_menu;
 pub use backlinks::WikiBacklinks;
 pub use card::{WikiCardSearchResult, WikiCardSkeleton, WikiGrid, WikiMetadataCard};
-pub use content::{WikiForwardLinks, WikiOutline, WikiPageContent, WikiPageNotFound, WikiPageSkeleton};
+pub use content::{
+    WikiForwardLinks, WikiOutline, WikiPageContent, WikiPageNotFound, WikiPageSkeleton,
+};
 pub use download_menu::WikiDownloadMenu;

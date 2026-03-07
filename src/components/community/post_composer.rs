@@ -1,9 +1,7 @@
 //! Community Post Composer Component
 //! Modal for creating new posts or replies in a community
 use crate::components::RichContent;
-use crate::stores::community_store::{
-    post_to_community, reply_to_post, Community, CommunityPost,
-};
+use crate::stores::community_store::{post_to_community, reply_to_post, Community, CommunityPost};
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
@@ -11,11 +9,9 @@ use dioxus::prelude::*;
 #[component]
 pub fn CommunityPostComposer(
     community: Community,
-    #[props(default)]
-    reply_to: Option<CommunityPost>,
+    #[props(default)] reply_to: Option<CommunityPost>,
     on_close: EventHandler<()>,
-    #[props(default)]
-    on_success: Option<EventHandler<String>>,
+    #[props(default)] on_success: Option<EventHandler<String>>,
 ) -> Element {
     let mut content = use_signal(String::new);
     let mut posting = use_signal(|| false);
@@ -72,7 +68,8 @@ pub fn CommunityPostComposer(
                 {
                     web_sys::window()
                         .and_then(|w| {
-                            w.confirm_with_message("You have unsaved content. Discard it?").ok()
+                            w.confirm_with_message("You have unsaved content. Discard it?")
+                                .ok()
                         })
                         .unwrap_or(false)
                 }
@@ -81,7 +78,10 @@ pub fn CommunityPostComposer(
                     // TODO: Implement crate::platform::dialog::confirm_discard for native
                     // For now, require manual content deletion to prevent accidental data loss
                     // Show user-visible feedback
-                    error.set(Some("Discard not supported on this platform — please delete content manually".to_string()));
+                    error.set(Some(
+                        "Discard not supported on this platform — please delete content manually"
+                            .to_string(),
+                    ));
                     false
                 }
             };
@@ -299,8 +299,7 @@ pub fn CommunityPostComposer(
 #[component]
 pub fn CommunityPostComposerInline(
     community: Community,
-    #[props(default)]
-    on_success: Option<EventHandler<String>>,
+    #[props(default)] on_success: Option<EventHandler<String>>,
 ) -> Element {
     let mut content = use_signal(String::new);
     let mut posting = use_signal(|| false);

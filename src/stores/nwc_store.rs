@@ -22,9 +22,8 @@ pub enum ConnectionStatus {
 /// Global NWC client
 pub static NWC_CLIENT: GlobalSignal<Option<Arc<NWC>>> = Signal::global(|| None);
 /// Connection status
-pub static NWC_STATUS: GlobalSignal<ConnectionStatus> = Signal::global(|| {
-    ConnectionStatus::Disconnected
-});
+pub static NWC_STATUS: GlobalSignal<ConnectionStatus> =
+    Signal::global(|| ConnectionStatus::Disconnected);
 /// Cached wallet balance in millisatoshis
 pub static NWC_BALANCE: GlobalSignal<Option<u64>> = Signal::global(|| None);
 /// Save NWC URI to secure storage (file with restricted permissions on native, web storage on web)
@@ -47,8 +46,12 @@ fn save_nwc_uri_secure(uri: &str) -> std::result::Result<(), String> {
     {
         use std::process::Command;
 
-        let username = std::env::var("USERNAME")
-            .map_err(|e| format!("Failed to determine current Windows user for {:?}: {}", path, e))?;
+        let username = std::env::var("USERNAME").map_err(|e| {
+            format!(
+                "Failed to determine current Windows user for {:?}: {}",
+                path, e
+            )
+        })?;
         let grant_arg = format!("{username}:F");
         let status = Command::new("icacls")
             .arg(&path)
@@ -62,7 +65,10 @@ fn save_nwc_uri_secure(uri: &str) -> std::result::Result<(), String> {
             })?;
         if !status.success() {
             let _ = fs::remove_file(&path);
-            return Err(format!("Failed to set permissions on {:?}: icacls exited with {}", path, status));
+            return Err(format!(
+                "Failed to set permissions on {:?}: icacls exited with {}",
+                path, status
+            ));
         }
     }
     Ok(())
@@ -106,19 +112,22 @@ fn delete_nwc_uri() {
 }
 /// Connect to NWC using a connection URI
 /// If remember_wallet is true, the URI will be stored securely
-pub async fn connect_nwc(uri_string: &str, remember_wallet: bool) -> std::result::Result<(), String> {
+pub async fn connect_nwc(
+    uri_string: &str,
+    remember_wallet: bool,
+) -> std::result::Result<(), String> {
     NWC_STATUS.write().clone_from(&ConnectionStatus::Connecting);
-    let uri = NostrWalletConnectURI::from_str(uri_string.trim())
-        .map_err(|e| {
-            let error_msg = format!("Invalid NWC URI: {}", e);
-            *NWC_STATUS.write() = ConnectionStatus::Error(error_msg.clone());
-            error_msg
-        })?;
+    let uri = NostrWalletConnectURI::from_str(uri_string.trim()).map_err(|e| {
+        let error_msg = format!("Invalid NWC URI: {}", e);
+        *NWC_STATUS.write() = ConnectionStatus::Error(error_msg.clone());
+        error_msg
+    })?;
     let nwc = NWC::new(uri);
     match nwc.get_info().await {
         Ok(info) => {
             log::info!(
-                "Connected to NWC wallet: {}", info.alias.as_deref().unwrap_or("Unknown")
+                "Connected to NWC wallet: {}",
+                info.alias.as_deref().unwrap_or("Unknown")
             );
             if remember_wallet {
                 save_nwc_uri_secure(uri_string.trim())?;
@@ -155,7 +164,11 @@ pub fn disconnect_nwc(preserve_storage: bool) {
 /// Restore NWC connection from persistent storage
 pub async fn restore_connection() {
     let secure_uri = load_nwc_uri_secure();
-    let legacy_uri = if secure_uri.is_none() { load_nwc_uri() } else { None };
+    let legacy_uri = if secure_uri.is_none() {
+        load_nwc_uri()
+    } else {
+        None
+    };
     match secure_uri.or_else(|| legacy_uri.clone()) {
         Some(uri) => {
             if legacy_uri.is_some() {
@@ -180,7 +193,10 @@ pub async fn restore_connection() {
 /// Get wallet balance in millisatoshis
 pub async fn get_balance() -> std::result::Result<u64, String> {
     let client = NWC_CLIENT.read().clone().ok_or("NWC not connected")?;
-    client.get_balance().await.map_err(|e| format!("Failed to get balance: {}", e))
+    client
+        .get_balance()
+        .await
+        .map_err(|e| format!("Failed to get balance: {}", e))
 }
 /// Refresh the cached balance
 pub async fn refresh_balance() -> std::result::Result<(), String> {
@@ -196,9 +212,7 @@ pub async fn refresh_balance() -> std::result::Result<(), String> {
     }
 }
 /// Pay a lightning invoice
-pub async fn pay_invoice(
-    invoice: String,
-) -> std::result::Result<PayInvoiceResponse, String> {
+pub async fn pay_invoice(invoice: String) -> std::result::Result<PayInvoiceResponse, String> {
     let client = NWC_CLIENT.read().clone().ok_or("NWC not connected")?;
     let request = PayInvoiceRequest::new(&invoice);
     match client.pay_invoice(request).await {

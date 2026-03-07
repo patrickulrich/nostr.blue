@@ -184,15 +184,13 @@ pub async fn geocode(query: &str) -> Result<Option<GeoLocation>, String> {
     let result = query_photon(&normalized).await;
     // Only cache successful responses (including Ok(None) real misses)
     if let Ok(ref location) = result {
-        cache
-            .entries
-            .insert(
-                normalized,
-                CachedGeoResult {
-                    location: location.clone(),
-                    cached_at: now_secs(),
-                },
-            );
+        cache.entries.insert(
+            normalized,
+            CachedGeoResult {
+                location: location.clone(),
+                cached_at: now_secs(),
+            },
+        );
         prune_geo_cache(&mut cache);
         save_cache(&cache);
     }

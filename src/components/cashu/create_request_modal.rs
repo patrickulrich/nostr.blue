@@ -58,7 +58,11 @@ pub fn CashuCreateRequestModal(on_close: EventHandler<()>) -> Element {
                 }
             }
         };
-        let desc = if description.is_empty() { None } else { Some(description) };
+        let desc = if description.is_empty() {
+            None
+        } else {
+            Some(description)
+        };
         error_message.set(None);
         is_creating.set(true);
         spawn(async move {
@@ -69,9 +73,7 @@ pub fn CashuCreateRequestModal(on_close: EventHandler<()>) -> Element {
                         current_request_id.set(Some(info.request_id.clone()));
                         let request_id = info.request_id.clone();
                         spawn(async move {
-                            match cashu::wait_for_nostr_payment(request_id.clone(), 300)
-                                .await
-                            {
+                            match cashu::wait_for_nostr_payment(request_id.clone(), 300).await {
                                 Ok(amount) => {
                                     log::info!("Received payment of {} sats", amount);
                                     // Only clear if this is still the active request

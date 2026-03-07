@@ -11,8 +11,8 @@ use nostr_sdk::prelude::*;
 use crate::components::{ClientInitializing, NoteCard};
 use crate::hooks::use_mute_block_cache;
 use crate::routes::Route;
-use crate::stores::{auth_store, nostr_client, packs_store, profiles};
 use crate::stores::packs_store::StarterPack;
+use crate::stores::{auth_store, nostr_client, packs_store, profiles};
 use crate::utils::time::format_relative_time;
 use crate::utils::validation::is_valid_http_url;
 use crate::utils::{process_events_to_feed_items, truncate_pubkey, FeedItem};
@@ -48,58 +48,56 @@ pub fn PackDetail(naddr: String) -> Element {
 
     // Load pack data
     let client_init = *nostr_client::CLIENT_INITIALIZED.read();
-    use_effect(
-        use_reactive(
-            (&naddr, &client_init),
-            move |(addr, client_initialized)| {
-                if !client_initialized {
-                    return;
-                }
-                let current_id = pack_request_id.peek().wrapping_add(1);
-                pack_request_id.set(current_id);
-                spawn(async move {
-                    loading.set(true);
-                    error.set(None);
+    use_effect(use_reactive(
+        (&naddr, &client_init),
+        move |(addr, client_initialized)| {
+            if !client_initialized {
+                return;
+            }
+            let current_id = pack_request_id.peek().wrapping_add(1);
+            pack_request_id.set(current_id);
+            spawn(async move {
+                loading.set(true);
+                error.set(None);
 
-                    match packs_store::fetch_pack_by_naddr(&addr).await {
-                        Ok(Some(p)) => {
-                            if *pack_request_id.peek() != current_id {
-                                log::debug!("Discarding stale pack request");
-                                return;
-                            }
-                            // Prefetch all member profiles
-                            let member_pubkeys: Vec<String> =
-                                p.members.iter().map(|m| m.pubkey.clone()).collect();
-                            let mut to_prefetch = vec![p.author_pubkey.clone()];
-                            to_prefetch.extend(member_pubkeys);
-                            profiles::prefetch_profiles(to_prefetch).await;
-                            if *pack_request_id.peek() != current_id {
-                                log::debug!("Discarding stale pack request after prefetch");
-                                return;
-                            }
-                            pack.set(Some(p));
+                match packs_store::fetch_pack_by_naddr(&addr).await {
+                    Ok(Some(p)) => {
+                        if *pack_request_id.peek() != current_id {
+                            log::debug!("Discarding stale pack request");
+                            return;
                         }
-                        Ok(None) => {
-                            if *pack_request_id.peek() != current_id {
-                                return;
-                            }
-                            error.set(Some("Pack not found".to_string()));
+                        // Prefetch all member profiles
+                        let member_pubkeys: Vec<String> =
+                            p.members.iter().map(|m| m.pubkey.clone()).collect();
+                        let mut to_prefetch = vec![p.author_pubkey.clone()];
+                        to_prefetch.extend(member_pubkeys);
+                        profiles::prefetch_profiles(to_prefetch).await;
+                        if *pack_request_id.peek() != current_id {
+                            log::debug!("Discarding stale pack request after prefetch");
+                            return;
                         }
-                        Err(e) => {
-                            if *pack_request_id.peek() != current_id {
-                                return;
-                            }
-                            log::error!("Failed to fetch pack: {}", e);
-                            error.set(Some(e));
-                        }
+                        pack.set(Some(p));
                     }
-                    if *pack_request_id.peek() == current_id {
-                        loading.set(false);
+                    Ok(None) => {
+                        if *pack_request_id.peek() != current_id {
+                            return;
+                        }
+                        error.set(Some("Pack not found".to_string()));
                     }
-                });
-            },
-        ),
-    );
+                    Err(e) => {
+                        if *pack_request_id.peek() != current_id {
+                            return;
+                        }
+                        log::error!("Failed to fetch pack: {}", e);
+                        error.set(Some(e));
+                    }
+                }
+                if *pack_request_id.peek() == current_id {
+                    loading.set(false);
+                }
+            });
+        },
+    ));
 
     // Load posts when Posts tab is selected
     use_effect(move || {
@@ -529,16 +527,13 @@ fn MemberRow(pubkey: String) -> Element {
         .unwrap_or_else(|| truncate_pubkey(&pubkey));
     let picture = profile.as_ref().and_then(|p| p.picture.clone());
     let nip05 = profile.as_ref().and_then(|p| p.nip05.clone());
-    let about = profile
-        .as_ref()
-        .and_then(|p| p.about.clone())
-        .map(|a| {
-            if a.chars().count() > 100 {
-                format!("{}...", a.chars().take(100).collect::<String>())
-            } else {
-                a
-            }
-        });
+    let about = profile.as_ref().and_then(|p| p.about.clone()).map(|a| {
+        if a.chars().count() > 100 {
+            format!("{}...", a.chars().take(100).collect::<String>())
+        } else {
+            a
+        }
+    });
 
     let is_authenticated = auth_store::is_authenticated();
     let mut is_following = use_signal(|| false);

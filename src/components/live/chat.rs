@@ -8,13 +8,15 @@ use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
 use nostr::TagKind;
-use nostr_sdk::{Event, EventBuilder, Filter, Kind, PublicKey, RelayPoolNotification, SubscriptionId, Tag, Timestamp};
+use nostr_sdk::{
+    Event, EventBuilder, Filter, Kind, PublicKey, RelayPoolNotification, SubscriptionId, Tag,
+    Timestamp,
+};
 use std::time::Duration;
 #[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
 #[cfg(feature = "web")]
-#[wasm_bindgen(
-    inline_js = r#"
+#[wasm_bindgen(inline_js = r#"
 export function scrollChatToBottom(elementId) {
     const element = document.getElementById(elementId);
     if (element) {
@@ -30,8 +32,7 @@ export function isScrolledNearBottom(elementId, threshold) {
     const clientHeight = element.clientHeight;
     return scrollHeight - scrollTop - clientHeight < threshold;
 }
-"#
-)]
+"#)]
 extern "C" {
     fn scrollChatToBottom(element_id: &str);
     fn isScrolledNearBottom(element_id: &str, threshold: f64) -> bool;
@@ -46,108 +47,103 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
     let mut chat_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
     let has_signer = use_memo(move || *HAS_SIGNER.read());
     let chat_container_id = use_hook(|| {
-        format!("live-chat-messages-{}-{}", stream_author_pubkey, stream_d_tag)
+        format!(
+            "live-chat-messages-{}-{}",
+            stream_author_pubkey, stream_d_tag
+        )
     });
     let a_tag = format!("30311:{}:{}", stream_author_pubkey, stream_d_tag);
     let a_tag_for_send_keydown = a_tag.clone();
     let a_tag_for_send_click = a_tag.clone();
     let chat_id_for_auto_scroll = chat_container_id.clone();
-    use_effect(
-        use_reactive(
-            (&stream_author_pubkey, &stream_d_tag),
-            move |(author, dtag)| {
-                let tag = format!("30311:{}:{}", author, dtag);
-                spawn(async move {
-                    loading.set(true);
-                    let parts: Vec<&str> = tag.split(':').collect();
-                    if parts.len() == 3 {
-                        let _kind_num = parts[0].parse::<u16>().unwrap_or(30311);
-                        if let Ok(_pubkey) = PublicKey::parse(parts[1]) {
-                            let _identifier = parts[2];
-                            let filter = Filter::new()
-                                .kind(Kind::from(1311))
-                                .custom_tag(
-                                    nostr_sdk::SingleLetterTag::lowercase(
-                                        nostr_sdk::Alphabet::A,
-                                    ),
-                                    tag.as_str(),
-                                )
-                                .limit(200);
-                            match fetch_events_aggregated(
-                                    filter,
-                                    Duration::from_secs(10),
-                                )
-                                .await
-                            {
-                                Ok(events) => {
-                                    let mut sorted_messages = events;
-                                    sorted_messages
-                                        .sort_by(|a, b| a.created_at.cmp(&b.created_at));
-                                    messages.set(sorted_messages);
-                                    log::info!(
-                                        "Loaded {} chat messages", messages.read().len()
-                                    );
-                                }
-                                Err(e) => {
-                                    log::error!("Failed to fetch chat messages: {}", e);
-                                }
-                            }
-                        }
-                    }
-                    loading.set(false);
-
-                    // Set up real-time subscription for new messages
-                    if let Some(client) = get_client() {
-                        let realtime_filter = Filter::new()
+    use_effect(use_reactive(
+        (&stream_author_pubkey, &stream_d_tag),
+        move |(author, dtag)| {
+            let tag = format!("30311:{}:{}", author, dtag);
+            spawn(async move {
+                loading.set(true);
+                let parts: Vec<&str> = tag.split(':').collect();
+                if parts.len() == 3 {
+                    let _kind_num = parts[0].parse::<u16>().unwrap_or(30311);
+                    if let Ok(_pubkey) = PublicKey::parse(parts[1]) {
+                        let _identifier = parts[2];
+                        let filter = Filter::new()
                             .kind(Kind::from(1311))
                             .custom_tag(
                                 nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::A),
                                 tag.as_str(),
                             )
-                            .since(Timestamp::now())
-                            .limit(0);
+                            .limit(200);
+                        match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+                            Ok(events) => {
+                                let mut sorted_messages = events;
+                                sorted_messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                                messages.set(sorted_messages);
+                                log::info!("Loaded {} chat messages", messages.read().len());
+                            }
+                            Err(e) => {
+                                log::error!("Failed to fetch chat messages: {}", e);
+                            }
+                        }
+                    }
+                }
+                loading.set(false);
 
-                        match client.subscribe(realtime_filter, None).await {
-                            Ok(output) => {
-                                let subscription_id = output.val;
-                                chat_sub_id.set(Some(subscription_id.clone()));
-                                log::debug!("Subscribed to live chat for {}", tag);
+                // Set up real-time subscription for new messages
+                if let Some(client) = get_client() {
+                    let realtime_filter = Filter::new()
+                        .kind(Kind::from(1311))
+                        .custom_tag(
+                            nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::A),
+                            tag.as_str(),
+                        )
+                        .since(Timestamp::now())
+                        .limit(0);
 
-                                spawn(async move {
-                                    let mut notifications = client.notifications();
-                                    while let Ok(notification) = notifications.recv().await {
-                                        if let RelayPoolNotification::Event {
-                                            subscription_id: recv_sub_id,
-                                            event,
-                                            ..
-                                        } = notification
-                                        {
-                                            if recv_sub_id == subscription_id {
-                                                let already_exists = messages.read().iter().any(|e| e.id == event.id);
-                                                if !already_exists {
-                                                    log::info!("New chat message via streaming: {}", event.id.to_hex());
-                                                    let mut msgs = messages.write();
-                                                    msgs.push((*event).clone());
-                                                    // Enforce 200 message limit
-                                                    let len = msgs.len();
-                                                    if len > 200 {
-                                                        msgs.drain(0..(len - 200));
-                                                    }
+                    match client.subscribe(realtime_filter, None).await {
+                        Ok(output) => {
+                            let subscription_id = output.val;
+                            chat_sub_id.set(Some(subscription_id.clone()));
+                            log::debug!("Subscribed to live chat for {}", tag);
+
+                            spawn(async move {
+                                let mut notifications = client.notifications();
+                                while let Ok(notification) = notifications.recv().await {
+                                    if let RelayPoolNotification::Event {
+                                        subscription_id: recv_sub_id,
+                                        event,
+                                        ..
+                                    } = notification
+                                    {
+                                        if recv_sub_id == subscription_id {
+                                            let already_exists =
+                                                messages.read().iter().any(|e| e.id == event.id);
+                                            if !already_exists {
+                                                log::info!(
+                                                    "New chat message via streaming: {}",
+                                                    event.id.to_hex()
+                                                );
+                                                let mut msgs = messages.write();
+                                                msgs.push((*event).clone());
+                                                // Enforce 200 message limit
+                                                let len = msgs.len();
+                                                if len > 200 {
+                                                    msgs.drain(0..(len - 200));
                                                 }
                                             }
                                         }
                                     }
-                                });
-                            }
-                            Err(e) => {
-                                log::error!("Failed to subscribe to live chat: {}", e);
-                            }
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            log::error!("Failed to subscribe to live chat: {}", e);
                         }
                     }
-                });
-            },
-        ),
-    );
+                }
+            });
+        },
+    ));
     let mut is_first_load = use_signal(|| true);
     use_effect(move || {
         let msg_count = messages.read().len();
@@ -195,8 +191,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
             match get_client() {
                 Some(client) => {
                     let tag = Tag::custom(TagKind::a(), vec![tag_clone.clone()]);
-                    let builder = EventBuilder::new(Kind::from(1311), content.clone())
-                        .tag(tag);
+                    let builder = EventBuilder::new(Kind::from(1311), content.clone()).tag(tag);
                     // Sign first to get the full event
                     match client.sign_event_builder(builder).await {
                         Ok(event) => {
@@ -207,7 +202,8 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
                                     message_input.set(String::new());
                                     // Add to messages immediately (optimistic update)
                                     // nostr-sdk excludes self-published events from RelayPoolNotification::Event
-                                    let already_exists = messages.read().iter().any(|e| e.id == event.id);
+                                    let already_exists =
+                                        messages.read().iter().any(|e| e.id == event.id);
                                     if !already_exists {
                                         let mut msgs = messages.write();
                                         msgs.push(event);
@@ -240,20 +236,25 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
     let mut escape_cb = use_signal(|| None::<Closure<dyn FnMut(web_sys::KeyboardEvent)>>);
     #[cfg(feature = "web")]
     use_effect(move || {
-        let Some(window) = web_sys::window() else { return };
+        let Some(window) = web_sys::window() else {
+            return;
+        };
         let cb = Closure::wrap(Box::new(move |e: web_sys::KeyboardEvent| {
             if e.key() == "Escape" && expanded() {
                 expanded.set(false);
             }
         }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
-        window.add_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref()).ok();
+        window
+            .add_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref())
+            .ok();
         escape_cb.set(Some(cb));
     });
     #[cfg(feature = "web")]
     use_drop(move || {
         if let Some(cb) = escape_cb.peek().as_ref() {
             if let Some(window) = web_sys::window() {
-                let _ = window.remove_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref());
+                let _ = window
+                    .remove_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref());
             }
         }
     });
@@ -373,9 +374,7 @@ fn ChatMessage(event: Event) -> Element {
             truncate_pubkey(&author_pk_for_name)
         }
     });
-    let author_picture = use_memo(move || {
-        metadata.read().as_ref().and_then(|m| m.picture.clone())
-    });
+    let author_picture = use_memo(move || metadata.read().as_ref().and_then(|m| m.picture.clone()));
     rsx! {
         div { class: "flex gap-3",
             Link {

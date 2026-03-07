@@ -2,13 +2,13 @@
 //!
 //! Renders an interactive card for Cashu ecash tokens found in note content.
 //! Supports both V3 (cashuA) and V4 (cashuB) token formats.
+use crate::stores::nostr_client::HAS_SIGNER;
 use cdk::nuts::CurrencyUnit;
 use dioxus::prelude::*;
 use dioxus_core::spawn_forever;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use std::str::FromStr;
 use std::time::Duration;
-use crate::stores::nostr_client::HAS_SIGNER;
 /// State machine for token claim operations
 #[derive(Clone, Debug, PartialEq)]
 enum ClaimState {
@@ -112,7 +112,10 @@ pub fn CashuTokenCard(token: String) -> Element {
             .unwrap_or_else(|| "sats".to_string());
         move |e: MouseEvent| {
             e.stop_propagation();
-            if !matches!(*claim_state.read(), ClaimState::Idle | ClaimState::Failed(_)) {
+            if !matches!(
+                *claim_state.read(),
+                ClaimState::Idle | ClaimState::Failed(_)
+            ) {
                 return;
             }
             let token = token.clone();
@@ -150,7 +153,9 @@ pub fn CashuTokenCard(token: String) -> Element {
             #[cfg(not(feature = "web"))]
             {
                 let _ = &token;
-                wallet_error.set(Some("Open wallet not supported on this platform".to_string()));
+                wallet_error.set(Some(
+                    "Open wallet not supported on this platform".to_string(),
+                ));
                 toast_api.error(
                     "Open wallet not supported on this platform".to_string(),
                     ToastOptions::new()
@@ -175,11 +180,10 @@ pub fn CashuTokenCard(token: String) -> Element {
                     }
                     Err(e) => {
                         log::warn!("Failed to copy to clipboard: {:?}", e);
-                        toast_api
-                            .error(
-                                "Failed to copy".to_string(),
-                                ToastOptions::new().duration(Duration::from_secs(2)),
-                            );
+                        toast_api.error(
+                            "Failed to copy".to_string(),
+                            ToastOptions::new().duration(Duration::from_secs(2)),
+                        );
                     }
                 }
             });

@@ -404,7 +404,10 @@ async fn publish_station(form: StationFormData) -> std::result::Result<String, S
         Tag::custom(TagKind::custom("name"), vec![name.clone()]),
     ];
     if !description.trim().is_empty() {
-        tags.push(Tag::custom(TagKind::custom("description"), vec![description]));
+        tags.push(Tag::custom(
+            TagKind::custom("description"),
+            vec![description],
+        ));
     }
     if !thumbnail.trim().is_empty() {
         tags.push(Tag::custom(TagKind::custom("thumbnail"), vec![thumbnail]));
@@ -416,16 +419,18 @@ async fn publish_station(form: StationFormData) -> std::result::Result<String, S
         tags.push(Tag::custom(TagKind::custom("location"), vec![location]));
     }
     if !country_code.trim().is_empty() {
-        tags.push(
-            Tag::custom(TagKind::custom("country"), vec![country_code.to_uppercase()]),
-        );
+        tags.push(Tag::custom(
+            TagKind::custom("country"),
+            vec![country_code.to_uppercase()],
+        ));
     }
     for genre in genres.split(',') {
         let genre = genre.trim().to_lowercase();
         if !genre.is_empty() {
-            tags.push(
-                Tag::custom(TagKind::custom("c"), vec![genre, "genre".to_string()]),
-            );
+            tags.push(Tag::custom(
+                TagKind::custom("c"),
+                vec![genre, "genre".to_string()],
+            ));
         }
     }
     for lang in languages.split(',') {
@@ -453,9 +458,7 @@ async fn publish_station(form: StationFormData) -> std::result::Result<String, S
         let sample_rate: u32 = stream.sample_rate.parse().unwrap_or(44100);
         let quality_json = format!(
             r#"{{"bitrate":{},"codec":"{}","sampleRate":{}}}"#,
-            bitrate,
-            codec,
-            sample_rate,
+            bitrate, codec, sample_rate,
         );
         let mut stream_values = vec![
             stream.url.trim().to_string(),
@@ -471,10 +474,12 @@ async fn publish_station(form: StationFormData) -> std::result::Result<String, S
         }
         tags.push(Tag::custom(TagKind::custom("stream"), stream_values));
     }
-    tags.push(Tag::custom(TagKind::custom("client"), vec!["nostr.blue".to_string()]));
+    tags.push(Tag::custom(
+        TagKind::custom("client"),
+        vec!["nostr.blue".to_string()],
+    ));
     let event_builder = EventBuilder::new(Kind::from(31237), "").tags(tags);
-    let client = nostr_client::get_client()
-        .ok_or_else(|| "Failed to get client".to_string())?;
+    let client = nostr_client::get_client().ok_or_else(|| "Failed to get client".to_string())?;
     let output = client
         .send_event_builder(event_builder)
         .await

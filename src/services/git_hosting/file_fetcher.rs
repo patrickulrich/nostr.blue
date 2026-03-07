@@ -4,8 +4,8 @@
 //! GitHub API → GitLab API → Codeberg API → Generic HTTP
 #![allow(dead_code)]
 use crate::platform::http::http_client;
-use serde::Deserialize;
 use crate::utils::nip34::Repository;
+use serde::Deserialize;
 /// A file or directory entry in the repository tree
 #[derive(Debug, Clone)]
 pub struct TreeEntry {
@@ -171,10 +171,7 @@ async fn fetch_github_file(
 ) -> Result<String, String> {
     let url = format!(
         "https://api.github.com/repos/{}/{}/contents/{}?ref={}",
-        owner,
-        repo,
-        path,
-        git_ref,
+        owner, repo, path, git_ref,
     );
     let response = http_client()
         .map_err(|e| format!("HTTP client init failed: {}", e))?
@@ -194,13 +191,10 @@ async fn fetch_github_file(
     if let (Some(content), Some(encoding)) = (content.content, content.encoding) {
         if encoding == "base64" {
             let cleaned = content.replace('\n', "");
-            let decoded = base64::Engine::decode(
-                    &base64::engine::general_purpose::STANDARD,
-                    &cleaned,
-                )
-                .map_err(|e| format!("Base64 decode error: {}", e))?;
-            return String::from_utf8(decoded)
-                .map_err(|e| format!("UTF-8 decode error: {}", e));
+            let decoded =
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &cleaned)
+                    .map_err(|e| format!("Base64 decode error: {}", e))?;
+            return String::from_utf8(decoded).map_err(|e| format!("UTF-8 decode error: {}", e));
         }
     }
     Err("No content in response".to_string())
@@ -213,9 +207,7 @@ async fn fetch_github_tree(
 ) -> Result<Vec<TreeEntry>, String> {
     let url = format!(
         "https://api.github.com/repos/{}/{}/git/trees/{}?recursive=1",
-        owner,
-        repo,
-        git_ref,
+        owner, repo, git_ref,
     );
     let response = http_client()
         .map_err(|e| format!("HTTP client init failed: {}", e))?
@@ -233,7 +225,11 @@ async fn fetch_github_tree(
         .await
         .map_err(|e| format!("Parse error: {}", e))?;
     let prefix = if path.is_empty() { "" } else { path };
-    let _depth = if prefix.is_empty() { 0 } else { prefix.matches('/').count() + 1 };
+    let _depth = if prefix.is_empty() {
+        0
+    } else {
+        prefix.matches('/').count() + 1
+    };
     let entries = tree
         .tree
         .into_iter()
@@ -241,7 +237,8 @@ async fn fetch_github_tree(
             if prefix.is_empty() {
                 !e.path.contains('/')
             } else {
-                e.path.starts_with(prefix) && e.path.len() > prefix.len()
+                e.path.starts_with(prefix)
+                    && e.path.len() > prefix.len()
                     && e.path.chars().nth(prefix.len()) == Some('/')
                     && e.path[prefix.len() + 1..].matches('/').count() == 0
             }
@@ -289,7 +286,10 @@ async fn fetch_gitlab_file(
     if !response.status().is_success() {
         return Err(format!("GitLab API error: {}", response.status()));
     }
-    response.text().await.map_err(|e| format!("Read error: {}", e))
+    response
+        .text()
+        .await
+        .map_err(|e| format!("Read error: {}", e))
 }
 async fn fetch_gitlab_tree(
     owner: &str,
@@ -324,20 +324,18 @@ async fn fetch_gitlab_tree(
         .json()
         .await
         .map_err(|e| format!("Parse error: {}", e))?;
-    Ok(
-        entries
-            .into_iter()
-            .map(|e| TreeEntry {
-                name: e.name,
-                path: e.path,
-                entry_type: match e.entry_type.as_str() {
-                    "tree" => EntryType::Directory,
-                    _ => EntryType::File,
-                },
-                size: None,
-            })
-            .collect(),
-    )
+    Ok(entries
+        .into_iter()
+        .map(|e| TreeEntry {
+            name: e.name,
+            path: e.path,
+            entry_type: match e.entry_type.as_str() {
+                "tree" => EntryType::Directory,
+                _ => EntryType::File,
+            },
+            size: None,
+        })
+        .collect())
 }
 async fn fetch_codeberg_file(
     owner: &str,
@@ -347,10 +345,7 @@ async fn fetch_codeberg_file(
 ) -> Result<String, String> {
     let url = format!(
         "https://codeberg.org/api/v1/repos/{}/{}/raw/{}?ref={}",
-        owner,
-        repo,
-        path,
-        git_ref,
+        owner, repo, path, git_ref,
     );
     let response = http_client()
         .map_err(|e| format!("HTTP client init failed: {}", e))?
@@ -361,7 +356,10 @@ async fn fetch_codeberg_file(
     if !response.status().is_success() {
         return Err(format!("Codeberg API error: {}", response.status()));
     }
-    response.text().await.map_err(|e| format!("Read error: {}", e))
+    response
+        .text()
+        .await
+        .map_err(|e| format!("Read error: {}", e))
 }
 async fn fetch_codeberg_tree(
     owner: &str,
@@ -371,10 +369,7 @@ async fn fetch_codeberg_tree(
 ) -> Result<Vec<TreeEntry>, String> {
     let url = format!(
         "https://codeberg.org/api/v1/repos/{}/{}/contents/{}?ref={}",
-        owner,
-        repo,
-        path,
-        git_ref,
+        owner, repo, path, git_ref,
     );
     let response = http_client()
         .map_err(|e| format!("HTTP client init failed: {}", e))?
@@ -397,21 +392,19 @@ async fn fetch_codeberg_tree(
         .json()
         .await
         .map_err(|e| format!("Parse error: {}", e))?;
-    Ok(
-        entries
-            .into_iter()
-            .map(|e| TreeEntry {
-                name: e.name,
-                path: e.path,
-                entry_type: match e.entry_type.as_str() {
-                    "dir" => EntryType::Directory,
-                    "submodule" => EntryType::Submodule,
-                    _ => EntryType::File,
-                },
-                size: e.size,
-            })
-            .collect(),
-    )
+    Ok(entries
+        .into_iter()
+        .map(|e| TreeEntry {
+            name: e.name,
+            path: e.path,
+            entry_type: match e.entry_type.as_str() {
+                "dir" => EntryType::Directory,
+                "submodule" => EntryType::Submodule,
+                _ => EntryType::File,
+            },
+            size: e.size,
+        })
+        .collect())
 }
 /// Fetch all file paths in the repository (recursive).
 ///
@@ -477,10 +470,7 @@ async fn fetch_github_all_paths(
 ///
 /// Tries REST APIs (GitHub/GitLab/Codeberg) first, then falls back to
 /// isomorphic-git for GRASP/ngit and other sources.
-pub async fn fetch_readme(
-    repo: &Repository,
-    git_ref: Option<&str>,
-) -> Result<String, String> {
+pub async fn fetch_readme(repo: &Repository, git_ref: Option<&str>) -> Result<String, String> {
     let readme_names = ["README.md", "README", "readme.md", "Readme.md"];
     // Try REST APIs first
     for name in readme_names {
@@ -490,12 +480,14 @@ pub async fn fetch_readme(
     }
     // Fall back to isomorphic-git (works for all sources including GRASP)
     use super::git_service;
-    if git_service::GitService::is_initialized()
-        || git_service::GitService::init().await.is_ok()
-    {
+    if git_service::GitService::is_initialized() || git_service::GitService::init().await.is_ok() {
         for name in readme_names {
             if let Ok(content) = git_service::git_service()
-                .read_file(repo, name, git_ref.map(|r| if r == "main" { "HEAD" } else { r }))
+                .read_file(
+                    repo,
+                    name,
+                    git_ref.map(|r| if r == "main" { "HEAD" } else { r }),
+                )
                 .await
             {
                 return Ok(content);

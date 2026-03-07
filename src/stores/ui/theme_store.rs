@@ -1,6 +1,6 @@
+use crate::platform::storage;
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
-use crate::platform::storage;
 use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub enum Theme {
@@ -102,7 +102,10 @@ pub fn apply_theme() {
             Theme::Dark => "dark",
             Theme::System => "",
         };
-        let js = format!("document.documentElement.setAttribute('class', '{}')", class);
+        let js = format!(
+            "document.documentElement.setAttribute('class', '{}')",
+            class
+        );
         dioxus::prelude::spawn(async move {
             if let Err(e) = dioxus::prelude::document::eval(&js).await {
                 log::warn!("Failed to apply theme on native: {:?}", e);

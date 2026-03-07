@@ -115,7 +115,9 @@ class MainActivity : WryActivity() {
     // should retry or handle gracefully.
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        cleanupTempShareFiles(cacheDir)
+        if (savedInstanceState == null) {
+            cleanupTempShareFiles(cacheDir, TEMP_FILE_PRESERVE_MILLIS)
+        }
         synchronized(lock) {
             instance = this
         }
@@ -163,8 +165,22 @@ class MainActivity : WryActivity() {
         private var filePickError: String? = null
         @Volatile
         private var filePickInFlight: Boolean = false
-        private const val MAX_UPLOAD_BYTES = 50 * 1024 * 1024 // 50MB
+        private const val MAX_UPLOAD_BYTES = 10 * 1024 * 1024 // 10MB
         private const val SHARE_TEMP_PREFIX = "share_"
+        private const val TEMP_FILE_PRESERVE_MILLIS = 5 * 60 * 1000L
+
+        private fun maxUploadError(): String = "File too large (max 10MB)"
+
+        private fun querySignerPackages(context: Context): Set<String> {
+            val intent = Intent().apply {
+                action = Intent.ACTION_VIEW
+                data = Uri.parse("nostrsigner:")
+            }
+            return context.packageManager
+                .queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+                .mapNotNull { it.activityInfo?.packageName }
+                .toSet()
+        }
 
         private fun processPickedContent(uri: Uri, fallbackMimeType: String, label: String) {
             try {
@@ -223,7 +239,7 @@ class MainActivity : WryActivity() {
             }
 
             if (fileSize > 0 && fileSize > MAX_UPLOAD_BYTES) {
-                throw IOException("File too large (max 50MB)")
+                throw IOException(maxUploadError())
             }
 
             val bytes = contentResolver.openInputStream(uri)?.use { stream ->
@@ -235,7 +251,7 @@ class MainActivity : WryActivity() {
                     if (read <= 0) break
                     totalBytes += read
                     if (totalBytes > MAX_UPLOAD_BYTES) {
-                        throw IOException("File too large (max 50MB)")
+                        throw IOException(maxUploadError())
                     }
                     output.write(buffer, 0, read)
                 }
@@ -248,9 +264,13 @@ class MainActivity : WryActivity() {
             )
         }
 
-        private fun cleanupTempShareFiles(cacheDir: File) {
+        private fun cleanupTempShareFiles(cacheDir: File, preserveDurationMillis: Long) {
+            val cutoff = System.currentTimeMillis() - preserveDurationMillis
             cacheDir.listFiles()?.forEach { file ->
                 if (file.name.startsWith(SHARE_TEMP_PREFIX)) {
+                    if (file.lastModified() >= cutoff) {
+                        return@forEach
+                    }
                     if (!file.delete()) {
                         Log.d(TAG, "Could not delete stale shared temp file: ${file.name}")
                     }
@@ -270,7 +290,18 @@ class MainActivity : WryActivity() {
             }
             return try {
                 context.packageManager.getPackageInfo(signerPackage, 0)
-                true
+                val validSignerPackages = querySignerPackages(context)
+                if (signerPackage !in validSignerPackages) {
+                    Log.w(TAG, "Package does not handle nostrsigner scheme: $signerPackage")
+                    synchronized(lock) {
+                        if (pendingPackage == signerPackage) {
+                            pendingPackage = null
+                        }
+                    }
+                    false
+                } else {
+                    true
+                }
             } catch (e: PackageManager.NameNotFoundException) {
                 Log.w(TAG, "Package not found: $signerPackage")
                 false
@@ -313,13 +344,9 @@ class MainActivity : WryActivity() {
         @JvmStatic
         fun getSignerPackages(context: Context): String {
             return try {
-                val intent = Intent().apply {
-                    action = Intent.ACTION_VIEW
-                    data = Uri.parse("nostrsigner:")
-                }
-                val infos = context.packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
-                infos.mapNotNull { it.activityInfo?.packageName }
-                    .distinct()
+                querySignerPackages(context)
+                    .toList()
+                    .sorted()
                     .joinToString(",")
             } catch (e: Exception) {
                 Log.e(TAG, "getSignerPackages failed", e)

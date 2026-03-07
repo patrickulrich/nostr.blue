@@ -72,7 +72,11 @@ pub fn safe_duration_millis(seconds: f64) -> u32 {
         return 0;
     }
     let millis = seconds * 1000.0;
-    if millis > u32::MAX as f64 { u32::MAX } else { millis as u32 }
+    if millis > u32::MAX as f64 {
+        u32::MAX
+    } else {
+        millis as u32
+    }
 }
 /// Format a timestamp as relative time
 ///
@@ -166,8 +170,7 @@ pub fn format_relative_time(timestamp: Timestamp) -> String {
 /// Format a timestamp as a human-readable date and time
 #[allow(dead_code)]
 pub fn format_datetime(timestamp: Timestamp) -> String {
-    let dt = DateTime::from_timestamp(timestamp.as_secs() as i64, 0)
-        .unwrap_or_else(Utc::now);
+    let dt = DateTime::from_timestamp(timestamp.as_secs() as i64, 0).unwrap_or_else(Utc::now);
     dt.format("%Y-%m-%d %H:%M:%S").to_string()
 }
 /// Calculate end timestamp based on preset or custom time
@@ -192,10 +195,7 @@ pub fn calculate_end_time(preset: &str, custom_time: &str) -> Option<Timestamp> 
             if custom_time.is_empty() {
                 return None;
             }
-            if let Ok(naive_dt) = NaiveDateTime::parse_from_str(
-                custom_time,
-                "%Y-%m-%dT%H:%M",
-            ) {
+            if let Ok(naive_dt) = NaiveDateTime::parse_from_str(custom_time, "%Y-%m-%dT%H:%M") {
                 if let Some(local_dt) = Local.from_local_datetime(&naive_dt).earliest() {
                     let utc_dt = local_dt.with_timezone(&Utc);
                     let timestamp = utc_dt.timestamp();

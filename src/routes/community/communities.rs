@@ -11,9 +11,7 @@ use crate::components::{
 use crate::hooks::use_infinite_scroll;
 use crate::routes::Route;
 use crate::stores::auth_store;
-use crate::stores::community_store::{
-    self, Community, CommunityWithMembership, MembershipStatus,
-};
+use crate::stores::community_store::{self, Community, CommunityWithMembership, MembershipStatus};
 use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::stores::pinned_communities::{self, get_pinned_communities_set};
 use dioxus::prelude::*;
@@ -23,9 +21,7 @@ pub fn Communities() -> Element {
     let mut communities = use_signal(Vec::<Community>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
-    let mut user_communities_with_membership = use_signal(
-        Vec::<CommunityWithMembership>::new,
-    );
+    let mut user_communities_with_membership = use_signal(Vec::<CommunityWithMembership>::new);
     let mut user_communities_loading = use_signal(|| false);
     let mut pinned_communities = use_signal(Vec::<CommunityWithMembership>::new);
     let mut pinned_loading = use_signal(|| false);
@@ -60,8 +56,7 @@ pub fn Communities() -> Element {
             user_communities_loading.set(true);
             pinned_loading.set(true);
             spawn(async move {
-                if let Err(e) = community_store::fetch_user_join_requests(&pubkey).await
-                {
+                if let Err(e) = community_store::fetch_user_join_requests(&pubkey).await {
                     log::warn!("Failed to fetch user join requests: {}", e);
                 }
                 match community_store::fetch_user_communities(&pubkey).await {
@@ -77,14 +72,11 @@ pub fn Communities() -> Element {
                             Some(pubkey.as_str()),
                             &pinned_set,
                         );
-                        let (pinned, user): (Vec<_>, Vec<_>) = sorted
-                            .into_iter()
-                            .partition(|c| c.is_pinned);
+                        let (pinned, user): (Vec<_>, Vec<_>) =
+                            sorted.into_iter().partition(|c| c.is_pinned);
                         let user_with_roles: Vec<_> = user
                             .into_iter()
-                            .filter(|c| {
-                                !matches!(c.membership_status, MembershipStatus::None)
-                            })
+                            .filter(|c| !matches!(c.membership_status, MembershipStatus::None))
                             .collect();
                         pinned_communities.set(pinned);
                         user_communities_with_membership.set(user_with_roles);
@@ -131,11 +123,10 @@ pub fn Communities() -> Element {
             search_loading.set(false);
             return;
         }
-        let version = search_version
-            .with_mut(|v| {
-                *v += 1;
-                *v
-            });
+        let version = search_version.with_mut(|v| {
+            *v += 1;
+            *v
+        });
         search_loading.set(true);
         spawn(async move {
             crate::platform::timer::sleep_ms(300).await;
@@ -213,8 +204,10 @@ pub fn Communities() -> Element {
             .cloned()
             .collect();
         log::info!(
-            "display_communities: total={}, excluded={}, filtered={}", all_communities
-            .len(), excluded_a_tags.len(), filtered.len()
+            "display_communities: total={}, excluded={}, filtered={}",
+            all_communities.len(),
+            excluded_a_tags.len(),
+            filtered.len()
         );
         filtered
     });

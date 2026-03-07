@@ -25,7 +25,7 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
         my_info
             .as_ref()
             .map(|info| info.relays.join("\n"))
-            .unwrap_or_else(|| { "wss://relay.damus.io\nwss://nos.lol".to_string() })
+            .unwrap_or_else(|| "wss://relay.damus.io\nwss://nos.lol".to_string())
     });
     let mut auto_redeem_enabled = use_signal(|| auto_redeem);
     let mut is_publishing = use_signal(|| false);
@@ -82,13 +82,9 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
             .filter(|r| seen_relays.insert(r.clone()))
             .collect();
         if relays.is_empty() {
-            error_message
-                .set(
-                    Some(
-                        "Please enter at least one valid relay URL (wss:// or ws://)"
-                            .to_string(),
-                    ),
-                );
+            error_message.set(Some(
+                "Please enter at least one valid relay URL (wss:// or ws://)".to_string(),
+            ));
             return;
         }
         let auto_redeem_setting = *auto_redeem_enabled.read();
@@ -112,15 +108,10 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
                         return;
                     }
                     *cashu::NUTZAP_AUTO_REDEEM.write() = auto_redeem_setting;
-                    success_message
-                        .set(
-                            Some(
-                                format!(
-                                    "Nutzap info published! Event: {}...",
-                                    &event_id[..12.min(event_id.len())],
-                                ),
-                            ),
-                        );
+                    success_message.set(Some(format!(
+                        "Nutzap info published! Event: {}...",
+                        &event_id[..12.min(event_id.len())],
+                    )));
                     if let Err(e) = cashu::start_nutzap_subscription().await {
                         log::warn!("Failed to start nutzap subscription: {}", e);
                     }

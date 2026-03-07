@@ -75,21 +75,41 @@ pub fn CodeSnippetNew() -> Element {
                 deps_val.split(',').map(|s| s.trim()).collect()
             };
             match publish_snippet(
-                    &code_val,
-                    if lang_val.is_empty() { None } else { Some(lang_val.as_str()) },
-                    if name_val.is_empty() { None } else { Some(name_val.as_str()) },
-                    if ext_val.is_empty() { None } else { Some(ext_val.as_str()) },
-                    if desc_val.is_empty() { None } else { Some(desc_val.as_str()) },
-                    None,
-                    if license_val.is_empty() {
-                        None
-                    } else {
-                        Some(license_val.as_str())
-                    },
-                    &deps_list,
-                    if repo_val.is_empty() { None } else { Some(repo_val.as_str()) },
-                )
-                .await
+                &code_val,
+                if lang_val.is_empty() {
+                    None
+                } else {
+                    Some(lang_val.as_str())
+                },
+                if name_val.is_empty() {
+                    None
+                } else {
+                    Some(name_val.as_str())
+                },
+                if ext_val.is_empty() {
+                    None
+                } else {
+                    Some(ext_val.as_str())
+                },
+                if desc_val.is_empty() {
+                    None
+                } else {
+                    Some(desc_val.as_str())
+                },
+                None,
+                if license_val.is_empty() {
+                    None
+                } else {
+                    Some(license_val.as_str())
+                },
+                &deps_list,
+                if repo_val.is_empty() {
+                    None
+                } else {
+                    Some(repo_val.as_str())
+                },
+            )
+            .await
             {
                 Ok(event_id) => {
                     nav.push(Route::CodeSnippetDetail {

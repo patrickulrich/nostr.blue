@@ -1,8 +1,6 @@
 //! Fork/Edit Recipe Page
 //! Form for forking (copying) or editing an existing recipe
-use crate::components::{
-    ClientInitializing, RecipeDetailViewSkeleton, RecipeForm, RecipeFormData,
-};
+use crate::components::{ClientInitializing, RecipeDetailViewSkeleton, RecipeForm, RecipeFormData};
 use crate::routes::Route;
 use crate::stores::auth_store;
 use crate::stores::nostr_client::{self, HAS_SIGNER};
@@ -25,35 +23,33 @@ pub fn RecipeFork(naddr: String) -> Element {
         }
         false
     });
-    use_effect(
-        use_reactive(
-            (&*nostr_client::CLIENT_INITIALIZED.read(), &naddr_for_effect),
-            move |(client_initialized, naddr_str)| {
-                if !client_initialized {
-                    return;
-                }
-                let naddr_clone = naddr_str.clone();
-                loading.set(true);
-                error.set(None);
-                spawn(async move {
-                    match recipe_store::fetch_recipe_by_naddr(&naddr_clone).await {
-                        Ok(Some(r)) => {
-                            original_recipe.set(Some(r));
-                            loading.set(false);
-                        }
-                        Ok(None) => {
-                            error.set(Some("Recipe not found".to_string()));
-                            loading.set(false);
-                        }
-                        Err(e) => {
-                            error.set(Some(e));
-                            loading.set(false);
-                        }
+    use_effect(use_reactive(
+        (&*nostr_client::CLIENT_INITIALIZED.read(), &naddr_for_effect),
+        move |(client_initialized, naddr_str)| {
+            if !client_initialized {
+                return;
+            }
+            let naddr_clone = naddr_str.clone();
+            loading.set(true);
+            error.set(None);
+            spawn(async move {
+                match recipe_store::fetch_recipe_by_naddr(&naddr_clone).await {
+                    Ok(Some(r)) => {
+                        original_recipe.set(Some(r));
+                        loading.set(false);
                     }
-                });
-            },
-        ),
-    );
+                    Ok(None) => {
+                        error.set(Some("Recipe not found".to_string()));
+                        loading.set(false);
+                    }
+                    Err(e) => {
+                        error.set(Some(e));
+                        loading.set(false);
+                    }
+                }
+            });
+        },
+    ));
     let handle_submit = move |form_data: RecipeFormData| {
         if let Err(validation_errors) = form_data.validate() {
             form_errors.set(Some(validation_errors));
@@ -73,24 +69,19 @@ pub fn RecipeFork(naddr: String) -> Element {
             let result = if is_editing {
                 if let Some(ref orig) = original {
                     recipe_store::update_recipe(
-                            orig.metadata.identifier.as_deref().unwrap_or(""),
-                            &form_data.title,
-                            summary,
-                            &form_data.image_urls,
-                            &content,
-                            form_data.tags.clone(),
-                        )
-                        .await
+                        orig.metadata.identifier.as_deref().unwrap_or(""),
+                        &form_data.title,
+                        summary,
+                        &form_data.image_urls,
+                        &content,
+                        form_data.tags.clone(),
+                    )
+                    .await
                 } else {
                     Err("Original recipe not found".to_string())
                 }
             } else if let Some(ref orig) = original {
-                recipe_store::fork_recipe(
-                        orig,
-                        &form_data.title,
-                        &content,
-                        form_data.tags.clone(),
-                    )
+                recipe_store::fork_recipe(orig, &form_data.title, &content, form_data.tags.clone())
                     .await
             } else {
                 Err("Original recipe not found".to_string())
@@ -107,7 +98,10 @@ pub fn RecipeFork(naddr: String) -> Element {
         });
     };
     let initial_data = use_memo(move || {
-        original_recipe.read().as_ref().map(RecipeFormData::from_cached_recipe)
+        original_recipe
+            .read()
+            .as_ref()
+            .map(RecipeFormData::from_cached_recipe)
     });
     rsx! {
         div { class: "min-h-screen",

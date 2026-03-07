@@ -62,17 +62,25 @@ pub async fn validate_proofs_batched(
         return Ok(ProofValidationResult::default());
     }
     log::debug!(
-        "Validating {} proofs in batches of {}", proofs.len(), MAX_SYNC_INPUT_SIZE
+        "Validating {} proofs in batches of {}",
+        proofs.len(),
+        MAX_SYNC_INPUT_SIZE
     );
     let mut result = ProofValidationResult::default();
     let mut valid_proofs = Vec::with_capacity(proofs.len());
     for (batch_idx, batch) in proofs.chunks(MAX_SYNC_INPUT_SIZE).enumerate() {
-        log::debug!("Validating batch {} ({} proofs)", batch_idx + 1, batch.len());
+        log::debug!(
+            "Validating batch {} ({} proofs)",
+            batch_idx + 1,
+            batch.len()
+        );
         let states = match wallet.check_proofs_spent(batch.to_vec()).await {
             Ok(s) => s,
             Err(e) => {
                 log::warn!(
-                    "Failed to check proof states for batch {}: {}", batch_idx, e
+                    "Failed to check proof states for batch {}: {}",
+                    batch_idx,
+                    e
                 );
                 valid_proofs.extend(batch.iter().cloned());
                 continue;
@@ -84,7 +92,8 @@ pub async fn validate_proofs_batched(
                     result.spent_count += 1;
                     result.spent_sats += u64::from(proof.amount);
                     log::debug!(
-                        "Proof {} is spent ({} sats)", & proof.secret.to_string() [..8],
+                        "Proof {} is spent ({} sats)",
+                        &proof.secret.to_string()[..8],
                         u64::from(proof.amount)
                     );
                 }
@@ -92,7 +101,8 @@ pub async fn validate_proofs_batched(
                     result.pending_count += 1;
                     valid_proofs.push(proof.clone());
                     log::debug!(
-                        "Proof {} is pending at mint", & proof.secret.to_string() [..8]
+                        "Proof {} is pending at mint",
+                        &proof.secret.to_string()[..8]
                     );
                 }
                 State::Unspent => {
@@ -108,11 +118,16 @@ pub async fn validate_proofs_batched(
     if result.spent_count > 0 {
         log::info!(
             "Proof validation complete: {} valid, {} spent ({} sats removed), {} pending",
-            result.valid_proofs.len(), result.spent_count, result.spent_sats, result
-            .pending_count
+            result.valid_proofs.len(),
+            result.spent_count,
+            result.spent_sats,
+            result.pending_count
         );
     } else {
-        log::debug!("All {} proofs validated as unspent", result.valid_proofs.len());
+        log::debug!(
+            "All {} proofs validated as unspent",
+            result.valid_proofs.len()
+        );
     }
     Ok(result)
 }
@@ -136,7 +151,8 @@ pub async fn validate_and_filter_proofs(
 /// Solution: Increment counter and retry with fresh signatures.
 pub fn should_heal_outputs_error(error: &str) -> bool {
     let lower = error.to_lowercase();
-    lower.contains("already signed") || lower.contains("duplicate key")
+    lower.contains("already signed")
+        || lower.contains("duplicate key")
         || lower.contains("outputs have already been signed")
         || lower.contains("blind signature already exists")
         || lower.contains("blinded message already used")
@@ -173,7 +189,8 @@ where
             Ok(result) => {
                 if heal_attempt > 0 {
                     log::info!(
-                        "Counter healing succeeded after {} attempt(s)", heal_attempt
+                        "Counter healing succeeded after {} attempt(s)",
+                        heal_attempt
                     );
                 }
                 return Ok(CounterHealResult {
@@ -183,12 +200,9 @@ where
             }
             Err(e) => {
                 let error_str = e.to_string();
-                if should_heal_outputs_error(&error_str)
-                    && heal_attempt < MAX_COUNTER_HEAL_ATTEMPTS
+                if should_heal_outputs_error(&error_str) && heal_attempt < MAX_COUNTER_HEAL_ATTEMPTS
                 {
-                    let increment = match COUNTER_HEAL_INCREMENTS
-                        .get(heal_attempt as usize)
-                    {
+                    let increment = match COUNTER_HEAL_INCREMENTS.get(heal_attempt as usize) {
                         Some(&inc) => inc,
                         None => {
                             log::error!(
@@ -235,12 +249,10 @@ pub fn sanitize_and_validate_token(token_string: &str) -> Result<String, String>
         return Err("Token string is empty".to_string());
     }
     if !sanitized.starts_with("cashuA") && !sanitized.starts_with("cashuB") {
-        return Err(
-            format!(
-                "Invalid token format. Must start with 'cashuA' or 'cashuB', got: '{}'",
-                sanitized.chars().take(10).collect::<String>(),
-            ),
-        );
+        return Err(format!(
+            "Invalid token format. Must start with 'cashuA' or 'cashuB', got: '{}'",
+            sanitized.chars().take(10).collect::<String>(),
+        ));
     }
     Ok(sanitized)
 }
@@ -249,7 +261,10 @@ mod tests {
     use super::*;
     #[test]
     fn test_normalize_mint_url() {
-        assert_eq!(normalize_mint_url("mint.example.com"), "https://mint.example.com");
+        assert_eq!(
+            normalize_mint_url("mint.example.com"),
+            "https://mint.example.com"
+        );
         assert_eq!(
             normalize_mint_url("https://mint.example.com/"),
             "https://mint.example.com",
@@ -265,9 +280,15 @@ mod tests {
     }
     #[test]
     fn test_mint_matches() {
-        assert!(mint_matches("https://mint.example.com/", "https://mint.example.com"));
+        assert!(mint_matches(
+            "https://mint.example.com/",
+            "https://mint.example.com"
+        ));
         assert!(mint_matches("mint.example.com", "https://mint.example.com"));
-        assert!(!mint_matches("https://other.mint.com", "https://mint.example.com"));
+        assert!(!mint_matches(
+            "https://other.mint.com",
+            "https://mint.example.com"
+        ));
     }
     #[test]
     fn test_sanitize_and_validate_token() {

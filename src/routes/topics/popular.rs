@@ -4,8 +4,8 @@ use crate::components::{TopicPostCard, TopicSidebar};
 use crate::stores::auth_store;
 use crate::stores::profiles::prefetch_profiles;
 use crate::stores::topic_store::{
-    compute_hot_score, fetch_recent_posts, fetch_votes_batch,
-    VoteCounts, ScoredPost, LOADING_TOPIC_POSTS,
+    compute_hot_score, fetch_recent_posts, fetch_votes_batch, ScoredPost, VoteCounts,
+    LOADING_TOPIC_POSTS,
 };
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
@@ -29,9 +29,10 @@ pub fn TopicsPopular() -> Element {
                 .iter()
                 .filter_map(|p| EventId::from_hex(&p.id).ok())
                 .collect();
-            let user_pk = auth_store::get_pubkey()
-                .and_then(|pk| PublicKey::from_hex(&pk).ok());
-            let votes = fetch_votes_batch(event_ids, user_pk).await.unwrap_or_default();
+            let user_pk = auth_store::get_pubkey().and_then(|pk| PublicKey::from_hex(&pk).ok());
+            let votes = fetch_votes_batch(event_ids, user_pk)
+                .await
+                .unwrap_or_default();
             vote_counts.write().extend(votes.clone());
 
             // Compute hot scores
@@ -45,7 +46,11 @@ pub fn TopicsPopular() -> Element {
                     ScoredPost { post, score }
                 })
                 .collect();
-            scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            scored.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             scored_posts.set(scored);
         }
     });

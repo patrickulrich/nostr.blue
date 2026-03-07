@@ -1,17 +1,16 @@
 //! Pinboard Card Component
 //! Displays a pinboard in a card format for listing pages
 //! Image-focused card with cover image gradient, title, and author
-use dioxus::prelude::*;
 use crate::components::icons::PinIcon;
 use crate::hooks::use_author_metadata;
 use crate::routes::Route;
 use crate::stores::auth_store;
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::pin_boards_store::{
-    fetch_pinboard_reaction_count, has_user_reacted_to_pinboard,
-    toggle_pinboard_reaction, Pinboard,
+    fetch_pinboard_reaction_count, has_user_reacted_to_pinboard, toggle_pinboard_reaction, Pinboard,
 };
 use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
 /// Hashtag badge for displaying board tags
 #[component]
 pub fn HashtagBadge(tag: String) -> Element {
@@ -51,8 +50,13 @@ pub fn PinBoardCard(
         .unwrap_or('?')
         .to_uppercase()
         .to_string();
-    let pin_text = pin_count
-        .map(|c| { if c == 1 { "1 pin".to_string() } else { format!("{} pins", c) } });
+    let pin_text = pin_count.map(|c| {
+        if c == 1 {
+            "1 pin".to_string()
+        } else {
+            format!("{} pins", c)
+        }
+    });
     let is_owner = auth_store::get_pubkey()
         .map(|pk| pk == author_pubkey)
         .unwrap_or(false);
@@ -155,16 +159,19 @@ pub fn PinBoardCardMosaic(
     let mut reaction_count = use_signal(|| 0usize);
     let mut reaction_loading = use_signal(|| false);
     let a_tag_for_reactions = board.a_tag.clone();
-    use_effect(
-        use_reactive!(
-            | a_tag_for_reactions | { let a_tag = a_tag_for_reactions.clone();
-            spawn(async move { if let Ok(count) = fetch_pinboard_reaction_count(& a_tag).
-            await { reaction_count.set(count); }
-            if *HAS_SIGNER.read() { if let
-            Ok(reacted) = has_user_reacted_to_pinboard(& a_tag). await { has_reacted
-            .set(reacted); } } }); }
-        ),
-    );
+    use_effect(use_reactive!(|a_tag_for_reactions| {
+        let a_tag = a_tag_for_reactions.clone();
+        spawn(async move {
+            if let Ok(count) = fetch_pinboard_reaction_count(&a_tag).await {
+                reaction_count.set(count);
+            }
+            if *HAS_SIGNER.read() {
+                if let Ok(reacted) = has_user_reacted_to_pinboard(&a_tag).await {
+                    has_reacted.set(reacted);
+                }
+            }
+        });
+    }));
     let display_name = author_metadata
         .read()
         .as_ref()
@@ -347,15 +354,12 @@ const SIZE_VARIANTS: [&str; 3] = ["small", "medium", "large"];
 #[component]
 pub fn PinBoardMosaicGrid(
     boards: Vec<Pinboard>,
-    #[props(default)]
-    on_board_click: Option<EventHandler<Pinboard>>,
+    #[props(default)] on_board_click: Option<EventHandler<Pinboard>>,
     /// Handler for zap button clicks - parent should open ZapModal
     #[props(default)]
     on_zap_request: Option<EventHandler<Pinboard>>,
-    #[props(default = false)]
-    loading: bool,
-    #[props(default = 8)]
-    skeleton_count: usize,
+    #[props(default = false)] loading: bool,
+    #[props(default = 8)] skeleton_count: usize,
     /// Callback when more items should be loaded
     #[props(default)]
     on_load_more: Option<EventHandler<()>>,
@@ -410,16 +414,17 @@ pub fn PinBoardMosaicGrid(
 }
 /// Compact pinboard card for smaller displays or sidebars
 #[component]
-pub fn PinBoardCardCompact(
-    board: Pinboard,
-    #[props(default)]
-    pin_count: Option<usize>,
-) -> Element {
+pub fn PinBoardCardCompact(board: Pinboard, #[props(default)] pin_count: Option<usize>) -> Element {
     let title = board.title.clone();
     let cover_image = board.image.clone();
     let naddr = board.naddr.clone();
-    let pin_text = pin_count
-        .map(|c| { if c == 1 { "1 pin".to_string() } else { format!("{} pins", c) } });
+    let pin_text = pin_count.map(|c| {
+        if c == 1 {
+            "1 pin".to_string()
+        } else {
+            format!("{} pins", c)
+        }
+    });
     rsx! {
         Link {
             to: Route::PinBoardDetail {
@@ -500,10 +505,8 @@ pub fn PinBoardCardCompactSkeleton() -> Element {
 #[component]
 pub fn PinBoardGrid(
     boards: Vec<Pinboard>,
-    #[props(default = false)]
-    loading: bool,
-    #[props(default = 4)]
-    skeleton_count: usize,
+    #[props(default = false)] loading: bool,
+    #[props(default = 4)] skeleton_count: usize,
 ) -> Element {
     rsx! {
         div { class: "grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4",

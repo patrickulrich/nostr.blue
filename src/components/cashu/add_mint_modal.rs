@@ -19,8 +19,7 @@ pub fn CashuAddMintModal(
             return;
         }
         if !url.starts_with("https://") && !url.starts_with("http://") {
-            error_message
-                .set(Some("URL must start with http:// or https://".to_string()));
+            error_message.set(Some("URL must start with http:// or https://".to_string()));
             return;
         }
         is_checking.set(true);

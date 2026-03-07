@@ -19,10 +19,8 @@ struct TabConfig {
 pub fn RepoTabNav(
     naddr: String,
     active_tab: String,
-    #[props(default = None)]
-    issue_count: Option<u32>,
-    #[props(default = None)]
-    pr_count: Option<u32>,
+    #[props(default = None)] issue_count: Option<u32>,
+    #[props(default = None)] pr_count: Option<u32>,
 ) -> Element {
     let mut show_overflow = use_signal(|| false);
     let tabs = [

@@ -3,9 +3,7 @@
 use crate::components::icons::{
     BookOpenIcon, GridIcon, ListIcon, PenSquareIcon, RefreshIcon, SearchIcon,
 };
-use crate::components::{
-    PublicationCardCompact, PublicationCardSkeleton, PublicationGrid,
-};
+use crate::components::{PublicationCardCompact, PublicationCardSkeleton, PublicationGrid};
 use crate::hooks::use_infinite_scroll;
 use crate::stores::publication_store::PublicationIndex;
 use crate::stores::{nostr_client, publication_store};
@@ -74,10 +72,8 @@ pub fn PublicationsHome() -> Element {
                             oldest_timestamp.set(Some(ts));
                         }
                         let mut current = publications.peek().clone();
-                        let existing_ids: HashSet<_> = current
-                            .iter()
-                            .map(|p| p.event.id.to_hex())
-                            .collect();
+                        let existing_ids: HashSet<_> =
+                            current.iter().map(|p| p.event.id.to_hex()).collect();
                         let mut added_count = 0;
                         for pub_item in fetched {
                             if !existing_ids.contains(&pub_item.event.id.to_hex()) {
@@ -91,7 +87,8 @@ pub fn PublicationsHome() -> Element {
                         }
                         log::info!(
                             "Pagination: fetched {}, added {} unique publications",
-                            fetched_count, added_count
+                            fetched_count,
+                            added_count
                         );
                     }
                 }
@@ -154,9 +151,7 @@ pub fn PublicationsHome() -> Element {
         oldest_timestamp.set(None);
         spawn(async move {
             loading.set(true);
-            if let Ok(result) = publication_store::fetch_publications(PAGE_SIZE, None)
-                .await
-            {
+            if let Ok(result) = publication_store::fetch_publications(PAGE_SIZE, None).await {
                 if let Some(oldest) = result.last() {
                     oldest_timestamp.set(Some(oldest.event.created_at.as_secs()));
                 }

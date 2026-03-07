@@ -221,21 +221,36 @@ fn NostrArtistSection(pubkey: String) -> Element {
     let mut tracks = use_signal(Vec::<nostr_music::NostrTrack>::new);
     let mut loading = use_signal(|| true);
     let mut error_msg = use_signal(|| None::<String>);
-    use_effect(
-        use_reactive!(
-            | pubkey | { let pk = pubkey.clone(); let client_ready =
-            nostr_client::NOSTR_CLIENT.read().is_some(); if ! client_ready { loading
-            .set(true); return; } loading.set(true); error_msg.set(None); spawn(async
-            move { let (profile_result, tracks_result) =
-            futures::join!(profiles::fetch_profile(pk.clone()),
-            nostr_music::fetch_artist_tracks(& pk, 100)); match profile_result { Ok(p) =>
-            profile.set(Some(p)), Err(e) =>
-            log::warn!("Failed to fetch artist profile: {}", e), } match tracks_result {
-            Ok(t) => { tracks.set(t); loading.set(false); } Err(e) => { error_msg
-            .set(Some(format!("Failed to load artist tracks: {}", e))); loading
-            .set(false); } } }); }
-        ),
-    );
+    use_effect(use_reactive!(|pubkey| {
+        let pk = pubkey.clone();
+        let client_ready = nostr_client::NOSTR_CLIENT.read().is_some();
+        if !client_ready {
+            loading.set(true);
+            return;
+        }
+        loading.set(true);
+        error_msg.set(None);
+        spawn(async move {
+            let (profile_result, tracks_result) = futures::join!(
+                profiles::fetch_profile(pk.clone()),
+                nostr_music::fetch_artist_tracks(&pk, 100)
+            );
+            match profile_result {
+                Ok(p) => profile.set(Some(p)),
+                Err(e) => log::warn!("Failed to fetch artist profile: {}", e),
+            }
+            match tracks_result {
+                Ok(t) => {
+                    tracks.set(t);
+                    loading.set(false);
+                }
+                Err(e) => {
+                    error_msg.set(Some(format!("Failed to load artist tracks: {}", e)));
+                    loading.set(false);
+                }
+            }
+        });
+    }));
     let artist_name = profile
         .read()
         .as_ref()
@@ -246,12 +261,14 @@ fn NostrArtistSection(pubkey: String) -> Element {
         .as_ref()
         .and_then(|p| p.picture.clone())
         .unwrap_or_else(|| {
-            format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", &pubkey)
+            format!(
+                "https://api.dicebear.com/7.x/identicon/svg?seed={}",
+                &pubkey
+            )
         });
     let artist_bio = profile.read().as_ref().and_then(|p| p.about.clone());
-    let music_tracks: Arc<Vec<MusicTrack>> = Arc::new(
-        tracks.read().iter().map(|t| t.clone().into()).collect(),
-    );
+    let music_tracks: Arc<Vec<MusicTrack>> =
+        Arc::new(tracks.read().iter().map(|t| t.clone().into()).collect());
     rsx! {
         div { class: "container mx-auto px-4 py-8",
             Link {

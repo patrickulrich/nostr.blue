@@ -14,16 +14,15 @@
 //! - **Clear Auth (NUT-21)**: JWT-based auth using OIDC providers
 //! - **Blind Auth (NUT-22)**: Blind signature-based tokens for privacy
 #![allow(dead_code)]
-use std::collections::HashMap;
-use dioxus::prelude::*;
 pub use cdk_common::{
-    AuthProof, AuthRequired, AuthToken, BlindAuthSettings, BlindAuthToken,
-    ClearAuthSettings, Method as HttpMethod, ProtectedEndpoint, RoutePath,
+    AuthProof, AuthRequired, AuthToken, BlindAuthSettings, BlindAuthToken, ClearAuthSettings,
+    Method as HttpMethod, ProtectedEndpoint, RoutePath,
 };
+use dioxus::prelude::*;
+use std::collections::HashMap;
 /// Global cache for mint auth states
-pub static MINT_AUTH_STATES: GlobalSignal<HashMap<String, MintAuthState>> = GlobalSignal::new(
-    HashMap::new,
-);
+pub static MINT_AUTH_STATES: GlobalSignal<HashMap<String, MintAuthState>> =
+    GlobalSignal::new(HashMap::new);
 /// Get auth state for a mint (from cache)
 pub fn get_mint_auth_state(mint_url: &str) -> Option<MintAuthState> {
     MINT_AUTH_STATES.read().get(mint_url).cloned()
@@ -35,7 +34,11 @@ pub fn set_mint_auth_state(mint_url: &str, mut state: MintAuthState) {
 }
 /// Check if a mint is known to require authentication
 pub fn mint_requires_auth(mint_url: &str) -> bool {
-    MINT_AUTH_STATES.read().get(mint_url).map(|s| s.requires_auth()).unwrap_or(false)
+    MINT_AUTH_STATES
+        .read()
+        .get(mint_url)
+        .map(|s| s.requires_auth())
+        .unwrap_or(false)
 }
 /// Clear auth state for a mint
 pub fn clear_mint_auth_state(mint_url: &str) {
@@ -60,8 +63,14 @@ impl std::fmt::Debug for MintAuthState {
         f.debug_struct("MintAuthState")
             .field("clear_auth", &self.clear_auth)
             .field("blind_auth", &self.blind_auth)
-            .field("clear_token", &self.clear_token.as_ref().map(|_| "<redacted>"))
-            .field("refresh_token", &self.refresh_token.as_ref().map(|_| "<redacted>"))
+            .field(
+                "clear_token",
+                &self.clear_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "<redacted>"),
+            )
             .field("protected_map", &self.protected_map)
             .finish()
     }
@@ -72,18 +81,11 @@ impl MintAuthState {
         self.clear_auth.is_some() || self.blind_auth.is_some()
     }
     /// Check if a specific endpoint requires authentication
-    pub fn endpoint_requires_auth(
-        &self,
-        endpoint: &ProtectedEndpoint,
-    ) -> Option<AuthRequired> {
+    pub fn endpoint_requires_auth(&self, endpoint: &ProtectedEndpoint) -> Option<AuthRequired> {
         self.protected_map.get(endpoint).copied()
     }
     /// Check if a specific method/path combination requires authentication
-    pub fn requires_auth_for(
-        &self,
-        method: HttpMethod,
-        path: RoutePath,
-    ) -> Option<AuthRequired> {
+    pub fn requires_auth_for(&self, method: HttpMethod, path: RoutePath) -> Option<AuthRequired> {
         let endpoint = ProtectedEndpoint::new(method, path);
         self.endpoint_requires_auth(&endpoint)
     }
@@ -109,17 +111,13 @@ pub fn parse_auth_from_mint_info(mint_info: &serde_json::Value) -> MintAuthState
     let mut state = MintAuthState::default();
     if let Some(nuts) = mint_info.get("nuts") {
         if let Some(nut21) = nuts.get("21") {
-            if let Ok(settings) = serde_json::from_value::<
-                ClearAuthSettings,
-            >(nut21.clone()) {
+            if let Ok(settings) = serde_json::from_value::<ClearAuthSettings>(nut21.clone()) {
                 state.clear_auth = Some(settings);
                 log::debug!("Mint supports Clear Auth (NUT-21)");
             }
         }
         if let Some(nut22) = nuts.get("22") {
-            if let Ok(settings) = serde_json::from_value::<
-                BlindAuthSettings,
-            >(nut22.clone()) {
+            if let Ok(settings) = serde_json::from_value::<BlindAuthSettings>(nut22.clone()) {
                 state.blind_auth = Some(settings);
                 log::debug!("Mint supports Blind Auth (NUT-22)");
             }
@@ -154,9 +152,7 @@ pub fn add_auth_header(
                 }
             }
             AuthRequired::Blind => {
-                if let Some(AuthToken::BlindAuth(bat)) = get_blind_auth_for_request(
-                    mint_url,
-                ) {
+                if let Some(AuthToken::BlindAuth(bat)) = get_blind_auth_for_request(mint_url) {
                     headers.push(("Blind-auth".to_string(), bat.to_string()));
                     return Ok(());
                 }
@@ -186,12 +182,14 @@ pub fn add_auth_header_for(
 /// Uses CDK error codes: 30001 (ClearAuthRequired), 31001 (BlindAuthRequired)
 pub fn is_auth_required_error(status: u16, body: &str) -> Option<AuthRequired> {
     if status == 401 || status == 403 {
-        if body.contains("30001") || body.contains("clear_auth_required")
+        if body.contains("30001")
+            || body.contains("clear_auth_required")
             || body.contains("Clear-auth")
         {
             return Some(AuthRequired::Clear);
         }
-        if body.contains("31001") || body.contains("blind_auth_required")
+        if body.contains("31001")
+            || body.contains("blind_auth_required")
             || body.contains("Blind-auth")
         {
             return Some(AuthRequired::Blind);

@@ -2,12 +2,12 @@
 //!
 //! Discovery/search page for NIP-58 badges.
 //! Shows user's badges, pending awards, and all badges.
-use dioxus::prelude::*;
 use crate::components::ClientInitializing;
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip58::{self, BadgeAward, BadgeDefinition};
 use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
 /// Tab selection for the Badges page
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum BadgesTab {
@@ -32,9 +32,7 @@ pub fn BadgesHome() -> Element {
     let mut active_tab = use_signal(|| BadgesTab::MyBadges);
     let mut search_query = use_signal(String::new);
     let mut my_badges = use_signal(Vec::<BadgeDefinition>::new);
-    let mut pending_awards = use_signal(
-        Vec::<(BadgeAward, Option<BadgeDefinition>)>::new,
-    );
+    let mut pending_awards = use_signal(Vec::<(BadgeAward, Option<BadgeDefinition>)>::new);
     let mut all_badges = use_signal(Vec::<BadgeDefinition>::new);
     let mut created_badges = use_signal(Vec::<BadgeDefinition>::new);
     let mut loading = use_signal(|| true);
@@ -42,112 +40,108 @@ pub fn BadgesHome() -> Element {
     let mut error = use_signal(|| None::<String>);
     let is_authenticated = auth_store::is_authenticated();
     let user_pubkey = auth_store::get_pubkey();
-    use_effect(
-        use_reactive(
-            (&*active_tab.read(), &*nostr_client::CLIENT_INITIALIZED.read()),
-            move |(tab, client_initialized)| {
-                if !client_initialized {
-                    return;
-                }
-                loading.set(true);
-                error.set(None);
-                let pubkey = user_pubkey.clone();
-                spawn(async move {
-                    match tab {
-                        BadgesTab::MyBadges => {
-                            if let Some(pk) = &pubkey {
-                                match nip58::fetch_profile_badges(pk).await {
-                                    Ok(entries) => {
-                                        let mut badges = Vec::new();
-                                        for entry in entries {
-                                            if let Ok(badge) = nip58::fetch_badge_by_coordinate(
-                                                    &entry.definition_coordinate,
-                                                )
-                                                .await
-                                            {
-                                                badges.push(badge);
-                                            }
+    use_effect(use_reactive(
+        (
+            &*active_tab.read(),
+            &*nostr_client::CLIENT_INITIALIZED.read(),
+        ),
+        move |(tab, client_initialized)| {
+            if !client_initialized {
+                return;
+            }
+            loading.set(true);
+            error.set(None);
+            let pubkey = user_pubkey.clone();
+            spawn(async move {
+                match tab {
+                    BadgesTab::MyBadges => {
+                        if let Some(pk) = &pubkey {
+                            match nip58::fetch_profile_badges(pk).await {
+                                Ok(entries) => {
+                                    let mut badges = Vec::new();
+                                    for entry in entries {
+                                        if let Ok(badge) = nip58::fetch_badge_by_coordinate(
+                                            &entry.definition_coordinate,
+                                        )
+                                        .await
+                                        {
+                                            badges.push(badge);
                                         }
-                                        my_badges.set(badges);
                                     }
-                                    Err(e) => {
-                                        log::warn!("Failed to fetch my badges: {}", e);
-                                        my_badges.set(Vec::new());
-                                    }
-                                }
-                            } else {
-                                my_badges.set(Vec::new());
-                            }
-                        }
-                        BadgesTab::Pending => {
-                            if let Some(pk) = &pubkey {
-                                match nip58::fetch_pending_badge_awards(pk).await {
-                                    Ok(awards) => {
-                                        let accepted: Vec<String> = nip58::fetch_profile_badges(pk)
-                                            .await
-                                            .unwrap_or_default()
-                                            .iter()
-                                            .map(|e| e.definition_coordinate.clone())
-                                            .collect();
-                                        let mut pending = Vec::new();
-                                        for award in awards {
-                                            if !accepted.contains(&award.definition_coordinate) {
-                                                let badge = nip58::fetch_badge_by_coordinate(
-                                                        &award.definition_coordinate,
-                                                    )
-                                                    .await
-                                                    .ok();
-                                                pending.push((award, badge));
-                                            }
-                                        }
-                                        pending_awards.set(pending);
-                                    }
-                                    Err(e) => {
-                                        log::warn!("Failed to fetch pending awards: {}", e);
-                                        pending_awards.set(Vec::new());
-                                    }
-                                }
-                            } else {
-                                pending_awards.set(Vec::new());
-                            }
-                        }
-                        BadgesTab::All => {
-                            match nip58::fetch_recent_badges(50).await {
-                                Ok(badges) => {
-                                    all_badges.set(badges);
-                                    has_more.set(true);
+                                    my_badges.set(badges);
                                 }
                                 Err(e) => {
-                                    log::warn!("Failed to fetch all badges: {}", e);
-                                    all_badges.set(Vec::new());
+                                    log::warn!("Failed to fetch my badges: {}", e);
+                                    my_badges.set(Vec::new());
                                 }
                             }
-                        }
-                        BadgesTab::Created => {
-                            if let Some(pk) = &pubkey {
-                                match nip58::fetch_badges_by_issuer(pk).await {
-                                    Ok(badges) => {
-                                        created_badges.set(badges);
-                                    }
-                                    Err(e) => {
-                                        log::warn!("Failed to fetch created badges: {}", e);
-                                        created_badges.set(Vec::new());
-                                    }
-                                }
-                            } else {
-                                created_badges.set(Vec::new());
-                            }
+                        } else {
+                            my_badges.set(Vec::new());
                         }
                     }
-                    loading.set(false);
-                });
-            },
-        ),
-    );
-    let filter_badges = |
-        badges: &[BadgeDefinition],
-        query: &str,
-    | -> Vec<BadgeDefinition> {
+                    BadgesTab::Pending => {
+                        if let Some(pk) = &pubkey {
+                            match nip58::fetch_pending_badge_awards(pk).await {
+                                Ok(awards) => {
+                                    let accepted: Vec<String> = nip58::fetch_profile_badges(pk)
+                                        .await
+                                        .unwrap_or_default()
+                                        .iter()
+                                        .map(|e| e.definition_coordinate.clone())
+                                        .collect();
+                                    let mut pending = Vec::new();
+                                    for award in awards {
+                                        if !accepted.contains(&award.definition_coordinate) {
+                                            let badge = nip58::fetch_badge_by_coordinate(
+                                                &award.definition_coordinate,
+                                            )
+                                            .await
+                                            .ok();
+                                            pending.push((award, badge));
+                                        }
+                                    }
+                                    pending_awards.set(pending);
+                                }
+                                Err(e) => {
+                                    log::warn!("Failed to fetch pending awards: {}", e);
+                                    pending_awards.set(Vec::new());
+                                }
+                            }
+                        } else {
+                            pending_awards.set(Vec::new());
+                        }
+                    }
+                    BadgesTab::All => match nip58::fetch_recent_badges(50).await {
+                        Ok(badges) => {
+                            all_badges.set(badges);
+                            has_more.set(true);
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to fetch all badges: {}", e);
+                            all_badges.set(Vec::new());
+                        }
+                    },
+                    BadgesTab::Created => {
+                        if let Some(pk) = &pubkey {
+                            match nip58::fetch_badges_by_issuer(pk).await {
+                                Ok(badges) => {
+                                    created_badges.set(badges);
+                                }
+                                Err(e) => {
+                                    log::warn!("Failed to fetch created badges: {}", e);
+                                    created_badges.set(Vec::new());
+                                }
+                            }
+                        } else {
+                            created_badges.set(Vec::new());
+                        }
+                    }
+                }
+                loading.set(false);
+            });
+        },
+    ));
+    let filter_badges = |badges: &[BadgeDefinition], query: &str| -> Vec<BadgeDefinition> {
         if query.is_empty() {
             return badges.to_vec();
         }
@@ -155,10 +149,12 @@ pub fn BadgesHome() -> Element {
         badges
             .iter()
             .filter(|b| {
-                b.name.as_ref().map(|n| n.to_lowercase().contains(&q)).unwrap_or(false)
+                b.name
+                    .as_ref()
+                    .map(|n| n.to_lowercase().contains(&q))
+                    .unwrap_or(false)
                     || b.id.to_lowercase().contains(&q)
-                    || b
-                        .description
+                    || b.description
                         .as_ref()
                         .map(|d| d.to_lowercase().contains(&q))
                         .unwrap_or(false)

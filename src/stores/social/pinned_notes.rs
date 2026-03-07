@@ -2,13 +2,13 @@ use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
-use nostr_sdk::{Event, EventBuilder, EventId, Filter, Kind, PublicKey};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
 #[cfg(feature = "web")]
 use gloo_timers::callback::Timeout;
+use nostr_sdk::{Event, EventBuilder, EventId, Filter, Kind, PublicKey};
 #[cfg(feature = "web")]
 use std::cell::RefCell;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 #[cfg(feature = "web")]
 use wasm_bindgen_futures::spawn_local;
 
@@ -25,9 +25,8 @@ pub struct PinnedRollbackStore {
     pub data: Option<Vec<String>>,
 }
 /// Global signal to track pinned event IDs (current user's pins)
-pub static PINNED_EVENTS: GlobalSignal<Store<PinnedEventsStore>> = Signal::global(|| Store::new(
-    PinnedEventsStore::default(),
-));
+pub static PINNED_EVENTS: GlobalSignal<Store<PinnedEventsStore>> =
+    Signal::global(|| Store::new(PinnedEventsStore::default()));
 /// Sync status for pinned notes publishing
 #[derive(Clone, Debug, PartialEq)]
 pub enum PinnedSyncStatus {
@@ -39,12 +38,11 @@ pub enum PinnedSyncStatus {
     Failed { error: String, retry_count: u32 },
 }
 /// Global signal to track pinned notes sync status
-pub static PINNED_SYNC_STATUS: GlobalSignal<PinnedSyncStatus> = Signal::global(|| {
-    PinnedSyncStatus::Idle
-});
+pub static PINNED_SYNC_STATUS: GlobalSignal<PinnedSyncStatus> =
+    Signal::global(|| PinnedSyncStatus::Idle);
 /// Previous pinned notes state for rollback on failure
-pub static PINNED_ROLLBACK_STATE: GlobalSignal<Store<PinnedRollbackStore>> = Signal::global(||
-Store::new(PinnedRollbackStore::default()));
+pub static PINNED_ROLLBACK_STATE: GlobalSignal<Store<PinnedRollbackStore>> =
+    Signal::global(|| Store::new(PinnedRollbackStore::default()));
 #[cfg(feature = "web")]
 thread_local! {
     /// Pending pinned notes publish timeout (for debouncing)
@@ -60,19 +58,14 @@ pub async fn init_pinned_notes() -> Result<(), String> {
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-    let pubkey = PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     log::info!("Loading pinned notes for {}", pubkey_str);
     let filter = Filter::new().author(pubkey).kind(Kind::PinList).limit(1);
     nostr_client::ensure_relays_ready(&client).await;
     match client.fetch_events(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
-                let pinned: Vec<String> = event
-                    .tags
-                    .event_ids()
-                    .map(|id| id.to_hex())
-                    .collect();
+                let pinned: Vec<String> = event.tags.event_ids().map(|id| id.to_hex()).collect();
                 log::info!("Loaded {} pinned notes", pinned.len());
                 *PINNED_EVENTS.read().data().write() = pinned;
                 Ok(())
@@ -97,8 +90,7 @@ pub async fn fetch_pinned_notes_for_user(
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-    let pubkey = PublicKey::parse(pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = Filter::new().author(pubkey).kind(Kind::PinList).limit(1);
     nostr_client::ensure_relays_ready(&client).await;
     let events = client
@@ -107,11 +99,7 @@ pub async fn fetch_pinned_notes_for_user(
         .map_err(|e| format!("Failed to fetch pinned notes list: {}", e))?;
     let pin_list = events.into_iter().next();
     if let Some(list_event) = pin_list {
-        let pin_ids: Vec<String> = list_event
-            .tags
-            .event_ids()
-            .map(|id| id.to_hex())
-            .collect();
+        let pin_ids: Vec<String> = list_event.tags.event_ids().map(|id| id.to_hex()).collect();
         if pin_ids.is_empty() {
             return Ok((Vec::new(), Vec::new()));
         }
@@ -131,12 +119,15 @@ pub async fn fetch_pinned_notes_for_user(
 }
 /// Check if an event is pinned by the current user
 pub fn is_pinned(event_id: &str) -> bool {
-    PINNED_EVENTS.read().data().read().contains(&event_id.to_string())
+    PINNED_EVENTS
+        .read()
+        .data()
+        .read()
+        .contains(&event_id.to_string())
 }
 /// Add event to pinned notes
 pub async fn pin_event(event_id: String) -> Result<(), String> {
-    EventId::from_hex(&event_id)
-        .map_err(|e| format!("Invalid event ID '{}': {}", event_id, e))?;
+    EventId::from_hex(&event_id).map_err(|e| format!("Invalid event ID '{}': {}", event_id, e))?;
     let mut pins = PINNED_EVENTS.read().data().read().clone();
     if pins.contains(&event_id) {
         return Ok(());
@@ -146,22 +137,20 @@ pub async fn pin_event(event_id: String) -> Result<(), String> {
     }
     pins.push(event_id);
     *PINNED_EVENTS.read().data().write() = pins.clone();
-    let captured_gen = GENERATION_COUNTER.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
+    let captured_gen = GENERATION_COUNTER
+        .fetch_add(1, Ordering::SeqCst)
+        .wrapping_add(1);
     #[cfg(feature = "web")]
     {
-        PINNED_PUBLISH_TIMEOUT
-            .with(|timeout| {
-                *timeout.borrow_mut() = None;
-                let timeout_handle = Timeout::new(
-                    1000,
-                    move || {
-                        spawn_local(async move {
-                            publish_with_retry(pins, captured_gen, 0).await;
-                        });
-                    },
-                );
-                *timeout.borrow_mut() = Some(timeout_handle);
+        PINNED_PUBLISH_TIMEOUT.with(|timeout| {
+            *timeout.borrow_mut() = None;
+            let timeout_handle = Timeout::new(1000, move || {
+                spawn_local(async move {
+                    publish_with_retry(pins, captured_gen, 0).await;
+                });
             });
+            *timeout.borrow_mut() = Some(timeout_handle);
+        });
     }
     #[cfg(feature = "native")]
     {
@@ -177,23 +166,21 @@ pub async fn unpin_event(event_id: String) -> Result<(), String> {
     }
     pins.retain(|id| id != &event_id);
     *PINNED_EVENTS.read().data().write() = pins.clone();
-    let captured_gen = GENERATION_COUNTER.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
+    let captured_gen = GENERATION_COUNTER
+        .fetch_add(1, Ordering::SeqCst)
+        .wrapping_add(1);
     #[cfg(feature = "web")]
     {
         let pins_for_timeout = pins.clone();
-        PINNED_PUBLISH_TIMEOUT
-            .with(|timeout| {
-                *timeout.borrow_mut() = None;
-                let timeout_handle = Timeout::new(
-                    1000,
-                    move || {
-                        spawn_local(async move {
-                            publish_with_retry(pins_for_timeout, captured_gen, 0).await;
-                        });
-                    },
-                );
-                *timeout.borrow_mut() = Some(timeout_handle);
+        PINNED_PUBLISH_TIMEOUT.with(|timeout| {
+            *timeout.borrow_mut() = None;
+            let timeout_handle = Timeout::new(1000, move || {
+                spawn_local(async move {
+                    publish_with_retry(pins_for_timeout, captured_gen, 0).await;
+                });
             });
+            *timeout.borrow_mut() = Some(timeout_handle);
+        });
     }
     #[cfg(feature = "native")]
     {
@@ -227,7 +214,9 @@ fn publish_with_retry(
             }
             Err(e) => {
                 log::error!(
-                    "Failed to publish pinned notes (attempt {}): {}", retry_count + 1, e
+                    "Failed to publish pinned notes (attempt {}): {}",
+                    retry_count + 1,
+                    e
                 );
                 if captured_gen != GENERATION_COUNTER.load(Ordering::SeqCst) {
                     log::debug!("Stale pinned notes publish failed, skipping retry");
@@ -237,20 +226,19 @@ fn publish_with_retry(
                     let delay_ms = 1000u32 * (1 << retry_count);
                     log::info!(
                         "Retrying pinned notes publish in {}ms (attempt {}/{})",
-                        delay_ms, retry_count + 1, MAX_RETRIES
+                        delay_ms,
+                        retry_count + 1,
+                        MAX_RETRIES
                     );
                     crate::platform::timer::sleep_ms(delay_ms).await;
                     publish_with_retry(pins, captured_gen, retry_count + 1).await;
                 } else {
                     log::error!(
-                        "Pinned notes publish failed after {} retries: {}", MAX_RETRIES,
+                        "Pinned notes publish failed after {} retries: {}",
+                        MAX_RETRIES,
                         e
                     );
-                    if let Some(previous_state) = PINNED_ROLLBACK_STATE
-                        .read()
-                        .data()
-                        .read()
-                        .clone()
+                    if let Some(previous_state) = PINNED_ROLLBACK_STATE.read().data().read().clone()
                     {
                         log::warn!(
                             "Automatically rolling back pinned notes to previous state due to publish failure"
@@ -294,7 +282,9 @@ fn publish_with_retry(
             }
             Err(e) => {
                 log::error!(
-                    "Failed to publish pinned notes (attempt {}): {}", retry_count + 1, e
+                    "Failed to publish pinned notes (attempt {}): {}",
+                    retry_count + 1,
+                    e
                 );
                 if captured_gen != GENERATION_COUNTER.load(Ordering::SeqCst) {
                     log::debug!("Stale pinned notes publish failed, skipping retry");
@@ -304,14 +294,13 @@ fn publish_with_retry(
                     let delay_ms = 1000u32 * (1 << retry_count);
                     log::info!(
                         "Retrying pinned notes publish in {}ms (attempt {}/{})",
-                        delay_ms, retry_count + 1, MAX_RETRIES
-                    );
-                    let timeout_handle = Timeout::new(
                         delay_ms,
-                        move || {
-                            spawn_local(publish_with_retry(pins, captured_gen, retry_count + 1));
-                        },
+                        retry_count + 1,
+                        MAX_RETRIES
                     );
+                    let timeout_handle = Timeout::new(delay_ms, move || {
+                        spawn_local(publish_with_retry(pins, captured_gen, retry_count + 1));
+                    });
                     // Intentionally forget the timeout handle to prevent the scheduled retry
                     // from being cancelled. When a Timeout is dropped, it cancels the callback.
                     // We use fire-and-forget here so the retry runs even after this scope ends.
@@ -320,14 +309,11 @@ fn publish_with_retry(
                     std::mem::forget(timeout_handle);
                 } else {
                     log::error!(
-                        "Pinned notes publish failed after {} retries: {}", MAX_RETRIES,
+                        "Pinned notes publish failed after {} retries: {}",
+                        MAX_RETRIES,
                         e
                     );
-                    if let Some(previous_state) = PINNED_ROLLBACK_STATE
-                        .read()
-                        .data()
-                        .read()
-                        .clone()
+                    if let Some(previous_state) = PINNED_ROLLBACK_STATE.read().data().read().clone()
                     {
                         log::warn!(
                             "Automatically rolling back pinned notes to previous state due to publish failure"
@@ -355,10 +341,7 @@ async fn publish_pinned_notes(pins: Vec<String>) -> Result<(), String> {
         return Err("No signer attached".to_string());
     }
     log::info!("Publishing {} pinned notes", pins.len());
-    let event_ids: Result<Vec<EventId>, _> = pins
-        .iter()
-        .map(|id| EventId::from_hex(id))
-        .collect();
+    let event_ids: Result<Vec<EventId>, _> = pins.iter().map(|id| EventId::from_hex(id)).collect();
     let event_ids = event_ids.map_err(|e| format!("Invalid event ID: {}", e))?;
     let builder = EventBuilder::pinned_notes(event_ids);
     match client.send_event_builder(builder).await {
@@ -367,8 +350,10 @@ async fn publish_pinned_notes(pins: Vec<String>) -> Result<(), String> {
             let failed_count = output.failed.len();
             let total = success_count + failed_count;
             log::info!(
-                "Pinned notes published: {} ({}/{} relays succeeded)", output.id()
-                .to_hex(), success_count, total
+                "Pinned notes published: {} ({}/{} relays succeeded)",
+                output.id().to_hex(),
+                success_count,
+                total
             );
             if !output.failed.is_empty() {
                 for (relay, error) in &output.failed {
@@ -399,7 +384,9 @@ pub fn rollback_pinned_notes() {
 #[allow(dead_code)]
 pub async fn retry_pinned_publish() {
     let current_pins = PINNED_EVENTS.read().data().read().clone();
-    let captured_gen = GENERATION_COUNTER.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
+    let captured_gen = GENERATION_COUNTER
+        .fetch_add(1, Ordering::SeqCst)
+        .wrapping_add(1);
     log::info!("Manually retrying pinned notes publish");
     publish_with_retry(current_pins, captured_gen, 0).await;
 }

@@ -69,5 +69,7 @@ pub async fn make_naddr_with_hints(
         .filter_map(|r| RelayUrl::parse(r).ok())
         .collect();
     let nip19 = Nip19Coordinate::new(coordinate, relay_urls);
-    nip19.to_bech32().map_err(|e| format!("Failed to encode naddr: {}", e))
+    nip19
+        .to_bech32()
+        .map_err(|e| format!("Failed to encode naddr: {}", e))
 }

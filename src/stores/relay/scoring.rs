@@ -57,7 +57,11 @@ pub async fn get_relay_score(client: &Client, url: &str) -> f64 {
             let stats = relay.stats();
             let live_score = {
                 let rate = stats.success_rate();
-                if rate.is_finite() { rate } else { 0.0 }
+                if rate.is_finite() {
+                    rate
+                } else {
+                    0.0
+                }
             };
             let connected_boost = if relay.is_connected() { 0.1 } else { 0.0 };
             return (live_score + connected_boost).min(1.0);
@@ -68,10 +72,7 @@ pub async fn get_relay_score(client: &Client, url: &str) -> f64 {
 /// Get persisted score from localStorage (WASM only)
 #[cfg(feature = "web")]
 fn get_persisted_score(url: &str) -> Option<f64> {
-    let snapshots: HashMap<String, RelayScoreSnapshot> = storage::get(
-            RELAY_SCORES_KEY,
-        )
-        .ok()?;
+    let snapshots: HashMap<String, RelayScoreSnapshot> = storage::get(RELAY_SCORES_KEY).ok()?;
     snapshots.get(url).map(|s| s.lifetime_success_rate)
 }
 /// Get persisted score - returns None on non-WASM platforms
@@ -110,10 +111,8 @@ pub async fn sort_relays_by_score(client: &Client, relays: Vec<String>) -> Vec<S
 #[allow(dead_code)]
 pub async fn persist_relay_stats(client: &Client) {
     let relays = client.relays().await;
-    let mut snapshots: HashMap<String, RelayScoreSnapshot> = storage::get(
-            RELAY_SCORES_KEY,
-        )
-        .unwrap_or_default();
+    let mut snapshots: HashMap<String, RelayScoreSnapshot> =
+        storage::get(RELAY_SCORES_KEY).unwrap_or_default();
     let now_ms = crate::platform::timestamp::now_millis();
     for (url, relay) in relays {
         let url_str = url.to_string();
@@ -126,7 +125,11 @@ pub async fn persist_relay_stats(client: &Client) {
             });
         snapshot.lifetime_success_rate = {
             let rate = stats.success_rate();
-            if rate.is_finite() { rate } else { 0.0 }
+            if rate.is_finite() {
+                rate
+            } else {
+                0.0
+            }
         };
         snapshot.total_bytes_transferred = stats.bytes_sent() + stats.bytes_received();
         if relay.is_connected() {
@@ -143,13 +146,11 @@ pub async fn persist_relay_stats(client: &Client) {
     }
     if snapshots.len() > MAX_STORED_RELAYS {
         let mut entries: Vec<_> = snapshots.into_iter().collect();
-        entries
-            .sort_by(|a, b| {
-                b.1
-                    .last_seen_connected
-                    .unwrap_or(0)
-                    .cmp(&a.1.last_seen_connected.unwrap_or(0))
-            });
+        entries.sort_by(|a, b| {
+            b.1.last_seen_connected
+                .unwrap_or(0)
+                .cmp(&a.1.last_seen_connected.unwrap_or(0))
+        });
         entries.truncate(MAX_STORED_RELAYS);
         snapshots = entries.into_iter().collect();
     }
@@ -167,14 +168,14 @@ pub async fn persist_relay_stats(_client: &Client) {}
 #[cfg(feature = "web")]
 #[allow(dead_code)]
 pub fn get_score_stats() -> Option<(usize, f64)> {
-    let snapshots: HashMap<String, RelayScoreSnapshot> = storage::get(
-            RELAY_SCORES_KEY,
-        )
-        .ok()?;
+    let snapshots: HashMap<String, RelayScoreSnapshot> = storage::get(RELAY_SCORES_KEY).ok()?;
     if snapshots.is_empty() {
         return None;
     }
-    let avg_score: f64 = snapshots.values().map(|s| s.lifetime_success_rate).sum::<f64>()
+    let avg_score: f64 = snapshots
+        .values()
+        .map(|s| s.lifetime_success_rate)
+        .sum::<f64>()
         / snapshots.len() as f64;
     Some((snapshots.len(), avg_score))
 }

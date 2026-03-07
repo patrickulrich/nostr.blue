@@ -110,7 +110,9 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
                 fetch_repo_issues(&n),
                 fetch_repo_prs(&n)
             );
-            if *gen.peek() != captured_gen { return; }
+            if *gen.peek() != captured_gen {
+                return;
+            }
 
             match repo_result {
                 Ok(r) => repo.set(Some(r)),
@@ -258,7 +260,12 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
 
 /// A single kanban column showing items of one status
 #[component]
-fn BoardColumn(title: &'static str, color: &'static str, count: usize, items: Vec<BoardItem>) -> Element {
+fn BoardColumn(
+    title: &'static str,
+    color: &'static str,
+    count: usize,
+    items: Vec<BoardItem>,
+) -> Element {
     rsx! {
         div { class: "min-w-72 flex-shrink-0 bg-muted/30 rounded-lg",
             // Column header

@@ -10,16 +10,15 @@ use dioxus::prelude::*;
 #[component]
 pub fn RepoHeader(
     repo: Repository,
-    #[props(default = None)]
-    owner_picture: Option<String>,
+    #[props(default = None)] owner_picture: Option<String>,
 ) -> Element {
     let owner_profile = PROFILE_CACHE.read().peek(&repo.pubkey).cloned();
     let owner_name = owner_profile
         .as_ref()
         .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
         .unwrap_or_else(|| repo.pubkey_display());
-    let picture_url = owner_picture
-        .or_else(|| owner_profile.as_ref().and_then(|p| p.picture.clone()));
+    let picture_url =
+        owner_picture.or_else(|| owner_profile.as_ref().and_then(|p| p.picture.clone()));
     let display_name = repo.name.clone().unwrap_or_else(|| repo.id.clone());
     rsx! {
         div { class: "flex items-center gap-2 text-lg",
@@ -85,8 +84,7 @@ pub fn RepoHeader(
 #[component]
 pub fn RepoHeaderCompact(
     repo: Repository,
-    #[props(default = None)]
-    current_path: Option<String>,
+    #[props(default = None)] current_path: Option<String>,
 ) -> Element {
     let owner_profile = PROFILE_CACHE.read().peek(&repo.pubkey).cloned();
     let owner_name = owner_profile

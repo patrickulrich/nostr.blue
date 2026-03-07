@@ -43,7 +43,9 @@ pub fn Chats() -> Element {
             loading.set(true);
             match fetch_channels_page(PAGE_SIZE, None).await {
                 Ok(parsed) => {
-                    if *load_request_id.peek() != current_id { return; }
+                    if *load_request_id.peek() != current_id {
+                        return;
+                    }
                     if let Some(last) = parsed.last() {
                         oldest_timestamp.set(Some(last.created_at));
                     }
@@ -101,8 +103,12 @@ pub fn Chats() -> Element {
         if search_results.peek().is_some() {
             return;
         }
-        if *search_loading.peek() { return; }
-        if !search_query.peek().is_empty() { return; }
+        if *search_loading.peek() {
+            return;
+        }
+        if !search_query.peek().is_empty() {
+            return;
+        }
         pagination_loading.set(true);
         let until = *oldest_timestamp.peek();
         spawn(async move {

@@ -52,6 +52,62 @@ jobs:
       - name: Clippy
         run: cargo clippy --target wasm32-unknown-unknown -- -D warnings
 
+  native-checks:
+    name: Native Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-native-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-native-cargo-
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build CSS and JS assets
+        run: npm run build:all
+
+      - name: Install Dioxus CLI
+        run: cargo install dioxus-cli --version 0.7.2 --locked --force
+
+      - name: Dioxus check
+        run: dx check
+
+      - name: Cargo check
+        run: cargo check
+
+      - name: Clippy host
+        run: cargo clippy -- -D warnings
+
+      - name: Clippy wasm
+        run: cargo clippy --target wasm32-unknown-unknown -- -D warnings
+
+      - name: Cargo test
+        run: cargo test
+
   android-build:
     name: Android APK Build
     runs-on: ubuntu-latest

@@ -181,9 +181,11 @@ pub struct RoomPresence {
 /// Parse a Kind 30312 event into a MeetingSpace
 pub fn parse_meeting_space(event: &Event) -> Result<MeetingSpace, String> {
     if event.kind.as_u16() != KIND_MEETING_SPACE {
-        return Err(
-            format!("Expected kind {}, got {}", KIND_MEETING_SPACE, event.kind.as_u16()),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_MEETING_SPACE,
+            event.kind.as_u16()
+        ));
     }
     let pubkey = event.pubkey.to_hex();
     let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
@@ -195,8 +197,7 @@ pub fn parse_meeting_space(event: &Event) -> Result<MeetingSpace, String> {
     let status = get_tag_value(event, "status")
         .and_then(|s| RoomStatus::from_str(&s))
         .unwrap_or_default();
-    let service_url = get_tag_value(event, "service")
-        .ok_or("Missing required 'service' tag")?;
+    let service_url = get_tag_value(event, "service").ok_or("Missing required 'service' tag")?;
     let endpoint_url = get_tag_value(event, "endpoint");
     let hashtags = get_all_tag_values(event, "t");
     let relays = get_relay_tag_values(event);
@@ -225,9 +226,11 @@ pub fn parse_meeting_space(event: &Event) -> Result<MeetingSpace, String> {
 /// Parse a Kind 30313 event into a MeetingRoomEvent
 pub fn parse_meeting_room_event(event: &Event) -> Result<MeetingRoomEvent, String> {
     if event.kind.as_u16() != KIND_MEETING_ROOM {
-        return Err(
-            format!("Expected kind {}, got {}", KIND_MEETING_ROOM, event.kind.as_u16()),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_MEETING_ROOM,
+            event.kind.as_u16()
+        ));
     }
     let pubkey = event.pubkey.to_hex();
     let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
@@ -246,10 +249,10 @@ pub fn parse_meeting_room_event(event: &Event) -> Result<MeetingRoomEvent, Strin
     let space_coordinate = get_coordinate_tags(event)
         .into_iter()
         .find(|c| c.starts_with("30312:"));
-    let current_participants = get_tag_value(event, "current_participants")
-        .and_then(|s| s.parse::<u32>().ok());
-    let total_participants = get_tag_value(event, "total_participants")
-        .and_then(|s| s.parse::<u32>().ok());
+    let current_participants =
+        get_tag_value(event, "current_participants").and_then(|s| s.parse::<u32>().ok());
+    let total_participants =
+        get_tag_value(event, "total_participants").and_then(|s| s.parse::<u32>().ok());
     let participants = parse_participants(event);
     let hashtags = get_all_tag_values(event, "t");
     Ok(MeetingRoomEvent {
@@ -276,9 +279,11 @@ pub fn parse_meeting_room_event(event: &Event) -> Result<MeetingRoomEvent, Strin
 /// Parse a Kind 10312 event into a RoomPresence
 pub fn parse_room_presence(event: &Event) -> Result<RoomPresence, String> {
     if event.kind.as_u16() != KIND_ROOM_PRESENCE {
-        return Err(
-            format!("Expected kind {}, got {}", KIND_ROOM_PRESENCE, event.kind.as_u16()),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_ROOM_PRESENCE,
+            event.kind.as_u16()
+        ));
     }
     let room_coordinate = get_coordinate_tags(event)
         .into_iter()
@@ -343,8 +348,14 @@ fn parse_participants(event: &Event) -> Vec<LiveParticipant> {
                 .get(2)
                 .map(|s| s.to_string())
                 .filter(|s| !s.is_empty());
-            let role = slice.get(3).map(|s| s.to_string()).filter(|s| !s.is_empty());
-            let proof = slice.get(4).map(|s| s.to_string()).filter(|s| !s.is_empty());
+            let role = slice
+                .get(3)
+                .map(|s| s.to_string())
+                .filter(|s| !s.is_empty());
+            let proof = slice
+                .get(4)
+                .map(|s| s.to_string())
+                .filter(|s| !s.is_empty());
             Some(LiveParticipant {
                 pubkey,
                 relay_hint,
@@ -419,13 +430,11 @@ impl LiveActivityEvent {
     pub fn status(&self) -> LiveStatus {
         match self {
             LiveActivityEvent::Meeting(e) => e.status,
-            LiveActivityEvent::Space(e) => {
-                match e.status {
-                    RoomStatus::Open => LiveStatus::Live,
-                    RoomStatus::Private => LiveStatus::Planned,
-                    RoomStatus::Closed => LiveStatus::Ended,
-                }
-            }
+            LiveActivityEvent::Space(e) => match e.status {
+                RoomStatus::Open => LiveStatus::Live,
+                RoomStatus::Private => LiveStatus::Planned,
+                RoomStatus::Closed => LiveStatus::Ended,
+            },
         }
     }
     pub fn hashtags(&self) -> &[String] {
@@ -498,16 +507,9 @@ pub fn parse_nip53_live_event(event: &Event) -> Option<LiveEvent> {
 /// 1. Tries the SDK-parsed host first (case-sensitive "Host")
 /// 2. Falls back to manual case-insensitive p tag parsing
 /// 3. Verifies the proof signature if provided
-pub fn extract_live_event_host(
-    event: &Event,
-    live_event: &LiveEvent,
-) -> Option<ParsedLiveHost> {
+pub fn extract_live_event_host(event: &Event, live_event: &LiveEvent) -> Option<ParsedLiveHost> {
     if let Some(host) = &live_event.host {
-        let is_verified = verify_host_proof(
-            event,
-            &host.public_key,
-            host.proof.as_ref(),
-        );
+        let is_verified = verify_host_proof(event, &host.public_key, host.proof.as_ref());
         return Some(ParsedLiveHost {
             public_key: host.public_key.to_string(),
             relay_url: host.relay_url.as_ref().map(|u| u.to_string()),
@@ -538,14 +540,8 @@ pub fn extract_live_event_host(
                     Ok(pk) => pk,
                     Err(_) => continue,
                 };
-                let proof_sig = proof_str
-                    .as_ref()
-                    .and_then(|p| Signature::from_str(p).ok());
-                let is_verified = verify_host_proof(
-                    event,
-                    &parsed_pubkey,
-                    proof_sig.as_ref(),
-                );
+                let proof_sig = proof_str.as_ref().and_then(|p| Signature::from_str(p).ok());
+                let is_verified = verify_host_proof(event, &parsed_pubkey, proof_sig.as_ref());
                 return Some(ParsedLiveHost {
                     public_key: parsed_pubkey.to_string(),
                     relay_url,
@@ -563,11 +559,7 @@ pub fn extract_live_event_host(
 /// (`kind:pubkey:dTag`) by each `p`'s private key, encoded in hex."
 ///
 /// Returns true if proof is valid, false if missing or invalid.
-fn verify_host_proof(
-    event: &Event,
-    host_pubkey: &PublicKey,
-    proof: Option<&Signature>,
-) -> bool {
+fn verify_host_proof(event: &Event, host_pubkey: &PublicKey, proof: Option<&Signature>) -> bool {
     use nostr_sdk::secp256k1::{Message, Secp256k1, XOnlyPublicKey};
     use sha2::{Digest, Sha256};
     let Some(proof_sig) = proof else {
@@ -576,9 +568,7 @@ fn verify_host_proof(
     let d_tag = event
         .tags
         .iter()
-        .find(|t| {
-            t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D))
-        })
+        .find(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)))
         .and_then(|t| t.content())
         .unwrap_or("");
     let message = format!("30311:{}:{}", event.pubkey, d_tag);

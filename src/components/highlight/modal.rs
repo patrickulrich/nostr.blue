@@ -27,19 +27,17 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
     let mut comment = use_signal(String::new);
     let mut is_submitting = use_signal(|| false);
     let parent_submitting = props.submitting;
-    use_effect(
-        use_reactive!(
-            | parent_submitting | { if parent_submitting == Some(false) { is_submitting
-            .set(false); } }
-        ),
-    );
+    use_effect(use_reactive!(|parent_submitting| {
+        if parent_submitting == Some(false) {
+            is_submitting.set(false);
+        }
+    }));
     let effective_submitting = props.submitting.unwrap_or(*is_submitting.read());
     let do_cancel = {
         let on_cancel = props.on_cancel;
         let parent_submitting = props.submitting;
         move || {
-            let currently_submitting = parent_submitting
-                .unwrap_or(*is_submitting.read());
+            let currently_submitting = parent_submitting.unwrap_or(*is_submitting.read());
             if currently_submitting {
                 return;
             }
@@ -51,8 +49,7 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
         let on_confirm = props.on_confirm;
         let parent_submitting = props.submitting;
         move || {
-            let currently_submitting = parent_submitting
-                .unwrap_or(*is_submitting.read());
+            let currently_submitting = parent_submitting.unwrap_or(*is_submitting.read());
             if currently_submitting {
                 return;
             }

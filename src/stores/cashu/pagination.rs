@@ -3,9 +3,9 @@
 //! Dynamic batch sizing based on mint's input limits.
 //! Prevents errors from exceeding mint constraints.
 #![allow(dead_code)]
-use std::collections::HashMap;
 use super::capabilities::get_mint_capabilities;
 use super::types::ProofData;
+use std::collections::HashMap;
 /// Default batch size when mint limits are unknown
 pub const DEFAULT_BATCH_SIZE: usize = 200;
 /// Minimum batch size
@@ -39,9 +39,8 @@ impl Default for MintLimits {
     }
 }
 /// Cache for mint limits
-static LIMITS_CACHE: std::sync::OnceLock<
-    std::sync::Mutex<HashMap<String, MintLimits>>,
-> = std::sync::OnceLock::new();
+static LIMITS_CACHE: std::sync::OnceLock<std::sync::Mutex<HashMap<String, MintLimits>>> =
+    std::sync::OnceLock::new();
 fn get_limits_cache() -> &'static std::sync::Mutex<HashMap<String, MintLimits>> {
     LIMITS_CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
 }
@@ -100,18 +99,12 @@ pub fn batch_proofs(proofs: Vec<ProofData>, batch_size: usize) -> Vec<Vec<ProofD
     proofs.chunks(batch_size).map(|c| c.to_vec()).collect()
 }
 /// Batch proofs with mint-specific sizing
-pub fn batch_proofs_for_mint(
-    mint_url: &str,
-    proofs: Vec<ProofData>,
-) -> Vec<Vec<ProofData>> {
+pub fn batch_proofs_for_mint(mint_url: &str, proofs: Vec<ProofData>) -> Vec<Vec<ProofData>> {
     let batch_size = get_batch_size(mint_url);
     batch_proofs(proofs, batch_size)
 }
 /// Batch proofs with adaptive sizing (async)
-pub async fn batch_proofs_adaptive(
-    mint_url: &str,
-    proofs: Vec<ProofData>,
-) -> Vec<Vec<ProofData>> {
+pub async fn batch_proofs_adaptive(mint_url: &str, proofs: Vec<ProofData>) -> Vec<Vec<ProofData>> {
     let batch_size = get_optimal_batch_size(mint_url).await;
     batch_proofs(proofs, batch_size)
 }
@@ -120,7 +113,10 @@ pub async fn batch_amount(mint_url: &str, total_amount: u64) -> Vec<u64> {
     let limits = fetch_mint_limits(mint_url).await.unwrap_or_default();
     let max_amount = limits.max_mint_amount.unwrap_or(u64::MAX);
     if max_amount == 0 {
-        log::warn!("Mint {} has zero max_mint_amount, using full amount", mint_url);
+        log::warn!(
+            "Mint {} has zero max_mint_amount, using full amount",
+            mint_url
+        );
         return vec![total_amount];
     }
     if total_amount <= max_amount {

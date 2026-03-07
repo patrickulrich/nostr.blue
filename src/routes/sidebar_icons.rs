@@ -3,10 +3,7 @@ use dioxus::prelude::*;
 use crate::stores::sidebar_store::SidebarItem;
 
 /// Helper function to render sidebar icons for dynamic sidebar
-pub(super) fn render_sidebar_icon(
-    item: &SidebarItem,
-    class: &str,
-) -> Element {
+pub(super) fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
     match item {
         SidebarItem::Home => {
             rsx! {

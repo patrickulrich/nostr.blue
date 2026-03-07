@@ -5,20 +5,24 @@
 use crate::components::code::{DiffViewer, PRReviewSection};
 use crate::components::{icons, CodeStatusBadge};
 use crate::routes::Route;
+use crate::services::git_hosting::conflict_detection::{
+    detect_conflicts, ConflictInfo, ConflictType,
+};
+use crate::services::git_hosting::pull_requests::{
+    fetch_line_comments_by_id, publish_line_comment_by_id, LineComment,
+};
+use crate::services::git_hosting::reviews::fetch_pr_reviews;
 use crate::services::git_hosting::{
     fetch_pr_comments_by_id, fetch_pull_request, fetch_repository, publish_pr_comment_by_id,
     publish_pr_update_by_id, update_pr_status_by_id,
-};
-use crate::services::git_hosting::conflict_detection::{detect_conflicts, ConflictInfo, ConflictType};
-use crate::services::git_hosting::pull_requests::{
-    fetch_line_comments_by_id, publish_line_comment_by_id, LineComment,
 };
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::format::{truncate_commit, truncate_pubkey};
 use crate::utils::format_relative_time_or;
-use crate::services::git_hosting::reviews::fetch_pr_reviews;
-use crate::utils::nip34::{GitComment, IssueStatus, PersistedReview, PullRequest, Repository, ReviewState};
+use crate::utils::nip34::{
+    GitComment, IssueStatus, PersistedReview, PullRequest, Repository, ReviewState,
+};
 use crate::utils::permissions;
 use dioxus::prelude::*;
 use std::collections::HashMap;
@@ -53,21 +57,24 @@ pub fn CodePullDetail(note_id: String) -> Element {
     let mut pr_result = use_signal(|| None::<Result<PullRequest, String>>);
     let mut refresh_trigger = use_signal(|| 0u32);
     let mut pr_gen = use_signal(|| 0u32);
-    use_effect(use_reactive((&note_id, &refresh_trigger), move |(note_id, _trigger)| {
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !client_initialized {
-            return;
-        }
-        let gen = pr_gen.peek().wrapping_add(1);
-        pr_gen.set(gen);
-        pr_result.set(None);
-        spawn(async move {
-            let result = fetch_pull_request(&note_id).await;
-            if *pr_gen.peek() == gen {
-                pr_result.set(Some(result));
+    use_effect(use_reactive(
+        (&note_id, &refresh_trigger),
+        move |(note_id, _trigger)| {
+            let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+            if !client_initialized {
+                return;
             }
-        });
-    }));
+            let gen = pr_gen.peek().wrapping_add(1);
+            pr_gen.set(gen);
+            pr_result.set(None);
+            spawn(async move {
+                let result = fetch_pull_request(&note_id).await;
+                if *pr_gen.peek() == gen {
+                    pr_result.set(Some(result));
+                }
+            });
+        },
+    ));
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
@@ -135,7 +142,12 @@ pub fn CodePullDetail(note_id: String) -> Element {
 }
 
 #[component]
-fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr_updated: EventHandler) -> Element {
+fn PRContent(
+    pr: PullRequest,
+    is_authenticated: bool,
+    user_pubkey: String,
+    on_pr_updated: EventHandler,
+) -> Element {
     let pr_id = pr.event_id.clone();
     let pr_pubkey = pr.pubkey.clone();
     let mut display_status = use_signal(|| pr.status);
@@ -190,26 +202,35 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
         let _ = reviews_gen.read();
         let id = pr_id_for_reviews.clone();
         let pr_author = pr_pubkey_for_reviews.clone();
-        let maintainer_set: Vec<String> = repo.read().as_ref()
+        let maintainer_set: Vec<String> = repo
+            .read()
+            .as_ref()
             .map(build_maintainers)
             .unwrap_or_default();
         async move {
             match fetch_pr_reviews(&id).await {
                 Ok(reviews) => {
-                    let mut latest: HashMap<&str, &PersistedReview> =
-                        HashMap::new();
+                    let mut latest: HashMap<&str, &PersistedReview> = HashMap::new();
                     // Filter out PR author's own reviews — authors cannot self-approve
                     for r in reviews.iter().filter(|r| r.pubkey != pr_author) {
                         match latest.get(r.pubkey.as_str()) {
                             Some(existing) if existing.created_at > r.created_at => {}
-                            _ => { latest.insert(r.pubkey.as_str(), r); }
+                            _ => {
+                                latest.insert(r.pubkey.as_str(), r);
+                            }
                         }
                     }
-                    let approved = latest.values()
-                        .filter(|r| r.state == ReviewState::Approved && (maintainer_set.is_empty() || maintainer_set.contains(&r.pubkey)))
+                    let approved = latest
+                        .values()
+                        .filter(|r| {
+                            r.state == ReviewState::Approved
+                                && (maintainer_set.is_empty() || maintainer_set.contains(&r.pubkey))
+                        })
                         .count() as u32;
-                    let has_changes_requested = latest.values()
-                        .any(|r| r.state == ReviewState::ChangesRequested && (maintainer_set.is_empty() || maintainer_set.contains(&r.pubkey)));
+                    let has_changes_requested = latest.values().any(|r| {
+                        r.state == ReviewState::ChangesRequested
+                            && (maintainer_set.is_empty() || maintainer_set.contains(&r.pubkey))
+                    });
                     ApprovalStatus {
                         approved,
                         has_changes_requested,
@@ -360,7 +381,9 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
         let pr_id = pr_id.clone();
         let repo_naddr = pr.repository_naddr.clone();
         move |_| {
-            if *is_submitting_update.peek() { return; }
+            if *is_submitting_update.peek() {
+                return;
+            }
             let content = update_content.read().clone();
             let commit = update_commit.read().trim().to_string();
             let parent = update_parent.read().trim().to_string();
@@ -371,22 +394,36 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
                 return;
             }
             if !commit.is_empty()
-                && (!matches!(commit.len(), 40 | 64) || !commit.chars().all(|c| c.is_ascii_hexdigit()))
+                && (!matches!(commit.len(), 40 | 64)
+                    || !commit.chars().all(|c| c.is_ascii_hexdigit()))
             {
-                update_error.set(Some("Commit hash must be a 40 or 64-character hex string".to_string()));
+                update_error.set(Some(
+                    "Commit hash must be a 40 or 64-character hex string".to_string(),
+                ));
                 return;
             }
             if !parent.is_empty()
-                && (!matches!(parent.len(), 40 | 64) || !parent.chars().all(|c| c.is_ascii_hexdigit()))
+                && (!matches!(parent.len(), 40 | 64)
+                    || !parent.chars().all(|c| c.is_ascii_hexdigit()))
             {
-                update_error.set(Some("Parent commit must be a 40 or 64-character hex string".to_string()));
+                update_error.set(Some(
+                    "Parent commit must be a 40 or 64-character hex string".to_string(),
+                ));
                 return;
             }
             is_submitting_update.set(true);
             update_error.set(None);
             spawn(async move {
-                let commit_opt = if commit.is_empty() { None } else { Some(commit.as_str()) };
-                let parent_opt = if parent.is_empty() { None } else { Some(parent.as_str()) };
+                let commit_opt = if commit.is_empty() {
+                    None
+                } else {
+                    Some(commit.as_str())
+                };
+                let parent_opt = if parent.is_empty() {
+                    None
+                } else {
+                    Some(parent.as_str())
+                };
                 match publish_pr_update_by_id(&id, &naddr, &content, commit_opt, parent_opt).await {
                     Ok(_) => {
                         show_update_form.set(false);
@@ -1122,7 +1159,9 @@ fn ConflictDetectionBanner(
                 checking.set(true);
                 spawn(async move {
                     let results = detect_conflicts(&r, &diff, &parent).await;
-                    if *detect_gen.peek() != gen { return; }
+                    if *detect_gen.peek() != gen {
+                        return;
+                    }
                     conflicts.set(results);
                     checking.set(false);
                 });

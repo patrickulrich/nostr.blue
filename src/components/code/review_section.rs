@@ -4,8 +4,8 @@
 //! to submit reviews with Approve/Request Changes/Comment states.
 //! Reviews are cached in-memory per PR event ID.
 use crate::services::git_hosting::reviews::fetch_pr_reviews;
-use crate::stores::profiles::PROFILE_CACHE;
 use crate::stores::nostr_client::{get_client, CLIENT_INITIALIZED, HAS_SIGNER};
+use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::format_relative_time_or;
 use crate::utils::nip34::PersistedReview;
 use crate::utils::truncate_pubkey;
@@ -16,13 +16,18 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 
 /// Publish a review as a Kind 9807 event on Nostr
-pub async fn publish_review_event(pr_event_id: &str, pr_author_pubkey: &str, state: crate::utils::nip34::ReviewState, content: &str) -> std::result::Result<String, String> {
+pub async fn publish_review_event(
+    pr_event_id: &str,
+    pr_author_pubkey: &str,
+    state: crate::utils::nip34::ReviewState,
+    content: &str,
+) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
-    let event_id = EventId::from_hex(pr_event_id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
+    let event_id =
+        EventId::from_hex(pr_event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
     let author_pk = PublicKey::from_hex(pr_author_pubkey)
         .map_err(|e| format!("Invalid author pubkey: {}", e))?;
     let builder = EventBuilder::new(Kind::Custom(PersistedReview::KIND), content)
@@ -32,7 +37,9 @@ pub async fn publish_review_event(pr_event_id: &str, pr_author_pubkey: &str, sta
             TagKind::Custom(Cow::Borrowed("state")),
             [state.as_str()],
         ));
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish review: {}", e))?;
     Ok(output.id().to_hex())
 }
@@ -83,14 +90,11 @@ pub fn PRReviewSection(
     maintainers: Vec<String>,
     user_pubkey: String,
     is_authenticated: bool,
-    #[props(default = None)]
-    required_approvals: Option<u32>,
-    #[props(default = None)]
-    on_review_submitted: Option<EventHandler<()>>,
+    #[props(default = None)] required_approvals: Option<u32>,
+    #[props(default = None)] on_review_submitted: Option<EventHandler<()>>,
 ) -> Element {
-    let can_review = is_authenticated
-        && user_pubkey != pr_pubkey
-        && maintainers.contains(&user_pubkey);
+    let can_review =
+        is_authenticated && user_pubkey != pr_pubkey && maintainers.contains(&user_pubkey);
     let mut show_form = use_signal(|| false);
     let mut selected_state = use_signal(|| LocalReviewState::Approved);
     let mut review_body = use_signal(String::new);
@@ -102,63 +106,75 @@ pub fn PRReviewSection(
     // Fetch persisted reviews from relays on mount, with generation counter
     // to discard stale responses when pr_id changes rapidly
     let mut gen = use_signal(|| 0u32);
-    use_effect(
-        use_reactive(
-            &pr_id,
-            move |id| {
-                if !*CLIENT_INITIALIZED.read() { return; }
-                let current_gen = gen.peek().wrapping_add(1);
-                gen.set(current_gen);
-                reviews.set(Vec::new());
-                publish_error.set(None);
-                fetch_error.set(None);
-                show_form.set(false);
-                review_body.set(String::new());
-                spawn(async move {
-                    match fetch_pr_reviews(&id).await {
-                        Ok(persisted) => {
-                            if *gen.peek() != current_gen { return; }
-                            // Dedup persisted reviews: keep latest per pubkey
-                            let mut by_pubkey = std::collections::HashMap::<String, PersistedReview>::new();
-                            for r in persisted {
-                                by_pubkey.entry(r.pubkey.clone())
-                                    .and_modify(|existing| {
-                                        if r.created_at > existing.created_at
-                                            || (r.created_at == existing.created_at && r.event_id > existing.event_id)
-                                        {
-                                            *existing = r.clone();
-                                        }
-                                    })
-                                    .or_insert(r);
-                            }
-                            // Merge: optimistic entries override persisted via insert()
-                            let current = reviews.read().clone();
-                            for r in current.into_iter().filter(|r| r.event_id.is_empty()) {
-                                by_pubkey.insert(r.pubkey.clone(), r);
-                            }
-                            let mut sorted: Vec<_> = by_pubkey.into_values().collect();
-                            sorted.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-                            reviews.set(sorted);
-                        }
-                        Err(e) => {
-                            if *gen.peek() != current_gen { return; }
-                            log::warn!("Failed to fetch PR reviews for {}: {}", id, e);
-                            fetch_error.set(Some(format!("Failed to load reviews: {}", e)));
-                        }
+    use_effect(use_reactive(&pr_id, move |id| {
+        if !*CLIENT_INITIALIZED.read() {
+            return;
+        }
+        let current_gen = gen.peek().wrapping_add(1);
+        gen.set(current_gen);
+        reviews.set(Vec::new());
+        publish_error.set(None);
+        fetch_error.set(None);
+        show_form.set(false);
+        review_body.set(String::new());
+        spawn(async move {
+            match fetch_pr_reviews(&id).await {
+                Ok(persisted) => {
+                    if *gen.peek() != current_gen {
+                        return;
                     }
-                });
-            },
-        ),
-    );
+                    // Dedup persisted reviews: keep latest per pubkey
+                    let mut by_pubkey = std::collections::HashMap::<String, PersistedReview>::new();
+                    for r in persisted {
+                        by_pubkey
+                            .entry(r.pubkey.clone())
+                            .and_modify(|existing| {
+                                if r.created_at > existing.created_at
+                                    || (r.created_at == existing.created_at
+                                        && r.event_id > existing.event_id)
+                                {
+                                    *existing = r.clone();
+                                }
+                            })
+                            .or_insert(r);
+                    }
+                    // Merge: optimistic entries override persisted via insert()
+                    let current = reviews.read().clone();
+                    for r in current.into_iter().filter(|r| r.event_id.is_empty()) {
+                        by_pubkey.insert(r.pubkey.clone(), r);
+                    }
+                    let mut sorted: Vec<_> = by_pubkey.into_values().collect();
+                    sorted.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                    reviews.set(sorted);
+                }
+                Err(e) => {
+                    if *gen.peek() != current_gen {
+                        return;
+                    }
+                    log::warn!("Failed to fetch PR reviews for {}: {}", id, e);
+                    fetch_error.set(Some(format!("Failed to load reviews: {}", e)));
+                }
+            }
+        });
+    }));
 
     let review_list = reviews.read();
     let maintainer_set: HashSet<&String> = HashSet::from_iter(maintainers.iter());
-    let approve_count = review_list.iter()
-        .filter(|r| r.state == crate::utils::nip34::ReviewState::Approved && maintainer_set.contains(&r.pubkey) && r.pubkey != pr_pubkey)
+    let approve_count = review_list
+        .iter()
+        .filter(|r| {
+            r.state == crate::utils::nip34::ReviewState::Approved
+                && maintainer_set.contains(&r.pubkey)
+                && r.pubkey != pr_pubkey
+        })
         .count();
     let changes_count = review_list
         .iter()
-        .filter(|r| r.state == crate::utils::nip34::ReviewState::ChangesRequested && maintainer_set.contains(&r.pubkey) && r.pubkey != pr_pubkey)
+        .filter(|r| {
+            r.state == crate::utils::nip34::ReviewState::ChangesRequested
+                && maintainer_set.contains(&r.pubkey)
+                && r.pubkey != pr_pubkey
+        })
         .count();
 
     let handle_submit = {
@@ -166,7 +182,9 @@ pub fn PRReviewSection(
         let user_pubkey = user_pubkey.clone();
         let saved_pr_pubkey = pr_pubkey.clone();
         move |_| {
-            if *submitting.peek() { return; }
+            if *submitting.peek() {
+                return;
+            }
             submitting.set(true);
             let state = *selected_state.read();
             let body = review_body.read().clone();
@@ -209,7 +227,10 @@ pub fn PRReviewSection(
                 match publish_review_event(&id, &author_pk, review_state, &saved_content).await {
                     Ok(event_id) => {
                         let mut current = reviews.write();
-                        if let Some(r) = current.iter_mut().find(|r| r.pubkey == saved_pubkey && r.event_id.is_empty()) {
+                        if let Some(r) = current
+                            .iter_mut()
+                            .find(|r| r.pubkey == saved_pubkey && r.event_id.is_empty())
+                        {
                             r.event_id = event_id;
                         }
                         drop(current);
@@ -223,7 +244,11 @@ pub fn PRReviewSection(
                         publish_error.set(Some(e.to_string()));
                         // Rollback: remove the optimistic entry and restore prior review
                         let mut current = reviews.write();
-                        current.retain(|r| !(r.pubkey == saved_pubkey && r.content == saved_content && r.event_id.is_empty()));
+                        current.retain(|r| {
+                            !(r.pubkey == saved_pubkey
+                                && r.content == saved_content
+                                && r.event_id.is_empty())
+                        });
                         if let Some(prior) = prior_review {
                             current.push(prior);
                             current.sort_by(|a, b| b.created_at.cmp(&a.created_at));

@@ -1,14 +1,14 @@
 //! Unified signer management for all authentication methods
+#[cfg(feature = "mobile")]
+use crate::platform::Nip55Signer;
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use nostr::{Keys, PublicKey};
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 #[cfg(target_family = "wasm")]
 use nostr_browser_signer::BrowserSigner;
 use nostr_connect::client::NostrConnect;
-#[cfg(feature = "mobile")]
-use crate::platform::Nip55Signer;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 /// Types of signers supported by the application
 #[derive(Debug, Clone)]
 pub enum SignerType {
@@ -34,18 +34,14 @@ impl SignerType {
                 signer
                     .get_public_key()
                     .await
-                    .map_err(|e| {
-                        format!("Failed to get public key from browser extension: {}", e)
-                    })
+                    .map_err(|e| format!("Failed to get public key from browser extension: {}", e))
             }
             SignerType::NostrConnect(nostr_connect) => {
                 use nostr::signer::NostrSigner;
                 nostr_connect
                     .get_public_key()
                     .await
-                    .map_err(|e| {
-                        format!("Failed to get public key from remote signer: {}", e)
-                    })
+                    .map_err(|e| format!("Failed to get public key from remote signer: {}", e))
             }
             #[cfg(feature = "mobile")]
             SignerType::AndroidSigner(signer) => {
@@ -53,9 +49,7 @@ impl SignerType {
                 signer
                     .get_public_key()
                     .await
-                    .map_err(|e| {
-                        format!("Failed to get public key from Android signer: {}", e)
-                    })
+                    .map_err(|e| format!("Failed to get public key from Android signer: {}", e))
             }
         }
     }
@@ -126,9 +120,8 @@ impl SignerBackend {
 /// Global signal for the current signer
 pub static CURRENT_SIGNER: GlobalSignal<Option<SignerType>> = Signal::global(|| None);
 /// Global signal for signer info (persisted)
-pub static SIGNER_INFO: GlobalSignal<Option<SignerInfo>> = Signal::global(|| {
-    crate::platform::storage::get("signer_info").ok()
-});
+pub static SIGNER_INFO: GlobalSignal<Option<SignerInfo>> =
+    Signal::global(|| crate::platform::storage::get("signer_info").ok());
 /// Set the current signer and persist session info
 pub async fn set_signer(signer: SignerType) -> Result<(), String> {
     let public_key = signer.public_key().await?;
@@ -178,27 +171,23 @@ pub async fn restore_session() -> Result<(), String> {
     if let Some(info) = get_signer_info() {
         match info.backend {
             #[cfg(target_family = "wasm")]
-            SignerBackend::BrowserExtension => {
-                match BrowserSigner::new() {
-                    Ok(signer) => {
-                        let signer_type = SignerType::BrowserExtension(Arc::new(signer));
-                        let pk = signer_type.public_key().await?;
-                        if pk.to_string() == info.public_key {
-                            *CURRENT_SIGNER.write() = Some(signer_type);
-                            return Ok(());
-                        } else {
-                            clear_signer();
-                            return Err(
-                                "Public key mismatch with stored session".to_string(),
-                            );
-                        }
-                    }
-                    Err(_) => {
+            SignerBackend::BrowserExtension => match BrowserSigner::new() {
+                Ok(signer) => {
+                    let signer_type = SignerType::BrowserExtension(Arc::new(signer));
+                    let pk = signer_type.public_key().await?;
+                    if pk.to_string() == info.public_key {
+                        *CURRENT_SIGNER.write() = Some(signer_type);
+                        return Ok(());
+                    } else {
                         clear_signer();
-                        return Err("Browser extension no longer available".to_string());
+                        return Err("Public key mismatch with stored session".to_string());
                     }
                 }
-            }
+                Err(_) => {
+                    clear_signer();
+                    return Err("Browser extension no longer available".to_string());
+                }
+            },
             SignerBackend::Keys => {
                 clear_signer();
                 return Err("Private key session requires re-login".to_string());

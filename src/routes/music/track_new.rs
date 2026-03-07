@@ -33,9 +33,7 @@ pub fn MusicTrackNew() -> Element {
     let mut do_add_genre = move || {
         let genre = genre_input.read().trim().to_string();
         let normalized = genre.to_lowercase();
-        if !normalized.is_empty()
-            && !genres.read().iter().any(|g| g.to_lowercase() == normalized)
-        {
+        if !normalized.is_empty() && !genres.read().iter().any(|g| g.to_lowercase() == normalized) {
             genres.write().push(genre);
             genre_input.set(String::new());
         }
@@ -66,22 +64,18 @@ pub fn MusicTrackNew() -> Element {
             } else {
                 Some(image_url_val)
             };
-            let d_tag = format!(
-                "{}-{}",
-                slugify(&title_val),
-                chrono::Utc::now().timestamp(),
-            );
+            let d_tag = format!("{}-{}", slugify(&title_val), chrono::Utc::now().timestamp(),);
             match nostr_music::publish_track(
-                    d_tag,
-                    title_val,
-                    audio_url_val,
-                    image,
-                    None,
-                    duration_val,
-                    genres_val,
-                    ai_generated_val,
-                )
-                .await
+                d_tag,
+                title_val,
+                audio_url_val,
+                image,
+                None,
+                duration_val,
+                genres_val,
+                ai_generated_val,
+            )
+            .await
             {
                 Ok(_event_id) => {
                     navigator.push(crate::routes::Route::MusicHome {});

@@ -68,7 +68,10 @@ mod tests {
     use super::*;
     #[test]
     fn test_protocol_display_names() {
-        assert_eq!(get_protocol_display_name(&Protocol::ActivityPub), "Fediverse");
+        assert_eq!(
+            get_protocol_display_name(&Protocol::ActivityPub),
+            "Fediverse"
+        );
         assert_eq!(get_protocol_display_name(&Protocol::ATProto), "Bluesky");
         assert_eq!(get_protocol_display_name(&Protocol::Rss), "RSS");
         assert_eq!(get_protocol_display_name(&Protocol::Web), "Web");

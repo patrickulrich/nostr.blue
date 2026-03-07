@@ -2,11 +2,10 @@
 //!
 //! Full-featured article editor with NIP-37 draft support, auto-save,
 //! image upload, publish confirmation, and formatting toolbar.
-use dioxus::prelude::*;
 use crate::components::icons::ArrowLeftIcon;
 use crate::components::{
-    ArticleCoverUploader, ImageInsertData, ImageUploadDialog, MarkdownEditor,
-    MentionSelection, NostrMentionDialog, PublishConfig, PublishConfirmDialog,
+    ArticleCoverUploader, ImageInsertData, ImageUploadDialog, MarkdownEditor, MentionSelection,
+    NostrMentionDialog, PublishConfig, PublishConfirmDialog,
 };
 use crate::hooks::{calculate_multi_hash, use_unsaved_changes};
 use crate::stores::auth_store;
@@ -14,6 +13,7 @@ use crate::stores::draft_store::{
     delete_draft, load_drafts, save_draft, ArticleDraft, DraftStatus, LoadedDraft,
 };
 use crate::utils::format_time_ago;
+use dioxus::prelude::*;
 /// Draft selection modal for when there are existing drafts
 #[derive(Clone, Copy, PartialEq)]
 enum EditorState {
@@ -45,16 +45,14 @@ pub fn ArticleNew() -> Element {
     let mut show_mention_dialog = use_signal(|| false);
     let mut show_inline_image_upload = use_signal(|| false);
     let content_hash = use_memo(move || {
-        calculate_multi_hash(
-            &[
-                &title.read(),
-                &summary.read(),
-                &content.read(),
-                &identifier.read(),
-                &cover_image.read(),
-                &hashtags.read(),
-            ],
-        )
+        calculate_multi_hash(&[
+            &title.read(),
+            &summary.read(),
+            &content.read(),
+            &identifier.read(),
+            &cover_image.read(),
+            &hashtags.read(),
+        ])
     });
     let unsaved = use_unsaved_changes(content_hash);
     let mut is_dirty = unsaved.is_dirty;
@@ -66,13 +64,13 @@ pub fn ArticleNew() -> Element {
             draft_status.set(DraftStatus::Dirty);
         }
     });
-    let is_authenticated = use_memo(move || {
-        auth_store::AUTH_STATE.read().is_authenticated
-    });
+    let is_authenticated = use_memo(move || auth_store::AUTH_STATE.read().is_authenticated);
     let title_chars = title.read().chars().count();
     let content_chars = content.read().chars().count();
-    let can_publish = title_chars > 0 && content_chars > 0
-        && !identifier.read().is_empty() && !*is_publishing.read();
+    let can_publish = title_chars > 0
+        && content_chars > 0
+        && !identifier.read().is_empty()
+        && !*is_publishing.read();
     use_effect(move || {
         if *is_authenticated.read() {
             spawn(async move {
@@ -157,11 +155,10 @@ pub fn ArticleNew() -> Element {
                     loaded_draft_id.set(Some(draft.identifier.clone()));
                     last_saved_hash.set(Some(saved_hash));
                     is_dirty.set(false);
-                    draft_status
-                        .set(DraftStatus::Saved {
-                            event_id,
-                            saved_at: now,
-                        });
+                    draft_status.set(DraftStatus::Saved {
+                        event_id,
+                        saved_at: now,
+                    });
                     log::info!("Draft auto-saved");
                 }
                 Err(e) => {
@@ -176,10 +173,9 @@ pub fn ArticleNew() -> Element {
     });
     use_effect(move || {
         if !*is_authenticated.read() {
-            navigator
-                .push(crate::routes::Route::Home {
-                    list: String::new(),
-                });
+            navigator.push(crate::routes::Route::Home {
+                list: String::new(),
+            });
         }
     });
     let handle_close = move |_| {
@@ -202,10 +198,9 @@ pub fn ArticleNew() -> Element {
             updated_at: 0,
         };
         if draft.title.is_empty() || draft.identifier.is_empty() {
-            error_message
-                .set(
-                    Some("Title and identifier are required to save draft".to_string()),
-                );
+            error_message.set(Some(
+                "Title and identifier are required to save draft".to_string(),
+            ));
             return;
         }
         let saved_hash = *content_hash.read();
@@ -225,11 +220,10 @@ pub fn ArticleNew() -> Element {
                     loaded_draft_id.set(Some(draft.identifier.clone()));
                     last_saved_hash.set(Some(saved_hash));
                     is_dirty.set(false);
-                    draft_status
-                        .set(DraftStatus::Saved {
-                            event_id,
-                            saved_at: now,
-                        });
+                    draft_status.set(DraftStatus::Saved {
+                        event_id,
+                        saved_at: now,
+                    });
                 }
                 Err(e) => {
                     if *auto_save_gen.read() != save_gen {
@@ -260,14 +254,14 @@ pub fn ArticleNew() -> Element {
                 .filter(|s| !s.is_empty())
                 .collect();
             match crate::stores::nostr_client::publish_article(
-                    title_val.clone(),
-                    summary_val.clone(),
-                    content_val.clone(),
-                    identifier_val.clone(),
-                    cover_image_val,
-                    tags_vec,
-                )
-                .await
+                title_val.clone(),
+                summary_val.clone(),
+                content_val.clone(),
+                identifier_val.clone(),
+                cover_image_val,
+                tags_vec,
+            )
+            .await
             {
                 Ok(event_id) => {
                     log::info!("Article published successfully: {}", event_id);
@@ -289,16 +283,10 @@ pub fn ArticleNew() -> Element {
                                 Err(_) => event_id.clone(),
                             }
                         };
-                        let promo_content = format!(
-                            "New article: {}\n\nnostr:{}",
-                            title_val,
-                            naddr_str,
-                        );
-                        if let Err(e) = crate::stores::nostr_client::publish_note(
-                                promo_content,
-                                vec![],
-                            )
-                            .await
+                        let promo_content =
+                            format!("New article: {}\n\nnostr:{}", title_val, naddr_str,);
+                        if let Err(e) =
+                            crate::stores::nostr_client::publish_note(promo_content, vec![]).await
                         {
                             log::warn!("Failed to create promotion note: {}", e);
                         }
@@ -316,16 +304,14 @@ pub fn ArticleNew() -> Element {
     };
     let mut handle_load_draft = move |draft: LoadedDraft| {
         let hashtags_str = draft.draft.hashtags.join(", ");
-        let hash = calculate_multi_hash(
-            &[
-                &draft.draft.title,
-                &draft.draft.summary,
-                &draft.draft.content,
-                &draft.draft.identifier,
-                &draft.draft.cover_image,
-                &hashtags_str,
-            ],
-        );
+        let hash = calculate_multi_hash(&[
+            &draft.draft.title,
+            &draft.draft.summary,
+            &draft.draft.content,
+            &draft.draft.identifier,
+            &draft.draft.cover_image,
+            &hashtags_str,
+        ]);
         title.set(draft.draft.title);
         summary.set(draft.draft.summary);
         content.set(draft.draft.content);

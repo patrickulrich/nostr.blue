@@ -61,10 +61,9 @@ pub fn CashuPayRequestModal(on_close: EventHandler<()>) -> Element {
     let handle_parse = move |_| {
         let input = request_input.read().trim().to_string();
         if input.is_empty() {
-            pay_state
-                .set(PayState::Error {
-                    message: "Please enter a payment request".to_string(),
-                });
+            pay_state.set(PayState::Error {
+                message: "Please enter a payment request".to_string(),
+            });
             return;
         }
         match cashu::parse_payment_request(&input) {
@@ -88,10 +87,9 @@ pub fn CashuPayRequestModal(on_close: EventHandler<()>) -> Element {
             match custom_amt_str.parse::<u64>() {
                 Ok(a) if a > 0 => Some(a),
                 _ => {
-                    pay_state
-                        .set(PayState::Error {
-                            message: "Invalid custom amount".to_string(),
-                        });
+                    pay_state.set(PayState::Error {
+                        message: "Invalid custom amount".to_string(),
+                    });
                     return;
                 }
             }

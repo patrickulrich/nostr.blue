@@ -107,10 +107,10 @@ pub fn Trending() -> Element {
 }
 /// Convert a TrendingNote to a nostr_sdk::Event
 fn convert_trending_to_event(note: &TrendingNote) -> Result<NostrEvent, String> {
-    let event_id = EventId::from_hex(&note.event.id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
-    let pubkey = PublicKey::from_hex(&note.event.pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let event_id =
+        EventId::from_hex(&note.event.id).map_err(|e| format!("Invalid event ID: {}", e))?;
+    let pubkey =
+        PublicKey::from_hex(&note.event.pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let created_at = Timestamp::from(note.event.created_at);
     let kind = Kind::from(note.event.kind);
     let tags: Vec<Tag> = note
@@ -124,19 +124,16 @@ fn convert_trending_to_event(note: &TrendingNote) -> Result<NostrEvent, String> 
             Tag::parse(tag_vec.iter().map(|s| s.as_str())).ok()
         })
         .collect();
-    let sig_bytes = hex::decode(&note.event.sig)
-        .map_err(|e| format!("Invalid signature hex: {}", e))?;
-    let sig = Signature::from_slice(&sig_bytes)
-        .map_err(|e| format!("Invalid signature: {}", e))?;
-    Ok(
-        NostrEvent::new(
-            event_id,
-            pubkey,
-            created_at,
-            kind,
-            tags,
-            note.event.content.clone(),
-            sig,
-        ),
-    )
+    let sig_bytes =
+        hex::decode(&note.event.sig).map_err(|e| format!("Invalid signature hex: {}", e))?;
+    let sig = Signature::from_slice(&sig_bytes).map_err(|e| format!("Invalid signature: {}", e))?;
+    Ok(NostrEvent::new(
+        event_id,
+        pubkey,
+        created_at,
+        kind,
+        tags,
+        note.event.content.clone(),
+        sig,
+    ))
 }

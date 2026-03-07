@@ -14,10 +14,10 @@
 //! - After: Rendering 1000 notes = ~20 DOM nodes (fast, constant memory)
 //! - Maintains 60fps even with 10,000+ items
 use dioxus::prelude::*;
-use std::collections::HashMap;
-use std::rc::Rc;
 #[cfg(feature = "web")]
 use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
 #[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
 #[cfg(feature = "web")]
@@ -120,13 +120,11 @@ impl VirtualState {
             }
         }
         let start_with_overscan = start_index.saturating_sub(self.config.overscan_count);
-        let end_with_overscan = (end_index + self.config.overscan_count)
-            .min(self.total_items);
+        let end_with_overscan = (end_index + self.config.overscan_count).min(self.total_items);
         let range_size = end_with_overscan - start_with_overscan;
         if range_size < self.config.min_batch_size {
             let additional_needed = self.config.min_batch_size - range_size;
-            let end_adjusted = (end_with_overscan + additional_needed)
-                .min(self.total_items);
+            let end_adjusted = (end_with_overscan + additional_needed).min(self.total_items);
             (start_with_overscan, end_adjusted)
         } else {
             (start_with_overscan, end_with_overscan)
@@ -142,14 +140,13 @@ impl VirtualState {
     }
     /// Update measured height for an item
     fn set_item_height(&mut self, index: usize, height: f64) {
-        self.item_heights
-            .insert(
-                index,
-                ItemHeight {
-                    height,
-                    is_measured: true,
-                },
-            );
+        self.item_heights.insert(
+            index,
+            ItemHeight {
+                height,
+                is_measured: true,
+            },
+        );
     }
 }
 /// Props for VirtualList component
@@ -193,21 +190,19 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
     let mut virtual_state = use_signal(|| VirtualState::new(props.items.len(), config));
     #[cfg(feature = "web")]
     let mut container_element = use_signal(|| None::<web_sys::HtmlElement>);
-    use_effect(
-        use_reactive(
-            &props.items,
-            move |items| {
-                virtual_state.write().total_items = items.len();
-            },
-        ),
-    );
+    use_effect(use_reactive(&props.items, move |items| {
+        virtual_state.write().total_items = items.len();
+    }));
     let state = virtual_state.read();
     let (start_index, end_index) = state.calculate_visible_range();
     let total_height = state.calculate_total_height();
     let start_offset = state.calculate_item_offset(start_index);
     log::debug!(
-        "VirtualList: Rendering items {}-{} of {} (viewport at {}px)", start_index,
-        end_index, props.items.len(), state.scroll_top
+        "VirtualList: Rendering items {}-{} of {} (viewport at {}px)",
+        start_index,
+        end_index,
+        props.items.len(),
+        state.scroll_top
     );
     drop(state);
     let visible_items = use_memo(move || {

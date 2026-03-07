@@ -64,9 +64,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
                 }
                 match read_file_as_bytes(&input_id, MEDIA_ACCEPT).await {
                     Ok((file_name, data, mime_type)) => {
-                        log::info!(
-                            "File selected: {} ({} bytes)", file_name, data.len()
-                        );
+                        log::info!("File selected: {} ({} bytes)", file_name, data.len());
                         selected_file.set(Some((file_name, data, mime_type)));
                     }
                     Err(e) => {
@@ -126,7 +124,8 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
     #[cfg(not(feature = "desktop"))]
     let handle_desktop_pick = move |_| {};
     let handle_upload = move |_| {
-        if let Some((_filename, data, mime_type)) = selected_file.read().clone() {
+        let selected = selected_file.with_mut(|selected| selected.take());
+        if let Some((_filename, data, mime_type)) = selected {
             let quality_val = *quality.read();
             let on_upload = props.on_upload;
             let input_id_for_clear = input_id_for_upload.clone();
@@ -134,12 +133,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
             uploading.set(true);
             error.set(None);
             spawn(async move {
-                match blossom_store::upload_image(
-                        data,
-                        mime_type,
-                        quality_val,
-                        Some(server_url),
-                    )
+                match blossom_store::upload_image(data, mime_type, quality_val, Some(server_url))
                     .await
                 {
                     Ok(url) => {
@@ -175,6 +169,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
                 div { class: "flex items-center justify-center w-full",
                     if cfg!(feature = "mobile") {
                         button {
+                            r#type: "button",
                             class: "flex flex-col items-center justify-center w-full h-32 border-2 border-border border-dashed rounded-lg bg-background hover:bg-muted transition",
                             onclick: handle_mobile_pick,
                             div { class: "flex flex-col items-center justify-center pt-5 pb-6",
@@ -189,6 +184,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
                         }
                     } else if cfg!(feature = "desktop") {
                         button {
+                            r#type: "button",
                             class: "flex flex-col items-center justify-center w-full h-32 border-2 border-border border-dashed rounded-lg bg-background hover:bg-muted transition",
                             onclick: handle_desktop_pick,
                             div { class: "flex flex-col items-center justify-center pt-5 pb-6",
@@ -237,6 +233,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
                                 }
                             }
                             button {
+                                r#type: "button",
                                 class: "px-3 py-1 text-sm text-muted-foreground hover:text-foreground transition",
                                 onclick: handle_clear,
                                 "✕ Remove"
@@ -288,6 +285,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
                             }
                         }
                         button {
+                            r#type: "button",
                             class: "w-full px-4 py-2 bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 rounded-lg font-medium transition",
                             disabled: *uploading.read(),
                             onclick: handle_upload,
@@ -336,10 +334,10 @@ async fn read_file_as_bytes(
         return Err("Selected file type is not allowed".to_string());
     }
     let promise = file.array_buffer();
-    let array_buffer = JsFuture::from(promise).await.map_err(|_| "Failed to read file")?;
-    let array_buffer: ArrayBuffer = array_buffer
-        .dyn_into()
-        .map_err(|_| "Not an ArrayBuffer")?;
+    let array_buffer = JsFuture::from(promise)
+        .await
+        .map_err(|_| "Failed to read file")?;
+    let array_buffer: ArrayBuffer = array_buffer.dyn_into().map_err(|_| "Not an ArrayBuffer")?;
     let uint8_array = Uint8Array::new(&array_buffer);
     let bytes = uint8_array.to_vec();
     Ok((file_name, bytes, mime_type))
@@ -364,7 +362,10 @@ async fn read_file_as_bytes(
     if !matches_accept_filter(accept, &mime_type, &file_name) {
         return Err("Selected file type is not allowed".to_string());
     }
-    let data = std::fs::read(&file_handle)
+    let file_path = file_handle.as_path().to_path_buf();
+    let data = tokio::task::spawn_blocking(move || std::fs::read(file_path))
+        .await
+        .map_err(|e| format!("Failed to read selected file: {}", e))?
         .map_err(|e| format!("Failed to read selected file: {}", e))?;
     Ok((file_name, data, mime_type))
 }

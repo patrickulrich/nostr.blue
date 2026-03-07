@@ -29,16 +29,12 @@ pub struct RecentGifsStore {
     pub data: Vec<GifMetadata>,
 }
 /// Global state for GIF search results
-pub static GIF_RESULTS: GlobalSignal<Store<GifResultsStore>> = Signal::global(|| Store::new(
-    GifResultsStore::default(),
-));
+pub static GIF_RESULTS: GlobalSignal<Store<GifResultsStore>> =
+    Signal::global(|| Store::new(GifResultsStore::default()));
 pub static GIF_LOADING: GlobalSignal<bool> = Signal::global(|| false);
-pub static GIF_OLDEST_TIMESTAMP: GlobalSignal<Option<Timestamp>> = Signal::global(|| {
-    None
-});
-pub static RECENT_GIFS: GlobalSignal<Store<RecentGifsStore>> = Signal::global(|| Store::new(
-    RecentGifsStore::default(),
-));
+pub static GIF_OLDEST_TIMESTAMP: GlobalSignal<Option<Timestamp>> = Signal::global(|| None);
+pub static RECENT_GIFS: GlobalSignal<Store<RecentGifsStore>> =
+    Signal::global(|| Store::new(RecentGifsStore::default()));
 pub static CURRENT_SEARCH_QUERY: GlobalSignal<String> = Signal::global(String::new);
 pub static GIF_SEARCH_SEQ: GlobalSignal<u64> = Signal::global(|| 0);
 const MAX_RECENT_GIFS: usize = 20;
@@ -49,7 +45,9 @@ pub async fn fetch_gifs(
     search_query: Option<String>,
 ) -> Result<Vec<GifMetadata>, String> {
     log::info!(
-        "Fetching GIFs from Nostr (limit: {}, until: {:?}, search: {:?})", limit, until,
+        "Fetching GIFs from Nostr (limit: {}, until: {:?}, search: {:?})",
+        limit,
+        until,
         search_query
     );
     let client = match crate::stores::nostr_client::get_client() {
@@ -78,11 +76,9 @@ pub async fn fetch_gifs(
     }
     crate::stores::relay::ensure_gif_relay(&client).await;
     log::info!("Fetching GIFs from all connected relays (including gifbuddy)");
-    let events = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
     log::info!("Fetched {} GIF events total", events.len());
     let mut gifs = Vec::new();
     for event in events {
@@ -231,9 +227,7 @@ pub async fn load_initial_gifs() {
         Ok(gifs) => {
             let current_query = CURRENT_SEARCH_QUERY.read().clone();
             if captured_query != current_query {
-                log::debug!(
-                    "Search query changed during initial load, discarding stale results"
-                );
+                log::debug!("Search query changed during initial load, discarding stale results");
                 *GIF_LOADING.write() = false;
                 return;
             }
@@ -263,7 +257,8 @@ pub async fn search_gifs(query: String) {
             let current_seq = *GIF_SEARCH_SEQ.read();
             if request_seq != current_seq {
                 log::debug!(
-                    "Discarding stale search results (seq {} != {})", request_seq,
+                    "Discarding stale search results (seq {} != {})",
+                    request_seq,
                     current_seq
                 );
                 return;
@@ -297,9 +292,7 @@ pub async fn load_more_gifs() {
         Ok(new_gifs) => {
             let current_query = CURRENT_SEARCH_QUERY.read().clone();
             if captured_query != current_query {
-                log::debug!(
-                    "Search query changed during pagination, discarding stale results"
-                );
+                log::debug!("Search query changed during pagination, discarding stale results");
                 *GIF_LOADING.write() = false;
                 return;
             }
@@ -371,23 +364,21 @@ pub async fn publish_gif_event(
 ) -> Result<String, String> {
     use nostr_sdk::prelude::*;
     log::info!("Publishing GIF event for: {}", url);
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     let signer = crate::stores::nostr_client::get_signer()
         .ok_or("Not authenticated. Please sign in to publish.")?;
     let file_url = Url::parse(&url).map_err(|e| format!("Invalid URL: {}", e))?;
-    let sha256_hash = nostr::hashes::sha256::Hash::from_str(&hash)
-        .map_err(|e| format!("Invalid hash: {}", e))?;
+    let sha256_hash =
+        nostr::hashes::sha256::Hash::from_str(&hash).map_err(|e| format!("Invalid hash: {}", e))?;
     let mut metadata = nip94::FileMetadata::new(file_url, mime_type, sha256_hash);
     if let Some(s) = size {
         metadata = metadata.size(s);
     }
     if let Some((w, h)) = dimensions {
-        metadata = metadata
-            .dimensions(ImageDimensions {
-                width: w as u64,
-                height: h as u64,
-            });
+        metadata = metadata.dimensions(ImageDimensions {
+            width: w as u64,
+            height: h as u64,
+        });
     }
     let builder = EventBuilder::file_metadata(&caption, metadata);
     let tags = vec![
@@ -397,38 +388,30 @@ pub async fn publish_gif_event(
     ];
     let builder = builder.tags(tags);
     let event = match signer {
-        crate::stores::signer::SignerType::Keys(keys) => {
-            builder
-                .sign(&keys)
-                .await
-                .map_err(|e| format!("Failed to sign event: {}", e))?
-        }
+        crate::stores::signer::SignerType::Keys(keys) => builder
+            .sign(&keys)
+            .await
+            .map_err(|e| format!("Failed to sign event: {}", e))?,
         #[cfg(target_family = "wasm")]
-        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
-            builder
-                .sign(browser_signer.as_ref())
-                .await
-                .map_err(|e| format!("Failed to sign event: {}", e))?
-        }
-        crate::stores::signer::SignerType::NostrConnect(nostr_connect) => {
-            builder
-                .sign(nostr_connect.as_ref())
-                .await
-                .map_err(|e| format!("Failed to sign event: {}", e))?
-        }
+        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => builder
+            .sign(browser_signer.as_ref())
+            .await
+            .map_err(|e| format!("Failed to sign event: {}", e))?,
+        crate::stores::signer::SignerType::NostrConnect(nostr_connect) => builder
+            .sign(nostr_connect.as_ref())
+            .await
+            .map_err(|e| format!("Failed to sign event: {}", e))?,
         #[cfg(feature = "mobile")]
-        crate::stores::signer::SignerType::AndroidSigner(android_signer) => {
-            builder
-                .sign(android_signer.as_ref())
-                .await
-                .map_err(|e| format!("Failed to sign event: {}", e))?
-        }
+        crate::stores::signer::SignerType::AndroidSigner(android_signer) => builder
+            .sign(android_signer.as_ref())
+            .await
+            .map_err(|e| format!("Failed to sign event: {}", e))?,
     };
     let event_id = event.id.to_string();
     log::info!("Created GIF event: {}", event_id);
     crate::stores::nostr_client::ensure_relays_ready(&client).await;
-    let gifbuddy_url = Url::parse(GIFBUDDY_RELAY)
-        .map_err(|e| format!("Invalid relay URL: {}", e))?;
+    let gifbuddy_url =
+        Url::parse(GIFBUDDY_RELAY).map_err(|e| format!("Invalid relay URL: {}", e))?;
     if let Err(e) = client.add_relay(&gifbuddy_url).await {
         log::warn!("Could not add gifbuddy relay: {}", e);
     }
@@ -439,9 +422,7 @@ pub async fn publish_gif_event(
         Ok(output) => {
             if output.success.is_empty() {
                 log::error!("GIF event was not accepted by any relay");
-                return Err(
-                    "Failed to publish: no relays accepted the event".to_string(),
-                );
+                return Err("Failed to publish: no relays accepted the event".to_string());
             }
             log::info!("Published GIF event to {} relays", output.success.len());
             if !output.failed.is_empty() {

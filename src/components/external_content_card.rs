@@ -6,8 +6,10 @@ use crate::components::icons;
 use crate::components::podcast::episode_card::DisplayEpisode;
 use crate::routes::Route;
 use crate::services::{
-    mempool, openlibrary::{self, CoverSize},
-    podcast_index, podcast_rss::format_duration,
+    mempool,
+    openlibrary::{self, CoverSize},
+    podcast_index,
+    podcast_rss::format_duration,
 };
 use crate::stores::{music_player, settings_store};
 use crate::utils::format::format_sats_with_unit;
@@ -29,8 +31,7 @@ fn truncate_guid(guid: &str) -> String {
 #[component]
 pub fn ExternalContentCard(
     content: ExternalContentId,
-    #[props(default = false)]
-    compact: bool,
+    #[props(default = false)] compact: bool,
     /// Optional podcast GUID for episode lookups (from same note's podcast:guid tag)
     podcast_guid: Option<String>,
 ) -> Element {
@@ -55,11 +56,7 @@ pub fn ExternalContentCard(
                 BitcoinTxCard { txid: transaction_hash.clone(), compact }
             }
         }
-        ExternalContentId::BlockchainAddress {
-            chain,
-            address,
-            ..
-        } if chain == "bitcoin" => {
+        ExternalContentId::BlockchainAddress { chain, address, .. } if chain == "bitcoin" => {
             rsx! {
                 BitcoinAddressCard { address: address.clone(), compact }
             }
@@ -104,29 +101,24 @@ pub fn ExternalContentCard(
 #[component]
 pub fn ExternalContentList(
     contents: Vec<(ExternalContentId, Option<String>)>,
-    #[props(default = false)]
-    compact: bool,
+    #[props(default = false)] compact: bool,
 ) -> Element {
     if contents.is_empty() {
         return rsx! {};
     }
-    let podcast_guid: Option<String> = contents
-        .iter()
-        .find_map(|(content, _)| {
-            if let ExternalContentId::PodcastFeed(guid) = content {
-                Some(guid.clone())
-            } else {
-                None
-            }
-        });
-    let (podcasts, other): (Vec<_>, Vec<_>) = contents
-        .into_iter()
-        .partition(|(content, _)| {
-            matches!(
-                content,
-                ExternalContentId::PodcastFeed(_) | ExternalContentId::PodcastEpisode(_)
-            )
-        });
+    let podcast_guid: Option<String> = contents.iter().find_map(|(content, _)| {
+        if let ExternalContentId::PodcastFeed(guid) = content {
+            Some(guid.clone())
+        } else {
+            None
+        }
+    });
+    let (podcasts, other): (Vec<_>, Vec<_>) = contents.into_iter().partition(|(content, _)| {
+        matches!(
+            content,
+            ExternalContentId::PodcastFeed(_) | ExternalContentId::PodcastEpisode(_)
+        )
+    });
     rsx! {
         div { class: "flex flex-col gap-2 mt-2",
             for (content , _hint) in podcasts.iter() {
@@ -274,11 +266,7 @@ fn BitcoinTxCard(props: BitcoinTxCardProps) -> Element {
     let mut expanded = use_signal(|| false);
     let mut tx_data = use_signal(|| None::<Result<mempool::BitcoinTransaction, String>>);
     let mempool_endpoint = settings_store::get_mempool_endpoint();
-    let mempool_url = format!(
-        "{}/tx/{}",
-        mempool_endpoint.trim_end_matches("/api"),
-        txid,
-    );
+    let mempool_url = format!("{}/tx/{}", mempool_endpoint.trim_end_matches("/api"), txid,);
     let short_txid = if txid.chars().count() > 16 {
         let start: String = txid.chars().take(8).collect();
         let end: String = txid
@@ -566,19 +554,19 @@ fn PodcastEpisodeGuidCard(props: PodcastEpisodeGuidCardProps) -> Element {
     let guid = props.guid.clone();
     let guid_for_fetch = guid.clone();
     let podcast_guid_for_fetch = props.podcast_guid.clone();
-    log::debug!("[PodcastEpisodeGuidCard] Rendering: {}", truncate_guid(& guid));
+    log::debug!(
+        "[PodcastEpisodeGuidCard] Rendering: {}",
+        truncate_guid(&guid)
+    );
     let episode_data = use_resource(move || {
         let guid = guid_for_fetch.clone();
         let podcast_guid = podcast_guid_for_fetch.clone();
         async move {
             log::debug!(
-                "[PodcastEpisodeGuidCard] Fetching episode: {}", truncate_guid(& guid)
+                "[PodcastEpisodeGuidCard] Fetching episode: {}",
+                truncate_guid(&guid)
             );
-            let result = podcast_index::get_episode_by_guid(
-                    &guid,
-                    podcast_guid.as_deref(),
-                )
-                .await;
+            let result = podcast_index::get_episode_by_guid(&guid, podcast_guid.as_deref()).await;
             if let Err(e) = &result {
                 log::error!("[PodcastEpisodeGuidCard] Fetch failed: {}", e);
             }
@@ -612,14 +600,21 @@ fn PodcastEpisodeGuidCard(props: PodcastEpisodeGuidCardProps) -> Element {
                     trending_score: None,
                     value: None,
                 };
-                Some(DisplayEpisode::from_podcast_index_episode(episode, &minimal_feed))
+                Some(DisplayEpisode::from_podcast_index_episode(
+                    episode,
+                    &minimal_feed,
+                ))
             }
         } else {
             None
         }
     });
     let episode_id = use_memo(move || {
-        display_episode.read().as_ref().map(|e| e.id.clone()).unwrap_or_default()
+        display_episode
+            .read()
+            .as_ref()
+            .map(|e| e.id.clone())
+            .unwrap_or_default()
     });
     let episode_id_for_playing = episode_id;
     let is_playing = use_memo(move || {
@@ -649,9 +644,7 @@ fn PodcastEpisodeGuidCard(props: PodcastEpisodeGuidCardProps) -> Element {
             drop(player_state);
             let track = episode.to_music_track();
             if !is_valid_http_url(&track.media_url) {
-                log::warn!(
-                    "[PodcastEpisodeGuidCard] Invalid track URL, skipping playback"
-                );
+                log::warn!("[PodcastEpisodeGuidCard] Invalid track URL, skipping playback");
                 return;
             }
             music_player::play_track(track, None, None);
@@ -659,7 +652,10 @@ fn PodcastEpisodeGuidCard(props: PodcastEpisodeGuidCardProps) -> Element {
     };
     let route_ids = use_memo(move || {
         if let Some(Ok((ref episode, _))) = *episode_data.read() {
-            Some((episode.feed_id.unwrap_or(0).to_string(), episode.id.to_string()))
+            Some((
+                episode.feed_id.unwrap_or(0).to_string(),
+                episode.id.to_string(),
+            ))
         } else {
             None
         }
@@ -708,7 +704,10 @@ fn PodcastEpisodeGuidCard(props: PodcastEpisodeGuidCardProps) -> Element {
         .filter(|url| is_valid_http_url(url))
         .cloned()
         .unwrap_or_else(|| {
-            format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", episode.id)
+            format!(
+                "https://api.dicebear.com/7.x/shapes/svg?seed={}",
+                episode.id
+            )
         });
     let duration_str = episode
         .duration
@@ -827,11 +826,14 @@ struct PodcastGuidCardProps {
 fn PodcastGuidCard(props: PodcastGuidCardProps) -> Element {
     let guid = props.guid.clone();
     let guid_for_fetch = guid.clone();
-    log::debug!("[PodcastGuidCard] Rendering: {}", truncate_guid(& guid));
+    log::debug!("[PodcastGuidCard] Rendering: {}", truncate_guid(&guid));
     let podcast_data = use_resource(move || {
         let guid = guid_for_fetch.clone();
         async move {
-            log::debug!("[PodcastGuidCard] Fetching podcast: {}", truncate_guid(& guid));
+            log::debug!(
+                "[PodcastGuidCard] Fetching podcast: {}",
+                truncate_guid(&guid)
+            );
             let result = podcast_index::get_podcast_by_guid(&guid).await;
             if let Err(e) = &result {
                 log::error!("[PodcastGuidCard] Fetch failed: {}", e);
@@ -880,7 +882,10 @@ fn PodcastGuidCard(props: PodcastGuidCardProps) -> Element {
         .filter(|url| is_valid_http_url(url))
         .map(String::from)
         .unwrap_or_else(|| {
-            format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", podcast.id)
+            format!(
+                "https://api.dicebear.com/7.x/shapes/svg?seed={}",
+                podcast.id
+            )
         });
     let author = podcast.author.clone().or(podcast.owner_name.clone());
     let episode_count = podcast.episode_count;

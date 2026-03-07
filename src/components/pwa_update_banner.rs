@@ -15,12 +15,10 @@ pub fn PwaUpdateBanner() -> Element {
             let Some(window) = web_sys::window() else {
                 return;
             };
-            let callback = wasm_bindgen::closure::Closure::wrap(
-                Box::new(move || {
-                    log::info!("[PWA] Update available - showing banner");
-                    update_available.set(true);
-                }) as Box<dyn FnMut()>,
-            );
+            let callback = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
+                log::info!("[PWA] Update available - showing banner");
+                update_available.set(true);
+            }) as Box<dyn FnMut()>);
             if let Err(e) = window.add_event_listener_with_callback(
                 "sw-update-available",
                 callback.as_ref().unchecked_ref(),

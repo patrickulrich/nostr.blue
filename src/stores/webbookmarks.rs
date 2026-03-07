@@ -10,9 +10,8 @@ use std::time::Duration;
 pub struct WebBookmarksStore {
     pub data: Vec<Event>,
 }
-pub static WEB_BOOKMARKS: GlobalSignal<Store<WebBookmarksStore>> = Signal::global(|| Store::new(
-    WebBookmarksStore::default(),
-));
+pub static WEB_BOOKMARKS: GlobalSignal<Store<WebBookmarksStore>> =
+    Signal::global(|| Store::new(WebBookmarksStore::default()));
 /// Add a new web bookmark
 ///
 /// # Arguments
@@ -43,10 +42,8 @@ pub async fn add_webbookmark(
         .trim_start_matches("http://")
         .to_string();
     log::info!("Creating web bookmark for URL: {}", url_without_scheme);
-    let mut bookmark = WebBookmark::new(
-        description.unwrap_or_default(),
-        url_without_scheme.clone(),
-    );
+    let mut bookmark =
+        WebBookmark::new(description.unwrap_or_default(), url_without_scheme.clone());
     if let Some(t) = title {
         bookmark = bookmark.title(t);
     }
@@ -59,8 +56,7 @@ pub async fn add_webbookmark(
     let mut builder = EventBuilder::web_bookmark(bookmark);
     if let Some(img) = image_url {
         use nostr_sdk::Tag;
-        builder = builder
-            .tag(Tag::custom(nostr_sdk::TagKind::custom("image"), vec![img]));
+        builder = builder.tag(Tag::custom(nostr_sdk::TagKind::custom("image"), vec![img]));
     }
     match client.send_event_builder(builder).await {
         Ok(output) => {
@@ -216,7 +212,11 @@ pub fn get_domain(url: &str) -> String {
     let without_scheme = url
         .trim_start_matches("https://")
         .trim_start_matches("http://");
-    without_scheme.split('/').next().unwrap_or(without_scheme).to_string()
+    without_scheme
+        .split('/')
+        .next()
+        .unwrap_or(without_scheme)
+        .to_string()
 }
 /// Load web bookmarks from followed users with pagination
 pub async fn load_following_webbookmarks(
@@ -247,13 +247,16 @@ pub async fn load_following_webbookmarks(
         log::warn!("No valid contact pubkeys");
         return Ok(Vec::new());
     }
-    let mut filter = Filter::new().kind(Kind::WebBookmark).authors(authors).limit(limit);
+    let mut filter = Filter::new()
+        .kind(Kind::WebBookmark)
+        .authors(authors)
+        .limit(limit);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts.saturating_sub(1)));
     }
     log::info!(
-        "Fetching web bookmarks from {} followed accounts", filter.authors.as_ref().map(|
-        a | a.len()).unwrap_or(0)
+        "Fetching web bookmarks from {} followed accounts",
+        filter.authors.as_ref().map(|a| a.len()).unwrap_or(0)
     );
     match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {

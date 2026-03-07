@@ -4,7 +4,9 @@
 //! bounty display, and permission-based status controls.
 use crate::components::{icons, CodeStatusBadge};
 use crate::routes::Route;
-use crate::services::git_hosting::bounties::{claim_bounty, fetch_bounties_for_issue, release_bounty};
+use crate::services::git_hosting::bounties::{
+    claim_bounty, fetch_bounties_for_issue, release_bounty,
+};
 use crate::services::git_hosting::{
     fetch_comments_by_id, fetch_issue, fetch_repository, publish_comment_by_id,
     update_issue_status_by_id,
@@ -34,7 +36,9 @@ pub fn CodeIssueDetail(note_id: String) -> Element {
         loading.set(true);
         spawn(async move {
             let result = fetch_issue(&note_id).await;
-            if *fetch_gen.peek() != gen { return; }
+            if *fetch_gen.peek() != gen {
+                return;
+            }
             issue_result.set(Some(result));
             loading.set(false);
         });

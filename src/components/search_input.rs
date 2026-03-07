@@ -1,11 +1,11 @@
-use dioxus::prelude::Event as DioxusEvent;
-use dioxus::prelude::*;
-use dioxus_core::Task;
-use nostr_sdk::prelude::*;
 use crate::routes::Route;
 use crate::services::profile_search::{
     get_contact_pubkeys, search_cached_profiles, search_profiles, ProfileSearchResult,
 };
+use dioxus::prelude::Event as DioxusEvent;
+use dioxus::prelude::*;
+use dioxus_core::Task;
+use nostr_sdk::prelude::*;
 #[component]
 pub fn SearchInput() -> Element {
     let mut query = use_signal(String::new);
@@ -89,10 +89,7 @@ pub fn SearchInput() -> Element {
                         let selected = results.get(*selected_index.read());
                         if let Some(profile) = selected {
                             let pubkey_hex = profile.pubkey.to_hex();
-                            navigator
-                                .push(Route::Profile {
-                                    pubkey: pubkey_hex,
-                                });
+                            navigator.push(Route::Profile { pubkey: pubkey_hex });
                             query.set(String::new());
                             show_dropdown.set(false);
                         }

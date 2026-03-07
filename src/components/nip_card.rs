@@ -1,9 +1,7 @@
 use crate::routes::Route;
 use crate::services::github_nips::{DocSpec, OfficialNip};
 use crate::utils::validation::is_valid_http_url;
-use crate::utils::{
-    format::truncate_with_word_break, time::format_relative_time, truncate_pubkey,
-};
+use crate::utils::{format::truncate_with_word_break, time::format_relative_time, truncate_pubkey};
 use dioxus::prelude::*;
 /// Card component for displaying an official NIP from GitHub
 #[component]
@@ -84,10 +82,8 @@ pub fn DocSpecCard(
 #[component]
 pub fn CustomNipCard(
     event: nostr_sdk::Event,
-    #[props(default = None)]
-    author_name: Option<String>,
-    #[props(default = None)]
-    author_picture: Option<String>,
+    #[props(default = None)] author_name: Option<String>,
+    #[props(default = None)] author_picture: Option<String>,
 ) -> Element {
     use crate::hooks::use_author_metadata;
     use nostr_sdk::prelude::*;
@@ -106,9 +102,7 @@ pub fn CustomNipCard(
     let related_kinds: Vec<String> = event
         .tags
         .iter()
-        .filter(|t| {
-            t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::K))
-        })
+        .filter(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::K)))
         .filter_map(|t| t.content().map(|s| s.to_string()))
         .collect();
     let author_pubkey = event.pubkey.to_hex();
@@ -121,9 +115,12 @@ pub fn CustomNipCard(
                 .and_then(|m| m.display_name.clone().or(m.name.clone()))
         })
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
-    let profile_picture = author_picture
-        .clone()
-        .or_else(|| { author_metadata.read().as_ref().and_then(|m| m.picture.clone()) });
+    let profile_picture = author_picture.clone().or_else(|| {
+        author_metadata
+            .read()
+            .as_ref()
+            .and_then(|m| m.picture.clone())
+    });
     let avatar_letter = display_name
         .chars()
         .next()

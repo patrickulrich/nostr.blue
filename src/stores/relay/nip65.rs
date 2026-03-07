@@ -10,20 +10,20 @@ compile_error!("Cannot enable both 'web' and 'native' features simultaneously");
 #[cfg(not(any(feature = "web", feature = "native")))]
 compile_error!("Must enable either 'web' or 'native' feature");
 
+#[cfg(feature = "web")]
+use crate::platform::storage;
+use crate::stores::nostr_client;
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use nostr_sdk::{
-    Client, EventBuilder, Filter, FromBech32, Kind, PublicKey, RelayUrl, SubscriptionId,
-    Tag, TagKind,
+    Client, EventBuilder, Filter, FromBech32, Kind, PublicKey, RelayUrl, SubscriptionId, Tag,
+    TagKind,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use std::time::Duration;
-use crate::stores::nostr_client;
-#[cfg(feature = "web")]
-use crate::platform::storage;
 #[cfg(all(feature = "native", not(feature = "web")))]
 use std::fs;
+use std::sync::Arc;
+use std::time::Duration;
 /// Configuration for a single relay with read/write permissions
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct RelayConfig {
@@ -40,8 +40,7 @@ pub struct RelayListMetadata {
     pub updated_at: u64,
 }
 /// Current user's relay metadata
-pub static USER_RELAY_METADATA: GlobalSignal<Option<RelayListMetadata>> = Signal::global(||
-None);
+pub static USER_RELAY_METADATA: GlobalSignal<Option<RelayListMetadata>> = Signal::global(|| None);
 /// Default NIP-65 relay URLs
 pub const DEFAULT_NIP65_RELAYS: &[&str] = &[
     "wss://relay.damus.io",
@@ -49,10 +48,7 @@ pub const DEFAULT_NIP65_RELAYS: &[&str] = &[
     "wss://relay.snort.social",
 ];
 /// Default DM inbox relay URLs (NIP-17)
-pub const DEFAULT_DM_RELAYS: &[&str] = &[
-    "wss://relay.damus.io",
-    "wss://auth.nostr1.com",
-];
+pub const DEFAULT_DM_RELAYS: &[&str] = &["wss://relay.damus.io", "wss://auth.nostr1.com"];
 /// Default relays to use when no kind 10002 is found
 pub fn default_relays() -> Vec<RelayConfig> {
     DEFAULT_NIP65_RELAYS
@@ -75,13 +71,13 @@ pub static BLOCKED_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
 /// Local relays (stored in browser, not published to Nostr)
 pub static LOCAL_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
 /// Default search relay URLs (NIP-50 compatible)
-pub const DEFAULT_SEARCH_RELAYS: &[&str] = &[
-    "wss://relay.nostr.band",
-    "wss://search.nos.today",
-];
+pub const DEFAULT_SEARCH_RELAYS: &[&str] = &["wss://relay.nostr.band", "wss://search.nos.today"];
 /// Default search relays to use when no kind 10007 is found
 pub fn default_search_relays() -> Vec<String> {
-    DEFAULT_SEARCH_RELAYS.iter().map(|s| s.to_string()).collect()
+    DEFAULT_SEARCH_RELAYS
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
 }
 /// Reset general relays to defaults (local change only)
 pub fn reset_general_relays_to_default() {
@@ -118,7 +114,12 @@ pub fn reset_dm_relays_to_default() {
 pub fn get_read_relays() -> Vec<String> {
     let metadata = USER_RELAY_METADATA.read();
     match metadata.as_ref() {
-        Some(m) => m.relays.iter().filter(|r| r.read).map(|r| r.url.clone()).collect(),
+        Some(m) => m
+            .relays
+            .iter()
+            .filter(|r| r.read)
+            .map(|r| r.url.clone())
+            .collect(),
         None => DEFAULT_NIP65_RELAYS.iter().map(|s| s.to_string()).collect(),
     }
 }
@@ -127,7 +128,12 @@ pub fn get_read_relays() -> Vec<String> {
 pub fn get_write_relays() -> Vec<String> {
     let metadata = USER_RELAY_METADATA.read();
     match metadata.as_ref() {
-        Some(m) => m.relays.iter().filter(|r| r.write).map(|r| r.url.clone()).collect(),
+        Some(m) => m
+            .relays
+            .iter()
+            .filter(|r| r.write)
+            .map(|r| r.url.clone())
+            .collect(),
         None => DEFAULT_NIP65_RELAYS.iter().map(|s| s.to_string()).collect(),
     }
 }
@@ -177,12 +183,11 @@ pub fn parse_relay_list_event(event: &nostr_sdk::Event) -> Vec<RelayConfig> {
             }
         };
         log::debug!("Found relay tag: {} (read={}, write={})", url, read, write);
-        relays
-            .push(RelayConfig {
-                url: url.to_string(),
-                read,
-                write,
-            });
+        relays.push(RelayConfig {
+            url: url.to_string(),
+            read,
+            write,
+        });
     }
     log::info!("Parsed {} relays from event", relays.len());
     relays
@@ -211,12 +216,15 @@ pub async fn fetch_relay_list(
 ) -> Result<RelayListMetadata, String> {
     log::info!("Fetching relay lists for {}", pubkey.to_hex());
     let filter_10002 = Filter::new().author(pubkey).kind(Kind::RelayList).limit(1);
-    let filter_10050 = Filter::new().author(pubkey).kind(Kind::from(10050)).limit(1);
+    let filter_10050 = Filter::new()
+        .author(pubkey)
+        .kind(Kind::from(10050))
+        .limit(1);
     let client_10002 = client.clone();
     let client_10050 = client.clone();
     let (result_10002, result_10050) = tokio::join!(
-        client_10002.fetch_events(filter_10002, Duration::from_secs(5)), client_10050
-        .fetch_events(filter_10050, Duration::from_secs(5))
+        client_10002.fetch_events(filter_10002, Duration::from_secs(5)),
+        client_10050.fetch_events(filter_10050, Duration::from_secs(5))
     );
     let mut relays = Vec::new();
     let mut dm_relays = Vec::new();
@@ -232,8 +240,10 @@ pub async fn fetch_relay_list(
                 log::info!("Parsed {} general relays from kind 10002", relays.len());
                 for relay in &relays {
                     log::debug!(
-                        "  - {} (read: {}, write: {})", relay.url, relay.read, relay
-                        .write
+                        "  - {} (read: {}, write: {})",
+                        relay.url,
+                        relay.read,
+                        relay.write
                     );
                 }
             } else {
@@ -335,14 +345,17 @@ pub async fn publish_dm_relay_list(
 /// # Arguments
 /// * `client` - The Nostr client instance
 pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
-    let user_pubkey = nostr_client::get_cached_pubkey()
-        .map_err(|_| "No signer attached")?;
-    log::info!("Loading relay lists for Settings UI for {}", user_pubkey.to_hex());
+    let user_pubkey = nostr_client::get_cached_pubkey().map_err(|_| "No signer attached")?;
+    log::info!(
+        "Loading relay lists for Settings UI for {}",
+        user_pubkey.to_hex()
+    );
     match fetch_relay_list(user_pubkey, client).await {
         Ok(metadata) => {
             log::info!(
                 "Loaded {} general relays and {} DM relays for Settings display",
-                metadata.relays.len(), metadata.dm_relays.len()
+                metadata.relays.len(),
+                metadata.dm_relays.len()
             );
             *USER_RELAY_METADATA.write() = Some(metadata);
             crate::services::search_relays::invalidate_search_relay_cache().await;
@@ -382,7 +395,10 @@ pub async fn publish_search_relays(
         .send_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to publish search relays: {}", e))?;
-    log::info!("Search relays published (kind 10007): {}", output.id().to_hex());
+    log::info!(
+        "Search relays published (kind 10007): {}",
+        output.id().to_hex()
+    );
     Ok(output.id().to_hex())
 }
 /// Publish blocked relays (kind 10006)
@@ -401,7 +417,10 @@ pub async fn publish_blocked_relays(
         .send_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to publish blocked relays: {}", e))?;
-    log::info!("Blocked relays published (kind 10006): {}", output.id().to_hex());
+    log::info!(
+        "Blocked relays published (kind 10006): {}",
+        output.id().to_hex()
+    );
     Ok(output.id().to_hex())
 }
 /// Fetch search relays (kind 10007) for a user
@@ -409,7 +428,10 @@ pub async fn fetch_search_relays(
     pubkey: PublicKey,
     client: Arc<Client>,
 ) -> Result<Vec<String>, String> {
-    let filter = Filter::new().author(pubkey).kind(Kind::SearchRelays).limit(1);
+    let filter = Filter::new()
+        .author(pubkey)
+        .kind(Kind::SearchRelays)
+        .limit(1);
     let events = client
         .fetch_events(filter, Duration::from_secs(5))
         .await
@@ -438,7 +460,10 @@ pub async fn fetch_blocked_relays(
     pubkey: PublicKey,
     client: Arc<Client>,
 ) -> Result<Vec<String>, String> {
-    let filter = Filter::new().author(pubkey).kind(Kind::BlockedRelays).limit(1);
+    let filter = Filter::new()
+        .author(pubkey)
+        .kind(Kind::BlockedRelays)
+        .limit(1);
     let events = client
         .fetch_events(filter, Duration::from_secs(5))
         .await
@@ -474,33 +499,35 @@ pub fn load_local_relays() -> Vec<String> {
             {
                 return Vec::new();
             }
-            log::error!("Failed to load local relays from storage: {}, key: {}", e, LOCAL_RELAYS_KEY);
+            log::error!(
+                "Failed to load local relays from storage: {}, key: {}",
+                e,
+                LOCAL_RELAYS_KEY
+            );
             Vec::new()
         }
     }
 }
 #[cfg(feature = "native")]
 pub fn load_local_relays() -> Vec<String> {
-    let path = dirs::config_dir()
-        .map(|p| { p.join("nostr_blue").join(format!("{}.json", LOCAL_RELAYS_KEY)) });
+    let path = dirs::config_dir().map(|p| {
+        p.join("nostr_blue")
+            .join(format!("{}.json", LOCAL_RELAYS_KEY))
+    });
     match path {
-        Some(p) if p.exists() => {
-            match fs::read_to_string(&p) {
-                Ok(json) => {
-                    match serde_json::from_str(&json) {
-                        Ok(relays) => relays,
-                        Err(e) => {
-                            log::error!("Failed to parse local relays JSON from {:?}: {}", p, e);
-                            Vec::new()
-                        }
-                    }
-                }
+        Some(p) if p.exists() => match fs::read_to_string(&p) {
+            Ok(json) => match serde_json::from_str(&json) {
+                Ok(relays) => relays,
                 Err(e) => {
-                    log::error!("Failed to read local relays file {:?}: {}", p, e);
+                    log::error!("Failed to parse local relays JSON from {:?}: {}", p, e);
                     Vec::new()
                 }
+            },
+            Err(e) => {
+                log::error!("Failed to read local relays file {:?}: {}", p, e);
+                Vec::new()
             }
-        }
+        },
         _ => Vec::new(),
     }
 }
@@ -526,7 +553,11 @@ pub fn save_local_relays(relays: &[String]) {
     match serde_json::to_string(relays) {
         Ok(json) => {
             if let Err(e) = fs::write(&temp_path, &json) {
-                log::error!("Failed to write local relays temp file {:?}: {}", temp_path, e);
+                log::error!(
+                    "Failed to write local relays temp file {:?}: {}",
+                    temp_path,
+                    e
+                );
                 let _ = fs::remove_file(&temp_path);
                 return;
             }
@@ -565,7 +596,10 @@ pub async fn apply_local_relays_to_client(client: Arc<Client>) {
     log::info!("Adding {} local relays to client pool", local_relays.len());
     for relay_url in local_relays {
         let normalized = relay_url.trim_end_matches('/');
-        if blocked_relays.iter().any(|b| b.trim_end_matches('/') == normalized) {
+        if blocked_relays
+            .iter()
+            .any(|b| b.trim_end_matches('/') == normalized)
+        {
             log::info!("Skipping blocked local relay: {}", relay_url);
             continue;
         }
@@ -581,10 +615,13 @@ pub async fn apply_local_relays_to_client(client: Arc<Client>) {
 /// Call after signer is attached
 pub async fn init_nip51_relay_lists(client: Arc<Client>) -> Result<(), String> {
     let pubkey = nostr_client::get_cached_pubkey().map_err(|_| "No signer attached")?;
-    log::info!("Fetching NIP-51 relay lists (search/blocked) for {}", pubkey.to_hex());
+    log::info!(
+        "Fetching NIP-51 relay lists (search/blocked) for {}",
+        pubkey.to_hex()
+    );
     let (search_result, blocked_result) = tokio::join!(
-        fetch_search_relays(pubkey, client.clone()), fetch_blocked_relays(pubkey, client
-        .clone()),
+        fetch_search_relays(pubkey, client.clone()),
+        fetch_blocked_relays(pubkey, client.clone()),
     );
     match search_result {
         Ok(relays) if !relays.is_empty() => {
@@ -612,8 +649,8 @@ pub async fn init_nip51_relay_lists(client: Arc<Client>) -> Result<(), String> {
     Ok(())
 }
 /// Track the current real-time subscription ID for NIP-65 updates
-pub static RELAY_LIST_SUBSCRIPTION_ID: GlobalSignal<Option<SubscriptionId>> = Signal::global(||
-None);
+pub static RELAY_LIST_SUBSCRIPTION_ID: GlobalSignal<Option<SubscriptionId>> =
+    Signal::global(|| None);
 /// Start real-time subscription for NIP-65 relay list updates
 /// Invalidates search relay cache when user's kind 10002 is updated
 pub async fn start_relay_list_subscription() {
@@ -644,13 +681,12 @@ pub async fn start_relay_list_subscription() {
             return;
         }
     };
-    let filter = Filter::new().author(my_pubkey).kind(Kind::RelayList).limit(1);
-    let subscription_result = crate::stores::subscription_manager::subscribe_realtime(
-            &client,
-            filter,
-            Some(600),
-        )
-        .await;
+    let filter = Filter::new()
+        .author(my_pubkey)
+        .kind(Kind::RelayList)
+        .limit(1);
+    let subscription_result =
+        crate::stores::subscription_manager::subscribe_realtime(&client, filter, Some(600)).await;
     match subscription_result {
         Ok(sub_id) => {
             RELAY_LIST_SUBSCRIPTION_ID.write().replace(sub_id.clone());
@@ -662,25 +698,21 @@ pub async fn start_relay_list_subscription() {
                         subscription_id,
                         event,
                         ..
-                    } = notification {
+                    } = notification
+                    {
                         if subscription_id != sub_id {
                             continue;
                         }
                         log::info!("Received NIP-65 relay list update (kind 10002)");
                         let relays = parse_relay_list_event(&event);
                         if !relays.is_empty() {
-                            let mut metadata = USER_RELAY_METADATA
-                                .read()
-                                .clone()
-                                .unwrap_or_default();
+                            let mut metadata =
+                                USER_RELAY_METADATA.read().clone().unwrap_or_default();
                             metadata.relays = relays;
                             metadata.updated_at = event.created_at.as_secs();
                             *USER_RELAY_METADATA.write() = Some(metadata);
-                            crate::services::search_relays::invalidate_search_relay_cache()
-                                .await;
-                            log::info!(
-                                "Invalidated search relay cache after NIP-65 update"
-                            );
+                            crate::services::search_relays::invalidate_search_relay_cache().await;
+                            log::info!("Invalidated search relay cache after NIP-65 update");
                         }
                     }
                 }

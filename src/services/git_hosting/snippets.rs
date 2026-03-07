@@ -2,12 +2,12 @@
 //!
 //! Handles fetching and publishing NIP-C0 Code Snippet events (Kind 1337).
 #![allow(dead_code)]
-use dioxus::signals::ReadableExt;
-use nostr_sdk::prelude::*;
-use std::time::Duration;
 use crate::stores::code_store::{cache_snippet_events, get_cached_snippet};
 use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
 use crate::utils::nip34::{decode_event_id, DisplaySnippet};
+use dioxus::signals::ReadableExt;
+use nostr_sdk::prelude::*;
+use std::time::Duration;
 /// Default timeout for fetching events
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 /// Fetch a snippet by its event ID (note1, nevent1, or hex)
@@ -16,8 +16,8 @@ pub async fn fetch_snippet(event_ref: &str) -> Result<DisplaySnippet, String> {
     if let Some(snippet) = get_cached_snippet(event_ref) {
         return Ok(snippet);
     }
-    let event_id = decode_event_id(event_ref)
-        .map_err(|e| format!("Invalid event reference: {}", e))?;
+    let event_id =
+        decode_event_id(event_ref).map_err(|e| format!("Invalid event reference: {}", e))?;
     let filter = Filter::new().id(event_id).kind(Kind::CodeSnippet);
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
@@ -34,12 +34,18 @@ pub async fn fetch_user_snippets(
     pubkey: &PublicKey,
     limit: usize,
 ) -> Result<Vec<DisplaySnippet>, String> {
-    let filter = Filter::new().kind(Kind::CodeSnippet).author(*pubkey).limit(limit);
+    let filter = Filter::new()
+        .kind(Kind::CodeSnippet)
+        .author(*pubkey)
+        .limit(limit);
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
         .map_err(|e| format!("Failed to fetch snippets: {}", e))?;
     cache_snippet_events(&events);
-    Ok(events.iter().filter_map(DisplaySnippet::from_event).collect())
+    Ok(events
+        .iter()
+        .filter_map(DisplaySnippet::from_event)
+        .collect())
 }
 /// Fetch recent snippets
 pub async fn fetch_recent_snippets(limit: usize) -> Result<Vec<DisplaySnippet>, String> {
@@ -48,7 +54,10 @@ pub async fn fetch_recent_snippets(limit: usize) -> Result<Vec<DisplaySnippet>, 
         .await
         .map_err(|e| format!("Failed to fetch snippets: {}", e))?;
     cache_snippet_events(&events);
-    Ok(events.iter().filter_map(DisplaySnippet::from_event).collect())
+    Ok(events
+        .iter()
+        .filter_map(DisplaySnippet::from_event)
+        .collect())
 }
 /// Fetch snippets by language
 pub async fn fetch_snippets_by_language(
@@ -63,7 +72,10 @@ pub async fn fetch_snippets_by_language(
         .await
         .map_err(|e| format!("Failed to fetch snippets: {}", e))?;
     cache_snippet_events(&events);
-    Ok(events.iter().filter_map(DisplaySnippet::from_event).collect())
+    Ok(events
+        .iter()
+        .filter_map(DisplaySnippet::from_event)
+        .collect())
 }
 /// Search snippets by text
 ///
@@ -81,7 +93,10 @@ pub async fn search_snippets(
         .await
         .map_err(|e| format!("Failed to search snippets: {}", e))?;
     cache_snippet_events(&events);
-    Ok(events.iter().filter_map(DisplaySnippet::from_event).collect())
+    Ok(events
+        .iter()
+        .filter_map(DisplaySnippet::from_event)
+        .collect())
 }
 /// Publish a new code snippet
 #[allow(clippy::too_many_arguments)]
@@ -145,12 +160,16 @@ pub async fn delete_snippet(event_id: EventId) -> Result<(), String> {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
     use nostr::nips::nip09::EventDeletionRequest;
-    let request = EventDeletionRequest::new().id(event_id).reason("Snippet deleted");
+    let request = EventDeletionRequest::new()
+        .id(event_id)
+        .reason("Snippet deleted");
     let builder = EventBuilder::delete(request);
     client
         .send_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to publish deletion: {}", e))?;
-    crate::stores::code_store::CODE_SNIPPETS_CACHE.write().pop(&event_id.to_hex());
+    crate::stores::code_store::CODE_SNIPPETS_CACHE
+        .write()
+        .pop(&event_id.to_hex());
     Ok(())
 }

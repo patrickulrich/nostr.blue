@@ -120,50 +120,55 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
     }
 
     // Load more callback - only runs after initial load is complete
-    let load_more = {
-        let feed = feed.clone();
-        move || {
-            // Don't load more until initial load is complete
-            if !*initial_load_complete.read() || *loading_more.read() || !*has_more.read() {
-                return;
-            }
-            let current_count = episodes.peek().len();
+    let load_more =
+        {
             let feed = feed.clone();
-            loading_more.set(true);
-            spawn(async move {
-                log::info!("Loading more episodes, skip: {}", current_count);
-                match podcast_index::get_episodes_by_feed_id(podcast_id, Some(30), Some(current_count)).await {
-                    Ok(new_eps) => {
-                        log::info!("Loaded {} more episodes", new_eps.len());
-                        if new_eps.is_empty() {
+            move || {
+                // Don't load more until initial load is complete
+                if !*initial_load_complete.read() || *loading_more.read() || !*has_more.read() {
+                    return;
+                }
+                let current_count = episodes.peek().len();
+                let feed = feed.clone();
+                loading_more.set(true);
+                spawn(async move {
+                    log::info!("Loading more episodes, skip: {}", current_count);
+                    match podcast_index::get_episodes_by_feed_id(
+                        podcast_id,
+                        Some(30),
+                        Some(current_count),
+                    )
+                    .await
+                    {
+                        Ok(new_eps) => {
+                            log::info!("Loaded {} more episodes", new_eps.len());
+                            if new_eps.is_empty() {
+                                has_more.set(false);
+                            } else {
+                                has_more.set(new_eps.len() >= 30);
+                                episodes.write().extend(new_eps.iter().map(|ep| {
+                                    DisplayEpisode::from_podcast_index_episode(ep, &feed)
+                                }));
+                            }
+                        }
+                        Err(e) => {
                             has_more.set(false);
-                        } else {
-                            has_more.set(new_eps.len() >= 30);
-                            episodes.write().extend(
-                                new_eps
-                                    .iter()
-                                    .map(|ep| DisplayEpisode::from_podcast_index_episode(ep, &feed)),
-                            );
+                            log::error!("Load more failed: {}", e);
                         }
                     }
-                    Err(e) => {
-                        has_more.set(false);
-                        log::error!("Load more failed: {}", e);
-                    }
-                }
-                loading_more.set(false);
-            });
-        }
-    };
+                    loading_more.set(false);
+                });
+            }
+        };
 
     let sentinel_id = use_infinite_scroll(load_more, has_more, loading_more);
 
-    let image_url = feed
-        .get_image()
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| {
-            format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", feed.title)
-        });
+    let image_url = feed.get_image().map(|s| s.to_string()).unwrap_or_else(|| {
+        format!(
+            "https://api.dicebear.com/7.x/shapes/svg?seed={}",
+            feed.title
+        )
+    });
     let has_v4v = feed.has_v4v();
     let podcast_guid = feed.podcast_guid.clone();
     let feed_url = feed.url.clone();

@@ -68,10 +68,17 @@ pub struct EventKindInfo {
 fn validate_hex_number(number: &str, label: &str) -> Result<String, String> {
     let trimmed = number.trim();
     if trimmed.len() < 2 || trimmed.len() > 3 {
-        return Err(format!("Invalid {} number length: expected 2-3 characters, got {}", label, trimmed.len()));
+        return Err(format!(
+            "Invalid {} number length: expected 2-3 characters, got {}",
+            label,
+            trimmed.len()
+        ));
     }
     if !trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(format!("Invalid {} number: must be hex characters, got '{}'", label, trimmed));
+        return Err(format!(
+            "Invalid {} number: must be hex characters, got '{}'",
+            label, trimmed
+        ));
     }
     Ok(trimmed.to_ascii_uppercase())
 }
@@ -85,7 +92,11 @@ async fn fetch_text(url: &str, context: &str) -> Result<String, String> {
         .await
         .map_err(|e| format!("Failed to fetch {}: {}", context, e))?;
     if !response.status().is_success() {
-        return Err(format!("Failed to fetch {}: HTTP {}", context, response.status()));
+        return Err(format!(
+            "Failed to fetch {}: HTTP {}",
+            context,
+            response.status()
+        ));
     }
     response
         .text()
@@ -110,9 +121,9 @@ pub async fn fetch_nip_content(number: &str) -> Result<String, String> {
 pub fn parse_nips_from_readme(content: &str) -> Vec<OfficialNip> {
     let mut nips = Vec::new();
     let nip_regex = Regex::new(
-            r"^\s*-\s*\[NIP-([0-9A-Fa-f]{2,3}):\s*([^\]]+)\]\(([0-9A-Fa-f]{2,3})\.md\)(.*)$",
-        )
-        .unwrap();
+        r"^\s*-\s*\[NIP-([0-9A-Fa-f]{2,3}):\s*([^\]]+)\]\(([0-9A-Fa-f]{2,3})\.md\)(.*)$",
+    )
+    .unwrap();
     for line in content.lines() {
         if let Some(caps) = nip_regex.captures(line) {
             let number = caps
@@ -146,9 +157,7 @@ pub fn parse_event_kinds_from_readme(content: &str) -> Vec<EventKindInfo> {
             in_event_kinds_section = true;
             continue;
         }
-        if in_event_kinds_section && line.starts_with("## ")
-            && !line.contains("Event Kinds")
-        {
+        if in_event_kinds_section && line.starts_with("## ") && !line.contains("Event Kinds") {
             break;
         }
         if !in_event_kinds_section {
@@ -172,12 +181,11 @@ pub fn parse_event_kinds_from_readme(content: &str) -> Vec<EventKindInfo> {
                 let nip_part = parts[3].trim();
                 let nip = extract_nip_number(nip_part);
                 if !kind.is_empty() && !description.is_empty() {
-                    kinds
-                        .push(EventKindInfo {
-                            kind,
-                            description,
-                            nip,
-                        });
+                    kinds.push(EventKindInfo {
+                        kind,
+                        description,
+                        nip,
+                    });
                 }
             }
         }
@@ -187,10 +195,16 @@ pub fn parse_event_kinds_from_readme(content: &str) -> Vec<EventKindInfo> {
 /// Extract NIP number from a reference like "[01](01.md)" or "01"
 fn extract_nip_number(text: &str) -> String {
     if let Some(caps) = LINK_REGEX.captures(text) {
-        return caps.get(1).map(|m| m.as_str().to_uppercase()).unwrap_or_default();
+        return caps
+            .get(1)
+            .map(|m| m.as_str().to_uppercase())
+            .unwrap_or_default();
     }
     if let Some(caps) = SIMPLE_REGEX.captures(text) {
-        return caps.get(1).map(|m| m.as_str().to_uppercase()).unwrap_or_default();
+        return caps
+            .get(1)
+            .map(|m| m.as_str().to_uppercase())
+            .unwrap_or_default();
     }
     String::new()
 }
@@ -299,7 +313,10 @@ pub fn parse_nuts_from_readme(content: &str) -> Vec<DocSpec> {
             break;
         }
         if let Some(caps) = NUT_NUM_REGEX.captures(line) {
-            let number = caps.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
+            let number = caps
+                .get(1)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default();
             // Extract description from the second column
             let parts: Vec<&str> = line.split('|').collect();
             let description = if parts.len() >= 3 {
@@ -322,8 +339,14 @@ pub fn parse_buds_from_readme(content: &str) -> Vec<DocSpec> {
     let mut buds = Vec::new();
     for line in content.lines() {
         if let Some(caps) = BUD_REGEX.captures(line) {
-            let number = caps.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
-            let title = caps.get(2).map(|m| m.as_str().trim().to_string()).unwrap_or_default();
+            let number = caps
+                .get(1)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default();
+            let title = caps
+                .get(2)
+                .map(|m| m.as_str().trim().to_string())
+                .unwrap_or_default();
             buds.push(DocSpec {
                 number,
                 title,

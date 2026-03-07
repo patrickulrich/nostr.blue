@@ -1,9 +1,7 @@
 //! Mini Calendar Component
 //!
 //! A compact calendar for sidebar navigation
-use crate::utils::date_helpers::{
-    get_day_number, get_month_dates, get_month_from_date, get_today,
-};
+use crate::utils::date_helpers::{get_day_number, get_month_dates, get_month_from_date, get_today};
 use dioxus::prelude::*;
 use std::collections::HashSet;
 /// Props for MiniCalendar
@@ -29,12 +27,9 @@ pub fn MiniCalendar(props: MiniCalendarProps) -> Element {
     let event_dates = props.event_dates.clone();
     let on_date_select_handler = props.on_date_select;
     let mut display_date = use_signal(|| props.selected_date.clone());
-    use_effect(
-        use_reactive!(
-            | selected_date_for_effect | { display_date.set(selected_date_for_effect
-            .clone()); }
-        ),
-    );
+    use_effect(use_reactive!(|selected_date_for_effect| {
+        display_date.set(selected_date_for_effect.clone());
+    }));
     let today = get_today();
     let month_dates = use_memo(move || get_month_dates(&display_date.read()));
     let month_info = use_memo(move || {

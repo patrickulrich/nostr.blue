@@ -1,12 +1,8 @@
 use crate::components::icons::{ArrowLeftIcon, ShareIcon, ZapIcon};
 use crate::components::live::stream_card::{parse_live_stream_event, LiveStreamMeta};
-use crate::components::{
-    LiveChat, LiveStreamPlayer, LiveStreamShareModal, StreamStatus, ZapModal,
-};
+use crate::components::{LiveChat, LiveStreamPlayer, LiveStreamShareModal, StreamStatus, ZapModal};
 use crate::routes::Route;
-use crate::stores::nostr_client::{
-    fetch_events_aggregated, CLIENT_INITIALIZED, HAS_SIGNER,
-};
+use crate::stores::nostr_client::{fetch_events_aggregated, CLIENT_INITIALIZED, HAS_SIGNER};
 use crate::stores::profiles;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
@@ -31,67 +27,61 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
         let (pubkey_str, _) = parsed_naddr.read().clone();
         profiles::get_profile(&pubkey_str)
     });
-    use_effect(
-        use_reactive(
-            (&*CLIENT_INITIALIZED.read(), &parsed_naddr),
-            move |(client_ready, _naddr)| {
-                if !client_ready {
-                    return;
-                }
-                let (author_pk, dtag) = parsed_naddr.read().clone();
-                spawn(async move {
-                    loading.set(true);
-                    error.set(None);
-                    let pubkey = match PublicKey::parse(&author_pk) {
-                        Ok(pk) => pk,
-                        Err(e) => {
-                            error.set(Some(format!("Invalid public key: {}", e)));
-                            loading.set(false);
-                            return;
-                        }
-                    };
-                    let filter = Filter::new()
-                        .kind(Kind::from(30311))
-                        .author(pubkey)
-                        .custom_tag(
-                            nostr_sdk::SingleLetterTag::lowercase(
-                                nostr_sdk::Alphabet::D,
-                            ),
-                            &dtag,
-                        )
-                        .limit(1);
-                    match fetch_events_aggregated(filter, Duration::from_secs(10)).await
-                    {
-                        Ok(events) => {
-                            if let Some(event) = events.first() {
-                                if let Some(meta) = parse_live_stream_event(event) {
-                                    let profile_to_fetch = meta
-                                        .host_pubkey
-                                        .clone()
-                                        .unwrap_or_else(|| author_pk.clone());
-                                    stream_meta.set(Some(meta));
-                                    stream_event.set(Some(event.clone()));
-                                    loading.set(false);
-                                    let _ = profiles::fetch_profile(profile_to_fetch).await;
-                                } else {
-                                    error
-                                        .set(Some("Failed to parse stream metadata".to_string()));
-                                    loading.set(false);
-                                }
+    use_effect(use_reactive(
+        (&*CLIENT_INITIALIZED.read(), &parsed_naddr),
+        move |(client_ready, _naddr)| {
+            if !client_ready {
+                return;
+            }
+            let (author_pk, dtag) = parsed_naddr.read().clone();
+            spawn(async move {
+                loading.set(true);
+                error.set(None);
+                let pubkey = match PublicKey::parse(&author_pk) {
+                    Ok(pk) => pk,
+                    Err(e) => {
+                        error.set(Some(format!("Invalid public key: {}", e)));
+                        loading.set(false);
+                        return;
+                    }
+                };
+                let filter = Filter::new()
+                    .kind(Kind::from(30311))
+                    .author(pubkey)
+                    .custom_tag(
+                        nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::D),
+                        &dtag,
+                    )
+                    .limit(1);
+                match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+                    Ok(events) => {
+                        if let Some(event) = events.first() {
+                            if let Some(meta) = parse_live_stream_event(event) {
+                                let profile_to_fetch = meta
+                                    .host_pubkey
+                                    .clone()
+                                    .unwrap_or_else(|| author_pk.clone());
+                                stream_meta.set(Some(meta));
+                                stream_event.set(Some(event.clone()));
+                                loading.set(false);
+                                let _ = profiles::fetch_profile(profile_to_fetch).await;
                             } else {
-                                error.set(Some("Stream not found".to_string()));
+                                error.set(Some("Failed to parse stream metadata".to_string()));
                                 loading.set(false);
                             }
-                        }
-                        Err(e) => {
-                            error.set(Some(format!("Failed to load stream: {}", e)));
+                        } else {
+                            error.set(Some("Stream not found".to_string()));
                             loading.set(false);
                         }
                     }
-                });
-            },
-        ),
-    );
+                    Err(e) => {
+                        error.set(Some(format!("Failed to load stream: {}", e)));
+                        loading.set(false);
+                    }
+                }
+            });
+        },
+    ));
     let handle_refresh = move |_| {
         loading.set(true);
         error.set(None);
@@ -375,9 +365,9 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
 }
 /// Parse naddr format - supports both NIP-19 bech32 and "30311:pubkey:dtag" formats
 fn parse_naddr(note_id: &str) -> (String, String) {
-    if let Ok(nostr_sdk::nips::nip19::Nip19::Coordinate(coord)) = nostr_sdk::nips::nip19::Nip19::from_bech32(
-        note_id,
-    ) {
+    if let Ok(nostr_sdk::nips::nip19::Nip19::Coordinate(coord)) =
+        nostr_sdk::nips::nip19::Nip19::from_bech32(note_id)
+    {
         return (coord.public_key.to_hex(), coord.identifier.clone());
     }
     let parts: Vec<&str> = note_id.splitn(3, ':').collect();

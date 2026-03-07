@@ -6,7 +6,9 @@ use crate::components::code::RepoTabNav;
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::git_hosting::git_service::extract_github_info;
-use crate::services::git_hosting::{fetch_repo_issues, fetch_repo_prs, fetch_repository, github_import};
+use crate::services::git_hosting::{
+    fetch_repo_issues, fetch_repo_prs, fetch_repository, github_import,
+};
 use crate::stores::nostr_client;
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::format_relative_time_or;
@@ -31,7 +33,9 @@ pub fn CodeRepoInsights(naddr: String) -> Element {
         repo_result.set(None);
         spawn(async move {
             let result = fetch_repository(&naddr).await;
-            if *repo_gen.peek() != gen { return; }
+            if *repo_gen.peek() != gen {
+                return;
+            }
             repo_result.set(Some(result));
         });
     }));
@@ -116,12 +120,11 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
             };
 
             // Fetch issues, PRs, and commits in parallel
-            let (issues_result, prs_result, commits_result) = futures::join!(
-                fetch_repo_issues(&n),
-                fetch_repo_prs(&n),
-                commit_future
-            );
-            if *request_gen.peek() != gen { return; }
+            let (issues_result, prs_result, commits_result) =
+                futures::join!(fetch_repo_issues(&n), fetch_repo_prs(&n), commit_future);
+            if *request_gen.peek() != gen {
+                return;
+            }
             match issues_result {
                 Ok(fetched) => issues.set(fetched),
                 Err(e) => {
@@ -161,13 +164,57 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
     let has_issues_error = issues_error.read().is_some();
     let has_prs_error = prs_error.read().is_some();
 
-    let total_issues: Option<usize> = if has_issues_error { None } else { Some(issues_read.len()) };
-    let open_issues: Option<usize> = if has_issues_error { None } else { Some(issues_read.iter().filter(|i| i.status == IssueStatus::Open).count()) };
-    let closed_issues: Option<usize> = if has_issues_error { None } else { Some(issues_read.iter().filter(|i| i.status == IssueStatus::Closed).count()) };
+    let total_issues: Option<usize> = if has_issues_error {
+        None
+    } else {
+        Some(issues_read.len())
+    };
+    let open_issues: Option<usize> = if has_issues_error {
+        None
+    } else {
+        Some(
+            issues_read
+                .iter()
+                .filter(|i| i.status == IssueStatus::Open)
+                .count(),
+        )
+    };
+    let closed_issues: Option<usize> = if has_issues_error {
+        None
+    } else {
+        Some(
+            issues_read
+                .iter()
+                .filter(|i| i.status == IssueStatus::Closed)
+                .count(),
+        )
+    };
 
-    let total_prs: Option<usize> = if has_prs_error { None } else { Some(prs_read.len()) };
-    let open_prs: Option<usize> = if has_prs_error { None } else { Some(prs_read.iter().filter(|p| p.status == IssueStatus::Open).count()) };
-    let merged_prs: Option<usize> = if has_prs_error { None } else { Some(prs_read.iter().filter(|p| p.status == IssueStatus::Applied).count()) };
+    let total_prs: Option<usize> = if has_prs_error {
+        None
+    } else {
+        Some(prs_read.len())
+    };
+    let open_prs: Option<usize> = if has_prs_error {
+        None
+    } else {
+        Some(
+            prs_read
+                .iter()
+                .filter(|p| p.status == IssueStatus::Open)
+                .count(),
+        )
+    };
+    let merged_prs: Option<usize> = if has_prs_error {
+        None
+    } else {
+        Some(
+            prs_read
+                .iter()
+                .filter(|p| p.status == IssueStatus::Applied)
+                .count(),
+        )
+    };
 
     let maintainer_count = {
         let mut unique = std::collections::HashSet::new();

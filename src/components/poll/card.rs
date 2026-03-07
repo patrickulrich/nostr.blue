@@ -1,19 +1,17 @@
 use super::timer::PollTimer;
-use crate::components::icons::{
-    BookmarkIcon, MessageCircleIcon, Repeat2Icon, ShareIcon, ZapIcon,
-};
+use crate::components::icons::{BookmarkIcon, MessageCircleIcon, Repeat2Icon, ShareIcon, ZapIcon};
 use crate::components::{ConfirmModal, ReactionButton, ZapModal};
 use crate::hooks::use_reaction;
-use crate::utils::clipboard::copy_to_clipboard;
-use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
 use crate::stores::bookmarks;
-use crate::stores::nostr_client::{self, publish_repost, delete_repost, HAS_SIGNER};
+use crate::stores::nostr_client::{self, delete_repost, publish_repost, HAS_SIGNER};
 use crate::stores::relay;
+use crate::utils::clipboard::copy_to_clipboard;
 use crate::utils::format::{format_relative_time_or, format_sats_compact};
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
+use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use nostr_sdk::{
     nips::nip19::Nip19Event,
     nips::nip88::{Poll, PollResponse, PollType},
@@ -28,8 +26,7 @@ use std::time::Duration;
 #[component]
 pub fn PollCard(
     event: NostrEvent,
-    #[props(default = None)]
-    precomputed_counts: Option<InteractionCounts>,
+    #[props(default = None)] precomputed_counts: Option<InteractionCounts>,
 ) -> Element {
     let author_pubkey = event.pubkey.to_string();
     let author_pubkey_for_metadata = author_pubkey.clone();
@@ -73,37 +70,31 @@ pub fn PollCard(
         precomputed_counts.as_ref(),
     );
     // Sync precomputed interaction counts
-    use_effect(
-        use_reactive(
-            &precomputed_counts,
-            move |counts_opt| {
-                if let Some(counts) = counts_opt {
-                    reply_count.set(counts.replies.min(501));
-                    repost_count.set(counts.reposts.min(501));
-                    zap_amount_sats.set(counts.zap_amount_sats);
-                    is_reposted.set(counts.user_reposted.unwrap_or(false));
-                    user_repost_id.set(counts.user_repost_id.clone());
-                    is_zapped.set(counts.user_zapped.unwrap_or(false));
-                } else {
-                    reply_count.set(0);
-                    repost_count.set(0);
-                    zap_amount_sats.set(0);
-                    is_reposted.set(false);
-                    user_repost_id.set(None);
-                    is_zapped.set(false);
-                }
-            },
-        ),
-    );
+    use_effect(use_reactive(&precomputed_counts, move |counts_opt| {
+        if let Some(counts) = counts_opt {
+            reply_count.set(counts.replies.min(501));
+            repost_count.set(counts.reposts.min(501));
+            zap_amount_sats.set(counts.zap_amount_sats);
+            is_reposted.set(counts.user_reposted.unwrap_or(false));
+            user_repost_id.set(counts.user_repost_id.clone());
+            is_zapped.set(counts.user_zapped.unwrap_or(false));
+        } else {
+            reply_count.set(0);
+            repost_count.set(0);
+            zap_amount_sats.set(0);
+            is_reposted.set(false);
+            user_repost_id.set(None);
+            is_zapped.set(false);
+        }
+    }));
     let _metadata_task = use_future(move || {
         let pubkey_str = author_pubkey_for_metadata.clone();
         async move {
             match PublicKey::parse(&pubkey_str) {
                 Ok(pk) => {
                     if let Some(client) = nostr_client::get_client() {
-                        if let Ok(Some(metadata)) = client
-                            .fetch_metadata(pk, Duration::from_secs(5))
-                            .await
+                        if let Ok(Some(metadata)) =
+                            client.fetch_metadata(pk, Duration::from_secs(5)).await
                         {
                             author_metadata.set(Some(metadata));
                         }
@@ -129,7 +120,9 @@ pub fn PollCard(
     let cancelled_for_loop = cancelled.clone();
 
     use_effect(use_reactive(&poll_data, move |pd| {
-        let Some(poll) = pd.read().clone() else { return; };
+        let Some(poll) = pd.read().clone() else {
+            return;
+        };
         let poll_id = event_id;
         let cancelled_for_loop = cancelled_for_loop.clone();
         // Increment generation counter before spawn to guard all mutations
@@ -144,7 +137,9 @@ pub fn PollCard(
             let pre_fetch = Timestamp::now();
             match fetch_poll_votes(poll_id, ends_at, poll_relays, false).await {
                 Ok(vote_events) => {
-                    if *vote_gen.peek() != current_vote_gen { return; }
+                    if *vote_gen.peek() != current_vote_gen {
+                        return;
+                    }
                     votes.set(vote_events.clone());
                     if let Ok(user_pubkey) = nostr_client::get_cached_pubkey() {
                         let user_pubkey_str = user_pubkey.to_string();
@@ -162,7 +157,9 @@ pub fn PollCard(
             // Subscribe for real-time vote updates unconditionally
             // (remove_relay is idempotent; subscribe/unsubscribe are
             // independent of relay state, so safe after a failed fetch)
-            if *vote_gen.peek() != current_vote_gen { return; }
+            if *vote_gen.peek() != current_vote_gen {
+                return;
+            }
             if let Some(client) = nostr_client::get_client() {
                 // Unsubscribe previous vote subscription before creating a new one
                 if let Some(old_sub_id) = vote_sub_id.peek().clone() {
@@ -176,7 +173,8 @@ pub fn PollCard(
                     let added = relay::add_relays(&client, &poll_relays_for_sub).await;
                     nostr_client::ensure_relays_ready(&client).await;
                     // New owned set = previously owned relays still in desired set + newly added
-                    let desired: HashSet<&nostr_sdk::RelayUrl> = poll_relays_for_sub.iter().collect();
+                    let desired: HashSet<&nostr_sdk::RelayUrl> =
+                        poll_relays_for_sub.iter().collect();
                     let mut new_owned: Vec<nostr_sdk::RelayUrl> = old_owned
                         .iter()
                         .filter(|r| desired.contains(r))
@@ -205,7 +203,9 @@ pub fn PollCard(
                         poll_relay_urls.set(Vec::new());
                     }
                 }
-                let since_ts = votes.read().iter()
+                let since_ts = votes
+                    .read()
+                    .iter()
                     .map(|v| v.created_at)
                     .max()
                     .map(|t| Timestamp::from_secs(t.as_secs().saturating_sub(1)))
@@ -233,7 +233,9 @@ pub fn PollCard(
                                     // Component is being dropped; use_drop handles relay cleanup
                                     break;
                                 }
-                                if *vote_gen.peek() != current_vote_gen { break; }
+                                if *vote_gen.peek() != current_vote_gen {
+                                    break;
+                                }
                                 if let RelayPoolNotification::Event {
                                     subscription_id: sub_id,
                                     event: new_vote,
@@ -241,13 +243,13 @@ pub fn PollCard(
                                 } = notification
                                 {
                                     if sub_id == subscription_id {
-                                        let already_exists = votes
-                                            .read()
-                                            .iter()
-                                            .any(|e| e.id == new_vote.id);
+                                        let already_exists =
+                                            votes.read().iter().any(|e| e.id == new_vote.id);
                                         if !already_exists {
                                             // Check if this is the current user's vote
-                                            if let Ok(current_user_pk) = nostr_client::get_cached_pubkey() {
+                                            if let Ok(current_user_pk) =
+                                                nostr_client::get_cached_pubkey()
+                                            {
                                                 if new_vote.pubkey == current_user_pk {
                                                     user_vote.set(Some((*new_vote).clone()));
                                                     show_results.set(true);
@@ -255,9 +257,8 @@ pub fn PollCard(
                                             }
                                             votes.with_mut(|current| {
                                                 current.push((*new_vote).clone());
-                                                let deduped = deduplicate_votes(
-                                                    std::mem::take(current),
-                                                );
+                                                let deduped =
+                                                    deduplicate_votes(std::mem::take(current));
                                                 *current = deduped;
                                             });
                                         }
@@ -322,23 +323,17 @@ pub fn PollCard(
         is_voting.set(true);
         spawn(async move {
             let response = match poll.r#type {
-                PollType::SingleChoice => {
-                    PollResponse::SingleChoice {
-                        poll_id,
-                        response: options.first().unwrap().clone(),
-                    }
-                }
-                PollType::MultipleChoice => {
-                    PollResponse::MultipleChoice {
-                        poll_id,
-                        responses: options,
-                    }
-                }
+                PollType::SingleChoice => PollResponse::SingleChoice {
+                    poll_id,
+                    response: options.first().unwrap().clone(),
+                },
+                PollType::MultipleChoice => PollResponse::MultipleChoice {
+                    poll_id,
+                    responses: options,
+                },
             };
             let relays = poll.relays.clone();
-            match nostr_client::publish_poll_vote(poll_id, response, relays.clone())
-                .await
-            {
+            match nostr_client::publish_poll_vote(poll_id, response, relays.clone()).await {
                 Ok(_event_id) => {
                     log::info!("Vote published successfully");
                     match fetch_poll_votes(poll_id, poll.ends_at, relays, false).await {
@@ -371,7 +366,10 @@ pub fn PollCard(
     };
     let poll = poll_data.read().clone();
     let poll_title = poll.as_ref().map(|p| p.title.clone()).unwrap_or_default();
-    let poll_type = poll.as_ref().map(|p| p.r#type).unwrap_or(PollType::SingleChoice);
+    let poll_type = poll
+        .as_ref()
+        .map(|p| p.r#type)
+        .unwrap_or(PollType::SingleChoice);
     let poll_options = poll.as_ref().map(|p| p.options.clone()).unwrap_or_default();
     let poll_ends_at = poll.as_ref().and_then(|p| p.ends_at);
     let author_name = author_metadata
@@ -856,7 +854,9 @@ fn deduplicate_votes(events: Vec<NostrEvent>) -> Vec<NostrEvent> {
     for event in events {
         let key = event.pubkey.to_string();
         match map.entry(key) {
-            Entry::Vacant(v) => { v.insert(event); }
+            Entry::Vacant(v) => {
+                v.insert(event);
+            }
             Entry::Occupied(mut o) => {
                 if event.created_at > o.get().created_at {
                     o.insert(event);

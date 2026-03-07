@@ -40,7 +40,8 @@ impl PaymentAddress {
             trimmed
         };
         let lowercased = stripped.to_lowercase();
-        if lowercased.starts_with("lnbc") || lowercased.starts_with("lntb")
+        if lowercased.starts_with("lnbc")
+            || lowercased.starts_with("lntb")
             || lowercased.starts_with("lnbcrt")
         {
             return Self {
@@ -148,7 +149,10 @@ pub async fn resolve_lightning_address(
         .await
         .map_err(|e| format!("Failed to parse response: {}", e))?;
     if lnurl_response.tag != "payRequest" {
-        return Err(format!("Invalid LNURL response tag: {}", lnurl_response.tag));
+        return Err(format!(
+            "Invalid LNURL response tag: {}",
+            lnurl_response.tag
+        ));
     }
     Ok(lnurl_response)
 }
@@ -161,22 +165,16 @@ pub async fn request_invoice(
     comment: Option<&str>,
 ) -> Result<String, String> {
     if amount_msats < lnurl_pay.min_sendable {
-        return Err(
-            format!(
-                "Amount {} msats is below minimum {} msats",
-                amount_msats,
-                lnurl_pay.min_sendable,
-            ),
-        );
+        return Err(format!(
+            "Amount {} msats is below minimum {} msats",
+            amount_msats, lnurl_pay.min_sendable,
+        ));
     }
     if amount_msats > lnurl_pay.max_sendable {
-        return Err(
-            format!(
-                "Amount {} msats exceeds maximum {} msats",
-                amount_msats,
-                lnurl_pay.max_sendable,
-            ),
-        );
+        return Err(format!(
+            "Amount {} msats exceeds maximum {} msats",
+            amount_msats, lnurl_pay.max_sendable,
+        ));
     }
     let mut url = format!("{}?amount={}", lnurl_pay.callback, amount_msats);
     if let Some(comment_text) = comment {
@@ -215,9 +213,7 @@ pub async fn get_invoice_for_address(
 ) -> Result<String, String> {
     let parsed = PaymentAddress::parse(address);
     if !parsed.is_lightning_address() {
-        return Err(
-            "Not a valid Lightning Address (expected user@domain.com)".to_string(),
-        );
+        return Err("Not a valid Lightning Address (expected user@domain.com)".to_string());
     }
     let lnurl_pay = resolve_lightning_address(&parsed).await?;
     let amount_msats = amount_sats

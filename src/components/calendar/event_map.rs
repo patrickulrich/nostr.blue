@@ -1,6 +1,11 @@
 //! Event Map Component
 //!
 //! Displays calendar events on an interactive map using Leaflet.
+use crate::services::geocoding::GeoLocation;
+#[cfg(feature = "web")]
+use crate::services::geocoding::{geocode, geohash_to_coords};
+use crate::stores::calendar_store::UnifiedEvent;
+use crate::utils::validation::validate_css_dimension;
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
 #[cfg(feature = "web")]
@@ -10,16 +15,10 @@ use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
-use crate::services::geocoding::GeoLocation;
-#[cfg(feature = "web")]
-use crate::services::geocoding::{geocode, geohash_to_coords};
-use crate::stores::calendar_store::UnifiedEvent;
-use crate::utils::validation::validate_css_dimension;
 /// Global counter for unique EventMap container IDs
 static EVENT_MAP_COUNTER: AtomicU64 = AtomicU64::new(0);
 #[cfg(feature = "web")]
-#[wasm_bindgen(
-    inline_js = r#"
+#[wasm_bindgen(inline_js = r#"
 // Store for map instances
 window.leafletMaps = window.leafletMaps || new Map();
 
@@ -166,8 +165,7 @@ export function invalidateSize(containerId) {
         map.invalidateSize();
     }
 }
-"#
-)]
+"#)]
 extern "C" {
     #[wasm_bindgen(catch)]
     async fn loadLeaflet() -> Result<(), JsValue>;
@@ -247,33 +245,26 @@ pub fn EventMap(props: EventMapProps) -> Element {
         geocode_cancelled.set(true);
         unmounted.set(true);
     });
-    let events_key = use_memo(
-        use_reactive(
-            (&props.events,),
-            |(events,)| {
-                let mut hasher = DefaultHasher::new();
-                for e in events.iter() {
-                    e.coordinate().hash(&mut hasher);
-                    e.title().hash(&mut hasher);
-                    e.start_timestamp().hash(&mut hasher);
-                    e.location().hash(&mut hasher);
-                    for loc in e.locations() {
-                        loc.hash(&mut hasher);
-                    }
-                }
-                hasher.finish().to_string()
-            },
-        ),
-    );
+    let events_key = use_memo(use_reactive((&props.events,), |(events,)| {
+        let mut hasher = DefaultHasher::new();
+        for e in events.iter() {
+            e.coordinate().hash(&mut hasher);
+            e.title().hash(&mut hasher);
+            e.start_timestamp().hash(&mut hasher);
+            e.location().hash(&mut hasher);
+            for loc in e.locations() {
+                loc.hash(&mut hasher);
+            }
+        }
+        hasher.finish().to_string()
+    }));
     #[cfg(feature = "web")]
     let events_for_geocode = props.events.clone();
     let events_count = props.events.len();
     use_effect(move || {
         #[cfg(feature = "web")]
         {
-            if *leaflet_loaded.read() || *leaflet_loading.read()
-                || leaflet_error.read().is_some()
-            {
+            if *leaflet_loaded.read() || *leaflet_loading.read() || leaflet_error.read().is_some() {
                 return;
             }
             leaflet_loading.set(true);
@@ -283,10 +274,9 @@ pub fn EventMap(props: EventMapProps) -> Element {
                         return;
                     }
                     log::error!("Failed to load Leaflet: {:?}", e);
-                    leaflet_error
-                        .set(
-                            Some("Failed to load map. Please refresh the page.".to_string()),
-                        );
+                    leaflet_error.set(Some(
+                        "Failed to load map. Please refresh the page.".to_string(),
+                    ));
                     leaflet_loading.set(false);
                     return;
                 }
@@ -299,7 +289,9 @@ pub fn EventMap(props: EventMapProps) -> Element {
         }
         #[cfg(not(feature = "web"))]
         {
-            leaflet_error.set(Some("Map view is only available in the web version.".to_string()));
+            leaflet_error.set(Some(
+                "Map view is only available in the web version.".to_string(),
+            ));
         }
     });
     use_effect(move || {
@@ -319,13 +311,9 @@ pub fn EventMap(props: EventMapProps) -> Element {
                     log::info!("Map initialized: {}", id);
                 } else {
                     log::error!("Failed to initialize map container: {}", id);
-                    leaflet_error
-                        .set(
-                            Some(
-                                "Failed to initialize map. Please refresh the page."
-                                    .to_string(),
-                            ),
-                        );
+                    leaflet_error.set(Some(
+                        "Failed to initialize map. Please refresh the page.".to_string(),
+                    ));
                 }
             });
         }
@@ -374,20 +362,19 @@ pub fn EventMap(props: EventMapProps) -> Element {
                         }
                         if let Some(geohash) = event.geohash() {
                             if let Some((lat, lon)) = geohash_to_coords(geohash) {
-                                results
-                                    .push(GeocodedEvent {
-                                        event: event.clone(),
-                                        location: GeoLocation {
-                                            lat,
-                                            lon,
-                                            display_name: event.location().unwrap_or("").to_string(),
-                                            city: None,
-                                            state: None,
-                                            country: None,
-                                            country_code: None,
-                                            place_type: None,
-                                        },
-                                    });
+                                results.push(GeocodedEvent {
+                                    event: event.clone(),
+                                    location: GeoLocation {
+                                        lat,
+                                        lon,
+                                        display_name: event.location().unwrap_or("").to_string(),
+                                        city: None,
+                                        state: None,
+                                        country: None,
+                                        country_code: None,
+                                        place_type: None,
+                                    },
+                                });
                                 continue;
                             }
                         }
@@ -397,21 +384,19 @@ pub fn EventMap(props: EventMapProps) -> Element {
                             }
                             match geocode(location_str).await {
                                 Ok(Some(loc)) => {
-                                    results
-                                        .push(GeocodedEvent {
-                                            event: event.clone(),
-                                            location: loc,
-                                        });
+                                    results.push(GeocodedEvent {
+                                        event: event.clone(),
+                                        location: loc,
+                                    });
                                 }
                                 Ok(None) => {
                                     log::debug!(
-                                        "Geocoding returned no results for: {}", location_str
+                                        "Geocoding returned no results for: {}",
+                                        location_str
                                     );
                                 }
                                 Err(e) => {
-                                    log::warn!(
-                                        "Geocoding failed for '{}': {}", location_str, e
-                                    );
+                                    log::warn!("Geocoding failed for '{}': {}", location_str, e);
                                     had_lookup_error = true;
                                 }
                             }
@@ -464,8 +449,10 @@ pub fn EventMap(props: EventMapProps) -> Element {
                 }
                 Err(e) => {
                     log::error!(
-                        "Failed to serialize {} map markers for container {}: {}", markers
-                        .len(), id, e
+                        "Failed to serialize {} map markers for container {}: {}",
+                        markers.len(),
+                        id,
+                        e
                     );
                 }
             }
@@ -586,18 +573,7 @@ fn format_popup_time(event: &UnifiedEvent) -> String {
     }
     let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
     let month_names = [
-        "Jan",
-        "Feb",
-        "Mar",
-        "Apr",
-        "May",
-        "Jun",
-        "Jul",
-        "Aug",
-        "Sep",
-        "Oct",
-        "Nov",
-        "Dec",
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
     let month = date.get_month() as usize;
     let day = date.get_date();
@@ -615,7 +591,10 @@ fn format_popup_time(event: &UnifiedEvent) -> String {
         } else {
             hours
         };
-        format!("{} {} at {}:{:02} {}", month_str, day, hour_12, minutes, am_pm)
+        format!(
+            "{} {} at {}:{:02} {}",
+            month_str, day, hour_12, minutes, am_pm
+        )
     }
 }
 

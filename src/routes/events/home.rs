@@ -1,13 +1,13 @@
 //! Events Discovery Page
 //!
 //! NIP-52 Calendar Events + NIP-53 Live Activities discovery page
-use dioxus::prelude::*;
 use crate::components::{ClientInitializing, EventCard, EventCardSkeleton, EventMap};
 use crate::hooks::use_infinite_scroll;
 use crate::stores::calendar_store::{
     EventFilterState, EventTypeFilter, LocationFilter, TimeFilter, UnifiedEvent,
 };
 use crate::stores::{calendar_store, nostr_client};
+use dioxus::prelude::*;
 use std::collections::HashSet;
 /// Debounce delay for NIP-50 search (milliseconds)
 const SEARCH_DEBOUNCE_MS: u32 = 300;
@@ -38,7 +38,8 @@ pub fn Events() -> Element {
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         log::info!(
-            "[Events] use_effect triggered, client_initialized={}", client_initialized
+            "[Events] use_effect triggered, client_initialized={}",
+            client_initialized
         );
         if !client_initialized {
             log::info!("[Events] Client not ready, returning early");
@@ -52,8 +53,9 @@ pub fn Events() -> Element {
             match calendar_store::fetch_all_events_paginated(200, None).await {
                 Ok((fetched_events, oldest_ts)) => {
                     log::info!(
-                        "[Events] Fetched {} events, oldest_ts={:?}", fetched_events
-                        .len(), oldest_ts
+                        "[Events] Fetched {} events, oldest_ts={:?}",
+                        fetched_events.len(),
+                        oldest_ts
                     );
                     events.set(fetched_events.clone());
                     oldest_timestamp.set(oldest_ts);
@@ -97,8 +99,7 @@ pub fn Events() -> Element {
             #[cfg(not(feature = "web"))]
             {
                 use std::time::Duration;
-                tokio::time::sleep(Duration::from_millis(SEARCH_DEBOUNCE_MS as u64))
-                    .await;
+                tokio::time::sleep(Duration::from_millis(SEARCH_DEBOUNCE_MS as u64)).await;
             }
             if *search_debounce_id.peek() != current_id {
                 return;
@@ -107,9 +108,7 @@ pub fn Events() -> Element {
             match calendar_store::search_all_events(&search_term, 100).await {
                 Ok(results) => {
                     if *search_debounce_id.peek() == current_id {
-                        log::info!(
-                            "[Events] NIP-50 search returned {} results", results.len()
-                        );
+                        log::info!("[Events] NIP-50 search returned {} results", results.len());
                         search_results.set(Some(results));
                     }
                 }
@@ -127,8 +126,9 @@ pub fn Events() -> Element {
     });
     let load_more = move || {
         log::info!(
-            "[Events] load_more called - pagination_loading: {}, has_more: {}", *
-            pagination_loading.peek(), * has_more.peek()
+            "[Events] load_more called - pagination_loading: {}, has_more: {}",
+            *pagination_loading.peek(),
+            *has_more.peek()
         );
         if *pagination_loading.peek() || !*has_more.peek() {
             log::info!("[Events] load_more blocked by guards");
@@ -147,10 +147,7 @@ pub fn Events() -> Element {
                     } else {
                         let mut current = events.write();
                         for event in new_events {
-                            if !current
-                                .iter()
-                                .any(|e| e.coordinate() == event.coordinate())
-                            {
+                            if !current.iter().any(|e| e.coordinate() == event.coordinate()) {
                                 current.push(event);
                             }
                         }
@@ -170,24 +167,30 @@ pub fn Events() -> Element {
         let hashtag = selected_hashtag.read().clone();
         let from_nip50 = *search_mode_active.read();
         let base_events = if let Some(ref results) = *search_results.read() {
-            log::info!("[Events] Using NIP-50 search results: {} events", results.len());
+            log::info!(
+                "[Events] Using NIP-50 search results: {} events",
+                results.len()
+            );
             results.clone()
         } else {
             let all_events = events.read();
             log::info!("[Events] Using all events: {} events", all_events.len());
             all_events.clone()
         };
-        let mut result = calendar_store::filter_events_with_nip50(
-            &base_events,
-            &current_filters,
-            from_nip50,
+        let mut result =
+            calendar_store::filter_events_with_nip50(&base_events, &current_filters, from_nip50);
+        log::info!(
+            "[Events] filtered_events memo: after filter = {}",
+            result.len()
         );
-        log::info!("[Events] filtered_events memo: after filter = {}", result.len());
         if let Some(ref tag) = hashtag {
             result.retain(|e| e.hashtags().contains(&tag.as_str()));
         }
         calendar_store::sort_events_for_display(&mut result);
-        log::info!("[Events] filtered_events memo: final result = {}", result.len());
+        log::info!(
+            "[Events] filtered_events memo: final result = {}",
+            result.len()
+        );
         result
     });
     let all_hashtags = use_memo(move || {

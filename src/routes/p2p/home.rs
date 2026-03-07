@@ -1,15 +1,18 @@
 //! P2P Orders Home Page
 //!
 //! NIP-69 P2P Trading - View peer-to-peer Bitcoin orders from the network
-use dioxus::prelude::*;
-use std::time::Duration;
 use crate::components::{
-    ClientInitializing, P2PDepthChart, P2PDepthChartSkeleton, P2POrderCard,
-    P2POrderCardSkeleton, P2POrderFilters,
+    ClientInitializing, P2PDepthChart, P2PDepthChartSkeleton, P2POrderCard, P2POrderCardSkeleton,
+    P2POrderFilters,
 };
 use crate::services::btc_price;
-use crate::stores::{nostr_client, p2p_store::{self, OrderSortBy, P2PFilterState}};
+use crate::stores::{
+    nostr_client,
+    p2p_store::{self, OrderSortBy, P2PFilterState},
+};
 use crate::utils::nip69::{OrderType, P2POrder};
+use dioxus::prelude::*;
+use std::time::Duration;
 /// Order tab selection
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub enum OrderTab {
@@ -31,9 +34,7 @@ pub fn P2PHome() -> Element {
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
-            log::debug!(
-                "Waiting for client initialization before loading P2P orders..."
-            );
+            log::debug!("Waiting for client initialization before loading P2P orders...");
             return;
         }
         spawn(async move {
@@ -76,7 +77,7 @@ pub fn P2PHome() -> Element {
         if !current_filters.is_empty() {
             result = p2p_store::filter_orders(&result, &current_filters);
         }
-        result.retain(|o| { o.time_remaining().map(|t| t > 0).unwrap_or(true) });
+        result.retain(|o| o.time_remaining().map(|t| t > 0).unwrap_or(true));
         p2p_store::sort_orders(&mut result, current_sort);
         result
     });
@@ -262,11 +263,7 @@ pub fn P2PHome() -> Element {
 }
 /// Tab button component
 #[component]
-fn TabButton(
-    label: &'static str,
-    active: bool,
-    onclick: EventHandler<MouseEvent>,
-) -> Element {
+fn TabButton(label: &'static str, active: bool, onclick: EventHandler<MouseEvent>) -> Element {
     let class = if active {
         "px-4 py-3 text-sm font-medium border-b-2 border-primary text-primary"
     } else {

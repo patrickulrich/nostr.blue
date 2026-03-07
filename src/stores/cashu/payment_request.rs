@@ -14,8 +14,8 @@ compile_error!("Must enable either 'web' or 'native' feature");
 
 use cdk::mint_url::MintUrl;
 use cdk::nuts::{
-    CurrencyUnit, PaymentRequest, PaymentRequestPayload as CdkPaymentRequestPayload,
-    Transport, TransportType,
+    CurrencyUnit, PaymentRequest, PaymentRequestPayload as CdkPaymentRequestPayload, Transport,
+    TransportType,
 };
 use cdk::Amount;
 use dioxus::prelude::*;
@@ -33,8 +33,7 @@ use super::proofs::{
     cdk_proof_to_proof_data, proof_data_to_cdk_proof, register_proofs_in_event_map,
 };
 use super::signals::{
-    try_acquire_mint_lock, PAYMENT_REQUEST_PROGRESS, PENDING_PAYMENT_REQUESTS,
-    WALLET_TOKENS,
+    try_acquire_mint_lock, PAYMENT_REQUEST_PROGRESS, PENDING_PAYMENT_REQUESTS, WALLET_TOKENS,
 };
 use super::types::PendingEventType;
 use super::types::{
@@ -57,46 +56,46 @@ pub async fn create_payment_request(
 ) -> Result<(String, Option<NostrPaymentWaitInfo>), String> {
     use nostr_sdk::ToBech32;
     log::info!(
-        "Creating payment request: amount={:?}, nostr={}", amount, use_nostr_transport
+        "Creating payment request: amount={:?}, nostr={}",
+        amount,
+        use_nostr_transport
     );
     let mints = get_mints();
     if mints.is_empty() {
         return Err("No mints available. Add a mint first.".to_string());
     }
     let request_id = uuid::Uuid::new_v4().to_string()[..8].to_string();
-    let (transports, nostr_info): (Vec<Transport>, Option<NostrPaymentWaitInfo>) = if use_nostr_transport {
-        let keys = nostr_sdk::Keys::generate();
-        let relays = crate::services::profile_search::get_user_relays().await;
-        if relays.is_empty() {
-            return Err("No relays configured for Nostr transport".to_string());
-        }
-        let relay_urls: Vec<nostr_sdk::RelayUrl> = relays
-            .iter()
-            .filter_map(|r| nostr_sdk::RelayUrl::parse(r).ok())
-            .collect();
-        let nprofile = nostr_sdk::nips::nip19::Nip19Profile::new(
-            keys.public_key(),
-            relay_urls,
-        );
-        let nprofile_str = nprofile
-            .to_bech32()
-            .map_err(|e| format!("Failed to encode nprofile: {}", e))?;
-        let transport = Transport::builder()
-            .transport_type(TransportType::Nostr)
-            .target(nprofile_str)
-            .tags(vec![vec!["n".to_string(), "17".to_string()]])
-            .build()
-            .map_err(|e| format!("Failed to build transport: {}", e))?;
-        let wait_info = NostrPaymentWaitInfo {
-            request_id: request_id.clone(),
-            secret_key: keys.secret_key().clone(),
-            relays,
-            pubkey: keys.public_key(),
+    let (transports, nostr_info): (Vec<Transport>, Option<NostrPaymentWaitInfo>) =
+        if use_nostr_transport {
+            let keys = nostr_sdk::Keys::generate();
+            let relays = crate::services::profile_search::get_user_relays().await;
+            if relays.is_empty() {
+                return Err("No relays configured for Nostr transport".to_string());
+            }
+            let relay_urls: Vec<nostr_sdk::RelayUrl> = relays
+                .iter()
+                .filter_map(|r| nostr_sdk::RelayUrl::parse(r).ok())
+                .collect();
+            let nprofile = nostr_sdk::nips::nip19::Nip19Profile::new(keys.public_key(), relay_urls);
+            let nprofile_str = nprofile
+                .to_bech32()
+                .map_err(|e| format!("Failed to encode nprofile: {}", e))?;
+            let transport = Transport::builder()
+                .transport_type(TransportType::Nostr)
+                .target(nprofile_str)
+                .tags(vec![vec!["n".to_string(), "17".to_string()]])
+                .build()
+                .map_err(|e| format!("Failed to build transport: {}", e))?;
+            let wait_info = NostrPaymentWaitInfo {
+                request_id: request_id.clone(),
+                secret_key: keys.secret_key().clone(),
+                relays,
+                pubkey: keys.public_key(),
+            };
+            (vec![transport], Some(wait_info))
+        } else {
+            (vec![], None)
         };
-        (vec![transport], Some(wait_info))
-    } else {
-        (vec![], None)
-    };
     let mint_urls: Vec<MintUrl> = mints
         .iter()
         .filter_map(|m| MintUrl::from_str(m).ok())
@@ -118,10 +117,13 @@ pub async fn create_payment_request(
     let request = builder.build();
     let request_string = request.to_string();
     if let Some(ref info) = nostr_info {
-        PENDING_PAYMENT_REQUESTS.write().insert(request_id, info.clone());
+        PENDING_PAYMENT_REQUESTS
+            .write()
+            .insert(request_id, info.clone());
     }
     log::info!(
-        "Created payment request: {}", & request_string[..50.min(request_string.len())]
+        "Created payment request: {}",
+        &request_string[..50.min(request_string.len())]
     );
     Ok((request_string, nostr_info))
 }
@@ -150,9 +152,7 @@ pub async fn pay_payment_request(
         (Some(amt), _) => u64::from(amt),
         (None, Some(amt)) => amt,
         (None, None) => {
-            return Err(
-                "Amount required but not specified in request or provided".to_string(),
-            );
+            return Err("Amount required but not specified in request or provided".to_string());
         }
     };
     if amount == 0 {
@@ -160,10 +160,7 @@ pub async fn pay_payment_request(
     }
     let our_mints = get_mints();
     let compatible_mint = if let Some(ref accepted_mints) = request.mints {
-        let accepted_strings: Vec<String> = accepted_mints
-            .iter()
-            .map(|m| m.to_string())
-            .collect();
+        let accepted_strings: Vec<String> = accepted_mints.iter().map(|m| m.to_string()).collect();
         our_mints
             .iter()
             .find(|m| accepted_strings.iter().any(|am| mint_matches(m, am)))
@@ -172,24 +169,18 @@ pub async fn pay_payment_request(
         our_mints.first().cloned()
     };
     let mint_url = compatible_mint
-        .ok_or(
-            "No compatible mint found. You don't have tokens from any of the accepted mints.",
-        )?;
+        .ok_or("No compatible mint found. You don't have tokens from any of the accepted mints.")?;
     let balance = get_mint_balance(&mint_url);
     if balance < amount {
-        return Err(
-            format!(
-                "Insufficient balance at {}. Have: {} sats, need: {} sats",
-                shorten_url(&mint_url, 30),
-                balance,
-                amount,
-            ),
-        );
+        return Err(format!(
+            "Insufficient balance at {}. Have: {} sats, need: {} sats",
+            shorten_url(&mint_url, 30),
+            balance,
+            amount,
+        ));
     }
     let _lock = try_acquire_mint_lock(&mint_url)
-        .ok_or_else(|| {
-            format!("Another operation is in progress for mint: {}", mint_url)
-        })?;
+        .ok_or_else(|| format!("Another operation is in progress for mint: {}", mint_url))?;
     let (all_proofs, event_ids_to_delete) = {
         let store = WALLET_TOKENS.read();
         let data = store.data();
@@ -234,8 +225,8 @@ pub async fn pay_payment_request(
     let proofs = token
         .proofs(&keysets_info)
         .map_err(|e| format!("Failed to extract proofs from token: {}", e))?;
-    let mint_url_parsed = MintUrl::from_str(&mint_url)
-        .map_err(|e| format!("Invalid mint URL: {}", e))?;
+    let mint_url_parsed =
+        MintUrl::from_str(&mint_url).map_err(|e| format!("Invalid mint URL: {}", e))?;
     let payload = CdkPaymentRequestPayload {
         id: request.payment_id.clone(),
         memo: None,
@@ -248,12 +239,17 @@ pub async fn pay_payment_request(
         .iter()
         .find(|t| t._type == TransportType::Nostr)
         .or_else(|| {
-            request.transports.iter().find(|t| t._type == TransportType::HttpPost)
+            request
+                .transports
+                .iter()
+                .find(|t| t._type == TransportType::HttpPost)
         });
-    let token_proof_secrets: Vec<String> = proofs
-        .iter()
-        .map(|p| p.secret.to_string())
-        .collect();
+    let token_proof_secrets: Vec<String> = proofs.iter().map(|p| p.secret.to_string()).collect();
+    let revert_pending_proofs = || async {
+        log::warn!("Transport failed, syncing proof states with mint");
+        let _ = super::recovery::sync_proofs_with_mints().await;
+        super::proofs::revert_proofs_to_spendable(&token_proof_secrets);
+    };
     super::proofs::register_proofs_pending_at_mint(&token_proof_secrets);
     if let Some(transport) = transport {
         match transport._type {
@@ -271,49 +267,48 @@ pub async fn pay_payment_request(
                 client.connect().await;
                 let payload_json = serde_json::to_string(&payload)
                     .map_err(|e| format!("Failed to serialize payload: {}", e))?;
-                let rumor = nostr_sdk::EventBuilder::new(
-                        nostr_sdk::Kind::from_u16(14),
-                        payload_json,
-                    )
-                    .build(nprofile.public_key);
+                let rumor =
+                    nostr_sdk::EventBuilder::new(nostr_sdk::Kind::from_u16(14), payload_json)
+                        .build(nprofile.public_key);
                 let result = client
-                    .gift_wrap_to(
-                        nprofile.relays.clone(),
-                        &nprofile.public_key,
-                        rumor,
-                        None,
-                    )
+                    .gift_wrap_to(nprofile.relays.clone(), &nprofile.public_key, rumor, None)
                     .await
                     .map_err(|e| format!("Failed to send gift wrap: {}", e))?;
                 log::info!(
-                    "Payment sent via Nostr: {} successes, {} failures", result.success
-                    .len(), result.failed.len()
+                    "Payment sent via Nostr: {} successes, {} failures",
+                    result.success.len(),
+                    result.failed.len()
                 );
                 if result.success.is_empty() {
-                    log::warn!("Nostr transport failed, syncing proof states with mint");
-                    let _ = super::recovery::sync_proofs_with_mints().await;
-                    super::proofs::revert_proofs_to_spendable(&token_proof_secrets);
+                    revert_pending_proofs().await;
                     return Err("Failed to deliver payment to any relay".to_string());
                 }
             }
             TransportType::HttpPost => {
                 log::info!("Sending payment via HTTP transport to {}", transport.target);
-                let response = http_client()
-        .map_err(|e| format!("HTTP client init failed: {}", e))?
-                    .post(&transport.target)
-                    .json(&payload)
-                    .send()
-                    .await
-                    .map_err(|e| format!("HTTP request failed: {}", e))?;
+                let client = match http_client() {
+                    Ok(client) => client,
+                    Err(e) => {
+                        revert_pending_proofs().await;
+                        return Err(format!("HTTP client init failed: {}", e));
+                    }
+                };
+                let response = client.post(&transport.target).json(&payload).send().await;
+                let response = match response {
+                    Ok(response) => response,
+                    Err(e) => {
+                        revert_pending_proofs().await;
+                        return Err(format!("HTTP request failed: {}", e));
+                    }
+                };
                 if !response.status().is_success() {
-                    log::warn!("HTTP transport failed, syncing proof states with mint");
-                    let _ = super::recovery::sync_proofs_with_mints().await;
-                    super::proofs::revert_proofs_to_spendable(&token_proof_secrets);
+                    revert_pending_proofs().await;
                     let status = response.status();
                     let body = response.text().await.unwrap_or_default();
-                    return Err(
-                        format!("HTTP request failed with status {}: {}", status, body),
-                    );
+                    return Err(format!(
+                        "HTTP request failed with status {}: {}",
+                        status, body
+                    ));
                 }
                 log::info!("Payment sent via HTTP");
             }
@@ -321,21 +316,16 @@ pub async fn pay_payment_request(
     } else {
         super::proofs::revert_proofs_to_spendable(&token_proof_secrets);
         return Err(
-            "No transport available in payment request. Cannot deliver payment."
-                .to_string(),
+            "No transport available in payment request. Cannot deliver payment.".to_string(),
         );
     }
     super::proofs::move_proofs_to_spent(&token_proof_secrets);
-    let _token_proofs: Vec<ProofData> = proofs
-        .iter()
-        .map(cdk_proof_to_proof_data)
-        .collect();
+    let _token_proofs: Vec<ProofData> = proofs.iter().map(cdk_proof_to_proof_data).collect();
     let signer = crate::stores::signer::get_signer()
         .ok_or("No signer available")?
         .as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pubkey = PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
@@ -343,10 +333,7 @@ pub async fn pay_payment_request(
         .clone();
     let mut new_event_id: Option<String> = None;
     if !keep_proofs.is_empty() {
-        let proof_data: Vec<ProofData> = keep_proofs
-            .iter()
-            .map(cdk_proof_to_proof_data)
-            .collect();
+        let proof_data: Vec<ProofData> = keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
         let extended_proofs: Vec<ExtendedCashuProof> = proof_data
             .iter()
             .map(|p| ExtendedCashuProof::from(p.clone()))
@@ -363,42 +350,37 @@ pub async fn pay_payment_request(
             .nip44_encrypt(&pubkey, &json_content)
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
-        let builder = nostr_sdk::EventBuilder::new(
-            Kind::CashuWalletUnspentProof,
-            encrypted,
-        );
-        new_event_id = Some(
-            match client.send_event_builder(builder.clone()).await {
-                Ok(event_output) => {
-                    if event_output.success.is_empty() {
-                        log::warn!("No relays accepted token event, queuing for retry");
-                        let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                        queue_event_for_retry(
-                                builder,
-                                PendingEventType::TokenEvent,
-                                Some(pending_id.clone()),
-                                Some(mint_url.clone()),
-                            )
-                            .await;
-                        pending_id
-                    } else {
-                        event_output.id().to_hex()
-                    }
-                }
-                Err(e) => {
-                    log::warn!("Failed to publish token event: {}", e);
+        let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+        new_event_id = Some(match client.send_event_builder(builder.clone()).await {
+            Ok(event_output) => {
+                if event_output.success.is_empty() {
+                    log::warn!("No relays accepted token event, queuing for retry");
                     let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
                     queue_event_for_retry(
-                            builder,
-                            PendingEventType::TokenEvent,
-                            Some(pending_id.clone()),
-                            Some(mint_url.clone()),
-                        )
-                        .await;
+                        builder,
+                        PendingEventType::TokenEvent,
+                        Some(pending_id.clone()),
+                        Some(mint_url.clone()),
+                    )
+                    .await;
                     pending_id
+                } else {
+                    event_output.id().to_hex()
                 }
-            },
-        );
+            }
+            Err(e) => {
+                log::warn!("Failed to publish token event: {}", e);
+                let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+                queue_event_for_retry(
+                    builder,
+                    PendingEventType::TokenEvent,
+                    Some(pending_id.clone()),
+                    Some(mint_url.clone()),
+                )
+                .await;
+                pending_id
+            }
+        });
     } else if !event_ids_to_delete.is_empty() {
         use nostr::nips::nip09::EventDeletionRequest;
         let mut deletion_request = EventDeletionRequest::new();
@@ -411,27 +393,14 @@ pub async fn pay_payment_request(
         match client.send_event_builder(builder.clone()).await {
             Ok(output) => {
                 if output.success.is_empty() {
-                    log::warn!(
-                        "No relays accepted deletion event, queuing for retry"
-                    );
-                    queue_event_for_retry(
-                            builder,
-                            PendingEventType::DeletionEvent,
-                            None,
-                            None,
-                        )
+                    log::warn!("No relays accepted deletion event, queuing for retry");
+                    queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None)
                         .await;
                 }
             }
             Err(e) => {
                 log::warn!("Failed to publish deletion event: {}", e);
-                queue_event_for_retry(
-                        builder,
-                        PendingEventType::DeletionEvent,
-                        None,
-                        None,
-                    )
-                    .await;
+                queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None).await;
             }
         }
     }
@@ -441,20 +410,17 @@ pub async fn pay_payment_request(
         let mut tokens = data.write();
         tokens.retain(|t| !event_ids_to_delete.contains(&t.event_id));
         if !keep_proofs.is_empty() {
-            let proof_data: Vec<ProofData> = keep_proofs
-                .iter()
-                .map(cdk_proof_to_proof_data)
-                .collect();
-            let event_id = new_event_id
-                .unwrap_or_else(|| format!("local-{}", chrono::Utc::now().timestamp()));
-            tokens
-                .push(TokenData {
-                    event_id: event_id.clone(),
-                    mint: mint_url,
-                    unit: "sat".to_string(),
-                    proofs: proof_data.clone(),
-                    created_at: chrono::Utc::now().timestamp() as u64,
-                });
+            let proof_data: Vec<ProofData> =
+                keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
+            let event_id =
+                new_event_id.unwrap_or_else(|| format!("local-{}", chrono::Utc::now().timestamp()));
+            tokens.push(TokenData {
+                event_id: event_id.clone(),
+                mint: mint_url,
+                unit: "sat".to_string(),
+                proofs: proof_data.clone(),
+                created_at: chrono::Utc::now().timestamp() as u64,
+            });
             register_proofs_in_event_map(&event_id, &proof_data);
         }
     }
@@ -466,10 +432,7 @@ pub async fn pay_payment_request(
 ///
 /// This listens for gift-wrapped events on the relays and processes
 /// incoming payments.
-pub async fn wait_for_nostr_payment(
-    request_id: String,
-    timeout_secs: u64,
-) -> Result<u64, String> {
+pub async fn wait_for_nostr_payment(request_id: String, timeout_secs: u64) -> Result<u64, String> {
     use nostr_sdk::prelude::*;
     log::info!("Waiting for Nostr payment for request: {}", request_id);
     *PAYMENT_REQUEST_PROGRESS.write() = Some(PaymentRequestProgress::WaitingForPayment);
@@ -498,7 +461,7 @@ pub async fn wait_for_nostr_payment(
             return Err(PAYMENT_CANCELLED_MSG.to_string());
         }
         let elapsed = chrono::Utc::now().timestamp() as u64 - start;
-        if elapsed > timeout_secs {
+        if elapsed >= timeout_secs {
             *PAYMENT_REQUEST_PROGRESS.write() = Some(PaymentRequestProgress::Cancelled);
             PENDING_PAYMENT_REQUESTS.write().remove(&request_id);
             return Err("Timeout waiting for payment".to_string());
@@ -506,7 +469,10 @@ pub async fn wait_for_nostr_payment(
         let notification = {
             use futures::future::{select, Either};
             use futures::pin_mut;
-            let timeout_fut = crate::platform::timer::sleep_ms(5000);
+            let remaining_ms = (timeout_secs - elapsed).saturating_mul(1000);
+            let timeout_fut = crate::platform::timer::sleep_ms(
+                remaining_ms.min(5000) as u32,
+            );
             let recv_fut = notifications.recv();
             pin_mut!(timeout_fut);
             pin_mut!(recv_fut);
@@ -520,30 +486,22 @@ pub async fn wait_for_nostr_payment(
             match client.unwrap_gift_wrap(&event).await {
                 Ok(unwrapped) => {
                     let rumor = unwrapped.rumor;
-                    match serde_json::from_str::<
-                        CdkPaymentRequestPayload,
-                    >(&rumor.content) {
+                    match serde_json::from_str::<CdkPaymentRequestPayload>(&rumor.content) {
                         Ok(payload) => {
-                            log::info!(
-                                "Received payment payload: {} proofs", payload.proofs.len()
-                            );
+                            log::info!("Received payment payload: {} proofs", payload.proofs.len());
                             let amount: u64 = payload
                                 .proofs
                                 .iter()
                                 .map(|p| u64::from(p.amount))
                                 .try_fold(0u64, |acc, amt| acc.checked_add(amt))
                                 .unwrap_or(u64::MAX);
-                            let proof_data: Vec<ProofData> = payload
-                                .proofs
-                                .iter()
-                                .map(cdk_proof_to_proof_data)
-                                .collect();
+                            let proof_data: Vec<ProofData> =
+                                payload.proofs.iter().map(cdk_proof_to_proof_data).collect();
                             let mint_str = payload.mint.to_string();
                             match receive_payment_proofs(&mint_str, proof_data).await {
                                 Ok(_) => {
-                                    *PAYMENT_REQUEST_PROGRESS.write() = Some(PaymentRequestProgress::Received {
-                                        amount,
-                                    });
+                                    *PAYMENT_REQUEST_PROGRESS.write() =
+                                        Some(PaymentRequestProgress::Received { amount });
                                     PENDING_PAYMENT_REQUESTS.write().remove(&request_id);
                                     return Ok(amount);
                                 }
@@ -573,10 +531,7 @@ pub async fn wait_for_nostr_payment(
     Err("Connection closed while waiting for payment".to_string())
 }
 /// Receive proofs from a payment request payload
-async fn receive_payment_proofs(
-    mint_url: &str,
-    proofs: Vec<ProofData>,
-) -> Result<u64, String> {
+async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Result<u64, String> {
     use nostr_sdk::signer::NostrSigner;
     let mint_url = normalize_mint_url(mint_url);
     log::info!("Receiving {} proofs from {}", proofs.len(), mint_url);
@@ -590,31 +545,30 @@ async fn receive_payment_proofs(
         .try_fold(0u64, |acc, amt| acc.checked_add(amt))
         .ok_or("Amount overflow")?;
     let _lock = try_acquire_mint_lock(&mint_url)
-        .ok_or_else(|| {
-            format!("Another operation is in progress for mint: {}", mint_url)
-        })?;
+        .ok_or_else(|| format!("Another operation is in progress for mint: {}", mint_url))?;
     let wallet = create_ephemeral_wallet(&mint_url, cdk_proofs.clone()).await?;
     let swapped = wallet
-        .swap(None, cdk::amount::SplitTarget::default(), cdk_proofs.clone(), None, true)
+        .swap(
+            None,
+            cdk::amount::SplitTarget::default(),
+            cdk_proofs.clone(),
+            None,
+            true,
+        )
         .await
         .map_err(|e| format!("Failed to swap proofs: {}", e))?;
-    let final_proofs = swapped
-        .ok_or("Swap validation failed - proofs rejected by mint")?;
+    let final_proofs = swapped.ok_or("Swap validation failed - proofs rejected by mint")?;
     let signer = crate::stores::signer::get_signer()
         .ok_or("No signer available")?
         .as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pubkey = PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-    let proof_data: Vec<ProofData> = final_proofs
-        .iter()
-        .map(cdk_proof_to_proof_data)
-        .collect();
+    let proof_data: Vec<ProofData> = final_proofs.iter().map(cdk_proof_to_proof_data).collect();
     let extended_proofs: Vec<ExtendedCashuProof> = proof_data
         .iter()
         .map(|p| ExtendedCashuProof::from(p.clone()))
@@ -638,12 +592,12 @@ async fn receive_payment_proofs(
                 log::warn!("No relays accepted token event, queuing for retry");
                 let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
                 queue_event_for_retry(
-                        builder,
-                        PendingEventType::TokenEvent,
-                        Some(pending_id.clone()),
-                        Some(mint_url.to_string()),
-                    )
-                    .await;
+                    builder,
+                    PendingEventType::TokenEvent,
+                    Some(pending_id.clone()),
+                    Some(mint_url.to_string()),
+                )
+                .await;
                 pending_id
             } else {
                 event_output.id().to_hex()
@@ -653,12 +607,12 @@ async fn receive_payment_proofs(
             log::warn!("Failed to publish token event: {}", e);
             let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
             queue_event_for_retry(
-                    builder,
-                    PendingEventType::TokenEvent,
-                    Some(pending_id.clone()),
-                    Some(mint_url.to_string()),
-                )
-                .await;
+                builder,
+                PendingEventType::TokenEvent,
+                Some(pending_id.clone()),
+                Some(mint_url.to_string()),
+            )
+            .await;
             pending_id
         }
     };
@@ -667,14 +621,13 @@ async fn receive_payment_proofs(
         let mut data = store.data();
         let mut tokens = data.write();
         let event_id = new_event_id;
-        tokens
-            .push(TokenData {
-                event_id: event_id.clone(),
-                mint: mint_url.to_string(),
-                unit: "sat".to_string(),
-                proofs: proof_data.clone(),
-                created_at: chrono::Utc::now().timestamp() as u64,
-            });
+        tokens.push(TokenData {
+            event_id: event_id.clone(),
+            mint: mint_url.to_string(),
+            unit: "sat".to_string(),
+            proofs: proof_data.clone(),
+            created_at: chrono::Utc::now().timestamp() as u64,
+        });
         register_proofs_in_event_map(&event_id, &proof_data);
     }
     super::signals::update_wallet_balances();

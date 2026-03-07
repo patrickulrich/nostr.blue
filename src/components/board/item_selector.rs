@@ -246,11 +246,7 @@ pub fn PinToBoardModal(props: PinToBoardModalProps) -> Element {
 }
 /// Board option row component (checkbox style)
 #[component]
-fn BoardOption(
-    board: Pinboard,
-    is_selected: bool,
-    on_toggle: EventHandler<String>,
-) -> Element {
+fn BoardOption(board: Pinboard, is_selected: bool, on_toggle: EventHandler<String>) -> Element {
     let a_tag = board.a_tag.clone();
     rsx! {
         button {
@@ -386,8 +382,7 @@ pub fn PinToBoardButton(props: PinToBoardButtonProps) -> Element {
 pub fn PinButton(
     content_type: PinContentType,
     reference: PinReference,
-    #[props(default)]
-    title: Option<String>,
+    #[props(default)] title: Option<String>,
 ) -> Element {
     rsx! {
         PinToBoardButton {

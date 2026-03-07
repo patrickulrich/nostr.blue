@@ -5,12 +5,12 @@
 //! - Direct relay fetch (bypassing cache)
 //! - Outbox routing (NIP-65 gossip)
 //! - Connected-only fetch (fast, bypasses gossip discovery)
-use dioxus::prelude::ReadableExt;
-use nostr_sdk::prelude::*;
-use std::time::Duration;
 use super::signals::{HAS_SIGNER, NOSTR_CLIENT};
 use crate::stores::relay;
 use crate::stores::relay::USER_RELAYS_APPLIED;
+use dioxus::prelude::ReadableExt;
+use nostr_sdk::prelude::*;
+use std::time::Duration;
 /// Get the current client instance
 pub(crate) fn get_client() -> Option<std::sync::Arc<Client>> {
     NOSTR_CLIENT.read().clone()
@@ -55,10 +55,7 @@ async fn fetch_events_aggregated_with_client(
                 let filter_clone = filter.clone();
                 dioxus::prelude::spawn(async move {
                     relay::connection::ensure_relays_ready(&client_clone).await;
-                    if let Err(e) = client_clone
-                        .fetch_events(filter_clone, timeout)
-                        .await
-                    {
+                    if let Err(e) = client_clone.fetch_events(filter_clone, timeout).await {
                         log::warn!("Background relay sync failed: {}", e);
                     }
                 });
@@ -106,7 +103,10 @@ pub async fn fetch_events_from_relays(
         .iter()
         .filter(|(_, r)| r.status() == nostr_relay_pool::RelayStatus::Connected)
         .count();
-    log::info!("fetch_events_from_relays: {} relays connected", connected_count);
+    log::info!(
+        "fetch_events_from_relays: {} relays connected",
+        connected_count
+    );
     let result = client
         .fetch_events(filter.clone(), timeout)
         .await
@@ -141,8 +141,10 @@ async fn fetch_events_aggregated_outbox_with_client(
     timeout: Duration,
 ) -> std::result::Result<Vec<nostr::Event>, String> {
     crate::stores::relay::wait_for_user_relays(
-        Duration::from_millis(500), "fetch_events_aggregated_outbox"
-    ).await;
+        Duration::from_millis(500),
+        "fetch_events_aggregated_outbox",
+    )
+    .await;
     ensure_relays_ready(client).await;
     let filter_authors = filter.authors.clone();
     let events = client
@@ -151,7 +153,10 @@ async fn fetch_events_aggregated_outbox_with_client(
         .map_err(|e| format!("Failed to fetch events: {}", e))?;
     let filtered_events: Vec<nostr::Event> = if let Some(ref authors) = filter_authors {
         let author_set: std::collections::HashSet<_> = authors.iter().collect();
-        events.into_iter().filter(|e| author_set.contains(&e.pubkey)).collect()
+        events
+            .into_iter()
+            .filter(|e| author_set.contains(&e.pubkey))
+            .collect()
     } else {
         events.into_iter().collect()
     };
@@ -234,15 +239,11 @@ async fn fetch_events_from_connected_relays_with_client(
         .collect();
     if connected_urls.is_empty() {
         log::warn!("No connected relays, falling back to gossip fetch");
-        return fetch_events_aggregated_outbox_with_client(
-                client,
-                filter.clone(),
-                timeout,
-            )
-            .await;
+        return fetch_events_aggregated_outbox_with_client(client, filter.clone(), timeout).await;
     }
     log::info!(
-        "Fast fetching from {} connected relays (bypassing gossip)", connected_urls.len()
+        "Fast fetching from {} connected relays (bypassing gossip)",
+        connected_urls.len()
     );
     let filter_authors = filter.authors.clone();
     let author_set: Option<std::collections::HashSet<_>> = filter_authors
@@ -262,7 +263,10 @@ async fn fetch_events_from_connected_relays_with_client(
             }
         })
         .collect();
-    log::info!("Fast fetch completed: {} events (after filtering)", result.len());
+    log::info!(
+        "Fast fetch completed: {} events (after filtering)",
+        result.len()
+    );
     Ok(result)
 }
 /// Fetch video events from connected relays (bypasses gossip)

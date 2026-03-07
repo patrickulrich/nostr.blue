@@ -80,40 +80,39 @@ pub fn PersistentMusicPlayer() -> Element {
         });
     }
     #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
-    use_effect(move || {
-        let state = MUSIC_PLAYER.read();
-        if let Some(ref track) = state.current_track {
+    use_effect(use_reactive(
+        (&state.current_track, &state.is_playing),
+        move |(current_track, is_playing)| {
+        if let Some(track) = current_track.as_ref() {
             let media_url = track.media_url.clone();
-            let is_playing = state.is_playing;
-            let _is_live_stream = track.is_live_stream;
             let is_hls = media_url.contains(".m3u8");
             native_source_bound.set(false);
-            let bind_token = native_bind_token.with_mut(|token| {
-                *token = token.wrapping_add(1);
-                *token
-            });
-            {
-                spawn(async move {
-                    if is_hls {
-                        if let Err(e) = ensure_native_audio_hls_manager().await {
-                            if *native_bind_token.read() == bind_token {
-                                native_source_bound.set(false);
-                                music_player::set_playback_error(Some(format!(
-                                    "Failed to load HLS support: {}",
-                                    e
-                                )));
+                let bind_token = native_bind_token.with_mut(|token| {
+                    *token = token.wrapping_add(1);
+                    *token
+                });
+                {
+                    spawn(async move {
+                        if is_hls {
+                            if let Err(e) = ensure_native_audio_hls_manager().await {
+                                if *native_bind_token.read() == bind_token {
+                                    native_source_bound.set(false);
+                                    music_player::set_playback_error(Some(format!(
+                                        "Failed to load HLS support: {}",
+                                        e
+                                    )));
+                                }
+                                return;
                             }
-                            return;
                         }
-                    }
-                    let audio_id_json = serde_json::to_string(&audio_id)
-                        .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
-                    let media_url_json = serde_json::to_string(&media_url)
-                        .unwrap_or_else(|_| "\"\"".to_string());
-                    let is_playing_literal = if is_playing { "true" } else { "false" };
-                    let script = if is_hls {
-                        format!(
-                            r#"
+                        let audio_id_json = serde_json::to_string(&audio_id)
+                            .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
+                        let media_url_json = serde_json::to_string(&media_url)
+                            .unwrap_or_else(|_| "\"\"".to_string());
+                        let is_playing_literal = if is_playing { "true" } else { "false" };
+                        let script = if is_hls {
+                            format!(
+                                r#"
                             (async function() {{
                                 try {{
                                     let audio = document.getElementById({audio_id});
@@ -154,13 +153,13 @@ pub fn PersistentMusicPlayer() -> Element {
                                 }}
                             }})();
                             "#,
-                            audio_id = audio_id_json,
-                            media_url = media_url_json,
-                            is_playing = is_playing_literal,
-                        )
-                    } else {
-                        format!(
-                            r#"
+                                audio_id = audio_id_json,
+                                media_url = media_url_json,
+                                is_playing = is_playing_literal,
+                            )
+                        } else {
+                            format!(
+                                r#"
                             (function() {{
                                 let audio = document.getElementById({audio_id});
                                 if (!audio) return "missing";
@@ -208,47 +207,51 @@ pub fn PersistentMusicPlayer() -> Element {
                                 return "bound:" + audio.dataset.currentUrl;
                             }})();
                             "#,
-                            audio_id = audio_id_json,
-                            media_url = media_url_json,
-                            is_playing = is_playing_literal,
-                        )
-                    };
-                    match document::eval(&script).await {
-                        Ok(val) => {
-                            let result = val.as_str().unwrap_or_default();
-                            if *native_bind_token.read() == bind_token {
-                                if result == format!("bound:{}", media_url) {
-                                    native_source_bound.set(true);
-                                    music_player::set_playback_error(None);
-                                } else {
-                                    native_source_bound.set(false);
-                                    if result == "cancelled" {
-                                        log::warn!("[Audio] Stream attach cancelled for {}", media_url);
+                                audio_id = audio_id_json,
+                                media_url = media_url_json,
+                                is_playing = is_playing_literal,
+                            )
+                        };
+                        match document::eval(&script).await {
+                            Ok(val) => {
+                                let result = val.as_str().unwrap_or_default();
+                                if *native_bind_token.read() == bind_token {
+                                    if result == format!("bound:{}", media_url) {
+                                        native_source_bound.set(true);
+                                        music_player::set_playback_error(None);
                                     } else {
-                                        let error_msg = result
-                                            .strip_prefix("error:")
-                                            .unwrap_or("Failed to attach stream")
-                                            .to_string();
-                                        log::error!("[Audio] {}", error_msg);
-                                        music_player::set_playback_error(Some(error_msg));
+                                        native_source_bound.set(false);
+                                        if result == "cancelled" {
+                                            log::warn!(
+                                                "[Audio] Stream attach cancelled for {}",
+                                                media_url
+                                            );
+                                        } else {
+                                            let error_msg = result
+                                                .strip_prefix("error:")
+                                                .unwrap_or("Failed to attach stream")
+                                                .to_string();
+                                            log::error!("[Audio] {}", error_msg);
+                                            music_player::set_playback_error(Some(error_msg));
+                                        }
                                     }
                                 }
                             }
-                        }
-                        Err(e) => {
-                            if *native_bind_token.read() == bind_token {
-                                native_source_bound.set(false);
-                                let error_msg =
-                                    format!("Failed to apply audio source script: {:?}", e);
-                                log::warn!("{}", error_msg);
-                                music_player::set_playback_error(Some(error_msg));
+                            Err(e) => {
+                                if *native_bind_token.read() == bind_token {
+                                    native_source_bound.set(false);
+                                    let error_msg =
+                                        format!("Failed to apply audio source script: {:?}", e);
+                                    log::warn!("{}", error_msg);
+                                    music_player::set_playback_error(Some(error_msg));
+                                }
                             }
                         }
-                    }
-                });
+                    });
+                }
             }
-        }
-    });
+        },
+    ));
     #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
     use_effect(move || {
         let state = MUSIC_PLAYER.read();
@@ -280,7 +283,10 @@ pub fn PersistentMusicPlayer() -> Element {
         let last_time = last_synced_time();
         if (current_time - last_time).abs() > 0.5 {
             last_synced_time.set(current_time);
-            let gen = seek_gen.with_mut(|g| { *g = g.wrapping_add(1); *g });
+            let gen = seek_gen.with_mut(|g| {
+                *g = g.wrapping_add(1);
+                *g
+            });
             is_seeking.set(true);
             spawn(async move {
                 {
@@ -425,9 +431,7 @@ pub fn PersistentMusicPlayer() -> Element {
                 .await;
                 if let Ok(json_val) = result {
                     if let Some(json_str) = json_val.as_str() {
-                        if let Ok(now_playing) = serde_json::from_str::<
-                            NowPlaying,
-                        >(json_str) {
+                        if let Ok(now_playing) = serde_json::from_str::<NowPlaying>(json_str) {
                             if now_playing.has_data() {
                                 music_player::set_now_playing(Some(now_playing));
                             }
@@ -482,28 +486,59 @@ pub fn PersistentMusicPlayer() -> Element {
     let track = state.current_track.as_ref().unwrap();
     let is_hls_track = track.media_url.to_lowercase().contains(".m3u8");
     let (share_url, share_content_type) = match &track.source {
-        crate::stores::nostr_music::TrackSource::Wavlake { .. } => {
-            (format!("https://nostr.blue/music/track/{}", track.id), ContentType::MusicTrack)
-        }
-        crate::stores::nostr_music::TrackSource::Nostr { coordinate, .. } => {
-            (format!("https://nostr.blue/music/track/{}", coordinate), ContentType::MusicTrack)
-        }
-        crate::stores::nostr_music::TrackSource::NostrPodcast { coordinate, .. } => {
-            (format!("https://nostr.blue/podcast/episode/{}", coordinate), ContentType::PodcastEpisode)
-        }
-        crate::stores::nostr_music::TrackSource::RssPodcast { feed_url, episode_guid, podcast_id, .. } => {
+        crate::stores::nostr_music::TrackSource::Wavlake { .. } => (
+            format!("https://nostr.blue/music/track/{}", track.id),
+            ContentType::MusicTrack,
+        ),
+        crate::stores::nostr_music::TrackSource::Nostr { coordinate, .. } => (
+            format!("https://nostr.blue/music/track/{}", coordinate),
+            ContentType::MusicTrack,
+        ),
+        crate::stores::nostr_music::TrackSource::NostrPodcast { coordinate, .. } => (
+            format!("https://nostr.blue/podcast/episode/{}", coordinate),
+            ContentType::PodcastEpisode,
+        ),
+        crate::stores::nostr_music::TrackSource::RssPodcast {
+            feed_url,
+            episode_guid,
+            podcast_id,
+            ..
+        } => {
             if let Some(id) = podcast_id {
-                (format!("https://nostr.blue/podcast/rss/{}/episode/{}", id, urlencoding::encode(episode_guid)), ContentType::PodcastEpisode)
+                (
+                    format!(
+                        "https://nostr.blue/podcast/rss/{}/episode/{}",
+                        id,
+                        urlencoding::encode(episode_guid)
+                    ),
+                    ContentType::PodcastEpisode,
+                )
             } else {
-                (format!("https://nostr.blue/podcast/rss/episode?feed={}&ep={}", urlencoding::encode(feed_url), urlencoding::encode(episode_guid)), ContentType::PodcastEpisode)
+                (
+                    format!(
+                        "https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
+                        urlencoding::encode(feed_url),
+                        urlencoding::encode(episode_guid)
+                    ),
+                    ContentType::PodcastEpisode,
+                )
             }
         }
-        crate::stores::nostr_music::TrackSource::RssMusic { feed_id, episode_id, .. } => {
-            (format!("https://nostr.blue/music/track/rss:{}:{}", feed_id, episode_id), ContentType::MusicTrack)
-        }
-        crate::stores::nostr_music::TrackSource::Radio { d_tag, .. } => {
-            (format!("https://nostr.blue/radio/{}", urlencoding::encode(d_tag)), ContentType::MusicTrack)
-        }
+        crate::stores::nostr_music::TrackSource::RssMusic {
+            feed_id,
+            episode_id,
+            ..
+        } => (
+            format!(
+                "https://nostr.blue/music/track/rss:{}:{}",
+                feed_id, episode_id
+            ),
+            ContentType::MusicTrack,
+        ),
+        crate::stores::nostr_music::TrackSource::Radio { d_tag, .. } => (
+            format!("https://nostr.blue/radio/{}", urlencoding::encode(d_tag)),
+            ContentType::MusicTrack,
+        ),
     };
     let progress = if state.duration > 0.0 {
         (state.current_time / state.duration * 100.0).min(100.0)
@@ -519,11 +554,6 @@ pub fn PersistentMusicPlayer() -> Element {
             if !*native_source_bound.read() {
                 log::warn!("Audio playback error before native source binding completed");
                 music_player::set_buffering(false);
-                if !music_player::try_next_stream() {
-                    music_player::set_playback_error(Some(
-                        "Playback error on this platform. Please retry.".to_string(),
-                    ));
-                }
                 return;
             }
             if !music_player::try_next_stream() {

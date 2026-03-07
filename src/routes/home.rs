@@ -12,7 +12,9 @@ use crate::stores::feed_cache::FeedCacheKey;
 use crate::stores::{auth_store, feed_cache, nostr_client, subscription_manager};
 use crate::utils::list_encryption::get_all_list_members;
 use crate::utils::list_kinds::NAMED_PEOPLE;
-use crate::utils::{extract_reposted_event, get_item_count, process_events_to_feed_items, DataState, FeedItem};
+use crate::utils::{
+    extract_reposted_event, get_item_count, process_events_to_feed_items, DataState, FeedItem,
+};
 use dioxus::prelude::*;
 use nostr_sdk::{Filter, Kind, PublicKey, Timestamp};
 use std::collections::{HashMap, HashSet};
@@ -49,9 +51,7 @@ impl FeedType {
     }
 }
 
-fn login_method_requires_signer(
-    login_method: Option<&auth_store::LoginMethod>,
-) -> bool {
+fn login_method_requires_signer(login_method: Option<&auth_store::LoginMethod>) -> bool {
     matches!(
         login_method,
         Some(auth_store::LoginMethod::BrowserExtension)
@@ -79,18 +79,14 @@ pub fn Home(list: String) -> Element {
     let mut pagination_loading = use_signal(|| false);
     let mut interaction_counts = use_signal(HashMap::<String, InteractionCounts>::new);
     let mut interactions_loaded = use_signal(|| false);
-    let mut cached_muted_posts: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| {
-        None
-    });
-    let mut cached_blocked_users: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| {
-        None
-    });
+    let mut cached_muted_posts: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
+    let mut cached_blocked_users: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
     let mut pending_posts = use_signal(Vec::<FeedItem>::new);
     let pending_count = use_memo(move || pending_posts.read().len());
     let mut realtime_started = use_signal(|| false);
     let mut subscription_ids = use_signal(Vec::<nostr_sdk::SubscriptionId>::new);
-    let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> = use_signal(||
-    None);
+    let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> =
+        use_signal(|| None);
     let mut request_id = use_signal(|| 0u32);
     let mut last_loaded_trigger = use_signal(|| (0u32, FeedType::Following, false));
     let (all_lists, _lists_loading, _lists_error, _) = use_user_lists();
@@ -112,10 +108,7 @@ pub fn Home(list: String) -> Element {
             if lists.is_empty() {
                 return;
             }
-            if let Some(matching_list) = lists
-                .iter()
-                .find(|l| l.identifier == list_param)
-            {
+            if let Some(matching_list) = lists.iter().find(|l| l.identifier == list_param) {
                 log::info!("Deep link: Setting feed to list '{}'", matching_list.name);
                 feed_type.set(FeedType::PeopleList(Box::new(matching_list.clone())));
             } else {
@@ -131,9 +124,7 @@ pub fn Home(list: String) -> Element {
         let current_pubkey = auth_store::AUTH_STATE.read().pubkey.clone();
         let current_token = *nostr_client::MUTE_BLOCK_INVALIDATE.read();
         if current_token != *last_invalidate_token.peek() {
-            log::debug!(
-                "Mute/block invalidation detected in home feed, clearing caches"
-            );
+            log::debug!("Mute/block invalidation detected in home feed, clearing caches");
             cached_muted_posts.set(None);
             cached_blocked_users.set(None);
             last_invalidate_token.set(current_token);
@@ -144,14 +135,11 @@ pub fn Home(list: String) -> Element {
             last_mute_pubkey.set(None);
             return;
         }
-        if let (Some(ref last), Some(ref current)) = (
-            last_mute_pubkey.peek().as_ref(),
-            current_pubkey.as_ref(),
-        ) {
+        if let (Some(ref last), Some(ref current)) =
+            (last_mute_pubkey.peek().as_ref(), current_pubkey.as_ref())
+        {
             if last != current {
-                log::debug!(
-                    "Account switch detected in home feed, clearing mute/block cache"
-                );
+                log::debug!("Account switch detected in home feed, clearing mute/block cache");
                 cached_muted_posts.set(None);
                 cached_blocked_users.set(None);
             }
@@ -181,23 +169,22 @@ pub fn Home(list: String) -> Element {
                         cached_muted_posts.set(Some(Rc::new(data.muted_posts)));
                         cached_blocked_users.set(Some(Rc::new(data.blocked_users)));
                     } else {
-                        log::debug!(
-                            "Discarding stale mute list fetch (pubkey or token changed)"
-                        );
+                        log::debug!("Discarding stale mute list fetch (pubkey or token changed)");
                     }
                 }
                 Err(e) => {
-                    let snapshot_short = auth_pubkey_snapshot
-                        .as_ref()
-                        .map(|s| &s[..8.min(s.len())]);
+                    let snapshot_short =
+                        auth_pubkey_snapshot.as_ref().map(|s| &s[..8.min(s.len())]);
                     let current_short = auth_store::AUTH_STATE
                         .peek()
                         .pubkey
                         .as_ref()
                         .map(|s| s[..8.min(s.len())].to_string());
                     log::error!(
-                        "Failed to fetch mute list: {} (snapshot={:?}, current={:?})", e,
-                        snapshot_short, current_short
+                        "Failed to fetch mute list: {} (snapshot={:?}, current={:?})",
+                        e,
+                        snapshot_short,
+                        current_short
                     );
                 }
             }
@@ -241,9 +228,7 @@ pub fn Home(list: String) -> Element {
             return;
         }
         if has_data && !feed_type_changed && !refresh_changed && !signer_changed {
-            log::debug!(
-                "Skipping feed re-load: data already present, no intentional change"
-            );
+            log::debug!("Skipping feed re-load: data already present, no intentional change");
             return;
         }
         last_loaded_trigger.set((refresh, current_feed_type.clone(), signer_available));
@@ -298,8 +283,8 @@ pub fn Home(list: String) -> Element {
                     }
                     let mut accumulated_items = if !cached_items.is_empty() {
                         log::info!(
-                            "Loaded {} items from cache for Following feed", cached_items
-                            .len()
+                            "Loaded {} items from cache for Following feed",
+                            cached_items.len()
                         );
                         feed_state.set(DataState::Loaded(cached_items.clone()));
                         cached_items
@@ -323,22 +308,16 @@ pub fn Home(list: String) -> Element {
                     }
                     let stream_req_id = request_id;
                     let stream_curr_id = current_id;
-                    let result = load_following_feed_streaming(
-                            None,
-                            |batch_items| {
-                                if *stream_req_id.peek() != stream_curr_id {
-                                    log::debug!("Discarding stale streaming batch");
-                                    return;
-                                }
-                                accumulated_items = feed_cache::merge_feed_items(
-                                    accumulated_items.clone(),
-                                    batch_items,
-                                );
-                                feed_state
-                                    .set(DataState::Loaded(accumulated_items.clone()));
-                            },
-                        )
-                        .await;
+                    let result = load_following_feed_streaming(None, |batch_items| {
+                        if *stream_req_id.peek() != stream_curr_id {
+                            log::debug!("Discarding stale streaming batch");
+                            return;
+                        }
+                        accumulated_items =
+                            feed_cache::merge_feed_items(accumulated_items.clone(), batch_items);
+                        feed_state.set(DataState::Loaded(accumulated_items.clone()));
+                    })
+                    .await;
                     if is_stale() {
                         return;
                     }
@@ -352,8 +331,7 @@ pub fn Home(list: String) -> Element {
                                 cache_key.clone()
                             };
                             if let Some(last_item) = feed_items.last() {
-                                oldest_timestamp
-                                    .set(Some(last_item.sort_timestamp().as_secs()));
+                                oldest_timestamp.set(Some(last_item.sort_timestamp().as_secs()));
                             }
                             has_more.set(true);
                             feed_state.set(DataState::Loaded(feed_items.clone()));
@@ -362,10 +340,10 @@ pub fn Home(list: String) -> Element {
                                 let items_for_cache = feed_items.clone();
                                 spawn(async move {
                                     if let Err(e) = feed_cache::store_feed_items(
-                                            &cache_key_for_store,
-                                            &items_for_cache,
-                                        )
-                                        .await
+                                        &cache_key_for_store,
+                                        &items_for_cache,
+                                    )
+                                    .await
                                     {
                                         log::warn!("Failed to store feed to cache: {}", e);
                                     }
@@ -389,16 +367,16 @@ pub fn Home(list: String) -> Element {
                                     }
                                     let counts = if is_first_load {
                                         fetch_interaction_counts_batch(
-                                                event_ids.clone(),
-                                                Duration::from_secs(5),
-                                            )
-                                            .await
+                                            event_ids.clone(),
+                                            Duration::from_secs(5),
+                                        )
+                                        .await
                                     } else {
                                         sync_interaction_counts(
-                                                event_ids.clone(),
-                                                Duration::from_secs(5),
-                                            )
-                                            .await
+                                            event_ids.clone(),
+                                            Duration::from_secs(5),
+                                        )
+                                        .await
                                     };
                                     if *req_id.peek() != curr_id {
                                         return;
@@ -407,11 +385,11 @@ pub fn Home(list: String) -> Element {
                                         interaction_counts.set(counts);
                                         interactions_loaded.set(true);
                                         match stream_interaction_counts(
-                                                event_ids.clone(),
-                                                interaction_counts,
-                                                Some(600),
-                                            )
-                                            .await
+                                            event_ids.clone(),
+                                            interaction_counts,
+                                            Some(600),
+                                        )
+                                        .await
                                         {
                                             Ok(handle) => {
                                                 if *req_id.peek() != curr_id {
@@ -448,9 +426,7 @@ pub fn Home(list: String) -> Element {
                 }
                 FeedType::FollowingWithReplies => {
                     let pubkey_str = auth_store::get_pubkey().unwrap_or_default();
-                    let cache_key = FeedCacheKey::FollowingWithReplies {
-                        pubkey: pubkey_str,
-                    };
+                    let cache_key = FeedCacheKey::FollowingWithReplies { pubkey: pubkey_str };
                     let cached_items = feed_cache::load_cached_feed(&cache_key, 50)
                         .await
                         .unwrap_or_default();
@@ -490,8 +466,7 @@ pub fn Home(list: String) -> Element {
                                 cache_key.clone()
                             };
                             if let Some(last_item) = feed_items.last() {
-                                oldest_timestamp
-                                    .set(Some(last_item.sort_timestamp().as_secs()));
+                                oldest_timestamp.set(Some(last_item.sort_timestamp().as_secs()));
                             }
                             has_more.set(true);
                             feed_state.set(DataState::Loaded(feed_items.clone()));
@@ -500,10 +475,10 @@ pub fn Home(list: String) -> Element {
                                 let items_for_cache = feed_items.clone();
                                 spawn(async move {
                                     let _ = feed_cache::store_feed_items(
-                                            &cache_key_for_store,
-                                            &items_for_cache,
-                                        )
-                                        .await;
+                                        &cache_key_for_store,
+                                        &items_for_cache,
+                                    )
+                                    .await;
                                     let _ = feed_cache::run_eviction_if_needed().await;
                                 });
                             }
@@ -522,16 +497,16 @@ pub fn Home(list: String) -> Element {
                                     }
                                     let counts = if is_first_load {
                                         fetch_interaction_counts_batch(
-                                                event_ids.clone(),
-                                                Duration::from_secs(5),
-                                            )
-                                            .await
+                                            event_ids.clone(),
+                                            Duration::from_secs(5),
+                                        )
+                                        .await
                                     } else {
                                         sync_interaction_counts(
-                                                event_ids.clone(),
-                                                Duration::from_secs(5),
-                                            )
-                                            .await
+                                            event_ids.clone(),
+                                            Duration::from_secs(5),
+                                        )
+                                        .await
                                     };
                                     if *req_id.peek() != curr_id {
                                         return;
@@ -540,11 +515,11 @@ pub fn Home(list: String) -> Element {
                                         interaction_counts.set(counts);
                                         interactions_loaded.set(true);
                                         match stream_interaction_counts(
-                                                event_ids.clone(),
-                                                interaction_counts,
-                                                Some(600),
-                                            )
-                                            .await
+                                            event_ids.clone(),
+                                            interaction_counts,
+                                            Some(600),
+                                        )
+                                        .await
                                         {
                                             Ok(handle) => {
                                                 if *req_id.peek() != curr_id {
@@ -589,8 +564,8 @@ pub fn Home(list: String) -> Element {
                     }
                     if !cached_items.is_empty() {
                         log::info!(
-                            "Loaded {} items from cache for Global feed", cached_items
-                            .len()
+                            "Loaded {} items from cache for Global feed",
+                            cached_items.len()
                         );
                         feed_state.set(DataState::Loaded(cached_items.clone()));
                     }
@@ -601,8 +576,7 @@ pub fn Home(list: String) -> Element {
                     match result {
                         Ok(feed_items) => {
                             if let Some(last_item) = feed_items.last() {
-                                oldest_timestamp
-                                    .set(Some(last_item.sort_timestamp().as_secs()));
+                                oldest_timestamp.set(Some(last_item.sort_timestamp().as_secs()));
                             }
                             has_more.set(true);
                             feed_state.set(DataState::Loaded(feed_items.clone()));
@@ -610,10 +584,10 @@ pub fn Home(list: String) -> Element {
                                 let items_for_cache = feed_items.clone();
                                 spawn(async move {
                                     let _ = feed_cache::store_feed_items(
-                                            &FeedCacheKey::Global,
-                                            &items_for_cache,
-                                        )
-                                        .await;
+                                        &FeedCacheKey::Global,
+                                        &items_for_cache,
+                                    )
+                                    .await;
                                     let _ = feed_cache::run_eviction_if_needed().await;
                                 });
                             }
@@ -632,16 +606,16 @@ pub fn Home(list: String) -> Element {
                                     }
                                     let counts = if is_first_load {
                                         fetch_interaction_counts_batch(
-                                                event_ids.clone(),
-                                                Duration::from_secs(5),
-                                            )
-                                            .await
+                                            event_ids.clone(),
+                                            Duration::from_secs(5),
+                                        )
+                                        .await
                                     } else {
                                         sync_interaction_counts(
-                                                event_ids.clone(),
-                                                Duration::from_secs(5),
-                                            )
-                                            .await
+                                            event_ids.clone(),
+                                            Duration::from_secs(5),
+                                        )
+                                        .await
                                     };
                                     if *req_id.peek() != curr_id {
                                         return;
@@ -650,11 +624,11 @@ pub fn Home(list: String) -> Element {
                                         interaction_counts.set(counts);
                                         interactions_loaded.set(true);
                                         match stream_interaction_counts(
-                                                event_ids.clone(),
-                                                interaction_counts,
-                                                Some(600),
-                                            )
-                                            .await
+                                            event_ids.clone(),
+                                            interaction_counts,
+                                            Some(600),
+                                        )
+                                        .await
                                         {
                                             Ok(handle) => {
                                                 if *req_id.peek() != curr_id {
@@ -727,8 +701,7 @@ pub fn Home(list: String) -> Element {
                     match result {
                         Ok(feed_items) => {
                             if let Some(last_item) = feed_items.last() {
-                                oldest_timestamp
-                                    .set(Some(last_item.sort_timestamp().as_secs()));
+                                oldest_timestamp.set(Some(last_item.sort_timestamp().as_secs()));
                             }
                             has_more.set(true);
                             feed_state.set(DataState::Loaded(feed_items.clone()));
@@ -737,10 +710,10 @@ pub fn Home(list: String) -> Element {
                                 let items_for_cache = feed_items.clone();
                                 spawn(async move {
                                     let _ = feed_cache::store_feed_items(
-                                            &cache_key_for_store,
-                                            &items_for_cache,
-                                        )
-                                        .await;
+                                        &cache_key_for_store,
+                                        &items_for_cache,
+                                    )
+                                    .await;
                                     let _ = feed_cache::run_eviction_if_needed().await;
                                 });
                             }
@@ -759,16 +732,16 @@ pub fn Home(list: String) -> Element {
                                     }
                                     let counts = if is_first_load {
                                         fetch_interaction_counts_batch(
-                                                event_ids.clone(),
-                                                Duration::from_secs(5),
-                                            )
-                                            .await
+                                            event_ids.clone(),
+                                            Duration::from_secs(5),
+                                        )
+                                        .await
                                     } else {
                                         sync_interaction_counts(
-                                                event_ids.clone(),
-                                                Duration::from_secs(5),
-                                            )
-                                            .await
+                                            event_ids.clone(),
+                                            Duration::from_secs(5),
+                                        )
+                                        .await
                                     };
                                     if *req_id.peek() != curr_id {
                                         return;
@@ -777,11 +750,11 @@ pub fn Home(list: String) -> Element {
                                         interaction_counts.set(counts);
                                         interactions_loaded.set(true);
                                         match stream_interaction_counts(
-                                                event_ids.clone(),
-                                                interaction_counts,
-                                                Some(600),
-                                            )
-                                            .await
+                                            event_ids.clone(),
+                                            interaction_counts,
+                                            Some(600),
+                                        )
+                                        .await
                                         {
                                             Ok(handle) => {
                                                 if *req_id.peek() != curr_id {
@@ -887,9 +860,7 @@ pub fn Home(list: String) -> Element {
             let contacts = match nostr_client::fetch_contacts(pubkey_str.clone()).await {
                 Ok(c) => c,
                 Err(e) => {
-                    log::error!(
-                        "Failed to fetch contacts for real-time subscription: {}", e
-                    );
+                    log::error!("Failed to fetch contacts for real-time subscription: {}", e);
                     return;
                 }
             };
@@ -930,66 +901,66 @@ pub fn Home(list: String) -> Element {
                     .since(since_timestamp)
                     .limit(0);
                 log::info!(
-                    "Subscribing to batch {}/{} ({} authors)", batch_num, num_batches,
+                    "Subscribing to batch {}/{} ({} authors)",
+                    batch_num,
+                    num_batches,
                     batch_authors.len()
                 );
                 match client.subscribe(filter, None).await {
                     Ok(output) => {
                         let subscription_id = output.val;
                         log::info!(
-                            "Batch {}/{} subscribed: {:?}", batch_num, num_batches,
+                            "Batch {}/{} subscribed: {:?}",
+                            batch_num,
+                            num_batches,
                             subscription_id
                         );
                         subscription_ids.write().push(subscription_id.clone());
                         let client_for_notifications = client.clone();
                         let batch_feed_type = current_feed_type.clone();
-                        let batch_author_set: std::collections::HashSet<_> = batch_authors
-                            .iter()
-                            .cloned()
-                            .collect();
+                        let batch_author_set: std::collections::HashSet<_> =
+                            batch_authors.iter().cloned().collect();
                         spawn(async move {
-                            let mut notifications = client_for_notifications
-                                .notifications();
+                            let mut notifications = client_for_notifications.notifications();
                             while let Ok(notification) = notifications.recv().await {
                                 if let nostr_sdk::RelayPoolNotification::Event {
                                     subscription_id: event_sub_id,
                                     event,
                                     ..
-                                } = notification {
+                                } = notification
+                                {
                                     if event_sub_id != subscription_id {
                                         continue;
                                     }
                                     if !batch_author_set.contains(&event.pubkey) {
                                         log::debug!(
-                                            "Filtered out event from non-followed author: {}", event
-                                            .pubkey
+                                            "Filtered out event from non-followed author: {}",
+                                            event.pubkey
                                         );
                                         continue;
                                     }
                                     let feed_item_opt = if event.kind == Kind::Repost {
                                         match extract_reposted_event(&event) {
-                                            Ok(original) => {
-                                                Some(FeedItem::Repost {
-                                                    original,
-                                                    reposted_by: event.pubkey,
-                                                    repost_timestamp: event.created_at,
-                                                })
-                                            }
+                                            Ok(original) => Some(FeedItem::Repost {
+                                                original,
+                                                reposted_by: event.pubkey,
+                                                repost_timestamp: event.created_at,
+                                            }),
                                             Err(e) => {
                                                 log::warn!(
-                                                    "Failed to parse repost event {}: {}", event.id, e
+                                                    "Failed to parse repost event {}: {}",
+                                                    event.id,
+                                                    e
                                                 );
                                                 None
                                             }
                                         }
                                     } else if event.kind == Kind::TextNote {
                                         let should_add = match &batch_feed_type {
-                                            FeedType::Following => {
-                                                !event
-                                                    .tags
-                                                    .iter()
-                                                    .any(|tag| tag.is_reply() || tag.is_root())
-                                            }
+                                            FeedType::Following => !event
+                                                .tags
+                                                .iter()
+                                                .any(|tag| tag.is_reply() || tag.is_root()),
                                             FeedType::FollowingWithReplies
                                             | FeedType::Global
                                             | FeedType::PeopleList(_) => true,
@@ -1002,7 +973,10 @@ pub fn Home(list: String) -> Element {
                                     } else if event.kind == Kind::Comment {
                                         // Include topic posts (kind 1111 with NIP-73 hashtag) as root posts only
                                         if crate::stores::topic_store::is_topic_post(&event) {
-                                            let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
+                                            let is_reply = event
+                                                .tags
+                                                .iter()
+                                                .any(|tag| tag.is_reply() || tag.is_root());
                                             if !is_reply {
                                                 Some(FeedItem::OriginalPost((*event).clone()))
                                             } else {
@@ -1016,7 +990,8 @@ pub fn Home(list: String) -> Element {
                                     };
                                     if let Some(feed_item) = feed_item_opt {
                                         log::info!(
-                                            "New post received in real-time from batch {}", batch_num
+                                            "New post received in real-time from batch {}",
+                                            batch_num
                                         );
                                         let event_id = feed_item.event().id;
                                         let already_buffered = pending_posts
@@ -1024,30 +999,33 @@ pub fn Home(list: String) -> Element {
                                             .iter()
                                             .any(|item| item.event().id == event_id);
                                         let already_in_feed = match &*feed_state.peek() {
-                                            DataState::Loaded(ref current_items) => {
-                                                current_items.iter().any(|item| item.event().id == event_id)
-                                            }
+                                            DataState::Loaded(ref current_items) => current_items
+                                                .iter()
+                                                .any(|item| item.event().id == event_id),
                                             _ => false,
                                         };
                                         if !already_buffered && !already_in_feed {
                                             let author_pk = feed_item.event().pubkey.to_hex();
                                             spawn(async move {
-                                                let _ = crate::stores::profiles::fetch_profile(author_pk)
-                                                    .await;
+                                                let _ = crate::stores::profiles::fetch_profile(
+                                                    author_pk,
+                                                )
+                                                .await;
                                             });
-                                            if let FeedItem::Repost { ref original, .. } = feed_item {
+                                            if let FeedItem::Repost { ref original, .. } = feed_item
+                                            {
                                                 let original_author_pk = original.pubkey.to_hex();
                                                 spawn(async move {
                                                     let _ = crate::stores::profiles::fetch_profile(
-                                                            original_author_pk,
-                                                        )
-                                                        .await;
+                                                        original_author_pk,
+                                                    )
+                                                    .await;
                                                 });
                                             }
                                             pending_posts.write().push(feed_item);
                                             log::info!(
-                                                "Buffered new post, total pending: {}", pending_posts.read()
-                                                .len()
+                                                "Buffered new post, total pending: {}",
+                                                pending_posts.read().len()
                                             );
                                         }
                                     }
@@ -1057,8 +1035,10 @@ pub fn Home(list: String) -> Element {
                     }
                     Err(e) => {
                         log::error!(
-                            "Failed to subscribe batch {}/{}: {}", batch_num,
-                            num_batches, e
+                            "Failed to subscribe batch {}/{}: {}",
+                            batch_num,
+                            num_batches,
+                            e
                         );
                     }
                 }
@@ -1067,8 +1047,9 @@ pub fn Home(list: String) -> Element {
     });
     let load_more = move || {
         log::info!(
-            "load_more called - pagination_loading: {}, has_more: {}", *
-            pagination_loading.peek(), * has_more.peek()
+            "load_more called - pagination_loading: {}, has_more: {}",
+            *pagination_loading.peek(),
+            *has_more.peek()
         );
         if *pagination_loading.peek() || !*has_more.peek() {
             log::info!("load_more blocked by guards");
@@ -1080,48 +1061,49 @@ pub fn Home(list: String) -> Element {
             let until = *oldest_timestamp.read();
             let current_feed_type = feed_type.read().clone();
             log::info!(
-                "load_more spawn executing - until: {:?}, feed_type: {:?}", until,
+                "load_more spawn executing - until: {:?}, feed_type: {:?}",
+                until,
                 current_feed_type
             );
             let fetch_result: Result<Vec<FeedItem>, NostrBlueError> = match current_feed_type {
-                FeedType::Following => {
-                    match load_following_feed(until).await {
-                        Ok((items, did_fallback)) => {
-                            if did_fallback {
-                                Err(NostrBlueError::Other("Contact fetch failed during pagination".to_string()))
-                            } else {
-                                Ok(items)
-                            }
+                FeedType::Following => match load_following_feed(until).await {
+                    Ok((items, did_fallback)) => {
+                        if did_fallback {
+                            Err(NostrBlueError::Other(
+                                "Contact fetch failed during pagination".to_string(),
+                            ))
+                        } else {
+                            Ok(items)
                         }
-                        Err(e) => Err(e),
                     }
-                }
-                FeedType::FollowingWithReplies => {
-                    match load_following_with_replies(until).await {
-                        Ok((items, did_fallback)) => {
-                            if did_fallback {
-                                Err(NostrBlueError::Other("Contact fetch failed during pagination".to_string()))
-                            } else {
-                                Ok(items)
-                            }
+                    Err(e) => Err(e),
+                },
+                FeedType::FollowingWithReplies => match load_following_with_replies(until).await {
+                    Ok((items, did_fallback)) => {
+                        if did_fallback {
+                            Err(NostrBlueError::Other(
+                                "Contact fetch failed during pagination".to_string(),
+                            ))
+                        } else {
+                            Ok(items)
                         }
-                        Err(e) => Err(e),
                     }
-                }
+                    Err(e) => Err(e),
+                },
                 FeedType::Global => load_global_feed(until).await,
                 FeedType::PeopleList(list) => load_people_list_feed(&list, until).await,
             };
             match fetch_result {
                 Ok(new_items) => {
                     append_paginated_items(
-                            new_items,
-                            &mut feed_state,
-                            &mut oldest_timestamp,
-                            &mut has_more,
-                            &mut pagination_loading,
-                            &mut interaction_counts,
-                        )
-                        .await;
+                        new_items,
+                        &mut feed_state,
+                        &mut oldest_timestamp,
+                        &mut has_more,
+                        &mut pagination_loading,
+                        &mut interaction_counts,
+                    )
+                    .await;
                 }
                 Err(e) => {
                     log::error!("Failed to load more events: {}", e);
@@ -1576,29 +1558,27 @@ fn LoginSection() -> Element {
         nip55_state.set(Nip55State::Checking);
         spawn(async move {
             match auth_store::login_with_android_signer_auto().await {
-                Ok(result) => {
-                    match result {
-                        auth_store::AndroidSignerAutoResult::LoggedIn(package) => {
-                            log::info!("NIP-55: auto-connected to signer: {}", package);
-                            error.set(None);
-                            nip55_state.set(Nip55State::Idle);
-                        }
-                        auth_store::AndroidSignerAutoResult::IntentLaunched => {
-                            log::info!("NIP-55: Intent launched, waiting for user approval");
-                            error.set(None);
-                            nip55_state.set(Nip55State::WaitingForApproval);
-                        }
-                        auth_store::AndroidSignerAutoResult::IntentInFlight => {
-                            log::info!("NIP-55: Intent already in flight");
-                            error.set(None);
-                            nip55_state.set(Nip55State::WaitingForApproval);
-                        }
-                        auth_store::AndroidSignerAutoResult::Error(e) => {
-                            log::error!("NIP-55: auto-detect error: {}", e);
-                            nip55_state.set(Nip55State::Error(e));
-                        }
+                Ok(result) => match result {
+                    auth_store::AndroidSignerAutoResult::LoggedIn(package) => {
+                        log::info!("NIP-55: auto-connected to signer: {}", package);
+                        error.set(None);
+                        nip55_state.set(Nip55State::Idle);
                     }
-                }
+                    auth_store::AndroidSignerAutoResult::IntentLaunched => {
+                        log::info!("NIP-55: Intent launched, waiting for user approval");
+                        error.set(None);
+                        nip55_state.set(Nip55State::WaitingForApproval);
+                    }
+                    auth_store::AndroidSignerAutoResult::IntentInFlight => {
+                        log::info!("NIP-55: Intent already in flight");
+                        error.set(None);
+                        nip55_state.set(Nip55State::WaitingForApproval);
+                    }
+                    auth_store::AndroidSignerAutoResult::Error(e) => {
+                        log::error!("NIP-55: auto-detect error: {}", e);
+                        nip55_state.set(Nip55State::Error(e));
+                    }
+                },
                 Err(e) => {
                     log::error!("NIP-55: auto-detect failed: {}", e);
                     nip55_state.set(Nip55State::Error(e));
@@ -1611,27 +1591,25 @@ fn LoginSection() -> Element {
         nip55_state.set(Nip55State::Checking);
         spawn(async move {
             match auth_store::login_with_android_signer_auto().await {
-                Ok(result) => {
-                    match result {
-                        auth_store::AndroidSignerAutoResult::LoggedIn(package) => {
-                            log::info!("NIP-55: connected after approval: {}", package);
-                            error.set(None);
-                            nip55_state.set(Nip55State::Idle);
-                        }
-                        auth_store::AndroidSignerAutoResult::IntentInFlight => {
-                            log::info!("NIP-55: still waiting for approval");
-                            error.set(None);
-                            nip55_state.set(Nip55State::WaitingForApproval);
-                        }
-                        auth_store::AndroidSignerAutoResult::IntentLaunched => {
-                            error.set(None);
-                            nip55_state.set(Nip55State::WaitingForApproval);
-                        }
-                        auth_store::AndroidSignerAutoResult::Error(e) => {
-                            nip55_state.set(Nip55State::Error(e));
-                        }
+                Ok(result) => match result {
+                    auth_store::AndroidSignerAutoResult::LoggedIn(package) => {
+                        log::info!("NIP-55: connected after approval: {}", package);
+                        error.set(None);
+                        nip55_state.set(Nip55State::Idle);
                     }
-                }
+                    auth_store::AndroidSignerAutoResult::IntentInFlight => {
+                        log::info!("NIP-55: still waiting for approval");
+                        error.set(None);
+                        nip55_state.set(Nip55State::WaitingForApproval);
+                    }
+                    auth_store::AndroidSignerAutoResult::IntentLaunched => {
+                        error.set(None);
+                        nip55_state.set(Nip55State::WaitingForApproval);
+                    }
+                    auth_store::AndroidSignerAutoResult::Error(e) => {
+                        nip55_state.set(Nip55State::Error(e));
+                    }
+                },
                 Err(e) => {
                     nip55_state.set(Nip55State::Error(e));
                 }
@@ -1990,17 +1968,16 @@ async fn append_paginated_items(
     }
     let current_state = feed_state.read().clone();
     if let DataState::Loaded(current) = current_state {
-        let existing_ids: std::collections::HashSet<_> = current
-            .iter()
-            .map(|item| item.event().id)
-            .collect();
+        let existing_ids: std::collections::HashSet<_> =
+            current.iter().map(|item| item.event().id).collect();
         let unique_items: Vec<_> = new_items
             .iter()
             .filter(|item| !existing_ids.contains(&item.event().id))
             .cloned()
             .collect();
         log::info!(
-            "Deduplication: {} total, {} unique items after filtering", new_items.len(),
+            "Deduplication: {} total, {} unique items after filtering",
+            new_items.len(),
             unique_items.len()
         );
         if let Some(last_item) = new_items.last() {
@@ -2022,11 +1999,8 @@ async fn append_paginated_items(
                     .iter()
                     .map(|item| item.event().id)
                     .collect();
-                if let Ok(new_counts) = fetch_interaction_counts_batch(
-                        event_ids,
-                        Duration::from_secs(5),
-                    )
-                    .await
+                if let Ok(new_counts) =
+                    fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await
                 {
                     counts_signal.extend(new_counts);
                     log::info!(
@@ -2041,20 +2015,23 @@ async fn append_paginated_items(
 }
 /// Load following feed (non-streaming version, used for pagination)
 /// Returns (feed_items, did_fallback) where did_fallback indicates if we fell back to global.
-async fn load_following_feed(
-    until: Option<u64>,
-) -> Result<(Vec<FeedItem>, bool), NostrBlueError> {
+async fn load_following_feed(until: Option<u64>) -> Result<(Vec<FeedItem>, bool), NostrBlueError> {
     let pubkey_str = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
-    log::info!("Loading following feed for {} (until: {:?})", pubkey_str, until);
+    log::info!(
+        "Loading following feed for {} (until: {:?})",
+        pubkey_str,
+        until
+    );
     let contacts_future = nostr_client::fetch_contacts(pubkey_str.clone());
     let global_future = load_global_feed(until);
-    let (contacts_result, global_result) = futures::join!(
-        contacts_future, global_future
-    );
+    let (contacts_result, global_result) = futures::join!(contacts_future, global_future);
     let contacts = match contacts_result {
         Ok(contacts) => contacts,
         Err(e) => {
-            log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
+            log::warn!(
+                "Failed to fetch contacts: {}, falling back to global feed",
+                e
+            );
             let global = global_result?;
             return Ok((global, true));
         }
@@ -2084,15 +2061,10 @@ async fn load_following_feed(
         filter = filter.until(Timestamp::from(until_ts));
     }
     log::info!(
-        "Fetching events from {} followed accounts", filter.authors.as_ref().map(| a | a
-        .len()).unwrap_or(0)
+        "Fetching events from {} followed accounts",
+        filter.authors.as_ref().map(|a| a.len()).unwrap_or(0)
     );
-    match nostr_client::fetch_events_from_connected_relays(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await
-    {
+    match nostr_client::fetch_events_from_connected_relays(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             let raw_count = events.len();
             log::info!(
@@ -2104,17 +2076,14 @@ async fn load_following_feed(
                 if event.kind == Kind::Repost {
                     match extract_reposted_event(&event) {
                         Ok(original) => {
-                            feed_items
-                                .push(FeedItem::Repost {
-                                    original,
-                                    reposted_by: event.pubkey,
-                                    repost_timestamp: event.created_at,
-                                });
+                            feed_items.push(FeedItem::Repost {
+                                original,
+                                reposted_by: event.pubkey,
+                                repost_timestamp: event.created_at,
+                            });
                         }
                         Err(e) => {
-                            log::warn!(
-                                "Failed to parse repost event {}: {}", event.id, e
-                            );
+                            log::warn!("Failed to parse repost event {}: {}", event.id, e);
                         }
                     }
                 } else if event.kind == Kind::TextNote {
@@ -2135,7 +2104,9 @@ async fn load_following_feed(
             }
             feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
             log::info!(
-                "After processing: {} feed items (raw: {})", feed_items.len(), raw_count
+                "After processing: {} feed items (raw: {})",
+                feed_items.len(),
+                raw_count
             );
             if feed_items.is_empty() {
                 log::info!("No posts from followed users");
@@ -2144,7 +2115,10 @@ async fn load_following_feed(
             Ok((feed_items, false))
         }
         Err(e) => {
-            log::error!("Failed to fetch following feed: {}, falling back to global", e);
+            log::error!(
+                "Failed to fetch following feed: {}, falling back to global",
+                e
+            );
             let global = load_global_feed(until).await?;
             Ok((global, true))
         }
@@ -2166,12 +2140,17 @@ where
     use std::collections::HashSet;
     let pubkey_str = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
     log::info!(
-        "Loading following feed (streaming) for {} (until: {:?})", pubkey_str, until
+        "Loading following feed (streaming) for {} (until: {:?})",
+        pubkey_str,
+        until
     );
     let contacts = match nostr_client::fetch_contacts(pubkey_str.clone()).await {
         Ok(contacts) => contacts,
         Err(e) => {
-            log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
+            log::warn!(
+                "Failed to fetch contacts: {}, falling back to global feed",
+                e
+            );
             let global = load_global_feed(until).await?;
             return Ok((global, true));
         }
@@ -2203,56 +2182,56 @@ where
     let mut all_items: Vec<FeedItem> = Vec::new();
     let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
     // Use immediate streaming for faster time-to-first-post
-    let stream_result = nostr_client::stream_events_immediate(
-            filter,
-            Duration::from_secs(10),
-            |event| {
-                // Process single event immediately
-                let item = if event.kind == Kind::Repost {
-                    match extract_reposted_event(&event) {
-                        Ok(original) => Some(FeedItem::Repost {
-                            original,
-                            reposted_by: event.pubkey,
-                            repost_timestamp: event.created_at,
-                        }),
-                        Err(_) => None,
-                    }
-                } else if event.kind == Kind::TextNote {
-                    // Posts with root/reply markers are thread replies - filter these out
-                    // Mentions (e-tags without markers) are preserved in the feed
+    let stream_result =
+        nostr_client::stream_events_immediate(filter, Duration::from_secs(10), |event| {
+            // Process single event immediately
+            let item = if event.kind == Kind::Repost {
+                match extract_reposted_event(&event) {
+                    Ok(original) => Some(FeedItem::Repost {
+                        original,
+                        reposted_by: event.pubkey,
+                        repost_timestamp: event.created_at,
+                    }),
+                    Err(_) => None,
+                }
+            } else if event.kind == Kind::TextNote {
+                // Posts with root/reply markers are thread replies - filter these out
+                // Mentions (e-tags without markers) are preserved in the feed
+                let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
+                if !is_reply {
+                    Some(FeedItem::OriginalPost(event))
+                } else {
+                    None
+                }
+            } else if event.kind == Kind::Comment {
+                if crate::stores::topic_store::is_topic_post(&event) {
                     let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
                     if !is_reply {
                         Some(FeedItem::OriginalPost(event))
                     } else {
                         None
                     }
-                } else if event.kind == Kind::Comment {
-                    if crate::stores::topic_store::is_topic_post(&event) {
-                        let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
-                        if !is_reply {
-                            Some(FeedItem::OriginalPost(event))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
                 } else {
                     None
-                };
-
-                if let Some(feed_item) = item {
-                    if seen_ids.insert(feed_item.event().id) {
-                        all_items.push(feed_item.clone());
-                        // Call on_batch with single item for immediate UI update
-                        on_batch(vec![feed_item]);
-                    }
                 }
-            },
-        )
+            } else {
+                None
+            };
+
+            if let Some(feed_item) = item {
+                if seen_ids.insert(feed_item.event().id) {
+                    all_items.push(feed_item.clone());
+                    // Call on_batch with single item for immediate UI update
+                    on_batch(vec![feed_item]);
+                }
+            }
+        })
         .await;
     if let Err(e) = stream_result {
-        log::error!("Failed to stream following feed: {}, falling back to global", e);
+        log::error!(
+            "Failed to stream following feed: {}, falling back to global",
+            e
+        );
         let global = load_global_feed(until).await?;
         return Ok((global, true));
     }
@@ -2271,12 +2250,17 @@ async fn load_following_with_replies(
 ) -> Result<(Vec<FeedItem>, bool), NostrBlueError> {
     let pubkey_str = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
     log::info!(
-        "Loading following feed with replies for {} (until: {:?})", pubkey_str, until
+        "Loading following feed with replies for {} (until: {:?})",
+        pubkey_str,
+        until
     );
     let contacts = match nostr_client::fetch_contacts(pubkey_str.clone()).await {
         Ok(contacts) => contacts,
         Err(e) => {
-            log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
+            log::warn!(
+                "Failed to fetch contacts: {}, falling back to global feed",
+                e
+            );
             let global = load_global_feed(until).await?;
             return Ok((global, true));
         }
@@ -2310,14 +2294,9 @@ async fn load_following_with_replies(
     }
     log::info!(
         "Fetching all events (including replies and reposts) from {} followed accounts",
-        filter.authors.as_ref().map(| a | a.len()).unwrap_or(0)
+        filter.authors.as_ref().map(|a| a.len()).unwrap_or(0)
     );
-    match nostr_client::fetch_events_from_connected_relays(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await
-    {
+    match nostr_client::fetch_events_from_connected_relays(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             log::info!(
                 "Loaded {} events (including replies and reposts) from following feed via outbox",
@@ -2328,17 +2307,14 @@ async fn load_following_with_replies(
                 if event.kind == Kind::Repost {
                     match extract_reposted_event(&event) {
                         Ok(original) => {
-                            feed_items
-                                .push(FeedItem::Repost {
-                                    original,
-                                    reposted_by: event.pubkey,
-                                    repost_timestamp: event.created_at,
-                                });
+                            feed_items.push(FeedItem::Repost {
+                                original,
+                                reposted_by: event.pubkey,
+                                repost_timestamp: event.created_at,
+                            });
                         }
                         Err(e) => {
-                            log::warn!(
-                                "Failed to parse repost event {}: {}", event.id, e
-                            );
+                            log::warn!("Failed to parse repost event {}: {}", event.id, e);
                         }
                     }
                 } else if event.kind == Kind::TextNote
@@ -2367,7 +2343,9 @@ async fn load_following_with_replies(
 }
 async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, NostrBlueError> {
     log::info!("Loading global feed (until: {:?})...", until);
-    let mut filter = Filter::new().kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment]).limit(50);
+    let mut filter = Filter::new()
+        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
+        .limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     } else {
@@ -2383,17 +2361,14 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, NostrBlue
                 if event.kind == Kind::Repost {
                     match extract_reposted_event(&event) {
                         Ok(original) => {
-                            feed_items
-                                .push(FeedItem::Repost {
-                                    original,
-                                    reposted_by: event.pubkey,
-                                    repost_timestamp: event.created_at,
-                                });
+                            feed_items.push(FeedItem::Repost {
+                                original,
+                                reposted_by: event.pubkey,
+                                repost_timestamp: event.created_at,
+                            });
                         }
                         Err(e) => {
-                            log::warn!(
-                                "Failed to parse repost event {}: {}", event.id, e
-                            );
+                            log::warn!("Failed to parse repost event {}: {}", event.id, e);
                         }
                     }
                 } else if event.kind == Kind::TextNote
@@ -2415,7 +2390,9 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, NostrBlue
 /// Fetch a small batch of global posts quickly for immediate display
 /// Used while contacts are loading to show something immediately
 #[allow(dead_code)]
-async fn fetch_quick_global_posts(limit: usize) -> Result<Vec<FeedItem>, crate::error::NostrBlueError> {
+async fn fetch_quick_global_posts(
+    limit: usize,
+) -> Result<Vec<FeedItem>, crate::error::NostrBlueError> {
     log::info!("Fetching {} quick global posts...", limit);
     let filter = Filter::new()
         .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
@@ -2443,7 +2420,11 @@ async fn prefetch_author_metadata(feed_items: &[FeedItem]) {
             FeedItem::OriginalPost(event) => {
                 pubkeys.push(event.pubkey);
             }
-            FeedItem::Repost { original, reposted_by, .. } => {
+            FeedItem::Repost {
+                original,
+                reposted_by,
+                ..
+            } => {
                 pubkeys.push(original.pubkey);
                 pubkeys.push(*reposted_by);
             }
@@ -2459,17 +2440,19 @@ async fn load_people_list_feed(
     list: &UserList,
     until: Option<u64>,
 ) -> Result<Vec<FeedItem>, NostrBlueError> {
-    log::info!("Loading people list feed for '{}' (until: {:?})", list.name, until);
-    let members = get_all_list_members(&list.event)
-        .await
-        .map_err(|e| {
-            log::error!("Failed to get list members: {}", e);
-            NostrBlueError::Other(format!("Failed to decrypt list members: {}", e))
-        })?;
+    log::info!(
+        "Loading people list feed for '{}' (until: {:?})",
+        list.name,
+        until
+    );
+    let members = get_all_list_members(&list.event).await.map_err(|e| {
+        log::error!("Failed to get list members: {}", e);
+        NostrBlueError::Other(format!("Failed to decrypt list members: {}", e))
+    })?;
     if members.is_empty() {
         log::warn!(
-            "People list '{}' has no members - check if private decryption failed", list
-            .name
+            "People list '{}' has no members - check if private decryption failed",
+            list.name
         );
         return Ok(Vec::new());
     }
@@ -2481,32 +2464,26 @@ async fn load_people_list_feed(
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
-    match nostr_client::fetch_events_from_connected_relays(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await
-    {
+    match nostr_client::fetch_events_from_connected_relays(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             log::info!(
-                "Loaded {} events from people list '{}'", events.len(), list.name
+                "Loaded {} events from people list '{}'",
+                events.len(),
+                list.name
             );
             let mut feed_items: Vec<FeedItem> = Vec::new();
             for event in events.into_iter() {
                 if event.kind == Kind::Repost {
                     match extract_reposted_event(&event) {
                         Ok(original) => {
-                            feed_items
-                                .push(FeedItem::Repost {
-                                    original,
-                                    reposted_by: event.pubkey,
-                                    repost_timestamp: event.created_at,
-                                });
+                            feed_items.push(FeedItem::Repost {
+                                original,
+                                reposted_by: event.pubkey,
+                                repost_timestamp: event.created_at,
+                            });
                         }
                         Err(e) => {
-                            log::warn!(
-                                "Failed to parse repost event {}: {}", event.id, e
-                            );
+                            log::warn!("Failed to parse repost event {}: {}", event.id, e);
                         }
                     }
                 } else if event.kind == Kind::TextNote
@@ -2520,7 +2497,11 @@ async fn load_people_list_feed(
             Ok(feed_items)
         }
         Err(e) => {
-            log::error!("Failed to fetch events for people list '{}': {}", list.name, e);
+            log::error!(
+                "Failed to fetch events for people list '{}': {}",
+                list.name,
+                e
+            );
             Err(NostrBlueError::Other(format!("Failed to load feed: {}", e)))
         }
     }

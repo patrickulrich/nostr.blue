@@ -21,7 +21,9 @@ pub mod urls {
 }
 /// Default options for specialty relays
 fn specialty_relay_options() -> RelayOptions {
-    RelayOptions::new().max_avg_latency(Some(Duration::from_secs(2))).reconnect(true)
+    RelayOptions::new()
+        .max_avg_latency(Some(Duration::from_secs(2)))
+        .reconnect(true)
 }
 /// Add relays temporarily, returning which ones were newly added.
 /// Uses SDK's add_relay() which returns Ok if added successfully.
@@ -68,7 +70,10 @@ pub async fn get_connected(client: &Client, relay_urls: &[RelayUrl]) -> Vec<Rela
     relay_urls
         .iter()
         .filter(|r| {
-            relays.get(*r).map(|relay| relay.is_connected()).unwrap_or(false)
+            relays
+                .get(*r)
+                .map(|relay| relay.is_connected())
+                .unwrap_or(false)
         })
         .cloned()
         .collect()
@@ -86,7 +91,8 @@ pub async fn ensure_connected(client: &Client, relay_url: &str) -> bool {
             return true;
         }
         log::info!(
-            "Specialty relay exists but not connected, connecting: {}", relay_url
+            "Specialty relay exists but not connected, connecting: {}",
+            relay_url
         );
     } else {
         let opts = specialty_relay_options();
@@ -227,7 +233,11 @@ pub async fn ensure_search_relays_connected(client: &Client) -> Vec<String> {
     use dioxus::prelude::ReadableExt;
     let search_relays = {
         let relays = super::nip65::SEARCH_RELAYS.peek().clone();
-        if relays.is_empty() { super::nip65::default_search_relays() } else { relays }
+        if relays.is_empty() {
+            super::nip65::default_search_relays()
+        } else {
+            relays
+        }
     };
     let mut connected = Vec::new();
     for relay_url in &search_relays {
@@ -241,8 +251,10 @@ pub async fn ensure_search_relays_connected(client: &Client) -> Vec<String> {
         log::error!("No search relays could be connected!");
     } else {
         log::info!(
-            "Search relays connected: {}/{} - {:?}", connected.len(), search_relays
-            .len(), connected
+            "Search relays connected: {}/{} - {:?}",
+            connected.len(),
+            search_relays.len(),
+            connected
         );
     }
     connected

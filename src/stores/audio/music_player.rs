@@ -1,3 +1,6 @@
+#[cfg(feature = "mobile")]
+use crate::platform::android_media::{self, AndroidPlaybackSnapshot};
+use crate::platform::storage;
 use crate::routes::Route;
 use crate::services::podcast_index::{Episode as PodcastIndexEpisode, PodcastFeed};
 use crate::services::wavlake::WavlakeTrack;
@@ -6,14 +9,11 @@ use crate::stores::{auth_store, nostr_client};
 use crate::utils::radio::{select_best_stream, NowPlaying, RadioStation};
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
-use crate::platform::storage;
 use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::nips::nip38::{LiveStatus, StatusType};
 use nostr_sdk::{EventBuilder, Kind, Tag, TagKind, Timestamp};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
-#[cfg(feature = "mobile")]
-use crate::platform::android_media::{self, AndroidPlaybackSnapshot};
 /// Kind number for Music Vote events (addressable, one per user)
 pub const KIND_MUSIC_VOTE: u16 = 33169;
 /// Music track for the player (unified for Wavlake, Nostr music, and Podcasts)
@@ -150,15 +150,9 @@ impl MusicTrack {
             TrackSource::NostrPodcast { pubkey, .. } => {
                 use nostr::prelude::*;
                 if let Ok(pk) = PublicKey::from_hex(pubkey) {
-                    let coord = nostr::nips::nip01::Coordinate::new(
-                            nostr::Kind::from(30078),
-                            pk,
-                        )
+                    let coord = nostr::nips::nip01::Coordinate::new(nostr::Kind::from(30078), pk)
                         .identifier("podcast-metadata");
-                    let nip19_coord = nostr::nips::nip19::Nip19Coordinate::new(
-                        coord,
-                        vec![],
-                    );
+                    let nip19_coord = nostr::nips::nip19::Nip19Coordinate::new(coord, vec![]);
                     if let Ok(naddr) = nip19_coord.to_bech32() {
                         return Some(Route::PodcastNostrDetail { naddr });
                     }
@@ -166,16 +160,13 @@ impl MusicTrack {
                 None
             }
             TrackSource::RssPodcast { podcast_id, .. } => {
-                podcast_id
-                    .map(|id| Route::PodcastRssFeedDetail {
-                        podcast_id: id.to_string(),
-                    })
-            }
-            TrackSource::Wavlake { artist_id, .. } => {
-                Some(Route::MusicArtist {
-                    artist_id: artist_id.clone(),
+                podcast_id.map(|id| Route::PodcastRssFeedDetail {
+                    podcast_id: id.to_string(),
                 })
             }
+            TrackSource::Wavlake { artist_id, .. } => Some(Route::MusicArtist {
+                artist_id: artist_id.clone(),
+            }),
             _ => None,
         }
     }
@@ -185,39 +176,32 @@ impl MusicTrack {
             TrackSource::NostrPodcast { pubkey, d_tag, .. } => {
                 use nostr::prelude::*;
                 if let Ok(pk) = PublicKey::from_hex(pubkey) {
-                    let coord = nostr::nips::nip01::Coordinate::new(
-                            nostr::Kind::from(30054),
-                            pk,
-                        )
+                    let coord = nostr::nips::nip01::Coordinate::new(nostr::Kind::from(30054), pk)
                         .identifier(d_tag);
-                    let nip19_coord = nostr::nips::nip19::Nip19Coordinate::new(
-                        coord,
-                        vec![],
-                    );
+                    let nip19_coord = nostr::nips::nip19::Nip19Coordinate::new(coord, vec![]);
                     if let Ok(naddr) = nip19_coord.to_bech32() {
-                        return Some(Route::PodcastNostrEpisodeDetail {
-                            naddr,
-                        });
+                        return Some(Route::PodcastNostrEpisodeDetail { naddr });
                     }
                 }
                 None
             }
-            TrackSource::RssPodcast { podcast_id, episode_guid, .. } => {
-                podcast_id
-                    .map(|id| Route::PodcastRssEpisodeDetail {
-                        podcast_id: id.to_string(),
-                        episode_id: urlencoding::encode(episode_guid).to_string(),
-                    })
-            }
+            TrackSource::RssPodcast {
+                podcast_id,
+                episode_guid,
+                ..
+            } => podcast_id.map(|id| Route::PodcastRssEpisodeDetail {
+                podcast_id: id.to_string(),
+                episode_id: urlencoding::encode(episode_guid).to_string(),
+            }),
             _ => None,
         }
     }
     /// Get route to the track detail page (for music tracks)
     pub fn get_track_route(&self) -> Option<Route> {
         match &self.source {
-            TrackSource::Wavlake { .. } => {
-                Some(Route::MusicTrackDetail { track_id: self.id.clone() })
-            }
+            TrackSource::Wavlake { .. } => Some(Route::MusicTrackDetail {
+                track_id: self.id.clone(),
+            }),
             TrackSource::Nostr { pubkey, d_tag, .. } => {
                 use nostr::prelude::*;
                 if let Ok(pk) = PublicKey::from_hex(pubkey) {
@@ -233,54 +217,46 @@ impl MusicTrack {
                 }
                 None
             }
-            TrackSource::RssMusic { feed_id, episode_id, .. } => {
-                Some(Route::MusicTrackDetail {
-                    track_id: format!("rss:{}:{}", feed_id, episode_id),
-                })
-            }
+            TrackSource::RssMusic {
+                feed_id,
+                episode_id,
+                ..
+            } => Some(Route::MusicTrackDetail {
+                track_id: format!("rss:{}:{}", feed_id, episode_id),
+            }),
             // Podcasts and radio use their own detail pages
             _ => None,
         }
     }
     /// Create MusicTrack from RSS music album track (Podcast Index medium="music")
-    pub fn from_rss_music_track(
-        episode: &PodcastIndexEpisode,
-        feed: &PodcastFeed,
-    ) -> Self {
-        let value_block = episode
-            .value
-            .as_ref()
-            .or(feed.value.as_ref())
-            .map(|v| {
-                let model = v.model.as_ref();
-                crate::utils::podcast::ValueBlock {
-                    value_type: model
-                        .and_then(|m| m.model_type.clone())
-                        .unwrap_or_else(|| "lightning".to_string()),
-                    method: model
-                        .and_then(|m| m.method.clone())
-                        .unwrap_or_else(|| "keysend".to_string()),
-                    suggested: model
-                        .and_then(|m| m.suggested.as_ref())
-                        .and_then(|s| s.parse().ok()),
-                    recipients: v
-                        .destinations
-                        .iter()
-                        .map(|d| crate::utils::podcast::ValueRecipient {
-                            name: d.name.clone(),
-                            recipient_type: d
-                                .dest_type
-                                .clone()
-                                .unwrap_or_else(|| "node".to_string()),
-                            address: d.address.clone().unwrap_or_default(),
-                            custom_key: None,
-                            custom_value: None,
-                            split: d.split.unwrap_or(100),
-                            fee: None,
-                        })
-                        .collect(),
-                }
-            });
+    pub fn from_rss_music_track(episode: &PodcastIndexEpisode, feed: &PodcastFeed) -> Self {
+        let value_block = episode.value.as_ref().or(feed.value.as_ref()).map(|v| {
+            let model = v.model.as_ref();
+            crate::utils::podcast::ValueBlock {
+                value_type: model
+                    .and_then(|m| m.model_type.clone())
+                    .unwrap_or_else(|| "lightning".to_string()),
+                method: model
+                    .and_then(|m| m.method.clone())
+                    .unwrap_or_else(|| "keysend".to_string()),
+                suggested: model
+                    .and_then(|m| m.suggested.as_ref())
+                    .and_then(|s| s.parse().ok()),
+                recipients: v
+                    .destinations
+                    .iter()
+                    .map(|d| crate::utils::podcast::ValueRecipient {
+                        name: d.name.clone(),
+                        recipient_type: d.dest_type.clone().unwrap_or_else(|| "node".to_string()),
+                        address: d.address.clone().unwrap_or_default(),
+                        custom_key: None,
+                        custom_value: None,
+                        split: d.split.unwrap_or(100),
+                        fee: None,
+                    })
+                    .collect(),
+            }
+        });
         Self {
             id: episode.id.to_string(),
             title: episode.title.clone(),
@@ -372,9 +348,7 @@ impl Default for MusicPlayerState {
     }
 }
 /// Global music player state
-pub static MUSIC_PLAYER: GlobalSignal<MusicPlayerState> = Signal::global(
-    MusicPlayerState::default,
-);
+pub static MUSIC_PLAYER: GlobalSignal<MusicPlayerState> = Signal::global(MusicPlayerState::default);
 const STORAGE_KEY_VOLUME: &str = "music_player_volume";
 const STORAGE_KEY_MUTED: &str = "music_player_muted";
 const STORAGE_KEY_PLAYBACK_SPEED: &str = "music_player_playback_speed";
@@ -415,14 +389,11 @@ async fn publish_music_status(track: &MusicTrack) {
             use nostr::prelude::*;
             if let Ok(pk) = PublicKey::from_hex(pubkey) {
                 let coord = nostr::nips::nip01::Coordinate::new(
-                        nostr::Kind::from(crate::stores::nostr_music::KIND_MUSIC_TRACK),
-                        pk,
-                    )
-                    .identifier(d_tag);
-                let nip19_coord = nostr::nips::nip19::Nip19Coordinate::new(
-                    coord,
-                    vec![],
-                );
+                    nostr::Kind::from(crate::stores::nostr_music::KIND_MUSIC_TRACK),
+                    pk,
+                )
+                .identifier(d_tag);
+                let nip19_coord = nostr::nips::nip19::Nip19Coordinate::new(coord, vec![]);
                 if let Ok(naddr) = nip19_coord.to_bech32() {
                     format!("nostr:{}", naddr)
                 } else {
@@ -445,46 +416,41 @@ async fn publish_music_status(track: &MusicTrack) {
         TrackSource::NostrPodcast { pubkey, d_tag, .. } => {
             use nostr::prelude::*;
             if let Ok(pk) = PublicKey::from_hex(pubkey) {
-                let coord = nostr::nips::nip01::Coordinate::new(
-                        nostr::Kind::from(30054),
-                        pk,
-                    )
+                let coord = nostr::nips::nip01::Coordinate::new(nostr::Kind::from(30054), pk)
                     .identifier(d_tag);
-                let nip19_coord = nostr::nips::nip19::Nip19Coordinate::new(
-                    coord,
-                    vec![],
-                );
+                let nip19_coord = nostr::nips::nip19::Nip19Coordinate::new(coord, vec![]);
                 if let Ok(naddr) = nip19_coord.to_bech32() {
                     format!("https://nostr.blue/podcast/nostr/episode/{}", naddr)
                 } else {
                     format!(
                         "https://nostr.blue/podcast/nostr/episode/30054:{}:{}",
-                        pubkey,
-                        d_tag,
+                        pubkey, d_tag,
                     )
                 }
             } else {
                 format!(
                     "https://nostr.blue/podcast/nostr/episode/30054:{}:{}",
-                    pubkey,
-                    d_tag,
+                    pubkey, d_tag,
                 )
             }
         }
-        TrackSource::RssPodcast { podcast_id, feed_url, episode_guid, .. } => {
-            match podcast_id {
-                Some(id) => format!(
-                    "https://nostr.blue/podcast/rss/episode/{}/{}",
-                    id,
-                    urlencoding::encode(episode_guid),
-                ),
-                None => format!(
-                    "https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
-                    urlencoding::encode(feed_url),
-                    urlencoding::encode(episode_guid),
-                ),
-            }
-        }
+        TrackSource::RssPodcast {
+            podcast_id,
+            feed_url,
+            episode_guid,
+            ..
+        } => match podcast_id {
+            Some(id) => format!(
+                "https://nostr.blue/podcast/rss/episode/{}/{}",
+                id,
+                urlencoding::encode(episode_guid),
+            ),
+            None => format!(
+                "https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
+                urlencoding::encode(feed_url),
+                urlencoding::encode(episode_guid),
+            ),
+        },
         TrackSource::RssMusic { feed_id, .. } => {
             format!("https://nostr.blue/music/rss/album/{}", feed_id)
         }
@@ -499,16 +465,17 @@ async fn publish_music_status(track: &MusicTrack) {
     };
     if let Some(duration) = track.duration {
         if duration > 0 {
-            status.expiration = Some(
-                Timestamp::now() + std::time::Duration::from_secs(duration as u64),
-            );
+            status.expiration =
+                Some(Timestamp::now() + std::time::Duration::from_secs(duration as u64));
         }
     }
     let builder = EventBuilder::live_status(status, content);
     match client.send_event_builder(builder).await {
         Ok(event_id) => {
             log::info!(
-                "Music status published: {} (event: {})", track.title, event_id.to_hex()
+                "Music status published: {} (event: {})",
+                track.title,
+                event_id.to_hex()
             );
         }
         Err(e) => {
@@ -574,7 +541,7 @@ pub fn play_or_toggle_track(
         state
             .current_track
             .as_ref()
-            .map(|current| current.id == track.id && state.is_playing)
+            .map(|current| current.id == track.id)
             .unwrap_or(false)
     };
     if should_toggle {
@@ -683,7 +650,9 @@ pub fn set_volume(volume: f64) {
             state.playback_error = Some(format!("Android playback failed: {}", e));
         }
     }
-    let gen = VOLUME_PERSIST_GEN.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
+    let gen = VOLUME_PERSIST_GEN
+        .fetch_add(1, Ordering::SeqCst)
+        .wrapping_add(1);
     crate::platform::spawn::spawn_detached(async move {
         crate::platform::timer::sleep_ms(300).await;
         if VOLUME_PERSIST_GEN.load(Ordering::SeqCst) != gen {
@@ -794,72 +763,99 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
         tags.push(Tag::custom(TagKind::custom("image"), vec![image.clone()]));
     }
     match &track.source {
-        TrackSource::Nostr { coordinate, pubkey, d_tag } => {
+        TrackSource::Nostr {
+            coordinate,
+            pubkey,
+            d_tag,
+        } => {
             let pk = nostr_sdk::PublicKey::from_hex(pubkey)
                 .map_err(|e| format!("Invalid pubkey: {}", e))?;
-            let coord = Coordinate::new(Kind::from(KIND_MUSIC_TRACK), pk)
-                .identifier(d_tag);
+            let coord = Coordinate::new(Kind::from(KIND_MUSIC_TRACK), pk).identifier(d_tag);
             tags.push(Tag::coordinate(coord, None));
-            tags.push(
-                Tag::custom(TagKind::custom("k"), vec![KIND_MUSIC_TRACK.to_string()]),
-            );
+            tags.push(Tag::custom(
+                TagKind::custom("k"),
+                vec![KIND_MUSIC_TRACK.to_string()],
+            ));
             log::debug!("Voting for Nostr track: {}", coordinate);
         }
         TrackSource::Wavlake { .. } => {
             let track_url = format!("https://wavlake.com/track/{}", track.id);
             tags.push(Tag::custom(TagKind::custom("r"), vec![track_url]));
-            tags.push(Tag::custom(TagKind::custom("k"), vec!["wavlake".to_string()]));
-            tags.push(Tag::custom(TagKind::custom("track_id"), vec![track.id.clone()]));
+            tags.push(Tag::custom(
+                TagKind::custom("k"),
+                vec!["wavlake".to_string()],
+            ));
+            tags.push(Tag::custom(
+                TagKind::custom("track_id"),
+                vec![track.id.clone()],
+            ));
             log::debug!("Voting for Wavlake track: {}", track.id);
         }
-        TrackSource::NostrPodcast { coordinate, pubkey, d_tag, .. } => {
+        TrackSource::NostrPodcast {
+            coordinate,
+            pubkey,
+            d_tag,
+            ..
+        } => {
             let pk = nostr_sdk::PublicKey::from_hex(pubkey)
                 .map_err(|e| format!("Invalid pubkey: {}", e))?;
-            let coord = Coordinate::new(
-                    Kind::from(crate::utils::podcast::KIND_PODCAST_EPISODE),
-                    pk,
-                )
-                .identifier(d_tag);
+            let coord =
+                Coordinate::new(Kind::from(crate::utils::podcast::KIND_PODCAST_EPISODE), pk)
+                    .identifier(d_tag);
             tags.push(Tag::coordinate(coord, None));
-            tags.push(
-                Tag::custom(
-                    TagKind::custom("k"),
-                    vec![crate::utils::podcast::KIND_PODCAST_EPISODE.to_string()],
-                ),
-            );
+            tags.push(Tag::custom(
+                TagKind::custom("k"),
+                vec![crate::utils::podcast::KIND_PODCAST_EPISODE.to_string()],
+            ));
             log::debug!("Voting for Nostr podcast: {}", coordinate);
         }
-        TrackSource::RssPodcast { feed_url, episode_guid, .. } => {
+        TrackSource::RssPodcast {
+            feed_url,
+            episode_guid,
+            ..
+        } => {
             tags.push(Tag::custom(TagKind::custom("r"), vec![feed_url.clone()]));
-            tags.push(Tag::custom(TagKind::custom("k"), vec!["podcast".to_string()]));
-            tags.push(
-                Tag::custom(TagKind::custom("episode_guid"), vec![episode_guid.clone()]),
-            );
+            tags.push(Tag::custom(
+                TagKind::custom("k"),
+                vec!["podcast".to_string()],
+            ));
+            tags.push(Tag::custom(
+                TagKind::custom("episode_guid"),
+                vec![episode_guid.clone()],
+            ));
             log::debug!("Voting for RSS podcast episode: {}", episode_guid);
         }
-        TrackSource::RssMusic { feed_url, episode_id, .. } => {
+        TrackSource::RssMusic {
+            feed_url,
+            episode_id,
+            ..
+        } => {
             tags.push(Tag::custom(TagKind::custom("r"), vec![feed_url.clone()]));
-            tags.push(Tag::custom(TagKind::custom("k"), vec!["rss-music".to_string()]));
-            tags.push(
-                Tag::custom(TagKind::custom("episode_id"), vec![episode_id.to_string()]),
-            );
+            tags.push(Tag::custom(
+                TagKind::custom("k"),
+                vec!["rss-music".to_string()],
+            ));
+            tags.push(Tag::custom(
+                TagKind::custom("episode_id"),
+                vec![episode_id.to_string()],
+            ));
             log::debug!("Voting for RSS music track: {}", episode_id);
         }
-        TrackSource::Radio { coordinate, pubkey, d_tag, .. } => {
+        TrackSource::Radio {
+            coordinate,
+            pubkey,
+            d_tag,
+            ..
+        } => {
             let pk = nostr_sdk::PublicKey::from_hex(pubkey)
                 .map_err(|e| format!("Invalid pubkey: {}", e))?;
-            let coord = Coordinate::new(
-                    Kind::from(crate::utils::radio::KIND_RADIO_STATION),
-                    pk,
-                )
+            let coord = Coordinate::new(Kind::from(crate::utils::radio::KIND_RADIO_STATION), pk)
                 .identifier(d_tag);
             tags.push(Tag::coordinate(coord, None));
-            tags.push(
-                Tag::custom(
-                    TagKind::custom("k"),
-                    vec![crate::utils::radio::KIND_RADIO_STATION.to_string()],
-                ),
-            );
+            tags.push(Tag::custom(
+                TagKind::custom("k"),
+                vec![crate::utils::radio::KIND_RADIO_STATION.to_string()],
+            ));
             log::debug!("Voting for radio station: {}", coordinate);
         }
     }
@@ -867,7 +863,9 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
     match client.send_event_builder(builder).await {
         Ok(output) => {
             log::info!(
-                "Vote submitted for '{}' by {} (event: {})", track.title, track.artist,
+                "Vote submitted for '{}' by {} (event: {})",
+                track.title,
+                track.artist,
                 output.id().to_hex()
             );
             Ok(())
@@ -927,9 +925,7 @@ pub fn try_next_stream() -> bool {
     }
     let next_idx = state.current_stream_index + 1;
     if next_idx >= state.available_streams.len() {
-        state.playback_error = Some(
-            "All streams failed - station may be offline".to_string(),
-        );
+        state.playback_error = Some("All streams failed - station may be offline".to_string());
         return false;
     }
     let new_url = state.available_streams[next_idx].clone();

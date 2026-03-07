@@ -37,9 +37,15 @@ pub async fn fetch_url_metadata(url: String) -> Result<UrlMetadata, String> {
     let html = fetch_html_native(&full_url).await?;
     let metadata = parse_html_metadata(&html, full_url);
     log::info!(
-        "Extracted metadata: title={:?}, description={:?}, image={:?}", metadata.title
-        .as_ref().map(| s | s.chars().take(50).collect::< String > ()), metadata
-        .description.as_ref().map(| s | s.chars().take(50).collect::< String > ()),
+        "Extracted metadata: title={:?}, description={:?}, image={:?}",
+        metadata
+            .title
+            .as_ref()
+            .map(|s| s.chars().take(50).collect::<String>()),
+        metadata
+            .description
+            .as_ref()
+            .map(|s| s.chars().take(50).collect::<String>()),
         metadata.image.is_some()
     );
     Ok(metadata)
@@ -56,7 +62,10 @@ async fn fetch_html_wasm(url: &str) -> Result<String, String> {
     if !response.status().is_success() {
         return Err(format!("HTTP error: {}", response.status()));
     }
-    response.text().await.map_err(|e| format!("Failed to read response body: {}", e))
+    response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response body: {}", e))
 }
 /// Fetch HTML content using reqwest (native)
 #[cfg(not(feature = "web"))]
@@ -70,7 +79,10 @@ async fn fetch_html_native(url: &str) -> Result<String, String> {
     if !response.status().is_success() {
         return Err(format!("HTTP error: {}", response.status()));
     }
-    response.text().await.map_err(|e| format!("Failed to read response body: {}", e))
+    response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response body: {}", e))
 }
 /// Parse HTML and extract metadata from meta tags
 fn parse_html_metadata(html: &str, url: String) -> UrlMetadata {
@@ -174,7 +186,11 @@ fn extract_meta_tags(html: &str) -> Vec<MetaTag> {
                     let property = extract_attribute(tag_content, "property");
                     let content = extract_attribute(tag_content, "content");
                     if name.is_some() || property.is_some() {
-                        tags.push(MetaTag { name, property, content });
+                        tags.push(MetaTag {
+                            name,
+                            property,
+                            content,
+                        });
                     }
                     pos = meta_pos + offset + 1;
                 } else {
@@ -266,9 +282,7 @@ fn clean_text(text: &str) -> String {
     while let Some(ch) = chars.next() {
         if ch == '&' && chars.peek() == Some(&'#') {
             let hash_ch = chars.next().unwrap();
-            let (is_hex, hex_ch) = if chars.peek() == Some(&'x')
-                || chars.peek() == Some(&'X')
-            {
+            let (is_hex, hex_ch) = if chars.peek() == Some(&'x') || chars.peek() == Some(&'X') {
                 (true, Some(chars.next().unwrap()))
             } else {
                 (false, None)
@@ -323,8 +337,14 @@ mod tests {
     #[test]
     fn test_extract_attribute() {
         let tag = r#"<meta property="og:title" content="Test Title">"#;
-        assert_eq!(extract_attribute(tag, "property"), Some("og:title".to_string()));
-        assert_eq!(extract_attribute(tag, "content"), Some("Test Title".to_string()));
+        assert_eq!(
+            extract_attribute(tag, "property"),
+            Some("og:title".to_string())
+        );
+        assert_eq!(
+            extract_attribute(tag, "content"),
+            Some("Test Title".to_string())
+        );
     }
     #[test]
     fn test_extract_tag_content() {
@@ -355,7 +375,10 @@ mod tests {
         let metadata = parse_html_metadata(html, "https://example.com".to_string());
         assert_eq!(metadata.title, Some("OG Title".to_string()));
         assert_eq!(metadata.description, Some("OG Description".to_string()));
-        assert_eq!(metadata.image, Some("https://example.com/image.jpg".to_string()));
+        assert_eq!(
+            metadata.image,
+            Some("https://example.com/image.jpg".to_string())
+        );
         assert_eq!(metadata.site_name, Some("Example Site".to_string()));
     }
 }

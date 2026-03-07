@@ -10,8 +10,8 @@ use crate::services::git_hosting::{
 };
 use crate::services::git_types::CommitEntry;
 use crate::stores::nostr_client;
-use crate::utils::{format_commit_date, format_time_ago};
 use crate::utils::nip34::Repository;
+use crate::utils::{format_commit_date, format_time_ago};
 use dioxus::prelude::*;
 
 /// Split a commit message into its first-line title and optional body.
@@ -51,7 +51,9 @@ pub fn CodeRepoCommits(naddr: String) -> Element {
         }
         spawn(async move {
             let result = fetch_repository(&n).await;
-            if *request_gen.peek() != gen { return; }
+            if *request_gen.peek() != gen {
+                return;
+            }
             if let Ok(ref repo) = result {
                 // Try isomorphic-git first (works for ALL repo sources)
                 if git_service::GitService::is_initialized()
@@ -59,40 +61,58 @@ pub fn CodeRepoCommits(naddr: String) -> Element {
                 {
                     match git_service().get_log(repo, None, 50).await {
                         Ok(entries) if !entries.is_empty() => {
-                            if *request_gen.peek() != gen { return; }
+                            if *request_gen.peek() != gen {
+                                return;
+                            }
                             commits_result.set(Some(Ok(CommitData::Git(entries))));
                             repo_result.set(Some(result));
                             return;
                         }
                         Ok(_) => {
-                            log::warn!("git_service get_log returned empty, falling back to GitHub API");
+                            log::warn!(
+                                "git_service get_log returned empty, falling back to GitHub API"
+                            );
                         }
                         Err(e) => {
-                            log::warn!("git_service get_log failed, falling back to GitHub API: {}", e);
+                            log::warn!(
+                                "git_service get_log failed, falling back to GitHub API: {}",
+                                e
+                            );
                         }
                     }
                 }
                 // Fall back to GitHub API for GitHub-hosted repos
                 let mut last_github_err: Option<String> = None;
                 for url in repo.clone.iter().chain(repo.web.iter()) {
-                    if *request_gen.peek() != gen { return; }
+                    if *request_gen.peek() != gen {
+                        return;
+                    }
                     if let Some((owner, repo_name)) = parse_github_url(url) {
                         match fetch_commits(&owner, &repo_name, 30).await {
                             Ok(commits) => {
-                                if *request_gen.peek() != gen { return; }
+                                if *request_gen.peek() != gen {
+                                    return;
+                                }
                                 commits_result.set(Some(Ok(CommitData::GitHub(commits))));
                                 repo_result.set(Some(result));
                                 return;
                             }
                             Err(e) => {
-                                log::warn!("fetch_commits failed for {}/{}: {}", owner, repo_name, e);
+                                log::warn!(
+                                    "fetch_commits failed for {}/{}: {}",
+                                    owner,
+                                    repo_name,
+                                    e
+                                );
                                 last_github_err = Some(e);
                                 continue;
                             }
                         }
                     }
                 }
-                if *request_gen.peek() != gen { return; }
+                if *request_gen.peek() != gen {
+                    return;
+                }
                 let msg = if let Some(err) = last_github_err {
                     format!("GitHub API error: {}. Try cloning the repository first by browsing its files.", err)
                 } else {
@@ -100,10 +120,14 @@ pub fn CodeRepoCommits(naddr: String) -> Element {
                 };
                 commits_result.set(Some(Err(msg)));
             } else if let Err(ref e) = result {
-                if *request_gen.peek() != gen { return; }
+                if *request_gen.peek() != gen {
+                    return;
+                }
                 commits_result.set(Some(Err(format!("Failed to load repository: {}", e))));
             }
-            if *request_gen.peek() != gen { return; }
+            if *request_gen.peek() != gen {
+                return;
+            }
             repo_result.set(Some(result));
         });
     }));

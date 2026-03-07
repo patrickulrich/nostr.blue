@@ -5,8 +5,8 @@ use crate::components::icons::{
     PenSquareIcon,
 };
 use crate::components::{
-    AsciiDocContent, BookPickerModal, BookSelection, CitationPickerModal,
-    CitationSelection, WikilinksList,
+    AsciiDocContent, BookPickerModal, BookSelection, CitationPickerModal, CitationSelection,
+    WikilinksList,
 };
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, wiki_store};
@@ -91,8 +91,7 @@ pub fn WikiNew() -> Element {
             if let Some(document) = window.document() {
                 if let Some(elem) = document.get_element_by_id("wiki-content-editor") {
                     if let Some(textarea) = elem.dyn_ref::<HtmlTextAreaElement>() {
-                        let pos = textarea.selection_start().ok().flatten().unwrap_or(0)
-                            as usize;
+                        let pos = textarea.selection_start().ok().flatten().unwrap_or(0) as usize;
                         cursor_position.set(pos);
                     }
                 }
@@ -105,8 +104,7 @@ pub fn WikiNew() -> Element {
             if let Some(document) = window.document() {
                 if let Some(elem) = document.get_element_by_id("wiki-content-editor") {
                     if let Some(textarea) = elem.dyn_ref::<HtmlTextAreaElement>() {
-                        let pos = textarea.selection_start().ok().flatten().unwrap_or(0)
-                            as usize;
+                        let pos = textarea.selection_start().ok().flatten().unwrap_or(0) as usize;
                         cursor_position.set(pos);
                     }
                 }
@@ -117,9 +115,7 @@ pub fn WikiNew() -> Element {
         let current = content.read().clone();
         let pos = *cursor_position.read();
         let prefix = inline_trigger_prefix.read().clone();
-        let (adjusted_content, adjusted_pos) = if !prefix.is_empty()
-            && current.ends_with(&prefix)
-        {
+        let (adjusted_content, adjusted_pos) = if !prefix.is_empty() && current.ends_with(&prefix) {
             let new_content = current[..current.len() - prefix.len()].to_string();
             let new_pos = pos.saturating_sub(prefix.len());
             inline_trigger_prefix.set(String::new());
@@ -127,19 +123,23 @@ pub fn WikiNew() -> Element {
         } else {
             (current, pos)
         };
-        let (before, after) = adjusted_content
-            .split_at(adjusted_pos.min(adjusted_content.len()));
+        let (before, after) = adjusted_content.split_at(adjusted_pos.min(adjusted_content.len()));
         let new_content = format!("{}{}{}", before, text, after);
         content.set(new_content);
     };
     let handle_citation_selected = move |selection: CitationSelection| {
         log::info!(
-            "Inserting citation: {} (style: {:?})", selection.identifier, selection.style
+            "Inserting citation: {} (style: {:?})",
+            selection.identifier,
+            selection.style
         );
         insert_at_cursor(&selection.markup);
     };
     let handle_book_selected = move |selection: BookSelection| {
-        log::info!("Inserting book reference: {}", selection.reference.display_text());
+        log::info!(
+            "Inserting book reference: {}",
+            selection.reference.display_text()
+        );
         insert_at_cursor(&selection.markup);
     };
     let handle_submit = move |_| {
@@ -172,12 +172,12 @@ pub fn WikiNew() -> Element {
                 Some(summary_val)
             };
             match wiki_store::publish_wiki_page(
-                    &title_val,
-                    &content_val,
-                    Some(&identifier_val),
-                    summary_opt.as_deref(),
-                )
-                .await
+                &title_val,
+                &content_val,
+                Some(&identifier_val),
+                summary_opt.as_deref(),
+            )
+            .await
             {
                 Ok(naddr) => {
                     log::info!("Published wiki page: {}", naddr);

@@ -54,11 +54,7 @@ mod tests {
         let pk2 = PublicKey::from_slice(&[2u8; 32]).unwrap();
         let npub1 = pk1.to_bech32().unwrap();
         let npub2 = pk2.to_bech32().unwrap();
-        let content = format!(
-            "Hey nostr:{} and nostr:{}, check this out!",
-            npub1,
-            npub2,
-        );
+        let content = format!("Hey nostr:{} and nostr:{}, check this out!", npub1, npub2,);
         let pubkeys = extract_mentioned_pubkeys(&content);
         assert_eq!(pubkeys.len(), 2);
         assert!(pubkeys.contains(&pk1));
@@ -68,11 +64,7 @@ mod tests {
     fn test_extract_duplicate_mentions() {
         let pk = PublicKey::from_slice(&[3u8; 32]).unwrap();
         let npub = pk.to_bech32().unwrap();
-        let content = format!(
-            "nostr:{} said something, and nostr:{} replied",
-            npub,
-            npub,
-        );
+        let content = format!("nostr:{} said something, and nostr:{} replied", npub, npub,);
         let pubkeys = extract_mentioned_pubkeys(&content);
         assert_eq!(pubkeys.len(), 1);
         assert_eq!(pubkeys[0], pk);
