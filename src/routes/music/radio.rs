@@ -2,6 +2,12 @@ use crate::routes::Route;
 use crate::services::wavlake::WavlakeAPI;
 use crate::stores::music_player::{self, MusicTrack};
 use dioxus::prelude::*;
+
+#[cfg(feature = "web")]
+use js_sys;
+#[cfg(not(feature = "web"))]
+use rand::{thread_rng, Rng};
+
 #[component]
 pub fn MusicRadio() -> Element {
     let mut selected_genre = use_signal(|| String::from("all"));
@@ -52,8 +58,21 @@ pub fn MusicRadio() -> Element {
                             .into_iter()
                             .map(|t| t.into())
                             .collect();
-                        use js_sys::Date;
-                        let seed = (Date::now() as u64) as usize;
+                        #[cfg(feature = "web")]
+                        let seed = (js_sys::Date::now() as u64) as usize;
+                        #[cfg(not(feature = "web"))]
+                        let seed = match std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                        {
+                            Ok(d) => d.as_millis() as usize,
+                            Err(e) => {
+                                log::warn!(
+                                    "Failed to get system time for shuffle seed: {}, using random fallback",
+                                    e
+                                );
+                                thread_rng().gen::<usize>()
+                            }
+                        };
                         for i in (1..music_tracks.len()).rev() {
                             let j = seed.wrapping_add(i) % (i + 1);
                             music_tracks.swap(i, j);

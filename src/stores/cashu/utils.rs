@@ -30,8 +30,7 @@ pub fn mint_matches(stored_mint: &str, normalized_mint: &str) -> bool {
 }
 /// Get current timestamp in seconds
 pub fn now_secs() -> u64 {
-    #[cfg(target_arch = "wasm32")] { js_sys::Date::now() as u64 / 1000 }
-    #[cfg(not(target_arch = "wasm32"))] { chrono::Utc::now().timestamp() as u64 }
+    crate::platform::timestamp::now_secs()
 }
 /// Get current timestamp using chrono (for non-WASM contexts)
 pub fn chrono_now_secs() -> u64 {
@@ -215,14 +214,7 @@ where
                         return Err(e);
                     }
                     heal_attempt += 1;
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        gloo_timers::future::TimeoutFuture::new(500).await;
-                    }
-                    #[cfg(not(target_arch = "wasm32"))]
-                    {
-                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                    }
+                    crate::platform::timer::sleep_ms(500).await;
                 } else {
                     return Err(e);
                 }

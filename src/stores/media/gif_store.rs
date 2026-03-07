@@ -416,6 +416,13 @@ pub async fn publish_gif_event(
                 .await
                 .map_err(|e| format!("Failed to sign event: {}", e))?
         }
+        #[cfg(feature = "mobile")]
+        crate::stores::signer::SignerType::AndroidSigner(android_signer) => {
+            builder
+                .sign(android_signer.as_ref())
+                .await
+                .map_err(|e| format!("Failed to sign event: {}", e))?
+        }
     };
     let event_id = event.id.to_string();
     log::info!("Created GIF event: {}", event_id);

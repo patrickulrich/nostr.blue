@@ -121,14 +121,14 @@ pub fn cache_event(event: CalendarEvent) {
 fn get_date_key(time: &EventTime) -> String {
     match time {
         EventTime::Date(d) => d.clone(),
-        EventTime::Timestamp(ts) => {
-            let date = js_sys::Date::new(&(*ts as f64 * 1000.0).into());
-            format!(
-                "{:04}-{:02}-{:02}",
-                date.get_full_year(),
-                date.get_month() + 1,
-                date.get_date(),
-            )
+        EventTime::Timestamp(ts) | EventTime::LocalDateTime { timestamp: ts, .. } => {
+            use chrono::{TimeZone, Utc};
+            const MAX_TIMESTAMP: i64 = 253_402_300_799; // Year 9999
+            let ts_i64 = i64::try_from(*ts).unwrap_or(MAX_TIMESTAMP).min(MAX_TIMESTAMP);
+            let Some(dt) = Utc.timestamp_opt(ts_i64, 0).single() else {
+                return String::new();
+            };
+            dt.format("%Y-%m-%d").to_string()
         }
     }
 }
@@ -449,7 +449,7 @@ pub struct CalendarStats {
 }
 /// Get calendar statistics
 pub fn get_calendar_stats() -> CalendarStats {
-    let now_secs = (js_sys::Date::now() / 1000.0) as u64;
+    let now_secs = crate::platform::timestamp::now_secs();
     let cal_cache = CALENDAR_EVENTS_CACHE.read();
     let live_cache = LIVE_EVENTS_CACHE.read();
     let hashtags = ALL_EVENT_HASHTAGS.read();

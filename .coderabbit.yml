@@ -2,7 +2,7 @@
 # A Nostr protocol client built with Rust and Dioxus
 
 # Global settings
-language: "en"
+language: "en-US"
 early_access: false
 
 # Customize AI personality and expertise
@@ -39,6 +39,11 @@ reviews:
     - "!**/package-lock.json"
     - "!**/Cargo.lock"
 
+    # Android build artifacts
+    - "!**/android/app/build/**"
+    - "!**/android/.gradle/**"
+    - "!**/android/.idea/**"
+
     # Configuration files that rarely need review
     - "!**/*.md"
     - "!.gitignore"
@@ -58,57 +63,65 @@ reviews:
   path_instructions:
     - path: "**/*.rs"
       instructions: |
-        You are reviewing Rust code for a Nostr client built with Dioxus and WebAssembly.
+        You are reviewing Rust code for a Nostr client built with Dioxus. This project targets **multiple platforms**: WebAssembly (browser), Android (mobile), and desktop.
+
         You have deep expertise in:
-        - **Nostr Protocol**: NIPs (Nostr Implementation Possibilities), event types, relay communication, and cryptographic signatures
+        - **Nostr Protocol**: NIPs, event types, relay communication, and cryptographic signatures
         - **nostr-sdk**: Rust SDK for Nostr protocol implementation
-        - **WebAssembly (WASM)**: Browser-based Rust applications, WASM-bindgen patterns, and performance considerations
-        - **Dioxus Framework**: Component patterns, reactive state management, hooks (use_signal, use_memo, use_effect), routing, and SSR
+        - **Multi-platform Rust**:
+          - **WASM**: Browser-based applications, WASM-bindgen, IndexedDB
+          - **Native/Desktop**: tokio runtime, file I/O, native databases
+          - **Android/Mobile**: JNI bridge patterns, ndk-context, Android Activity lifecycle
+        - **Dioxus Framework**: Component patterns, reactive state management, hooks (use_signal, use_memo, use_effect), routing
         - **Async Rust**: Tokio runtime, async/await patterns, futures, and concurrency primitives
-        - **Cashu/Ecash Protocol**: CDK (Cashu Development Kit) integration, mint/melt operations, quote lifecycle, blind signatures, and proof management
-        - **Browser Storage**: IndexedDB patterns for persistent state, atomic transactions, and database trait implementations
+        - **Cashu/Ecash Protocol**: CDK integration, mint/melt operations, quote lifecycle, blind signatures
+        - **Dual Storage Architecture**:
+          - **WASM**: IndexedDB via `nostr-indexeddb::WebDatabase` + custom `IndexedDbDatabase` for CDK wallet
+          - **Native**: `nostr-ndb::NdbDatabase` for events + `cdk-sqlite` for wallet + JSON file storage for settings
 
         Thoroughly review the code snippets and suggest improvements for these key areas:
           - **Logic**: Flaws in program logic, edge cases, and algorithmic correctness.
+          - **Platform-Specific Code**: Check for proper use of `#[cfg(feature = "web")]`, `#[cfg(feature = "native")]`, `#[cfg(feature = "mobile")]` to handle platform differences correctly.
           - **Security**: Vulnerabilities, especially:
             - Nostr event validation and signature verification
-            - XSS risks in user-generated content rendering (use the ammonia crate for HTML sanitization)
+            - XSS risks in user-generated content rendering
             - Relay communication and untrusted data handling
             - Cryptographic operations and key management
-            - LocalStorage/IndexedDB data exposure
-            - Private key handling and secure storage
+            - JNI security when communicating with Android signer apps (NIP-55)
           - **Performance**: Bottlenecks, inefficient algorithms, or unnecessary allocations, especially:
             - WASM binary size optimizations (avoid bloat from unused dependencies)
             - Unnecessary clones or allocations (use references where possible)
-            - Database query efficiency (nostr-indexeddb and IndexedDB for CDK wallet)
-            - Rendering performance in Dioxus components (minimize re-renders)
-            - Atomic IndexedDB transactions for wallet operations
-            - Lazy loading and code splitting strategies
+            - Database query efficiency for both IndexedDB (WASM) and nostr-ndb (native)
+            - CDK wallet: atomic IndexedDB transactions (WASM) vs SQLite transactions (native)
+            - Keyset counter persistence: IndexedDB vs SQLite mechanisms
           - **Concurrency**: Potential data races, deadlocks, improper use of async/await, or channel misuse.
           - **Nostr Protocol Compliance**: Correct implementation of NIPs, event structure, and relay communication patterns.
           - **Cashu Protocol Compliance**:
-            - Proper CDK trait implementations (WalletDatabase)
+            - Proper CDK trait implementations (WalletDatabase) for both backends
             - Quote lifecycle management (create → poll → mint/melt → cleanup)
-            - Keyset counter atomicity and persistence to prevent duplicate blinded messages
+            - Keyset counter atomicity and persistence
             - Blind signature handling
             - Proof management and deletion according to NIP-60
           - **Database Correctness**:
-            - Atomic transactions for wallet operations
-            - Proper quote cleanup on both success and failure
-            - Counter persistence across page refresh
+            - **WASM**: IndexedDB atomic transactions, proper quote cleanup
+            - **Native**: SQLite transactions via cdk-sqlite, nostr-ndb usage
+            - Keyset counter persistence across app restarts
             - Race condition prevention in concurrent operations
+          - **Android/Mobile Specific**:
+            - JNI bridge safety (android_signer.rs patterns)
+            - NIP-55 signer integration via ContentResolver and Intents
+            - Android Activity lifecycle handling
+            - Thread safety with jni::objects::JObject and classloaders
           - **WASM Best Practices**:
             - Efficient JavaScript interop
             - Memory management (avoiding leaks)
             - Avoiding panics (use proper error handling)
             - Send+Sync safety in single-threaded WASM contexts
-            - Console logging for debugging
           - **Dioxus Patterns**:
             - Proper use of hooks (use_signal for state, use_memo for derived state)
             - Component lifecycle and re-render optimization
             - Event handlers and user interactions
             - Router integration and navigation
-            - Props and component composition
           - **Error Handling**:
             - Proper use of Result/Option types
             - Error propagation with ? operator
@@ -141,6 +154,16 @@ reviews:
           - Flag any suspicious or unnecessary dependencies
           - Check for duplicate dependencies with different versions
           - Verify nostr-sdk and CDK versions are compatible
+          - **Platform-specific dependencies**:
+            - WASM: wasm-bindgen, web-sys, gloo-*, nostr-indexeddb, indexed_db_futures
+            - Native: nostr-ndb, cdk-sqlite, dirs, tokio with multi-thread runtime
+            - Mobile: jni, ndk-context (must match NDK version)
+            - Desktop: arboard, rfd, dioxus/desktop
+          - **Feature flag dependencies**:
+            - `web`: browser APIs, WASM-specific crates
+            - `native`: shared by mobile + desktop (nostr-ndb, cdk-sqlite, git2)
+            - `mobile`: JNI bindings for Android
+            - `desktop`: desktop-only features
         Only comment on significant issues, not minor version updates.
 
     - path: "**/*.js"
@@ -169,6 +192,37 @@ reviews:
           - Verify responsive design patterns
           - Check for accessibility issues (color contrast, focus styles)
           - Flag unused or redundant styles
+
+    - path: "**/android/**/*.kt"
+      instructions: |
+        Review Kotlin/Android code for the native Android signer integration (NIP-55):
+          - **NIP-55 Signer Implementation**:
+            - ContentResolver queries for get_public_key, sign_event, nip04/nip44 encrypt/decrypt
+            - Intent-based approval flows for first-time signer connections
+            - Proper handling of signer permissions (pre-authorized event kinds)
+          - **Android Lifecycle**:
+            - Activity creation and destruction (onCreate, onDestroy)
+            - Activity instance management and thread safety
+            - Proper synchronization for pending results
+          - **Thread Safety**:
+            - Volatile variables for mutable state shared across threads
+            - Synchronized blocks for Intent state management
+            - Thread-safe polling pattern for signer results
+          - **Security**:
+            - Package name validation for signer apps
+            - Error handling for ContentResolver queries
+            - Protection against malicious signer apps
+          - **Error Handling**:
+            - Graceful handling of signer rejections
+            - Proper null checks for cursor operations
+            - Logging for debugging signer interactions
+          - **Package Manager**:
+            - Querying for installed signer apps via Intent resolution
+            - Proper handling when no signers are installed
+          - **Code Quality**:
+            - Clean separation between MainActivity and signer logic
+            - Proper resource cleanup
+            - Clear documentation of NIP-55 protocol interactions
 
   # Auto-review configuration
   auto_review:

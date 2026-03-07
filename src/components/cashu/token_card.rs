@@ -98,6 +98,7 @@ fn parse_token(token: &str) -> Option<ParsedTokenInfo> {
 pub fn CashuTokenCard(token: String) -> Element {
     let mut claim_state = use_signal(|| ClaimState::Idle);
     let mut copied = use_signal(|| false);
+    let _wallet_error = use_signal(|| None::<String>);
     let toast = consume_toast();
     let has_signer = use_memo(move || *HAS_SIGNER.read());
     let token_for_memo = token.clone();
@@ -133,11 +134,29 @@ pub fn CashuTokenCard(token: String) -> Element {
     };
     let handle_wallet = {
         let token = token.clone();
+        #[allow(unused_variables)]
+        let toast_api = toast;
+        #[allow(unused_variables, unused_mut)]
+        let mut wallet_error = _wallet_error;
         move |e: MouseEvent| {
             e.stop_propagation();
-            if let Some(window) = web_sys::window() {
-                let url = format!("cashu://{}", token);
-                let _ = window.open_with_url_and_target(&url, "_blank");
+            #[cfg(feature = "web")]
+            {
+                if let Some(window) = web_sys::window() {
+                    let url = format!("cashu://{}", token);
+                    let _ = window.open_with_url_and_target(&url, "_blank");
+                }
+            }
+            #[cfg(not(feature = "web"))]
+            {
+                let _ = &token;
+                wallet_error.set(Some("Open wallet not supported on this platform".to_string()));
+                toast_api.error(
+                    "Open wallet not supported on this platform".to_string(),
+                    ToastOptions::new()
+                        .duration(Duration::from_secs(3))
+                        .permanent(false),
+                );
             }
         }
     };
@@ -151,7 +170,7 @@ pub fn CashuTokenCard(token: String) -> Element {
                 match copy_to_clipboard(&token).await {
                     Ok(_) => {
                         copied.set(true);
-                        gloo_timers::future::TimeoutFuture::new(2000).await;
+                        crate::platform::timer::sleep_ms(2000).await;
                         copied.set(false);
                     }
                     Err(e) => {
@@ -240,8 +259,10 @@ pub fn CashuTokenCard(token: String) -> Element {
                         },
                     }
                     button {
-                        class: "px-4 py-2 bg-amber-100 dark:bg-amber-800/50 text-amber-800 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-700/50 rounded-full text-sm font-medium transition",
+                        class: if cfg!(feature = "web") { "px-4 py-2 bg-amber-100 dark:bg-amber-800/50 text-amber-800 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-700/50 rounded-full text-sm font-medium transition" } else { "px-4 py-2 bg-amber-100 dark:bg-amber-800/50 text-amber-800 dark:text-amber-200/50 rounded-full text-sm font-medium transition cursor-not-allowed opacity-50" },
                         onclick: handle_wallet,
+                        disabled: !cfg!(feature = "web"),
+                        title: if cfg!(feature = "web") { "" } else { "Not supported on this platform" },
                         "Wallet"
                     }
                     button {

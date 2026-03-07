@@ -89,14 +89,7 @@ pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {
                     }
                 }
                 redeeming_ids.write().remove(&event_id);
-                #[cfg(target_arch = "wasm32")]
-                {
-                    gloo_timers::future::TimeoutFuture::new(100).await;
-                }
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                }
+                crate::platform::timer::sleep_ms(100).await;
             }
             if error_count == 0 {
                 success_message
@@ -139,7 +132,7 @@ pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {
         .count();
     rsx! {
         div {
-            class: "fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4",
+            class: "fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4",
             onclick: move |_| on_close.call(()),
             div {
                 class: "bg-card border border-border rounded-lg max-w-lg w-full shadow-xl max-h-[80vh] overflow-hidden flex flex-col",

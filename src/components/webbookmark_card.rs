@@ -5,6 +5,11 @@ use crate::stores::webbookmarks::{
 };
 use crate::utils::format_relative_time_or;
 use dioxus::prelude::*;
+use dioxus_primitives::toast::consume_toast;
+#[cfg(not(feature = "web"))]
+use dioxus_primitives::toast::ToastOptions;
+#[cfg(not(feature = "web"))]
+use std::time::Duration;
 use nostr_sdk::Event as NostrEvent;
 #[component]
 pub fn WebBookmarkCard(
@@ -26,6 +31,7 @@ pub fn WebBookmarkCard(
     let deleting = use_signal(|| false);
     let toggling_favorite = use_signal(|| false);
     let mut show_actions = use_signal(|| false);
+    let toast = consume_toast();
     let domain = url.as_ref().map(|u| get_domain(u)).unwrap_or_default();
     let full_url = url
         .as_ref()
@@ -97,17 +103,25 @@ pub fn WebBookmarkCard(
     };
     let handle_open = {
         let full_url_clone = full_url.clone();
+        #[allow(unused_variables)]
+        let toast_api = toast;
         move |_| {
             if let Some(ref url) = full_url_clone {
-                #[cfg(target_arch = "wasm32")]
+                #[cfg(feature = "web")]
                 {
                     if let Some(window) = web_sys::window() {
                         let _ = window.open_with_url_and_target(url, "_blank");
                     }
                 }
-                #[cfg(not(target_arch = "wasm32"))]
+                #[cfg(not(feature = "web"))]
                 {
                     log::info!("Open URL: {}", url);
+                    toast_api.error(
+                        "Open URL not supported on this platform".to_string(),
+                        ToastOptions::new()
+                            .duration(Duration::from_secs(3))
+                            .permanent(false),
+                    );
                 }
             }
         }

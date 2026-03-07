@@ -21,25 +21,25 @@
 //! ```
 use crate::utils::FeedItem;
 use std::collections::HashSet;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use super::feed_cache_db::{
     CachedFeedItem, CachedFeedItemType, FeedCacheDb, FeedCacheMetadata, LruEntry,
 };
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use std::sync::OnceLock;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use nostr_sdk::Event;
 /// Maximum items per feed type
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub const MAX_ITEMS_PER_FEED: usize = 500;
 /// Maximum total items across all feeds
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub const MAX_TOTAL_ITEMS: usize = 5000;
 /// Number of items to evict when over limit
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 const EVICTION_BATCH_SIZE: usize = 100;
 /// Minimum age (in seconds) before item can be evicted
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 const MIN_AGE_BEFORE_EVICTION_SECS: u64 = 3600;
 /// Identifies a specific feed for caching
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -67,7 +67,7 @@ pub enum FeedCacheKey {
 }
 impl FeedCacheKey {
     /// Convert to string key for IndexedDB storage
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     pub fn to_string_key(&self) -> String {
         match self {
             FeedCacheKey::Following { pubkey } => format!("following:{}", pubkey),
@@ -87,26 +87,26 @@ impl FeedCacheKey {
         }
     }
 }
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 pub async fn init_feed_cache() -> Result<(), String> {
     log::warn!("Feed cache not available on native targets");
     Ok(())
 }
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 pub async fn load_cached_feed(
     _key: &FeedCacheKey,
     _limit: usize,
 ) -> Result<Vec<FeedItem>, String> {
     Ok(Vec::new())
 }
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 pub async fn store_feed_items(
     _key: &FeedCacheKey,
     _items: &[FeedItem],
 ) -> Result<(), String> {
     Ok(())
 }
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 pub fn merge_feed_items(cached: Vec<FeedItem>, network: Vec<FeedItem>) -> Vec<FeedItem> {
     let mut seen = HashSet::new();
     let mut merged = Vec::new();
@@ -125,20 +125,20 @@ pub fn merge_feed_items(cached: Vec<FeedItem>, network: Vec<FeedItem>) -> Vec<Fe
     merged.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
     merged
 }
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 pub async fn run_eviction_if_needed() -> Result<usize, String> {
     Ok(0)
 }
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 #[allow(dead_code)]
 pub async fn touch_items(_event_ids: &[String]) -> Result<(), String> {
     Ok(())
 }
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 static FEED_CACHE_DB: OnceLock<FeedCacheDb> = OnceLock::new();
 /// Initialize the feed cache database
 /// Should be called once at application startup
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub async fn init_feed_cache() -> Result<(), String> {
     if FEED_CACHE_DB.get().is_some() {
         return Ok(());
@@ -149,12 +149,12 @@ pub async fn init_feed_cache() -> Result<(), String> {
     Ok(())
 }
 /// Get the feed cache database instance
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 fn get_db() -> Option<&'static FeedCacheDb> {
     FEED_CACHE_DB.get()
 }
 /// Load cached feed items for instant display
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub async fn load_cached_feed(
     key: &FeedCacheKey,
     limit: usize,
@@ -229,7 +229,7 @@ pub async fn load_cached_feed(
     Ok(feed_items)
 }
 /// Store feed items in cache
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub async fn store_feed_items(
     key: &FeedCacheKey,
     items: &[FeedItem],
@@ -294,7 +294,7 @@ pub async fn store_feed_items(
     Ok(())
 }
 /// Merge cached items with network items, deduplicating by event ID
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub fn merge_feed_items(cached: Vec<FeedItem>, network: Vec<FeedItem>) -> Vec<FeedItem> {
     let mut seen = HashSet::new();
     let mut merged = Vec::new();
@@ -314,7 +314,7 @@ pub fn merge_feed_items(cached: Vec<FeedItem>, network: Vec<FeedItem>) -> Vec<Fe
     merged
 }
 /// Run LRU eviction if cache exceeds limits
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub async fn run_eviction_if_needed() -> Result<usize, String> {
     let db = match get_db() {
         Some(db) => db,
@@ -369,7 +369,7 @@ pub async fn run_eviction_if_needed() -> Result<usize, String> {
     Ok(evicted)
 }
 /// Update LRU timestamps for displayed items
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 #[allow(dead_code)]
 pub async fn touch_items(event_ids: &[String]) -> Result<(), String> {
     let db = match get_db() {
@@ -382,7 +382,7 @@ pub async fn touch_items(event_ids: &[String]) -> Result<(), String> {
     }
     Ok(())
 }
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 fn current_timestamp() -> u64 {
     use web_sys::js_sys::Date;
     (Date::now() / 1000.0) as u64

@@ -51,7 +51,7 @@ pub fn BadgeDetailModal(
             }
             // Spawn new timer
             let task = spawn(async move {
-                gloo_timers::future::TimeoutFuture::new(10_000).await;
+                crate::platform::timer::sleep_ms(10_000).await;
                 // Use peek() in async to avoid subscription
                 if *processing_state.peek() != ProcessingState::Idle {
                     log::warn!("Processing state timed out, resetting to Idle");

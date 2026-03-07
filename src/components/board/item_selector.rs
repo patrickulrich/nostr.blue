@@ -79,11 +79,8 @@ pub fn PinToBoardModal(props: PinToBoardModalProps) -> Element {
                     if let Some(handler) = on_success {
                         handler.call(());
                     }
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        gloo_timers::future::TimeoutFuture::new(1500).await;
-                        on_close.call(());
-                    }
+                    crate::platform::timer::sleep_ms(1500).await;
+                    on_close.call(());
                 }
                 Err(e) => {
                     log::error!("Failed to publish pin: {}", e);
@@ -102,7 +99,7 @@ pub fn PinToBoardModal(props: PinToBoardModalProps) -> Element {
                 class: "bg-background border border-border rounded-lg p-6 max-w-md mx-4 w-full max-h-[80vh] overflow-hidden flex flex-col",
                 tabindex: "-1",
                 onmounted: move |_evt| {
-                    #[cfg(target_arch = "wasm32")]
+                    #[cfg(feature = "web")]
                     {
                         if let Some(html_element) = _evt.data().downcast::<web_sys::HtmlElement>() {
                             let _ = html_element.focus();

@@ -4,10 +4,18 @@ use stores::{
     auth_store, cashu, feed_cache, music_player, nostr_client, nwc_store,
     reactions_store, relay, settings_store, shop_store, sidebar_store, theme_store,
 };
+
+#[cfg(all(feature = "web", feature = "native"))]
+compile_error!("Cannot enable both 'web' and 'native' features simultaneously");
+
+#[cfg(not(any(feature = "web", feature = "native")))]
+compile_error!("Must enable either 'web' or 'native' feature");
+
 mod components;
 mod context;
 mod error;
 mod hooks;
+pub mod platform;
 mod routes;
 mod services;
 mod stores;
@@ -15,10 +23,16 @@ mod utils;
 pub use error::{NostrBlueError, Result};
 use components::toast::ToastProvider;
 fn main() {
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
         console_error_panic_hook::set_once();
         wasm_logger::init(wasm_logger::Config::new(log::Level::Info));
+    }
+    #[cfg(feature = "native")]
+    {
+        let _ = env_logger::Builder::from_default_env()
+            .filter_level(log::LevelFilter::Info)
+            .try_init();
     }
     log::info!("Starting nostr.blue Rust client");
     dioxus::launch(App);

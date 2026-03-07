@@ -51,6 +51,9 @@ yarn-error.log*
 # Screenshots
 *.png
 
+# Android build output
+*.apk
+
 # Generated assets
 /assets/tailwind.css
 /public/tailwind.css

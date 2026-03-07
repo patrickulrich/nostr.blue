@@ -839,7 +839,7 @@ where
     let max_polls = 60;
     for poll_count in 0..max_polls {
         if poll_count > 0 {
-            gloo_timers::future::TimeoutFuture::new(poll_interval_ms).await;
+            crate::platform::timer::sleep_ms(poll_interval_ms).await;
         }
         match cashu_ws::poll_proof_states(&mint_url, y_values.clone()).await {
             Ok(states) => {

@@ -2,7 +2,7 @@
 /// Stores user settings on Nostr relays using kind 30078 events
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
-use gloo_storage::Storage;
+use crate::platform::storage;
 use nostr_sdk::{EventBuilder, Filter, FromBech32, Kind, Tag};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -54,11 +54,11 @@ pub static SETTINGS_LOADING: GlobalSignal<bool> = Signal::global(|| false);
 pub static SETTINGS_ERROR: GlobalSignal<Option<String>> = Signal::global(|| None);
 /// Load cached settings from localStorage (synchronous)
 fn load_cached_settings() -> Option<AppSettings> {
-    gloo_storage::LocalStorage::get::<AppSettings>(SETTINGS_LOCAL_STORAGE_KEY).ok()
+    storage::get::<AppSettings>(SETTINGS_LOCAL_STORAGE_KEY).ok()
 }
 /// Save settings to localStorage cache
 fn cache_settings(settings: &AppSettings) {
-    let _ = gloo_storage::LocalStorage::set(SETTINGS_LOCAL_STORAGE_KEY, settings);
+    let _ = storage::set(SETTINGS_LOCAL_STORAGE_KEY, settings);
 }
 /// Initialize settings from localStorage cache (synchronous, for instant UI)
 /// Call this during app init BEFORE async client initialization

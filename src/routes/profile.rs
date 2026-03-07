@@ -16,6 +16,7 @@ use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 use std::collections::HashMap;
 use std::time::Duration;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 #[derive(Clone, PartialEq, Debug, Eq, Hash)]
 enum MediaSubTab {
@@ -1221,6 +1222,7 @@ pub fn Profile(pubkey: String) -> Element {
                                 button {
                                     class: "px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition",
                                     onclick: move |_| {
+                                        #[cfg(feature = "web")]
                                         if let Ok(pk) = PublicKey::from_bech32(&pubkey_for_info)
                                             .or_else(|_| PublicKey::from_hex(&pubkey_for_info))
                                         {
@@ -1245,6 +1247,7 @@ pub fn Profile(pubkey: String) -> Element {
                                         button {
                                             class: "px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition",
                                             onclick: move |_| {
+                                                #[cfg(feature = "web")]
                                                 if let Some(metadata) = profile_data.read().as_ref() {
                                                     if let Some(lud16) = &metadata.lud16 {
                                                         if let Some(window) = web_sys::window() {
@@ -1262,6 +1265,7 @@ pub fn Profile(pubkey: String) -> Element {
                         if is_own_profile {
                             if let Ok(p2pk_pubkey) = crate::stores::cashu::get_wallet_pubkey() {
                                 {
+                                    #[allow(unused_variables)]
                                     let pubkey_for_copy = p2pk_pubkey.clone();
                                     rsx! {
                                         div {
@@ -1276,6 +1280,7 @@ pub fn Profile(pubkey: String) -> Element {
                                                 button {
                                                     class: "px-3 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 transition",
                                                     onclick: move |_| {
+                                                        #[cfg(feature = "web")]
                                                         if let Some(window) = web_sys::window() {
                                                             let _ = window.navigator().clipboard().write_text(&pubkey_for_copy);
                                                         }
@@ -1372,6 +1377,7 @@ fn VertsVideoCard(event: NostrEvent) -> Element {
             move |hovering| {
                 let id = video_element_id_for_effect.clone();
                 spawn(async move {
+                    #[cfg(feature = "web")]
                     if let Some(window) = web_sys::window() {
                         if let Some(document) = window.document() {
                             if let Some(element) = document.get_element_by_id(&id) {
@@ -1388,6 +1394,8 @@ fn VertsVideoCard(event: NostrEvent) -> Element {
                             }
                         }
                     }
+                    #[cfg(not(feature = "web"))]
+                    let _ = (&id, hovering);
                 });
             },
         ),

@@ -7,16 +7,30 @@
 //! - Explicit close() for resource cleanup
 //! - Subscribe sent in onopen callback (no timing races)
 #![allow(dead_code)]
+
+#[cfg(all(feature = "web", feature = "native"))]
+compile_error!("Cannot enable both 'web' and 'native' features simultaneously");
+
+#[cfg(not(any(feature = "web", feature = "native")))]
+compile_error!("Must enable either 'web' or 'native' feature");
+
+use crate::platform::http::http_client;
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "web")]
 use std::cell::RefCell;
 use std::collections::HashMap;
+#[cfg(feature = "web")]
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::mpsc;
+#[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
+#[cfg(feature = "web")]
 use web_sys::{CloseEvent, ErrorEvent, MessageEvent, WebSocket};
 /// Global counter for JSON-RPC request IDs
+#[cfg(feature = "web")]
 static REQUEST_ID: AtomicU64 = AtomicU64::new(0);
 /// Global signal tracking active WebSocket connections by mint URL
 pub static WS_CONNECTIONS: GlobalSignal<HashMap<String, WsConnectionState>> = GlobalSignal::new(
@@ -28,12 +42,14 @@ pub static MINT_WS_SUPPORT_CACHE: GlobalSignal<HashMap<String, (f64, bool)>> = G
     HashMap::new,
 );
 const MINT_WS_CACHE_TTL_MS: f64 = 300_000.0;
+#[cfg(feature = "web")]
 thread_local! {
     static WS_CLOSURES: RefCell<HashMap<String, WsClosures>> = RefCell::new(
         HashMap::new(),
     );
 }
 /// Stored closures for a WebSocket connection
+#[cfg(feature = "web")]
 struct WsClosures {
     #[allow(dead_code)]
     onopen: Closure<dyn FnMut(web_sys::Event)>,
@@ -52,9 +68,11 @@ pub struct WsConnectionState {
     /// Active subscriptions (sub_id -> quote_id)
     pub subscriptions: HashMap<String, String>,
     /// WebSocket handle for explicit cleanup (WebSocket is Clone - it's a JS handle)
+    #[cfg(feature = "web")]
     pub ws: Option<WebSocket>,
 }
 /// Close a WebSocket connection and clean up all resources
+#[cfg(feature = "web")]
 pub fn close_connection(mint_url: &str) {
     let mut connections = WS_CONNECTIONS.write();
     if let Some(state) = connections.remove(mint_url) {
@@ -68,8 +86,19 @@ pub fn close_connection(mint_url: &str) {
     }
     WS_CLOSURES
         .with(|closures| {
-            closures.borrow_mut().remove(mint_url);
+            let mut map = closures.borrow_mut();
+            map.remove(mint_url);
+            // Also remove proof-states subscription if present
+            let proof_states_key = format!("{}:proof_states", mint_url);
+            map.remove(&proof_states_key);
         });
+    log::info!("Cleaned up WebSocket resources for {}", mint_url);
+}
+
+#[cfg(not(feature = "web"))]
+pub fn close_connection(mint_url: &str) {
+    let mut connections = WS_CONNECTIONS.write();
+    connections.remove(mint_url);
     log::info!("Cleaned up WebSocket resources for {}", mint_url);
 }
 /// Subscription kind for NUT-17
@@ -237,6 +266,7 @@ pub type ProofStateCallback = Box<
 /// - No Closure::forget() - closures stored in thread_local for cleanup
 /// - Subscribe sent in onopen callback (no timing races)
 /// - WebSocket stored for explicit cleanup
+#[cfg(feature = "web")]
 pub async fn subscribe_to_quote(
     mint_url: String,
     quote_id: String,
@@ -382,6 +412,17 @@ pub async fn subscribe_to_quote(
     }
     Ok(rx)
 }
+
+/// Subscribe to quote status updates (native stub - WebSocket not available)
+#[cfg(not(feature = "web"))]
+pub async fn subscribe_to_quote(
+    _mint_url: String,
+    _quote_id: String,
+    _kind: SubscriptionKind,
+) -> Result<mpsc::Receiver<QuoteStatus>, String> {
+    Err("WebSocket subscriptions not available on native".to_string())
+}
+
 /// Unsubscribe from quote updates
 ///
 /// If this is the last subscription for this mint, closes the connection
@@ -401,22 +442,8 @@ pub fn unsubscribe(mint_url: &str, sub_id: &str) {
         close_connection(mint_url);
     }
 }
-/// Check if WebSocket subscriptions are supported for a mint
-#[allow(dead_code)]
-pub async fn check_ws_support(mint_url: &str) -> bool {
-    let ws_url = match mint_url_to_ws(mint_url) {
-        Ok(url) => url,
-        Err(_) => return false,
-    };
-    match WebSocket::new(&ws_url) {
-        Ok(ws) => {
-            let _ = ws.close();
-            true
-        }
-        Err(_) => false,
-    }
-}
 /// Convert HTTP mint URL to WebSocket URL
+#[cfg(feature = "web")]
 fn mint_url_to_ws(mint_url: &str) -> Result<String, String> {
     let mut url = mint_url.trim_end_matches('/').to_string();
     if url.starts_with("https://") {
@@ -440,11 +467,12 @@ pub async fn poll_quote_status(
     } else {
         format!("{}/v1/melt/quote/bolt11/{}", mint_url.trim_end_matches('/'), quote_id)
     };
-    let response = gloo_net::http::Request::get(&endpoint)
+    let response = crate::platform::http::http_client()
+        .get(&endpoint)
         .send()
         .await
         .map_err(|e| format!("HTTP request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("HTTP error: {}", response.status()));
     }
     let json: serde_json::Value = response
@@ -463,6 +491,7 @@ pub async fn poll_quote_status(
 /// - Detecting when sent proofs are redeemed
 /// - Monitoring pending swap/melt operations
 /// - Recovery workflows to check proof validity
+#[cfg(feature = "web")]
 pub async fn subscribe_to_proof_states(
     mint_url: String,
     y_values: Vec<String>,
@@ -613,6 +642,16 @@ pub async fn subscribe_to_proof_states(
     }
     Ok(rx)
 }
+
+/// Subscribe to proof state updates (native stub - WebSocket not available)
+#[cfg(not(feature = "web"))]
+pub async fn subscribe_to_proof_states(
+    _mint_url: String,
+    _y_values: Vec<String>,
+) -> Result<mpsc::Receiver<ProofStateNotification>, String> {
+    Err("WebSocket subscriptions not available on native".to_string())
+}
+
 /// Poll proof states via HTTP (fallback when WebSocket not available)
 ///
 /// Uses the /v1/checkstate endpoint to query proof states.
@@ -626,14 +665,13 @@ pub async fn poll_proof_states(
     }
     let endpoint = format!("{}/v1/checkstate", mint_url.trim_end_matches('/'));
     let request_body = serde_json::json!({ "Ys" : y_values });
-    let response = gloo_net::http::Request::post(&endpoint)
-        .header("Content-Type", "application/json")
-        .body(request_body.to_string())
-        .map_err(|e| format!("Failed to build request: {}", e))?
+    let response = http_client()
+        .post(&endpoint)
+        .json(&request_body)
         .send()
         .await
         .map_err(|e| format!("HTTP request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("HTTP error: {}", response.status()));
     }
     let json: serde_json::Value = response
@@ -750,7 +788,7 @@ where
                     quote_id, e
                 );
                 for _ in 0..60 {
-                    gloo_timers::future::TimeoutFuture::new(10_000).await;
+                    crate::platform::timer::sleep_ms(10_000).await;
                     match poll_quote_status(&mint_url, &quote_id, true).await {
                         Ok(status) => {
                             if matches!(status, QuoteStatus::Paid) {
@@ -805,7 +843,7 @@ where
                     quote_id, e
                 );
                 for _ in 0..6 {
-                    gloo_timers::future::TimeoutFuture::new(10_000).await;
+                    crate::platform::timer::sleep_ms(10_000).await;
                     match poll_quote_status(&mint_url, &quote_id, false).await {
                         Ok(status) => {
                             match status {
@@ -839,7 +877,7 @@ where
 /// Checks the mint info's `nuts.nut17.supported` array. Results are cached
 /// for 5 minutes to reduce network requests.
 pub async fn mint_supports_websocket(mint_url: &str) -> bool {
-    let now = js_sys::Date::now();
+    let now = crate::platform::timestamp::now_millis() as f64;
     {
         let cache = MINT_WS_SUPPORT_CACHE.read();
         if let Some((timestamp, supports)) = cache.get(mint_url) {

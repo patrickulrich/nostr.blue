@@ -1084,7 +1084,7 @@ fn LightningInvoiceDisplay(
                             spawn(async move {
                                 if crate::utils::clipboard::copy_to_clipboard(&inv).await.is_ok() {
                                     copied.set(true);
-                                    gloo_timers::future::TimeoutFuture::new(2000).await;
+                                    crate::platform::timer::sleep_ms(2000).await;
                                     copied.set(false);
                                 }
                             });
@@ -1113,7 +1113,7 @@ fn LightningInvoiceDisplay(
                 onclick: move |_| {
                     waiting_for_payment.set(true);
                     spawn(async move {
-                        gloo_timers::future::TimeoutFuture::new(1500).await;
+                        crate::platform::timer::sleep_ms(1500).await;
                         on_paid.call("manual_payment".to_string());
                     });
                 },
@@ -1263,7 +1263,7 @@ fn MultiMerchantPaymentDisplay(
                                         spawn(async move {
                                             if crate::utils::clipboard::copy_to_clipboard(&inv).await.is_ok() {
                                                 copied.set(true);
-                                                gloo_timers::future::TimeoutFuture::new(2000).await;
+                                                crate::platform::timer::sleep_ms(2000).await;
                                                 copied.set(false);
                                             }
                                         });

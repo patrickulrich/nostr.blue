@@ -261,7 +261,7 @@ pub async fn submit_join_request(
         community_a_tag: community.a_tag.clone(),
         user_pubkey: current_pubkey,
         reason: reason.map(|s| s.to_string()),
-        created_at: (js_sys::Date::now() / 1000.0) as u64,
+        created_at: crate::platform::timestamp::now_secs(),
         event: None,
     };
     USER_PENDING_REQUESTS.write().insert(community.a_tag.clone(), request);

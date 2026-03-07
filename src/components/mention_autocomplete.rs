@@ -3,7 +3,7 @@ use dioxus::prelude::*;
 use dioxus_core::Task;
 use nostr_sdk::prelude::*;
 use std::rc::Rc;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 use crate::services::profile_search::{
     get_contact_pubkeys, search_cached_profiles, search_profiles, ProfileSearchResult,
@@ -117,7 +117,7 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
                 if current < max {
                     let new_index = current + 1;
                     autocomplete.selected_index.set(new_index);
-                    #[cfg(target_family = "wasm")]
+                    #[cfg(feature = "web")]
                     {
                         use dioxus::document;
                         let _ = document::eval(
@@ -135,7 +135,7 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
                 if current > 0 {
                     let new_index = current - 1;
                     autocomplete.selected_index.set(new_index);
-                    #[cfg(target_family = "wasm")]
+                    #[cfg(feature = "web")]
                     {
                         use dioxus::document;
                         let _ = document::eval(
@@ -242,6 +242,12 @@ fn detect_mention(
         let after_at = &before_cursor[at_pos + 1..];
         if after_at.contains(char::is_whitespace) {
             state.show.set(false);
+            // Cancel any pending search task
+            if let Some(task) = state.relay_search_task.read().as_ref() {
+                task.cancel();
+            }
+            state.relay_search_task.write().take();
+            state.is_searching.set(false);
             return;
         }
         let query = after_at.to_string();
@@ -272,15 +278,7 @@ fn detect_mention(
             let mut searching_signal = state.is_searching;
             let mut task_signal = state.relay_search_task;
             let new_task = spawn(async move {
-                #[cfg(target_family = "wasm")]
-                {
-                    gloo_timers::future::TimeoutFuture::new(300).await;
-                }
-                #[cfg(not(target_family = "wasm"))]
-                {
-                    use std::time::Duration;
-                    tokio::time::sleep(Duration::from_millis(300)).await;
-                }
+                crate::platform::timer::sleep_ms(300).await;
                 let query_relays = query_snapshot.len() >= 3;
                 match search_profiles(&query_snapshot, 10, query_relays).await {
                     Ok(results) => {
@@ -304,9 +302,17 @@ fn detect_mention(
             });
             task_signal.set(Some(new_task));
         } else {
+            if let Some(task) = state.relay_search_task.read().as_ref() {
+                task.cancel();
+            }
+            state.relay_search_task.write().take();
             state.is_searching.set(false);
         }
     } else {
+        // Cancel any pending search task before hiding
+        if let Some(task) = state.relay_search_task.read().as_ref() {
+            task.cancel();
+        }
         state.show.set(false);
     }
 }
@@ -369,7 +375,7 @@ fn insert_mention(
         if let Some(mut signal) = external_cursor_position {
             signal.set(new_cursor_byte_pos);
         }
-        #[cfg(target_family = "wasm")]
+        #[cfg(feature = "web")]
         {
             if let Some(window) = web_sys::window() {
                 if let Some(document) = window.document() {
@@ -425,7 +431,7 @@ fn utf8_to_utf16_index(text: &str, utf8_index: usize) -> usize {
 /// Get cursor position from textarea
 #[allow(unused_variables)]
 fn get_cursor_position(textarea_id: &str) -> usize {
-    #[cfg(target_family = "wasm")]
+    #[cfg(feature = "web")]
     {
         if let Some(window) = web_sys::window() {
             if let Some(document) = window.document() {
@@ -451,7 +457,7 @@ fn update_dropdown_position(
     show_below: &mut Signal<bool>,
     is_mobile: &mut Signal<bool>,
 ) {
-    #[cfg(target_family = "wasm")]
+    #[cfg(feature = "web")]
     {
         if let Some(window) = web_sys::window() {
             if let Some(document) = window.document() {

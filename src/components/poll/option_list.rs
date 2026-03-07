@@ -58,7 +58,7 @@ pub fn PollOptionList(
                                     update_option(option_index, evt.value().clone());
                                 },
                                 onmounted: move |_evt| {
-                                    #[cfg(target_arch = "wasm32")]
+                                    #[cfg(feature = "web")]
                                     {
                                         if let Some(element) = _evt.data.downcast::<web_sys::HtmlTextAreaElement>() {
                                             let _ = element.set_attribute("style", "height: auto;");

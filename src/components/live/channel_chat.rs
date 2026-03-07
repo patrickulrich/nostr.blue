@@ -17,8 +17,10 @@ use dioxus_core::use_drop;
 use dioxus_core::Task;
 use nostr_sdk::{Event, PublicKey, RelayPoolNotification, RelayUrl, SubscriptionId};
 use std::time::Duration;
+#[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
 
+#[cfg(feature = "web")]
 #[wasm_bindgen(
     inline_js = r#"
 export function scrollChannelChatToBottom(elementId) {
@@ -227,12 +229,20 @@ pub fn ChannelChat(channel_id: String) -> Element {
         let msg_count = messages.read().len();
         let container_id = chat_container_id_for_scroll.clone();
         spawn(async move {
-            gloo_timers::future::TimeoutFuture::new(50).await;
-            if *is_first_load.peek() && msg_count > 0 {
-                scrollChannelChatToBottom(&container_id);
+            crate::platform::timer::sleep_ms(50).await;
+            #[cfg(feature = "web")]
+            {
+                if *is_first_load.peek() && msg_count > 0 {
+                    scrollChannelChatToBottom(&container_id);
+                    is_first_load.set(false);
+                } else if isChannelChatScrolledNearBottom(&container_id, 100.0) {
+                    scrollChannelChatToBottom(&container_id);
+                }
+            }
+            #[cfg(not(feature = "web"))]
+            {
+                let _ = (&container_id, msg_count);
                 is_first_load.set(false);
-            } else if isChannelChatScrolledNearBottom(&container_id, 100.0) {
-                scrollChannelChatToBottom(&container_id);
             }
         });
     });
@@ -309,7 +319,9 @@ pub fn ChannelChat(channel_id: String) -> Element {
     });
 
     // Escape key handler
+    #[cfg(feature = "web")]
     let mut escape_cb = use_signal(|| None::<Closure<dyn FnMut(web_sys::KeyboardEvent)>>);
+    #[cfg(feature = "web")]
     use_effect(move || {
         let Some(window) = web_sys::window() else {
             return;
@@ -324,6 +336,7 @@ pub fn ChannelChat(channel_id: String) -> Element {
             .ok();
         escape_cb.set(Some(cb));
     });
+    #[cfg(feature = "web")]
     use_drop(move || {
         if let Some(cb) = escape_cb.peek().as_ref() {
             if let Some(window) = web_sys::window() {

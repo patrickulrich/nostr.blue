@@ -9,8 +9,10 @@ use crate::stores::nostr_client;
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
 use std::collections::HashSet;
+#[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
 
+#[cfg(feature = "web")]
 #[wasm_bindgen(
     inline_js = r#"
 export function initArchitectureMermaid() {
@@ -270,6 +272,7 @@ pub fn CodeRepoArchitecture(naddr: String) -> Element {
     // Initialize mermaid after DOM update (rAF retry loop handles DOM readiness)
     use_effect(use_reactive(&mermaid_code, move |code| {
         if !code.is_empty() {
+            #[cfg(feature = "web")]
             initArchitectureMermaid();
         }
     }));

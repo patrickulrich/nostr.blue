@@ -1,3 +1,4 @@
+use crate::platform::http::http_client;
 use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::nips::nip57::ZapRequestData;
 use nostr_sdk::{Event, EventBuilder, EventId, JsonUtil, PublicKey, RelayUrl};
@@ -63,11 +64,6 @@ impl std::fmt::Display for LnUrlError {
             LnUrlError::InvalidAmount => write!(f, "Invalid zap amount"),
         }
     }
-}
-/// Create an HTTP client
-/// Note: Timeout is handled by the browser's fetch API in WASM environments
-fn create_http_client() -> Result<reqwest::Client, LnUrlError> {
-    reqwest::Client::builder().build().map_err(|e| LnUrlError::FetchError(e.to_string()))
 }
 /// Validate that a URL is safe for LNURL requests
 /// Validates scheme and blocks private/local IP addresses to prevent SSRF attacks
@@ -155,7 +151,7 @@ pub fn decode_lud06(lud06: &str) -> Result<String, LnUrlError> {
 /// Fetch LNURL pay information
 pub async fn fetch_lnurl_pay_info(url: &str) -> Result<LnUrlPayResponse, LnUrlError> {
     validate_url(url)?;
-    let client = create_http_client()?;
+    let client = http_client();
     let response = client
         .get(url)
         .send()
@@ -228,7 +224,7 @@ pub async fn request_zap_invoice(
     if let Some(lnurl_value) = lnurl {
         url.push_str(&format!("&lnurl={}", urlencoding::encode(lnurl_value)));
     }
-    let client = create_http_client()?;
+    let client = http_client();
     let response = client
         .get(&url)
         .send()
@@ -262,7 +258,7 @@ pub async fn fetch_lnurl_pay_info_simple(
     url: &str,
 ) -> Result<LnUrlPayResponse, LnUrlError> {
     validate_url(url)?;
-    let client = create_http_client()?;
+    let client = http_client();
     let response = client
         .get(url)
         .send()
@@ -286,7 +282,7 @@ pub async fn request_simple_invoice(
     if let Some(c) = comment {
         url.push_str(&format!("&comment={}", urlencoding::encode(c)));
     }
-    let client = create_http_client()?;
+    let client = http_client();
     let response = client
         .get(&url)
         .send()

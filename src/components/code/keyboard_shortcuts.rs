@@ -12,9 +12,9 @@
 use crate::routes::Route;
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 
 #[component]
@@ -26,15 +26,15 @@ pub fn CodeKeyboardShortcuts() -> Element {
     let nav = navigator();
 
     // Store JS function reference for event listener cleanup on unmount
-    #[allow(unused_variables, unused_mut)]
+    #[cfg(feature = "web")]
     let mut cleanup_fn = use_signal(|| None::<js_sys::Function>);
     // Store timeout ID for cleanup on unmount
-    #[allow(unused_variables, unused_mut)]
+    #[cfg(feature = "web")]
     let mut timeout_id = use_signal(|| None::<i32>);
 
     // Set up keyboard event listener once
+    #[cfg(feature = "web")]
     use_effect(move || {
-        #[cfg(target_arch = "wasm32")]
         {
             let Some(window) = web_sys::window() else { return; };
 
@@ -152,8 +152,8 @@ pub fn CodeKeyboardShortcuts() -> Element {
         }
     });
 
+    #[cfg(feature = "web")]
     use_drop(move || {
-        #[cfg(target_arch = "wasm32")]
         {
             if let Some(window) = web_sys::window() {
                 if let Some(js_fn) = cleanup_fn.peek().as_ref() {

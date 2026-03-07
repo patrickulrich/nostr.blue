@@ -5,6 +5,7 @@
 //! - Split payments to multiple recipients
 //! - Support for both node pubkeys and Lightning Addresses
 use crate::components::icons;
+use crate::platform::http::http_client;
 use crate::services::lnurl;
 use crate::stores::nwc_store;
 use crate::utils::podcast::{ValueBlock, ValueRecipient};
@@ -254,6 +255,7 @@ struct CustomBoostInputProps {
 fn CustomBoostInput(props: CustomBoostInputProps) -> Element {
     let mut amount = use_signal(String::new);
     let mut is_sending = use_signal(|| false);
+    let mut error = use_signal(|| None::<String>);
     let handle_send = {
         let vb = props.value_block.clone();
         let on_send = props.on_send;
@@ -262,10 +264,16 @@ fn CustomBoostInput(props: CustomBoostInputProps) -> Element {
                 if amt > 0 {
                     let vb = vb.clone();
                     let on_send = on_send;
+                    error.set(None);
                     is_sending.set(true);
                     spawn(async move {
-                        if send_v4v_payment(&vb, amt).await.is_ok() {
-                            on_send.call(amt);
+                        match send_v4v_payment(&vb, amt).await {
+                            Ok(_) => {
+                                on_send.call(amt);
+                            }
+                            Err(e) => {
+                                error.set(Some(e));
+                            }
                         }
                         is_sending.set(false);
                     });
@@ -274,7 +282,7 @@ fn CustomBoostInput(props: CustomBoostInputProps) -> Element {
         }
     };
     rsx! {
-        div { class: "flex gap-2",
+        div { class: "flex gap-2 relative",
             input {
                 r#type: "number",
                 placeholder: "Custom sats",
@@ -293,6 +301,11 @@ fn CustomBoostInput(props: CustomBoostInputProps) -> Element {
                     }
                 } else {
                     "Send"
+                }
+            }
+            if let Some(ref err) = *error.read() {
+                div { class: "absolute top-full left-0 mt-2 p-2 rounded-lg bg-destructive/10 text-destructive text-xs max-w-[200px]",
+                    "{err}"
                 }
             }
         }
@@ -323,7 +336,7 @@ pub fn V4VBadge(props: V4VBadgeProps) -> Element {
 async fn send_v4v_payment(
     value_block: &ValueBlock,
     total_sats: u64,
-) -> Result<(), String> {
+) -> Result<usize, String> {
     if value_block.recipients.is_empty() {
         return Err("No recipients configured".to_string());
     }
@@ -337,6 +350,7 @@ async fn send_v4v_payment(
             "No wallet connected. Please connect a wallet in settings.".to_string(),
         );
     }
+    let mut success_count = 0;
     for recipient in &value_block.recipients {
         let amount = (total_sats as f64 * recipient.split as f64 / total_split as f64)
             .round() as u64;
@@ -361,7 +375,7 @@ async fn send_v4v_payment(
                             info.callback,
                             amount_msats,
                         );
-                        match reqwest::get(&callback_url).await {
+                        match http_client().get(&callback_url).send().await {
                             Ok(response) => {
                                 if let Ok(invoice_response) = response
                                     .json::<serde_json::Value>()
@@ -371,15 +385,18 @@ async fn send_v4v_payment(
                                         .get("pr")
                                         .and_then(|v| v.as_str())
                                     {
-                                        if let Err(e) = nwc_store::pay_invoice(pr.to_string()).await
-                                        {
-                                            log::error!(
-                                                "Payment failed for {}: {}", recipient.address, e
-                                            );
-                                        } else {
-                                            log::info!(
-                                                "V4V payment sent: {} sats to {}", amount, recipient.address
-                                            );
+                                        match nwc_store::pay_invoice(pr.to_string()).await {
+                                            Ok(_) => {
+                                                log::info!(
+                                                    "V4V payment sent: {} sats to {}", amount, recipient.address
+                                                );
+                                                success_count += 1;
+                                            }
+                                            Err(e) => {
+                                                log::error!(
+                                                    "Payment failed for {}: {}", recipient.address, e
+                                                );
+                                            }
                                         }
                                     }
                                 }
@@ -408,5 +425,9 @@ async fn send_v4v_payment(
             }
         }
     }
-    Ok(())
+    if success_count == 0 {
+        Err("All payment attempts failed".to_string())
+    } else {
+        Ok(success_count)
+    }
 }

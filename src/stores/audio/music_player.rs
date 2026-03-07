@@ -6,7 +6,7 @@ use crate::stores::{auth_store, nostr_client};
 use crate::utils::radio::{select_best_stream, NowPlaying, RadioStation};
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
-use gloo_storage::{LocalStorage, Storage};
+use crate::platform::storage;
 use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::nips::nip38::{LiveStatus, StatusType};
 use nostr_sdk::{EventBuilder, Kind, Tag, TagKind, Timestamp};
@@ -378,14 +378,14 @@ const STORAGE_KEY_PLAYBACK_SPEED: &str = "music_player_playback_speed";
 /// Initialize music player from localStorage
 pub fn init_player() {
     let mut state = MusicPlayerState::default();
-    if let Ok(volume) = LocalStorage::get::<f64>(STORAGE_KEY_VOLUME) {
+    if let Ok(volume) = storage::get::<f64>(STORAGE_KEY_VOLUME) {
         state.volume = volume.clamp(0.0, 1.0);
     }
-    if let Ok(is_muted) = LocalStorage::get::<bool>(STORAGE_KEY_MUTED) {
+    if let Ok(is_muted) = storage::get::<bool>(STORAGE_KEY_MUTED) {
         state.is_muted = is_muted;
     }
-    if let Ok(speed) = LocalStorage::get::<f64>(STORAGE_KEY_PLAYBACK_SPEED) {
-        state.playback_speed = speed.clamp(0.5, 3.0);
+    if let Ok(speed) = storage::get::<f64>(STORAGE_KEY_PLAYBACK_SPEED) {
+        state.playback_speed = speed.clamp(0.5, 2.0);
     }
     *MUSIC_PLAYER.write() = state;
     log::info!("Music player initialized");
@@ -618,17 +618,23 @@ pub fn previous_track() {
 /// Set volume (0.0 - 1.0)
 pub fn set_volume(volume: f64) {
     let clamped = volume.clamp(0.0, 1.0);
-    let mut state = MUSIC_PLAYER.write();
-    state.volume = clamped;
-    LocalStorage::set(STORAGE_KEY_VOLUME, clamped).ok();
+    {
+        let mut state = MUSIC_PLAYER.write();
+        state.volume = clamped;
+    }
+    storage::set(STORAGE_KEY_VOLUME, &clamped).ok();
 }
 /// Toggle mute
 pub fn toggle_mute() {
-    let mut state = MUSIC_PLAYER.write();
-    state.is_muted = !state.is_muted;
-    LocalStorage::set(STORAGE_KEY_MUTED, state.is_muted).ok();
+    let is_muted = {
+        let mut state = MUSIC_PLAYER.write();
+        state.is_muted = !state.is_muted;
+        state.is_muted
+    };
+    storage::set(STORAGE_KEY_MUTED, &is_muted).ok();
 }
 /// Set current time
+#[allow(dead_code)]
 pub fn set_current_time(time: f64) {
     let mut state = MUSIC_PLAYER.write();
     state.current_time = time;
@@ -652,6 +658,7 @@ pub fn seek_to(time: f64) {
     });
 }
 /// Set duration
+#[allow(dead_code)]
 pub fn set_duration(duration: f64) {
     let mut state = MUSIC_PLAYER.write();
     state.duration = duration;
@@ -831,23 +838,25 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
 }
 /// Set playback speed (for podcasts)
 pub fn set_playback_speed(speed: f64) {
-    let speed = speed.clamp(0.5, 3.0);
+    let speed = speed.clamp(0.5, 2.0);
     MUSIC_PLAYER.write().playback_speed = speed;
-    let _ = LocalStorage::set(STORAGE_KEY_PLAYBACK_SPEED, speed);
+    let _ = storage::set(STORAGE_KEY_PLAYBACK_SPEED, &speed);
     log::debug!("Playback speed set to {}x", speed);
 }
 /// Skip forward by specified seconds (for podcasts)
 pub fn skip_forward(seconds: f64) {
-    let mut state = MUSIC_PLAYER.write();
+    let state = MUSIC_PLAYER.read();
     let new_time = (state.current_time + seconds).min(state.duration);
-    state.current_time = new_time;
+    drop(state);
+    seek_to(new_time);
     log::debug!("Skipped forward {} seconds to {}", seconds, new_time);
 }
 /// Skip backward by specified seconds (for podcasts)
 pub fn skip_backward(seconds: f64) {
-    let mut state = MUSIC_PLAYER.write();
+    let state = MUSIC_PLAYER.read();
     let new_time = (state.current_time - seconds).max(0.0);
-    state.current_time = new_time;
+    drop(state);
+    seek_to(new_time);
     log::debug!("Skipped backward {} seconds to {}", seconds, new_time);
 }
 /// Set playback error message
@@ -860,6 +869,7 @@ pub fn set_buffering(buffering: bool) {
 }
 /// Try next available stream when current one fails
 /// Returns true if there's a fallback stream to try, false if all failed
+#[allow(dead_code)]
 pub fn try_next_stream() -> bool {
     let mut state = MUSIC_PLAYER.write();
     if state.available_streams.is_empty() {
@@ -888,6 +898,7 @@ pub fn set_available_streams(streams: Vec<String>) {
     state.current_stream_index = 0;
 }
 /// Set now playing metadata from HLS ID3 tags
+#[allow(dead_code)]
 pub fn set_now_playing(now_playing: Option<NowPlaying>) {
     MUSIC_PLAYER.write().now_playing = now_playing;
 }

@@ -1,5 +1,4 @@
 use dioxus::prelude::*;
-use gloo_timers::future::TimeoutFuture;
 use js_sys::Reflect;
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
@@ -7,7 +6,7 @@ const MAX_DURATION_SECONDS: f64 = 60.0;
 #[derive(Clone, PartialEq)]
 enum RecorderState {
     Idle,
-    Recording { started_at: f64 },
+    Recording,
     Stopped { duration: f64 },
     Error { message: String },
 }
@@ -17,19 +16,27 @@ pub fn VoiceRecorder(
 ) -> Element {
     let mut state = use_signal(|| RecorderState::Idle);
     let mut current_time = use_signal(|| 0.0);
-    let is_mounted = use_signal(|| true);
+    let mut is_mounted = use_signal(|| true);
     let mut is_playing_preview = use_signal(|| false);
     let mut blob_url_cache = use_signal(|| None::<String>);
     let recorder_id = use_signal(|| Uuid::new_v4().to_string());
+    use_drop(move || {
+        is_mounted.set(false);
+        if let Some(ref url) = *blob_url_cache.peek() {
+            let _ = js_sys::eval(&format!("URL.revokeObjectURL('{}')", url));
+        }
+        let cleanup_script = format!(
+            "if (window.voiceRecorderManager) {{ window.voiceRecorderManager.cleanup('{}'); }}",
+            recorder_id.read()
+        );
+        let _ = js_sys::eval(&cleanup_script);
+    });
     let start_recording_handler = {
         let recorder_id = recorder_id.read().clone();
         move |_| {
             let recorder_id = recorder_id.clone();
             log::info!("Start recording button clicked, recorder_id: {}", recorder_id);
-            state
-                .set(RecorderState::Recording {
-                    started_at: js_sys::Date::now() / 1000.0,
-                });
+            state.set(RecorderState::Recording);
             log::debug!("State set to Recording");
             spawn(async move {
                 let start_script = format!(
@@ -75,11 +82,11 @@ pub fn VoiceRecorder(
                                 let monitor_state = state;
                                 let monitor_is_mounted = is_mounted;
                                 spawn(async move {
-                                    let started_at = js_sys::Date::now() / 1000.0;
+                                    let started_at = crate::platform::timestamp::now_millis() as f64;
                                     log::info!("Monitoring loop started at: {}", started_at);
                                     let mut last_logged_second: i32 = -1;
                                     loop {
-                                        TimeoutFuture::new(100).await;
+                                        crate::platform::timer::sleep_ms(100).await;
                                         if !*monitor_is_mounted.read() {
                                             log::debug!(
                                                 "Component unmounted, stopping monitoring loop"
@@ -87,8 +94,8 @@ pub fn VoiceRecorder(
                                             break;
                                         }
                                         let current_state = monitor_state.read().clone();
-                                        if let RecorderState::Recording { .. } = current_state {
-                                            let elapsed = (js_sys::Date::now() / 1000.0) - started_at;
+                                        if let RecorderState::Recording = current_state {
+                                            let elapsed = (crate::platform::timestamp::now_millis() as f64 - started_at) / 1000.0;
                                             monitor_current_time.set(elapsed);
                                             let current_second = elapsed as i32;
                                             if current_second != last_logged_second {
@@ -149,7 +156,7 @@ pub fn VoiceRecorder(
                         let mut attempts = 0;
                         const MAX_ATTEMPTS: u32 = 50;
                         loop {
-                            TimeoutFuture::new(200).await;
+                            crate::platform::timer::sleep_ms(200).await;
                             attempts += 1;
                             if attempts > MAX_ATTEMPTS {
                                 log::error!("Timeout waiting for recording result");
@@ -298,7 +305,7 @@ pub fn VoiceRecorder(
                 match js_sys::eval(&script) {
                     Ok(result) => {
                         if result.as_bool() == Some(true) {
-                            TimeoutFuture::new(100).await;
+                            crate::platform::timer::sleep_ms(100).await;
                             let check_script = "window.__voice_preview_playing === true";
                             if let Ok(playing) = js_sys::eval(check_script) {
                                 let actual_playing = playing.as_bool().unwrap_or(false);
@@ -423,7 +430,7 @@ pub fn VoiceRecorder(
                     RecorderState::Idle => rsx! {
                         div { class: "text-muted-foreground", "Ready to record voice message" }
                     },
-                    RecorderState::Recording { .. } => rsx! {
+                    RecorderState::Recording => rsx! {
                         div { class: "space-y-2",
                             div { class: "flex items-center justify-center gap-2 text-red-500 font-bold",
                                 div { class: "w-3 h-3 bg-red-500 rounded-full animate-pulse" }
@@ -449,7 +456,7 @@ pub fn VoiceRecorder(
             }
             div { class: "h-20 bg-muted rounded flex items-center justify-center",
                 match state.read().clone() {
-                    RecorderState::Recording { .. } => rsx! {
+                    RecorderState::Recording => rsx! {
                         div { class: "flex items-center gap-1",
                             for i in 0..40 {
                                 div {
@@ -498,7 +505,7 @@ pub fn VoiceRecorder(
                             }
                         }
                     },
-                    RecorderState::Recording { .. } => rsx! {
+                    RecorderState::Recording => rsx! {
                         button {
                             class: "w-16 h-16 rounded-full bg-gray-700 hover:bg-gray-800 text-white flex items-center justify-center transition shadow-lg",
                             onclick: move |_| stop_recording(()),

@@ -102,7 +102,7 @@ pub fn filter_events_with_nip50(
     filters: &EventFilterState,
     from_nip50: bool,
 ) -> Vec<UnifiedEvent> {
-    let now_secs = (js_sys::Date::now() / 1000.0) as u64;
+    let now_secs = crate::platform::timestamp::now_secs();
     let today_start = now_secs - (now_secs % 86400);
     let week_end = today_start + (7 * 86400);
     let month_end = today_start + (30 * 86400);

@@ -227,13 +227,7 @@ pub async fn publish_video_tracked(
 
     // Generate d-tag identifier: slug from title + timestamp for uniqueness
     // Use millisecond precision to prevent collisions on rapid publishes
-    #[cfg(target_family = "wasm")]
-    let timestamp_ms = js_sys::Date::now() as u64; // Already milliseconds
-    #[cfg(not(target_family = "wasm"))]
-    let timestamp_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+    let timestamp_ms = crate::platform::timestamp::now_millis();
     let slug = crate::utils::slugify(&title);
     let identifier = format!("{}-{}", slug, timestamp_ms);
 

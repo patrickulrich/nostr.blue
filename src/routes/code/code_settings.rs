@@ -11,7 +11,7 @@ use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use std::time::Duration;
-use gloo_storage::{LocalStorage, Storage};
+use crate::platform::storage;
 use serde::{Deserialize, Serialize};
 
 const CODE_SETTINGS_KEY: &str = "nostrblue_code_settings";
@@ -74,11 +74,25 @@ fn settings_storage_key() -> String {
 }
 
 fn load_code_settings() -> CodeSettingsData {
-    LocalStorage::get::<CodeSettingsData>(&settings_storage_key()).unwrap_or_default()
+    match storage::get::<CodeSettingsData>(&settings_storage_key()) {
+        Ok(data) => data,
+        Err(e) => {
+            if e.contains("not found") {
+                CodeSettingsData::default()
+            } else {
+                log::warn!(
+                    "Failed to load code settings from {}: {}",
+                    settings_storage_key(),
+                    e
+                );
+                CodeSettingsData::default()
+            }
+        }
+    }
 }
 
 fn save_code_settings(settings: &CodeSettingsData) -> Result<(), String> {
-    LocalStorage::set(settings_storage_key(), settings)
+    storage::set(&settings_storage_key(), settings)
         .map_err(|e| format!("Failed to save settings: {}", e))
 }
 
@@ -114,16 +128,16 @@ pub fn CodeSettings() -> Element {
                 save_error.set(None);
                 save_success.set(true);
                 spawn(async move {
-                    gloo_timers::future::TimeoutFuture::new(2500).await;
+                    crate::platform::timer::sleep_ms(2500).await;
                     save_success.set(false);
                 });
             }
             Err(e) => {
                 save_success.set(false);
                 save_error.set(Some(e.clone()));
-                web_sys::console::error_1(&format!("Settings save failed: {}", e).into());
+                log::error!("Settings save failed: {}", e);
                 spawn(async move {
-                    gloo_timers::future::TimeoutFuture::new(2500).await;
+                    crate::platform::timer::sleep_ms(2500).await;
                     save_error.set(None);
                 });
             }
@@ -407,7 +421,7 @@ fn WalletSection() -> Element {
         connect_error.set(None);
         is_connecting.set(true);
         spawn(async move {
-            match nwc_store::connect_nwc(&uri).await {
+            match nwc_store::connect_nwc(&uri, true).await {
                 Ok(()) => {
                     nwc_uri.set(String::new());
                     connect_error.set(None);
@@ -421,14 +435,14 @@ fn WalletSection() -> Element {
     };
 
     let handle_disconnect = move |_| {
-        nwc_store::disconnect_nwc();
+        nwc_store::disconnect_nwc(false);
     };
 
     let handle_refresh = move |_| {
         let toast = toast;
         spawn(async move {
             if let Err(e) = nwc_store::refresh_balance().await {
-                web_sys::console::error_1(&format!("Failed to refresh balance: {}", e).into());
+                log::error!("Failed to refresh balance: {}", e);
                 toast.error(
                     format!("Failed to refresh balance: {}", e),
                     ToastOptions::new()

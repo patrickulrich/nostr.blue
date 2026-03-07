@@ -55,7 +55,7 @@ pub fn P2PHome() -> Element {
             let _ = btc_price::fetch_btc_prices().await;
         }
         loop {
-            gloo_timers::future::sleep(Duration::from_secs(30)).await;
+            crate::platform::timer::sleep(Duration::from_secs(30)).await;
             let _ = btc_price::fetch_btc_prices().await;
         }
     });

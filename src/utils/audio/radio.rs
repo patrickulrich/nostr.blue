@@ -166,6 +166,7 @@ pub struct NowPlaying {
 }
 impl NowPlaying {
     /// Check if any metadata is available
+    #[allow(dead_code)]
     pub fn has_data(&self) -> bool {
         self.title.is_some() || self.artist.is_some()
     }

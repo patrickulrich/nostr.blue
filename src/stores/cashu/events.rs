@@ -125,6 +125,13 @@ pub async fn sign_event_builder(
                 .await
                 .map_err(|e| format!("Failed to sign event: {}", e))
         }
+        #[cfg(feature = "mobile")]
+        crate::stores::signer::SignerType::AndroidSigner(android_signer) => {
+            builder
+                .sign(&*android_signer)
+                .await
+                .map_err(|e| format!("Failed to sign event: {}", e))
+        }
     }
 }
 /// Queue an EventBuilder for retry when initial publication fails

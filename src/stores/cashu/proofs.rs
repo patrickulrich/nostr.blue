@@ -11,12 +11,7 @@ use super::utils::mint_matches;
 /// Cross-platform timestamp helper (aligned with nostr SDK pattern)
 /// Returns current time in seconds since Unix epoch
 pub fn now_secs() -> u64 {
-    #[cfg(target_arch = "wasm32")] { (js_sys::Date::now() / 1000.0) as u64 }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
-    }
+    crate::platform::timestamp::now_secs()
 }
 /// Register proofs in the event map (called when adding new token events)
 pub fn register_proofs_in_event_map(event_id: &str, proofs: &[ProofData]) {

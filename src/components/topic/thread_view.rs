@@ -19,9 +19,8 @@ const MAX_RECURSION_DEPTH: usize = 20;
 /// Display a thread tree with recursive nested replies
 #[component]
 pub fn ThreadView(
-    thread: Vec<TopicThread>,
-    #[props(default)]
-    vote_counts: Rc<HashMap<String, VoteCounts>>,
+    thread: Vec<Rc<TopicThread>>,
+    #[props(default)] vote_counts: Rc<HashMap<String, VoteCounts>>,
 ) -> Element {
     rsx! {
         div {
@@ -42,13 +41,13 @@ pub fn ThreadView(
 fn count_descendants(thread: &TopicThread) -> usize {
     const MAX_COUNT: usize = 1000;
     let mut count = 0usize;
-    let mut stack: Vec<&TopicThread> = thread.replies.iter().collect();
+    let mut stack: Vec<&TopicThread> = thread.replies.iter().map(|r| r.as_ref()).collect();
     while let Some(node) = stack.pop() {
         count += 1;
         if count >= MAX_COUNT {
             return count;
         }
-        stack.extend(node.replies.iter());
+        stack.extend(node.replies.iter().map(|r| r.as_ref()));
     }
     count
 }
@@ -56,10 +55,9 @@ fn count_descendants(thread: &TopicThread) -> usize {
 /// Single thread node with its replies
 #[component]
 fn ThreadNode(
-    thread: TopicThread,
+    thread: Rc<TopicThread>,
     vote_counts: Rc<HashMap<String, VoteCounts>>,
-    #[props(default = 0)]
-    depth: usize,
+    #[props(default = 0)] depth: usize,
 ) -> Element {
     // Prevent stack overflow on deeply nested threads
     if depth >= MAX_RECURSION_DEPTH {
@@ -85,7 +83,10 @@ fn ThreadNode(
         });
     let author_picture = profile.as_ref().and_then(|p| p.picture.clone());
     let time_ago = format_relative_time_or(thread.post.created_at, "just now");
-    let counts = vote_counts.get(&thread.post.id).cloned().unwrap_or_default();
+    let counts = vote_counts
+        .get(&thread.post.id)
+        .cloned()
+        .unwrap_or_default();
     let post_for_vote = thread.post.clone();
 
     let indent_class = match depth.min(MAX_VISUAL_DEPTH) {
@@ -135,7 +136,7 @@ fn ThreadNode(
                         class: "text-sm text-foreground",
                         RichContent {
                             content: thread.post.content.clone(),
-                            tags: thread.post.event.tags.to_vec(),
+                            tags: thread.post.event.tags.clone().to_vec(),
                         }
                     }
                 }

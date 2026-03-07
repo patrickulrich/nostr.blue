@@ -19,6 +19,7 @@ pub fn Calendar() -> Element {
     let mut events = use_signal(Vec::<UnifiedEvent>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
+    let mut export_error = use_signal(|| None::<String>);
     let mut selected_date = use_signal(get_today);
     let mut view_mode = use_signal(|| CalendarViewMode::Week);
     let mut show_all_day = use_signal(|| true);
@@ -201,6 +202,11 @@ pub fn Calendar() -> Element {
                                 }
                                 h1 { class: "text-xl font-semibold ml-4", "{month_header}" }
                             }
+                            if let Some(err) = export_error.read().as_ref() {
+                                div { class: "px-4 py-2 m-4 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded-lg text-sm",
+                                    "{err}"
+                                }
+                            }
                             div { class: "flex items-center gap-3",
                                 if is_logged_in && !filtered_events.read().is_empty() {
                                     button {
@@ -221,7 +227,12 @@ pub fn Calendar() -> Element {
                                                 let ics_content = export_events_to_ics(&calendar_events);
                                                 let today = get_today();
                                                 let filename = format!("nostr_calendar_{}.ics", today);
-                                                download_ics(&filename, &ics_content);
+                                                if let Err(e) = download_ics(&filename, &ics_content) {
+                                                    log::error!("Failed to download calendar: {}", e);
+                                                    export_error.set(Some(format!("Failed to export: {}", e)));
+                                                } else {
+                                                    export_error.set(None);
+                                                }
                                             }
                                         },
                                         svg {
@@ -257,7 +268,12 @@ pub fn Calendar() -> Element {
                                                 let ics_content = export_events_to_ics(&calendar_events);
                                                 let today = get_today();
                                                 let filename = format!("nostr_calendar_{}.ics", today);
-                                                download_ics(&filename, &ics_content);
+                                                if let Err(e) = download_ics(&filename, &ics_content) {
+                                                    log::error!("Failed to download calendar: {}", e);
+                                                    export_error.set(Some(format!("Failed to export: {}", e)));
+                                                } else {
+                                                    export_error.set(None);
+                                                }
                                             }
                                         },
                                         svg {
@@ -442,15 +458,44 @@ fn add_days(date: &str, days: i32) -> String {
     let year: i32 = parts[0].parse().unwrap_or(2024);
     let month: i32 = parts[1].parse::<i32>().unwrap_or(1) - 1;
     let day: i32 = parts[2].parse().unwrap_or(1);
-    let js_date = js_sys::Date::new_with_year_month_day(year as u32, month, day);
-    let ms_per_day = 24.0 * 60.0 * 60.0 * 1000.0;
-    js_date.set_time(js_date.get_time() + (days as f64 * ms_per_day));
-    format!(
-        "{:04}-{:02}-{:02}",
-        js_date.get_full_year(),
-        js_date.get_month() + 1,
-        js_date.get_date(),
-    )
+    #[cfg(feature = "web")]
+    {
+        let js_date = js_sys::Date::new_with_year_month_day(year as u32, month, day);
+        let current_day = js_date.get_date() as i32;
+        let new_day = current_day + days;
+        let js_date = js_sys::Date::new_with_year_month_day(year as u32, month, new_day);
+        format!(
+            "{:04}-{:02}-{:02}",
+            js_date.get_full_year(),
+            js_date.get_month() + 1,
+            js_date.get_date(),
+        )
+    }
+    #[cfg(not(feature = "web"))]
+    {
+        // Simple date arithmetic without js_sys
+        let total_days = day + days;
+        let mut y = year;
+        let mut m = month; // 0-indexed
+        let mut d = total_days;
+        while d > crate::utils::date_helpers::days_in_month(y, m + 1) {
+            d -= crate::utils::date_helpers::days_in_month(y, m + 1);
+            m += 1;
+            if m >= 12 {
+                m -= 12;
+                y += 1;
+            }
+        }
+        while d < 1 {
+            m -= 1;
+            if m < 0 {
+                m += 12;
+                y -= 1;
+            }
+            d += crate::utils::date_helpers::days_in_month(y, m + 1);
+        }
+        format!("{:04}-{:02}-{:02}", y, m + 1, d)
+    }
 }
 /// Add months to a date
 fn add_months(date: &str, months: i32) -> String {
@@ -469,13 +514,9 @@ fn add_months(date: &str, months: i32) -> String {
         total_months / 12
     };
     let new_year = year + year_adjustment;
-    let js_date = js_sys::Date::new_with_year_month_day(new_year as u32, new_month, day);
-    format!(
-        "{:04}-{:02}-{:02}",
-        js_date.get_full_year(),
-        js_date.get_month() + 1,
-        js_date.get_date(),
-    )
+    let max_day = crate::utils::date_helpers::days_in_month(new_year, new_month + 1);
+    let clamped_day = day.min(max_day);
+    format!("{:04}-{:02}-{:02}", new_year, new_month + 1, clamped_day)
 }
 /// Props for EventTypeFilterRow
 #[derive(Props, Clone, PartialEq)]

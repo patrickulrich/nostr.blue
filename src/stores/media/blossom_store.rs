@@ -69,6 +69,8 @@ pub static BLOSSOM_SERVERS: GlobalSignal<Store<BlossomServersStore>> = Signal::g
 pub static SERVERS_LOADED: GlobalSignal<bool> = Signal::global(|| false);
 /// Global signal for upload progress (0-100)
 pub static UPLOAD_PROGRESS: GlobalSignal<Option<f32>> = Signal::global(|| None);
+/// Generation counter for upload progress to prevent stale clears
+pub static UPLOAD_PROGRESS_GEN: GlobalSignal<u32> = Signal::global(|| 0);
 /// Represents a media item stored on Blossom servers (BUD-01/BUD-02 compatible)
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MediaItem {
@@ -346,6 +348,11 @@ async fn upload_blob_with_auth(
 ) -> Result<String, String> {
     let signer = nostr_client::get_signer()
         .ok_or("Not authenticated. Please sign in to upload.")?;
+    // Increment generation for this upload and capture it
+    let gen = UPLOAD_PROGRESS_GEN.with_mut(|g| {
+        *g = g.wrapping_add(1);
+        *g
+    });
     UPLOAD_PROGRESS.write().replace(start_progress);
     let server_url = server_url.unwrap_or_else(get_primary_server);
     let url = Url::parse(&server_url).map_err(|e| format!("Invalid server URL: {}", e))?;
@@ -364,7 +371,13 @@ async fn upload_blob_with_auth(
                 .upload_blob(data, Some(content_type), auth_options, Some(&keys))
                 .await
                 .map_err(|e| {
-                    UPLOAD_PROGRESS.write().replace(0.0);
+                    let gen = UPLOAD_PROGRESS_GEN.with_mut(|g| {
+                        *g = g.wrapping_add(1);
+                        *g
+                    });
+                    if *UPLOAD_PROGRESS_GEN.read() == gen {
+                        *UPLOAD_PROGRESS.write() = None;
+                    }
                     format!("Upload failed: {}", e)
                 })?
         }
@@ -379,7 +392,13 @@ async fn upload_blob_with_auth(
                 )
                 .await
                 .map_err(|e| {
-                    UPLOAD_PROGRESS.write().replace(0.0);
+                    let gen = UPLOAD_PROGRESS_GEN.with_mut(|g| {
+                        *g = g.wrapping_add(1);
+                        *g
+                    });
+                    if *UPLOAD_PROGRESS_GEN.read() == gen {
+                        *UPLOAD_PROGRESS.write() = None;
+                    }
                     format!("Upload failed: {}", e)
                 })?
         }
@@ -393,7 +412,34 @@ async fn upload_blob_with_auth(
                 )
                 .await
                 .map_err(|e| {
-                    UPLOAD_PROGRESS.write().replace(0.0);
+                    let gen = UPLOAD_PROGRESS_GEN.with_mut(|g| {
+                        *g = g.wrapping_add(1);
+                        *g
+                    });
+                    if *UPLOAD_PROGRESS_GEN.read() == gen {
+                        *UPLOAD_PROGRESS.write() = None;
+                    }
+                    format!("Upload failed: {}", e)
+                })?
+        }
+        #[cfg(feature = "mobile")]
+        crate::stores::signer::SignerType::AndroidSigner(android_signer) => {
+            client
+                .upload_blob(
+                    data,
+                    Some(content_type),
+                    auth_options,
+                    Some(android_signer.as_ref()),
+                )
+                .await
+                .map_err(|e| {
+                    let gen = UPLOAD_PROGRESS_GEN.with_mut(|g| {
+                        *g = g.wrapping_add(1);
+                        *g
+                    });
+                    if *UPLOAD_PROGRESS_GEN.read() == gen {
+                        *UPLOAD_PROGRESS.write() = None;
+                    }
                     format!("Upload failed: {}", e)
                 })?
         }
@@ -401,8 +447,11 @@ async fn upload_blob_with_auth(
     UPLOAD_PROGRESS.write().replace(100.0);
     log::info!("Upload successful: {}", descriptor.url);
     spawn(async move {
-        gloo_timers::future::TimeoutFuture::new(1000).await;
-        *UPLOAD_PROGRESS.write() = None;
+        crate::platform::timer::sleep_ms(1000).await;
+        // Only clear if generation hasn't changed (no new upload started)
+        if *UPLOAD_PROGRESS_GEN.read() == gen {
+            *UPLOAD_PROGRESS.write() = None;
+        }
     });
     Ok(descriptor.url.to_string())
 }
@@ -571,6 +620,13 @@ pub async fn publish_user_servers() -> Result<String, String> {
                 .await
                 .map_err(|e| format!("Failed to sign event: {}", e))?
         }
+        #[cfg(feature = "mobile")]
+        crate::stores::signer::SignerType::AndroidSigner(android_signer) => {
+            builder
+                .sign(android_signer.as_ref())
+                .await
+                .map_err(|e| format!("Failed to sign event: {}", e))?
+        }
     };
     nostr_client::ensure_relays_ready(&client).await;
     use nostr_relay_pool::RelayStatus as PoolRelayStatus;
@@ -658,6 +714,13 @@ pub async fn get_auth_header(
         crate::stores::signer::SignerType::NostrConnect(nostr_connect) => {
             builder
                 .sign(nostr_connect.as_ref())
+                .await
+                .map_err(|e| format!("Failed to sign auth event: {}", e))?
+        }
+        #[cfg(feature = "mobile")]
+        crate::stores::signer::SignerType::AndroidSigner(android_signer) => {
+            builder
+                .sign(android_signer.as_ref())
                 .await
                 .map_err(|e| format!("Failed to sign auth event: {}", e))?
         }

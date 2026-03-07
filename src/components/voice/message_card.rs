@@ -11,10 +11,11 @@ use crate::services::aggregation::InteractionCounts;
 use crate::utils::truncate_pubkey;
 use dioxus::events::{MediaData, MouseData};
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
 use dioxus::web::WebEventExt;
-use js_sys;
 use nostr_sdk::{Event as NostrEvent, EventId, Filter, Kind, PublicKey};
 use std::time::Duration;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 #[component]
 pub fn VoiceMessageCard(
@@ -29,8 +30,10 @@ pub fn VoiceMessageCard(
     let event_id_str = event_id.to_string();
     let event_clone = event.clone();
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+    #[allow(unused_mut)]
     let mut duration = use_signal(|| 0.0);
     let mut current_time = use_signal(|| 0.0);
+    #[allow(unused_variables, unused_mut)]
     let mut is_loading = use_signal(|| true);
     let mut show_reply_modal = use_signal(|| false);
     let mut show_zap_modal = use_signal(|| false);
@@ -242,54 +245,61 @@ pub fn VoiceMessageCard(
             },
         ),
     );
-    let toggle_play = move |_| {
+    let toggle_play = move |e: MouseEvent| {
+        e.stop_propagation();
         voice_messages_store::toggle_voice_message(event_id);
     };
     let audio_id_for_effect = audio_id.clone();
     use_effect(move || {
         let global_state = voice_messages_store::VOICE_PLAYBACK.read();
-        let is_playing = global_state.currently_playing == Some(event_id);
-        let audio_id_clone = audio_id_for_effect.clone();
-        let window = match web_sys::window() {
-            Some(w) => w,
-            None => {
-                log::error!("Failed to get window object");
-                return;
+        let _is_playing = global_state.currently_playing == Some(event_id);
+        let _audio_id_clone = audio_id_for_effect.clone();
+        #[cfg(feature = "web")]
+        {
+            let is_playing = _is_playing;
+            let audio_id_clone = _audio_id_clone;
+            let window = match web_sys::window() {
+                Some(w) => w,
+                None => {
+                    log::error!("Failed to get window object");
+                    return;
+                }
+            };
+            let document = match window.document() {
+                Some(d) => d,
+                None => {
+                    log::error!("Failed to get document object");
+                    return;
+                }
+            };
+            let element = match document.get_element_by_id(&audio_id_clone) {
+                Some(e) => e,
+                None => {
+                    log::debug!("Audio element {} not found yet", audio_id_clone);
+                    return;
+                }
+            };
+            let audio: web_sys::HtmlAudioElement = match element.dyn_into() {
+                Ok(a) => a,
+                Err(e) => {
+                    log::error!("Element is not an HtmlAudioElement: {:?}", e);
+                    return;
+                }
+            };
+            if is_playing {
+                let _ = audio
+                    .play()
+                    .map_err(|e| {
+                        log::debug!("Play failed: {:?}", e);
+                    });
+            } else if let Err(e) = audio.pause() {
+                log::debug!("Pause failed: {:?}", e);
             }
-        };
-        let document = match window.document() {
-            Some(d) => d,
-            None => {
-                log::error!("Failed to get document object");
-                return;
-            }
-        };
-        let element = match document.get_element_by_id(&audio_id_clone) {
-            Some(e) => e,
-            None => {
-                log::debug!("Audio element {} not found yet", audio_id_clone);
-                return;
-            }
-        };
-        let audio: web_sys::HtmlAudioElement = match element.dyn_into() {
-            Ok(a) => a,
-            Err(e) => {
-                log::error!("Element is not an HtmlAudioElement: {:?}", e);
-                return;
-            }
-        };
-        if is_playing {
-            let _ = audio
-                .play()
-                .map_err(|e| {
-                    log::debug!("Play failed: {:?}", e);
-                });
-        } else if let Err(e) = audio.pause() {
-            log::debug!("Pause failed: {:?}", e);
         }
     });
-    let handle_timeupdate = move |evt: Event<MediaData>| {
-        if let Some(target) = evt.data.as_web_event().target() {
+    #[cfg(feature = "web")]
+    let _handle_timeupdate = move |_evt: Event<MediaData>| {
+        if let Some(target) = _evt.data.as_web_event().target() {
             if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
                 let time = audio.current_time();
                 if !time.is_nan() {
@@ -301,8 +311,11 @@ pub fn VoiceMessageCard(
             }
         }
     };
-    let handle_loadedmetadata = move |evt: Event<MediaData>| {
-        if let Some(target) = evt.data.as_web_event().target() {
+    #[cfg(not(feature = "web"))]
+    let _handle_timeupdate = move |_: Event<MediaData>| {};
+    #[cfg(feature = "web")]
+    let _handle_loadedmetadata = move |_evt: Event<MediaData>| {
+        if let Some(target) = _evt.data.as_web_event().target() {
             if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
                 let dur = audio.duration();
                 if !dur.is_nan() {
@@ -315,12 +328,15 @@ pub fn VoiceMessageCard(
             }
         }
     };
-    let handle_ended = move |_| {
+    #[cfg(not(feature = "web"))]
+    let _handle_loadedmetadata = move |_: Event<MediaData>| {};
+    let _handle_ended = move |_: Event<MediaData>| {
         voice_messages_store::pause_voice_message();
         current_time.set(0.0);
     };
     let event_id_for_repost = event_id_str.clone();
-    let handle_repost = move |_| {
+    let handle_repost = move |e: MouseEvent| {
+        e.stop_propagation();
         let event_id_copy = event_id_for_repost.clone();
         is_reposting.set(true);
         spawn(async move {
@@ -360,7 +376,7 @@ pub fn VoiceMessageCard(
         .and_then(|m| m.picture.clone())
         .unwrap_or_default();
     let time_ago = {
-        let now = js_sys::Date::now() / 1000.0;
+        let now = crate::platform::timestamp::now_secs() as f64;
         let diff = now - created_at.as_secs() as f64;
         if diff < 60.0 {
             format!("{}s", diff as u32)
@@ -372,45 +388,53 @@ pub fn VoiceMessageCard(
             format!("{}d", (diff / 86400.0) as u32)
         }
     };
-    let navigator = use_navigator();
-    let voice_id_for_nav = event_id_str.clone();
-    let navigate_to_detail = move |evt: Event<MouseData>| {
-        if let Some(target) = evt.data.as_web_event().target() {
-            if let Some(element) = target.dyn_ref::<web_sys::Element>() {
-                let tag_name = element.tag_name().to_lowercase();
-                if tag_name == "button" || tag_name == "a" || tag_name == "audio" {
-                    return;
-                }
-                let mut current = element.clone();
-                for _ in 0..5 {
-                    if let Some(parent) = current.parent_element() {
-                        let parent_tag = parent.tag_name().to_lowercase();
-                        if parent_tag == "button" || parent_tag == "a" {
-                            return;
-                        }
-                        current = parent;
-                    } else {
-                        break;
-                    }
-                }
+    let navigator: Option<Box<dyn Fn()>> = {
+        #[cfg(feature = "web")]
+        {
+            use crate::routes::Route;
+            let nav = use_navigator();
+            let voice_id = event_id_str.clone();
+            Some(Box::new(move || {
+                let _ = nav.push(Route::Note {
+                    note_id: voice_id.clone(),
+                    from_voice: Some("true".to_string()),
+                });
+            }))
+        }
+        #[cfg(not(feature = "web"))]
+        {
+            None
+        }
+    };
+    #[cfg(feature = "web")]
+    let is_clickable = true;
+    #[cfg(not(feature = "web"))]
+    let is_clickable = false;
+    let card_class = if is_clickable {
+        "p-4 hover:bg-accent/50 transition cursor-pointer border-b border-border"
+    } else {
+        "p-4 border-b border-border opacity-60"
+    };
+    let tooltip_text = if !is_clickable { "Not supported on this platform" } else { "" };
+    let handle_click = move |_evt: Event<MouseData>| {
+        if is_clickable {
+            if let Some(nav) = &navigator {
+                nav();
             }
         }
-        navigator
-            .push(Route::Note {
-                note_id: voice_id_for_nav.clone(),
-                from_voice: Some("true".to_string()),
-            });
     };
     rsx! {
         div {
-            class: "p-4 hover:bg-accent/50 transition cursor-pointer border-b border-border",
-            onclick: navigate_to_detail,
+            class: "{card_class}",
+            title: "{tooltip_text}",
+            onclick: handle_click,
             div { class: "flex items-start gap-3 mb-3",
                 Link {
                     to: Route::Profile {
                         pubkey: author_pubkey.clone(),
                     },
                     class: "shrink-0",
+                    onclick: |e: MouseEvent| e.stop_propagation(),
                     if !author_avatar.is_empty() {
                         img {
                             src: "{author_avatar}",
@@ -429,6 +453,7 @@ pub fn VoiceMessageCard(
                             pubkey: author_pubkey.clone(),
                         },
                         class: "hover:underline",
+                        onclick: |e: MouseEvent| e.stop_propagation(),
                         div { class: "flex items-center gap-2",
                             span { class: "font-semibold text-foreground truncate", "{author_name}" }
                             if !author_username.is_empty() && author_username != author_name {
@@ -447,59 +472,72 @@ pub fn VoiceMessageCard(
                     src: "{audio_url}",
                     preload: "metadata",
                     style: "display: none;",
-                    ontimeupdate: handle_timeupdate,
-                    onloadedmetadata: handle_loadedmetadata,
-                    onended: handle_ended,
+                    ontimeupdate: move |_| {},
+                    onloadedmetadata: move |_| {},
+                    onended: move |_| {},
                 }
-                div { class: "flex items-center gap-4 bg-muted/30 rounded-lg p-3",
-                    button {
-                        class: "shrink-0 w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition flex items-center justify-center",
-                        onclick: toggle_play,
-                        if voice_messages_store::VOICE_PLAYBACK.read().currently_playing == Some(event_id) {
-                            svg {
-                                class: "w-5 h-5",
-                                view_box: "0 0 24 24",
-                                fill: "currentColor",
-                                rect {
-                                    x: "6",
-                                    y: "4",
-                                    width: "4",
-                                    height: "16",
+                if cfg!(feature = "web") {
+                    div { class: "flex items-center gap-4 bg-muted/30 rounded-lg p-3",
+                        button {
+                            class: "shrink-0 w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition flex items-center justify-center",
+                            onclick: toggle_play,
+                            if voice_messages_store::VOICE_PLAYBACK.read().currently_playing == Some(event_id) {
+                                svg {
+                                    class: "w-5 h-5",
+                                    view_box: "0 0 24 24",
+                                    fill: "currentColor",
+                                    rect {
+                                        x: "6",
+                                        y: "4",
+                                        width: "4",
+                                        height: "16",
+                                    }
+                                    rect {
+                                        x: "14",
+                                        y: "4",
+                                        width: "4",
+                                        height: "16",
+                                    }
                                 }
-                                rect {
-                                    x: "14",
-                                    y: "4",
-                                    width: "4",
-                                    height: "16",
+                            } else {
+                                svg {
+                                    class: "w-5 h-5 ml-0.5",
+                                    view_box: "0 0 24 24",
+                                    fill: "currentColor",
+                                    polygon { points: "8,5 19,12 8,19" }
                                 }
                             }
-                        } else {
-                            svg {
-                                class: "w-5 h-5 ml-0.5",
-                                view_box: "0 0 24 24",
-                                fill: "currentColor",
-                                polygon { points: "8,5 19,12 8,19" }
+                        }
+                        div { class: "flex-1",
+                            div { class: "w-full h-1 bg-muted rounded-full overflow-hidden mb-1",
+                                div {
+                                    class: "h-full bg-primary transition-all",
+                                    style: "width: {progress_percent}%",
+                                }
+                            }
+                            div { class: "flex justify-between text-xs text-muted-foreground",
+                                span { "{current_time_str}" }
+                                span { "{duration_str}" }
                             }
                         }
                     }
-                    div { class: "flex-1",
-                        div { class: "w-full h-1 bg-muted rounded-full overflow-hidden mb-1",
-                            div {
-                                class: "h-full bg-primary transition-all",
-                                style: "width: {progress_percent}%",
-                            }
+                } else {
+                    div { class: "flex items-center gap-4 bg-muted/30 rounded-lg p-3",
+                        div { class: "shrink-0 w-10 h-10 rounded-full bg-muted flex items-center justify-center",
+                            span { class: "text-muted-foreground text-xs", "N/A" }
                         }
-                        div { class: "flex justify-between text-xs text-muted-foreground",
-                            span { "{current_time_str}" }
-                            span { "{duration_str}" }
+                        div { class: "flex-1 text-sm text-muted-foreground",
+                            "Playback not supported on this platform"
                         }
                     }
                 }
             }
             div { class: "flex items-center justify-between text-muted-foreground",
                 button {
-                    class: "flex items-center gap-1 hover:text-blue-500 transition group",
-                    onclick: move |_| show_reply_modal.set(true),
+                    onclick: move |e: MouseEvent| {
+                        e.stop_propagation();
+                        show_reply_modal.set(true);
+                    },
                     MessageCircleIcon { class: "w-4 h-4 group-hover:scale-110 transition" }
                     if *reply_count.read() > 0 {
                         span { class: "text-sm", "{reply_count.read()}" }
@@ -522,7 +560,10 @@ pub fn VoiceMessageCard(
                 }
                 button {
                     class: if *is_zapped.read() { "flex items-center gap-1 text-yellow-500 transition group" } else { "flex items-center gap-1 hover:text-yellow-500 transition group" },
-                    onclick: move |_| show_zap_modal.set(true),
+                    onclick: move |e: MouseEvent| {
+                        e.stop_propagation();
+                        show_zap_modal.set(true);
+                    },
                     ZapIcon { class: "w-4 h-4 group-hover:scale-110 transition" }
                     if *zap_amount_sats.read() > 0 {
                         span { class: "text-sm", "{zap_amount_sats.read()}" }

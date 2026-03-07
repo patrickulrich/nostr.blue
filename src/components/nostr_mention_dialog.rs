@@ -149,10 +149,7 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
                 user_results.set(mapped);
                 is_searching_users.set(true);
                 let new_task = spawn(async move {
-                    #[cfg(target_family = "wasm")]
-                    gloo_timers::future::TimeoutFuture::new(300).await;
-                    #[cfg(not(target_family = "wasm"))]
-                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    crate::platform::timer::sleep_ms(300).await;
                     match search_profiles(&query_snapshot, 20, true).await {
                         Ok(results) => {
                             if search_query.read().as_str() == query_snapshot.as_str() {
@@ -177,10 +174,7 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
             MentionTab::Notes => {
                 is_searching_notes.set(true);
                 let new_task = spawn(async move {
-                    #[cfg(target_family = "wasm")]
-                    gloo_timers::future::TimeoutFuture::new(300).await;
-                    #[cfg(not(target_family = "wasm"))]
-                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    crate::platform::timer::sleep_ms(300).await;
                     match search_text_notes(&query_snapshot, 20, &contacts).await {
                         Ok(results) => {
                             if search_query.read().as_str() == query_snapshot.as_str() {
@@ -201,10 +195,7 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
             MentionTab::Articles => {
                 is_searching_articles.set(true);
                 let new_task = spawn(async move {
-                    #[cfg(target_family = "wasm")]
-                    gloo_timers::future::TimeoutFuture::new(300).await;
-                    #[cfg(not(target_family = "wasm"))]
-                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    crate::platform::timer::sleep_ms(300).await;
                     match search_articles(&query_snapshot, 20, &contacts).await {
                         Ok(results) => {
                             if search_query.read().as_str() == query_snapshot.as_str() {

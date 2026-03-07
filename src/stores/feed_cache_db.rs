@@ -20,10 +20,10 @@
 //! This module only compiles on wasm32 targets. A stub type is provided for
 //! native targets to allow type checking.
 #![cfg_attr(
-    not(target_arch = "wasm32"),
+    not(feature = "web"),
     allow(dead_code, unused_imports, unused_variables)
 )]
-#![cfg_attr(target_arch = "wasm32", allow(dead_code))]
+#![cfg_attr(feature = "web", allow(dead_code))]
 use serde::{Deserialize, Serialize};
 /// Cached feed item with metadata
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -77,7 +77,7 @@ pub struct BulkReadResult<T> {
     /// Keys of entries that failed to deserialize (for cleanup)
     pub failed_keys: Vec<String>,
 }
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 mod native_stub {
     use super::*;
     /// Stub type for native targets - cannot be instantiated
@@ -175,6 +175,15 @@ mod native_stub {
                 ),
             )
         }
+        pub async fn get_all_feed_metadata(
+            &self,
+        ) -> Result<Vec<(String, FeedCacheMetadata)>, String> {
+            Err(
+                Self::make_error(
+                    "FeedCacheDb is only available on wasm32 targets".to_string(),
+                ),
+            )
+        }
         pub async fn get_all_lru_entries(
             &self,
         ) -> Result<Vec<(String, LruEntry)>, String> {
@@ -232,9 +241,9 @@ mod native_stub {
         }
     }
 }
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 pub use native_stub::FeedCacheDb;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 mod wasm_impl {
     use super::*;
     use indexed_db_futures::prelude::*;
@@ -726,5 +735,5 @@ mod wasm_impl {
         }
     }
 }
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub use wasm_impl::FeedCacheDb;

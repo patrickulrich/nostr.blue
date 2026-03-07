@@ -2,32 +2,9 @@
 //!
 //! Provides async interface to the isomorphic-git Web Worker.
 //! Follows the same pattern as voice_recorder.rs for JS interop.
+use crate::services::git_types::{CommitEntry, FileEntry};
 use js_sys::Reflect;
-use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
-/// File entry from git tree listing
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FileEntry {
-    pub name: String,
-    #[serde(rename = "type")]
-    pub entry_type: String,
-    pub path: String,
-}
-impl FileEntry {
-    pub fn is_directory(&self) -> bool {
-        self.entry_type == "tree"
-    }
-}
-/// Commit entry from git log
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CommitEntry {
-    pub oid: String,
-    pub message: String,
-    pub author: String,
-    pub email: String,
-    pub timestamp: u64,
-    pub parent: Option<String>,
-}
 /// Git Worker manager - follows voice_recorder.rs pattern
 /// Worker is initialized globally via window.gitWorkerManager
 pub struct GitWorkerManager;

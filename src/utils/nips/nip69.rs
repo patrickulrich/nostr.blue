@@ -9,7 +9,7 @@ use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 /// Get current Unix timestamp in seconds (WASM-compatible)
 fn now_secs() -> u64 {
-    (js_sys::Date::now() / 1000.0) as u64
+    crate::platform::timestamp::now_secs()
 }
 /// P2P order event kind (addressable)
 /// Note: Kind::PeerToPeerOrder is also available in nostr-sdk

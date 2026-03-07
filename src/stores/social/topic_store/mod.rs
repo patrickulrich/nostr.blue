@@ -24,6 +24,7 @@ use nostr::Event as NostrEvent;
 use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
+use std::rc::Rc;
 
 pub const KIND_TOPIC_SUBSCRIPTION: u16 = 10073;
 
@@ -76,7 +77,7 @@ pub struct TopicInfo {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TopicThread {
     pub post: TopicPost,
-    pub replies: Vec<TopicThread>,
+    pub replies: Vec<Rc<TopicThread>>,
     pub depth: usize,
 }
 
@@ -340,7 +341,7 @@ pub fn post_replies_filter(post_id: &str, limit: usize) -> Filter {
 // --- Thread Tree ---
 
 /// Build a thread tree from flat posts list
-pub fn build_topic_thread_tree(posts: Vec<TopicPost>) -> Vec<TopicThread> {
+pub fn build_topic_thread_tree(posts: Vec<TopicPost>) -> Vec<Rc<TopicThread>> {
     let mut children_map: HashMap<Option<String>, Vec<TopicPost>> = HashMap::new();
     for post in posts {
         children_map.entry(post.parent_id.clone()).or_default().push(post);
@@ -355,7 +356,7 @@ pub fn build_topic_thread_tree(posts: Vec<TopicPost>) -> Vec<TopicThread> {
         map: &HashMap<Option<String>, Vec<TopicPost>>,
         depth: usize,
         max_depth: usize,
-    ) -> Vec<TopicThread> {
+    ) -> Vec<Rc<TopicThread>> {
         if depth > max_depth {
             return Vec::new();
         }
@@ -363,7 +364,7 @@ pub fn build_topic_thread_tree(posts: Vec<TopicPost>) -> Vec<TopicThread> {
             .map(|posts| {
                 posts
                     .iter()
-                    .map(|post| TopicThread {
+                    .map(|post| Rc::new(TopicThread {
                         post: post.clone(),
                         replies: build_tree(
                             Some(post.id.clone()),
@@ -372,7 +373,7 @@ pub fn build_topic_thread_tree(posts: Vec<TopicPost>) -> Vec<TopicThread> {
                             max_depth,
                         ),
                         depth,
-                    })
+                    }))
                     .collect()
             })
             .unwrap_or_default()
@@ -384,18 +385,18 @@ pub fn build_topic_thread_tree(posts: Vec<TopicPost>) -> Vec<TopicThread> {
 }
 
 /// Flatten a thread tree to a list with depth info
-pub fn flatten_topic_thread_tree(tree: Vec<TopicThread>) -> Vec<(TopicPost, usize)> {
+pub fn flatten_topic_thread_tree(tree: Vec<Rc<TopicThread>>) -> Vec<(TopicPost, usize)> {
     let mut result = Vec::new();
     fn flatten_recursive(
-        threads: Vec<TopicThread>,
+        threads: &[Rc<TopicThread>],
         result: &mut Vec<(TopicPost, usize)>,
     ) {
         for thread in threads {
-            result.push((thread.post, thread.depth));
-            flatten_recursive(thread.replies, result);
+            result.push((thread.post.clone(), thread.depth));
+            flatten_recursive(&thread.replies, result);
         }
     }
-    flatten_recursive(tree, &mut result);
+    flatten_recursive(&tree, &mut result);
     result
 }
 

@@ -3,13 +3,17 @@ use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
 use nostr_sdk::{Event, EventBuilder, EventId, Filter, Kind, PublicKey};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use gloo_timers::callback::Timeout;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use std::cell::RefCell;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen_futures::spawn_local;
+
+static GENERATION_COUNTER: AtomicU64 = AtomicU64::new(0);
+
 /// Store for pinned event IDs with fine-grained reactivity
 #[derive(Clone, Debug, Default, Store)]
 pub struct PinnedEventsStore {
@@ -41,7 +45,7 @@ pub static PINNED_SYNC_STATUS: GlobalSignal<PinnedSyncStatus> = Signal::global(|
 /// Previous pinned notes state for rollback on failure
 pub static PINNED_ROLLBACK_STATE: GlobalSignal<Store<PinnedRollbackStore>> = Signal::global(||
 Store::new(PinnedRollbackStore::default()));
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 thread_local! {
     /// Pending pinned notes publish timeout (for debouncing)
     static PINNED_PUBLISH_TIMEOUT: RefCell<Option<Timeout>> = const {
@@ -142,7 +146,8 @@ pub async fn pin_event(event_id: String) -> Result<(), String> {
     }
     pins.push(event_id);
     *PINNED_EVENTS.read().data().write() = pins.clone();
-    #[cfg(target_arch = "wasm32")]
+    let captured_gen = GENERATION_COUNTER.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
+    #[cfg(feature = "web")]
     {
         PINNED_PUBLISH_TIMEOUT
             .with(|timeout| {
@@ -151,16 +156,16 @@ pub async fn pin_event(event_id: String) -> Result<(), String> {
                     1000,
                     move || {
                         spawn_local(async move {
-                            publish_with_retry(pins, 0).await;
+                            publish_with_retry(pins, captured_gen, 0).await;
                         });
                     },
                 );
                 *timeout.borrow_mut() = Some(timeout_handle);
             });
     }
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(feature = "native")]
     {
-        publish_with_retry(pins, 0).await;
+        publish_with_retry(pins, captured_gen, 0).await;
     }
     Ok(())
 }
@@ -172,8 +177,10 @@ pub async fn unpin_event(event_id: String) -> Result<(), String> {
     }
     pins.retain(|id| id != &event_id);
     *PINNED_EVENTS.read().data().write() = pins.clone();
-    #[cfg(target_arch = "wasm32")]
+    let captured_gen = GENERATION_COUNTER.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
+    #[cfg(feature = "web")]
     {
+        let pins_for_timeout = pins.clone();
         PINNED_PUBLISH_TIMEOUT
             .with(|timeout| {
                 *timeout.borrow_mut() = None;
@@ -181,29 +188,39 @@ pub async fn unpin_event(event_id: String) -> Result<(), String> {
                     1000,
                     move || {
                         spawn_local(async move {
-                            publish_with_retry(pins, 0).await;
+                            publish_with_retry(pins_for_timeout, captured_gen, 0).await;
                         });
                     },
                 );
                 *timeout.borrow_mut() = Some(timeout_handle);
             });
     }
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(feature = "native")]
     {
-        publish_with_retry(pins, 0).await;
+        publish_with_retry(pins, captured_gen, 0).await;
     }
     Ok(())
 }
-/// Publish pinned notes with retry and exponential backoff
+/// Publish pinned notes with retry and exponential backoff (native - requires Send)
+#[cfg(feature = "native")]
 fn publish_with_retry(
     pins: Vec<String>,
+    captured_gen: u64,
     retry_count: u32,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static>> {
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>> {
     Box::pin(async move {
+        if captured_gen != GENERATION_COUNTER.load(Ordering::SeqCst) {
+            log::debug!("Skipping stale pinned notes publish");
+            return;
+        }
         const MAX_RETRIES: u32 = 3;
         *PINNED_SYNC_STATUS.write() = PinnedSyncStatus::Syncing;
         match publish_pinned_notes(pins.clone()).await {
             Ok(_) => {
+                if captured_gen != GENERATION_COUNTER.load(Ordering::SeqCst) {
+                    log::debug!("Stale pinned notes publish succeeded, skipping state update");
+                    return;
+                }
                 *PINNED_ROLLBACK_STATE.read().data().write() = None;
                 *PINNED_SYNC_STATUS.write() = PinnedSyncStatus::Idle;
                 log::info!("Pinned notes published successfully");
@@ -212,27 +229,95 @@ fn publish_with_retry(
                 log::error!(
                     "Failed to publish pinned notes (attempt {}): {}", retry_count + 1, e
                 );
+                if captured_gen != GENERATION_COUNTER.load(Ordering::SeqCst) {
+                    log::debug!("Stale pinned notes publish failed, skipping retry");
+                    return;
+                }
                 if retry_count < MAX_RETRIES {
                     let delay_ms = 1000u32 * (1 << retry_count);
                     log::info!(
                         "Retrying pinned notes publish in {}ms (attempt {}/{})",
                         delay_ms, retry_count + 1, MAX_RETRIES
                     );
-                    #[cfg(target_arch = "wasm32")]
+                    crate::platform::timer::sleep_ms(delay_ms).await;
+                    publish_with_retry(pins, captured_gen, retry_count + 1).await;
+                } else {
+                    log::error!(
+                        "Pinned notes publish failed after {} retries: {}", MAX_RETRIES,
+                        e
+                    );
+                    if let Some(previous_state) = PINNED_ROLLBACK_STATE
+                        .read()
+                        .data()
+                        .read()
+                        .clone()
                     {
-                        let timeout_handle = Timeout::new(
-                            delay_ms,
-                            move || {
-                                spawn_local(publish_with_retry(pins, retry_count + 1));
-                            },
+                        log::warn!(
+                            "Automatically rolling back pinned notes to previous state due to publish failure"
                         );
-                        std::mem::forget(timeout_handle);
+                        *PINNED_EVENTS.read().data().write() = previous_state;
                     }
-                    #[cfg(not(target_arch = "wasm32"))]
-                    {
-                        tokio::time::sleep(Duration::from_millis(delay_ms as u64)).await;
-                        publish_with_retry(pins, retry_count + 1).await;
-                    }
+                    *PINNED_ROLLBACK_STATE.read().data().write() = None;
+                    *PINNED_SYNC_STATUS.write() = PinnedSyncStatus::Failed {
+                        error: e.clone(),
+                        retry_count,
+                    };
+                }
+            }
+        }
+    })
+}
+
+/// Publish pinned notes with retry and exponential backoff (WASM - no Send bound)
+#[cfg(feature = "web")]
+fn publish_with_retry(
+    pins: Vec<String>,
+    captured_gen: u64,
+    retry_count: u32,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static>> {
+    Box::pin(async move {
+        if captured_gen != GENERATION_COUNTER.load(Ordering::SeqCst) {
+            log::debug!("Skipping stale pinned notes publish");
+            return;
+        }
+        const MAX_RETRIES: u32 = 3;
+        *PINNED_SYNC_STATUS.write() = PinnedSyncStatus::Syncing;
+        match publish_pinned_notes(pins.clone()).await {
+            Ok(_) => {
+                if captured_gen != GENERATION_COUNTER.load(Ordering::SeqCst) {
+                    log::debug!("Stale pinned notes publish succeeded, skipping state update");
+                    return;
+                }
+                *PINNED_ROLLBACK_STATE.read().data().write() = None;
+                *PINNED_SYNC_STATUS.write() = PinnedSyncStatus::Idle;
+                log::info!("Pinned notes published successfully");
+            }
+            Err(e) => {
+                log::error!(
+                    "Failed to publish pinned notes (attempt {}): {}", retry_count + 1, e
+                );
+                if captured_gen != GENERATION_COUNTER.load(Ordering::SeqCst) {
+                    log::debug!("Stale pinned notes publish failed, skipping retry");
+                    return;
+                }
+                if retry_count < MAX_RETRIES {
+                    let delay_ms = 1000u32 * (1 << retry_count);
+                    log::info!(
+                        "Retrying pinned notes publish in {}ms (attempt {}/{})",
+                        delay_ms, retry_count + 1, MAX_RETRIES
+                    );
+                    let timeout_handle = Timeout::new(
+                        delay_ms,
+                        move || {
+                            spawn_local(publish_with_retry(pins, captured_gen, retry_count + 1));
+                        },
+                    );
+                    // Intentionally forget the timeout handle to prevent the scheduled retry
+                    // from being cancelled. When a Timeout is dropped, it cancels the callback.
+                    // We use fire-and-forget here so the retry runs even after this scope ends.
+                    // This is a deliberate WASM pattern - the small memory leak is acceptable
+                    // because the callback runs once and the module lifetime is the app lifetime.
+                    std::mem::forget(timeout_handle);
                 } else {
                     log::error!(
                         "Pinned notes publish failed after {} retries: {}", MAX_RETRIES,
@@ -314,8 +399,9 @@ pub fn rollback_pinned_notes() {
 #[allow(dead_code)]
 pub async fn retry_pinned_publish() {
     let current_pins = PINNED_EVENTS.read().data().read().clone();
+    let captured_gen = GENERATION_COUNTER.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
     log::info!("Manually retrying pinned notes publish");
-    publish_with_retry(current_pins, 0).await;
+    publish_with_retry(current_pins, captured_gen, 0).await;
 }
 /// Dismiss failed status and keep local changes
 #[allow(dead_code)]

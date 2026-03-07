@@ -105,14 +105,14 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
         selected_verses.set(Vec::new());
         show_toolbar.set(false);
     };
-    #[allow(unused_variables, unused_mut)]
     let copy_verses = {
         let translation = translation_for_copy;
-        let mut selected_verses = selected_verses;
-        let mut show_toolbar = show_toolbar;
+        let selected_verses_for_copy = selected_verses;
+        let mut selected_verses_for_clear = selected_verses;
+        let mut show_toolbar_for_clear = show_toolbar;
         move |_| {
             if let Some(Ok(ref data)) = *chapter_data.read() {
-                let verses = selected_verses.read().clone();
+                let verses = selected_verses_for_copy.read().clone();
                 if verses.is_empty() {
                     return;
                 }
@@ -124,58 +124,32 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                         text_parts.push(format!("{} {}", v, text));
                     }
                 }
-                #[cfg(target_arch = "wasm32")]
-                {
-                    let first = *verses.first().unwrap_or(&0);
-                    let last = *verses.last().unwrap_or(&0);
-                    let reference = if first == last {
-                        format!("{} {}:{} ({})", book_name, chapter, first, translation)
-                    } else {
-                        format!(
-                            "{} {}:{}-{} ({})",
-                            book_name,
-                            chapter,
-                            first,
-                            last,
-                            translation,
-                        )
-                    };
-                    let full_text = format!(
-                        "{}\n\u{2014} {}",
-                        text_parts.join(" "),
-                        reference,
-                    );
-                    wasm_bindgen_futures::spawn_local(async move {
-                        let window = match web_sys::window() {
-                            Some(w) => w,
-                            None => {
-                                log::error!("Clipboard: No window object available");
-                                return;
-                            }
-                        };
-                        let navigator = window.navigator();
-                        let clipboard_exists = js_sys::Reflect::has(
-                                &navigator,
-                                &"clipboard".into(),
-                            )
-                            .unwrap_or(false);
-                        if !clipboard_exists {
-                            log::warn!(
-                                "Clipboard API unavailable (requires HTTPS or localhost)"
-                            );
-                            return;
-                        }
-                        let clipboard = navigator.clipboard();
-                        let promise = clipboard.write_text(&full_text);
-                        if let Err(e) = wasm_bindgen_futures::JsFuture::from(promise)
-                            .await
-                        {
-                            log::error!("Clipboard write failed: {:?}", e);
-                        }
-                    });
-                }
-                selected_verses.set(Vec::new());
-                show_toolbar.set(false);
+                let first = *verses.first().unwrap_or(&0);
+                let last = *verses.last().unwrap_or(&0);
+                let reference = if first == last {
+                    format!("{} {}:{} ({})", book_name, chapter, first, translation)
+                } else {
+                    format!(
+                        "{} {}:{}-{} ({})",
+                        book_name,
+                        chapter,
+                        first,
+                        last,
+                        translation,
+                    )
+                };
+                let full_text = format!(
+                    "{}\n\u{2014} {}",
+                    text_parts.join(" "),
+                    reference,
+                );
+                spawn(async move {
+                    if let Err(e) = crate::platform::clipboard::copy_to_clipboard(&full_text).await {
+                        log::error!("Clipboard write failed: {:?}", e);
+                    }
+                    selected_verses_for_clear.set(Vec::new());
+                    show_toolbar_for_clear.set(false);
+                });
             }
         }
     };
@@ -584,7 +558,7 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                             log::info!("Highlight created");
                                             highlight_feedback.set(Some((true, "Highlight saved".to_string())));
                                             spawn(async move {
-                                                gloo_timers::future::TimeoutFuture::new(2000).await;
+                                                crate::platform::timer::sleep_ms(2000).await;
                                                 highlight_feedback.set(None);
                                             });
                                         }
@@ -592,7 +566,7 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                             log::error!("Failed to create highlight: {}", e);
                                             highlight_feedback.set(Some((false, format!("Failed: {}", e))));
                                             spawn(async move {
-                                                gloo_timers::future::TimeoutFuture::new(4000).await;
+                                                crate::platform::timer::sleep_ms(4000).await;
                                                 highlight_feedback.set(None);
                                             });
                                         }

@@ -8,10 +8,25 @@
 
 Run before committing:
 ```bash
+# Dioxus
+dx check
+
+# Cargo
 cargo check
-dx check                                                
-cargo clippy -- -D warnings                                # Native lints
-cargo clippy --target wasm32-unknown-unknown -- -D warnings  # WASM lints (CI enforced)
+
+# Web (WASM)
+cargo check --target wasm32-unknown-unknown
+cargo clippy --target wasm32-unknown-unknown -- -D warnings
+
+# Desktop
+cargo check --no-default-features --features desktop
+cargo clippy --no-default-features --features desktop -- -D warnings
+
+# Mobile
+cargo check --no-default-features --features mobile
+cargo clippy --no-default-features --features mobile -- -D warnings
+
+# Tests
 cargo test
 ```
 
@@ -23,9 +38,11 @@ npm run build   # Production build
 
 ## Project Overview
 
-**nostr.blue** is a Nostr social client built with Rust + Dioxus, compiled to WebAssembly. Features include feeds, DMs, communities, zaps, Cashu ecash wallet, articles, wikis, podcasts, and more.
+**nostr.blue** is a Nostr social client built with Rust + Dioxus, compiled to WebAssembly for browsers, Android via WebView, and Linux Desktop. Features include feeds, DMs, communities, zaps, Cashu ecash wallet, articles, wikis, podcasts, and more.
 
 **Stack**: Dioxus 0.7 (reactive UI), rust-nostr SDK, CDK (Cashu), TailwindCSS 4
+
+**Platforms**: Web (WASM), Android (WebView), Linux Desktop
 
 ## Architecture
 

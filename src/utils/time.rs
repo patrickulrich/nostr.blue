@@ -23,8 +23,8 @@ pub fn format_commit_date(date_str: &str) -> String {
 }
 /// Format a Unix timestamp as relative time (e.g., "2h ago", "3d ago")
 ///
-/// This version takes a raw `u64` timestamp and is WASM-compatible,
-/// using `js_sys::Date::now()` in WASM and `std::time::SystemTime` otherwise.
+/// This version takes a raw `u64` timestamp and is cross-platform,
+/// using `crate::platform::timestamp::now_secs()` for current time.
 ///
 /// # Examples
 /// - Recent: "just now"
@@ -34,13 +34,7 @@ pub fn format_commit_date(date_str: &str) -> String {
 /// - Weeks: "2w ago"
 /// - Months: "3mo ago"
 pub fn format_time_ago(timestamp: u64) -> String {
-    #[cfg(target_family = "wasm")]
-    let now = (js_sys::Date::now() / 1000.0) as u64;
-    #[cfg(not(target_family = "wasm"))]
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let now = crate::platform::timestamp::now_secs();
     let diff = now.saturating_sub(timestamp);
     if diff < 60 {
         "just now".to_string()

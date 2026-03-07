@@ -17,12 +17,12 @@ pub fn NwcSetupModal(
             connection_error.set(None);
             connection_success.set(false);
             let uri = nwc_uri.read().clone();
-            match nwc_store::connect_nwc(&uri).await {
+            match nwc_store::connect_nwc(&uri, true).await {
                 Ok(()) => {
                     log::info!("NWC connected successfully");
                     connection_success.set(true);
                     spawn(async move {
-                        gloo_timers::future::TimeoutFuture::new(1500).await;
+                        crate::platform::timer::sleep_ms(1500).await;
                         on_close.call(());
                     });
                 }

@@ -198,7 +198,7 @@ pub async fn stream_interaction_counts(
         log::debug!(
             "Waiting for relay connections (attempt {}/{})", attempts, MAX_ATTEMPTS
         );
-        gloo_timers::future::TimeoutFuture::new(500).await;
+        crate::platform::timer::sleep_ms(500).await;
     };
     if connected_urls.is_empty() {
         return Err(

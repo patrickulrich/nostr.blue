@@ -115,7 +115,7 @@ pub fn RecipeDetailView(recipe: CachedRecipe) -> Element {
                         r#type: "button",
                         class: "flex items-center gap-2 px-4 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm font-medium",
                         onclick: move |_| {
-                            #[cfg(target_arch = "wasm32")]
+                            #[cfg(feature = "web")]
                             {
                                 let share_url = format!("nostr:{}", naddr_for_share);
                                 if let Some(window) = web_sys::window() {
@@ -123,7 +123,7 @@ pub fn RecipeDetailView(recipe: CachedRecipe) -> Element {
                                     let _ = clipboard.write_text(&share_url);
                                     share_copied.set(true);
                                     spawn(async move {
-                                        gloo_timers::future::TimeoutFuture::new(2000).await;
+                                        crate::platform::timer::sleep_ms(2000).await;
                                         share_copied.set(false);
                                     });
                                 }

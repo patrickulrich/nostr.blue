@@ -13,12 +13,28 @@ pub use payments::btc_price;
 pub use payments::mempool;
 pub use payments::lnurl;
 
+#[cfg(all(feature = "web", feature = "desktop"))]
+compile_error!("Cannot enable both 'web' and 'desktop' features");
+
+#[cfg(all(feature = "web", feature = "mobile"))]
+compile_error!("Cannot enable both 'web' and 'mobile' features");
+
+#[cfg(all(feature = "desktop", feature = "mobile"))]
+compile_error!("Cannot enable both 'desktop' and 'mobile' features");
+
+#[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile")))]
+compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature");
+
 pub mod admission_policy;
 pub mod aggregation;
-#[cfg(target_arch = "wasm32")]
 pub mod bible_api;
 pub mod geocoding;
 pub mod git_hosting;
+#[cfg(any(feature = "desktop", feature = "mobile"))]
+#[allow(dead_code)]
+pub mod git_native;
+pub mod git_types;
+#[cfg(feature = "web")]
 pub mod git_worker;
 pub mod github_nips;
 pub mod openlibrary;

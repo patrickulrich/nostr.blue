@@ -59,6 +59,13 @@ pub async fn create_auth_header(
                 .await
                 .map_err(|e| format!("Failed to create NIP-98 auth: {}", e))?
         }
+        #[cfg(feature = "mobile")]
+        crate::stores::signer::SignerType::AndroidSigner(android_signer) => {
+            http_data
+                .to_authorization(android_signer.as_ref())
+                .await
+                .map_err(|e| format!("Failed to create NIP-98 auth: {}", e))?
+        }
     };
     Ok(AuthResult { header, signed_url })
 }
@@ -77,6 +84,7 @@ pub async fn create_auth_header(
 /// # Returns
 /// * `Ok(AuthResult)` - The authorization header and signed URL
 /// * `Err(String)` - Error message if auth creation fails
+#[allow(dead_code)]
 pub async fn create_auth_header_with_payload(
     url: &str,
     method: nip98::HttpMethod,
@@ -106,6 +114,13 @@ pub async fn create_auth_header_with_payload(
         crate::stores::signer::SignerType::NostrConnect(nostr_connect) => {
             http_data
                 .to_authorization(nostr_connect.as_ref())
+                .await
+                .map_err(|e| format!("Failed to create NIP-98 auth: {}", e))?
+        }
+        #[cfg(feature = "mobile")]
+        crate::stores::signer::SignerType::AndroidSigner(android_signer) => {
+            http_data
+                .to_authorization(android_signer.as_ref())
                 .await
                 .map_err(|e| format!("Failed to create NIP-98 auth: {}", e))?
         }

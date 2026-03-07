@@ -1,6 +1,5 @@
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
-use gloo_storage::{LocalStorage, Storage};
 use nostr::{Keys, PublicKey};
 use nostr_sdk::ToBech32;
 use serde::{Deserialize, Serialize};
@@ -25,6 +24,8 @@ pub enum LoginMethod {
     PrivateKey,
     ReadOnly,
     RemoteSigner,
+    #[cfg(feature = "mobile")]
+    AndroidSigner,
 }
 /// Global authentication state
 pub static AUTH_STATE: GlobalSignal<AuthState> = Signal::global(AuthState::default);
@@ -36,6 +37,7 @@ const STORAGE_KEY_NPUB: &str = "nostr_npub";
 const STORAGE_KEY_METHOD: &str = "nostr_login_method";
 const STORAGE_KEY_BUNKER_URI: &str = "nostr_bunker_uri";
 const STORAGE_KEY_APP_KEYS: &str = "nostr_app_keys";
+const STORAGE_KEY_SIGNER_PACKAGE: &str = "signer_package";
 /// State for password prompt modal (NIP-49 decryption)
 #[derive(Clone, Debug, Default)]
 pub struct PasswordPromptState {
@@ -57,11 +59,11 @@ pub static PASSWORD_PROMPT: GlobalSignal<PasswordPromptState> = Signal::global(
 /// Actual signer restoration should be done via restore_session_async()
 pub fn init_auth() {
     log::info!("Initializing authentication...");
-    if let Ok(method_str) = LocalStorage::get::<String>(STORAGE_KEY_METHOD) {
+    if let Ok(method_str) = crate::platform::storage::get::<String>(STORAGE_KEY_METHOD) {
         match method_str.as_str() {
             "extension" => {
                 log::info!("Found extension login method");
-                if let Ok(npub) = LocalStorage::get::<String>(STORAGE_KEY_NPUB) {
+                if let Ok(npub) = crate::platform::storage::get::<String>(STORAGE_KEY_NPUB) {
                     *AUTH_STATE.write() = AuthState {
                         pubkey: Some(npub),
                         is_authenticated: true,
@@ -70,7 +72,7 @@ pub fn init_auth() {
                 }
             }
             "private_key" => {
-                if let Ok(npub) = LocalStorage::get::<String>(STORAGE_KEY_NPUB) {
+                if let Ok(npub) = crate::platform::storage::get::<String>(STORAGE_KEY_NPUB) {
                     log::info!("Found stored private key session");
                     *AUTH_STATE.write() = AuthState {
                         pubkey: Some(npub),
@@ -80,7 +82,7 @@ pub fn init_auth() {
                 }
             }
             "read_only" => {
-                if let Ok(npub) = LocalStorage::get::<String>(STORAGE_KEY_NPUB) {
+                if let Ok(npub) = crate::platform::storage::get::<String>(STORAGE_KEY_NPUB) {
                     log::info!("Found stored read-only session");
                     match crate::utils::nip19::normalize_pubkey(&npub) {
                         Ok(pubkey_hex) => {
@@ -92,14 +94,14 @@ pub fn init_auth() {
                         }
                         Err(_) => {
                             log::warn!("Corrupted read-only pubkey in storage, clearing");
-                            LocalStorage::delete(STORAGE_KEY_NPUB);
-                            LocalStorage::delete(STORAGE_KEY_METHOD);
+                            let _ = crate::platform::storage::delete(STORAGE_KEY_NPUB);
+                            let _ = crate::platform::storage::delete(STORAGE_KEY_METHOD);
                         }
                     }
                 }
             }
             "remote_signer" => {
-                if let Ok(stored_pubkey) = LocalStorage::get::<String>(STORAGE_KEY_NPUB) {
+                if let Ok(stored_pubkey) = crate::platform::storage::get::<String>(STORAGE_KEY_NPUB) {
                     log::info!("Found stored remote signer session");
                     match crate::utils::nip19::normalize_pubkey(&stored_pubkey) {
                         Ok(pubkey_hex) => {
@@ -111,12 +113,23 @@ pub fn init_auth() {
                         }
                         Err(_) => {
                             log::warn!("Corrupted remote signer pubkey in storage, clearing");
-                            LocalStorage::delete(STORAGE_KEY_NPUB);
-                            LocalStorage::delete(STORAGE_KEY_BUNKER_URI);
-                            LocalStorage::delete(STORAGE_KEY_APP_KEYS);
-                            LocalStorage::delete(STORAGE_KEY_METHOD);
+                            let _ = crate::platform::storage::delete(STORAGE_KEY_NPUB);
+                            let _ = crate::platform::storage::delete(STORAGE_KEY_BUNKER_URI);
+                            let _ = crate::platform::storage::delete(STORAGE_KEY_APP_KEYS);
+                            let _ = crate::platform::storage::delete(STORAGE_KEY_METHOD);
                         }
                     }
+                }
+            }
+            #[cfg(feature = "mobile")]
+            "android_signer" => {
+                if let Ok(npub) = crate::platform::storage::get::<String>(STORAGE_KEY_NPUB) {
+                    log::info!("Found stored Android signer session");
+                    *AUTH_STATE.write() = AuthState {
+                        pubkey: Some(npub),
+                        is_authenticated: true,
+                        login_method: Some(LoginMethod::AndroidSigner),
+                    };
                 }
             }
             _ => {}
@@ -126,7 +139,7 @@ pub fn init_auth() {
 /// Restore session asynchronously (call this after app initialization)
 pub async fn restore_session_async() {
     log::info!("Restoring session...");
-    if let Ok(method_str) = LocalStorage::get::<String>(STORAGE_KEY_METHOD) {
+    if let Ok(method_str) = crate::platform::storage::get::<String>(STORAGE_KEY_METHOD) {
         match method_str.as_str() {
             "extension" => {
                 if let Err(e) = login_with_browser_extension().await {
@@ -135,9 +148,7 @@ pub async fn restore_session_async() {
                 }
             }
             "private_key" => {
-                if let Ok(ncryptsec) = LocalStorage::get::<
-                    String,
-                >(STORAGE_KEY_NCRYPTSEC) {
+                if let Ok(ncryptsec) = crate::platform::storage::get::<String>(STORAGE_KEY_NCRYPTSEC) {
                     if crate::utils::nip49::is_ncryptsec(&ncryptsec) {
                         *PASSWORD_PROMPT.write() = PasswordPromptState {
                             required: true,
@@ -149,10 +160,14 @@ pub async fn restore_session_async() {
                     } else {
                         log::error!("Invalid ncryptsec format in storage");
                         clear_auth();
-                        LocalStorage::delete(STORAGE_KEY_NCRYPTSEC);
-                        LocalStorage::delete(STORAGE_KEY_METHOD);
+                        if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_NCRYPTSEC) {
+                            log::error!("Failed to delete ncryptsec: {}", e);
+                        }
+                        if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_METHOD) {
+                            log::error!("Failed to delete method: {}", e);
+                        }
                     }
-                } else if let Ok(_nsec) = LocalStorage::get::<String>(STORAGE_KEY_NSEC) {
+                } else if let Ok(_nsec) = crate::platform::storage::get::<String>(STORAGE_KEY_NSEC) {
                     *PASSWORD_PROMPT.write() = PasswordPromptState {
                         required: true,
                         ncryptsec: None,
@@ -168,17 +183,28 @@ pub async fn restore_session_async() {
                 }
             }
             "read_only" => {
-                if let Ok(npub) = LocalStorage::get::<String>(STORAGE_KEY_NPUB) {
+                if let Ok(npub) = crate::platform::storage::get::<String>(STORAGE_KEY_NPUB) {
                     if let Err(e) = login_with_npub(&npub).await {
                         log::error!("Failed to restore read-only session: {}", e);
                         clear_auth();
                     }
                 }
             }
+            #[cfg(feature = "mobile")]
+            "android_signer" => {
+                if let Ok(npub) = crate::platform::storage::get::<String>(STORAGE_KEY_NPUB) {
+                    let package = crate::platform::storage::get::<String>(STORAGE_KEY_SIGNER_PACKAGE)
+                        .unwrap_or_else(|_| crate::platform::Nip55Signer::default_package().to_string());
+                    if let Err(e) = login_with_android_signer(&npub, Some(&package)).await {
+                        log::error!("Failed to restore Android signer session: {}", e);
+                        clear_auth();
+                    }
+                }
+            }
             "remote_signer" => {
                 if let (Ok(bunker_uri), Ok(app_keys_str)) = (
-                    LocalStorage::get::<String>(STORAGE_KEY_BUNKER_URI),
-                    LocalStorage::get::<String>(STORAGE_KEY_APP_KEYS),
+                    crate::platform::storage::get::<String>(STORAGE_KEY_BUNKER_URI),
+                    crate::platform::storage::get::<String>(STORAGE_KEY_APP_KEYS),
                 ) {
                     match restore_nostr_connect(&bunker_uri, &app_keys_str).await {
                         Ok(nostr_connect) => {
@@ -214,10 +240,10 @@ pub async fn restore_session_async() {
                         "Cannot restore remote signer session: incomplete saved credentials (missing bunker URI or app keys)"
                     );
                     clear_auth();
-                    LocalStorage::delete(STORAGE_KEY_BUNKER_URI);
-                    LocalStorage::delete(STORAGE_KEY_APP_KEYS);
-                    LocalStorage::delete(STORAGE_KEY_METHOD);
-                    LocalStorage::delete(STORAGE_KEY_NPUB);
+                    let _ = crate::platform::storage::delete(STORAGE_KEY_BUNKER_URI);
+                    let _ = crate::platform::storage::delete(STORAGE_KEY_APP_KEYS);
+                    let _ = crate::platform::storage::delete(STORAGE_KEY_METHOD);
+                    let _ = crate::platform::storage::delete(STORAGE_KEY_NPUB);
                 }
             }
             _ => {}
@@ -246,10 +272,10 @@ pub async fn login_with_nsec(nsec: &str, password: &str) -> Result<(), String> {
         is_authenticated: true,
         login_method: Some(LoginMethod::PrivateKey),
     };
-    LocalStorage::set(STORAGE_KEY_NCRYPTSEC, &ncryptsec).ok();
-    LocalStorage::set(STORAGE_KEY_NPUB, &pubkey).ok();
-    LocalStorage::set(STORAGE_KEY_METHOD, "private_key").ok();
-    LocalStorage::delete(STORAGE_KEY_NSEC);
+    crate::platform::storage::set(STORAGE_KEY_NCRYPTSEC, &ncryptsec)?;
+    crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey)?;
+    crate::platform::storage::set(STORAGE_KEY_METHOD, "private_key")?;
+    crate::platform::storage::delete(STORAGE_KEY_NSEC)?;
     log::info!("Successfully logged in with encrypted key, pubkey: {}", pubkey);
     run_post_login_init().await;
     Ok(())
@@ -282,8 +308,8 @@ pub async fn login_with_npub(npub: &str) -> Result<(), String> {
         is_authenticated: false,
         login_method: Some(LoginMethod::ReadOnly),
     };
-    LocalStorage::set(STORAGE_KEY_NPUB, &pubkey_str).ok();
-    LocalStorage::set(STORAGE_KEY_METHOD, "read_only").ok();
+    crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey_str)?;
+    crate::platform::storage::set(STORAGE_KEY_METHOD, "read_only")?;
     log::info!("Loaded read-only mode with pubkey: {}", pubkey_str);
     Ok(())
 }
@@ -308,8 +334,8 @@ pub async fn login_with_browser_extension() -> Result<(), String> {
             is_authenticated: true,
             login_method: Some(LoginMethod::BrowserExtension),
         };
-        LocalStorage::set(STORAGE_KEY_METHOD, "extension").ok();
-        LocalStorage::set(STORAGE_KEY_NPUB, &pubkey_str).ok();
+        crate::platform::storage::set(STORAGE_KEY_METHOD, "extension")?;
+        crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey_str)?;
         log::info!(
             "Successfully logged in via browser extension with pubkey: {}", pubkey_str
         );
@@ -339,7 +365,7 @@ pub fn is_nip07_available() -> bool {
 /// Get or create app keys for NIP-46 connection
 /// These keys are used by the app to authenticate to the remote signer
 fn get_or_create_app_keys() -> Result<Keys, String> {
-    if let Ok(stored_keys) = LocalStorage::get::<String>(STORAGE_KEY_APP_KEYS) {
+    if let Ok(stored_keys) = crate::platform::storage::get::<String>(STORAGE_KEY_APP_KEYS) {
         if let Ok(keys) = Keys::parse(&stored_keys) {
             return Ok(keys);
         }
@@ -431,17 +457,17 @@ pub async fn login_with_nostr_connect(bunker_uri: &str) -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to get public key: {}", e))?;
     let pubkey_str = public_key.to_hex();
-    LocalStorage::set(STORAGE_KEY_BUNKER_URI, bunker_uri)
+    crate::platform::storage::set(STORAGE_KEY_BUNKER_URI, bunker_uri)
         .map_err(|e| format!("Failed to store bunker URI: {}", e))?;
     let app_keys_bech32 = app_keys
         .secret_key()
         .to_bech32()
         .map_err(|e| format!("Failed to convert app keys: {}", e))?;
-    LocalStorage::set(STORAGE_KEY_APP_KEYS, &app_keys_bech32)
+    crate::platform::storage::set(STORAGE_KEY_APP_KEYS, &app_keys_bech32)
         .map_err(|e| format!("Failed to store app keys: {}", e))?;
-    LocalStorage::set(STORAGE_KEY_METHOD, "remote_signer")
+    crate::platform::storage::set(STORAGE_KEY_METHOD, "remote_signer")
         .map_err(|e| format!("Failed to store login method: {}", e))?;
-    LocalStorage::set(STORAGE_KEY_NPUB, &pubkey_str)
+    crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey_str)
         .map_err(|e| format!("Failed to store public key: {}", e))?;
     let signer_type = SignerType::NostrConnect(Arc::new(nostr_connect));
     store_signer(signer_type.clone()).await?;
@@ -495,12 +521,27 @@ pub async fn logout() {
     });
     let _ = nostr_client::set_read_only().await;
     clear_auth();
-    LocalStorage::delete(STORAGE_KEY_NSEC);
-    LocalStorage::delete(STORAGE_KEY_NCRYPTSEC);
-    LocalStorage::delete(STORAGE_KEY_NPUB);
-    LocalStorage::delete(STORAGE_KEY_METHOD);
-    LocalStorage::delete(STORAGE_KEY_BUNKER_URI);
-    LocalStorage::delete(STORAGE_KEY_APP_KEYS);
+    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_NSEC) {
+        log::error!("Failed to delete nsec: {}", e);
+    }
+    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_NCRYPTSEC) {
+        log::error!("Failed to delete ncryptsec: {}", e);
+    }
+    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_NPUB) {
+        log::error!("Failed to delete npub: {}", e);
+    }
+    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_METHOD) {
+        log::error!("Failed to delete method: {}", e);
+    }
+    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_BUNKER_URI) {
+        log::error!("Failed to delete bunker URI: {}", e);
+    }
+    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_APP_KEYS) {
+        log::error!("Failed to delete app keys: {}", e);
+    }
+    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_SIGNER_PACKAGE) {
+        log::error!("Failed to delete signer package: {}", e);
+    }
     *PASSWORD_PROMPT.write() = PasswordPromptState::default();
 }
 /// Clear authentication state
@@ -534,7 +575,7 @@ pub async fn restore_with_password(password: &str) -> Result<(), String> {
                 Err(e.to_string())
             }
         }
-    } else if let Ok(nsec) = LocalStorage::get::<String>(STORAGE_KEY_NSEC) {
+    } else if let Ok(nsec) = crate::platform::storage::get::<String>(STORAGE_KEY_NSEC) {
         if let Some(err) = crate::utils::nip49::validate_password(password) {
             PASSWORD_PROMPT.write().loading = false;
             PASSWORD_PROMPT.write().error = Some(err.clone());
@@ -562,8 +603,8 @@ pub async fn restore_with_password(password: &str) -> Result<(), String> {
                 return Err(err);
             }
         };
-        LocalStorage::set(STORAGE_KEY_NCRYPTSEC, &ncryptsec).ok();
-        LocalStorage::delete(STORAGE_KEY_NSEC);
+        crate::platform::storage::set(STORAGE_KEY_NCRYPTSEC, &ncryptsec)?;
+        crate::platform::storage::delete(STORAGE_KEY_NSEC)?;
         if let Err(e) = login_with_keys_internal(keys).await {
             PASSWORD_PROMPT.write().loading = false;
             PASSWORD_PROMPT.write().error = Some(e.clone());
@@ -583,10 +624,18 @@ pub async fn restore_with_password(password: &str) -> Result<(), String> {
 pub fn cancel_password_prompt() {
     *PASSWORD_PROMPT.write() = PasswordPromptState::default();
     clear_auth();
-    LocalStorage::delete(STORAGE_KEY_NCRYPTSEC);
-    LocalStorage::delete(STORAGE_KEY_NSEC);
-    LocalStorage::delete(STORAGE_KEY_NPUB);
-    LocalStorage::delete(STORAGE_KEY_METHOD);
+    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_NCRYPTSEC) {
+        log::error!("Failed to delete ncryptsec: {}", e);
+    }
+    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_NSEC) {
+        log::error!("Failed to delete nsec: {}", e);
+    }
+    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_NPUB) {
+        log::error!("Failed to delete npub: {}", e);
+    }
+    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_METHOD) {
+        log::error!("Failed to delete method: {}", e);
+    }
 }
 /// Sign a message with current keys
 #[allow(dead_code)]
@@ -604,4 +653,142 @@ pub fn export_npub() -> Result<String, String> {
     let pubkey_hex = get_pubkey().ok_or("Not logged in")?;
     let pubkey = PublicKey::parse(&pubkey_hex).map_err(|e| e.to_string())?;
     pubkey.to_bech32().map_err(|e| e.to_string())
+}
+/// Result of the auto-detection flow for Android signer login.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // Variants used on mobile but not on desktop/WASM targets
+pub enum AndroidSignerAutoResult {
+    /// Successfully logged in; contains the signer package name.
+    LoggedIn(String),
+    /// Intent launched — Amber opened, user must approve and return.
+    IntentLaunched,
+    /// An Intent is already in flight (user hasn't come back yet).
+    IntentInFlight,
+    /// An error occurred during auto-detection.
+    Error(String),
+}
+
+/// Check if an Android signer (NIP-55) is available
+pub fn is_android_signer_available() -> bool {
+    #[cfg(feature = "mobile")]
+    { crate::platform::Nip55Signer::is_signer_installed() }
+    #[cfg(not(feature = "mobile"))]
+    { false }
+}
+/// Login with Android signer (NIP-55)
+///
+/// `npub` can be bech32 npub or hex public key.
+/// `signer_package` overrides the default Amber package if provided.
+#[allow(dead_code)] // Called on mobile but not on desktop/WASM targets
+pub async fn login_with_android_signer(npub: &str, signer_package: Option<&str>) -> Result<(), String> {
+    #[cfg(feature = "mobile")]
+    {
+        use crate::platform::Nip55Signer;
+
+        log::info!("Attempting Android signer login...");
+
+        let public_key = PublicKey::parse(npub)
+            .map_err(|e| format!("Invalid public key: {}", e))?;
+        let pubkey_hex = public_key.to_hex();
+
+        let package = signer_package
+            .unwrap_or_else(|| Nip55Signer::default_package())
+            .to_string();
+
+        let signer = Nip55Signer::new(public_key, package.clone());
+        let signer_type = SignerType::AndroidSigner(Arc::new(signer));
+
+        store_signer(signer_type.clone()).await?;
+        nostr_client::set_signer(signer_type).await?;
+
+        *AUTH_STATE.write() = AuthState {
+            pubkey: Some(pubkey_hex.clone()),
+            is_authenticated: true,
+            login_method: Some(LoginMethod::AndroidSigner),
+        };
+
+        crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey_hex)?;
+        crate::platform::storage::set(STORAGE_KEY_METHOD, "android_signer")?;
+        crate::platform::storage::set(STORAGE_KEY_SIGNER_PACKAGE, &package)?;
+
+        log::info!("Successfully logged in via Android signer with pubkey: {}", pubkey_hex);
+        run_post_login_init().await;
+        Ok(())
+    }
+    #[cfg(not(feature = "mobile"))]
+    {
+        let _ = (npub, signer_package);
+        Err("Android signer is only available on mobile".to_string())
+    }
+}
+
+/// Auto-detect and login with Android signer (NIP-55)
+///
+/// Implements a 3-phase detection flow:
+/// 1. **Poll**: Check for pending Intent result from a previous launch
+/// 2. **ContentResolver**: Try to get pubkey from already-approved signers
+/// 3. **Intent**: Launch get_public_key Intent to open signer for first-time approval
+#[cfg(feature = "mobile")]
+pub async fn login_with_android_signer_auto() -> Result<AndroidSignerAutoResult, String> {
+    use crate::platform::{IntentPollResult, Nip55Signer};
+
+    log::info!("NIP-55 auto-detect: starting 3-phase flow");
+
+    // Phase 1: Poll for pending Intent result from previous launch
+    log::info!("NIP-55 auto-detect: phase 1 — polling for pending Intent result");
+    match Nip55Signer::poll_intent_result() {
+        IntentPollResult::Ready { pubkey, package } => {
+            let pubkey_hex = pubkey.to_hex();
+            log::info!("NIP-55 auto-detect: found pending result from {}: {}", package, pubkey_hex);
+            Nip55Signer::clear_pending_result();
+            login_with_android_signer(&pubkey_hex, Some(&package)).await?;
+            return Ok(AndroidSignerAutoResult::LoggedIn(package));
+        }
+        IntentPollResult::InFlight => {
+            log::info!("NIP-55 auto-detect: Intent still in flight");
+            return Ok(AndroidSignerAutoResult::IntentInFlight);
+        }
+        IntentPollResult::Error(e) => {
+            log::warn!("NIP-55 auto-detect: previous Intent error: {}", e);
+            Nip55Signer::clear_pending_result();
+            // Fall through to try ContentResolver / new Intent
+        }
+        IntentPollResult::None => {
+            log::debug!("NIP-55 auto-detect: no pending Intent result");
+        }
+    }
+
+    // Phase 2: Try ContentResolver for already-approved signers
+    log::info!("NIP-55 auto-detect: phase 2 — trying ContentResolver");
+    let packages = Nip55Signer::get_signer_packages();
+    if packages.is_empty() {
+        return Err("No NIP-55 signer apps installed".to_string());
+    }
+
+    for package in &packages {
+        log::info!("NIP-55 auto-detect: trying ContentResolver for {}", package);
+        if let Some(pubkey) = Nip55Signer::request_public_key(package) {
+            let pubkey_hex = pubkey.to_hex();
+            log::info!("NIP-55 auto-detect: ContentResolver success from {}: {}", package, pubkey_hex);
+            login_with_android_signer(&pubkey_hex, Some(package)).await?;
+            return Ok(AndroidSignerAutoResult::LoggedIn(package.clone()));
+        }
+    }
+
+    // Phase 3: Launch Intent for first-time approval
+    log::info!("NIP-55 auto-detect: phase 3 — launching get_public_key Intent");
+    match Nip55Signer::launch_get_public_key() {
+        Ok(true) => Ok(AndroidSignerAutoResult::IntentLaunched),
+        Ok(false) => Ok(AndroidSignerAutoResult::IntentInFlight),
+        Err(e) => {
+            log::error!("NIP-55 auto-detect: failed to launch Intent: {}", e);
+            Ok(AndroidSignerAutoResult::Error(e))
+        }
+    }
+}
+
+/// Auto-detect and login with Android signer (NIP-55) — non-mobile stub.
+#[cfg(not(feature = "mobile"))]
+pub async fn login_with_android_signer_auto() -> Result<AndroidSignerAutoResult, String> {
+    Err("Android signer is only available on mobile".to_string())
 }
