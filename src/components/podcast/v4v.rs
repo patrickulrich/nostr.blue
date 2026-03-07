@@ -205,12 +205,26 @@ pub fn V4VBoostButton(props: V4VBoostButtonProps) -> Element {
                                             show_menu.set(false);
                                             is_sending.set(true);
                                             spawn(async move {
+                                                error.set(None);
                                                 match send_v4v_payment(&vb, amt).await {
-                                                    Ok(_) => {
+                                                    Ok(PaymentOutcome::FullSuccess) => {
+                                                        error.set(None);
                                                         if let Some(handler) = on_boost {
                                                             handler.call(amt);
                                                         }
                                                         log::info!("Boost sent: {} sats", amt);
+                                                    }
+                                                    Ok(PaymentOutcome::PartialSuccess {
+                                                        success_count,
+                                                        attempted_count,
+                                                        failed_recipients,
+                                                    }) => {
+                                                        error.set(Some(format!(
+                                                            "Sent {}/{} payments. Failed: {}",
+                                                            success_count,
+                                                            attempted_count,
+                                                            failed_recipients.join(", ")
+                                                        )));
                                                     }
                                                     Err(e) => {
                                                         error.set(Some(e));
@@ -267,9 +281,23 @@ fn CustomBoostInput(props: CustomBoostInputProps) -> Element {
                     error.set(None);
                     is_sending.set(true);
                     spawn(async move {
+                        error.set(None);
                         match send_v4v_payment(&vb, amt).await {
-                            Ok(_) => {
+                            Ok(PaymentOutcome::FullSuccess) => {
+                                error.set(None);
                                 on_send.call(amt);
+                            }
+                            Ok(PaymentOutcome::PartialSuccess {
+                                success_count,
+                                attempted_count,
+                                failed_recipients,
+                            }) => {
+                                error.set(Some(format!(
+                                    "Sent {}/{} payments. Failed: {}",
+                                    success_count,
+                                    attempted_count,
+                                    failed_recipients.join(", ")
+                                )));
                             }
                             Err(e) => {
                                 error.set(Some(e));
@@ -332,11 +360,20 @@ pub fn V4VBadge(props: V4VBadgeProps) -> Element {
         }
     }
 }
+
+enum PaymentOutcome {
+    FullSuccess,
+    PartialSuccess {
+        success_count: usize,
+        attempted_count: usize,
+        failed_recipients: Vec<String>,
+    },
+}
 /// Send V4V payment split across recipients
 async fn send_v4v_payment(
     value_block: &ValueBlock,
     total_sats: u64,
-) -> Result<usize, String> {
+) -> Result<PaymentOutcome, String> {
     if value_block.recipients.is_empty() {
         return Err("No recipients configured".to_string());
     }
@@ -351,12 +388,15 @@ async fn send_v4v_payment(
         );
     }
     let mut success_count = 0;
+    let mut attempted_count = 0;
+    let mut failed_recipients = Vec::new();
     for recipient in &value_block.recipients {
         let amount = (total_sats as f64 * recipient.split as f64 / total_split as f64)
             .round() as u64;
         if amount == 0 {
             continue;
         }
+        attempted_count += 1;
         match recipient.recipient_type.as_str() {
             "lnaddress" => {
                 match lnurl::get_lnurl_pay_info(Some(&recipient.address), None).await {
@@ -368,6 +408,7 @@ async fn send_v4v_payment(
                             log::warn!(
                                 "Amount {} out of range for {}", amount, recipient.address
                             );
+                            failed_recipients.push(recipient.address.clone());
                             continue;
                         }
                         let callback_url = format!(
@@ -379,6 +420,7 @@ async fn send_v4v_payment(
                             Ok(client) => client,
                             Err(e) => {
                                 log::error!("Failed to initialize HTTP client for {}: {}", recipient.address, e);
+                                failed_recipients.push(recipient.address.clone());
                                 continue;
                             }
                         };
@@ -403,15 +445,21 @@ async fn send_v4v_payment(
                                                 log::error!(
                                                     "Payment failed for {}: {}", recipient.address, e
                                                 );
+                                                failed_recipients.push(recipient.address.clone());
                                             }
                                         }
+                                    } else {
+                                        failed_recipients.push(recipient.address.clone());
                                     }
+                                } else {
+                                    failed_recipients.push(recipient.address.clone());
                                 }
                             }
                             Err(e) => {
                                 log::error!(
                                     "Failed to get invoice from {}: {}", recipient.address, e
                                 );
+                                failed_recipients.push(recipient.address.clone());
                             }
                         }
                     }
@@ -419,6 +467,7 @@ async fn send_v4v_payment(
                         log::error!(
                             "Failed to fetch LNURL for {}: {:?}", recipient.address, e
                         );
+                        failed_recipients.push(recipient.address.clone());
                     }
                 }
             }
@@ -426,15 +475,24 @@ async fn send_v4v_payment(
                 log::warn!(
                     "Keysend payments not yet supported for node: {}", recipient.address
                 );
+                failed_recipients.push(recipient.address.clone());
             }
             _ => {
                 log::warn!("Unknown recipient type: {}", recipient.recipient_type);
+                failed_recipients.push(recipient.address.clone());
             }
         }
     }
     if success_count == 0 {
         Err("All payment attempts failed".to_string())
+    } else if success_count < attempted_count {
+        Ok(PaymentOutcome::PartialSuccess {
+            success_count,
+            attempted_count,
+            failed_recipients,
+        })
     } else {
-        Ok(success_count)
+        let _ = success_count;
+        Ok(PaymentOutcome::FullSuccess)
     }
 }

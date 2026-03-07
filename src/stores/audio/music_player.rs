@@ -12,6 +12,8 @@ use nostr_sdk::nips::nip38::{LiveStatus, StatusType};
 use nostr_sdk::{EventBuilder, Kind, Tag, TagKind, Timestamp};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(feature = "mobile")]
+use crate::platform::android_media::{self, AndroidPlaybackSnapshot};
 /// Kind number for Music Vote events (addressable, one per user)
 pub const KIND_MUSIC_VOTE: u16 = 33169;
 /// Music track for the player (unified for Wavlake, Nostr music, and Podcasts)
@@ -324,7 +326,7 @@ pub struct MusicPlayerState {
     pub show_zap_dialog: bool,
     #[serde(skip)]
     pub zap_track: Option<MusicTrack>,
-    /// Playback speed for podcasts (0.5, 0.75, 1.0, 1.25, 1.5, 2.0)
+    /// Playback speed for podcasts (0.5x to 3.0x)
     #[serde(default = "default_playback_speed")]
     pub playback_speed: f64,
     /// Error message if stream playback failed
@@ -387,7 +389,7 @@ pub fn init_player() {
         state.is_muted = is_muted;
     }
     if let Ok(speed) = storage::get::<f64>(STORAGE_KEY_PLAYBACK_SPEED) {
-        state.playback_speed = speed.clamp(0.5, 2.0);
+        state.playback_speed = speed.clamp(0.5, 3.0);
     }
     *MUSIC_PLAYER.write() = state;
     log::info!("Music player initialized");
@@ -552,14 +554,51 @@ pub fn play_track(
     state.current_time = 0.0;
     state.now_playing = None;
     log::info!("Playing track: {}", track.title);
+    #[cfg(feature = "mobile")]
+    if let Err(e) = android_media::set_queue(&state.playlist, state.current_index, true) {
+        log::error!("Failed to start native Android playback queue: {}", e);
+        state.playback_error = Some(format!("Android playback failed: {}", e));
+    }
     spawn(async move {
         publish_music_status(&track).await;
     });
+}
+
+pub fn play_or_toggle_track(
+    track: MusicTrack,
+    playlist: Option<Vec<MusicTrack>>,
+    index_override: Option<usize>,
+) {
+    let should_toggle = {
+        let state = MUSIC_PLAYER.read();
+        state
+            .current_track
+            .as_ref()
+            .map(|current| current.id == track.id && state.is_playing)
+            .unwrap_or(false)
+    };
+    if should_toggle {
+        toggle_play();
+    } else {
+        play_track(track, playlist, index_override);
+    }
 }
 /// Toggle play/pause
 pub fn toggle_play() {
     let mut state = MUSIC_PLAYER.write();
     state.is_playing = !state.is_playing;
+    #[cfg(feature = "mobile")]
+    {
+        let result = if state.is_playing {
+            android_media::play()
+        } else {
+            android_media::pause()
+        };
+        if let Err(e) = result {
+            log::error!("Failed to toggle native Android playback: {}", e);
+            state.playback_error = Some(format!("Android playback failed: {}", e));
+        }
+    }
     if !state.is_playing {
         spawn(async move {
             clear_music_status().await;
@@ -582,6 +621,11 @@ pub fn next_track() {
     state.current_time = 0.0;
     if let Some(track) = state.current_track.clone() {
         log::info!("Next track: {}", track.title);
+        #[cfg(feature = "mobile")]
+        if let Err(e) = android_media::next_track() {
+            log::error!("Failed to skip to next native Android track: {}", e);
+            state.playback_error = Some(format!("Android playback failed: {}", e));
+        }
         spawn(async move {
             publish_music_status(&track).await;
         });
@@ -595,6 +639,11 @@ pub fn previous_track() {
     }
     if state.current_time > 3.0 {
         state.current_time = 0.0;
+        #[cfg(feature = "mobile")]
+        if let Err(e) = android_media::seek_to(0.0) {
+            log::error!("Failed to rewind native Android track: {}", e);
+            state.playback_error = Some(format!("Android playback failed: {}", e));
+        }
         if let Some(track) = state.current_track.clone() {
             spawn(async move {
                 publish_music_status(&track).await;
@@ -612,6 +661,11 @@ pub fn previous_track() {
     state.current_time = 0.0;
     if let Some(track) = state.current_track.clone() {
         log::info!("Previous track: {}", track.title);
+        #[cfg(feature = "mobile")]
+        if let Err(e) = android_media::previous_track() {
+            log::error!("Failed to skip to previous native Android track: {}", e);
+            state.playback_error = Some(format!("Android playback failed: {}", e));
+        }
         spawn(async move {
             publish_music_status(&track).await;
         });
@@ -623,6 +677,11 @@ pub fn set_volume(volume: f64) {
     {
         let mut state = MUSIC_PLAYER.write();
         state.volume = clamped;
+        #[cfg(feature = "mobile")]
+        if let Err(e) = android_media::set_volume(if state.is_muted { 0.0 } else { clamped }) {
+            log::error!("Failed to set native Android volume: {}", e);
+            state.playback_error = Some(format!("Android playback failed: {}", e));
+        }
     }
     let gen = VOLUME_PERSIST_GEN.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
     crate::platform::spawn::spawn_detached(async move {
@@ -638,11 +697,17 @@ pub fn toggle_mute() {
     let is_muted = {
         let mut state = MUSIC_PLAYER.write();
         state.is_muted = !state.is_muted;
+        #[cfg(feature = "mobile")]
+        if let Err(e) = android_media::set_volume(if state.is_muted { 0.0 } else { state.volume }) {
+            log::error!("Failed to toggle native Android mute: {}", e);
+            state.playback_error = Some(format!("Android playback failed: {}", e));
+        }
         state.is_muted
     };
     storage::set(STORAGE_KEY_MUTED, &is_muted).ok();
 }
 /// Set current time
+#[cfg(not(feature = "mobile"))]
 pub fn set_current_time(time: f64) {
     let mut state = MUSIC_PLAYER.write();
     state.current_time = time;
@@ -652,6 +717,11 @@ pub fn set_current_time(time: f64) {
 pub fn seek_to(time: f64) {
     let mut state = MUSIC_PLAYER.write();
     state.current_time = time;
+    #[cfg(feature = "mobile")]
+    if let Err(e) = android_media::seek_to(time) {
+        log::error!("Failed to seek native Android playback: {}", e);
+        state.playback_error = Some(format!("Android playback failed: {}", e));
+    }
     drop(state);
     #[cfg(feature = "web")]
     spawn(async move {
@@ -669,6 +739,7 @@ pub fn seek_to(time: f64) {
     });
 }
 /// Set duration
+#[cfg(not(feature = "mobile"))]
 pub fn set_duration(duration: f64) {
     let mut state = MUSIC_PLAYER.write();
     state.duration = duration;
@@ -678,6 +749,15 @@ pub fn close_player() {
     let mut state = MUSIC_PLAYER.write();
     state.is_visible = false;
     state.is_playing = false;
+    #[cfg(feature = "mobile")]
+    {
+        if let Err(e) = android_media::stop() {
+            log::error!("Failed to stop native Android playback: {}", e);
+        }
+        if let Err(e) = android_media::clear_queue() {
+            log::error!("Failed to clear native Android playback queue: {}", e);
+        }
+    }
     spawn(async move {
         clear_music_status().await;
     });
@@ -800,9 +880,17 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
 }
 /// Set playback speed (for podcasts)
 pub fn set_playback_speed(speed: f64) {
-    let speed = speed.clamp(0.5, 2.0);
-    MUSIC_PLAYER.write().playback_speed = speed;
-    let _ = storage::set(STORAGE_KEY_PLAYBACK_SPEED, &speed);
+    let speed = speed.clamp(0.5, 3.0);
+    {
+        let mut state = MUSIC_PLAYER.write();
+        state.playback_speed = speed;
+        #[cfg(feature = "mobile")]
+        if let Err(e) = android_media::set_playback_speed(speed) {
+            log::error!("Failed to set native Android playback speed: {}", e);
+            state.playback_error = Some(format!("Android playback failed: {}", e));
+        }
+    }
+    storage::set(STORAGE_KEY_PLAYBACK_SPEED, &speed).ok();
     log::debug!("Playback speed set to {}x", speed);
 }
 /// Skip forward by specified seconds (for podcasts)
@@ -831,6 +919,7 @@ pub fn set_buffering(buffering: bool) {
 }
 /// Try next available stream when current one fails
 /// Returns true if there's a fallback stream to try, false if all failed
+#[cfg(not(feature = "mobile"))]
 pub fn try_next_stream() -> bool {
     let mut state = MUSIC_PLAYER.write();
     if state.available_streams.is_empty() {
@@ -859,10 +948,37 @@ pub fn set_available_streams(streams: Vec<String>) {
     state.current_stream_index = 0;
 }
 /// Set now playing metadata from HLS ID3 tags
+#[cfg(not(feature = "mobile"))]
 pub fn set_now_playing(now_playing: Option<NowPlaying>) {
     MUSIC_PLAYER.write().now_playing = now_playing;
 }
 /// Clear now playing metadata
 pub fn clear_now_playing() {
     MUSIC_PLAYER.write().now_playing = None;
+}
+
+#[cfg(feature = "mobile")]
+pub fn sync_native_playback_snapshot(snapshot: AndroidPlaybackSnapshot) {
+    let mut state = MUSIC_PLAYER.write();
+    if !state.playlist.is_empty() && snapshot.current_index < state.playlist.len() {
+        state.current_index = snapshot.current_index;
+        state.current_track = state.playlist.get(snapshot.current_index).cloned();
+    }
+    state.is_playing = snapshot.is_playing;
+    state.is_buffering = snapshot.is_buffering;
+    if snapshot.current_time.is_finite() && snapshot.current_time >= 0.0 {
+        state.current_time = snapshot.current_time;
+    }
+    if snapshot.duration.is_finite() && snapshot.duration >= 0.0 {
+        state.duration = snapshot.duration;
+    }
+    state.playback_error = snapshot.playback_error;
+    if !state
+        .current_track
+        .as_ref()
+        .map(|track| track.is_live_stream)
+        .unwrap_or(false)
+    {
+        state.now_playing = None;
+    }
 }

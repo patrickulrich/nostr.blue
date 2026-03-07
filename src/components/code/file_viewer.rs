@@ -348,11 +348,9 @@ pub fn RawFileButton(content: String, filename: String) -> Element {
                 let filename = filename.clone();
                 move |_| {
                     save_error.set(false);
-                    let _content = content.clone();
-                    let _filename = filename.clone();
                     match crate::platform::download::save_file(
-                        &_filename,
-                        &_content,
+                        &filename,
+                        &content,
                         "text/plain;charset=utf-8",
                     ) {
                         Ok(()) => save_error.set(false),
@@ -360,7 +358,7 @@ pub fn RawFileButton(content: String, filename: String) -> Element {
                             save_error.set(false);
                         }
                         Err(e) => {
-                            log::error!("Download failed for '{}': {}", _filename, e);
+                            log::error!("Download failed for '{}': {}", filename, e);
                             save_error.set(true);
                         }
                     }

@@ -43,6 +43,8 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     let input_id = use_signal(|| format!("gif-upload-{}", uuid::Uuid::new_v4()));
     let close_modal = move |_| {
         upload_session_token.with_mut(|token| *token = token.wrapping_add(1));
+        uploading.set(false);
+        current_upload_id.set(None);
         show.set(false);
         #[cfg(feature = "web")]
         if let Some((_, _, _, Some(url))) = selected_file.read().as_ref() {
@@ -56,7 +58,10 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     };
     let handle_file_select = move |_evt: Event<FormData>| {
         let input_id = input_id.read().clone();
-        let session_token = *upload_session_token.read();
+        let session_token = upload_session_token.with_mut(|token| {
+            *token = token.wrapping_add(1);
+            *token
+        });
         spawn(async move {
             error.set(None);
             match read_file_as_bytes(&input_id).await {
@@ -217,6 +222,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                         let _ = web_sys::Url::revoke_object_url(url);
                                     }
                                     show.set(false);
+                                    uploading.set(false);
                                     selected_file.set(None);
                                     caption.set(String::new());
                                     success.set(false);

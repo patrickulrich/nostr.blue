@@ -38,8 +38,10 @@ fn save_nwc_uri_secure(uri: &str) -> std::result::Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
-            .map_err(|e| format!("Failed to set permissions on {:?}: {}", path, e))?;
+        if let Err(e) = fs::set_permissions(&path, fs::Permissions::from_mode(0o600)) {
+            let _ = fs::remove_file(&path);
+            return Err(format!("Failed to set permissions on {:?}: {}", path, e));
+        }
     }
     #[cfg(windows)]
     {
@@ -54,8 +56,12 @@ fn save_nwc_uri_secure(uri: &str) -> std::result::Result<(), String> {
             .arg("/grant:r")
             .arg(&grant_arg)
             .status()
-            .map_err(|e| format!("Failed to set permissions on {:?}: {}", path, e))?;
+            .map_err(|e| {
+                let _ = fs::remove_file(&path);
+                format!("Failed to set permissions on {:?}: {}", path, e)
+            })?;
         if !status.success() {
+            let _ = fs::remove_file(&path);
             return Err(format!("Failed to set permissions on {:?}: icacls exited with {}", path, status));
         }
     }
@@ -115,9 +121,7 @@ pub async fn connect_nwc(uri_string: &str, remember_wallet: bool) -> std::result
                 "Connected to NWC wallet: {}", info.alias.as_deref().unwrap_or("Unknown")
             );
             if remember_wallet {
-                if let Err(e) = save_nwc_uri_secure(uri_string.trim()) {
-                    log::warn!("Failed to save NWC URI securely: {}", e);
-                }
+                save_nwc_uri_secure(uri_string.trim())?;
             } else {
                 delete_nwc_uri_secure();
                 delete_nwc_uri();

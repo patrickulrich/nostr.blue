@@ -347,21 +347,11 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
     let playlist = props.playlist.clone();
     let handle_play = {
         let episode = episode.clone();
-        let episode_id = episode.id.clone();
         let playlist = playlist.clone();
         move |_| {
-            let player_state = music_player::MUSIC_PLAYER.read();
-            if let Some(ref current) = player_state.current_track {
-                if current.id == episode_id && player_state.is_playing {
-                    drop(player_state);
-                    music_player::toggle_play();
-                    return;
-                }
-            }
-            drop(player_state);
             let track = episode.to_music_track();
             let playlist_vec = playlist.as_ref().map(|rc| (**rc).clone());
-            music_player::play_track(track, playlist_vec, None);
+            music_player::play_or_toggle_track(track, playlist_vec, None);
         }
     };
     let duration_str = episode
@@ -387,7 +377,9 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
     };
     let has_v4v = episode.value.is_some();
     rsx! {
-        div { class: "flex items-start gap-3 p-3 hover:bg-muted/50 rounded-lg transition group",
+        div {
+            class: "flex items-start gap-3 p-3 hover:bg-muted/50 rounded-lg transition group cursor-pointer",
+            onclick: handle_play,
             div { class: "relative shrink-0",
                 img {
                     src: "{image_url}",
@@ -406,7 +398,6 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
                 }
                 button {
                     class: "absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition rounded-lg",
-                    onclick: handle_play,
                     dangerous_inner_html: if *is_playing.read() { icons::PAUSE } else { icons::PLAY },
                 }
             }

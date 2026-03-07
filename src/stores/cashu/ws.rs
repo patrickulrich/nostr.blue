@@ -67,31 +67,54 @@ pub struct WsConnectionState {
     pub connected: bool,
     /// Active subscriptions (sub_id -> quote_id)
     pub subscriptions: HashMap<String, String>,
-    /// WebSocket handle for explicit cleanup (WebSocket is Clone - it's a JS handle)
+    /// WebSocket handles for explicit cleanup (WebSocket is Clone - it's a JS handle)
     #[cfg(feature = "web")]
-    pub ws: Option<WebSocket>,
+    pub websockets: HashMap<String, WebSocket>,
+}
+
+#[cfg(feature = "web")]
+fn cleanup_subscription_state(mint_url: &str, sub_id: &str) -> bool {
+    let mut should_remove_connection = false;
+    {
+        let mut connections = WS_CONNECTIONS.write();
+        if let Some(state) = connections.get_mut(mint_url) {
+            state.subscriptions.remove(sub_id);
+            if let Some(ws) = state.websockets.remove(sub_id) {
+                let _ = ws.close();
+            }
+            if state.subscriptions.is_empty() {
+                state.connected = false;
+                should_remove_connection = true;
+            }
+        }
+        if should_remove_connection {
+            connections.remove(mint_url);
+        }
+    }
+    WS_CLOSURES.with(|closures| {
+        closures.borrow_mut().remove(sub_id);
+    });
+    should_remove_connection
 }
 /// Close a WebSocket connection and clean up all resources
 #[cfg(feature = "web")]
 pub fn close_connection(mint_url: &str) {
     let mut connections = WS_CONNECTIONS.write();
     if let Some(state) = connections.remove(mint_url) {
-        if let Some(ws) = state.ws {
+        for (_, ws) in state.websockets {
             if let Err(e) = ws.close() {
                 log::error!("Failed to close WebSocket for {}: {:?}", mint_url, e);
             } else {
                 log::debug!("WebSocket connection closed for {}", mint_url);
             }
         }
-    }
-    WS_CLOSURES
-        .with(|closures| {
+        WS_CLOSURES.with(|closures| {
             let mut map = closures.borrow_mut();
-            map.remove(mint_url);
-            // Also remove proof-states subscription if present
-            let proof_states_key = format!("{}:proof_states", mint_url);
-            map.remove(&proof_states_key);
+            for sub_id in state.subscriptions.keys() {
+                map.remove(sub_id);
+            }
         });
+    }
     log::info!("Cleaned up WebSocket resources for {}", mint_url);
 }
 
@@ -292,7 +315,7 @@ pub async fn subscribe_to_quote(
                 .or_insert_with(|| WsConnectionState {
                     connected: false,
                     subscriptions: HashMap::new(),
-                    ws: None,
+                    websockets: HashMap::new(),
                 });
             state.connected = true;
             state
@@ -361,9 +384,11 @@ pub async fn subscribe_to_quote(
     );
     ws.set_onmessage(Some(onmessage_callback.as_ref().unchecked_ref()));
     let mint_url_for_error = mint_url.clone();
+    let sub_id_for_error = sub_id.clone();
     let onerror_callback = Closure::wrap(
         Box::new(move |e: ErrorEvent| {
             log::error!("WebSocket error for {}: {:?}", mint_url_for_error, e.message());
+            cleanup_subscription_state(&mint_url_for_error, &sub_id_for_error);
         }) as Box<dyn FnMut(ErrorEvent)>,
     );
     ws.set_onerror(Some(onerror_callback.as_ref().unchecked_ref()));
@@ -375,13 +400,7 @@ pub async fn subscribe_to_quote(
                 "WebSocket closed for {}: code={}, reason={}", mint_url_for_close, e
                 .code(), e.reason()
             );
-            let mut connections = WS_CONNECTIONS.write();
-            if let Some(state) = connections.get_mut(&mint_url_for_close) {
-                state.subscriptions.remove(&sub_id_for_close);
-                if state.subscriptions.is_empty() {
-                    state.connected = false;
-                }
-            }
+            cleanup_subscription_state(&mint_url_for_close, &sub_id_for_close);
         }) as Box<dyn FnMut(CloseEvent)>,
     );
     ws.set_onclose(Some(onclose_callback.as_ref().unchecked_ref()));
@@ -390,7 +409,7 @@ pub async fn subscribe_to_quote(
             closures
                 .borrow_mut()
                 .insert(
-                    mint_url.clone(),
+                    sub_id.clone(),
                     WsClosures {
                         onopen: onopen_callback,
                         onmessage: onmessage_callback,
@@ -406,9 +425,9 @@ pub async fn subscribe_to_quote(
             .or_insert_with(|| WsConnectionState {
                 connected: false,
                 subscriptions: HashMap::new(),
-                ws: None,
+                websockets: HashMap::new(),
             });
-        state.ws = Some(ws);
+        state.websockets.insert(sub_id.clone(), ws);
     }
     Ok(rx)
 }
@@ -428,19 +447,18 @@ pub async fn subscribe_to_quote(
 /// If this is the last subscription for this mint, closes the connection
 /// and cleans up all resources (following nostr-sdk pattern).
 #[allow(dead_code)]
+#[cfg(feature = "web")]
 pub fn unsubscribe(mint_url: &str, sub_id: &str) {
-    let should_close = {
-        let mut connections = WS_CONNECTIONS.write();
-        if let Some(state) = connections.get_mut(mint_url) {
-            state.subscriptions.remove(sub_id);
-            state.subscriptions.is_empty()
-        } else {
-            false
-        }
-    };
+    let should_close = cleanup_subscription_state(mint_url, sub_id);
     if should_close {
         close_connection(mint_url);
     }
+}
+
+#[allow(dead_code)]
+#[cfg(not(feature = "web"))]
+pub fn unsubscribe(mint_url: &str, _sub_id: &str) {
+    close_connection(mint_url);
 }
 /// Convert HTTP mint URL to WebSocket URL
 #[cfg(feature = "web")]
@@ -522,7 +540,7 @@ pub async fn subscribe_to_proof_states(
                 .or_insert_with(|| WsConnectionState {
                     connected: false,
                     subscriptions: HashMap::new(),
-                    ws: None,
+                    websockets: HashMap::new(),
                 });
             state.connected = true;
             state
@@ -592,9 +610,11 @@ pub async fn subscribe_to_proof_states(
     );
     ws.set_onmessage(Some(onmessage_callback.as_ref().unchecked_ref()));
     let mint_url_for_error = mint_url.clone();
+    let sub_id_for_error = sub_id.clone();
     let onerror_callback = Closure::wrap(
         Box::new(move |e: ErrorEvent| {
             log::error!("WebSocket error for {}: {:?}", mint_url_for_error, e.message());
+            cleanup_subscription_state(&mint_url_for_error, &sub_id_for_error);
         }) as Box<dyn FnMut(ErrorEvent)>,
     );
     ws.set_onerror(Some(onerror_callback.as_ref().unchecked_ref()));
@@ -606,13 +626,7 @@ pub async fn subscribe_to_proof_states(
                 "WebSocket closed for {}: code={}, reason={}", mint_url_for_close, e
                 .code(), e.reason()
             );
-            let mut connections = WS_CONNECTIONS.write();
-            if let Some(state) = connections.get_mut(&mint_url_for_close) {
-                state.subscriptions.remove(&sub_id_for_close);
-                if state.subscriptions.is_empty() {
-                    state.connected = false;
-                }
-            }
+            cleanup_subscription_state(&mint_url_for_close, &sub_id_for_close);
         }) as Box<dyn FnMut(CloseEvent)>,
     );
     ws.set_onclose(Some(onclose_callback.as_ref().unchecked_ref()));
@@ -621,7 +635,7 @@ pub async fn subscribe_to_proof_states(
             closures
                 .borrow_mut()
                 .insert(
-                    format!("{}:proof_states", mint_url),
+                    sub_id.clone(),
                     WsClosures {
                         onopen: onopen_callback,
                         onmessage: onmessage_callback,
@@ -637,9 +651,9 @@ pub async fn subscribe_to_proof_states(
             .or_insert_with(|| WsConnectionState {
                 connected: false,
                 subscriptions: HashMap::new(),
-                ws: None,
+                websockets: HashMap::new(),
             });
-        state.ws = Some(ws);
+        state.websockets.insert(sub_id.clone(), ws);
     }
     Ok(rx)
 }

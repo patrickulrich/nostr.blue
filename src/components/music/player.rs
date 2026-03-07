@@ -1,7 +1,10 @@
 use crate::components::icons;
 use crate::components::{ContentShareModal, ContentType};
+#[cfg(feature = "mobile")]
+use crate::platform::android_media;
 use crate::routes::Route;
 use crate::stores::music_player::{self, MUSIC_PLAYER};
+#[cfg(not(feature = "mobile"))]
 use crate::utils::radio::NowPlaying;
 use dioxus::prelude::*;
 #[cfg(feature = "web")]
@@ -17,44 +20,73 @@ fn format_time(seconds: f64) -> String {
     let secs = (seconds % 60.0).floor() as u32;
     format!("{}:{:02}", mins, secs)
 }
+
+#[cfg(all(not(feature = "web"), not(feature = "mobile")))]
+async fn ensure_native_audio_hls_manager() -> Result<(), String> {
+    let check = document::eval("return typeof window.hlsManager !== 'undefined'")
+        .await
+        .map_err(|e| format!("Failed to check HLS manager: {:?}", e))?;
+    let loaded = check.as_bool().unwrap_or(false);
+    if loaded {
+        return Ok(());
+    }
+    log::info!("[Audio] Injecting HLS manager into WebView");
+    let hls_js = include_str!("../../../public/hls-manager.js");
+    document::eval(hls_js)
+        .await
+        .map_err(|e| format!("Failed to inject HLS manager: {:?}", e))?;
+    for _ in 0..10 {
+        let check = document::eval("return typeof window.hlsManager !== 'undefined'")
+            .await
+            .map_err(|e| format!("Failed to confirm HLS manager: {:?}", e))?;
+        if check.as_bool().unwrap_or(false) {
+            return Ok(());
+        }
+        crate::platform::timer::sleep_ms(25).await;
+    }
+    Err("HLS manager did not become available".to_string())
+}
 /// Persistent music player that stays at bottom of screen
 #[component]
 pub fn PersistentMusicPlayer() -> Element {
     let state = MUSIC_PLAYER.read().clone();
+    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
     let mut is_seeking = use_signal(|| false);
+    #[cfg(any(feature = "web", feature = "mobile"))]
+    let is_seeking = use_signal(|| false);
+    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
+    #[allow(unused_mut)]
     let mut seek_gen = use_signal(|| 0u32);
     let mut show_share_modal = use_signal(|| false);
+    #[cfg(not(feature = "mobile"))]
+    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
+    #[allow(unused_mut)]
     let mut native_source_bound = use_signal(|| false);
+    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
+    #[allow(unused_mut)]
     let mut native_bind_token = use_signal(|| 0u32);
     let audio_id = "global-music-player-audio";
-    // Inject HLS manager JS on non-web platforms.
+    // Inject HLS manager JS on desktop builds.
     // On web, it loads via <script> tag in index.html.
     // On mobile, index.html is not used — Dioxus generates its own HTML.
-    #[cfg(not(feature = "web"))]
+    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
     {
         use_effect(move || {
             spawn(async move {
-                let check = document::eval(
-                    "return typeof window.hlsManager !== 'undefined'",
-                )
-                .await;
-                let loaded = check.ok().and_then(|v| v.as_bool()).unwrap_or(false);
-                if !loaded {
-                    log::info!("[Audio] Injecting HLS manager into WebView");
-                    let hls_js = include_str!("../../../public/hls-manager.js");
-                    if let Err(e) = document::eval(hls_js).await {
-                        log::error!("[Audio] Failed to inject HLS manager: {:?}", e);
-                    }
+                if let Err(e) = ensure_native_audio_hls_manager().await {
+                    log::error!("[Audio] {}", e);
                 }
             });
         });
     }
+    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
     use_effect(move || {
         let state = MUSIC_PLAYER.read();
         if let Some(ref track) = state.current_track {
             let media_url = track.media_url.clone();
             let is_playing = state.is_playing;
             let _is_live_stream = track.is_live_stream;
+            let is_hls = media_url.contains(".m3u8");
             native_source_bound.set(false);
             let bind_token = native_bind_token.with_mut(|token| {
                 *token = token.wrapping_add(1);
@@ -62,12 +94,23 @@ pub fn PersistentMusicPlayer() -> Element {
             });
             {
                 spawn(async move {
+                    if is_hls {
+                        if let Err(e) = ensure_native_audio_hls_manager().await {
+                            if *native_bind_token.read() == bind_token {
+                                native_source_bound.set(false);
+                                music_player::set_playback_error(Some(format!(
+                                    "Failed to load HLS support: {}",
+                                    e
+                                )));
+                            }
+                            return;
+                        }
+                    }
                     let audio_id_json = serde_json::to_string(&audio_id)
                         .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
                     let media_url_json = serde_json::to_string(&media_url)
                         .unwrap_or_else(|_| "\"\"".to_string());
                     let is_playing_literal = if is_playing { "true" } else { "false" };
-                    let is_hls = media_url.contains(".m3u8");
                     let script = if is_hls {
                         format!(
                             r#"
@@ -87,25 +130,27 @@ pub fn PersistentMusicPlayer() -> Element {
                                         return "bound:" + audio.dataset.currentUrl;
                                     }}
 
-                                    if (window.hlsManager) {{
-                                        const result = await window.hlsManager.attachToMedia({audio_id}, {media_url});
-                                        console.log('[Radio] Stream attached:', result);
-                                        if (result && result.type === 'error') {{
-                                            console.error('[Radio] Stream attach returned error:', result.error || 'unknown');
-                                            return "error";
-                                        }}
-                                        if (result && result.type === 'cancelled') {{
-                                            return "cancelled";
-                                        }}
-                                        audio.dataset.currentUrl = {media_url};
+                                    if (!window.hlsManager) {{
+                                        return "error:HLS manager unavailable";
                                     }}
+
+                                    const result = await window.hlsManager.attachToMedia({audio_id}, {media_url});
+                                    console.log('[Radio] Stream attached:', result);
+                                    if (result && result.type === 'error') {{
+                                        console.error('[Radio] Stream attach returned error:', result.error || 'unknown');
+                                        return "error:" + (result.error || 'Failed to attach stream');
+                                    }}
+                                    if (result && result.type === 'cancelled') {{
+                                        return "cancelled";
+                                    }}
+                                    audio.dataset.currentUrl = {media_url};
                                     if ({is_playing}) {{
                                         audio.play().catch(e => console.log('Play failed:', e));
                                     }}
                                     return "bound:" + audio.dataset.currentUrl;
                                 }} catch (e) {{
                                     console.error('[Radio] Stream attach failed:', e);
-                                    return "error";
+                                    return "error:" + (e.message || "Failed to attach stream");
                                 }}
                             }})();
                             "#,
@@ -171,21 +216,40 @@ pub fn PersistentMusicPlayer() -> Element {
                     match document::eval(&script).await {
                         Ok(val) => {
                             let result = val.as_str().unwrap_or_default();
-                            if *native_bind_token.read() == bind_token
-                                && result == format!("bound:{}", media_url)
-                            {
-                                native_source_bound.set(true);
+                            if *native_bind_token.read() == bind_token {
+                                if result == format!("bound:{}", media_url) {
+                                    native_source_bound.set(true);
+                                    music_player::set_playback_error(None);
+                                } else {
+                                    native_source_bound.set(false);
+                                    if result == "cancelled" {
+                                        log::warn!("[Audio] Stream attach cancelled for {}", media_url);
+                                    } else {
+                                        let error_msg = result
+                                            .strip_prefix("error:")
+                                            .unwrap_or("Failed to attach stream")
+                                            .to_string();
+                                        log::error!("[Audio] {}", error_msg);
+                                        music_player::set_playback_error(Some(error_msg));
+                                    }
+                                }
                             }
                         }
                         Err(e) => {
-                            native_source_bound.set(false);
-                            log::warn!("Failed to apply audio source script: {:?}", e);
+                            if *native_bind_token.read() == bind_token {
+                                native_source_bound.set(false);
+                                let error_msg =
+                                    format!("Failed to apply audio source script: {:?}", e);
+                                log::warn!("{}", error_msg);
+                                music_player::set_playback_error(Some(error_msg));
+                            }
                         }
                     }
                 });
             }
         }
     });
+    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
     use_effect(move || {
         let state = MUSIC_PLAYER.read();
         let volume = if state.is_muted { 0.0 } else { state.volume };
@@ -207,7 +271,9 @@ pub fn PersistentMusicPlayer() -> Element {
             });
         }
     });
+    #[cfg(not(feature = "mobile"))]
     let mut last_synced_time = use_signal(|| 0.0f64);
+    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
     use_effect(move || {
         let state = MUSIC_PLAYER.read();
         let current_time = state.current_time;
@@ -248,7 +314,7 @@ pub fn PersistentMusicPlayer() -> Element {
     // ontimeupdate/onloadedmetadata use web_sys which is WASM-only.
     // NOTE: Bare `return` (no IIFE) — Dioxus wraps eval scripts in an AsyncFunction,
     // so IIFE return values are lost. Bare return exits the outer AsyncFunction correctly.
-    #[cfg(not(feature = "web"))]
+    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
     {
         let _time_poller = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
             loop {
@@ -293,7 +359,9 @@ pub fn PersistentMusicPlayer() -> Element {
             }
         });
     }
+    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
     let playback_speed = use_memo(move || MUSIC_PLAYER.read().playback_speed);
+    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
     use_effect(move || {
         let speed = playback_speed();
         {
@@ -327,12 +395,23 @@ pub fn PersistentMusicPlayer() -> Element {
             music_player::clear_now_playing();
         }
     });
+    #[cfg(feature = "mobile")]
+    let _native_snapshot_poller = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
+        loop {
+            crate::platform::timer::sleep_ms(250).await;
+            if let Ok(snapshot) = android_media::snapshot() {
+                music_player::sync_native_playback_snapshot(snapshot);
+            }
+        }
+    });
     let _now_playing_poller = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
         loop {
             crate::platform::timer::sleep_ms(2000).await;
+            #[cfg(not(feature = "mobile"))]
             if !is_live() {
                 continue;
             }
+            #[cfg(not(feature = "mobile"))]
             {
                 // Bare return (no IIFE) — Dioxus wraps eval in AsyncFunction on mobile
                 let result = document::eval(
@@ -359,6 +438,11 @@ pub fn PersistentMusicPlayer() -> Element {
         }
     });
     if !state.is_visible || state.current_track.is_none() {
+        #[cfg(feature = "mobile")]
+        {
+            return rsx! {};
+        }
+        #[cfg(not(feature = "mobile"))]
         return rsx! {
             audio {
                 id: "{audio_id}",
@@ -430,9 +514,16 @@ pub fn PersistentMusicPlayer() -> Element {
         // On mobile, playback is managed entirely via document::eval.
         // The RSX audio element has src="" which fires onerror immediately.
         // Suppress placeholder src errors — eval path handles binding/errors.
-        #[cfg(not(feature = "web"))]
+        #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
         {
             if !*native_source_bound.read() {
+                log::warn!("Audio playback error before native source binding completed");
+                music_player::set_buffering(false);
+                if !music_player::try_next_stream() {
+                    music_player::set_playback_error(Some(
+                        "Playback error on this platform. Please retry.".to_string(),
+                    ));
+                }
                 return;
             }
             if !music_player::try_next_stream() {
@@ -452,6 +543,7 @@ pub fn PersistentMusicPlayer() -> Element {
         }
     };
     rsx! {
+        if !cfg!(feature = "mobile") {
         audio {
             id: "{audio_id}",
             preload: if track.is_live_stream { "none" } else { "metadata" },
@@ -499,6 +591,7 @@ pub fn PersistentMusicPlayer() -> Element {
                 music_player::set_buffering(false);
                 music_player::set_playback_error(None);
             },
+        }
         }
         div {
             class: "fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur border-t border-border shadow-lg z-50",
@@ -642,37 +735,66 @@ pub fn PersistentMusicPlayer() -> Element {
                                 onclick: move |evt| {
                                     let client_x = evt.client_coordinates().x;
                                     let client_y = evt.client_coordinates().y;
-                                    let audio_id_str = audio_id.to_string();
+                                    #[cfg(feature = "mobile")]
                                     {
-                                    spawn(async move {
-                                        let audio_id_json = serde_json::to_string(&audio_id_str)
-                                            .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
-                                        let script = format!(
-                                            r#"
-                                            (function() {{
-                                                let audio = document.getElementById({audio_id});
-                                                if (!audio) return;
-
+                                        let duration = state.duration;
+                                        spawn(async move {
+                                            let script = format!(
+                                                r#"
                                                 let element = document.elementFromPoint({client_x}, {client_y});
-                                                if (!element) return;
-
+                                                if (!element) return -1;
                                                 let progressBar = element.closest('.cursor-pointer') || element;
                                                 let rect = progressBar.getBoundingClientRect();
-
                                                 let percent = Math.max(0, Math.min(1, ({client_x} - rect.left) / rect.width));
-                                                let newTime = percent * audio.duration;
+                                                return percent * {duration};
+                                                "#,
+                                                client_x = client_x,
+                                                client_y = client_y,
+                                                duration = duration,
+                                            );
+                                            if let Ok(result) = document::eval(&script).await {
+                                                let new_time = result
+                                                    .as_f64()
+                                                    .or_else(|| result.as_str().and_then(|s| s.parse::<f64>().ok()))
+                                                    .unwrap_or(-1.0);
+                                                if new_time >= 0.0 && new_time.is_finite() {
+                                                    music_player::seek_to(new_time);
+                                                }
+                                            }
+                                        });
+                                    }
+                                    #[cfg(not(feature = "mobile"))]
+                                    {
+                                        let audio_id_str = audio_id.to_string();
+                                        spawn(async move {
+                                            let audio_id_json = serde_json::to_string(&audio_id_str)
+                                                .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
+                                            let script = format!(
+                                                r#"
+                                                (function() {{
+                                                    let audio = document.getElementById({audio_id});
+                                                    if (!audio) return;
 
-                                                if (!isNaN(newTime) && isFinite(newTime)) {{
-                                                    audio.currentTime = newTime;
-                                                }}
-                                            }})();
-                                            "#,
-                                            audio_id = audio_id_json,
-                                            client_x = client_x,
-                                            client_y = client_y,
-                                        );
-                                        let _ = document::eval(&script);
-                                    });
+                                                    let element = document.elementFromPoint({client_x}, {client_y});
+                                                    if (!element) return;
+
+                                                    let progressBar = element.closest('.cursor-pointer') || element;
+                                                    let rect = progressBar.getBoundingClientRect();
+
+                                                    let percent = Math.max(0, Math.min(1, ({client_x} - rect.left) / rect.width));
+                                                    let newTime = percent * audio.duration;
+
+                                                    if (!isNaN(newTime) && isFinite(newTime)) {{
+                                                        audio.currentTime = newTime;
+                                                    }}
+                                                }})();
+                                                "#,
+                                                audio_id = audio_id_json,
+                                                client_x = client_x,
+                                                client_y = client_y,
+                                            );
+                                            let _ = document::eval(&script);
+                                        });
                                     }
                                 },
                                 div {

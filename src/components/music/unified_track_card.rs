@@ -56,20 +56,10 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
     let playlist = props.playlist.clone();
     let handle_play = {
         let track = track.clone();
-        let track_id_clone = track_id.clone();
         let playlist = playlist.clone();
         move |_| {
-            let player_state = music_player::MUSIC_PLAYER.read();
-            if let Some(ref current) = player_state.current_track {
-                if current.id == track_id_clone && player_state.is_playing {
-                    drop(player_state);
-                    music_player::toggle_play();
-                    return;
-                }
-            }
-            drop(player_state);
             let playlist_vec = playlist.as_ref().map(|arc| (**arc).clone());
-            music_player::play_track(track.clone(), playlist_vec, None);
+            music_player::play_or_toggle_track(track.clone(), playlist_vec, None);
         }
     };
     let duration_str = track
@@ -188,7 +178,9 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
         }
     };
     rsx! {
-        div { class: "flex items-center gap-3 p-3 hover:bg-muted/50 rounded-lg transition group",
+        div {
+            class: "flex items-center gap-3 p-3 hover:bg-muted/50 rounded-lg transition group cursor-pointer",
+            onclick: handle_play,
             div { class: "relative shrink-0",
                 img {
                     src: "{artwork_url}",
@@ -205,7 +197,6 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
                 }
                 button {
                     class: "absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition rounded",
-                    onclick: handle_play,
                     dangerous_inner_html: if *is_playing.read() { icons::PAUSE } else { icons::PLAY },
                 }
             }

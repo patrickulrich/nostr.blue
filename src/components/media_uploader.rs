@@ -360,12 +360,12 @@ async fn read_file_as_bytes(
         .and_then(|name| name.to_str())
         .ok_or("Invalid file name")?
         .to_string();
-    let data = std::fs::read(&file_handle)
-        .map_err(|e| format!("Failed to read selected file: {}", e))?;
     let mime_type = mime_type_from_filename(&file_name);
     if !matches_accept_filter(accept, &mime_type, &file_name) {
         return Err("Selected file type is not allowed".to_string());
     }
+    let data = std::fs::read(&file_handle)
+        .map_err(|e| format!("Failed to read selected file: {}", e))?;
     Ok((file_name, data, mime_type))
 }
 

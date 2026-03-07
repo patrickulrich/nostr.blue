@@ -396,8 +396,14 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
     }
     let handle_retry = move |_| {
         if *loading.peek() { return; } // Guard: already loading
-        error.set(None);
-        loading.set(true);
+        let gen = init_gen.with_mut(|g| {
+            *g = g.wrapping_add(1);
+            *g
+        });
+        if *init_gen.peek() == gen {
+            error.set(None);
+            loading.set(true);
+        }
         let _video_id = video_id.clone();
         let _stream_url = stream_url.clone();
         #[cfg(feature = "web")]
@@ -408,15 +414,20 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                 crate::platform::timer::sleep_ms(100).await;
                 match init_video_js_player(&video_id, &stream_url, autoplay).await {
                     Ok(_) => {
-                        loading.set(false);
-                        error.set(None);
-                        cleanup_guard.set(Some(CleanupGuard { video_id: video_id.clone() }));
+                        if *init_gen.peek() == gen {
+                            loading.set(false);
+                            error.set(None);
+                            cleanup_guard
+                                .set(Some(CleanupGuard { video_id: video_id.clone() }));
+                        }
                     }
                     Err(e) => {
-                        let error_msg = format!("Failed to load stream: {:?}", e);
-                        log::error!("{}", error_msg);
-                        error.set(Some(error_msg));
-                        loading.set(false);
+                        if *init_gen.peek() == gen {
+                            let error_msg = format!("Failed to load stream: {:?}", e);
+                            log::error!("{}", error_msg);
+                            error.set(Some(error_msg));
+                            loading.set(false);
+                        }
                     }
                 }
             });
@@ -430,8 +441,10 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
 
                 if let Err(e) = ensure_hls_manager().await {
                     log::error!("[Live] {}", e);
-                    error.set(Some(format!("Failed to load HLS support: {}", e)));
-                    loading.set(false);
+                    if *init_gen.peek() == gen {
+                        error.set(Some(format!("Failed to load HLS support: {}", e)));
+                        loading.set(false);
+                    }
                     return;
                 }
 
@@ -440,24 +453,28 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
 
                 match document::eval(&setup_script).await {
                     Ok(val) => {
-                        let result = val
-                            .as_str()
-                            .unwrap_or("error:Unexpected eval result type");
-                        if let Some(err_msg) = result.strip_prefix("error:") {
-                            error.set(Some(err_msg.to_string()));
-                        } else if result == "cancelled" {
-                            error.set(Some("Stream setup was cancelled".to_string()));
-                        } else {
-                            error.set(None);
+                        if *init_gen.peek() == gen {
+                            let result = val
+                                .as_str()
+                                .unwrap_or("error:Unexpected eval result type");
+                            if let Some(err_msg) = result.strip_prefix("error:") {
+                                error.set(Some(err_msg.to_string()));
+                            } else if result == "cancelled" {
+                                error.set(Some("Stream setup was cancelled".to_string()));
+                            } else {
+                                error.set(None);
+                            }
+                            loading.set(false);
                         }
-                        loading.set(false);
                     }
                     Err(e) => {
-                        error.set(Some(format!(
-                            "Failed to setup stream: {:?}",
-                            e
-                        )));
-                        loading.set(false);
+                        if *init_gen.peek() == gen {
+                            error.set(Some(format!(
+                                "Failed to setup stream: {:?}",
+                                e
+                            )));
+                            loading.set(false);
+                        }
                     }
                 }
             });

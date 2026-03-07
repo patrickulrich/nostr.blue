@@ -239,13 +239,14 @@ pub fn ChannelChat(channel_id: String) -> Element {
             #[cfg(feature = "web")]
             {
                 let mut did_scroll = false;
-                let should_scroll = (*is_first_load.peek() && msg_count > 0)
-                    || isChannelChatScrolledNearBottom(&container_id, 100.0);
+                let should_scroll = msg_count > 0
+                    && (*is_first_load.peek()
+                        || isChannelChatScrolledNearBottom(&container_id, 100.0));
                 if should_scroll {
                     scrollChannelChatToBottom(&container_id);
                     did_scroll = true;
                 }
-                if did_scroll && *channel_scroll_gen.read() == scroll_gen {
+                if did_scroll && msg_count > 0 && *channel_scroll_gen.read() == scroll_gen {
                     is_first_load.set(false);
                 }
             }

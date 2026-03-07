@@ -126,6 +126,17 @@ fn validate_url(url: &str) -> Result<(), LnUrlError> {
     Ok(())
 }
 impl std::error::Error for LnUrlError {}
+
+async fn ensure_success_response(
+    response: reqwest::Response,
+) -> Result<reqwest::Response, LnUrlError> {
+    let status = response.status();
+    if status.is_success() {
+        return Ok(response);
+    }
+    let body = response.text().await.unwrap_or_default();
+    Err(LnUrlError::FetchError(format!("HTTP {}: {}", status, body)))
+}
 /// Convert lud16 (Lightning Address) to LNURL endpoint
 /// Example: username@domain.com -> https://domain.com/.well-known/lnurlp/username
 pub fn lud16_to_url(lud16: &str) -> Result<String, LnUrlError> {
@@ -158,6 +169,7 @@ pub async fn fetch_lnurl_pay_info(url: &str) -> Result<LnUrlPayResponse, LnUrlEr
         .send()
         .await
         .map_err(|e| LnUrlError::FetchError(e.to_string()))?;
+    let response = ensure_success_response(response).await?;
     let pay_info: LnUrlPayResponse = response
         .json()
         .await
@@ -232,6 +244,7 @@ pub async fn request_zap_invoice(
         .send()
         .await
         .map_err(|e| LnUrlError::FetchError(e.to_string()))?;
+    let response = ensure_success_response(response).await?;
     let invoice: LnUrlInvoiceResponse = response
         .json()
         .await
@@ -267,6 +280,7 @@ pub async fn fetch_lnurl_pay_info_simple(
         .send()
         .await
         .map_err(|e| LnUrlError::FetchError(e.to_string()))?;
+    let response = ensure_success_response(response).await?;
     let pay_info: LnUrlPayResponse = response
         .json()
         .await
@@ -292,6 +306,7 @@ pub async fn request_simple_invoice(
         .send()
         .await
         .map_err(|e| LnUrlError::FetchError(e.to_string()))?;
+    let response = ensure_success_response(response).await?;
     let invoice: LnUrlInvoiceResponse = response
         .json()
         .await

@@ -7,11 +7,15 @@ android_main_activity = "android/MainActivity.kt"
 android_min_sdk_version = 24
 
 [bundle]
-identifier = "blue.nostr.app"
+identifier = "com.nostr.blue"
 publisher = "nostr.blue"
 icon = ["public/icons/icon-512.png", "public/icons/icon-192.png"]
 resources = ["public/**/*"]
 short_description = "Decentralized social client for Nostr"
+
+[android]
+identifier = "com.nostr.blue"
+icon = ["public/icons/icon-512.png", "public/icons/icon-192.png"]
 
 [web.app]
 title = "nostr.blue - Decentralized Social Network"

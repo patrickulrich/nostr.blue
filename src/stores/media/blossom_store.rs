@@ -85,6 +85,12 @@ fn clear_progress_if_gen_matches(gen: u32) {
     }
 }
 
+fn set_progress_if_gen_matches(gen: u32, value: Option<f32>) {
+    if *UPLOAD_PROGRESS_GEN.read() == gen {
+        *UPLOAD_PROGRESS.write() = value;
+    }
+}
+
 struct UploadProgressGuard {
     gen: u32,
     clear_on_drop: bool,
@@ -301,23 +307,23 @@ pub async fn upload_image(
         format!(", quality: {}%", quality)
     };
     log::info!("Uploading {}: {} bytes{}", media_type, data.len(), quality_str);
-    UPLOAD_PROGRESS.write().replace(0.0);
+    set_progress_if_gen_matches(gen, Some(0.0));
     if nostr_client::get_signer().is_none() {
         return Err("Not authenticated. Please sign in to upload media.".to_string());
     }
     let final_data = if !is_video && quality < 100 {
         log::info!("Compressing image to {}% quality", quality);
-        UPLOAD_PROGRESS.write().replace(25.0);
+        set_progress_if_gen_matches(gen, Some(25.0));
         compress_image(data, content_type.clone(), quality).await?
     } else {
         if is_video {
             log::info!("Skipping compression for video file");
-            UPLOAD_PROGRESS.write().replace(25.0);
+            set_progress_if_gen_matches(gen, Some(25.0));
         }
         data
     };
     log::info!("Final {} size: {} bytes", media_type, final_data.len());
-    UPLOAD_PROGRESS.write().replace(50.0);
+    set_progress_if_gen_matches(gen, Some(50.0));
     let result = upload_blob_with_auth(
             final_data,
             content_type,
@@ -396,12 +402,12 @@ async fn upload_blob_with_auth(
     let mut progress_guard = UploadProgressGuard::new(gen);
     let signer = nostr_client::get_signer()
         .ok_or("Not authenticated. Please sign in to upload.")?;
-    UPLOAD_PROGRESS.write().replace(start_progress);
+    set_progress_if_gen_matches(gen, Some(start_progress));
     let server_url = server_url.unwrap_or_else(get_primary_server);
     let url = Url::parse(&server_url).map_err(|e| format!("Invalid server URL: {}", e))?;
     let client = BlossomClient::new(url);
     log::info!("Uploading to {} with authentication", server_url);
-    UPLOAD_PROGRESS.write().replace(start_progress + 25.0);
+    set_progress_if_gen_matches(gen, Some(start_progress + 25.0));
     let auth_options = Some(BlossomAuthorizationOptions {
         content: Some(auth_content),
         expiration: None,
@@ -463,7 +469,7 @@ async fn upload_blob_with_auth(
                 })?
         }
     };
-    UPLOAD_PROGRESS.write().replace(100.0);
+    set_progress_if_gen_matches(gen, Some(100.0));
     log::info!("Upload successful: {}", descriptor.url);
     progress_guard.disarm();
     spawn(async move {
@@ -490,7 +496,7 @@ pub async fn upload_audio(
     let gen = next_upload_gen();
     let mut progress_guard = UploadProgressGuard::new(gen);
     log::info!("Uploading audio: {} bytes, type: {}", data.len(), content_type);
-    UPLOAD_PROGRESS.write().replace(0.0);
+    set_progress_if_gen_matches(gen, Some(0.0));
     let result = upload_blob_with_auth(
             data,
             content_type,

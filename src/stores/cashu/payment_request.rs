@@ -12,19 +12,20 @@ compile_error!("Cannot enable both 'web' and 'native' features simultaneously");
 #[cfg(not(any(feature = "web", feature = "native")))]
 compile_error!("Must enable either 'web' or 'native' feature");
 
-use crate::platform::http::http_client;
-/// Error message returned when a payment request is cancelled by the user.
-/// This is NOT an error condition - it indicates a clean shutdown.
-pub const PAYMENT_CANCELLED_MSG: &str = "Payment request cancelled";
-use std::str::FromStr;
-use dioxus::prelude::*;
-use nostr_sdk::{EventId, Kind, PublicKey};
 use cdk::mint_url::MintUrl;
 use cdk::nuts::{
     CurrencyUnit, PaymentRequest, PaymentRequestPayload as CdkPaymentRequestPayload,
     Transport, TransportType,
 };
 use cdk::Amount;
+use dioxus::prelude::*;
+use nostr_sdk::{EventId, Kind, PublicKey};
+use std::str::FromStr;
+
+use crate::platform::http::http_client;
+/// Error message returned when a payment request is cancelled by the user.
+/// This is NOT an error condition - it indicates a clean shutdown.
+pub const PAYMENT_CANCELLED_MSG: &str = "Payment request cancelled";
 use super::events::queue_event_for_retry;
 use super::internal::create_ephemeral_wallet;
 use super::mint_mgmt::{get_mint_balance, get_mints};
@@ -503,34 +504,16 @@ pub async fn wait_for_nostr_payment(
             return Err("Timeout waiting for payment".to_string());
         }
         let notification = {
-            #[cfg(feature = "web")]
-            {
-                use futures::future::{select, Either};
-                use futures::pin_mut;
-                let timeout_fut = crate::platform::timer::sleep_ms(5000);
-                let recv_fut = notifications.recv();
-                pin_mut!(timeout_fut);
-                pin_mut!(recv_fut);
-                match select(recv_fut, timeout_fut).await {
-                    Either::Left((Ok(n), _)) => Some(n),
-                    Either::Left((Err(_), _)) => break,
-                    Either::Right((_, _)) => continue,
-                }
-            }
-            #[cfg(feature = "native")]
-            {
-                use futures::future::{select, Either};
-                use futures::pin_mut;
-                use std::time::Duration;
-                let timeout_fut = crate::platform::timer::sleep(Duration::from_secs(5));
-                let recv_fut = notifications.recv();
-                pin_mut!(timeout_fut);
-                pin_mut!(recv_fut);
-                match select(recv_fut, timeout_fut).await {
-                    Either::Left((Ok(n), _)) => Some(n),
-                    Either::Left((Err(_), _)) => break,
-                    Either::Right((_, _)) => continue,
-                }
+            use futures::future::{select, Either};
+            use futures::pin_mut;
+            let timeout_fut = crate::platform::timer::sleep_ms(5000);
+            let recv_fut = notifications.recv();
+            pin_mut!(timeout_fut);
+            pin_mut!(recv_fut);
+            match select(recv_fut, timeout_fut).await {
+                Either::Left((Ok(n), _)) => Some(n),
+                Either::Left((Err(_), _)) => break,
+                Either::Right((_, _)) => continue,
             }
         };
         if let Some(RelayPoolNotification::Event { event, .. }) = notification {

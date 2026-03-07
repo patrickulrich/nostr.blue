@@ -9,9 +9,12 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import java.io.File
 import java.io.IOException
 import java.util.UUID
+
+typealias BuildConfig = com.nostr.blue.BuildConfig
 
 /**
  * NIP-55 Android Signer Bridge
@@ -804,6 +807,70 @@ class MainActivity : WryActivity() {
         @JvmStatic
         fun isFilePickInFlight(@Suppress("UNUSED_PARAMETER") context: Context): Boolean {
             return synchronized(lock) { filePickInFlight }
+        }
+
+        @JvmStatic
+        fun setPlaybackQueue(
+            context: Context,
+            queueJson: String,
+            startIndex: Int,
+            playWhenReady: Boolean
+        ): String {
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, MediaPlaybackService::class.java)
+            )
+            return NativeAudioBridge.setQueue(context, queueJson, startIndex, playWhenReady)
+        }
+
+        @JvmStatic
+        fun playNativeAudio(context: Context): String {
+            return NativeAudioBridge.play(context)
+        }
+
+        @JvmStatic
+        fun pauseNativeAudio(context: Context): String {
+            return NativeAudioBridge.pause(context)
+        }
+
+        @JvmStatic
+        fun nextNativeTrack(context: Context): String {
+            return NativeAudioBridge.skipNext(context)
+        }
+
+        @JvmStatic
+        fun previousNativeTrack(context: Context): String {
+            return NativeAudioBridge.skipPrevious(context)
+        }
+
+        @JvmStatic
+        fun seekNativeAudio(context: Context, positionMs: Long): String {
+            return NativeAudioBridge.seekTo(context, positionMs)
+        }
+
+        @JvmStatic
+        fun setNativePlaybackSpeed(context: Context, speed: Float): String {
+            return NativeAudioBridge.setPlaybackSpeed(context, speed)
+        }
+
+        @JvmStatic
+        fun setNativeVolume(context: Context, volume: Float): String {
+            return NativeAudioBridge.setVolume(context, volume)
+        }
+
+        @JvmStatic
+        fun stopNativeAudio(context: Context): String {
+            return NativeAudioBridge.stop(context)
+        }
+
+        @JvmStatic
+        fun clearNativeAudioQueue(context: Context): String {
+            return NativeAudioBridge.clearQueue(context)
+        }
+
+        @JvmStatic
+        fun getNativePlaybackSnapshot(context: Context): String {
+            return NativeAudioBridge.getSnapshot(context)
         }
     }
 }

@@ -184,6 +184,7 @@ pub fn MusicZapDialog() -> Element {
             spawn(async move {
                 #[cfg(feature = "web")]
                 {
+                    error_msg.set(None);
                     let inv_json = serde_json::to_string(&inv).unwrap_or_default();
                     let script = format!(
                         r#"
@@ -213,6 +214,7 @@ pub fn MusicZapDialog() -> Element {
                                         .and_then(|v| v.as_bool())
                                         .unwrap_or(false);
                                     if success {
+                                        error_msg.set(None);
                                         log::info!("WebLN payment completed successfully");
                                     } else {
                                         let js_error = js_sys::Reflect::get(&result, &"error".into())

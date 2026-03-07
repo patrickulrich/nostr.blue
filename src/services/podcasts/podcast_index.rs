@@ -428,12 +428,30 @@ async fn fetch_via_proxy<T: for<'de> Deserialize<'de>>(
     log::debug!("[podcast_index] fetching {} via proxy", resource_type);
     let auth_result = nip98_utils::create_auth_header(&proxy_url, nip98::HttpMethod::GET)
         .await?;
-    let response = http_client()
-        .map_err(|e| format!("HTTP client init failed: {}", e))?
+    let client = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?;
+    #[cfg(target_arch = "wasm32")]
+    let response = {
+        use futures::FutureExt;
+        let req_fut = client
+            .get(&auth_result.signed_url)
+            .header("Authorization", &auth_result.header)
+            .send()
+            .fuse();
+        let timeout = gloo_timers::future::TimeoutFuture::new(15_000).fuse();
+        futures::pin_mut!(req_fut, timeout);
+        futures::select! {
+            resp = req_fut => resp,
+            _ = timeout => return Err(format!("{} fetch timed out", resource_type)),
+        }
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    let response = client
         .get(&auth_result.signed_url)
         .header("Authorization", &auth_result.header)
         .send()
-        .await
+        .await;
+    let response = response
         .map_err(|e| format!("Failed to fetch {}: {}", resource_type, e))?;
     if !response.status().is_success() {
         let status = response.status();
@@ -453,12 +471,30 @@ async fn fetch_text_via_proxy(url: &str, resource_type: &str) -> Result<String, 
     log::debug!("[podcast_index] fetching {} via proxy", resource_type);
     let auth_result = nip98_utils::create_auth_header(&proxy_url, nip98::HttpMethod::GET)
         .await?;
-    let response = http_client()
-        .map_err(|e| format!("HTTP client init failed: {}", e))?
+    let client = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?;
+    #[cfg(target_arch = "wasm32")]
+    let response = {
+        use futures::FutureExt;
+        let req_fut = client
+            .get(&auth_result.signed_url)
+            .header("Authorization", &auth_result.header)
+            .send()
+            .fuse();
+        let timeout = gloo_timers::future::TimeoutFuture::new(15_000).fuse();
+        futures::pin_mut!(req_fut, timeout);
+        futures::select! {
+            resp = req_fut => resp,
+            _ = timeout => return Err(format!("{} fetch timed out", resource_type)),
+        }
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    let response = client
         .get(&auth_result.signed_url)
         .header("Authorization", &auth_result.header)
         .send()
-        .await
+        .await;
+    let response = response
         .map_err(|e| format!("Failed to fetch {}: {}", resource_type, e))?;
     if !response.status().is_success() {
         let status = response.status();

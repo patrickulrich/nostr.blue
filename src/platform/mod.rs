@@ -29,3 +29,6 @@ pub use android_signer::{IntentPollResult, Nip55Signer};
 pub mod mobile;
 #[cfg(feature = "mobile")]
 pub use mobile::download_file;
+
+#[cfg(feature = "mobile")]
+pub mod android_media;

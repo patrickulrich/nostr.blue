@@ -53,6 +53,7 @@ pub fn VideosLiveTag(tag: String) -> Element {
                                 return;
                             }
                             error.set(Some(e));
+                            has_more.set(false);
                             loading.set(false);
                         }
                     }
@@ -255,6 +256,7 @@ async fn trigger_load_more_for_tag(
                 return;
             }
             log::error!("Failed to load more streams: {}", e);
+            has_more.set(false);
             loading.set(false);
         }
     }
