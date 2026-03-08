@@ -341,6 +341,13 @@ pub fn EventMap(props: EventMapProps) -> Element {
                     geocoded_events.set(Vec::new());
                     return;
                 }
+                // If a geocode lookup is already running and key changed, invalidate it
+                if *loading_geo.peek() && key != *processed_event_ids.peek() {
+                    geocode_gen.with_mut(|g| *g = g.wrapping_add(1));
+                    processed_event_ids.set(key.clone());
+                    geocoded_events.set(Vec::new());
+                    return;
+                }
                 if *loading_geo.peek() {
                     return;
                 }
@@ -416,8 +423,8 @@ pub fn EventMap(props: EventMapProps) -> Element {
                         loading_geo.set(false);
                         return;
                     }
-                    geocoded_events.set(results);
                     if !had_lookup_error {
+                        geocoded_events.set(results);
                         processed_event_ids.set(key_to_store);
                     }
                     loading_geo.set(false);
@@ -578,14 +585,14 @@ fn format_popup_time(event: &UnifiedEvent) -> String {
     let month_names = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
-    let month = date.get_month() as usize;
-    let day = date.get_date();
+    let month = date.get_utc_month() as usize;
+    let day = date.get_utc_date();
     let month_str = month_names.get(month).unwrap_or(&"");
     if event.is_all_day() {
         format!("{} {}", month_str, day)
     } else {
-        let hours = date.get_hours();
-        let minutes = date.get_minutes();
+        let hours = date.get_utc_hours();
+        let minutes = date.get_utc_minutes();
         let am_pm = if hours >= 12 { "PM" } else { "AM" };
         let hour_12 = if hours == 0 {
             12
@@ -595,7 +602,7 @@ fn format_popup_time(event: &UnifiedEvent) -> String {
             hours
         };
         format!(
-            "{} {} at {}:{:02} {}",
+            "{} {} at {}:{:02} {} UTC",
             month_str, day, hour_12, minutes, am_pm
         )
     }

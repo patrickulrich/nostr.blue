@@ -386,6 +386,16 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
                 }
                 button {
                     class: "absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition rounded-lg",
+                    onclick: {
+                        let episode = episode.clone();
+                        let playlist = playlist.clone();
+                        move |e: Event<MouseData>| {
+                            e.stop_propagation();
+                            let track = episode.to_music_track();
+                            let playlist_vec = playlist.as_ref().map(|rc| (**rc).clone());
+                            music_player::play_or_toggle_track(track, playlist_vec, None);
+                        }
+                    },
                     dangerous_inner_html: if *is_playing.read() { icons::PAUSE } else { icons::PLAY },
                 }
             }

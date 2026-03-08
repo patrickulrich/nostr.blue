@@ -218,6 +218,9 @@ pub fn V4VBoostButton(props: V4VBoostButtonProps) -> Element {
                                                         }
                                                         log::info!("Boost sent: {} sats", amt);
                                                     }
+                                                    Ok(PaymentOutcome::NoAttempts) => {
+                                                        error.set(Some("No payment attempts: all computed amounts were zero".to_string()));
+                                                    }
                                                     Ok(PaymentOutcome::PartialSuccess {
                                                         success_count,
                                                         attempted_count,
@@ -288,6 +291,9 @@ fn CustomBoostInput(props: CustomBoostInputProps) -> Element {
                         match send_v4v_payment(&vb, amt).await {
                             Ok(PaymentOutcome::FullSuccess) => {
                                 on_send.call(amt);
+                            }
+                            Ok(PaymentOutcome::NoAttempts) => {
+                                error.set(Some("No payment attempts: all computed amounts were zero".to_string()));
                             }
                             Ok(PaymentOutcome::PartialSuccess {
                                 success_count,
@@ -370,6 +376,7 @@ enum PaymentOutcome {
         attempted_count: usize,
         failed_recipients: Vec<String>,
     },
+    NoAttempts,
 }
 /// Send V4V payment split across recipients
 async fn send_v4v_payment(
@@ -384,6 +391,9 @@ async fn send_v4v_payment(
         .iter()
         .try_fold(0u64, |acc, r| acc.checked_add(r.split as u64))
         .ok_or_else(|| "Overflow in split total".to_string())?;
+    if total_split == 0 {
+        return Err("Zero total_split: invalid V4V configuration".to_string());
+    }
     let mut success_count = 0;
     let mut attempted_count = 0;
     let mut failed_recipients = Vec::new();
@@ -455,70 +465,69 @@ async fn send_v4v_payment(
                                     continue;
                                 }
                             };
-                            if let Ok(invoice_response) =
-                                serde_json::from_str::<serde_json::Value>(&raw_response)
-                            {
-                                if let Some(pr) =
-                                    invoice_response.get("pr").and_then(|v| v.as_str())
-                                {
-                                    let expected_amount_msats = amount * 1000;
-                                    if let Some(parsed_amount) =
-                                        crate::utils::bolt11::parse_bolt11_amount(pr)
-                                    {
-                                        if parsed_amount != expected_amount_msats {
-                                            log::error!(
-                                                "Bolt11 amount mismatch for {}: expected {} msats, got {} msats",
-                                                recipient.address,
-                                                expected_amount_msats,
-                                                parsed_amount
-                                            );
-                                            failed_recipients.push(recipient.address.clone());
-                                            continue;
+                            let parse_result = serde_json::from_str::<serde_json::Value>(&raw_response);
+                            match parse_result {
+                                Ok(invoice_response) => {
+                                    if let Some(pr) = invoice_response.get("pr").and_then(|v| v.as_str()) {
+                                        let expected_amount_msats = amount * 1000;
+                                        match crate::utils::bolt11::parse_bolt11_amount(pr) {
+                                            Some(parsed_amount) => {
+                                                if parsed_amount != expected_amount_msats {
+                                                    log::error!(
+                                                        "Bolt11 amount mismatch for {}: expected {} msats, got {} msats",
+                                                        recipient.address,
+                                                        expected_amount_msats,
+                                                        parsed_amount
+                                                    );
+                                                    failed_recipients.push(recipient.address.clone());
+                                                    continue;
+                                                }
+                                            }
+                                            None => {
+                                                log::error!(
+                                                    "Could not parse bolt11 amount for {}, rejecting payment",
+                                                    recipient.address
+                                                );
+                                                failed_recipients.push(recipient.address.clone());
+                                                continue;
+                                            }
+                                        }
+                                        match nwc_store::pay_invoice(pr.to_string()).await {
+                                            Ok(_) => {
+                                                log::info!(
+                                                    "V4V payment sent: {} sats to {}",
+                                                    amount,
+                                                    recipient.address
+                                                );
+                                                success_count += 1;
+                                            }
+                                            Err(e) => {
+                                                log::error!(
+                                                    "Payment failed for {}: {}",
+                                                    recipient.address,
+                                                    e
+                                                );
+                                                failed_recipients.push(recipient.address.clone());
+                                            }
                                         }
                                     } else {
                                         log::error!(
-                                            "Could not parse bolt11 amount for {}, rejecting payment",
-                                            recipient.address
+                                            "Invoice response missing pr for {}: {}",
+                                            recipient.address,
+                                            raw_response
                                         );
                                         failed_recipients.push(recipient.address.clone());
-                                        continue;
                                     }
-                                    match nwc_store::pay_invoice(pr.to_string()).await {
-                                        Ok(_) => {
-                                            log::info!(
-                                                "V4V payment sent: {} sats to {}",
-                                                amount,
-                                                recipient.address
-                                            );
-                                            success_count += 1;
-                                        }
-                                        Err(e) => {
-                                            log::error!(
-                                                "Payment failed for {}: {}",
-                                                recipient.address,
-                                                e
-                                            );
-                                            failed_recipients.push(recipient.address.clone());
-                                        }
-                                    }
-                                } else {
+                                }
+                                Err(parse_error) => {
                                     log::error!(
-                                        "Invoice response missing pr for {}: {}",
+                                        "Failed to parse invoice response for {}: {}. Raw response: {}",
                                         recipient.address,
+                                        parse_error,
                                         raw_response
                                     );
                                     failed_recipients.push(recipient.address.clone());
                                 }
-                            } else if let Err(parse_error) =
-                                serde_json::from_str::<serde_json::Value>(&raw_response)
-                            {
-                                log::error!(
-                                    "Failed to parse invoice response for {}: {}. Raw response: {}",
-                                    recipient.address,
-                                    parse_error,
-                                    raw_response
-                                );
-                                failed_recipients.push(recipient.address.clone());
                             }
                         }
                         Err(e) => {
@@ -545,7 +554,9 @@ async fn send_v4v_payment(
             }
         }
     }
-    if success_count == 0 {
+    if attempted_count == 0 {
+        Ok(PaymentOutcome::NoAttempts)
+    } else if success_count == 0 {
         Err("All payment attempts failed".to_string())
     } else if success_count < attempted_count {
         Ok(PaymentOutcome::PartialSuccess {

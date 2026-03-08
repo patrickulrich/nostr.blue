@@ -323,17 +323,17 @@ fn format_event_time(event: &UnifiedEvent) -> String {
     }
     let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
     if event.is_all_day() {
-        let month = date.get_month() as usize;
-        let day = date.get_date();
-        let weekday = date.get_day() as usize;
+        let month = date.get_utc_month() as usize;
+        let day = date.get_utc_date();
+        let weekday = date.get_utc_day() as usize;
         let weekday_name = WEEKDAY_NAMES.get(weekday).unwrap_or(&"");
         let month_name = MONTH_NAMES.get(month).unwrap_or(&"");
         format!("{}, {} {}", weekday_name, month_name, day)
     } else {
-        let month = date.get_month() as usize;
-        let day = date.get_date();
-        let hours = date.get_hours();
-        let minutes = date.get_minutes();
+        let month = date.get_utc_month() as usize;
+        let day = date.get_utc_date();
+        let hours = date.get_utc_hours();
+        let minutes = date.get_utc_minutes();
         let am_pm = if hours >= 12 { "PM" } else { "AM" };
         let hour_12 = if hours == 0 {
             12
@@ -344,7 +344,7 @@ fn format_event_time(event: &UnifiedEvent) -> String {
         };
         let month_name = MONTH_NAMES.get(month).unwrap_or(&"");
         format!(
-            "{} {} at {}:{:02} {}",
+            "{} {} at {}:{:02} {} UTC",
             month_name, day, hour_12, minutes, am_pm
         )
     }
@@ -367,7 +367,7 @@ fn format_event_time(event: &UnifiedEvent) -> String {
     if event.is_all_day() {
         return dt.format("%b %-d").to_string();
     }
-    dt.format("%b %-d at %-I:%M %p").to_string()
+    dt.format("%b %-d at %-I:%M %p UTC").to_string()
 }
 /// Format event time (short version for compact cards)
 fn format_event_time_short(event: &UnifiedEvent) -> String {
@@ -383,8 +383,8 @@ fn format_event_time_short(event: &UnifiedEvent) -> String {
         #[cfg(feature = "web")]
         {
             let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
-            let month = date.get_month() as usize;
-            let day = date.get_date();
+            let month = date.get_utc_month() as usize;
+            let day = date.get_utc_date();
             let month_str = MONTH_NAMES.get(month).unwrap_or(&"");
             format!("{} {}", month_str, day)
         }

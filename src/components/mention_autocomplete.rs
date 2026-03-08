@@ -268,6 +268,7 @@ fn detect_mention(
             let mut results_signal = state.results;
             let mut searching_signal = state.is_searching;
             let mut task_signal = state.relay_search_task;
+            let thread_pubkeys_for_relay = thread_pubkeys.to_vec();
             let new_task = spawn(async move {
                 crate::platform::timer::sleep_ms(300).await;
                 let query_relays = query_snapshot.len() >= 3;
@@ -277,10 +278,16 @@ fn detect_mention(
                             let merged: Vec<_> = results
                                 .into_iter()
                                 .map(|mut r| {
+                                    // Check cached results for thread participant flag
                                     if cached_results
                                         .iter()
                                         .any(|c| c.pubkey == r.pubkey && c.is_thread_participant)
                                     {
+                                        r.is_thread_participant = true;
+                                        r.relevance += 2000;
+                                    }
+                                    // Also check thread_pubkeys directly
+                                    if thread_pubkeys_for_relay.contains(&r.pubkey) && !r.is_thread_participant {
                                         r.is_thread_participant = true;
                                         r.relevance += 2000;
                                     }
@@ -318,6 +325,7 @@ fn detect_mention(
         if let Some(task) = state.relay_search_task.read().as_ref() {
             task.cancel();
         }
+        state.relay_search_task.write().take();
         state.show.set(false);
     }
 }

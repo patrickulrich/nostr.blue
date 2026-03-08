@@ -132,6 +132,11 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
             session_token.set(new_token);
         }
     }));
+    use_effect(use_reactive(&props.citation_to_edit, move |_citation| {
+        // Increment session_token when citation_to_edit changes to prevent stale saves
+        let new_token = *session_token.peek() + 1;
+        session_token.set(new_token);
+    }));
     let close_modal = move |_| {
         props.show.set(false);
     };
@@ -163,7 +168,7 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
         let title_val = title.read().trim().to_string();
         let author_val = author.read().trim().to_string();
         let cited_text_val = cited_text.read().clone();
-        let coordinate_val = coordinate.read().clone();
+        let coordinate_val = coordinate.read().trim().to_string();
         let url_val = url.read().trim().to_string();
         let page_range_val = page_range.read().trim().to_string();
         let publisher_val = publisher.read().trim().to_string();

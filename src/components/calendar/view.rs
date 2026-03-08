@@ -371,13 +371,13 @@ fn get_weekday_short(date_str: &str) -> String {
 /// Format hour for display
 fn format_hour(hour: u32) -> String {
     if hour == 0 {
-        "12 AM".to_string()
+        "12 AM UTC".to_string()
     } else if hour < 12 {
-        format!("{} AM", hour)
+        format!("{} AM UTC", hour)
     } else if hour == 12 {
-        "12 PM".to_string()
+        "12 PM UTC".to_string()
     } else {
-        format!("{} PM", hour - 12)
+        format!("{} PM UTC", hour - 12)
     }
 }
 /// Format day header
@@ -790,9 +790,9 @@ fn format_event_time(event: &UnifiedEvent) -> String {
             hours
         };
         if minutes == 0 {
-            format!("{} {}", hour_12, am_pm)
+            format!("{} {} UTC", hour_12, am_pm)
         } else {
-            format!("{}:{:02} {}", hour_12, minutes, am_pm)
+            format!("{}:{:02} {} UTC", hour_12, minutes, am_pm)
         }
     }
     #[cfg(not(feature = "web"))]
@@ -818,9 +818,9 @@ fn format_event_time(event: &UnifiedEvent) -> String {
             hours
         };
         if minutes == 0 {
-            format!("{} {}", hour_12, am_pm)
+            format!("{} {} UTC", hour_12, am_pm)
         } else {
-            format!("{}:{:02} {}", hour_12, minutes, am_pm)
+            format!("{}:{:02} {} UTC", hour_12, minutes, am_pm)
         }
     }
 }

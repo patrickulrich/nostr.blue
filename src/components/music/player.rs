@@ -11,6 +11,8 @@ use dioxus::prelude::*;
 use dioxus::web::WebEventExt;
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
+#[cfg(feature = "web")]
+use web_sys;
 /// Format seconds as M:SS
 fn format_time(seconds: f64) -> String {
     if seconds.is_nan() {
@@ -269,17 +271,12 @@ pub fn PersistentMusicPlayer() -> Element {
     #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
     {
         let audio_id_for_volume = audio_id.to_string();
-        let mut volume_signal = use_signal(|| {
+        let volume_memo = use_memo(move || {
             let state = MUSIC_PLAYER.read();
-            (state.is_muted, state.volume)
+            if state.is_muted { 0.0 } else { state.volume }
         });
         use_effect(move || {
-            let state = MUSIC_PLAYER.read();
-            volume_signal.set((state.is_muted, state.volume));
-        });
-        use_effect(move || {
-            let (is_muted, volume) = *volume_signal.read();
-            let volume_value = if is_muted { 0.0 } else { volume };
+            let volume_value = *volume_memo.read();
             let audio_id_clone = audio_id_for_volume.clone();
             spawn(async move {
                 let audio_id_json = serde_json::to_string(&audio_id_clone)
@@ -791,6 +788,32 @@ pub fn PersistentMusicPlayer() -> Element {
                                     let client_x = evt.client_coordinates().x;
                                     #[allow(unused_variables)]
                                     let client_y = evt.client_coordinates().y;
+                                    #[cfg(all(feature = "web", not(feature = "mobile")))]
+                                    {
+                                        let duration = state.duration;
+                                        spawn(async move {
+                                            if let Some(window) = web_sys::window() {
+                                                if let Some(document) = window.document() {
+                                                    let element = document.element_from_point(client_x as f32, client_y as f32);
+                                                    if let Some(el) = element {
+                                                        let closest_result = el.closest(".cursor-pointer");
+                                                        let progress_bar = match closest_result {
+                                                            Ok(Some(closest_el)) => closest_el,
+                                                            _ => el,
+                                                        };
+                                                        let rect = progress_bar.get_bounding_client_rect();
+                                                        let left = rect.left();
+                                                        let width = rect.width();
+                                                        let percent = ((client_x - left) / width).clamp(0.0, 1.0);
+                                                        let new_time = percent * duration;
+                                                        if new_time.is_finite() {
+                                                            music_player::seek_to(new_time);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        });
+                                    }
                                     #[cfg(feature = "mobile")]
                                     {
                                         let duration = state.duration;

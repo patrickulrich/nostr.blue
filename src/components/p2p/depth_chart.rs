@@ -103,20 +103,25 @@ fn build_area_path(
     if data.is_empty() {
         return String::new();
     }
+    use std::fmt::Write;
     let baseline = height - padding;
     let first_x = premium_to_x(data[0].0, width, padding);
-    let mut path = format!("M {} {}", first_x, baseline);
-    path.push_str(" L ");
-    path.push_str(&first_x.to_string());
-    path.push(' ');
-    path.push_str(&sats_to_y(data[0].1, max_sats, height, padding).to_string());
+    let mut path = String::new();
+    write!(path, "M {} {}", first_x, baseline).unwrap();
+    write!(
+        path,
+        " L {} {}",
+        first_x,
+        sats_to_y(data[0].1, max_sats, height, padding)
+    )
+    .unwrap();
     for (premium, cumulative) in data.iter().skip(1) {
         let x = premium_to_x(*premium, width, padding);
         let y = sats_to_y(*cumulative, max_sats, height, padding);
-        path.push_str(&format!(" L {} {}", x, y));
+        write!(path, " L {} {}", x, y).unwrap();
     }
     let last_x = premium_to_x(data.last().unwrap().0, width, padding);
-    path.push_str(&format!(" L {} {} Z", last_x, baseline));
+    write!(path, " L {} {} Z", last_x, baseline).unwrap();
     path
 }
 /// P2P Depth Chart component

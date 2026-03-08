@@ -54,8 +54,8 @@ pub fn NoteCard(
     let mut is_bookmarking = use_signal(|| false);
     let is_bookmarked = bookmarks::is_bookmarked(&event_id_memo);
     let has_signer = *HAS_SIGNER.read();
-    let mut is_muted = use_signal(|| false);
-    let mut is_author_blocked = use_signal(|| false);
+    let mut is_muted = use_signal(|| None::<bool>);
+    let mut is_author_blocked = use_signal(|| None::<bool>);
     let mut show_hidden_anyway = use_signal(|| false);
     let mut reply_count = use_signal(|| 0usize);
     let mut repost_count = use_signal(|| 0usize);
@@ -78,8 +78,8 @@ pub fn NoteCard(
             let new_has_data =
                 counts.replies > 0 || counts.reposts > 0 || counts.zap_amount_sats > 0;
             if new_has_data || !current_has_data {
-                reply_count.set(counts.replies.min(500));
-                repost_count.set(counts.reposts.min(500));
+                reply_count.set(counts.replies);
+                repost_count.set(counts.reposts);
                 zap_amount_sats.set(counts.zap_amount_sats);
             }
             is_reposted.set(counts.user_reposted.unwrap_or(false));
@@ -94,6 +94,11 @@ pub fn NoteCard(
             if has_precomputed {
                 return;
             }
+            // Read SIGNER_INFO synchronously so the effect tracks viewer changes
+            let current_user_pubkey = SIGNER_INFO
+                .read()
+                .as_ref()
+                .map(|info| info.public_key.clone());
             spawn(async move {
                 let client = match get_client() {
                     Some(c) => c,
@@ -111,10 +116,6 @@ pub fn NoteCard(
                     .fetch_events(combined_filter, Duration::from_secs(5))
                     .await
                 {
-                    let current_user_pubkey = SIGNER_INFO
-                        .read()
-                        .as_ref()
-                        .map(|info| info.public_key.clone());
                     let mut replies = 0;
                     let mut reposts = 0;
                     let mut total_sats = 0u64;
@@ -202,13 +203,13 @@ pub fn NoteCard(
                     let current_replies = *reply_count.peek();
                     let current_reposts = *repost_count.peek();
                     let current_zaps = *zap_amount_sats.peek();
-                    if replies > current_replies {
-                        reply_count.set(replies.min(500));
+                    if replies != current_replies {
+                        reply_count.set(replies);
                     }
-                    if reposts > current_reposts {
-                        repost_count.set(reposts.min(500));
+                    if reposts != current_reposts {
+                        repost_count.set(reposts);
                     }
-                    if total_sats > current_zaps {
+                    if total_sats != current_zaps {
                         zap_amount_sats.set(total_sats);
                     }
                     is_reposted.set(user_has_reposted);
@@ -359,34 +360,32 @@ pub fn NoteCard(
     )| {
         let event_id = event_id_mute_check.clone();
         let author_pubkey = author_pubkey_block_check.clone();
+        // Check cached values first - these give us definitive Known(true/false)
         if let Some(ref muted_set) = cached_muted_posts {
             if let Ok(muted) = nostr_client::is_post_muted_cached(&event_id, muted_set) {
-                is_muted.set(muted);
+                is_muted.set(Some(muted));
             }
-        } else {
-            is_muted.set(false);
         }
         if let Some(ref blocked_set) = cached_blocked_users {
             if let Ok(blocked) = nostr_client::is_user_blocked_cached(&author_pubkey, blocked_set) {
-                is_author_blocked.set(blocked);
+                is_author_blocked.set(Some(blocked));
             }
-        } else {
-            is_author_blocked.set(false);
         }
+        // Only spawn async if we don't have cached values (Unknown -> Known transition)
         if cached_muted_posts.is_none() || cached_blocked_users.is_none() {
             let need_muted = cached_muted_posts.is_none();
             let need_blocked = cached_blocked_users.is_none();
             spawn(async move {
                 if need_muted {
                     match nostr_client::is_post_muted(event_id.clone()).await {
-                        Ok(muted) => is_muted.set(muted),
-                        Err(_) => is_muted.set(false),
+                        Ok(muted) => is_muted.set(Some(muted)),
+                        Err(_) => is_muted.set(Some(false)),
                     }
                 }
                 if need_blocked {
                     match nostr_client::is_user_blocked(author_pubkey).await {
-                        Ok(blocked) => is_author_blocked.set(blocked),
-                        Err(_) => is_author_blocked.set(false),
+                        Ok(blocked) => is_author_blocked.set(Some(blocked)),
+                        Err(_) => is_author_blocked.set(Some(false)),
                     }
                 }
             });
@@ -455,7 +454,7 @@ pub fn NoteCard(
     };
     let nav = use_navigator();
     let event_id_nav = event_id.clone();
-    let is_hidden = (*is_muted.read() || *is_author_blocked.read()) && !*show_hidden_anyway.read();
+    let is_hidden = (is_muted.read().unwrap_or(false) || is_author_blocked.read().unwrap_or(false)) && !*show_hidden_anyway.read();
     rsx! {
         article {
             class: "border-b border-border p-4 hover:bg-accent/50 transition-colors cursor-pointer",
@@ -470,9 +469,9 @@ pub fn NoteCard(
             if is_hidden {
                 div { class: "flex items-center gap-3 py-4",
                     div { class: "flex-1 text-muted-foreground text-sm",
-                        if *is_author_blocked.read() {
+                        if is_author_blocked.read().unwrap_or(false) {
                             "Post from blocked user"
-                        } else if *is_muted.read() {
+                        } else if is_muted.read().unwrap_or(false) {
                             "Muted post"
                         }
                     }

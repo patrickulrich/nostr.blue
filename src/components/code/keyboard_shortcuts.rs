@@ -97,7 +97,6 @@ pub fn CodeKeyboardShortcuts() -> Element {
                 // Handle `g` prefix
                 if key == "g" && !*pending_g.read() {
                     event.prevent_default();
-                    pending_g.set(true);
 
                     // Reset after 1 second timeout, storing the ID for cleanup
                     let Some(window_clone) = web_sys::window() else {
@@ -107,13 +106,16 @@ pub fn CodeKeyboardShortcuts() -> Element {
                         pending_g.set(false);
                         timeout_id.set(None);
                     }) as Box<dyn FnMut()>);
+                    let js_callback = callback
+                        .as_ref()
+                        .unchecked_ref::<js_sys::Function>()
+                        .clone();
                     if let Ok(id) = window_clone
-                        .set_timeout_with_callback_and_timeout_and_arguments_0(
-                            callback.into_js_value().as_ref().unchecked_ref(),
-                            1000,
-                        )
+                        .set_timeout_with_callback_and_timeout_and_arguments_0(&js_callback, 1000)
                     {
+                        pending_g.set(true);
                         timeout_id.set(Some(id));
+                        callback.forget();
                     }
                     return;
                 }
@@ -154,11 +156,13 @@ pub fn CodeKeyboardShortcuts() -> Element {
 
             let js_fn: js_sys::Function =
                 closure.as_ref().unchecked_ref::<js_sys::Function>().clone();
-            window
+            if window
                 .add_event_listener_with_callback("keydown", &js_fn)
-                .ok();
-            cleanup_fn.set(Some(js_fn));
-            closure.forget();
+                .is_ok()
+            {
+                cleanup_fn.set(Some(js_fn));
+                closure.forget();
+            }
         }
     });
 
