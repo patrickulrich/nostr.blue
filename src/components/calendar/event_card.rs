@@ -352,7 +352,7 @@ fn format_event_time(event: &UnifiedEvent) -> String {
 
 #[cfg(not(feature = "web"))]
 fn format_event_time(event: &UnifiedEvent) -> String {
-    use chrono::{Local, TimeZone};
+    use chrono::{TimeZone, Utc};
     let ts = event.start_timestamp();
     if ts == 0 {
         return "TBD".to_string();
@@ -361,9 +361,12 @@ fn format_event_time(event: &UnifiedEvent) -> String {
     let ts_i64 = i64::try_from(ts)
         .unwrap_or(MAX_TIMESTAMP)
         .min(MAX_TIMESTAMP);
-    let Some(dt) = Local.timestamp_opt(ts_i64, 0).single() else {
+    let Some(dt) = Utc.timestamp_opt(ts_i64, 0).single() else {
         return "TBD".to_string();
     };
+    if event.is_all_day() {
+        return dt.format("%b %-d").to_string();
+    }
     dt.format("%b %-d at %-I:%M %p").to_string()
 }
 /// Format event time (short version for compact cards)
@@ -387,12 +390,12 @@ fn format_event_time_short(event: &UnifiedEvent) -> String {
         }
         #[cfg(not(feature = "web"))]
         {
-            use chrono::{Local, TimeZone};
+            use chrono::{TimeZone, Utc};
             const MAX_TIMESTAMP: i64 = 253_402_300_799;
             let ts_i64 = i64::try_from(ts)
                 .unwrap_or(MAX_TIMESTAMP)
                 .min(MAX_TIMESTAMP);
-            let Some(dt) = Local.timestamp_opt(ts_i64, 0).single() else {
+            let Some(dt) = Utc.timestamp_opt(ts_i64, 0).single() else {
                 return "TBD".to_string();
             };
             dt.format("%b %-d").to_string()

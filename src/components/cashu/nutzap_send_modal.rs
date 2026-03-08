@@ -30,15 +30,11 @@ pub fn NutzapSendModal(
     let mut request_version: Signal<u64> = use_signal(|| 0);
     let recipient_pubkey_for_effect = recipient_pubkey.clone();
     let client_initialized = *crate::stores::nostr_client::CLIENT_INITIALIZED.read();
+    #[allow(unused_variables)]
     use_effect(use_reactive!(|(
         recipient_pubkey_for_effect,
         client_initialized,
     )| {
-        if !client_initialized {
-            log::debug!("Waiting for client initialization before fetching nutzap info");
-            return;
-        }
-
         let recipient = recipient_pubkey_for_effect.clone();
         // Use peek() to read without creating dependency, then increment
         let version = *request_version.peek() + 1;

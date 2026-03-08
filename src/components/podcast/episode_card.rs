@@ -465,7 +465,8 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
                     onclick: {
                         let episode = episode.clone();
                         let playlist = playlist.clone();
-                        move |_| {
+                        move |e: Event<MouseData>| {
+                            e.stop_propagation();
                             let track = episode.to_music_track();
                             let playlist_vec = playlist.as_ref().map(|rc| (**rc).clone());
                             music_player::play_or_toggle_track(track, playlist_vec, None);

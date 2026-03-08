@@ -45,15 +45,15 @@ fn compute_depth_data(orders: &[P2POrder]) -> DepthData {
         .copied()
         .collect();
     sell_orders.sort_by(|a, b| {
-        a.premium
-            .unwrap_or(0.0)
-            .partial_cmp(&b.premium.unwrap_or(0.0))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    buy_orders.sort_by(|a, b| {
         b.premium
             .unwrap_or(0.0)
             .partial_cmp(&a.premium.unwrap_or(0.0))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    buy_orders.sort_by(|a, b| {
+        a.premium
+            .unwrap_or(0.0)
+            .partial_cmp(&b.premium.unwrap_or(0.0))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     let mut cumulative: u64 = 0;
@@ -108,7 +108,7 @@ fn build_area_path(
     let mut path = format!("M {} {}", first_x, baseline);
     path.push_str(" L ");
     path.push_str(&first_x.to_string());
-    path.push_str(" ");
+    path.push(' ');
     path.push_str(&sats_to_y(data[0].1, max_sats, height, padding).to_string());
     for (premium, cumulative) in data.iter().skip(1) {
         let x = premium_to_x(*premium, width, padding);

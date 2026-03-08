@@ -279,7 +279,7 @@ pub fn ContentShareModal(
                 let recipient_hex = match PublicKey::parse(&manual_recipient) {
                     Ok(pubkey) => pubkey.to_hex(),
                     Err(_) => {
-                        log::error!("Invalid recipient pubkey: {}", manual_recipient);
+                        log::error!("Invalid recipient pubkey supplied");
                         dm_error.set(Some(
                             "Invalid recipient. Please enter a valid npub, hex, or nostr: URI."
                                 .to_string(),
@@ -291,7 +291,7 @@ pub fn ContentShareModal(
                 let message = content_type_dm.dm_message(&url_clone);
                 match dms::send_dm(recipient_hex.clone(), message).await {
                     Ok(_) => {
-                        log::info!("Sent DM to {}", recipient_hex);
+                        log::info!("Sent DM successfully");
                         dm_error.set(None);
                         dm_recipient.set(String::new());
                         share_mode.set(ShareMode::Main);
@@ -299,7 +299,7 @@ pub fn ContentShareModal(
                         on_close.call(());
                     }
                     Err(e) => {
-                        log::error!("Failed to send DM to {}: {}", recipient_hex, e);
+                        log::error!("Failed to send DM: {}", e);
                         dm_error.set(Some(format!("Failed to send message: {}", e)));
                         is_publishing.set(false);
                     }

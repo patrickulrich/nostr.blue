@@ -73,7 +73,6 @@ pub fn PersistentMusicPlayer() -> Element {
     #[allow(unused_mut)]
     let mut seek_gen = use_signal(|| 0u32);
     let mut show_share_modal = use_signal(|| false);
-    #[cfg(not(feature = "mobile"))]
     #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
     #[allow(unused_mut)]
     let mut native_source_bound = use_signal(|| false);
@@ -100,7 +99,7 @@ pub fn PersistentMusicPlayer() -> Element {
         move |(current_track, is_playing)| {
         if let Some(track) = current_track.as_ref() {
             let media_url = track.media_url.clone();
-            let is_hls = media_url.contains(".m3u8");
+            let is_hls = media_url.to_lowercase().contains(".m3u8");
             native_source_bound.set(false);
                 let bind_token = native_bind_token.with_mut(|token| {
                     *token = token.wrapping_add(1);
@@ -788,7 +787,9 @@ pub fn PersistentMusicPlayer() -> Element {
                             div {
                                 class: "flex-1 relative h-2 bg-secondary rounded-full overflow-hidden cursor-pointer",
                                 onclick: move |evt| {
+                                    #[allow(unused_variables)]
                                     let client_x = evt.client_coordinates().x;
+                                    #[allow(unused_variables)]
                                     let client_y = evt.client_coordinates().y;
                                     #[cfg(feature = "mobile")]
                                     {

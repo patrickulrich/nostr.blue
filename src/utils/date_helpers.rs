@@ -3,7 +3,7 @@
 //! Shared date manipulation functions for calendar components.
 //! All functions work with YYYY-MM-DD format strings.
 use crate::stores::calendar_store::UnifiedEvent;
-use chrono::{Datelike, Local, NaiveDate, TimeZone};
+use chrono::{Datelike, Local, NaiveDate, TimeZone, Utc};
 
 /// Check if a year is a leap year
 #[allow(dead_code)]
@@ -39,7 +39,7 @@ pub fn get_event_date(event: &UnifiedEvent) -> String {
     let ts_i64 = i64::try_from(ts)
         .unwrap_or(MAX_TIMESTAMP)
         .min(MAX_TIMESTAMP);
-    let Some(dt) = Local.timestamp_opt(ts_i64, 0).single() else {
+    let Some(dt) = Utc.timestamp_opt(ts_i64, 0).single() else {
         return String::new();
     };
     dt.format("%Y-%m-%d").to_string()

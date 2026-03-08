@@ -274,7 +274,20 @@ fn detect_mention(
                 match search_profiles(&query_snapshot, 10, query_relays).await {
                     Ok(results) => {
                         if query_signal.read().as_str() == query_snapshot.as_str() {
-                            results_signal.set(results);
+                            let merged: Vec<_> = results
+                                .into_iter()
+                                .map(|mut r| {
+                                    if cached_results
+                                        .iter()
+                                        .any(|c| c.pubkey == r.pubkey && c.is_thread_participant)
+                                    {
+                                        r.is_thread_participant = true;
+                                        r.relevance += 2000;
+                                    }
+                                    r
+                                })
+                                .collect();
+                            results_signal.set(merged);
                             searching_signal.set(false);
                         } else {
                             log::debug!(

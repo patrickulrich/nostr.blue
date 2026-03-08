@@ -160,17 +160,17 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
         saving.set(true);
         error.set(None);
         let current_tab = *active_tab.read();
-        let title_val = title.read().clone();
-        let author_val = author.read().clone();
+        let title_val = title.read().trim().to_string();
+        let author_val = author.read().trim().to_string();
         let cited_text_val = cited_text.read().clone();
         let coordinate_val = coordinate.read().clone();
-        let url_val = url.read().clone();
-        let page_range_val = page_range.read().clone();
-        let publisher_val = publisher.read().clone();
-        let doi_val = doi.read().clone();
-        let llm_val = llm.read().clone();
-        let summary_val = conversation_summary.read().clone();
-        let prompt_url_val = prompt_url.read().clone();
+        let url_val = url.read().trim().to_string();
+        let page_range_val = page_range.read().trim().to_string();
+        let publisher_val = publisher.read().trim().to_string();
+        let doi_val = doi.read().trim().to_string();
+        let llm_val = llm.read().trim().to_string();
+        let summary_val = conversation_summary.read().trim().to_string();
+        let prompt_url_val = prompt_url.read().trim().to_string();
         let on_save = props.on_save;
         let mut show = props.show;
         let save_request = save_request_id.with_mut(|request_id| {

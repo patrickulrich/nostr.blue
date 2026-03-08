@@ -11,6 +11,7 @@
 #[allow(unused_imports)]
 use crate::routes::Route;
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
 use dioxus_core::use_drop;
 #[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;

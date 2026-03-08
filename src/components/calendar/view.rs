@@ -530,7 +530,7 @@ fn position_day_events(events: &[UnifiedEvent], _date: &str) -> Vec<PositionedEv
                 let local_hours = date.get_hours() as i32;
                 let local_minutes = date.get_minutes() as i32;
                 let utc_minutes =
-                    (local_hours * 60 + local_minutes - offset_minutes).rem_euclid(1440);
+                    (local_hours * 60 + local_minutes + offset_minutes).rem_euclid(1440);
                 utc_minutes as f32
             }
             #[cfg(not(feature = "web"))]
@@ -778,7 +778,7 @@ fn format_event_time(event: &UnifiedEvent) -> String {
         let local_hours = date.get_hours() as i32;
         let local_minutes = date.get_minutes() as i32;
         let utc_total_minutes =
-            (local_hours * 60 + local_minutes - offset_minutes).rem_euclid(1440);
+            (local_hours * 60 + local_minutes + offset_minutes).rem_euclid(1440);
         let hours = utc_total_minutes / 60;
         let minutes = utc_total_minutes % 60;
         let am_pm = if hours >= 12 { "PM" } else { "AM" };

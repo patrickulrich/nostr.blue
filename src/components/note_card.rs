@@ -135,33 +135,23 @@ pub fn NoteCard(
                             }
                             Kind::ZapReceipt => {
                                 if let Some(ref user_pk) = current_user_pubkey {
-                                    let mut zap_sender_pubkey = event.tags.iter().find_map(|tag| {
+                                    let zap_sender_pubkey = event.tags.iter().find_map(|tag| {
                                         let slice = tag.as_slice();
-                                        if slice.len() >= 2 && slice.first()?.as_str() == "P" {
-                                            Some(slice.get(1)?.as_str().to_string())
-                                        } else {
-                                            None
-                                        }
-                                    });
-                                    if zap_sender_pubkey.is_none() {
-                                        zap_sender_pubkey = event.tags.iter().find_map(|tag| {
-                                            let slice = tag.as_slice();
-                                            if slice.first()?.as_str() == "description" {
-                                                let zap_request_json = slice.get(1)?.as_str();
-                                                if let Ok(zap_request) =
-                                                    serde_json::from_str::<serde_json::Value>(
-                                                        zap_request_json,
-                                                    )
-                                                {
-                                                    return zap_request
-                                                        .get("pubkey")
-                                                        .and_then(|p| p.as_str())
-                                                        .map(|s| s.to_string());
-                                                }
+                                        if slice.first()?.as_str() == "description" {
+                                            let zap_request_json = slice.get(1)?.as_str();
+                                            if let Ok(zap_request) =
+                                                serde_json::from_str::<serde_json::Value>(
+                                                    zap_request_json,
+                                                )
+                                            {
+                                                return zap_request
+                                                    .get("pubkey")
+                                                    .and_then(|p| p.as_str())
+                                                    .map(|s| s.to_string());
                                             }
-                                            None
-                                        });
-                                    }
+                                        }
+                                        None
+                                    });
                                     if let Some(zap_sender) = zap_sender_pubkey {
                                         if zap_sender == *user_pk {
                                             user_has_zapped = true;

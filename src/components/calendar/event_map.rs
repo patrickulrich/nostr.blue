@@ -240,7 +240,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
     #[cfg(feature = "web")]
     let mut geocode_gen = use_signal(|| 0u32);
     #[cfg(not(feature = "web"))]
-    let _geocode_gen = use_signal(|| 0u32);
+    let mut _geocode_gen = use_signal(|| 0u32);
     use_drop(move || {
         geocode_cancelled.set(true);
         unmounted.set(true);
@@ -326,6 +326,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
             #[cfg(not(feature = "web"))]
             {
                 let key = events_key.read().clone();
+                _geocode_gen.with_mut(|g| *g = g.wrapping_add(1));
                 processed_event_ids.set(key);
             }
             #[cfg(feature = "web")]
@@ -335,6 +336,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
                     return;
                 }
                 if events_for_geocode.is_empty() {
+                    geocode_gen.with_mut(|g| *g = g.wrapping_add(1));
                     processed_event_ids.set(key);
                     geocoded_events.set(Vec::new());
                     return;

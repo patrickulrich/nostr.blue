@@ -11,7 +11,7 @@ use crate::utils::nip54::extract_wikilinks;
 use crate::utils::nkbip03::ResolvedCitation;
 use crate::utils::nkbip08::render_book_wikilinks;
 use dioxus::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 /// Citation metadata exposed to parent components
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CitationMetadata {
@@ -67,7 +67,12 @@ pub fn AsciiDocContent(
             return;
         }
         let identifiers = extract_citation_identifiers(&content_for_effect);
-        if identifiers.is_empty() {
+        let unique_identifiers: Vec<String> = identifiers
+            .into_iter()
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        if unique_identifiers.is_empty() {
             citations_loading.set(false);
             citations_error.set(false);
             resolved_citations.set(HashMap::new());
@@ -76,7 +81,7 @@ pub fn AsciiDocContent(
         citations_loading.set(true);
         citations_error.set(false);
         spawn(async move {
-            let result = fetch_citations_by_identifiers(&identifiers).await;
+            let result = fetch_citations_by_identifiers(&unique_identifiers).await;
             if *fetch_generation.peek() != current_generation {
                 return;
             }

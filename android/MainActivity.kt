@@ -84,8 +84,9 @@ class MainActivity : WryActivity() {
             return@registerForActivityResult
         }
         val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
+        val resolver = contentResolver
         Thread {
-            processPickedContent(uri, mimeType, "file")
+            processPickedContent(uri, mimeType, "file", resolver)
         }.start()
     }
 
@@ -105,8 +106,9 @@ class MainActivity : WryActivity() {
             return@registerForActivityResult
         }
         val mimeType = contentResolver.getType(uri) ?: "image/*"
+        val resolver = contentResolver
         Thread {
-            processPickedContent(uri, mimeType, "image")
+            processPickedContent(uri, mimeType, "image", resolver)
         }.start()
     }
 
@@ -182,9 +184,9 @@ class MainActivity : WryActivity() {
                 .toSet()
         }
 
-        private fun processPickedContent(uri: Uri, fallbackMimeType: String, label: String) {
+        private fun processPickedContent(uri: Uri, fallbackMimeType: String, label: String, contentResolver: ContentResolver) {
             try {
-                val result = readPickedContent(uri, fallbackMimeType)
+                val result = readPickedContent(uri, fallbackMimeType, contentResolver)
                 synchronized(lock) {
                     pendingFileContent = result.first
                     pendingFileMimeType = result.second
@@ -202,10 +204,7 @@ class MainActivity : WryActivity() {
         }
 
         @Throws(IOException::class)
-        private fun readPickedContent(uri: Uri, fallbackMimeType: String): Pair<String, String> {
-            val activity = synchronized(lock) { instance }
-                ?: throw IOException("Activity unavailable")
-            val contentResolver = activity.contentResolver
+        private fun readPickedContent(uri: Uri, fallbackMimeType: String, contentResolver: ContentResolver): Pair<String, String> {
             val mimeType = contentResolver.getType(uri) ?: fallbackMimeType
 
             var fileSize: Long = -1

@@ -43,6 +43,8 @@ pub fn PinnedNoteCard(props: PinnedNoteCardProps) -> Element {
     use_effect(use_reactive(&author_pubkey, move |pubkey| {
         if let Some(metadata) = profiles::get_profile(&pubkey) {
             author_metadata.set(Some(metadata));
+        } else {
+            author_metadata.set(None);
         }
     }));
     let author_avatar = author_metadata

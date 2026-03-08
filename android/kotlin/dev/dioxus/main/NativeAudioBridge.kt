@@ -322,34 +322,40 @@ object NativeAudioBridge {
                     .build()
             )
             setOnPreparedListener {
-                isPreparing = false
-                lastDurationSeconds = if (it.duration > 0) it.duration / 1000.0 else 0.0
-                if (playWhenReady) {
-                    it.start()
-                    updatePlaybackState(true, PlaybackState.STATE_PLAYING)
-                } else {
-                    updatePlaybackState(false, PlaybackState.STATE_PAUSED)
-                }
-                updateNotification()
-            }
-            setOnCompletionListener {
-                isPreparing = false
-                if (currentIndex < queue.lastIndex) {
-                    currentIndex += 1
-                    prepareCurrent(true)
-                } else {
-                    playWhenReady = false
-                    updatePlaybackState(false, PlaybackState.STATE_STOPPED)
-                    stopForegroundPlayback()
+                synchronized(this@NativeAudioBridge) {
+                    isPreparing = false
+                    lastDurationSeconds = if (it.duration > 0) it.duration / 1000.0 else 0.0
+                    if (playWhenReady) {
+                        it.start()
+                        updatePlaybackState(true, PlaybackState.STATE_PLAYING)
+                    } else {
+                        updatePlaybackState(false, PlaybackState.STATE_PAUSED)
+                    }
                     updateNotification()
                 }
             }
+            setOnCompletionListener {
+                synchronized(this@NativeAudioBridge) {
+                    isPreparing = false
+                    if (currentIndex < queue.lastIndex) {
+                        currentIndex += 1
+                        prepareCurrent(true)
+                    } else {
+                        playWhenReady = false
+                        updatePlaybackState(false, PlaybackState.STATE_STOPPED)
+                        stopForegroundPlayback()
+                        updateNotification()
+                    }
+                }
+            }
             setOnErrorListener { _, _, _ ->
-                isPreparing = false
-                playWhenReady = false
-                lastError.set("Playback failed")
-                updatePlaybackState(false, PlaybackState.STATE_ERROR)
-                updateNotification()
+                synchronized(this@NativeAudioBridge) {
+                    isPreparing = false
+                    playWhenReady = false
+                    lastError.set("Playback failed")
+                    updatePlaybackState(false, PlaybackState.STATE_ERROR)
+                    updateNotification()
+                }
                 true
             }
             player = this

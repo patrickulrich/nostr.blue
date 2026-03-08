@@ -104,6 +104,12 @@ async fn ensure_hls_manager() -> Result<(), String> {
     Ok(())
 }
 /// Cleanup guard that destroys player on drop
+///
+/// Note: `video_id` is marked #[allow(dead_code)] because native cleanup requires
+/// async `document::eval` which cannot be performed in a synchronous `Drop` implementation.
+/// Native cleanup is handled separately in the `use_drop` logic (see `use_drop` around
+/// lines 418-431) while the `Drop` impl only runs web-specific `destroy_video_js_player` calls.
+/// This intentional runtime split ensures proper cleanup on both platforms.
 #[derive(Clone)]
 struct CleanupGuard {
     #[allow(dead_code)]
@@ -388,13 +394,6 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
             } else {
                 cleanup_guard.set(None);
                 mounted.set(false);
-                #[cfg(feature = "web")]
-                {
-                    let video_id_clone = video_id.clone();
-                    spawn(async move {
-                        destroy_video_js_player(&video_id_clone);
-                    });
-                }
                 #[cfg(feature = "native")]
                 {
                     let video_id_clone = video_id.clone();

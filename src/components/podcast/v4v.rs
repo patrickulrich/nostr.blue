@@ -70,7 +70,11 @@ pub fn V4VRecipientList(props: V4VRecipientListProps) -> Element {
     if props.recipients.is_empty() {
         return rsx! {};
     }
-    let total_split: u32 = props.recipients.iter().map(|r| r.split).sum();
+    let total_split: u64 = props
+        .recipients
+        .iter()
+        .try_fold(0u64, |acc, r| acc.checked_add(r.split as u64))
+        .unwrap_or(0);
     rsx! {
         div { class: "space-y-2",
             div { class: "text-xs font-medium text-muted-foreground uppercase tracking-wide",
@@ -91,7 +95,7 @@ pub fn V4VRecipientList(props: V4VRecipientListProps) -> Element {
 #[derive(Props, Clone, PartialEq)]
 struct RecipientRowProps {
     recipient: ValueRecipient,
-    total_split: u32,
+    total_split: u64,
 }
 #[component]
 fn RecipientRow(props: RecipientRowProps) -> Element {
@@ -103,8 +107,11 @@ fn RecipientRow(props: RecipientRowProps) -> Element {
     };
     let name = recipient.name.clone().unwrap_or_else(|| {
         let addr = &recipient.address;
-        if addr.len() > 20 {
-            format!("{}...{}", &addr[..8], &addr[addr.len() - 8..])
+        let char_count = addr.chars().count();
+        if char_count > 20 {
+            let first_8: String = addr.chars().take(8).collect();
+            let last_8: String = addr.chars().rev().take(8).collect::<String>().chars().rev().collect();
+            format!("{}...{}", first_8, last_8)
         } else {
             addr.clone()
         }
@@ -372,14 +379,11 @@ async fn send_v4v_payment(
     if value_block.recipients.is_empty() {
         return Err("No recipients configured".to_string());
     }
-    let total_split: u32 = value_block.recipients.iter().map(|r| r.split).sum();
-    if total_split == 0 {
-        return Err("Invalid split configuration".to_string());
-    }
-    let nwc_connected = nwc_store::is_connected();
-    if !nwc_connected {
-        return Err("No wallet connected. Please connect a wallet in settings.".to_string());
-    }
+    let total_split: u64 = value_block
+        .recipients
+        .iter()
+        .try_fold(0u64, |acc, r| acc.checked_add(r.split as u64))
+        .ok_or_else(|| "Overflow in split total".to_string())?;
     let mut success_count = 0;
     let mut attempted_count = 0;
     let mut failed_recipients = Vec::new();
@@ -390,10 +394,13 @@ async fn send_v4v_payment(
         let amount = if idx == recipients_len - 1 {
             remaining_sats
         } else {
-            ((remaining_sats as f64 * recipient.split as f64) / remaining_split as f64).round() as u64
+            let rem_sats = remaining_sats as f64;
+            let rem_split = remaining_split as f64;
+            let recipient_split = recipient.split as f64;
+            (rem_sats * recipient_split / rem_split).round() as u64
         };
         remaining_sats = remaining_sats.saturating_sub(amount);
-        remaining_split = remaining_split.saturating_sub(recipient.split);
+        remaining_split = remaining_split.saturating_sub(recipient.split as u64);
         if amount == 0 {
             continue;
         }
@@ -454,6 +461,26 @@ async fn send_v4v_payment(
                                 if let Some(pr) =
                                     invoice_response.get("pr").and_then(|v| v.as_str())
                                 {
+                                    let expected_amount_msats = amount * 1000;
+                                    if let Some(parsed_amount) =
+                                        crate::utils::bolt11::parse_bolt11_amount(pr)
+                                    {
+                                        if parsed_amount != expected_amount_msats {
+                                            log::error!(
+                                                "Bolt11 amount mismatch for {}: expected {} msats, got {} msats",
+                                                recipient.address,
+                                                expected_amount_msats,
+                                                parsed_amount
+                                            );
+                                            failed_recipients.push(recipient.address.clone());
+                                            continue;
+                                        }
+                                    } else {
+                                        log::warn!(
+                                            "Could not parse bolt11 amount for {}, proceeding with payment",
+                                            recipient.address
+                                        );
+                                    }
                                     match nwc_store::pay_invoice(pr.to_string()).await {
                                         Ok(_) => {
                                             log::info!(
