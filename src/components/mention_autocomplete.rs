@@ -287,7 +287,9 @@ fn detect_mention(
                                         r.relevance += 2000;
                                     }
                                     // Also check thread_pubkeys directly
-                                    if thread_pubkeys_for_relay.contains(&r.pubkey) && !r.is_thread_participant {
+                                    if thread_pubkeys_for_relay.contains(&r.pubkey)
+                                        && !r.is_thread_participant
+                                    {
                                         r.is_thread_participant = true;
                                         r.relevance += 2000;
                                     }

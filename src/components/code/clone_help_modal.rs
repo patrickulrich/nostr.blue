@@ -5,6 +5,10 @@ use crate::utils::clipboard::copy_to_clipboard;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 
+fn is_ssh_clone_url(url: &str) -> bool {
+    url.starts_with("ssh://") || (url.contains('@') && url.contains(':') && !url.contains("://"))
+}
+
 /// Clone help modal with tabbed URL display
 #[component]
 pub fn CloneHelpModal(
@@ -17,17 +21,14 @@ pub fn CloneHelpModal(
         .any(|u| u.starts_with("https://") || u.starts_with("http://"))
     {
         "https"
-    } else if clone_urls
-        .iter()
-        .any(|u| u.starts_with("ssh://") || u.starts_with("git@"))
-    {
+    } else if clone_urls.iter().any(|u| is_ssh_clone_url(u)) {
         "ssh"
     } else if clone_urls.iter().any(|u| u.starts_with("git://")) {
         "git"
     } else if clone_urls.iter().any(|u| u.starts_with("nostr:")) {
         "nostr"
     } else if let Some(first) = clone_urls.first() {
-        if first.starts_with("ssh://") || first.contains('@') {
+        if is_ssh_clone_url(first) {
             "ssh"
         } else if first.starts_with("git://") {
             "git"
@@ -40,12 +41,7 @@ pub fn CloneHelpModal(
     let mut active_tab = use_signal(move || initial_tab);
 
     // Categorize URLs
-    let ssh_urls: Vec<&String> = clone_urls
-        .iter()
-        .filter(|u| {
-            u.starts_with("ssh://") || (u.contains('@') && u.contains(':') && !u.contains("://"))
-        })
-        .collect();
+    let ssh_urls: Vec<&String> = clone_urls.iter().filter(|u| is_ssh_clone_url(u)).collect();
     let https_urls: Vec<&String> = clone_urls
         .iter()
         .filter(|u| u.starts_with("https://") || u.starts_with("http://"))

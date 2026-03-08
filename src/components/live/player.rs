@@ -398,7 +398,8 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                 {
                     let video_id_clone = video_id.clone();
                     spawn(async move {
-                        let video_id_json = serde_json::to_string(&video_id_clone).unwrap_or_default();
+                        let video_id_json =
+                            serde_json::to_string(&video_id_clone).unwrap_or_default();
                         let _ = document::eval(&format!(
                             "if (window.hlsManager) {{ window.hlsManager.detach({}); }}",
                             video_id_json

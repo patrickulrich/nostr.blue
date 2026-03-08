@@ -4,7 +4,9 @@ use crate::hooks::use_reaction;
 use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
 use crate::stores::bookmarks;
-use crate::stores::nostr_client::{get_client, publish_note_tracked, publish_repost, HAS_SIGNER, CLIENT_INITIALIZED};
+use crate::stores::nostr_client::{
+    get_client, publish_note_tracked, publish_repost, CLIENT_INITIALIZED, HAS_SIGNER,
+};
 use crate::stores::signer::SIGNER_INFO;
 use crate::utils::{format_relative_time_or, format_sats_compact, truncate_pubkey};
 use dioxus::prelude::*;
@@ -134,6 +136,8 @@ pub fn PhotoCard(
     let mut comment_text = use_signal(String::new);
     let mut is_posting_comment = use_signal(|| false);
     let mut show_zap_modal = use_signal(|| false);
+    let mut counts_fetch_gen = use_signal(|| 0u32);
+    let mut author_fetch_gen = use_signal(|| 0u32);
     if images.is_empty() {
         return rsx! {
             div { class: "hidden" }
@@ -156,6 +160,10 @@ pub fn PhotoCard(
             if has_precomputed || !client_ready {
                 return;
             }
+            let fetch_gen = counts_fetch_gen.with_mut(|gen| {
+                *gen = gen.wrapping_add(1);
+                *gen
+            });
             spawn(async move {
                 let client = match get_client() {
                     Some(c) => c,
@@ -213,6 +221,9 @@ pub fn PhotoCard(
                         }
                         _ => {}
                     }
+                }
+                if *counts_fetch_gen.peek() != fetch_gen {
+                    return;
                 }
                 reply_count.set(replies);
                 repost_count.set(reposts);
@@ -301,6 +312,9 @@ pub fn PhotoCard(
                             })
                         })
                         .sum();
+                    if *counts_fetch_gen.peek() != fetch_gen {
+                        return;
+                    }
                     zap_amount_sats.set(total_sats);
                     is_zapped.set(user_has_zapped);
                 }
@@ -313,29 +327,37 @@ pub fn PhotoCard(
             if !client_ready {
                 return;
             }
+            let fetch_gen = author_fetch_gen.with_mut(|gen| {
+                *gen = gen.wrapping_add(1);
+                *gen
+            });
             spawn(async move {
-            let pubkey = match PublicKey::from_hex(&pubkey_str)
-                .or_else(|_| PublicKey::from_bech32(&pubkey_str))
-            {
-                Ok(pk) => pk,
-                Err(_) => return,
-            };
-            let client = match get_client() {
-                Some(c) => c,
-                None => return,
-            };
-            let filter = Filter::new().author(pubkey).kind(Kind::Metadata).limit(1);
-            if let Ok(events) = client.fetch_events(filter, Duration::from_secs(5)).await {
-                if let Some(event) = events.into_iter().next() {
-                    if let Ok(metadata) =
-                        serde_json::from_str::<nostr_sdk::Metadata>(&event.content)
-                    {
-                        author_metadata.set(Some(metadata));
+                let pubkey = match PublicKey::from_hex(&pubkey_str)
+                    .or_else(|_| PublicKey::from_bech32(&pubkey_str))
+                {
+                    Ok(pk) => pk,
+                    Err(_) => return,
+                };
+                let client = match get_client() {
+                    Some(c) => c,
+                    None => return,
+                };
+                let filter = Filter::new().author(pubkey).kind(Kind::Metadata).limit(1);
+                if let Ok(events) = client.fetch_events(filter, Duration::from_secs(5)).await {
+                    if let Some(event) = events.into_iter().next() {
+                        if let Ok(metadata) =
+                            serde_json::from_str::<nostr_sdk::Metadata>(&event.content)
+                        {
+                            if *author_fetch_gen.peek() != fetch_gen {
+                                return;
+                            }
+                            author_metadata.set(Some(metadata));
+                        }
                     }
                 }
-            }
-        });
-    }));
+            });
+        },
+    ));
     let timestamp = format_relative_time_or(created_at.as_secs(), "just now");
     let display_name = author_metadata
         .read()

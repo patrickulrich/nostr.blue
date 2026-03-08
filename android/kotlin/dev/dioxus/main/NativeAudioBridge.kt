@@ -150,6 +150,10 @@ object NativeAudioBridge {
                 updateNotification()
                 return "ok"
             }
+            if (player == null) {
+                prepareCurrent(true)
+                return "ok"
+            }
             val player = ensurePlayer()
             if (!player.isPlaying) {
                 player.start()

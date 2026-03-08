@@ -1,7 +1,7 @@
 //! Code Issue Card Component
 //!
 //! Displays NIP-34 Git issues in cards.
-use super::status_badge::{BadgeSize, CodeStatusBadge};
+use super::status_badge::{BadgeSize, CodeStatusBadge, StatusDisplayContext};
 use crate::components::icons::CommentIcon;
 use crate::routes::Route;
 use crate::utils::nip34::Issue;
@@ -17,7 +17,11 @@ pub fn CodeIssueCard(issue: Issue) -> Element {
             },
             class: "block p-4 border border-border rounded-lg hover:bg-accent/50 transition",
             div { class: "flex items-start gap-3",
-                CodeStatusBadge { status: issue.status, size: BadgeSize::Small }
+                CodeStatusBadge {
+                    status: issue.status,
+                    size: BadgeSize::Small,
+                    context: StatusDisplayContext::Issue,
+                }
                 div { class: "flex-1 min-w-0",
                     h3 { class: "font-medium text-foreground line-clamp-2", "{title}" }
                     div { class: "mt-1 flex items-center gap-2 text-sm text-muted-foreground",

@@ -46,12 +46,10 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
     let mut expanded = use_signal(|| false);
     let mut chat_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
     let has_signer = use_memo(move || *HAS_SIGNER.read());
-    let chat_container_id = use_hook(|| {
-        format!(
-            "live-chat-messages-{}-{}",
-            stream_author_pubkey, stream_d_tag
-        )
-    });
+    let chat_container_id = format!(
+        "live-chat-messages-{}-{}",
+        stream_author_pubkey, stream_d_tag
+    );
     let a_tag = format!("30311:{}:{}", stream_author_pubkey, stream_d_tag);
     let a_tag_for_send_keydown = a_tag.clone();
     let a_tag_for_send_click = a_tag.clone();
@@ -63,27 +61,23 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
             spawn(async move {
                 loading.set(true);
                 let parts: Vec<&str> = tag.split(':').collect();
-                if parts.len() == 3 {
-                    let _kind_num = parts[0].parse::<u16>().unwrap_or(30311);
-                    if let Ok(_pubkey) = PublicKey::parse(parts[1]) {
-                        let _identifier = parts[2];
-                        let filter = Filter::new()
-                            .kind(Kind::from(1311))
-                            .custom_tag(
-                                nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::A),
-                                tag.as_str(),
-                            )
-                            .limit(200);
-                        match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
-                            Ok(events) => {
-                                let mut sorted_messages = events;
-                                sorted_messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-                                messages.set(sorted_messages);
-                                log::info!("Loaded {} chat messages", messages.read().len());
-                            }
-                            Err(e) => {
-                                log::error!("Failed to fetch chat messages: {}", e);
-                            }
+                if parts.len() == 3 && PublicKey::parse(parts[1]).is_ok() {
+                    let filter = Filter::new()
+                        .kind(Kind::from(1311))
+                        .custom_tag(
+                            nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::A),
+                            tag.as_str(),
+                        )
+                        .limit(200);
+                    match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+                        Ok(events) => {
+                            let mut sorted_messages = events;
+                            sorted_messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                            messages.set(sorted_messages);
+                            log::info!("Loaded {} chat messages", messages.read().len());
+                        }
+                        Err(e) => {
+                            log::error!("Failed to fetch chat messages: {}", e);
                         }
                     }
                 }

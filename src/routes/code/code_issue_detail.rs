@@ -2,6 +2,7 @@
 //!
 //! View a single NIP-34 Git issue (Kind 1621) with comments,
 //! bounty display, and permission-based status controls.
+use crate::components::code::status_badge::StatusDisplayContext;
 use crate::components::{icons, CodeStatusBadge};
 use crate::routes::Route;
 use crate::services::git_hosting::bounties::{
@@ -262,7 +263,10 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                             "Issue #{issue.event_id.chars().take(8).collect::<String>()}"
                         }
                     }
-                    CodeStatusBadge { status: display_status() }
+                    CodeStatusBadge {
+                        status: display_status(),
+                        context: StatusDisplayContext::Issue,
+                    }
                 }
                 div { class: "flex items-center gap-3",
                     Link {

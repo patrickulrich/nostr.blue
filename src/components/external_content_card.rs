@@ -106,13 +106,6 @@ pub fn ExternalContentList(
     if contents.is_empty() {
         return rsx! {};
     }
-    let podcast_guid: Option<String> = contents.iter().find_map(|(content, _)| {
-        if let ExternalContentId::PodcastFeed(guid) = content {
-            Some(guid.clone())
-        } else {
-            None
-        }
-    });
     let (podcasts, other): (Vec<_>, Vec<_>) = contents.into_iter().partition(|(content, _)| {
         matches!(
             content,
@@ -121,12 +114,12 @@ pub fn ExternalContentList(
     });
     rsx! {
         div { class: "flex flex-col gap-2 mt-2",
-            for (content , _hint) in podcasts.iter() {
+            for (content , hint) in podcasts.iter() {
                 ExternalContentCard {
                     key: "{nip73::get_raw_identifier(content)}",
                     content: content.clone(),
                     compact: false,
-                    podcast_guid: podcast_guid.clone(),
+                    podcast_guid: hint.clone(),
                 }
             }
             if !other.is_empty() {

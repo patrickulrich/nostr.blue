@@ -12,16 +12,36 @@ pub enum BadgeSize {
     Default,
     Large,
 }
+
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum StatusDisplayContext {
+    #[default]
+    Issue,
+    PullRequest,
+}
 /// Status badge component
 #[component]
-pub fn CodeStatusBadge(status: IssueStatus, #[props(default)] size: BadgeSize) -> Element {
+pub fn CodeStatusBadge(
+    status: IssueStatus,
+    #[props(default)] size: BadgeSize,
+    #[props(default)] context: StatusDisplayContext,
+) -> Element {
+    let icon_class = match size {
+        BadgeSize::Small => "w-3 h-3",
+        BadgeSize::Default => "w-3.5 h-3.5",
+        BadgeSize::Large => "w-4 h-4",
+    };
+    let applied_text = match context {
+        StatusDisplayContext::Issue => "Applied",
+        StatusDisplayContext::PullRequest => "Merged",
+    };
     let (bg_class, text, icon) = match status {
         IssueStatus::Open => (
             "bg-green-500/10 text-green-500 border-green-500/20",
             "Open",
             rsx! {
                 svg {
-                    class: "w-3.5 h-3.5",
+                    class: "{icon_class}",
                     xmlns: "http://www.w3.org/2000/svg",
                     width: "24",
                     height: "24",
@@ -37,10 +57,10 @@ pub fn CodeStatusBadge(status: IssueStatus, #[props(default)] size: BadgeSize) -
         ),
         IssueStatus::Applied => (
             "bg-purple-500/10 text-purple-500 border-purple-500/20",
-            "Merged",
+            applied_text,
             rsx! {
                 svg {
-                    class: "w-3.5 h-3.5",
+                    class: "{icon_class}",
                     xmlns: "http://www.w3.org/2000/svg",
                     width: "24",
                     height: "24",
@@ -61,7 +81,7 @@ pub fn CodeStatusBadge(status: IssueStatus, #[props(default)] size: BadgeSize) -
             "Closed",
             rsx! {
                 svg {
-                    class: "w-3.5 h-3.5",
+                    class: "{icon_class}",
                     xmlns: "http://www.w3.org/2000/svg",
                     width: "24",
                     height: "24",
@@ -92,7 +112,7 @@ pub fn CodeStatusBadge(status: IssueStatus, #[props(default)] size: BadgeSize) -
             "Draft",
             rsx! {
                 svg {
-                    class: "w-3.5 h-3.5",
+                    class: "{icon_class}",
                     xmlns: "http://www.w3.org/2000/svg",
                     width: "24",
                     height: "24",
@@ -125,9 +145,12 @@ pub fn CodeStatusBadge(status: IssueStatus, #[props(default)] size: BadgeSize) -
 /// Simple text-only status indicator
 #[allow(dead_code)]
 #[component]
-pub fn CodeStatusText(status: IssueStatus) -> Element {
+pub fn CodeStatusText(
+    status: IssueStatus,
+    #[props(default)] context: StatusDisplayContext,
+) -> Element {
     rsx! {
-        span { class: "font-medium {status_color_class(status)}", "{status_text(status)}" }
+        span { class: "font-medium {status_color_class(status)}", "{status_text(status, context)}" }
     }
 }
 /// Get the color class for a status (for use in custom styling)
@@ -140,10 +163,13 @@ pub fn status_color_class(status: IssueStatus) -> &'static str {
     }
 }
 /// Get the display text for a status
-pub fn status_text(status: IssueStatus) -> &'static str {
+pub fn status_text(status: IssueStatus, context: StatusDisplayContext) -> &'static str {
     match status {
         IssueStatus::Open => "Open",
-        IssueStatus::Applied => "Merged",
+        IssueStatus::Applied => match context {
+            StatusDisplayContext::Issue => "Applied",
+            StatusDisplayContext::PullRequest => "Merged",
+        },
         IssueStatus::Closed => "Closed",
         IssueStatus::Draft => "Draft",
     }

@@ -54,12 +54,17 @@ pub fn ZapDistribution(
 
     // Deduplicate zap_splits by pubkey, summing weights for duplicates
     let deduped_splits: Vec<(String, u64)> = {
-        let mut deduped: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+        let mut deduped = Vec::<(String, u64)>::new();
+        let mut indices = std::collections::HashMap::<String, usize>::new();
         for (pk, _, w) in &zap_splits {
-            let entry = deduped.entry(pk.clone()).or_default();
-            *entry = entry.saturating_add(*w as u64);
+            if let Some(idx) = indices.get(pk).copied() {
+                deduped[idx].1 = deduped[idx].1.saturating_add(*w as u64);
+            } else {
+                indices.insert(pk.clone(), deduped.len());
+                deduped.push((pk.clone(), *w as u64));
+            }
         }
-        deduped.into_iter().collect()
+        deduped
     };
 
     // Manage selected pubkeys for the user picker

@@ -454,7 +454,8 @@ pub fn NoteCard(
     };
     let nav = use_navigator();
     let event_id_nav = event_id.clone();
-    let is_hidden = (is_muted.read().unwrap_or(false) || is_author_blocked.read().unwrap_or(false)) && !*show_hidden_anyway.read();
+    let is_hidden = (is_muted.read().unwrap_or(false) || is_author_blocked.read().unwrap_or(false))
+        && !*show_hidden_anyway.read();
     rsx! {
         article {
             class: "border-b border-border p-4 hover:bg-accent/50 transition-colors cursor-pointer",

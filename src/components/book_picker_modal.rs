@@ -124,11 +124,12 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     let mut fetch_generation = use_signal(|| 0u64);
     use_effect(use_reactive(&*props.show.read(), move |is_shown| {
         if is_shown {
+            let has_cached_publications = !get_all_cached_publications().is_empty();
             // Increment generation token to invalidate any in-flight requests
             let current_generation = *fetch_generation.peek() + 1;
             fetch_generation.set(current_generation);
 
-            loading.set(true);
+            loading.set(!has_cached_publications);
             fetch_error.set(None);
             spawn(async move {
                 let result = fetch_publications(100, None).await;
@@ -145,7 +146,9 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                     }
                     Err(e) => {
                         crate::utils::log_fetch_error("publications", e.clone());
-                        fetch_error.set(Some(format!("Failed to load publications: {}", e)));
+                        if !has_cached_publications {
+                            fetch_error.set(Some(format!("Failed to load publications: {}", e)));
+                        }
                     }
                 }
                 loading.set(false);

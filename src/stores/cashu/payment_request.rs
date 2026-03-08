@@ -470,9 +470,7 @@ pub async fn wait_for_nostr_payment(request_id: String, timeout_secs: u64) -> Re
             use futures::future::{select, Either};
             use futures::pin_mut;
             let remaining_ms = (timeout_secs - elapsed).saturating_mul(1000);
-            let timeout_fut = crate::platform::timer::sleep_ms(
-                remaining_ms.min(5000) as u32,
-            );
+            let timeout_fut = crate::platform::timer::sleep_ms(remaining_ms.min(5000) as u32);
             let recv_fut = notifications.recv();
             pin_mut!(timeout_fut);
             pin_mut!(recv_fut);

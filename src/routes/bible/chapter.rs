@@ -138,7 +138,10 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                     if let Err(e) = crate::platform::clipboard::copy_to_clipboard(&full_text).await
                     {
                         log::error!("Clipboard write failed: {:?}", e);
-                        toast.error("Failed to copy to clipboard".to_string(), ToastOptions::new());
+                        toast.error(
+                            "Failed to copy to clipboard".to_string(),
+                            ToastOptions::new(),
+                        );
                         return;
                     }
                     selected_verses_for_clear.set(Vec::new());

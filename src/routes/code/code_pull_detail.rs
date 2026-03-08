@@ -2,6 +2,7 @@
 //!
 //! View a single NIP-34 Git patch/PR (Kind 1617) with comments,
 //! diff viewer, code reviews, and merge controls.
+use crate::components::code::status_badge::StatusDisplayContext;
 use crate::components::code::{DiffViewer, PRReviewSection};
 use crate::components::{icons, CodeStatusBadge};
 use crate::routes::Route;
@@ -463,7 +464,10 @@ fn PRContent(
                             "PR #{pr.event_id.chars().take(8).collect::<String>()}"
                         }
                     }
-                    CodeStatusBadge { status: *display_status.read() }
+                    CodeStatusBadge {
+                        status: *display_status.read(),
+                        context: StatusDisplayContext::PullRequest,
+                    }
                 }
                 div { class: "flex flex-wrap gap-2",
                     if pr.is_cover_letter {

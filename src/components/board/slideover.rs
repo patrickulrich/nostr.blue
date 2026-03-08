@@ -71,17 +71,21 @@ pub fn BoardSlideover(board: Pinboard, show: Signal<bool>, on_close: EventHandle
         .as_ref()
         .map(|pk| pk == &board.pubkey)
         .unwrap_or(false);
-    let display_name = use_memo(use_reactive((&author_pubkey, &*author_metadata.read()), move |(author_pubkey, author_metadata)| {
-        author_metadata
-            .as_ref()
-            .and_then(|m| m.display_name.clone().or(m.name.clone()))
-            .unwrap_or_else(|| truncate_pubkey(&author_pubkey))
-    }));
-    let profile_picture = use_memo(use_reactive((&author_pubkey, &*author_metadata.read()), move |(_author_pubkey, author_metadata)| {
-        author_metadata
-            .as_ref()
-            .and_then(|m| m.picture.clone())
-    }));
+    let display_name = use_memo(use_reactive(
+        (&author_pubkey, &*author_metadata.read()),
+        move |(author_pubkey, author_metadata)| {
+            author_metadata
+                .as_ref()
+                .and_then(|m| m.display_name.clone().or(m.name.clone()))
+                .unwrap_or_else(|| truncate_pubkey(&author_pubkey))
+        },
+    ));
+    let profile_picture = use_memo(use_reactive(
+        (&author_pubkey, &*author_metadata.read()),
+        move |(_author_pubkey, author_metadata)| {
+            author_metadata.as_ref().and_then(|m| m.picture.clone())
+        },
+    ));
     let avatar_letter = use_memo(move || {
         display_name()
             .chars()

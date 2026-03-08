@@ -26,10 +26,11 @@ pub struct AddToListModalProps {
 #[component]
 pub fn AddToListModal(props: AddToListModalProps) -> Element {
     let (lists_signal, lists_loading, lists_error, mut refresh_trigger) = use_user_lists();
+    let existing_lists_supported = cfg!(feature = "native");
     let mut selected_list_id = use_signal(|| None::<String>);
     let mut selected_people_list = use_signal(|| None::<UserList>);
     let mut new_list_name = use_signal(String::new);
-    let mut create_new = use_signal(|| false);
+    let mut create_new = use_signal(move || !existing_lists_supported);
     let mut loading = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
     let mut success = use_signal(|| false);
@@ -238,10 +239,12 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                             }
                         }
                         div { class: "flex gap-2 border-b border-border pb-2",
-                            button {
-                                class: if !*create_new.read() { "px-3 py-1 text-sm font-medium border-b-2 border-primary" } else { "px-3 py-1 text-sm font-medium text-muted-foreground hover:text-foreground" },
-                                onclick: move |_| create_new.set(false),
-                                "Existing List"
+                            if existing_lists_supported {
+                                button {
+                                    class: if !*create_new.read() { "px-3 py-1 text-sm font-medium border-b-2 border-primary" } else { "px-3 py-1 text-sm font-medium text-muted-foreground hover:text-foreground" },
+                                    onclick: move |_| create_new.set(false),
+                                    "Existing List"
+                                }
                             }
                             button {
                                 class: if *create_new.read() { "px-3 py-1 text-sm font-medium border-b-2 border-primary" } else { "px-3 py-1 text-sm font-medium text-muted-foreground hover:text-foreground" },
@@ -249,7 +252,12 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                                 "Create New"
                             }
                         }
-                        if !*create_new.read() {
+                        if !existing_lists_supported {
+                            div { class: "text-sm text-muted-foreground",
+                                "Existing curation lists can only be updated on native builds right now. Create a new list instead."
+                            }
+                        }
+                        if existing_lists_supported && !*create_new.read() {
                             div {
                                 label { class: "block text-sm font-medium mb-2", "Select a curation list" }
                                 if *lists_loading.read() {

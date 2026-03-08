@@ -99,10 +99,10 @@ pub fn PersistentMusicPlayer() -> Element {
     use_effect(use_reactive(
         (&state.current_track, &state.is_playing),
         move |(current_track, is_playing)| {
-        if let Some(track) = current_track.as_ref() {
-            let media_url = track.media_url.clone();
-            let is_hls = media_url.to_lowercase().contains(".m3u8");
-            native_source_bound.set(false);
+            if let Some(track) = current_track.as_ref() {
+                let media_url = track.media_url.clone();
+                let is_hls = media_url.to_lowercase().contains(".m3u8");
+                native_source_bound.set(false);
                 let bind_token = native_bind_token.with_mut(|token| {
                     *token = token.wrapping_add(1);
                     *token
@@ -273,7 +273,11 @@ pub fn PersistentMusicPlayer() -> Element {
         let audio_id_for_volume = audio_id.to_string();
         let volume_memo = use_memo(move || {
             let state = MUSIC_PLAYER.read();
-            if state.is_muted { 0.0 } else { state.volume }
+            if state.is_muted {
+                0.0
+            } else {
+                state.volume
+            }
         });
         use_effect(move || {
             let volume_value = *volume_memo.read();

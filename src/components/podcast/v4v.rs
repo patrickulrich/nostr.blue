@@ -110,7 +110,14 @@ fn RecipientRow(props: RecipientRowProps) -> Element {
         let char_count = addr.chars().count();
         if char_count > 20 {
             let first_8: String = addr.chars().take(8).collect();
-            let last_8: String = addr.chars().rev().take(8).collect::<String>().chars().rev().collect();
+            let last_8: String = addr
+                .chars()
+                .rev()
+                .take(8)
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect();
             format!("{}...{}", first_8, last_8)
         } else {
             addr.clone()
@@ -293,7 +300,10 @@ fn CustomBoostInput(props: CustomBoostInputProps) -> Element {
                                 on_send.call(amt);
                             }
                             Ok(PaymentOutcome::NoAttempts) => {
-                                error.set(Some("No payment attempts: all computed amounts were zero".to_string()));
+                                error.set(Some(
+                                    "No payment attempts: all computed amounts were zero"
+                                        .to_string(),
+                                ));
                             }
                             Ok(PaymentOutcome::PartialSuccess {
                                 success_count,
@@ -426,7 +436,8 @@ async fn send_v4v_payment(
                     }
                     let callback_url = match Url::parse(&info.callback) {
                         Ok(mut url) => {
-                            url.query_pairs_mut().append_pair("amount", &amount_msats.to_string());
+                            url.query_pairs_mut()
+                                .append_pair("amount", &amount_msats.to_string());
                             url.to_string()
                         }
                         Err(e) => {
@@ -465,10 +476,13 @@ async fn send_v4v_payment(
                                     continue;
                                 }
                             };
-                            let parse_result = serde_json::from_str::<serde_json::Value>(&raw_response);
+                            let parse_result =
+                                serde_json::from_str::<serde_json::Value>(&raw_response);
                             match parse_result {
                                 Ok(invoice_response) => {
-                                    if let Some(pr) = invoice_response.get("pr").and_then(|v| v.as_str()) {
+                                    if let Some(pr) =
+                                        invoice_response.get("pr").and_then(|v| v.as_str())
+                                    {
                                         let expected_amount_msats = amount * 1000;
                                         match crate::utils::bolt11::parse_bolt11_amount(pr) {
                                             Some(parsed_amount) => {
@@ -479,7 +493,8 @@ async fn send_v4v_payment(
                                                         expected_amount_msats,
                                                         parsed_amount
                                                     );
-                                                    failed_recipients.push(recipient.address.clone());
+                                                    failed_recipients
+                                                        .push(recipient.address.clone());
                                                     continue;
                                                 }
                                             }
