@@ -386,6 +386,27 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                     });
                 }
             } else {
+                cleanup_guard.set(None);
+                mounted.set(false);
+                #[cfg(feature = "web")]
+                {
+                    let video_id_clone = video_id.clone();
+                    spawn(async move {
+                        destroy_video_js_player(&video_id_clone);
+                    });
+                }
+                #[cfg(feature = "native")]
+                {
+                    let video_id_clone = video_id.clone();
+                    spawn(async move {
+                        let video_id_json = serde_json::to_string(&video_id_clone).unwrap_or_default();
+                        let _ = document::eval(&format!(
+                            "if (window.hlsManager) {{ window.hlsManager.detach({}); }}",
+                            video_id_json
+                        ))
+                        .await;
+                    });
+                }
                 error.set(Some("Invalid stream URL".to_string()));
                 loading.set(false);
             }
@@ -418,6 +439,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
         });
         error.set(None);
         loading.set(true);
+        cleanup_guard.set(None);
         let _video_id = video_id.clone();
         let _stream_url = stream_url.clone();
         #[cfg(feature = "web")]
@@ -451,8 +473,13 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
         {
             let video_id = _video_id;
             let stream_url = _stream_url;
+            let init_gen = init_gen;
             spawn(async move {
                 crate::platform::timer::sleep_ms(100).await;
+
+                if *init_gen.peek() != gen {
+                    return;
+                }
 
                 if let Err(e) = ensure_hls_manager().await {
                     log::error!("[Live] {}", e);
@@ -460,6 +487,10 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                         error.set(Some(format!("Failed to load HLS support: {}", e)));
                         loading.set(false);
                     }
+                    return;
+                }
+
+                if *init_gen.peek() != gen {
                     return;
                 }
 

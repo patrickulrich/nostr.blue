@@ -296,7 +296,8 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                                                         .permanent(false),
                                                 );
                                         }
-                                        Err(_) => {
+                                        Err(e) => {
+                                            log::error!("Failed to copy clipboard for {}: {:?}", content_name, e);
                                             toast_api
                                                 .error(
                                                     "Failed to copy".to_string(),

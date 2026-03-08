@@ -132,7 +132,7 @@ pub fn AsciiDocContent(
         if let (Some(ref handler), Some(ref metadata)) =
             (&on_citations_loaded, &citation_metadata_for_effect)
         {
-            let should_notify = last_notified_metadata.read().as_ref() != Some(metadata);
+            let should_notify = last_notified_metadata.peek().as_ref() != Some(metadata);
             if should_notify {
                 last_notified_metadata.set(Some(metadata.clone()));
                 handler.call(metadata.clone());

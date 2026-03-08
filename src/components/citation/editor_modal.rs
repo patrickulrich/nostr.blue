@@ -289,7 +289,9 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                         }
                     }
                     if *session_token.read() != my_token {
-                        saving.set(false);
+                        if *save_request_id.peek() == save_request {
+                            saving.set(false);
+                        }
                         return;
                     }
                     if let Some(ref handler) = on_save {

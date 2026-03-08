@@ -41,6 +41,7 @@ pub fn BoardSlideover(board: Pinboard, show: Signal<bool>, on_close: EventHandle
     let mut show_delete_confirm = use_signal(|| false);
     let mut delete_task_id = use_signal(|| 0u32);
     let mut delete_task: Signal<Option<Task>> = use_signal(|| None);
+    let mut pins_task: Signal<Option<Task>> = use_signal(|| None);
     let mut delete_error = use_signal(|| None::<String>);
     let mut pin_to_board_request: Signal<Option<PinToBoardRequest>> = use_signal(|| None);
     use_effect(move || {
@@ -49,6 +50,9 @@ pub fn BoardSlideover(board: Pinboard, show: Signal<bool>, on_close: EventHandle
             show_share_modal.set(false);
             show_delete_confirm.set(false);
             if let Some(task) = delete_task.take() {
+                task.cancel();
+            }
+            if let Some(task) = pins_task.take() {
                 task.cancel();
             }
             delete_task_id.set(0);
@@ -67,19 +71,17 @@ pub fn BoardSlideover(board: Pinboard, show: Signal<bool>, on_close: EventHandle
         .as_ref()
         .map(|pk| pk == &board.pubkey)
         .unwrap_or(false);
-    let display_name = use_memo(move || {
+    let display_name = use_memo(use_reactive((&author_pubkey, &*author_metadata.read()), move |(author_pubkey, author_metadata)| {
         author_metadata
-            .read()
             .as_ref()
             .and_then(|m| m.display_name.clone().or(m.name.clone()))
             .unwrap_or_else(|| truncate_pubkey(&author_pubkey))
-    });
-    let profile_picture = use_memo(move || {
+    }));
+    let profile_picture = use_memo(use_reactive((&author_pubkey, &*author_metadata.read()), move |(_author_pubkey, author_metadata)| {
         author_metadata
-            .read()
             .as_ref()
             .and_then(|m| m.picture.clone())
-    });
+    }));
     let avatar_letter = use_memo(move || {
         display_name()
             .chars()
@@ -93,6 +95,7 @@ pub fn BoardSlideover(board: Pinboard, show: Signal<bool>, on_close: EventHandle
     let show_signal = show;
     let mut request_id_mut = request_id;
     let mut retry_trigger_mut = retry_trigger;
+    let mut pins_task_mut = pins_task;
     use_effect(use_reactive!(|(
         show_signal,
         board_a_tag,
@@ -105,6 +108,9 @@ pub fn BoardSlideover(board: Pinboard, show: Signal<bool>, on_close: EventHandle
         if !shown {
             return;
         }
+        if let Some(task) = pins_task_mut.take() {
+            task.cancel();
+        }
         let a_tag = board_a_tag.clone();
         let owner_pk = owner_pubkey_for_pins.clone();
         let current_request = request_id_mut.with_mut(|request_id| {
@@ -114,7 +120,7 @@ pub fn BoardSlideover(board: Pinboard, show: Signal<bool>, on_close: EventHandle
         });
         pins_loading.set(true);
         pins_error.set(None);
-        spawn(async move {
+        let task = spawn(async move {
             let result = if is_collaborative {
                 fetch_pins_for_board_filtered(&a_tag, None, None).await
             } else {
@@ -137,6 +143,7 @@ pub fn BoardSlideover(board: Pinboard, show: Signal<bool>, on_close: EventHandle
             }
             pins_loading.set(false);
         });
+        pins_task_mut.set(Some(task));
     }));
     let nav = navigator();
     let on_close_for_delete = on_close;

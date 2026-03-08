@@ -10,6 +10,7 @@ use crate::services::lnurl;
 use crate::stores::nwc_store;
 use crate::utils::podcast::{ValueBlock, ValueRecipient};
 use dioxus::prelude::*;
+use url::Url;
 #[derive(Props, Clone, PartialEq)]
 pub struct V4VInfoProps {
     /// The V4V value block
@@ -382,9 +383,17 @@ async fn send_v4v_payment(
     let mut success_count = 0;
     let mut attempted_count = 0;
     let mut failed_recipients = Vec::new();
-    for recipient in &value_block.recipients {
-        let amount =
-            (total_sats as f64 * recipient.split as f64 / total_split as f64).round() as u64;
+    let mut remaining_sats = total_sats;
+    let mut remaining_split = total_split;
+    let recipients_len = value_block.recipients.len();
+    for (idx, recipient) in value_block.recipients.iter().enumerate() {
+        let amount = if idx == recipients_len - 1 {
+            remaining_sats
+        } else {
+            ((remaining_sats as f64 * recipient.split as f64) / remaining_split as f64).round() as u64
+        };
+        remaining_sats = remaining_sats.saturating_sub(amount);
+        remaining_split = remaining_split.saturating_sub(recipient.split);
         if amount == 0 {
             continue;
         }
@@ -398,7 +407,21 @@ async fn send_v4v_payment(
                         failed_recipients.push(recipient.address.clone());
                         continue;
                     }
-                    let callback_url = format!("{}?amount={}", info.callback, amount_msats,);
+                    let callback_url = match Url::parse(&info.callback) {
+                        Ok(mut url) => {
+                            url.query_pairs_mut().append_pair("amount", &amount_msats.to_string());
+                            url.to_string()
+                        }
+                        Err(e) => {
+                            log::error!(
+                                "Failed to parse callback URL for {}: {}",
+                                recipient.address,
+                                e
+                            );
+                            failed_recipients.push(recipient.address.clone());
+                            continue;
+                        }
+                    };
                     let client = match http_client() {
                         Ok(client) => client,
                         Err(e) => {

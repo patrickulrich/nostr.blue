@@ -862,4 +862,36 @@ mod tests {
         assert_eq!(days_since_epoch(1970, 1, 1), Some(0));
         assert_eq!(days_since_epoch(1970, 1, 2), Some(1));
     }
+    #[test]
+    fn test_parse_invalid_dates() {
+        use super::CalendarEventType;
+        use super::EventTime;
+        assert_eq!(
+            EventTime::parse("2024-02-30", CalendarEventType::DateBased),
+            None,
+            "Invalid day 30 in February should return None"
+        );
+        assert_eq!(
+            EventTime::parse("2024-00-00", CalendarEventType::DateBased),
+            None,
+            "Invalid month 0 and day 0 should return None"
+        );
+        assert_eq!(
+            EventTime::parse("2024-13-01", CalendarEventType::DateBased),
+            None,
+            "Invalid month 13 should return None"
+        );
+        assert_eq!(
+            EventTime::parse("0001-01-01", CalendarEventType::DateBased),
+            None,
+            "Pre-1970 date should return None"
+        );
+    }
+    #[test]
+    fn test_to_timestamp_pre_epoch() {
+        use super::CalendarEventType;
+        use super::EventTime;
+        let result = EventTime::parse("1969-01-01", CalendarEventType::DateBased);
+        assert_eq!(result, None, "Pre-1970 dates should not parse");
+    }
 }

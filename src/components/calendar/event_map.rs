@@ -252,6 +252,9 @@ pub fn EventMap(props: EventMapProps) -> Element {
             e.title().hash(&mut hasher);
             e.start_timestamp().hash(&mut hasher);
             e.location().hash(&mut hasher);
+            if let Some(geohash) = e.geohash() {
+                geohash.hash(&mut hasher);
+            }
             for loc in e.locations() {
                 loc.hash(&mut hasher);
             }

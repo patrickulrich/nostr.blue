@@ -175,7 +175,7 @@ pub fn PersistentMusicPlayer() -> Element {
                         } else {
                             format!(
                                 r#"
-                            (function() {{
+                            return (function() {{
                                 let audio = document.getElementById({audio_id});
                                 if (!audio) return "missing";
                                 audio.dataset.isPlaying = {is_playing};
@@ -268,12 +268,22 @@ pub fn PersistentMusicPlayer() -> Element {
         },
     ));
     #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
-    use_effect(move || {
-        let state = MUSIC_PLAYER.read();
-        let volume = if state.is_muted { 0.0 } else { state.volume };
-        {
+    {
+        let audio_id_for_volume = audio_id.to_string();
+        let mut volume_signal = use_signal(|| {
+            let state = MUSIC_PLAYER.read();
+            (state.is_muted, state.volume)
+        });
+        use_effect(move || {
+            let state = MUSIC_PLAYER.read();
+            volume_signal.set((state.is_muted, state.volume));
+        });
+        use_effect(move || {
+            let (is_muted, volume) = *volume_signal.read();
+            let volume_value = if is_muted { 0.0 } else { volume };
+            let audio_id_clone = audio_id_for_volume.clone();
             spawn(async move {
-                let audio_id_json = serde_json::to_string(&audio_id)
+                let audio_id_json = serde_json::to_string(&audio_id_clone)
                     .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
                 let script = format!(
                     r#"
@@ -283,12 +293,12 @@ pub fn PersistentMusicPlayer() -> Element {
                     }})();
                     "#,
                     audio_id = audio_id_json,
-                    volume = volume,
+                    volume = volume_value,
                 );
                 let _ = document::eval(&script);
             });
-        }
-    });
+        });
+    }
     #[cfg(not(feature = "mobile"))]
     let mut last_synced_time = use_signal(|| 0.0f64);
     #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
@@ -588,7 +598,7 @@ pub fn PersistentMusicPlayer() -> Element {
         }
     };
     rsx! {
-        if !cfg!(feature = "mobile") {
+        if cfg!(not(feature = "mobile")) {
         audio {
             id: "{audio_id}",
             preload: if track.is_live_stream { "none" } else { "metadata" },
@@ -808,9 +818,11 @@ pub fn PersistentMusicPlayer() -> Element {
                                             }
                                         });
                                     }
-                                    #[cfg(not(feature = "mobile"))]
+                                    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
                                     {
                                         let audio_id_str = audio_id.to_string();
+                                        let mut seek_gen = seek_gen;
+                                        let mut is_seeking = is_seeking;
                                         spawn(async move {
                                             let audio_id_json = serde_json::to_string(&audio_id_str)
                                                 .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
@@ -818,10 +830,10 @@ pub fn PersistentMusicPlayer() -> Element {
                                                 r#"
                                                 (function() {{
                                                     let audio = document.getElementById({audio_id});
-                                                    if (!audio) return;
+                                                    if (!audio) return null;
 
                                                     let element = document.elementFromPoint({client_x}, {client_y});
-                                                    if (!element) return;
+                                                    if (!element) return null;
 
                                                     let progressBar = element.closest('.cursor-pointer') || element;
                                                     let rect = progressBar.getBoundingClientRect();
@@ -831,14 +843,33 @@ pub fn PersistentMusicPlayer() -> Element {
 
                                                     if (!isNaN(newTime) && isFinite(newTime)) {{
                                                         audio.currentTime = newTime;
+                                                        return newTime;
                                                     }}
+                                                    return null;
                                                 }})();
                                                 "#,
                                                 audio_id = audio_id_json,
                                                 client_x = client_x,
                                                 client_y = client_y,
                                             );
-                                            let _ = document::eval(&script);
+                                            if let Ok(result) = document::eval(&script).await {
+                                                let new_time = result
+                                                    .as_f64()
+                                                    .or_else(|| result.as_str().and_then(|s| s.parse::<f64>().ok()))
+                                                    .unwrap_or(-1.0);
+                                                if new_time >= 0.0 && new_time.is_finite() {
+                                                    let gen = seek_gen.with_mut(|g| {
+                                                        *g = g.wrapping_add(1);
+                                                        *g
+                                                    });
+                                                    is_seeking.set(true);
+                                                    music_player::seek_to(new_time);
+                                                    crate::platform::timer::sleep_ms(500).await;
+                                                    if *seek_gen.peek() == gen {
+                                                        is_seeking.set(false);
+                                                    }
+                                                }
+                                            }
                                         });
                                     }
                                 },

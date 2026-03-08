@@ -526,18 +526,23 @@ fn position_day_events(events: &[UnifiedEvent], _date: &str) -> Vec<PositionedEv
             #[cfg(feature = "web")]
             {
                 let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
-                (date.get_hours() * 60 + date.get_minutes()) as f32
+                let offset_minutes = date.get_timezone_offset() as i32;
+                let local_hours = date.get_hours() as i32;
+                let local_minutes = date.get_minutes() as i32;
+                let utc_minutes =
+                    (local_hours * 60 + local_minutes - offset_minutes).rem_euclid(1440);
+                utc_minutes as f32
             }
             #[cfg(not(feature = "web"))]
             {
-                use chrono::{Local, TimeZone, Timelike};
+                use chrono::{TimeZone, Timelike, Utc};
                 // Clamp timestamp to max safe value (9999-12-31) before i64 cast to prevent overflow
                 let ts_clamped = ts.min(253_402_300_799) as i64;
-                let dt = match Local.timestamp_opt(ts_clamped, 0).single() {
+                let dt = match Utc.timestamp_opt(ts_clamped, 0).single() {
                     Some(dt) => dt,
                     None => {
                         log::warn!("Invalid timestamp {} fell back to epoch", ts);
-                        Local.timestamp_opt(0, 0).single().unwrap_or_default()
+                        Utc.timestamp_opt(0, 0).single().unwrap_or_default()
                     }
                 };
                 (dt.hour() * 60 + dt.minute()) as f32
@@ -769,8 +774,13 @@ fn format_event_time(event: &UnifiedEvent) -> String {
     #[cfg(feature = "web")]
     {
         let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
-        let hours = date.get_hours();
-        let minutes = date.get_minutes();
+        let offset_minutes = date.get_timezone_offset() as i32;
+        let local_hours = date.get_hours() as i32;
+        let local_minutes = date.get_minutes() as i32;
+        let utc_total_minutes =
+            (local_hours * 60 + local_minutes - offset_minutes).rem_euclid(1440);
+        let hours = utc_total_minutes / 60;
+        let minutes = utc_total_minutes % 60;
         let am_pm = if hours >= 12 { "PM" } else { "AM" };
         let hour_12 = if hours == 0 {
             12
@@ -787,14 +797,14 @@ fn format_event_time(event: &UnifiedEvent) -> String {
     }
     #[cfg(not(feature = "web"))]
     {
-        use chrono::{Local, TimeZone, Timelike};
+        use chrono::{TimeZone, Timelike, Utc};
         // Clamp timestamp to max safe value (9999-12-31) before i64 cast to prevent overflow
         let ts_clamped = ts.min(253_402_300_799) as i64;
-        let dt = match Local.timestamp_opt(ts_clamped, 0).single() {
+        let dt = match Utc.timestamp_opt(ts_clamped, 0).single() {
             Some(dt) => dt,
             None => {
                 log::warn!("Invalid timestamp {} fell back to epoch", ts);
-                Local.timestamp_opt(0, 0).single().unwrap_or_default()
+                Utc.timestamp_opt(0, 0).single().unwrap_or_default()
             }
         };
         let hours = dt.hour();

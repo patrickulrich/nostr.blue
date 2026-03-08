@@ -3,6 +3,9 @@
 //! Displays a single podcast episode with play controls,
 //! supporting both Nostr and RSS podcast episodes.
 use dioxus::prelude::*;
+/// Default episode artwork fallback URL (local asset)
+const DEFAULT_EPISODE_ARTWORK: &str = "/icons/icon-512.svg";
+
 /// D-tag used for podcast metadata events (Kind 30078)
 /// This is a convention for Nostr podcast coordination
 const PODCAST_METADATA_D_TAG: &str = "podcast-metadata";
@@ -349,12 +352,7 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
         .image
         .clone()
         .or(episode.podcast_image.clone())
-        .unwrap_or_else(|| {
-            format!(
-                "https://api.dicebear.com/7.x/shapes/svg?seed={}",
-                episode.id
-            )
-        });
+        .unwrap_or_else(|| DEFAULT_EPISODE_ARTWORK.to_string());
     let episode_label = match (episode.season, episode.episode_number) {
         (Some(s), Some(e)) => Some(format!("S{}E{}", s, e)),
         (None, Some(e)) => Some(format!("Ep. {}", e)),

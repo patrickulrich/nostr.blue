@@ -7,6 +7,7 @@ use crate::services::bible_api::verse_to_plain_text;
 use crate::stores::auth_store;
 use crate::stores::bible_store::{self, ChapterContent, VerseContent};
 use dioxus::prelude::*;
+use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use std::collections::HashMap;
 /// Build a HashMap mapping verse numbers to plain text for efficient lookup
 fn build_verse_text_map(content: &[ChapterContent]) -> HashMap<u32, String> {
@@ -60,6 +61,7 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
     let mut pending_highlight_text = use_signal(String::new);
     let mut pending_highlight_reference = use_signal(String::new);
     let is_authenticated = auth_store::is_authenticated();
+    let toast = consume_toast();
     let current_key = format!("{}/{}/{}", translation, book, chapter);
     let mut loaded_key = use_signal(String::new);
     let mut chapter_data: Signal<
@@ -136,6 +138,7 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                     if let Err(e) = crate::platform::clipboard::copy_to_clipboard(&full_text).await
                     {
                         log::error!("Clipboard write failed: {:?}", e);
+                        toast.error("Failed to copy to clipboard".to_string(), ToastOptions::new());
                         return;
                     }
                     selected_verses_for_clear.set(Vec::new());
