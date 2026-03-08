@@ -133,7 +133,7 @@ pub fn LiveStreamCard(event: NostrEvent) -> Element {
     let naddr = coord
         .to_bech32()
         .unwrap_or_else(|_| format!("30311:{}:{}", event.pubkey, stream_meta.d_tag));
-    let author_metadata = use_memo(move || profiles::get_profile(&author_pubkey_for_fetch));
+    let author_metadata = profiles::get_profile(&author_pubkey_for_fetch);
     use_effect(use_reactive(
         (&author_pubkey_display, &*CLIENT_INITIALIZED.read()),
         move |(pk, client_initialized)| {
@@ -145,7 +145,7 @@ pub fn LiveStreamCard(event: NostrEvent) -> Element {
             });
         },
     ));
-    let author_name = if let Some(ref metadata) = *author_metadata.read() {
+    let author_name = if let Some(ref metadata) = author_metadata {
         metadata
             .display_name
             .clone()
@@ -155,7 +155,6 @@ pub fn LiveStreamCard(event: NostrEvent) -> Element {
         truncate_pubkey(&author_pubkey_display)
     };
     let author_picture = author_metadata
-        .read()
         .as_ref()
         .and_then(|m| m.picture.as_ref().map(|u| u.to_string()));
     rsx! {

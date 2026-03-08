@@ -253,6 +253,9 @@ pub fn NoteCard(
                 if let Some(lud16) = &cached_profile.lud16 {
                     metadata = metadata.lud16(lud16);
                 }
+                if let Some(lud06) = &cached_profile.lud06 {
+                    metadata = metadata.lud06(lud06);
+                }
                 author_metadata.set(Some(metadata));
                 return;
             }
@@ -288,6 +291,9 @@ pub fn NoteCard(
                     }
                     if let Some(lud16) = &profile.lud16 {
                         metadata = metadata.lud16(lud16);
+                    }
+                    if let Some(lud06) = &profile.lud06 {
+                        metadata = metadata.lud06(lud06);
                     }
                     author_metadata.set(Some(metadata));
                 }

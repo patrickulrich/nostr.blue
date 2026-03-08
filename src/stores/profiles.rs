@@ -63,6 +63,7 @@ pub struct Profile {
     pub banner: Option<String>,
     pub nip05: Option<String>,
     pub lud16: Option<String>,
+    pub lud06: Option<String>,
     pub website: Option<String>,
     /// Whether this account is a bot (NIP-24)
     pub bot: Option<bool>,
@@ -221,6 +222,7 @@ async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> {
                     banner: None,
                     nip05: None,
                     lud16: None,
+                    lud06: None,
                     website: None,
                     bot: None,
                     birthday: None,
@@ -244,6 +246,7 @@ async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> {
                 banner: None,
                 nip05: None,
                 lud16: None,
+                lud06: None,
                 website: None,
                 bot: None,
                 birthday: None,
@@ -320,6 +323,11 @@ fn parse_profile_event(event: &Event) -> Result<Profile, String> {
             .map(String::from),
         lud16: metadata
             .get("lud16")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from),
+        lud06: metadata
+            .get("lud06")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .map(String::from),

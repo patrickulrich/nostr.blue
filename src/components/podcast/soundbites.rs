@@ -70,6 +70,7 @@ struct SoundbiteCardProps {
 #[component]
 fn SoundbiteCard(props: SoundbiteCardProps) -> Element {
     let mut is_playing = use_signal(|| false);
+    let play_generation = use_signal(|| 0u64);
     let soundbite = props.soundbite.clone();
     let title = soundbite
         .title
@@ -80,6 +81,7 @@ fn SoundbiteCard(props: SoundbiteCardProps) -> Element {
     let handle_play = {
         let sb = soundbite.clone();
         let on_play = props.on_play;
+        let mut play_gen = play_generation;
         move |_| {
             if let Some(handler) = &on_play {
                 handler.call(sb.clone());
@@ -87,10 +89,14 @@ fn SoundbiteCard(props: SoundbiteCardProps) -> Element {
                 music_player::seek_to(sb.start_time);
             }
             is_playing.set(true);
+            play_gen += 1;
+            let generation = *play_gen.read();
             let duration = sb.duration;
             spawn(async move {
                 crate::platform::timer::sleep_ms(safe_duration_millis(duration)).await;
-                is_playing.set(false);
+                if generation == *play_gen.read() {
+                    is_playing.set(false);
+                }
             });
         }
     };
@@ -210,6 +216,7 @@ struct SoundbiteGridCardProps {
 #[component]
 fn SoundbiteGridCard(props: SoundbiteGridCardProps) -> Element {
     let mut is_playing = use_signal(|| false);
+    let play_generation = use_signal(|| 0u64);
     let item = &props.item;
     let soundbite = &item.soundbite;
     let title = soundbite
@@ -219,13 +226,18 @@ fn SoundbiteGridCard(props: SoundbiteGridCardProps) -> Element {
     let duration_str = format!("{}s", soundbite.duration as u32);
     let handle_play = {
         let sb = soundbite.clone();
+        let mut play_gen = play_generation;
         move |_| {
             music_player::seek_to(sb.start_time);
             is_playing.set(true);
+            play_gen += 1;
+            let generation = *play_gen.read();
             let duration = sb.duration;
             spawn(async move {
                 crate::platform::timer::sleep_ms(safe_duration_millis(duration)).await;
-                is_playing.set(false);
+                if generation == *play_gen.read() {
+                    is_playing.set(false);
+                }
             });
         }
     };
@@ -311,6 +323,7 @@ pub struct FeaturedSoundbiteProps {
 #[component]
 pub fn FeaturedSoundbite(props: FeaturedSoundbiteProps) -> Element {
     let mut is_playing = use_signal(|| false);
+    let play_generation = use_signal(|| 0u64);
     let soundbite = props.soundbite.clone();
     let title = soundbite
         .title
@@ -320,6 +333,7 @@ pub fn FeaturedSoundbite(props: FeaturedSoundbiteProps) -> Element {
     let handle_play = {
         let sb = soundbite.clone();
         let on_play = props.on_play;
+        let mut play_gen = play_generation;
         move |_| {
             if let Some(handler) = &on_play {
                 handler.call(sb.clone());
@@ -327,10 +341,14 @@ pub fn FeaturedSoundbite(props: FeaturedSoundbiteProps) -> Element {
                 music_player::seek_to(sb.start_time);
             }
             is_playing.set(true);
+            play_gen += 1;
+            let generation = *play_gen.read();
             let duration = sb.duration;
             spawn(async move {
                 crate::platform::timer::sleep_ms(safe_duration_millis(duration)).await;
-                is_playing.set(false);
+                if generation == *play_gen.read() {
+                    is_playing.set(false);
+                }
             });
         }
     };

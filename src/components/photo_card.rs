@@ -4,7 +4,7 @@ use crate::hooks::use_reaction;
 use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
 use crate::stores::bookmarks;
-use crate::stores::nostr_client::{get_client, publish_note_tracked, publish_repost, HAS_SIGNER};
+use crate::stores::nostr_client::{get_client, publish_note_tracked, publish_repost, HAS_SIGNER, CLIENT_INITIALIZED};
 use crate::stores::signer::SIGNER_INFO;
 use crate::utils::{format_relative_time_or, format_sats_compact, truncate_pubkey};
 use dioxus::prelude::*;
@@ -149,10 +149,11 @@ pub fn PhotoCard(
         }
     }));
     let has_precomputed = precomputed_counts.is_some();
+    let client_initialized = *CLIENT_INITIALIZED.read();
     use_effect(use_reactive(
-        &(event_id_counts, has_precomputed),
-        move |(event_id_for_counts, has_precomputed)| {
-            if has_precomputed {
+        &(event_id_counts, has_precomputed, client_initialized),
+        move |(event_id_for_counts, has_precomputed, client_ready)| {
+            if has_precomputed || !client_ready {
                 return;
             }
             spawn(async move {
@@ -306,8 +307,13 @@ pub fn PhotoCard(
             });
         },
     ));
-    use_effect(use_reactive(&author_pubkey_for_fetch, move |pubkey_str| {
-        spawn(async move {
+    use_effect(use_reactive(
+        &(author_pubkey_for_fetch, client_initialized),
+        move |(pubkey_str, client_ready)| {
+            if !client_ready {
+                return;
+            }
+            spawn(async move {
             let pubkey = match PublicKey::from_hex(&pubkey_str)
                 .or_else(|_| PublicKey::from_bech32(&pubkey_str))
             {

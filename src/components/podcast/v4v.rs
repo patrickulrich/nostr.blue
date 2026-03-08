@@ -476,10 +476,12 @@ async fn send_v4v_payment(
                                             continue;
                                         }
                                     } else {
-                                        log::warn!(
-                                            "Could not parse bolt11 amount for {}, proceeding with payment",
+                                        log::error!(
+                                            "Could not parse bolt11 amount for {}, rejecting payment",
                                             recipient.address
                                         );
+                                        failed_recipients.push(recipient.address.clone());
+                                        continue;
                                     }
                                     match nwc_store::pay_invoice(pr.to_string()).await {
                                         Ok(_) => {

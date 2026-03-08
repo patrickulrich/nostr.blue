@@ -88,7 +88,7 @@ pub fn CodeStatusBadge(status: IssueStatus, #[props(default)] size: BadgeSize) -
             },
         ),
         IssueStatus::Draft => (
-            "bg-gray-500/10 text-gray-500 border-gray-500/20",
+            "bg-yellow-500/10 text-yellow-500 border-yellow-500/20",
             "Draft",
             rsx! {
                 svg {
@@ -136,7 +136,7 @@ pub fn status_color_class(status: IssueStatus) -> &'static str {
         IssueStatus::Open => "text-green-500",
         IssueStatus::Applied => "text-purple-500",
         IssueStatus::Closed => "text-red-500",
-        IssueStatus::Draft => "text-gray-500",
+        IssueStatus::Draft => "text-yellow-500",
     }
 }
 /// Get the display text for a status

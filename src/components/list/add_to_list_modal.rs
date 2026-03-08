@@ -495,6 +495,7 @@ async fn create_new_curation_list(name: String, event_id: String) -> Result<(), 
     log::info!("Created new curation list: {}", name);
     Ok(())
 }
+#[cfg(feature = "native")]
 async fn add_to_existing_list(list_event_id: String, event_id: String) -> Result<(), String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
     if !*nostr_client::HAS_SIGNER.read() {
@@ -533,4 +534,9 @@ async fn add_to_existing_list(list_event_id: String, event_id: String) -> Result
         .map_err(|e| format!("Failed to update list: {}", e))?;
     log::info!("Added event to existing list");
     Ok(())
+}
+
+#[cfg(not(feature = "native"))]
+async fn add_to_existing_list(_list_event_id: String, _event_id: String) -> Result<(), String> {
+    Err("Adding to existing lists is not supported on web".to_string())
 }

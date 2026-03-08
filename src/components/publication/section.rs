@@ -104,6 +104,20 @@ fn NestedIndexContent(
                 .collect();
             loaded_sections
                 .sort_by_key(|s| address_order.get(&s.a_tag).copied().unwrap_or(usize::MAX));
+
+            if loaded_sections.is_empty() && !errors.is_empty() {
+                let error_msg = if errors.len() == 1 {
+                    format!("Failed to load sections: {}", errors[0])
+                } else {
+                    format!("Failed to load sections: {} errors occurred", errors.len())
+                };
+                log::error!("{}", error_msg);
+                fetch_error.set(Some(error_msg));
+                loading.set(false);
+                return;
+            }
+
+            fetch_error.set(None);
             child_sections.set(loaded_sections);
             if !errors.is_empty() {
                 log::warn!("Some section fetches failed: {:?}", errors);
@@ -271,7 +285,7 @@ fn estimate_reading_time(content: &str) -> usize {
 /// Section outline (headings extracted from content)
 #[component]
 pub fn SectionOutline(content: String, on_heading_click: EventHandler<String>) -> Element {
-    let headings = use_memo(move || extract_headings(&content));
+    let headings = use_memo(use_reactive(&content, |c| extract_headings(&c)));
     if headings.read().is_empty() {
         return rsx! {};
     }

@@ -53,18 +53,26 @@ pub fn MarkdownEditor(mut props: MarkdownEditorProps) -> Element {
     let handle_format = {
         let mut content = props.content;
         move |format: MarkdownFormat| {
-            let current_content = content.read().clone();
-            let id_str = (*textarea_id.read()).clone();
-            let (cursor_start, cursor_end) = get_textarea_cursor(&id_str, &current_content);
-            let (new_content, new_cursor) =
-                apply_markdown_format(&current_content, cursor_start, cursor_end, format);
-            content.set(new_content.clone());
-            let id_clone = id_str.clone();
-            spawn(async move {
-                #[cfg(feature = "web")]
-                crate::platform::timer::sleep_ms(10).await;
-                set_textarea_cursor(&id_clone, new_cursor, &new_content);
-            });
+            #[cfg(feature = "web")]
+            {
+                let current_content = content.read().clone();
+                let id_str = (*textarea_id.read()).clone();
+                let (cursor_start, cursor_end) = get_textarea_cursor(&id_str, &current_content);
+                let (new_content, new_cursor) =
+                    apply_markdown_format(&current_content, cursor_start, cursor_end, format);
+                content.set(new_content.clone());
+                let id_clone = id_str.clone();
+                spawn(async move {
+                    crate::platform::timer::sleep_ms(10).await;
+                    set_textarea_cursor(&id_clone, new_cursor, &new_content);
+                });
+            }
+            #[cfg(not(feature = "web"))]
+            {
+                let current_content = content.read().clone();
+                let (new_content, _) = apply_markdown_format(&current_content, 0, 0, format);
+                content.set(new_content);
+            }
         }
     };
     let handle_keydown = {
