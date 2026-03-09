@@ -132,7 +132,10 @@ impl DisplayEpisode {
     }
     /// Create from Podcast Index API episode
     pub fn from_podcast_index_episode(episode: &PodcastIndexEpisode, feed: &PodcastFeed) -> Self {
-        let created_at = episode.date_published.unwrap_or(0) as u64;
+        let created_at = episode
+            .date_published
+            .and_then(|ts| u64::try_from(ts).ok())
+            .unwrap_or(0);
         let pub_date = episode.date_published.map(|ts| {
             chrono::DateTime::from_timestamp(ts, 0)
                 .map(|dt| dt.format("%b %d, %Y").to_string())
@@ -234,8 +237,22 @@ impl DisplayEpisode {
     }
     /// Convert to MusicTrack for player
     pub fn to_music_track(&self) -> MusicTrack {
+        let track_id = match &self.source {
+            TrackSource::RssPodcast {
+                podcast_id,
+                episode_guid,
+                feed_url,
+                ..
+            } => {
+                let feed_key = podcast_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| feed_url.clone());
+                format!("rss-podcast:{feed_key}:{episode_guid}")
+            }
+            _ => self.id.clone(),
+        };
         MusicTrack {
-            id: self.id.clone(),
+            id: track_id,
             title: self.title.clone(),
             artist: self.podcast_title.clone(),
             artist_npub: None,

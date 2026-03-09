@@ -42,11 +42,16 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
     let mut selected_citation = use_signal(|| None::<CachedCitation>);
     let mut selected_style = use_signal(|| CitationStyle::End);
     let mut loading = use_signal(|| false);
+    let mut load_version = use_signal(|| 0u64);
     let user_pubkey = auth_store::get_pubkey();
     use_effect(use_reactive(
         (&*props.show.read(), &user_pubkey),
         move |(is_shown, pubkey)| {
             if is_shown {
+                let version = load_version.with_mut(|v| {
+                    *v = v.wrapping_add(1);
+                    *v
+                });
                 if let Some(pk) = pubkey {
                     loading.set(true);
                     let pk_clone = pk.clone();
@@ -54,14 +59,19 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
                         if let Err(e) = fetch_citations_by_author(&pk_clone, 100).await {
                             crate::utils::log_fetch_error("citations", e);
                         }
-                        loading.set(false);
+                        if *load_version.peek() == version && *props.show.peek() {
+                            loading.set(false);
+                        }
                     });
+                } else {
+                    loading.set(false);
                 }
                 selected_citation.set(None);
                 selected_style.set(CitationStyle::End);
                 search_query.set(String::new());
                 search_results.set(Vec::new());
             } else {
+                load_version.with_mut(|v| *v = v.wrapping_add(1));
                 // Cleanup on hide - reset all modal state
                 loading.set(false);
                 selected_citation.set(None);

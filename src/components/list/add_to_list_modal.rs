@@ -27,10 +27,11 @@ pub struct AddToListModalProps {
 pub fn AddToListModal(props: AddToListModalProps) -> Element {
     let (lists_signal, lists_loading, lists_error, mut refresh_trigger) = use_user_lists();
     let existing_lists_supported = cfg!(feature = "native");
+    let create_new_default = !existing_lists_supported;
     let mut selected_list_id = use_signal(|| None::<String>);
     let mut selected_people_list = use_signal(|| None::<UserList>);
     let mut new_list_name = use_signal(String::new);
-    let mut create_new = use_signal(move || !existing_lists_supported);
+    let mut create_new = use_signal(move || create_new_default);
     let mut loading = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
     let mut success = use_signal(|| false);
@@ -232,7 +233,7 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                                 class: "text-sm text-muted-foreground hover:text-foreground flex items-center gap-1 mb-2",
                                 onclick: move |_| {
                                     add_mode.set(AddMode::SelectMode);
-                                    create_new.set(false);
+                                    create_new.set(create_new_default);
                                     error_msg.set(None);
                                 },
                                 "← Back"

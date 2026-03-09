@@ -592,8 +592,9 @@ pub fn get_textarea_cursor(textarea_id: &str, content: &str) -> (usize, usize) {
     (0, 0)
 }
 #[cfg(not(feature = "web"))]
-pub fn get_textarea_cursor(_textarea_id: &str, _content: &str) -> (usize, usize) {
-    (0, 0)
+pub fn get_textarea_cursor(_textarea_id: &str, content: &str) -> (usize, usize) {
+    let end = content.len();
+    (end, end)
 }
 /// Convert UTF-16 code unit index (from DOM) to UTF-8 byte index (for Rust string slicing)
 #[cfg(feature = "web")]

@@ -240,12 +240,12 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
             .to_bech32()
             .unwrap_or_else(|_| result.event.id.to_hex());
         let uri = format!("nostr:{}", nevent);
-        let display_text = result.event.content.chars().take(50).collect::<String>()
-            + if result.event.content.len() > 50 {
-                "..."
-            } else {
-                ""
-            };
+        let truncated: String = result.event.content.chars().take(50).collect();
+        let display_text = if result.event.content.chars().count() > 50 {
+            format!("{truncated}...")
+        } else {
+            truncated
+        };
         props.on_select.call(MentionSelection {
             uri,
             display_text,

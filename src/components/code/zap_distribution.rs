@@ -68,13 +68,24 @@ pub fn ZapDistribution(
     };
 
     // Manage selected pubkeys for the user picker
-    let selected_pubkeys = use_signal({
+    let mut selected_pubkeys = use_signal({
         let deduped_splits = deduped_splits.clone();
         move || {
             deduped_splits
                 .iter()
                 .map(|(pk, _)| pk.clone())
                 .collect::<Vec<String>>()
+        }
+    });
+    use_effect({
+        let deduped_splits = deduped_splits.clone();
+        move || {
+            selected_pubkeys.set(
+                deduped_splits
+                    .iter()
+                    .map(|(pk, _)| pk.clone())
+                    .collect::<Vec<String>>(),
+            );
         }
     });
 

@@ -52,9 +52,17 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
     let person_pubkey = props.person_pubkey.clone();
     let person_pubkey_for_effect = props.person_pubkey.clone();
     let mut person_metadata = use_signal(move || profiles::get_profile(&person_pubkey));
+    let mut profile_fetch_version = use_signal(|| 0u32);
     use_effect(use_reactive((&person_pubkey_for_effect,), move |(pk,)| {
+        let version = profile_fetch_version.with_mut(|v| {
+            *v = v.wrapping_add(1);
+            *v
+        });
+        person_metadata.set(profiles::get_profile(&pk));
         spawn(async move {
-            if profiles::fetch_profile(pk.clone()).await.is_ok() {
+            if profiles::fetch_profile(pk.clone()).await.is_ok()
+                && *profile_fetch_version.peek() == version
+            {
                 person_metadata.set(profiles::get_profile(&pk));
             }
         });

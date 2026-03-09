@@ -24,9 +24,16 @@ pub fn TrackCard(props: TrackCardProps) -> Element {
             is_playing.set(false);
         }
     });
-    let handle_play = {
+    let play_track_on_click = {
         let track = track.clone();
-        move |_| {
+        move || {
+            let music_track: MusicTrack = track.clone().into();
+            music_player::play_or_toggle_track(music_track, None, None);
+        }
+    };
+    let play_track_on_keydown = {
+        let track = track.clone();
+        move || {
             let music_track: MusicTrack = track.clone().into();
             music_player::play_or_toggle_track(music_track, None, None);
         }
@@ -39,7 +46,22 @@ pub fn TrackCard(props: TrackCardProps) -> Element {
     rsx! {
         div {
             class: "flex items-center gap-3 p-3 hover:bg-muted/50 rounded-lg transition group cursor-pointer",
-            onclick: handle_play,
+            role: "button",
+            tabindex: "0",
+            onclick: move |_| play_track_on_click(),
+            onkeydown: move |evt| {
+                match evt.key() {
+                    Key::Enter => {
+                        evt.prevent_default();
+                        play_track_on_keydown();
+                    }
+                    Key::Character(ref c) if c == " " => {
+                        evt.prevent_default();
+                        play_track_on_keydown();
+                    }
+                    _ => {}
+                }
+            },
             div { class: "relative shrink-0",
                 img {
                     src: "{track.album_art_url}",
@@ -49,6 +71,7 @@ pub fn TrackCard(props: TrackCardProps) -> Element {
                 }
                 button {
                     class: "absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition rounded",
+                    tabindex: "-1",
                     dangerous_inner_html: if *is_playing.read() { icons::PAUSE } else { icons::PLAY },
                 }
             }

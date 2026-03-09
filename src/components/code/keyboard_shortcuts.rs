@@ -29,6 +29,8 @@ pub fn CodeKeyboardShortcuts() -> Element {
     // Store JS function reference for event listener cleanup on unmount
     #[cfg(feature = "web")]
     let mut cleanup_fn = use_signal(|| None::<js_sys::Function>);
+    #[cfg(feature = "web")]
+    let mut timeout_closure = use_signal(|| None::<Closure<dyn FnMut()>>);
     // Store timeout ID for cleanup on unmount
     #[cfg(feature = "web")]
     let mut timeout_id = use_signal(|| None::<i32>);
@@ -75,6 +77,7 @@ pub fn CodeKeyboardShortcuts() -> Element {
                             w.clear_timeout_with_handle(id);
                         }
                         timeout_id.set(None);
+                        timeout_closure.set(None);
                     }
                     return;
                 }
@@ -90,6 +93,7 @@ pub fn CodeKeyboardShortcuts() -> Element {
                             w.clear_timeout_with_handle(id);
                         }
                         timeout_id.set(None);
+                        timeout_closure.set(None);
                     }
                     return;
                 }
@@ -105,6 +109,7 @@ pub fn CodeKeyboardShortcuts() -> Element {
                     let callback = Closure::wrap(Box::new(move || {
                         pending_g.set(false);
                         timeout_id.set(None);
+                        timeout_closure.set(None);
                     }) as Box<dyn FnMut()>);
                     let js_callback = callback
                         .as_ref()
@@ -115,7 +120,7 @@ pub fn CodeKeyboardShortcuts() -> Element {
                     {
                         pending_g.set(true);
                         timeout_id.set(Some(id));
-                        callback.forget();
+                        timeout_closure.set(Some(callback));
                     }
                     return;
                 }
@@ -131,6 +136,7 @@ pub fn CodeKeyboardShortcuts() -> Element {
                             w.clear_timeout_with_handle(id);
                         }
                         timeout_id.set(None);
+                        timeout_closure.set(None);
                     }
 
                     match key.as_str() {
@@ -175,6 +181,7 @@ pub fn CodeKeyboardShortcuts() -> Element {
             if let Some(id) = *timeout_id.peek() {
                 window.clear_timeout_with_handle(id);
             }
+            timeout_closure.set(None);
         }
     });
 

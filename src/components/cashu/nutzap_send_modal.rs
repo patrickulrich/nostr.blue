@@ -46,6 +46,12 @@ pub fn NutzapSendModal(
         recipient_info.set(None);
         compatible_mint.set(None);
 
+        if !client_initialized {
+            is_loading_info.set(false);
+            load_error.set(Some("Nostr client is still initializing".to_string()));
+            return;
+        }
+
         spawn(async move {
             match cashu::fetch_nutzap_info(&recipient).await {
                 Ok(info) => {

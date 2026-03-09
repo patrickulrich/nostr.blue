@@ -45,6 +45,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
     let mut sending = use_signal(|| false);
     let mut expanded = use_signal(|| false);
     let mut chat_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
+    let mut request_gen = use_signal(|| 0u32);
     let has_signer = use_memo(move || *HAS_SIGNER.read());
     let chat_container_id = format!(
         "live-chat-messages-{}-{}",
@@ -58,8 +59,18 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
         (&stream_author_pubkey, &stream_d_tag),
         move |(author, dtag)| {
             let tag = format!("30311:{}:{}", author, dtag);
+            let current_gen = request_gen.peek().wrapping_add(1);
+            request_gen.set(current_gen);
+            messages.set(Vec::new());
+            loading.set(true);
             spawn(async move {
-                loading.set(true);
+                let previous_sub_id = chat_sub_id.read().clone();
+                chat_sub_id.set(None);
+                if let Some(sub_id) = previous_sub_id {
+                    if let Some(client) = get_client() {
+                        client.unsubscribe(&sub_id).await;
+                    }
+                }
                 let parts: Vec<&str> = tag.split(':').collect();
                 if parts.len() == 3 && PublicKey::parse(parts[1]).is_ok() {
                     let filter = Filter::new()
@@ -71,6 +82,9 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
                         .limit(200);
                     match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
                         Ok(events) => {
+                            if *request_gen.peek() != current_gen {
+                                return;
+                            }
                             let mut sorted_messages = events;
                             sorted_messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
                             messages.set(sorted_messages);
@@ -80,6 +94,9 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
                             log::error!("Failed to fetch chat messages: {}", e);
                         }
                     }
+                }
+                if *request_gen.peek() != current_gen {
+                    return;
                 }
                 loading.set(false);
 
@@ -96,6 +113,10 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
 
                     match client.subscribe(realtime_filter, None).await {
                         Ok(output) => {
+                            if *request_gen.peek() != current_gen {
+                                client.unsubscribe(&output.val).await;
+                                return;
+                            }
                             let subscription_id = output.val;
                             chat_sub_id.set(Some(subscription_id.clone()));
                             log::debug!("Subscribed to live chat for {}", tag);
@@ -103,6 +124,9 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
                             spawn(async move {
                                 let mut notifications = client.notifications();
                                 while let Ok(notification) = notifications.recv().await {
+                                    if *request_gen.peek() != current_gen {
+                                        break;
+                                    }
                                     if let RelayPoolNotification::Event {
                                         subscription_id: recv_sub_id,
                                         event,
@@ -110,6 +134,9 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
                                     } = notification
                                     {
                                         if recv_sub_id == subscription_id {
+                                            if *request_gen.peek() != current_gen {
+                                                break;
+                                            }
                                             let already_exists =
                                                 messages.read().iter().any(|e| e.id == event.id);
                                             if !already_exists {

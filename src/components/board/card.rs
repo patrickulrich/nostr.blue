@@ -158,17 +158,29 @@ pub fn PinBoardCardMosaic(
     let mut has_reacted = use_signal(|| false);
     let mut reaction_count = use_signal(|| 0usize);
     let mut reaction_loading = use_signal(|| false);
+    let mut reaction_request_gen = use_signal(|| 0u32);
     let a_tag_for_reactions = board.a_tag.clone();
     use_effect(use_reactive!(|a_tag_for_reactions| {
         let a_tag = a_tag_for_reactions.clone();
+        let has_signer = *HAS_SIGNER.read();
+        let current_gen = reaction_request_gen.peek().wrapping_add(1);
+        reaction_request_gen.set(current_gen);
         spawn(async move {
             if let Ok(count) = fetch_pinboard_reaction_count(&a_tag).await {
+                if *reaction_request_gen.peek() != current_gen {
+                    return;
+                }
                 reaction_count.set(count);
             }
-            if *HAS_SIGNER.read() {
+            if has_signer {
                 if let Ok(reacted) = has_user_reacted_to_pinboard(&a_tag).await {
+                    if *reaction_request_gen.peek() != current_gen {
+                        return;
+                    }
                     has_reacted.set(reacted);
                 }
+            } else if *reaction_request_gen.peek() == current_gen {
+                has_reacted.set(false);
             }
         });
     }));

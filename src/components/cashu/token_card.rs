@@ -98,7 +98,6 @@ fn parse_token(token: &str) -> Option<ParsedTokenInfo> {
 pub fn CashuTokenCard(token: String) -> Element {
     let mut claim_state = use_signal(|| ClaimState::Idle);
     let mut copied = use_signal(|| false);
-    let _wallet_error = use_signal(|| None::<String>);
     let toast = consume_toast();
     let has_signer = use_memo(move || *HAS_SIGNER.read());
     let token_for_memo = token.clone();
@@ -139,8 +138,6 @@ pub fn CashuTokenCard(token: String) -> Element {
         let token = token.clone();
         #[allow(unused_variables)]
         let toast_api = toast;
-        #[allow(unused_variables, unused_mut)]
-        let mut wallet_error = _wallet_error;
         move |e: MouseEvent| {
             e.stop_propagation();
             #[cfg(feature = "web")]
@@ -153,9 +150,6 @@ pub fn CashuTokenCard(token: String) -> Element {
             #[cfg(not(feature = "web"))]
             {
                 let _ = &token;
-                wallet_error.set(Some(
-                    "Open wallet not supported on this platform".to_string(),
-                ));
                 toast_api.error(
                     "Open wallet not supported on this platform".to_string(),
                     ToastOptions::new()

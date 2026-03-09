@@ -192,8 +192,6 @@ window.hlsManager = window.hlsManager || {
                 if (this.activeAttachMap.get(elementId) !== attachId) {
                     clearTimeout(timeout);
                     hls.destroy();
-                    this.pendingTimeouts.delete(elementId);
-                    this.settlePendingAttach(elementId, { type: 'cancelled', url: streamUrl });
                     return;
                 }
                 console.log('[HLS Manager] Media attached, loading source:', streamUrl);
@@ -205,8 +203,6 @@ window.hlsManager = window.hlsManager || {
                 if (this.activeAttachMap.get(elementId) !== attachId) {
                     clearTimeout(timeout);
                     hls.destroy();
-                    this.pendingTimeouts.delete(elementId);
-                    this.settlePendingAttach(elementId, { type: 'cancelled', url: streamUrl });
                     return;
                 }
                 clearTimeout(timeout);

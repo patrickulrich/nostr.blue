@@ -60,6 +60,7 @@ pub fn NoteCard(
     let mut reply_count = use_signal(|| 0usize);
     let mut repost_count = use_signal(|| 0usize);
     let mut zap_amount_sats = use_signal(|| 0u64);
+    let mut count_request_gen = use_signal(|| 0u32);
     let reaction = use_reaction(
         event_id_like.clone(),
         author_pubkey_like.clone(),
@@ -69,19 +70,9 @@ pub fn NoteCard(
     let mut reposter_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
     use_effect(use_reactive(&precomputed_counts, move |counts_opt| {
         if let Some(counts) = counts_opt {
-            let current_has_data = {
-                let reply = *reply_count.peek();
-                let repost = *repost_count.peek();
-                let zap = *zap_amount_sats.peek();
-                reply > 0 || repost > 0 || zap > 0
-            };
-            let new_has_data =
-                counts.replies > 0 || counts.reposts > 0 || counts.zap_amount_sats > 0;
-            if new_has_data || !current_has_data {
-                reply_count.set(counts.replies);
-                repost_count.set(counts.reposts);
-                zap_amount_sats.set(counts.zap_amount_sats);
-            }
+            reply_count.set(counts.replies);
+            repost_count.set(counts.reposts);
+            zap_amount_sats.set(counts.zap_amount_sats);
             is_reposted.set(counts.user_reposted.unwrap_or(false));
             user_repost_id.set(counts.user_repost_id.clone());
             is_zapped.set(counts.user_zapped.unwrap_or(false));
@@ -99,6 +90,8 @@ pub fn NoteCard(
                 .read()
                 .as_ref()
                 .map(|info| info.public_key.clone());
+            let current_gen = count_request_gen.peek().wrapping_add(1);
+            count_request_gen.set(current_gen);
             spawn(async move {
                 let client = match get_client() {
                     Some(c) => c,
@@ -116,6 +109,9 @@ pub fn NoteCard(
                     .fetch_events(combined_filter, Duration::from_secs(5))
                     .await
                 {
+                    if *count_request_gen.peek() != current_gen {
+                        return;
+                    }
                     let mut replies = 0;
                     let mut reposts = 0;
                     let mut total_sats = 0u64;

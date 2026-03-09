@@ -32,40 +32,39 @@ class MainActivity : WryActivity() {
     private val signerLauncher: ActivityResultLauncher<Intent> = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        Log.d(TAG, "Signer activity result: resultCode=${result.resultCode}")
-        if (result.resultCode == Activity.RESULT_OK) {
-            val pubkey = result.data?.getStringExtra("result")
-            val pkg = result.data?.getStringExtra("package")
-            val maskedPubkey = pubkey?.let { if (it.length > 8) "...${it.takeLast(4)}" else it }
-            Log.d(TAG, "Signer approved: pubkey=$maskedPubkey, package=$pkg")
-            synchronized(lock) {
-                when {
-                    pubkey.isNullOrBlank() -> {
-                        intentError = "Signer approval returned without a pubkey"
-                        Log.e(TAG, "Signer approval missing pubkey for package=$pkg")
-                    }
-                    pkg.isNullOrBlank() -> {
-                        intentError = "Signer approval returned without a package name"
-                        Log.e(TAG, "Signer approval missing package for pubkey=$maskedPubkey")
-                    }
-                    else -> {
-                        pendingPubkey = pubkey
-                        pendingPackage = pkg
-                        intentError = null
-                    }
-                }
-            }
-        } else {
-            val errorMsg = "User rejected or cancelled (resultCode=${result.resultCode})"
-            Log.w(TAG, errorMsg)
-            synchronized(lock) {
-                pendingPubkey = null
-                pendingPackage = null
-                intentError = errorMsg
-            }
-        }
         synchronized(lock) {
-            intentInFlight = false
+            try {
+                Log.d(TAG, "Signer activity result: resultCode=${result.resultCode}")
+                if (result.resultCode == Activity.RESULT_OK) {
+                    val pubkey = result.data?.getStringExtra("result")
+                    val pkg = result.data?.getStringExtra("package")
+                    val maskedPubkey = pubkey?.let { if (it.length > 8) "...${it.takeLast(4)}" else it }
+                    Log.d(TAG, "Signer approved: pubkey=$maskedPubkey, package=$pkg")
+                    when {
+                        pubkey.isNullOrBlank() -> {
+                            intentError = "Signer approval returned without a pubkey"
+                            Log.e(TAG, "Signer approval missing pubkey for package=$pkg")
+                        }
+                        pkg.isNullOrBlank() -> {
+                            intentError = "Signer approval returned without a package name"
+                            Log.e(TAG, "Signer approval missing package for pubkey=$maskedPubkey")
+                        }
+                        else -> {
+                            pendingPubkey = pubkey
+                            pendingPackage = pkg
+                            intentError = null
+                        }
+                    }
+                } else {
+                    val errorMsg = "User rejected or cancelled (resultCode=${result.resultCode})"
+                    Log.w(TAG, errorMsg)
+                    pendingPubkey = null
+                    pendingPackage = null
+                    intentError = errorMsg
+                }
+            } finally {
+                intentInFlight = false
+            }
         }
     }
 
@@ -323,12 +322,7 @@ class MainActivity : WryActivity() {
         @JvmStatic
         fun isSignerInstalled(context: Context): Boolean {
             return try {
-                val intent = Intent().apply {
-                    action = Intent.ACTION_VIEW
-                    data = Uri.parse("nostrsigner:")
-                }
-                val infos = context.packageManager.queryIntentActivities(intent, 0)
-                infos.isNotEmpty()
+                querySignerPackages(context).isNotEmpty()
             } catch (e: Exception) {
                 Log.e(TAG, "isSignerInstalled failed", e)
                 false
@@ -609,7 +603,6 @@ class MainActivity : WryActivity() {
                 pendingPubkey = null
                 pendingPackage = null
                 intentError = null
-                intentInFlight = false
             }
             Log.d(TAG, "Cleared pending Intent state")
         }

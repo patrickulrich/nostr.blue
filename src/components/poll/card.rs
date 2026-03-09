@@ -78,13 +78,6 @@ pub fn PollCard(
             is_reposted.set(counts.user_reposted.unwrap_or(false));
             user_repost_id.set(counts.user_repost_id.clone());
             is_zapped.set(counts.user_zapped.unwrap_or(false));
-        } else {
-            reply_count.set(0);
-            repost_count.set(0);
-            zap_amount_sats.set(0);
-            is_reposted.set(false);
-            user_repost_id.set(None);
-            is_zapped.set(false);
         }
     }));
     let _metadata_task = use_future(move || {

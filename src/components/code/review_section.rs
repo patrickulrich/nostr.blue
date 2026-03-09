@@ -82,6 +82,15 @@ impl LocalReviewState {
     }
 }
 
+fn should_replace_review(existing: &PersistedReview, candidate: &PersistedReview) -> bool {
+    candidate.created_at > existing.created_at
+        || (candidate.created_at == existing.created_at
+            && existing.event_id.is_empty()
+            && !candidate.event_id.is_empty())
+        || (candidate.created_at == existing.created_at
+            && candidate.event_id > existing.event_id)
+}
+
 /// PR Review Section component
 #[component]
 pub fn PRReviewSection(
@@ -103,13 +112,10 @@ pub fn PRReviewSection(
     let mut fetch_error = use_signal(|| None::<String>);
     let mut submitting = use_signal(|| false);
 
-    // Fetch persisted reviews from relays on mount, with generation counter
-    // to discard stale responses when pr_id changes rapidly
+    // Increment the generation and reset local UI state only when the PR changes.
     let mut gen = use_signal(|| 0u32);
     use_effect(use_reactive(&pr_id, move |id| {
-        if !*CLIENT_INITIALIZED.read() {
-            return;
-        }
+        let _ = id;
         let current_gen = gen.peek().wrapping_add(1);
         gen.set(current_gen);
         reviews.set(Vec::new());
@@ -117,31 +123,43 @@ pub fn PRReviewSection(
         fetch_error.set(None);
         show_form.set(false);
         review_body.set(String::new());
+    }));
+
+    // Fetch persisted reviews when the PR changes or the client becomes ready.
+    use_effect(use_reactive((&pr_id, &*CLIENT_INITIALIZED.read()), move |(id, is_ready)| {
+        if !is_ready {
+            return;
+        }
+        let current_gen = *gen.read();
+        if !*CLIENT_INITIALIZED.read() {
+            return;
+        }
         spawn(async move {
             match fetch_pr_reviews(&id).await {
                 Ok(persisted) => {
                     if *gen.peek() != current_gen {
                         return;
                     }
-                    // Dedup persisted reviews: keep latest per pubkey
                     let mut by_pubkey = std::collections::HashMap::<String, PersistedReview>::new();
-                    for r in persisted {
+                    for r in reviews.read().iter().cloned() {
                         by_pubkey
                             .entry(r.pubkey.clone())
                             .and_modify(|existing| {
-                                if r.created_at > existing.created_at
-                                    || (r.created_at == existing.created_at
-                                        && r.event_id > existing.event_id)
-                                {
+                                if should_replace_review(existing, &r) {
                                     *existing = r.clone();
                                 }
                             })
                             .or_insert(r);
                     }
-                    // Merge: optimistic entries override persisted via insert()
-                    let current = reviews.read().clone();
-                    for r in current.into_iter().filter(|r| r.event_id.is_empty()) {
-                        by_pubkey.insert(r.pubkey.clone(), r);
+                    for r in persisted {
+                        by_pubkey
+                            .entry(r.pubkey.clone())
+                            .and_modify(|existing| {
+                                if should_replace_review(existing, &r) {
+                                    *existing = r.clone();
+                                }
+                            })
+                            .or_insert(r);
                     }
                     let mut sorted: Vec<_> = by_pubkey.into_values().collect();
                     sorted.sort_by(|a, b| b.created_at.cmp(&a.created_at));

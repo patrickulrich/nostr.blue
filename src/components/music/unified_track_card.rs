@@ -37,14 +37,28 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
     let artist_pubkey = track.artist_npub.clone();
     let artist_is_empty = track.artist.is_empty();
     let mut artist_name = use_signal(|| track.artist.clone());
+    let mut artist_lookup_gen = use_signal(|| 0u32);
+    use_effect({
+        let track_artist = track.artist.clone();
+        move || {
+            artist_name.set(track_artist.clone());
+        }
+    });
     use_effect(use_reactive(
-        (&artist_pubkey, &artist_is_empty),
-        move |(pubkey_opt, is_empty)| {
+        (&track.id, &artist_pubkey, &artist_is_empty),
+        move |(track_id, pubkey_opt, is_empty)| {
+            let _ = track_id;
+            let gen = artist_lookup_gen.with_mut(|g| {
+                *g = g.wrapping_add(1);
+                *g
+            });
             if let Some(pubkey) = pubkey_opt.clone() {
                 if is_empty {
                     spawn(async move {
                         if let Ok(profile) = profiles::fetch_profile(pubkey).await {
-                            artist_name.set(profile.get_display_name());
+                            if *artist_lookup_gen.peek() == gen {
+                                artist_name.set(profile.get_display_name());
+                            }
                         }
                     });
                 }
@@ -138,22 +152,22 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
         ),
     };
     let artist_route = match &track.source {
-        TrackSource::Wavlake { artist_id, .. } => Route::MusicArtist {
+        TrackSource::Wavlake { artist_id, .. } => Some(Route::MusicArtist {
             artist_id: artist_id.clone(),
-        },
-        TrackSource::Nostr { pubkey, .. } => Route::MusicArtist {
+        }),
+        TrackSource::Nostr { pubkey, .. } => Some(Route::MusicArtist {
             artist_id: pubkey.clone(),
-        },
-        TrackSource::NostrPodcast { pubkey, .. } => Route::Profile {
+        }),
+        TrackSource::NostrPodcast { pubkey, .. } => Some(Route::Profile {
             pubkey: pubkey.clone(),
-        },
-        TrackSource::RssPodcast { .. } => Route::Home {
-            list: String::new(),
-        },
-        TrackSource::RssMusic { feed_id, .. } => Route::MusicRssAlbum { feed_id: *feed_id },
-        TrackSource::Radio { pubkey, .. } => Route::Profile {
+        }),
+        TrackSource::RssPodcast { podcast_id, .. } => podcast_id.map(|id| Route::PodcastRssFeedDetail {
+            podcast_id: id.to_string(),
+        }),
+        TrackSource::RssMusic { feed_id, .. } => Some(Route::MusicRssAlbum { feed_id: *feed_id }),
+        TrackSource::Radio { pubkey, .. } => Some(Route::Profile {
             pubkey: pubkey.clone(),
-        },
+        }),
     };
     rsx! {
         div {
@@ -208,11 +222,15 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
                     }
                 }
                 div { class: "text-xs text-muted-foreground truncate",
-                    Link {
-                        to: artist_route.clone(),
-                        class: "hover:text-foreground hover:underline",
-                        onclick: move |e: Event<MouseData>| e.stop_propagation(),
-                        "{artist_name}"
+                    if let Some(route) = artist_route.clone() {
+                        Link {
+                            to: route,
+                            class: "hover:text-foreground hover:underline",
+                            onclick: move |e: Event<MouseData>| e.stop_propagation(),
+                            "{artist_name}"
+                        }
+                    } else {
+                        span { "{artist_name}" }
                     }
                 }
                 if props.show_album {

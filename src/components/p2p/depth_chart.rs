@@ -29,7 +29,10 @@ fn compute_depth_data(orders: &[P2POrder]) -> DepthData {
     let mut data = DepthData::new();
     let pending_orders: Vec<&P2POrder> = orders
         .iter()
-        .filter(|o| o.status == OrderStatus::Pending && o.premium.is_some())
+        .filter(|o| {
+            o.status == OrderStatus::Pending
+                && o.premium.map(|premium| premium.is_finite()).unwrap_or(false)
+        })
         .collect();
     if pending_orders.is_empty() {
         return data;
@@ -46,14 +49,14 @@ fn compute_depth_data(orders: &[P2POrder]) -> DepthData {
         .collect();
     sell_orders.sort_by(|a, b| {
         b.premium
-            .unwrap_or(0.0)
-            .partial_cmp(&a.premium.unwrap_or(0.0))
+            .expect("finite premium filtered above")
+            .partial_cmp(&a.premium.expect("finite premium filtered above"))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     buy_orders.sort_by(|a, b| {
         a.premium
-            .unwrap_or(0.0)
-            .partial_cmp(&b.premium.unwrap_or(0.0))
+            .expect("finite premium filtered above")
+            .partial_cmp(&b.premium.expect("finite premium filtered above"))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     let mut cumulative: u64 = 0;
@@ -62,7 +65,7 @@ fn compute_depth_data(orders: &[P2POrder]) -> DepthData {
             continue;
         }
         cumulative = cumulative.saturating_add(order.amount_sats);
-        data.sells.push((order.premium.unwrap_or(0.0), cumulative));
+        data.sells.push((order.premium.expect("finite premium filtered above"), cumulative));
     }
     data.max_cumulative = data.max_cumulative.max(cumulative);
     cumulative = 0;
@@ -71,7 +74,7 @@ fn compute_depth_data(orders: &[P2POrder]) -> DepthData {
             continue;
         }
         cumulative = cumulative.saturating_add(order.amount_sats);
-        data.buys.push((order.premium.unwrap_or(0.0), cumulative));
+        data.buys.push((order.premium.expect("finite premium filtered above"), cumulative));
     }
     data.max_cumulative = data.max_cumulative.max(cumulative);
     if data.max_cumulative == 0 {

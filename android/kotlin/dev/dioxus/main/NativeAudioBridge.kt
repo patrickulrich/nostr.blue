@@ -118,8 +118,8 @@ object NativeAudioBridge {
     @Synchronized
     fun setQueue(context: Context, queueJson: String, startIndex: Int, playWhenReady: Boolean): String {
         return try {
-            ensureServiceStarted(context)
             val parsed = parseQueue(queueJson)
+            ensureServiceStarted(context)
             queue.clear()
             queue.addAll(parsed)
             currentIndex = startIndex.coerceIn(0, (queue.size - 1).coerceAtLeast(0))
@@ -204,7 +204,7 @@ object NativeAudioBridge {
             ensureInitialized(context)
             if (queue.isEmpty()) return "ok"
             currentIndex = (currentIndex + 1).coerceAtMost(queue.lastIndex)
-            prepareCurrent(player?.isPlaying == true)
+            prepareCurrent(playWhenReady)
             "ok"
         } catch (e: Exception) {
             Log.e(AUDIO_TAG, "skipNext failed", e)
@@ -217,12 +217,12 @@ object NativeAudioBridge {
         return try {
             ensureInitialized(context)
             if (queue.isEmpty()) return "ok"
-            val currentPosition = player?.currentPosition ?: 0
+            val currentPosition = if (isPreparing) 0 else (player?.currentPosition ?: 0)
             if (currentPosition > 3_000) {
                 player?.seekTo(0)
             } else {
                 currentIndex = (currentIndex - 1).coerceAtLeast(0)
-                prepareCurrent(player?.isPlaying == true)
+                prepareCurrent(playWhenReady)
             }
             "ok"
         } catch (e: Exception) {
@@ -382,7 +382,7 @@ object NativeAudioBridge {
         try {
             player.setDataSource(item.mediaUrl)
         } catch (e: Exception) {
-            Log.e(AUDIO_TAG, "Failed to load media URL: ${item.mediaUrl}", e)
+            Log.e(AUDIO_TAG, "Failed to load media source for item=${item.id}", e)
             lastError.set("Failed to load: ${e.message}")
             isPreparing = false
             updatePlaybackState(false, PlaybackState.STATE_ERROR)
@@ -419,13 +419,18 @@ object NativeAudioBridge {
             PlaybackState.ACTION_SKIP_TO_PREVIOUS or
             PlaybackState.ACTION_SEEK_TO or
             PlaybackState.ACTION_STOP
+        val positionMs = if (isPreparing) {
+            0L
+        } else {
+            try {
+                (player?.currentPosition ?: 0).toLong()
+            } catch (_: IllegalStateException) {
+                0L
+            }
+        }
         val playbackState = PlaybackState.Builder()
             .setActions(actions)
-            .setState(
-                state,
-                (player?.currentPosition ?: 0).toLong(),
-                if (isPlaying) 1.0f else 0.0f
-            )
+            .setState(state, positionMs, if (isPlaying) 1.0f else 0.0f)
             .build()
         mediaSession?.setPlaybackState(playbackState)
         mediaSession?.isActive = true
@@ -518,6 +523,7 @@ object NativeAudioBridge {
         val service = serviceRef?.get() ?: return
         service.stopForeground(Service.STOP_FOREGROUND_REMOVE)
         NotificationManagerCompat.from(service).cancel(NOTIFICATION_ID)
+        service.stopSelf()
     }
 
     private fun serviceIntent(context: Context, action: String): PendingIntent {

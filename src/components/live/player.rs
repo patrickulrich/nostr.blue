@@ -32,11 +32,20 @@ fn build_native_setup_script(
                             let video = document.getElementById({video_id});
                             if (!video) return "error:Video element not found";
 
-                            {detach_block}
                             let url = {stream_url};
                             let isHls = url.toLowerCase().includes('.m3u8');
 
-                            if (isHls && window.hlsManager) {{
+                            {detach_block}
+
+                            if (window.hlsManager) {{
+                                window.hlsManager.detach({video_id});
+                            }}
+
+                            if (!isHls) {{
+                                video.removeAttribute('src');
+                                video.load();
+                                video.src = url;
+                            }} else if (window.hlsManager) {{
                                 let result = await window.hlsManager.attachToMedia({video_id}, url);
                                 console.log('[Live] HLS stream {log_msg}:', result);
                                 if (result && result.type === 'error') {{
@@ -46,7 +55,7 @@ fn build_native_setup_script(
                                     return "cancelled";
                                 }}
                             }} else {{
-                                video.src = url;
+                                return "error:HLS manager unavailable";
                             }}
 
                             if ({autoplay}) {{

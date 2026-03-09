@@ -439,7 +439,7 @@ fn get_event_status(event: &UnifiedEvent) -> EventStatus {
     if event.is_calendar_event() {
         let end_ts = event.end_timestamp().unwrap_or_else(|| {
             if event.is_all_day() {
-                start_ts + 86400
+                start_ts.saturating_add(86400)
             } else {
                 start_ts
             }

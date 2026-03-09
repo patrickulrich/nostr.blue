@@ -23,8 +23,8 @@ fn format_time(seconds: f64) -> String {
     format!("{}:{:02}", mins, secs)
 }
 
-#[cfg(all(not(feature = "web"), not(feature = "mobile")))]
-fn parse_native_audio_bind_result(val: serde_json::Value) -> String {
+#[cfg(not(feature = "mobile"))]
+fn parse_audio_bind_result(val: serde_json::Value) -> String {
     match val {
         serde_json::Value::String(result) => result,
         serde_json::Value::Null => {
@@ -38,8 +38,8 @@ fn parse_native_audio_bind_result(val: serde_json::Value) -> String {
     }
 }
 
-#[cfg(all(not(feature = "web"), not(feature = "mobile")))]
-async fn ensure_native_audio_hls_manager() -> Result<(), String> {
+#[cfg(not(feature = "mobile"))]
+async fn ensure_audio_hls_manager() -> Result<(), String> {
     let check = document::eval("return typeof window.hlsManager !== 'undefined'")
         .await
         .map_err(|e| format!("Failed to check HLS manager: {:?}", e))?;
@@ -75,27 +75,27 @@ pub fn PersistentMusicPlayer() -> Element {
     #[allow(unused_mut)]
     let mut seek_gen = use_signal(|| 0u32);
     let mut show_share_modal = use_signal(|| false);
-    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
+    #[cfg(not(feature = "mobile"))]
     #[allow(unused_mut)]
     let mut native_source_bound = use_signal(|| false);
-    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
+    #[cfg(not(feature = "mobile"))]
     #[allow(unused_mut)]
     let mut native_bind_token = use_signal(|| 0u32);
     let audio_id = "global-music-player-audio";
     // Inject HLS manager JS on desktop builds.
     // On web, it loads via <script> tag in index.html.
     // On mobile, index.html is not used — Dioxus generates its own HTML.
-    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
+    #[cfg(all(not(feature = "mobile"), not(feature = "web")))]
     {
         use_effect(move || {
             spawn(async move {
-                if let Err(e) = ensure_native_audio_hls_manager().await {
+                if let Err(e) = ensure_audio_hls_manager().await {
                     log::error!("[Audio] {}", e);
                 }
             });
         });
     }
-    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
+    #[cfg(not(feature = "mobile"))]
     use_effect(use_reactive(
         (&state.current_track, &state.is_playing),
         move |(current_track, is_playing)| {
@@ -110,7 +110,7 @@ pub fn PersistentMusicPlayer() -> Element {
                 {
                     spawn(async move {
                         if is_hls {
-                            if let Err(e) = ensure_native_audio_hls_manager().await {
+                            if let Err(e) = ensure_audio_hls_manager().await {
                                 if *native_bind_token.read() == bind_token {
                                     native_source_bound.set(false);
                                     music_player::set_playback_error(Some(format!(
@@ -230,7 +230,7 @@ pub fn PersistentMusicPlayer() -> Element {
                         };
                         match document::eval(&script).await {
                             Ok(val) => {
-                                let result = parse_native_audio_bind_result(val);
+                                let result = parse_audio_bind_result(val);
                                 if *native_bind_token.read() == bind_token {
                                     if result == format!("bound:{}", media_url) {
                                         native_source_bound.set(true);

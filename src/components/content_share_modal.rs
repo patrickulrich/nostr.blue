@@ -106,22 +106,21 @@ pub fn ContentShareModal(
     let mut cursor_position = use_signal(|| 0usize);
     let textarea_id = use_signal(|| format!("content-share-textarea-{}", modal_id()));
     #[allow(unused_variables)]
-    fn get_cursor_position(textarea_id: &str) -> Option<usize> {
+    fn get_cursor_position(textarea_id: &str, current_text: &str) -> usize {
         #[cfg(feature = "web")]
         {
             if let Some(window) = web_sys::window() {
                 if let Some(document) = window.document() {
                     if let Some(element) = document.get_element_by_id(textarea_id) {
                         if let Some(textarea) = element.dyn_ref::<web_sys::HtmlTextAreaElement>() {
-                            return Some(
-                                textarea.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize,
-                            );
+                            return textarea.selection_start().unwrap_or(Some(0)).unwrap_or(0)
+                                as usize;
                         }
                     }
                 }
             }
         }
-        None
+        current_text.len()
     }
     fn utf16_to_utf8_index(text: &str, utf16_index: usize) -> usize {
         let mut utf8_index = 0;
@@ -446,24 +445,21 @@ pub fn ContentShareModal(
                                 oninput: move |e| {
                                     nostr_text.set(e.value().clone());
                                     nostr_error.set(None);
-                                    if let Some(pos) = get_cursor_position(&textarea_id.read()) {
-                                        let utf8_pos = utf16_to_utf8_index(&e.value(), pos);
-                                        cursor_position.set(utf8_pos);
-                                    }
+                                    let pos = get_cursor_position(&textarea_id.read(), &e.value());
+                                    let utf8_pos = utf16_to_utf8_index(&e.value(), pos);
+                                    cursor_position.set(utf8_pos);
                                 },
                                 onclick: move |_| {
-                                    if let Some(pos) = get_cursor_position(&textarea_id.read()) {
-                                        let text = nostr_text.read();
-                                        let utf8_pos = utf16_to_utf8_index(&text, pos);
-                                        cursor_position.set(utf8_pos);
-                                    }
+                                    let text = nostr_text.read();
+                                    let pos = get_cursor_position(&textarea_id.read(), &text);
+                                    let utf8_pos = utf16_to_utf8_index(&text, pos);
+                                    cursor_position.set(utf8_pos);
                                 },
                                 onkeyup: move |_| {
-                                    if let Some(pos) = get_cursor_position(&textarea_id.read()) {
-                                        let text = nostr_text.read();
-                                        let utf8_pos = utf16_to_utf8_index(&text, pos);
-                                        cursor_position.set(utf8_pos);
-                                    }
+                                    let text = nostr_text.read();
+                                    let pos = get_cursor_position(&textarea_id.read(), &text);
+                                    let utf8_pos = utf16_to_utf8_index(&text, pos);
+                                    cursor_position.set(utf8_pos);
                                 },
                             }
                             if let Some(error) = nostr_error.read().as_ref() {

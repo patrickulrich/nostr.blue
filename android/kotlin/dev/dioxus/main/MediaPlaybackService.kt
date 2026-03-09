@@ -19,7 +19,7 @@ class MediaPlaybackService : Service() {
             NativeAudioBridge.ACTION_PREVIOUS -> NativeAudioBridge.skipPrevious(applicationContext)
             NativeAudioBridge.ACTION_STOP -> NativeAudioBridge.stop(applicationContext)
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {

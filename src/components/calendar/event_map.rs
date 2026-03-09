@@ -344,7 +344,6 @@ pub fn EventMap(props: EventMapProps) -> Element {
                 // If a geocode lookup is already running and key changed, invalidate it
                 if *loading_geo.peek() && key != *processed_event_ids.peek() {
                     geocode_gen.with_mut(|g| *g = g.wrapping_add(1));
-                    processed_event_ids.set(key.clone());
                     geocoded_events.set(Vec::new());
                     return;
                 }
@@ -358,7 +357,6 @@ pub fn EventMap(props: EventMapProps) -> Element {
                 let events_to_process = events_for_geocode.clone();
                 spawn(async move {
                     let mut results = Vec::new();
-                    let mut had_lookup_error = false;
                     const BATCH_SIZE: usize = 5;
                     const BATCH_DELAY_MS: u32 = 200;
                     for (idx, event) in events_to_process.iter().enumerate() {
@@ -407,7 +405,6 @@ pub fn EventMap(props: EventMapProps) -> Element {
                                 }
                                 Err(e) => {
                                     log::warn!("Geocoding failed for '{}': {}", location_str, e);
-                                    had_lookup_error = true;
                                 }
                             }
                         }
@@ -423,10 +420,8 @@ pub fn EventMap(props: EventMapProps) -> Element {
                         loading_geo.set(false);
                         return;
                     }
-                    if !had_lookup_error {
-                        geocoded_events.set(results);
-                        processed_event_ids.set(key_to_store);
-                    }
+                    geocoded_events.set(results);
+                    processed_event_ids.set(key_to_store);
                     loading_geo.set(false);
                 });
             }
