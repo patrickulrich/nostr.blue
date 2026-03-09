@@ -244,6 +244,9 @@ pub fn PinBoardCardMosaic(
                             log::warn!("Cannot react: no signer");
                             return;
                         }
+                        // Invalidate any in-flight bootstrap fetch before optimistic update
+                        let next_gen = reaction_request_gen.peek().wrapping_add(1);
+                        reaction_request_gen.set(next_gen);
                         let board = board_for_react.clone();
                         let currently_reacted = *has_reacted.peek();
                         let current_count = *reaction_count.peek();

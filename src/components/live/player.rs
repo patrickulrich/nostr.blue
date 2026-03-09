@@ -7,7 +7,6 @@ fn build_native_setup_script(
     video_id: &str,
     stream_url: &str,
     autoplay: bool,
-    _detach_first: bool,
 ) -> String {
     let video_id_json = serde_json::to_string(video_id).unwrap_or_default();
     let stream_url_json = serde_json::to_string(stream_url).unwrap_or_default();
@@ -144,16 +143,16 @@ export async function loadVideoJs() {
         // Load CSS with SRI
         const link = document.createElement('link');
         link.rel = 'stylesheet';
-        link.href = 'https://vjs.zencdn.net/8.10.0/video-js.css';
-        link.integrity = 'sha384-6LeG/ONVwTyNrI1eNFYoIcUrglv6y7o8hvl3DB8Qd4K2/wD8niobYgHS3RJSO7uL';
+        link.href = 'https://vjs.zencdn.net/8.23.4/video-js.css';
+        link.integrity = 'sha384-FTL3/NcK7fyX2Wjq1fJtFmQq0ZrBsTOYLSLybPXwARdpRxVO44w30lMGxfg/9lpp';
         link.crossOrigin = 'anonymous';
         link.onerror = () => reject(new Error('Failed to load Video.js CSS'));
         document.head.appendChild(link);
 
         // Load JS with SRI
         const script = document.createElement('script');
-        script.src = 'https://vjs.zencdn.net/8.10.0/video.min.js';
-        script.integrity = 'sha384-KUwosImoEnKt2Q36Bs3MxeOh0vghQarvecyjG6yVFknPMBxWK1YB0/gqXVWFgzsj';
+        script.src = 'https://vjs.zencdn.net/8.23.4/video.min.js';
+        script.integrity = 'sha384-GK0UA/tBku6A4JblKlmFXkAtBuKfr8BbYGvrdgqmSkNbVQ1M7VfSRCZO75VUS/O6';
         script.crossOrigin = 'anonymous';
         script.onload = () => {
             console.log('Video.js loaded successfully');
@@ -353,6 +352,9 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                         if !*mounted.peek() {
                             return;
                         }
+                        if *init_gen.peek() != gen {
+                            return;
+                        }
 
                         if let Err(e) = ensure_hls_manager().await {
                             log::error!("[Live] {}", e);
@@ -365,7 +367,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
 
                         // Set up the video element via eval
                         let setup_script =
-                            build_native_setup_script(&video_id, &stream_url, autoplay_prop, false);
+                            build_native_setup_script(&video_id, &stream_url, autoplay_prop);
 
                         if *init_gen.peek() != gen {
                             return;
@@ -506,7 +508,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                 }
 
                 let setup_script =
-                    build_native_setup_script(&video_id, &stream_url, autoplay, true);
+                    build_native_setup_script(&video_id, &stream_url, autoplay);
 
                 match document::eval(&setup_script).await {
                     Ok(val) => {

@@ -83,12 +83,23 @@ impl LocalReviewState {
 }
 
 fn should_replace_review(existing: &PersistedReview, candidate: &PersistedReview) -> bool {
-    candidate.created_at > existing.created_at
-        || (candidate.created_at == existing.created_at
-            && existing.event_id.is_empty()
-            && !candidate.event_id.is_empty())
-        || (candidate.created_at == existing.created_at
-            && candidate.event_id > existing.event_id)
+    if candidate.created_at > existing.created_at {
+        return true;
+    }
+    if candidate.created_at == existing.created_at {
+        // If existing is optimistic (no event_id), only replace if candidate is semantically the same
+        if existing.event_id.is_empty() && !candidate.event_id.is_empty() {
+            // Compare semantic fields to ensure it's the same review
+            return existing.pubkey == candidate.pubkey
+                && existing.state == candidate.state
+                && existing.content == candidate.content;
+        }
+        // For persisted reviews, use event_id as tie-breaker (NIP-01 style: lower ID wins)
+        if !existing.event_id.is_empty() && !candidate.event_id.is_empty() {
+            return candidate.event_id > existing.event_id;
+        }
+    }
+    false
 }
 
 /// PR Review Section component
@@ -124,6 +135,7 @@ pub fn PRReviewSection(
         show_form.set(false);
         submitting.set(false);
         review_body.set(String::new());
+        selected_state.set(LocalReviewState::Approved);
     }));
 
     // Fetch persisted reviews when the PR changes or the client becomes ready.

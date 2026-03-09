@@ -105,6 +105,28 @@ pub fn PersistentMusicPlayer() -> Element {
 
             // Only proceed if we have a track to bind
             let Some(track) = current_track.as_ref() else {
+                // Clean up existing playback before returning
+                spawn(async move {
+                    let audio_id_json = serde_json::to_string(&"global-music-player-audio")
+                        .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
+                    let script = format!(
+                        r#"
+                        (function() {{
+                            let audio = document.getElementById({audio_id});
+                            if (audio) {{
+                                audio.pause();
+                                audio.src = "";
+                                audio.currentTime = 0;
+                            }}
+                            if (window.hlsManager) {{
+                                window.hlsManager.detach({audio_id});
+                            }}
+                        }})();
+                        "#,
+                        audio_id = audio_id_json,
+                    );
+                    let _ = document::eval(&script).await;
+                });
                 return;
             };
 

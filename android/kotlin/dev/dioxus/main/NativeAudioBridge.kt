@@ -376,6 +376,9 @@ object NativeAudioBridge {
         val item = queue.getOrNull(currentIndex) ?: return
         this.playWhenReady = playWhenReady
         isPreparing = true
+        // Reset per-track state before preparing new track
+        lastError.set(null)
+        lastDurationSeconds = 0.0
         val player = ensurePlayer()
         player.reset()
         player.setAudioAttributes(

@@ -181,6 +181,12 @@ class MainActivity : WryActivity() {
         private const val SHARE_TEMP_PREFIX = "share_"
         private const val TEMP_FILE_PRESERVE_MILLIS = 5 * 60 * 1000L
 
+        // NIP-55 permissions: pre-authorize signing for common event kinds.
+        // Kinds not listed here prompt the user in the signer each time.
+        // Full list of app kinds: 0,1,3,5,6,7,14,1063,1088,1311,1617,1619,
+        // 1621,1622,6969,7001,9734,10000-10050,30000-30311,31237,38000+
+        private const val NIP55_PERMISSIONS = """[{"type":"sign_event","kind":0},{"type":"sign_event","kind":1},{"type":"sign_event","kind":3},{"type":"sign_event","kind":5},{"type":"sign_event","kind":6},{"type":"sign_event","kind":7},{"type":"sign_event","kind":14},{"type":"sign_event","kind":1063},{"type":"sign_event","kind":1088},{"type":"sign_event","kind":1311},{"type":"sign_event","kind":1617},{"type":"sign_event","kind":1621},{"type":"sign_event","kind":1622},{"type":"sign_event","kind":6969},{"type":"sign_event","kind":7001},{"type":"sign_event","kind":9734},{"type":"sign_event","kind":10000},{"type":"sign_event","kind":10002},{"type":"sign_event","kind":30000},{"type":"sign_event","kind":30001},{"type":"sign_event","kind":30023},{"type":"sign_event","kind":30078},{"type":"sign_event","kind":30311},{"type":"sign_event","kind":31237},{"type":"nip04_encrypt"},{"type":"nip04_decrypt"},{"type":"nip44_encrypt"},{"type":"nip44_decrypt"}]"""
+
         private fun maxUploadError(): String = "File too large (max 10MB)"
 
         private fun querySignerPackages(context: Context): Set<String> {
@@ -540,15 +546,9 @@ class MainActivity : WryActivity() {
                     intentError = null
                 }
 
-                // NIP-55 permissions: pre-authorize signing for common event kinds.
-                // Kinds not listed here prompt the user in the signer each time.
-                // Full list of app kinds: 0,1,3,5,6,7,14,1063,1088,1311,1617,1619,
-                // 1621,1622,6969,7001,9734,10000-10050,30000-30311,31237,38000+
-                val permissions = """[{"type":"sign_event","kind":0},{"type":"sign_event","kind":1},{"type":"sign_event","kind":3},{"type":"sign_event","kind":5},{"type":"sign_event","kind":6},{"type":"sign_event","kind":7},{"type":"sign_event","kind":14},{"type":"sign_event","kind":1063},{"type":"sign_event","kind":1088},{"type":"sign_event","kind":1311},{"type":"sign_event","kind":1617},{"type":"sign_event","kind":1621},{"type":"sign_event","kind":1622},{"type":"sign_event","kind":6969},{"type":"sign_event","kind":7001},{"type":"sign_event","kind":9734},{"type":"sign_event","kind":10000},{"type":"sign_event","kind":10002},{"type":"sign_event","kind":30000},{"type":"sign_event","kind":30001},{"type":"sign_event","kind":30023},{"type":"sign_event","kind":30078},{"type":"sign_event","kind":30311},{"type":"sign_event","kind":31237},{"type":"nip04_encrypt"},{"type":"nip04_decrypt"},{"type":"nip44_encrypt"},{"type":"nip44_decrypt"}]"""
-
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse("nostrsigner:")).apply {
                     putExtra("type", "get_public_key")
-                    putExtra("permissions", permissions)
+                    putExtra("permissions", NIP55_PERMISSIONS)
                 }
 
                 Log.d(TAG, "Launching get_public_key Intent")
@@ -846,16 +846,8 @@ class MainActivity : WryActivity() {
             startIndex: Int,
             playWhenReady: Boolean
         ): String {
-            // First validate/set the queue
-            val result = NativeAudioBridge.setQueue(context, queueJson, startIndex, playWhenReady)
-            // Only start service if queue was accepted (non-error)
-            if (!result.startsWith("error")) {
-                ContextCompat.startForegroundService(
-                    context,
-                    Intent(context, MediaPlaybackService::class.java)
-                )
-            }
-            return result
+            // NativeAudioBridge.setQueue already calls ensureServiceStarted()
+            return NativeAudioBridge.setQueue(context, queueJson, startIndex, playWhenReady)
         }
 
         @JvmStatic

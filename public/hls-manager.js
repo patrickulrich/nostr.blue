@@ -72,11 +72,11 @@ window.hlsManager = window.hlsManager || {
         }
     },
 
-    settlePendingAttach(elementId, result) {
-        const pendingResolve = this.pendingResolves.get(elementId);
-        if (pendingResolve) {
+    settlePendingAttach(elementId, result, attachId) {
+        const pending = this.pendingResolves.get(elementId);
+        if (pending && pending.attachId === attachId) {
             this.pendingResolves.delete(elementId);
-            pendingResolve(result);
+            pending.resolve(result);
         }
     },
 
@@ -114,11 +114,8 @@ window.hlsManager = window.hlsManager || {
         const attachId = Symbol();
         this.activeAttachMap.set(elementId, attachId);
 
-        // Store resolve function for later use
-        const resolvePromise = (result) => {
-            this.settlePendingAttach(elementId, result);
-        };
-        this.pendingResolves.set(elementId, resolvePromise);
+        // Store resolve function with attachId for later use
+        this.pendingResolves.set(elementId, { attachId, resolve: resolvePromise });
 
         // Start async work outside of Promise executor to avoid swallowing sync exceptions
         this._doAttach(elementId, streamUrl, attachId).catch((e) => {
@@ -129,20 +126,14 @@ window.hlsManager = window.hlsManager || {
                     type: 'error',
                     url: streamUrl,
                     error: e.message || 'Unknown error'
-                });
+                }, attachId);
             }
         });
 
         // Return a Promise that will be settled via settlePendingAttach
         return new Promise((resolve) => {
-            // The resolve is already stored above; this ensures we return a proper Promise
-            const existingResolve = this.pendingResolves.get(elementId);
-            if (existingResolve && existingResolve !== resolve) {
-                // If already resolved by _doAttach, resolve immediately
-                existingResolve({ type: 'pending' });
-            }
-            // Store the new resolve (it will be called by settlePendingAttach)
-            this.pendingResolves.set(elementId, resolve);
+            // Store the resolve with attachId (it will be called by settlePendingAttach)
+            this.pendingResolves.set(elementId, { attachId, resolve });
         });
     },
 
@@ -158,7 +149,7 @@ window.hlsManager = window.hlsManager || {
                 await this.loadHls();
             } catch (e) {
                 if (this.activeAttachMap.get(elementId) !== attachId) {
-                    this.settlePendingAttach(elementId, { type: 'cancelled', url: streamUrl });
+                    this.settlePendingAttach(elementId, { type: 'cancelled', url: streamUrl }, attachId);
                     return;
                 }
                 // Remove only our own token to avoid clobbering a newer attach
@@ -168,13 +159,13 @@ window.hlsManager = window.hlsManager || {
                     type: 'error',
                     url: streamUrl,
                     error: 'Failed to load hls.js'
-                });
+                }, attachId);
                 return;
             }
 
             // Check if this attach is still valid after await
             if (this.activeAttachMap.get(elementId) !== attachId) {
-                this.settlePendingAttach(elementId, { type: 'cancelled', url: streamUrl });
+                this.settlePendingAttach(elementId, { type: 'cancelled', url: streamUrl }, attachId);
                 return;
             }
 
@@ -184,7 +175,7 @@ window.hlsManager = window.hlsManager || {
                     type: 'error',
                     url: streamUrl,
                     error: 'HLS not supported in this browser'
-                });
+                }, attachId);
                 return;
             }
 
@@ -212,7 +203,7 @@ window.hlsManager = window.hlsManager || {
             if (this.activeAttachMap.get(elementId) !== attachId) {
                 hls.destroy();
                 this.instances.delete(elementId);
-                this.settlePendingAttach(elementId, { type: 'cancelled', url: streamUrl });
+                this.settlePendingAttach(elementId, { type: 'cancelled', url: streamUrl }, attachId);
                 return;
             }
 
@@ -231,7 +222,7 @@ window.hlsManager = window.hlsManager || {
                     type: 'error',
                     url: streamUrl,
                     error: 'HLS stream timeout - stream may be offline'
-                });
+                }, capturedAttachId);
             }, 15000);
             this.pendingTimeouts.set(elementId, timeout);
 
@@ -264,7 +255,7 @@ window.hlsManager = window.hlsManager || {
                     backend: 'hls.js',
                     levels: data.levels.length,
                     url: streamUrl
-                });
+                }, attachId);
             });
 
             hls.on(Hls.Events.ERROR, (event, data) => {
@@ -297,7 +288,7 @@ window.hlsManager = window.hlsManager || {
                         type: 'error',
                         url: streamUrl,
                         error: 'HLS error: ' + data.details
-                    });
+                    }, attachId);
                 } else {
                     // Non-fatal error - hls.js will try to recover
                     console.warn('[HLS Manager] Non-fatal error:', data.details);
@@ -375,13 +366,21 @@ window.hlsManager = window.hlsManager || {
      * Detach and cleanup HLS instance (public API - settles pending promises)
      */
     detach(elementId) {
+        const pending = this.pendingResolves.get(elementId);
+        const pendingAttachId = pending ? pending.attachId : null;
+
         this.clearPendingAttach(elementId, false);
 
         // Clear active attach token to invalidate pending operations
         this.activeAttachMap.delete(elementId);
 
         // Resolve any in-flight attach Promise as cancelled
-        this.settlePendingAttach(elementId, { type: 'cancelled' });
+        if (pendingAttachId) {
+            this.settlePendingAttach(elementId, { type: 'cancelled' }, pendingAttachId);
+        } else {
+            // No pending attach, clean up the entry
+            this.pendingResolves.delete(elementId);
+        }
 
         const hls = this.instances.get(elementId);
         if (hls) {

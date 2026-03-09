@@ -99,7 +99,7 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
         let query_lower = query_snapshot.to_lowercase();
         let new_task = spawn(async move {
             crate::platform::timer::sleep_ms(150).await;
-            if search_query.read().as_str() == query_snapshot.as_str() {
+            if search_query.peek().as_str() == query_snapshot.as_str() {
                 let all_citations = USER_CITATIONS.read().all();
                 let filtered: Vec<CachedCitation> = all_citations
                     .into_iter()
