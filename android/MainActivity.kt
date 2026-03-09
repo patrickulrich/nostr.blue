@@ -1,6 +1,7 @@
 package dev.dioxus.main
 
 import android.app.Activity
+import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager

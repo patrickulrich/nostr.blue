@@ -1,4 +1,6 @@
 use dioxus::prelude::*;
+#[cfg(feature = "mobile")]
+use dioxus_core::{use_drop, Task};
 use std::cell::RefCell;
 use std::rc::Rc;
 /// Type alias for the IntersectionObserver handles (observer + closure)
@@ -37,12 +39,12 @@ where
     F: FnMut() + 'static,
 {
     let sentinel_id = use_hook(|| format!("scroll-sentinel-{}", uuid::Uuid::new_v4()));
-    #[cfg_attr(not(feature = "web"), allow(unused_variables))]
+    #[cfg_attr(not(any(feature = "web", feature = "mobile")), allow(unused_variables))]
     let last_check = use_signal(|| 0u64);
     let trigger = use_signal(|| 0u64);
-    #[cfg_attr(not(feature = "web"), allow(unused_variables))]
+    #[cfg_attr(not(any(feature = "web", feature = "mobile")), allow(unused_variables))]
     let cb = use_hook(|| Rc::new(RefCell::new(callback)));
-    #[cfg_attr(not(feature = "web"), allow(unused_variables))]
+    #[cfg_attr(not(any(feature = "web", feature = "mobile")), allow(unused_variables))]
     let id_for_effect = sentinel_id.clone();
     use_effect(move || {
         let trigger_value = *trigger.read();
@@ -242,6 +244,93 @@ where
                 );
                 *observer_handles_clone.borrow_mut() = Some((observer, callback));
             });
+        });
+    }
+    #[cfg(feature = "mobile")]
+    {
+        let mut polling_generation = use_signal(|| 0u64);
+        let mut polling_task: Signal<Option<Task>> = use_signal(|| None);
+
+        use_effect(move || {
+            let has_more_value = *has_more.read();
+
+            polling_generation.with_mut(|generation| *generation = generation.wrapping_add(1));
+            if let Some(task) = polling_task.write().take() {
+                task.cancel();
+            }
+
+            if !has_more_value {
+                log::debug!("[InfiniteScroll] has_more is false, skipping mobile polling");
+                return;
+            }
+
+            let generation = *polling_generation.peek();
+            let id = id_for_effect.clone();
+            let mut trigger_clone = trigger;
+            let mut last_check_for_polling = last_check;
+            let polling_generation_for_task = polling_generation;
+
+            let task = spawn(async move {
+                log::info!("[InfiniteScroll] Starting mobile polling for sentinel {}", id);
+
+                loop {
+                    if *polling_generation_for_task.peek() != generation {
+                        log::debug!(
+                            "[InfiniteScroll] Stopping stale mobile polling task for sentinel {}",
+                            id
+                        );
+                        break;
+                    }
+
+                    let id_json = serde_json::to_string(&id).unwrap_or_default();
+                    let script = format!(
+                        r#"
+                        return (() => {{
+                            const el = document.getElementById({id});
+                            if (!el) return false;
+                            const rect = el.getBoundingClientRect();
+                            const viewportHeight = window.innerHeight || document.documentElement?.clientHeight || 0;
+                            return rect.top <= viewportHeight + 300;
+                        }})()
+                        "#,
+                        id = id_json,
+                    );
+
+                    match document::eval(&script).await {
+                        Ok(result) => {
+                            if result.as_bool().unwrap_or(false) {
+                                let now = crate::platform::timestamp::now_millis();
+                                let last = *last_check_for_polling.peek();
+                                if now - last > 1000 {
+                                    last_check_for_polling.set(now);
+                                    trigger_clone.set(now);
+                                    log::info!(
+                                        "[InfiniteScroll] Mobile polling detected sentinel near viewport"
+                                    );
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            log::debug!(
+                                "[InfiniteScroll] Mobile polling eval failed for {}: {:?}",
+                                id,
+                                err
+                            );
+                        }
+                    }
+
+                    crate::platform::timer::sleep_ms(250).await;
+                }
+            });
+
+            polling_task.set(Some(task));
+        });
+
+        use_drop(move || {
+            polling_generation.with_mut(|generation| *generation = generation.wrapping_add(1));
+            if let Some(task) = polling_task.write().take() {
+                task.cancel();
+            }
         });
     }
     sentinel_id
