@@ -846,11 +846,16 @@ class MainActivity : WryActivity() {
             startIndex: Int,
             playWhenReady: Boolean
         ): String {
-            ContextCompat.startForegroundService(
-                context,
-                Intent(context, MediaPlaybackService::class.java)
-            )
-            return NativeAudioBridge.setQueue(context, queueJson, startIndex, playWhenReady)
+            // First validate/set the queue
+            val result = NativeAudioBridge.setQueue(context, queueJson, startIndex, playWhenReady)
+            // Only start service if queue was accepted (non-error)
+            if (!result.startsWith("error")) {
+                ContextCompat.startForegroundService(
+                    context,
+                    Intent(context, MediaPlaybackService::class.java)
+                )
+            }
+            return result
         }
 
         @JvmStatic

@@ -35,6 +35,20 @@ impl PartialEq for CachedCitation {
         self.event.id == other.event.id
     }
 }
+
+impl CachedCitation {
+    /// Get the best identifier for this citation
+    /// Returns naddr if available, otherwise nevent (bech32), falling back to hex
+    pub fn identifier(&self) -> String {
+        self.naddr.clone().unwrap_or_else(|| {
+            self.event
+                .id
+                .to_bech32()
+                .unwrap_or_else(|_| self.event.id.to_hex())
+        })
+    }
+}
+
 /// Citation list for display (grouped by type)
 #[derive(Clone, Debug, Default)]
 pub struct CitationGroup {

@@ -160,8 +160,8 @@ pub fn PinBoardCardMosaic(
     let mut reaction_loading = use_signal(|| false);
     let mut reaction_request_gen = use_signal(|| 0u32);
     let a_tag_for_reactions = board.a_tag.clone();
-    use_effect(use_reactive!(|a_tag_for_reactions| {
-        let a_tag = a_tag_for_reactions.clone();
+    use_effect(use_reactive((&a_tag_for_reactions, &crate::stores::auth_store::AUTH_STATE.read().pubkey), move |(a_tag, _pubkey)| {
+        let a_tag = a_tag.clone();
         let has_signer = *HAS_SIGNER.read();
         let current_gen = reaction_request_gen.peek().wrapping_add(1);
         reaction_request_gen.set(current_gen);

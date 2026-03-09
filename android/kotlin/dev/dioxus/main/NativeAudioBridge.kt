@@ -203,8 +203,11 @@ object NativeAudioBridge {
         return try {
             ensureInitialized(context)
             if (queue.isEmpty()) return "ok"
-            currentIndex = (currentIndex + 1).coerceAtMost(queue.lastIndex)
-            prepareCurrent(playWhenReady)
+            // Only advance if not at last index
+            if (currentIndex < queue.lastIndex) {
+                currentIndex += 1
+                prepareCurrent(playWhenReady)
+            }
             "ok"
         } catch (e: Exception) {
             Log.e(AUDIO_TAG, "skipNext failed", e)
@@ -348,6 +351,8 @@ object NativeAudioBridge {
                         playWhenReady = false
                         updatePlaybackState(false, PlaybackState.STATE_STOPPED)
                         stopForegroundPlayback()
+                        // Clear service state before updating notification to prevent re-triggering startForeground()
+                        serviceRef = null
                         updateNotification()
                     }
                 }
@@ -557,13 +562,18 @@ object NativeAudioBridge {
         return buildList(arr.length()) {
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
+                val mediaUrl = obj.optString("media_url")
+                // Skip entries with blank or missing media_url
+                if (mediaUrl.isBlank()) {
+                    continue
+                }
                 add(
                     NativeQueueItem(
                         id = obj.optString("id"),
                         title = obj.optString("title"),
                         artist = obj.optString("artist"),
                         album = obj.optString("album").takeUnless { it.isBlank() },
-                        mediaUrl = obj.optString("media_url"),
+                        mediaUrl = mediaUrl,
                         albumArtUrl = obj.optString("album_art_url").takeUnless { it.isBlank() },
                         durationSeconds = obj.optDouble("duration").takeUnless { it.isNaN() || it <= 0.0 },
                         isLiveStream = obj.optBoolean("is_live_stream", false),

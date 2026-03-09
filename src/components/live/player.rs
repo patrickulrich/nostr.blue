@@ -7,24 +7,11 @@ fn build_native_setup_script(
     video_id: &str,
     stream_url: &str,
     autoplay: bool,
-    detach_first: bool,
+    _detach_first: bool,
 ) -> String {
     let video_id_json = serde_json::to_string(video_id).unwrap_or_default();
     let stream_url_json = serde_json::to_string(stream_url).unwrap_or_default();
     let autoplay_str = if autoplay { "true" } else { "false" };
-    let detach_block = if detach_first {
-        format!(
-            r#"
-                        // Detach any existing HLS stream first
-                        if (window.hlsManager) {{
-                            window.hlsManager.detach({});
-                        }}
-"#,
-            video_id_json
-        )
-    } else {
-        String::new()
-    };
     format!(
         r#"
                     return (async () => {{
@@ -35,8 +22,7 @@ fn build_native_setup_script(
                             let url = {stream_url};
                             let isHls = url.toLowerCase().includes('.m3u8');
 
-                            {detach_block}
-
+                            // Always detach any existing stream first
                             if (window.hlsManager) {{
                                 window.hlsManager.detach({video_id});
                             }}
@@ -47,7 +33,7 @@ fn build_native_setup_script(
                                 video.src = url;
                             }} else if (window.hlsManager) {{
                                 let result = await window.hlsManager.attachToMedia({video_id}, url);
-                                console.log('[Live] HLS stream {log_msg}:', result);
+                                console.log('[Live] HLS stream attached:', result);
                                 if (result && result.type === 'error') {{
                                     return "error:" + (result.error || "Failed to attach HLS stream");
                                 }}
@@ -62,27 +48,23 @@ fn build_native_setup_script(
                                 try {{
                                     await video.play();
                                 }} catch (e) {{
-                                    console.warn('[Live] Autoplay failed:', e);
-                                    return "blocked";
+                                    if (e.name === 'NotAllowedError') {{
+                                        return "blocked";
+                                    }}
+                                    console.log('Autoplay failed:', e);
                                 }}
                             }}
-                            return "ok";
+
+                            return "success";
                         }} catch (e) {{
-                            console.error('[Live] {error_label} error:', e);
-                            return "error:" + e.message;
+                            console.error('[Live] Player setup error:', e);
+                            return "error:" + (e.message || "Unknown error");
                         }}
-                    }})().catch(e => {{ console.error('[Live] {error_label} IIFE error:', e); return "error:" + e.message; }})
-                    "#,
+                    }})();
+                "#,
         video_id = video_id_json,
         stream_url = stream_url_json,
-        autoplay = autoplay_str,
-        detach_block = detach_block,
-        log_msg = if detach_first {
-            "re-attached"
-        } else {
-            "attached"
-        },
-        error_label = if detach_first { "Retry" } else { "Setup" }
+        autoplay = autoplay_str
     )
 }
 
@@ -301,7 +283,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
     let instance_id = use_signal(|| {
         use std::sync::atomic::{AtomicU32, Ordering};
         static COUNTER: AtomicU32 = AtomicU32::new(1);
-        COUNTER.fetch_add(1, Ordering::SeqCst)
+        COUNTER.fetch_add(1, Ordering::Relaxed)
     });
     let video_id = format!("videojs-player-{}", instance_id());
     let mut error = use_signal(|| None::<String>);

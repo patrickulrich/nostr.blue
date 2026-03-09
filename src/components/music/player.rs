@@ -96,28 +96,36 @@ pub fn PersistentMusicPlayer() -> Element {
     use_effect(use_reactive(
         (&state.current_track, &state.is_playing),
         move |(current_track, is_playing)| {
-            if let Some(track) = current_track.as_ref() {
-                let media_url = track.media_url.clone();
-                let is_hls = media_url.to_lowercase().contains(".m3u8");
-                native_source_bound.set(false);
-                let bind_token = native_bind_token.with_mut(|token| {
-                    *token = token.wrapping_add(1);
-                    *token
-                });
-                {
-                    spawn(async move {
-                        if is_hls {
-                            if let Err(e) = ensure_audio_hls_manager().await {
-                                if *native_bind_token.read() == bind_token {
-                                    native_source_bound.set(false);
-                                    music_player::set_playback_error(Some(format!(
-                                        "Failed to load HLS support: {}",
-                                        e
-                                    )));
-                                }
-                                return;
+            // Rotate token FIRST to invalidate any pending bind tasks
+            native_source_bound.set(false);
+            let bind_token = native_bind_token.with_mut(|token| {
+                *token = token.wrapping_add(1);
+                *token
+            });
+
+            // Only proceed if we have a track to bind
+            let Some(track) = current_track.as_ref() else {
+                return;
+            };
+
+            let media_url = track.media_url.clone();
+            let is_hls = media_url.to_lowercase().contains(".m3u8");
+            spawn(async move {
+                if is_hls {
+                    if let Err(e) = ensure_audio_hls_manager().await {
+                        if *native_bind_token.read() == bind_token {
+                            native_source_bound.set(false);
+                            // Try next stream before showing error
+                            if !music_player::try_next_stream() {
+                                music_player::set_playback_error(Some(format!(
+                                    "Failed to load HLS support: {}",
+                                    e
+                                )));
                             }
                         }
+                        return;
+                    }
+                }
                         let audio_id_json = serde_json::to_string(&audio_id)
                             .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
                         let media_url_json = serde_json::to_string(&media_url)
@@ -240,12 +248,15 @@ pub fn PersistentMusicPlayer() -> Element {
                                                 media_url
                                             );
                                         } else {
-                                            let error_msg = result
-                                                .strip_prefix("error:")
-                                                .unwrap_or("Failed to attach stream")
-                                                .to_string();
-                                            log::error!("[Audio] {}", error_msg);
-                                            music_player::set_playback_error(Some(error_msg));
+                                            // Try next stream before showing error
+                                            if !music_player::try_next_stream() {
+                                                let error_msg = result
+                                                    .strip_prefix("error:")
+                                                    .unwrap_or("Failed to attach stream")
+                                                    .to_string();
+                                                log::error!("[Audio] {}", error_msg);
+                                                music_player::set_playback_error(Some(error_msg));
+                                            }
                                         }
                                     }
                                 }
@@ -253,18 +264,19 @@ pub fn PersistentMusicPlayer() -> Element {
                             Err(e) => {
                                 if *native_bind_token.read() == bind_token {
                                     native_source_bound.set(false);
-                                    let error_msg =
-                                        format!("Failed to apply audio source script: {:?}", e);
-                                    log::warn!("{}", error_msg);
-                                    music_player::set_playback_error(Some(error_msg));
+                                    // Try next stream before showing error
+                                    if !music_player::try_next_stream() {
+                                        let error_msg =
+                                            format!("Failed to apply audio source script: {:?}", e);
+                                        log::warn!("{}", error_msg);
+                                        music_player::set_playback_error(Some(error_msg));
+                                    }
                                 }
                             }
                         }
                     });
-                }
-            }
-        },
-    ));
+                },
+            ));
     #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
     {
         let audio_id_for_volume = audio_id.to_string();

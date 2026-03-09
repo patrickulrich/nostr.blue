@@ -114,8 +114,44 @@ window.hlsManager = window.hlsManager || {
         const attachId = Symbol();
         this.activeAttachMap.set(elementId, attachId);
 
-        return new Promise(async (resolve) => {
+        // Store resolve function for later use
+        const resolvePromise = (result) => {
+            this.settlePendingAttach(elementId, result);
+        };
+        this.pendingResolves.set(elementId, resolvePromise);
+
+        // Start async work outside of Promise executor to avoid swallowing sync exceptions
+        this._doAttach(elementId, streamUrl, attachId).catch((e) => {
+            console.error('[HLS Manager] Attach failed:', e);
+            // Ensure promise is settled even on unexpected errors
+            if (this.activeAttachMap.get(elementId) === attachId) {
+                this.settlePendingAttach(elementId, {
+                    type: 'error',
+                    url: streamUrl,
+                    error: e.message || 'Unknown error'
+                });
+            }
+        });
+
+        // Return a Promise that will be settled via settlePendingAttach
+        return new Promise((resolve) => {
+            // The resolve is already stored above; this ensures we return a proper Promise
+            const existingResolve = this.pendingResolves.get(elementId);
+            if (existingResolve && existingResolve !== resolve) {
+                // If already resolved by _doAttach, resolve immediately
+                existingResolve({ type: 'pending' });
+            }
+            // Store the new resolve (it will be called by settlePendingAttach)
             this.pendingResolves.set(elementId, resolve);
+        });
+    },
+
+    /**
+     * Internal async method to perform the actual attach work
+     * Separated from Promise executor to properly handle exceptions
+     */
+    async _doAttach(elementId, streamUrl, attachId) {
+        const resolve = this.pendingResolves.get(elementId);
 
             // Use hls.js for browsers without native HLS support
             try {
@@ -152,8 +188,8 @@ window.hlsManager = window.hlsManager || {
                 return;
             }
 
-            // Cleanup any previous instance before creating new one
-            this.detach(elementId);
+            // Cleanup any previous instance before creating new one (use internal cleanup to not settle promise)
+            this.cleanupInstance(elementId);
 
             // Re-register attach token after cleanup to maintain valid attach state
             this.activeAttachMap.set(elementId, attachId);
@@ -306,7 +342,37 @@ window.hlsManager = window.hlsManager || {
     },
 
     /**
-     * Detach and cleanup HLS instance
+     * Internal cleanup method that removes resources without settling promises
+     * Used during attach flow to avoid prematurely settling the public attach Promise
+     */
+    cleanupInstance(elementId) {
+        // Clear timeouts but DON'T settle pending promises
+        const pendingTimeout = this.pendingTimeouts.get(elementId);
+        if (pendingTimeout) {
+            clearTimeout(pendingTimeout);
+            this.pendingTimeouts.delete(elementId);
+        }
+
+        // Clear active attach token
+        this.activeAttachMap.delete(elementId);
+
+        // Destroy HLS instance if exists
+        const hls = this.instances.get(elementId);
+        if (hls) {
+            console.log('[HLS Manager] Destroying HLS instance for:', elementId);
+            hls.destroy();
+            this.instances.delete(elementId);
+        }
+
+        // Clear now playing metadata only if this audio owned it
+        if (this.nowPlayingElementId === elementId) {
+            this.nowPlaying = null;
+            this.nowPlayingElementId = null;
+        }
+    },
+
+    /**
+     * Detach and cleanup HLS instance (public API - settles pending promises)
      */
     detach(elementId) {
         this.clearPendingAttach(elementId, false);

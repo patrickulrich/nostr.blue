@@ -2,7 +2,7 @@
 
 A multi-platform Nostr client built using **Rust + Dioxus + rust-nostr** with integrated CDK wallet.
 
-![Version](https://img.shields.io/badge/version-0.7.14-blue)
+![Version](https://img.shields.io/badge/version-0.8.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Rust](https://img.shields.io/badge/rust-1.82+-orange)
 ![Platforms](https://img.shields.io/badge/platforms-Web%20%7C%20Android%20%7C%20Desktop-blue)

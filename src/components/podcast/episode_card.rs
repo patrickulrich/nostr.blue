@@ -3,6 +3,8 @@
 //! Displays a single podcast episode with play controls,
 //! supporting both Nostr and RSS podcast episodes.
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
+use dioxus::web::WebEventExt;
 /// Default episode artwork fallback URL (local asset)
 const DEFAULT_EPISODE_ARTWORK: &str = "/icons/icon-512.svg";
 
@@ -344,7 +346,28 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
     let handle_play = {
         let episode = episode.clone();
         let playlist = playlist.clone();
-        move |_| {
+        move |_e: Event<MouseData>| {
+            // Guard against clicks on interactive elements inside the card
+            #[cfg(feature = "web")]
+            {
+                use wasm_bindgen::JsCast;
+                use web_sys::Element;
+                // Use the event in web builds to check target
+                let e = _e;
+                if let Some(target) = e
+                    .data()
+                    .try_as_web_event()
+                    .and_then(|evt: web_sys::MouseEvent| evt.target())
+                    .and_then(|t| t.dyn_into::<Element>().ok())
+                {
+                    if let Some(_closest) = target.closest(
+                        "a,button,input,textarea,select,summary,[role='button'],[role='link'],[contenteditable='true']"
+                    ).ok().flatten() {
+                        // Click was on an interactive element - don't trigger play
+                        return;
+                    }
+                }
+            }
             let track = episode.to_music_track();
             let playlist_vec = playlist.as_ref().map(|rc| (**rc).clone());
             music_player::play_or_toggle_track(track, playlist_vec, None);
@@ -496,7 +519,8 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
                         title: "Send a boost",
                         onclick: {
                             let episode = episode.clone();
-                            move |e: Event<MouseData>| {
+        #[cfg_attr(not(feature = "web"), allow(unused_variables))]
+        move |e: Event<MouseData>| {
                                 e.stop_propagation();
                                 let track = episode.to_music_track();
                                 music_player::show_zap_dialog_for_track(Some(track));

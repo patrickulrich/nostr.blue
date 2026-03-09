@@ -197,11 +197,8 @@ pub fn ContentShareModal(
     };
     let handle_copy_link = {
         let copy_text = if matches!(content_type, ContentType::BibleVerse) {
-            if let Some(ref text) = content {
-                format!("{}\n\n— {}", text, title)
-            } else {
-                url.clone()
-            }
+            // For Bible verses, copy the URL (canonical reference), not the verse text
+            url.clone()
         } else {
             url.clone()
         };
@@ -269,6 +266,14 @@ pub fn ContentShareModal(
         let url_dm = url.clone();
         let content_type_dm = content_type;
         move |_| {
+            // Guard: check signer availability before proceeding
+            if !*HAS_SIGNER.read() {
+                log::error!("Attempted to send DM without a signer");
+                dm_error.set(Some(
+                    "No signer available. Please log in first.".to_string(),
+                ));
+                return;
+            }
             let manual_recipient = dm_recipient.read().trim().to_string();
             if manual_recipient.is_empty() {
                 return;

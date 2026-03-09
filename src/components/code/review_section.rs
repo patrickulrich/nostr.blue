@@ -132,9 +132,6 @@ pub fn PRReviewSection(
             return;
         }
         let current_gen = *gen.peek();
-        if !*CLIENT_INITIALIZED.read() {
-            return;
-        }
         spawn(async move {
             match fetch_pr_reviews(&id).await {
                 Ok(persisted) => {
