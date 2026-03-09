@@ -106,11 +106,11 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
                         error_message.set(Some(msg));
                     } else {
                         *cashu::NUTZAP_AUTO_REDEEM.write() = auto_redeem_setting;
+                        success_message.set(Some(format!(
+                            "Nutzap info published! Event: {}...",
+                            &event_id[..12.min(event_id.len())],
+                        )));
                     }
-                    success_message.set(Some(format!(
-                        "Nutzap info published! Event: {}...",
-                        &event_id[..12.min(event_id.len())],
-                    )));
                     if let Err(e) = cashu::start_nutzap_subscription().await {
                         log::warn!("Failed to start nutzap subscription: {}", e);
                     }

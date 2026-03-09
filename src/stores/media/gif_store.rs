@@ -251,7 +251,11 @@ pub async fn search_gifs(query: String) {
     };
     *GIF_LOADING.write() = true;
     *CURRENT_SEARCH_QUERY.write() = query.clone();
-    let search_query = if query.is_empty() { None } else { Some(query) };
+    let search_query = if query.is_empty() {
+        None
+    } else {
+        Some(query.clone())
+    };
     match fetch_gifs(100, None, search_query).await {
         Ok(gifs) => {
             let current_seq = *GIF_SEARCH_SEQ.read();
@@ -261,6 +265,12 @@ pub async fn search_gifs(query: String) {
                     request_seq,
                     current_seq
                 );
+                return;
+            }
+            let current_query = CURRENT_SEARCH_QUERY.read().clone();
+            if search_gifs_query_mismatch(&current_query, &query) {
+                log::debug!("Search query changed during fetch, discarding stale results");
+                *GIF_LOADING.write() = false;
                 return;
             }
             if let Some(oldest) = gifs.last() {
@@ -273,6 +283,10 @@ pub async fn search_gifs(query: String) {
         }
     }
     *GIF_LOADING.write() = false;
+}
+
+fn search_gifs_query_mismatch(current_query: &str, requested_query: &str) -> bool {
+    current_query != requested_query
 }
 /// Load more GIFs (pagination)
 pub async fn load_more_gifs() {

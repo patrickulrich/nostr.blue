@@ -73,9 +73,6 @@ class MainActivity : WryActivity() {
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         Log.d(TAG, "File picker result: uri=$uri")
-        synchronized(lock) {
-            filePickInFlight = true
-        }
         if (uri == null) {
             synchronized(lock) {
                 filePickError = "No file selected"
@@ -85,9 +82,17 @@ class MainActivity : WryActivity() {
         }
         val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
         val resolver = contentResolver
-        Thread {
-            processPickedContent(uri, mimeType, "file", resolver)
-        }.start()
+        try {
+            Thread {
+                processPickedContent(uri, mimeType, "file", resolver)
+            }.start()
+        } catch (e: Exception) {
+            synchronized(lock) {
+                filePickError = e.message ?: "Failed to process selected file"
+                filePickInFlight = false
+            }
+            Log.e(TAG, "Failed to start file processing thread", e)
+        }
     }
 
     // Image picker launcher - must be instance property registered before STARTED
@@ -95,9 +100,6 @@ class MainActivity : WryActivity() {
         ActivityResultContracts.GetContent()
     ) { uri ->
         Log.d(TAG, "Image picker result: uri=$uri")
-        synchronized(lock) {
-            filePickInFlight = true
-        }
         if (uri == null) {
             synchronized(lock) {
                 filePickError = "No image selected"
@@ -107,9 +109,17 @@ class MainActivity : WryActivity() {
         }
         val mimeType = contentResolver.getType(uri) ?: "image/*"
         val resolver = contentResolver
-        Thread {
-            processPickedContent(uri, mimeType, "image", resolver)
-        }.start()
+        try {
+            Thread {
+                processPickedContent(uri, mimeType, "image", resolver)
+            }.start()
+        } catch (e: Exception) {
+            synchronized(lock) {
+                filePickError = e.message ?: "Failed to process selected image"
+                filePickInFlight = false
+            }
+            Log.e(TAG, "Failed to start image processing thread", e)
+        }
     }
 
     // Note: `instance` can be briefly null during Activity recreation (e.g., config

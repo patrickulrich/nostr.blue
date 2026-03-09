@@ -59,7 +59,12 @@ fn build_native_setup_script(
                             }}
 
                             if ({autoplay}) {{
-                                await video.play().catch(e => console.log('[Live] Autoplay failed:', e));
+                                try {{
+                                    await video.play();
+                                }} catch (e) {{
+                                    console.warn('[Live] Autoplay failed:', e);
+                                    return "blocked";
+                                }}
                             }}
                             return "ok";
                         }} catch (e) {{
@@ -302,6 +307,8 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut loading = use_signal(|| true);
     let mut mounted = use_signal(|| false);
+    #[allow(unused_mut)]
+    let mut playback_blocked = use_signal(|| false);
     #[allow(unused_mut, unused_variables)]
     let mut cleanup_guard = use_signal(|| None::<CleanupGuard>);
     let mut init_gen = use_signal(|| 0u32);
@@ -320,6 +327,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
             });
             error.set(None);
             loading.set(url_valid);
+            playback_blocked.set(false);
             if url_valid {
                 cleanup_guard.set(None);
                 mounted.set(true);
@@ -329,6 +337,9 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                     spawn(async move {
                         crate::platform::timer::sleep_ms(300).await;
                         if !*mounted.peek() {
+                            return;
+                        }
+                        if *init_gen.peek() != gen {
                             return;
                         }
                         match init_video_js_player(&video_id, &stream_url, autoplay_prop).await {
@@ -383,10 +394,16 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                                     let result = parse_native_setup_result(val);
                                     if let Some(err_msg) = result.strip_prefix("error:") {
                                         error.set(Some(err_msg.to_string()));
+                                        playback_blocked.set(false);
                                     } else if result == "cancelled" {
                                         error.set(Some("Stream setup was cancelled".to_string()));
+                                        playback_blocked.set(false);
+                                    } else if result == "blocked" {
+                                        error.set(None);
+                                        playback_blocked.set(true);
                                     } else {
                                         error.set(None);
+                                        playback_blocked.set(false);
                                     }
                                     loading.set(false);
                                 }
@@ -457,6 +474,9 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
             let stream_url = _stream_url;
             spawn(async move {
                 crate::platform::timer::sleep_ms(100).await;
+                if *init_gen.peek() != gen {
+                    return;
+                }
                 match init_video_js_player(&video_id, &stream_url, autoplay).await {
                     Ok(_) => {
                         if *init_gen.peek() == gen {
@@ -512,10 +532,16 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                             let result = parse_native_setup_result(val);
                             if let Some(err_msg) = result.strip_prefix("error:") {
                                 error.set(Some(err_msg.to_string()));
+                                playback_blocked.set(false);
                             } else if result == "cancelled" {
                                 error.set(Some("Stream setup was cancelled".to_string()));
+                                playback_blocked.set(false);
+                            } else if result == "blocked" {
+                                error.set(None);
+                                playback_blocked.set(true);
                             } else {
                                 error.set(None);
+                                playback_blocked.set(false);
                             }
                             loading.set(false);
                         }
@@ -546,6 +572,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                 class: "video-js vjs-big-play-centered vjs-fluid",
                 poster: poster.as_deref().unwrap_or(""),
                 playsinline: true,
+                controls: cfg!(feature = "native"),
                 p { class: "vjs-no-js",
                     "To view this video please enable JavaScript, and consider upgrading to a web browser that supports HTML5 video"
                 }
@@ -582,6 +609,11 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                             "Retry"
                         }
                     }
+                }
+            }
+            if cfg!(feature = "native") && *playback_blocked.read() && error.read().is_none() {
+                div { class: "absolute bottom-4 left-1/2 -translate-x-1/2 z-10 rounded-lg bg-black/75 px-4 py-2 text-center text-sm text-white",
+                    "Autoplay was blocked. Use the player controls to start playback."
                 }
             }
         }

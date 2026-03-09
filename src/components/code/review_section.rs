@@ -122,6 +122,7 @@ pub fn PRReviewSection(
         publish_error.set(None);
         fetch_error.set(None);
         show_form.set(false);
+        submitting.set(false);
         review_body.set(String::new());
     }));
 
@@ -130,7 +131,7 @@ pub fn PRReviewSection(
         if !is_ready {
             return;
         }
-        let current_gen = *gen.read();
+        let current_gen = *gen.peek();
         if !*CLIENT_INITIALIZED.read() {
             return;
         }
@@ -241,9 +242,13 @@ pub fn PRReviewSection(
             let saved_pubkey = user_pubkey.clone();
             let author_pk = saved_pr_pubkey.clone();
             let on_review_submitted = on_review_submitted;
+            let submit_gen = *gen.peek();
             spawn(async move {
                 match publish_review_event(&id, &author_pk, review_state, &saved_content).await {
                     Ok(event_id) => {
+                        if *gen.peek() != submit_gen {
+                            return;
+                        }
                         let mut current = reviews.write();
                         if let Some(r) = current
                             .iter_mut()
@@ -258,6 +263,9 @@ pub fn PRReviewSection(
                         }
                     }
                     Err(e) => {
+                        if *gen.peek() != submit_gen {
+                            return;
+                        }
                         submitting.set(false);
                         publish_error.set(Some(e.to_string()));
                         // Rollback: remove the optimistic entry and restore prior review

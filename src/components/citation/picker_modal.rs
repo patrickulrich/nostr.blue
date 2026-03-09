@@ -73,7 +73,11 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
             } else {
                 load_version.with_mut(|v| *v = v.wrapping_add(1));
                 // Cleanup on hide - reset all modal state
+                if let Some(task) = search_task.take() {
+                    task.cancel();
+                }
                 loading.set(false);
+                is_searching.set(false);
                 selected_citation.set(None);
                 selected_style.set(CitationStyle::End);
                 search_query.set(String::new());

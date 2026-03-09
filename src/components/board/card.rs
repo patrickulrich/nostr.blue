@@ -7,7 +7,7 @@ use crate::routes::Route;
 use crate::stores::auth_store;
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::pin_boards_store::{
-    fetch_pinboard_reaction_count, has_user_reacted_to_pinboard, toggle_pinboard_reaction, Pinboard,
+    fetch_pinboard_reaction_state, toggle_pinboard_reaction, Pinboard,
 };
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
@@ -166,19 +166,12 @@ pub fn PinBoardCardMosaic(
         let current_gen = reaction_request_gen.peek().wrapping_add(1);
         reaction_request_gen.set(current_gen);
         spawn(async move {
-            if let Ok(count) = fetch_pinboard_reaction_count(&a_tag).await {
+            if let Ok((count, reacted)) = fetch_pinboard_reaction_state(&a_tag).await {
                 if *reaction_request_gen.peek() != current_gen {
                     return;
                 }
                 reaction_count.set(count);
-            }
-            if has_signer {
-                if let Ok(reacted) = has_user_reacted_to_pinboard(&a_tag).await {
-                    if *reaction_request_gen.peek() != current_gen {
-                        return;
-                    }
-                    has_reacted.set(reacted);
-                }
+                has_reacted.set(if has_signer { reacted } else { false });
             } else if *reaction_request_gen.peek() == current_gen {
                 has_reacted.set(false);
             }

@@ -317,7 +317,8 @@ pub fn EventCardCompactSkeleton() -> Element {
 /// Format event time for display
 #[cfg(feature = "web")]
 fn format_event_time(event: &UnifiedEvent) -> String {
-    let ts = event.start_timestamp();
+    const MAX_TIMESTAMP: u64 = 253_402_300_799;
+    let ts = event.start_timestamp().min(MAX_TIMESTAMP);
     if ts == 0 {
         return "TBD".to_string();
     }
@@ -371,7 +372,8 @@ fn format_event_time(event: &UnifiedEvent) -> String {
 }
 /// Format event time (short version for compact cards)
 fn format_event_time_short(event: &UnifiedEvent) -> String {
-    let ts = event.start_timestamp();
+    const MAX_TIMESTAMP: u64 = 253_402_300_799;
+    let ts = event.start_timestamp().min(MAX_TIMESTAMP);
     if ts == 0 {
         return "TBD".to_string();
     }

@@ -114,57 +114,71 @@ window.hlsManager = window.hlsManager || {
         const attachId = Symbol();
         this.activeAttachMap.set(elementId, attachId);
 
-        // Use hls.js for browsers without native HLS support
-        try {
-            await this.loadHls();
-        } catch (e) {
-            // Remove only our own token to avoid clobbering a newer attach
-            if (this.activeAttachMap.get(elementId) === attachId) {
+        return new Promise(async (resolve) => {
+            this.pendingResolves.set(elementId, resolve);
+
+            // Use hls.js for browsers without native HLS support
+            try {
+                await this.loadHls();
+            } catch (e) {
+                if (this.activeAttachMap.get(elementId) !== attachId) {
+                    this.settlePendingAttach(elementId, { type: 'cancelled', url: streamUrl });
+                    return;
+                }
+                // Remove only our own token to avoid clobbering a newer attach
                 this.activeAttachMap.delete(elementId);
-            }
-            console.error('[HLS Manager] Failed to load HLS:', e);
-            return { type: 'error', url: streamUrl, error: 'Failed to load hls.js' };
-        }
-
-        // Check if this attach is still valid after await
-        if (this.activeAttachMap.get(elementId) !== attachId) {
-            return { type: 'cancelled', url: streamUrl };
-        }
-
-        if (!Hls.isSupported()) {
-            this.activeAttachMap.delete(elementId);
-            return { type: 'error', url: streamUrl, error: 'HLS not supported in this browser' };
-        }
-
-        // Cleanup any previous instance before creating new one
-        this.detach(elementId);
-
-        // Re-register attach token after cleanup to maintain valid attach state
-        this.activeAttachMap.set(elementId, attachId);
-
-        const hls = new Hls({
-            enableWorker: true,
-            lowLatencyMode: true,
-            backBufferLength: 30,
-            maxBufferLength: 60,
-            maxMaxBufferLength: 120,
-            // Radio stream optimizations
-            liveSyncDurationCount: 3,
-            liveMaxLatencyDurationCount: 10,
-        });
-
-        // Track instance immediately to prevent orphaned workers on timeout
-        this.instances.set(elementId, hls);
-
-        return new Promise((resolve) => {
-            // Check if this attach is still valid before setting up
-            if (this.activeAttachMap.get(elementId) !== attachId) {
-                hls.destroy();
-                resolve({ type: 'cancelled', url: streamUrl });
+                console.error('[HLS Manager] Failed to load HLS:', e);
+                this.settlePendingAttach(elementId, {
+                    type: 'error',
+                    url: streamUrl,
+                    error: 'Failed to load hls.js'
+                });
                 return;
             }
 
-            this.pendingResolves.set(elementId, resolve);
+            // Check if this attach is still valid after await
+            if (this.activeAttachMap.get(elementId) !== attachId) {
+                this.settlePendingAttach(elementId, { type: 'cancelled', url: streamUrl });
+                return;
+            }
+
+            if (!Hls.isSupported()) {
+                this.activeAttachMap.delete(elementId);
+                this.settlePendingAttach(elementId, {
+                    type: 'error',
+                    url: streamUrl,
+                    error: 'HLS not supported in this browser'
+                });
+                return;
+            }
+
+            // Cleanup any previous instance before creating new one
+            this.detach(elementId);
+
+            // Re-register attach token after cleanup to maintain valid attach state
+            this.activeAttachMap.set(elementId, attachId);
+
+            const hls = new Hls({
+                enableWorker: true,
+                lowLatencyMode: true,
+                backBufferLength: 30,
+                maxBufferLength: 60,
+                maxMaxBufferLength: 120,
+                // Radio stream optimizations
+                liveSyncDurationCount: 3,
+                liveMaxLatencyDurationCount: 10,
+            });
+
+            // Track instance immediately to prevent orphaned workers on timeout
+            this.instances.set(elementId, hls);
+
+            // Check if this attach is still valid before setting up
+            if (this.activeAttachMap.get(elementId) !== attachId) {
+                hls.destroy();
+                this.instances.delete(elementId);
+                this.settlePendingAttach(elementId, { type: 'cancelled', url: streamUrl });
+                return;
+            }
 
             // Capture the current attachId for timeout validation
             const capturedAttachId = attachId;
@@ -229,6 +243,10 @@ window.hlsManager = window.hlsManager || {
                     hls.destroy();
                     this.instances.delete(elementId);
                     this.activeAttachMap.delete(elementId);
+                    if (this.nowPlayingElementId === elementId) {
+                        this.nowPlaying = null;
+                        this.nowPlayingElementId = null;
+                    }
 
                     // Dispatch error event for Rust to catch
                     window.dispatchEvent(new CustomEvent('hls-stream-error', {

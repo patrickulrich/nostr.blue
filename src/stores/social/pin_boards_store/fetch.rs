@@ -458,6 +458,19 @@ pub async fn fetch_pinboard_reaction_count(a_tag: &str) -> std::result::Result<u
     Ok(reactions.len())
 }
 
+/// Fetch both reaction count and current-user reacted state from a single query
+pub async fn fetch_pinboard_reaction_state(
+    a_tag: &str,
+) -> std::result::Result<(usize, bool), String> {
+    let current_pubkey = crate::stores::auth_store::get_pubkey();
+    let reactions = fetch_pinboard_reactions(a_tag).await?;
+    let reacted = current_pubkey
+        .as_ref()
+        .map(|pubkey| reactions.iter().any(|r| &r.pubkey == pubkey))
+        .unwrap_or(false);
+    Ok((reactions.len(), reacted))
+}
+
 /// Check if current user has reacted to a pinboard
 pub async fn has_user_reacted_to_pinboard(a_tag: &str) -> std::result::Result<bool, String> {
     let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;

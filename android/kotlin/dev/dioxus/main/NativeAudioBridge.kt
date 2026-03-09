@@ -119,7 +119,6 @@ object NativeAudioBridge {
     fun setQueue(context: Context, queueJson: String, startIndex: Int, playWhenReady: Boolean): String {
         return try {
             val parsed = parseQueue(queueJson)
-            ensureServiceStarted(context)
             queue.clear()
             queue.addAll(parsed)
             currentIndex = startIndex.coerceIn(0, (queue.size - 1).coerceAtLeast(0))
@@ -130,6 +129,7 @@ object NativeAudioBridge {
                 updatePlaybackState(false, PlaybackState.STATE_STOPPED)
                 stopForegroundPlayback()
             } else {
+                ensureServiceStarted(context)
                 prepareCurrent(playWhenReady)
             }
             "ok"
@@ -142,8 +142,8 @@ object NativeAudioBridge {
     @Synchronized
     fun play(context: Context): String {
         return try {
-            ensureServiceStarted(context)
             if (queue.isEmpty()) return "ok"
+            ensureServiceStarted(context)
             if (isPreparing) {
                 playWhenReady = true
                 updatePlaybackState(false, PlaybackState.STATE_BUFFERING)

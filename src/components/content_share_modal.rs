@@ -120,7 +120,7 @@ pub fn ContentShareModal(
                 }
             }
         }
-        current_text.len()
+        current_text.encode_utf16().count()
     }
     fn utf16_to_utf8_index(text: &str, utf16_index: usize) -> usize {
         let mut utf8_index = 0;

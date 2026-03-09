@@ -61,6 +61,10 @@ pub struct DisplayEpisode {
     pub is_live: bool,
 }
 impl DisplayEpisode {
+    fn rss_episode_track_id(feed_key: &str, episode_guid: &str) -> String {
+        format!("rss-podcast:{feed_key}:{episode_guid}")
+    }
+
     /// Create from Nostr podcast episode
     pub fn from_nostr_episode(
         episode: &PodcastEpisode,
@@ -103,7 +107,7 @@ impl DisplayEpisode {
             .and_then(|d| parse_rfc2822_to_timestamp(d))
             .unwrap_or(0);
         Self {
-            id: episode.guid.clone(),
+            id: Self::rss_episode_track_id(&podcast.feed_url, &episode.guid),
             title: episode.title.clone(),
             description: episode.description.clone(),
             image: episode.image.clone(),
@@ -169,7 +173,7 @@ impl DisplayEpisode {
             })
             .collect();
         Self {
-            id: episode.id.to_string(),
+            id: Self::rss_episode_track_id(&feed.id.to_string(), &episode.id.to_string()),
             title: episode.title.clone(),
             description: episode.description.clone(),
             image: episode.get_image().map(|s| s.to_string()),
@@ -237,22 +241,8 @@ impl DisplayEpisode {
     }
     /// Convert to MusicTrack for player
     pub fn to_music_track(&self) -> MusicTrack {
-        let track_id = match &self.source {
-            TrackSource::RssPodcast {
-                podcast_id,
-                episode_guid,
-                feed_url,
-                ..
-            } => {
-                let feed_key = podcast_id
-                    .map(|id| id.to_string())
-                    .unwrap_or_else(|| feed_url.clone());
-                format!("rss-podcast:{feed_key}:{episode_guid}")
-            }
-            _ => self.id.clone(),
-        };
         MusicTrack {
-            id: track_id,
+            id: self.id.clone(),
             title: self.title.clone(),
             artist: self.podcast_title.clone(),
             artist_npub: None,
@@ -341,8 +331,7 @@ pub struct PodcastEpisodeCardProps {
 #[component]
 pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
     let episode = &props.episode;
-    let episode_id = episode.id.clone();
-    let episode_id_for_memo = episode_id.clone();
+    let episode_id_for_memo = episode.id.clone();
     let is_playing = use_memo(move || {
         let player_state = music_player::MUSIC_PLAYER.read();
         if let Some(ref current) = player_state.current_track {

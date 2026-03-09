@@ -67,11 +67,8 @@ async fn ensure_audio_hls_manager() -> Result<(), String> {
 #[component]
 pub fn PersistentMusicPlayer() -> Element {
     let state = MUSIC_PLAYER.read().clone();
-    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
+    #[allow(unused_mut)]
     let mut is_seeking = use_signal(|| false);
-    #[cfg(any(feature = "web", feature = "mobile"))]
-    let is_seeking = use_signal(|| false);
-    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
     #[allow(unused_mut)]
     let mut seek_gen = use_signal(|| 0u32);
     let mut show_share_modal = use_signal(|| false);
@@ -430,6 +427,9 @@ pub fn PersistentMusicPlayer() -> Element {
     let _native_snapshot_poller = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
         loop {
             crate::platform::timer::sleep_ms(250).await;
+            if *is_seeking.read() {
+                continue;
+            }
             if let Ok(snapshot) = android_media::snapshot() {
                 music_player::sync_native_playback_snapshot(snapshot);
             }
@@ -795,6 +795,8 @@ pub fn PersistentMusicPlayer() -> Element {
                                     #[cfg(all(feature = "web", not(feature = "mobile")))]
                                     {
                                         let duration = state.duration;
+                                        let mut seek_gen = seek_gen;
+                                        let mut is_seeking = is_seeking;
                                         spawn(async move {
                                             if let Some(window) = web_sys::window() {
                                                 if let Some(document) = window.document() {
@@ -811,7 +813,16 @@ pub fn PersistentMusicPlayer() -> Element {
                                                         let percent = ((client_x - left) / width).clamp(0.0, 1.0);
                                                         let new_time = percent * duration;
                                                         if new_time.is_finite() {
+                                                            let gen = seek_gen.with_mut(|g| {
+                                                                *g = g.wrapping_add(1);
+                                                                *g
+                                                            });
+                                                            is_seeking.set(true);
                                                             music_player::seek_to(new_time);
+                                                            crate::platform::timer::sleep_ms(500).await;
+                                                            if *seek_gen.peek() == gen {
+                                                                is_seeking.set(false);
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -821,6 +832,8 @@ pub fn PersistentMusicPlayer() -> Element {
                                     #[cfg(feature = "mobile")]
                                     {
                                         let duration = state.duration;
+                                        let mut seek_gen = seek_gen;
+                                        let mut is_seeking = is_seeking;
                                         spawn(async move {
                                             let script = format!(
                                                 r#"
@@ -841,7 +854,16 @@ pub fn PersistentMusicPlayer() -> Element {
                                                     .or_else(|| result.as_str().and_then(|s| s.parse::<f64>().ok()))
                                                     .unwrap_or(-1.0);
                                                 if new_time >= 0.0 && new_time.is_finite() {
+                                                    let gen = seek_gen.with_mut(|g| {
+                                                        *g = g.wrapping_add(1);
+                                                        *g
+                                                    });
+                                                    is_seeking.set(true);
                                                     music_player::seek_to(new_time);
+                                                    crate::platform::timer::sleep_ms(500).await;
+                                                    if *seek_gen.peek() == gen {
+                                                        is_seeking.set(false);
+                                                    }
                                                 }
                                             }
                                         });

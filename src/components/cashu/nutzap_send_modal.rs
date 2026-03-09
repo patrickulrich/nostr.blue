@@ -47,8 +47,8 @@ pub fn NutzapSendModal(
         compatible_mint.set(None);
 
         if !client_initialized {
-            is_loading_info.set(false);
-            load_error.set(Some("Nostr client is still initializing".to_string()));
+            is_loading_info.set(true);
+            load_error.set(None);
             return;
         }
 

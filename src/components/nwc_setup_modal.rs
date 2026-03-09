@@ -127,7 +127,7 @@ pub fn NwcSetupModal(
                 div { class: "mt-4 p-3 bg-blue-50 dark:bg-blue-900/30 border border-blue-200
                             dark:border-blue-800 rounded-lg",
                     p { class: "text-xs text-blue-800 dark:text-blue-200",
-                        "🔒 Your connection URI is stored locally in your browser and never sent to our servers."
+                        "🔒 Your wallet connection is session-only and never sent to our servers. Reconnect after refresh."
                     }
                 }
             }
