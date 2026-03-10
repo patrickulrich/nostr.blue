@@ -247,11 +247,10 @@ pub fn PinBoardCardMosaic(
                 button {
                     class: "rounded-full p-2 bg-white/90 hover:bg-white shadow-md backdrop-blur-sm
                             {heart_button_class} transition-colors disabled:opacity-50",
-                    disabled: *reaction_loading.read() || !*reaction_bootstrapped.read(),
+                    disabled: *reaction_loading.read() || !*reaction_bootstrapped.read() || !*HAS_SIGNER.read(),
                     onclick: move |e| {
                         e.stop_propagation();
                         if !*HAS_SIGNER.read() {
-                            log::warn!("Cannot react: no signer");
                             return;
                         }
                         // Invalidate any in-flight bootstrap fetch before optimistic update
@@ -267,12 +266,19 @@ pub fn PinBoardCardMosaic(
                             reaction_count.set(current_count + 1);
                         }
                         reaction_loading.set(true);
+                        let current_gen = *reaction_request_gen.peek();
                         spawn(async move {
                             match toggle_pinboard_reaction(&board, "+").await {
                                 Ok(added) => {
+                                    if *reaction_request_gen.peek() != current_gen {
+                                        return;
+                                    }
                                     if added == currently_reacted {
                                         match fetch_pinboard_reaction_state(&board.a_tag).await {
                                             Ok((count, reacted)) => {
+                                                if *reaction_request_gen.peek() != current_gen {
+                                                    return;
+                                                }
                                                 has_reacted.set(reacted);
                                                 reaction_count.set(count);
                                             }
@@ -289,12 +295,17 @@ pub fn PinBoardCardMosaic(
                                     }
                                 }
                                 Err(e) => {
+                                    if *reaction_request_gen.peek() != current_gen {
+                                        return;
+                                    }
                                     log::error!("Failed to toggle reaction: {}", e);
                                     has_reacted.set(currently_reacted);
                                     reaction_count.set(current_count);
                                 }
                             }
-                            reaction_loading.set(false);
+                            if *reaction_request_gen.peek() == current_gen {
+                                reaction_loading.set(false);
+                            }
                         });
                     },
                     title: if *has_reacted.read() { "Unlike" } else { "Like" },

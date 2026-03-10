@@ -106,26 +106,36 @@ pub fn PersistentMusicPlayer() -> Element {
             // Only proceed if we have a track to bind
             let Some(track) = current_track.as_ref() else {
                 // Clean up existing playback before returning
+                // Capture bind token to fence the cleanup
+                let bind_token = *native_bind_token.peek();
                 spawn(async move {
                     let audio_id_json = serde_json::to_string(&"global-music-player-audio")
                         .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
                     let script = format!(
                         r#"
                         (function() {{
+                            // Fence: check if this cleanup belongs to the current bind
                             let audio = document.getElementById({audio_id});
-                            if (audio) {{
-                                audio.pause();
-                                audio.src = "";
-                                audio.currentTime = 0;
-                                delete audio.dataset.currentUrl;
-                                delete audio.dataset.pendingUrl;
-                            }}
+                            if (!audio) return;
+                            
+                            // Read the current bind token from the element
+                            let currentToken = audio.dataset.bindToken ? parseInt(audio.dataset.bindToken, 10) : 0;
+                            if (currentToken !== {bind_token}) return;
+                            
+                            audio.pause();
+                            audio.src = "";
+                            audio.currentTime = 0;
+                            delete audio.dataset.currentUrl;
+                            delete audio.dataset.pendingUrl;
+                            delete audio.dataset.bindToken;
+                            
                             if (window.hlsManager) {{
                                 window.hlsManager.detach({audio_id});
                             }}
                         }})();
                         "#,
                         audio_id = audio_id_json,
+                        bind_token = bind_token,
                     );
                     let _ = document::eval(&script).await;
                 });
@@ -188,6 +198,7 @@ pub fn PersistentMusicPlayer() -> Element {
                                         return "cancelled";
                                     }}
                                     audio.dataset.currentUrl = {media_url};
+                                    audio.dataset.bindToken = "{bind_token}";
                                     if ({is_playing}) {{
                                         audio.play().catch(e => console.log('Play failed:', e));
                                     }}
@@ -201,6 +212,7 @@ pub fn PersistentMusicPlayer() -> Element {
                         audio_id = audio_id_json,
                         media_url = media_url_json,
                         is_playing = is_playing_literal,
+                        bind_token = bind_token,
                     )
                 } else {
                     format!(
@@ -225,6 +237,7 @@ pub fn PersistentMusicPlayer() -> Element {
 
                                 if (urlChanged) {{
                                     audio.dataset.currentUrl = {media_url};
+                                    audio.dataset.bindToken = "{bind_token}";
                                     audio.src = {media_url};
                                     // For live streams, wait for canplay before playing
                                     if ({is_playing}) {{
@@ -255,6 +268,7 @@ pub fn PersistentMusicPlayer() -> Element {
                         audio_id = audio_id_json,
                         media_url = media_url_json,
                         is_playing = is_playing_literal,
+                        bind_token = bind_token,
                     )
                 };
                 match document::eval(&script).await {
@@ -627,6 +641,9 @@ pub fn PersistentMusicPlayer() -> Element {
             music_player::set_buffering(false);
             if !music_player::try_next_stream() {
                 log::error!("All streams failed");
+                music_player::set_playback_error(Some(
+                    "Playback error on this platform. Please retry.".to_string(),
+                ));
             }
         }
     };

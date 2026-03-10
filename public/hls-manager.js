@@ -115,9 +115,17 @@ window.hlsManager = window.hlsManager || {
         this.activeAttachMap.set(elementId, attachId);
 
         // Return a Promise that will be settled via settlePendingAttach
-        return new Promise((resolve) => {
-            // Store the resolve with attachId (it will be called by settlePendingAttach)
-            this.pendingResolves.set(elementId, { attachId, resolve });
+        return new Promise((resolve, reject) => {
+            // Check if there's an existing pending resolve for this elementId
+            const existing = this.pendingResolves.get(elementId);
+            if (existing && existing.attachId !== attachId) {
+                // Cancel the old pending promise by rejecting it
+                existing.reject({ type: 'cancelled', url: streamUrl });
+                this.pendingResolves.delete(elementId);
+            }
+
+            // Store the resolve/reject with attachId (it will be called by settlePendingAttach)
+            this.pendingResolves.set(elementId, { attachId, resolve, reject });
 
             // Start async work only after the real resolver is registered
             this._doAttach(elementId, streamUrl, attachId).catch((e) => {

@@ -51,6 +51,11 @@ pub fn MobileSearchSlideout(show: bool, on_close: EventHandler<()>) -> Element {
 
         if new_value.is_empty() {
             show_dropdown.set(false);
+            // Cancel any pending relay search
+            if let Some(task) = relay_search_task.take() {
+                task.cancel();
+            }
+            is_searching.set(false);
             return;
         }
 

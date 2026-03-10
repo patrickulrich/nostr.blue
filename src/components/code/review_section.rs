@@ -177,6 +177,8 @@ pub fn PRReviewSection(
                         if *gen.peek() != current_gen {
                             return;
                         }
+                        // Clear any previous fetch error on success
+                        fetch_error.set(None);
                         let mut by_pubkey =
                             std::collections::HashMap::<String, PersistedReview>::new();
                         for r in reviews.read().iter().cloned() {
