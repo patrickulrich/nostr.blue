@@ -9,6 +9,7 @@ use crate::utils::FeedItem;
 use dioxus::prelude::*;
 use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp};
 use std::time::Duration;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum FeedType {
@@ -100,7 +101,16 @@ pub fn Videos() -> Element {
             Some(auth_store::LoginMethod::BrowserExtension)
                 | Some(auth_store::LoginMethod::PrivateKey)
                 | Some(auth_store::LoginMethod::RemoteSigner)
-        );
+        ) || {
+            #[cfg(feature = "mobile")]
+            {
+                matches!(login_method, Some(auth_store::LoginMethod::AndroidSigner))
+            }
+            #[cfg(not(feature = "mobile"))]
+            {
+                false
+            }
+        };
         if is_authenticated && requires_signer && !has_signer {
             log::debug!("Waiting for signer restoration before loading video feed...");
             return;
@@ -132,11 +142,7 @@ pub fn Videos() -> Element {
             }
             let pubkey_str = auth_store::get_pubkey().unwrap_or_default();
             let cache_key = match current_feed_type {
-                FeedType::Following => {
-                    FeedCacheKey::Videos {
-                        pubkey: pubkey_str,
-                    }
-                }
+                FeedType::Following => FeedCacheKey::Videos { pubkey: pubkey_str },
                 FeedType::Global => FeedCacheKey::VideosGlobal,
             };
             let cached_items = feed_cache::load_cached_feed(&cache_key, 100)
@@ -151,10 +157,8 @@ pub fn Videos() -> Element {
             }
             if !cached_items.is_empty() {
                 log::info!("Loaded {} videos from cache", cached_items.len());
-                let cached_events: Vec<Event> = cached_items
-                    .iter()
-                    .map(|i| i.event().clone())
-                    .collect();
+                let cached_events: Vec<Event> =
+                    cached_items.iter().map(|i| i.event().clone()).collect();
                 if let Some(oldest) = cached_events.iter().map(|e| e.created_at).min() {
                     oldest_timestamp.set(Some(oldest.as_secs().saturating_sub(1)));
                 }
@@ -167,7 +171,8 @@ pub fn Videos() -> Element {
                             return;
                         }
                         let mut current = feed_events.cloned();
-                        let filtered: Vec<_> = batch.into_iter()
+                        let filtered: Vec<_> = batch
+                            .into_iter()
                             .filter(|e| e.kind != Kind::Custom(30311) || is_live_stream(e))
                             .collect();
                         current.extend(filtered);
@@ -175,24 +180,26 @@ pub fn Videos() -> Element {
                         let deduped = dedupe_videos_by_url(current);
                         feed_events.set(deduped);
                         loading_feed.set(false);
-                    }).await
+                    })
+                    .await
                 }
-                FeedType::Global => {
-                    load_global_videos(None, |batch| {
-                        if *request_id.peek() != current_id {
-                            return;
-                        }
-                        let mut current = feed_events.cloned();
-                        let filtered: Vec<_> = batch.into_iter()
-                            .filter(|e| e.kind != Kind::Custom(30311) || is_live_stream(e))
-                            .collect();
-                        current.extend(filtered);
-                        current.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-                        let deduped = dedupe_videos_by_url(current);
-                        feed_events.set(deduped);
-                        loading_feed.set(false);
-                    }).await.map(|(e, h)| (e, h, false))
-                }
+                FeedType::Global => load_global_videos(None, |batch| {
+                    if *request_id.peek() != current_id {
+                        return;
+                    }
+                    let mut current = feed_events.cloned();
+                    let filtered: Vec<_> = batch
+                        .into_iter()
+                        .filter(|e| e.kind != Kind::Custom(30311) || is_live_stream(e))
+                        .collect();
+                    current.extend(filtered);
+                    current.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                    let deduped = dedupe_videos_by_url(current);
+                    feed_events.set(deduped);
+                    loading_feed.set(false);
+                })
+                .await
+                .map(|(e, h)| (e, h, false)),
             };
             if *request_id.peek() != current_id {
                 log::debug!(
@@ -219,11 +226,8 @@ pub fn Videos() -> Element {
                         .collect();
                     let cache_key_for_store = effective_cache_key;
                     spawn(async move {
-                        let _ = feed_cache::store_feed_items(
-                                &cache_key_for_store,
-                                &feed_items,
-                            )
-                            .await;
+                        let _ =
+                            feed_cache::store_feed_items(&cache_key_for_store, &feed_items).await;
                         let _ = feed_cache::run_eviction_if_needed().await;
                     });
                     has_more.set(page_has_more);
@@ -253,16 +257,19 @@ pub fn Videos() -> Element {
         loading_feed.set(true);
         spawn(async move {
             let result = match current_feed_type {
-                FeedType::Following => {
-                    load_following_videos(until, |_| {}).await.map(|(e, h, _)| (e, h))
-                }
+                FeedType::Following => load_following_videos(until, |_| {})
+                    .await
+                    .map(|(e, h, _)| (e, h)),
                 FeedType::Global => load_global_videos(until, |_| {}).await,
             };
             match result {
                 Ok((new_events, page_has_more)) => {
                     // Capture oldest timestamp from new page BEFORE merge (for cursor advancement)
                     // This ensures the cursor advances past duplicates even if they get deduped
-                    let oldest_new_ts = new_events.iter().min_by_key(|e| e.created_at).map(|e| e.created_at.as_secs());
+                    let oldest_new_ts = new_events
+                        .iter()
+                        .min_by_key(|e| e.created_at)
+                        .map(|e| e.created_at.as_secs());
 
                     // Merge existing feed with new events, then dedupe
                     // This allows addressable kinds to replace non-addressable across pages
@@ -283,7 +290,9 @@ pub fn Videos() -> Element {
                     if deduped != current {
                         feed_events.set(deduped);
                     } else {
-                        log::info!("Page contained only duplicates, cursor advanced to continue discovery");
+                        log::info!(
+                            "Page contained only duplicates, cursor advanced to continue discovery"
+                        );
                     }
                     loading_feed.set(false);
                 }
@@ -469,45 +478,33 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
     let mut is_hovering = use_signal(|| false);
     let video_element_id = format!("preview-{}", &event.id.to_hex()[..12]);
     let video_element_id_for_effect = video_element_id.clone();
-    use_effect(
-        use_reactive(
-            &author_pubkey,
-            move |pubkey_str| {
-                spawn(async move {
-                    if let Ok(pubkey) = PublicKey::parse(&pubkey_str) {
-                        let filter = Filter::new()
-                            .author(pubkey)
-                            .kind(Kind::Metadata)
-                            .limit(1);
-                        if let Ok(events) = nostr_client::fetch_events_aggregated(
-                                filter,
-                                Duration::from_secs(5),
-                            )
-                            .await
+    use_effect(use_reactive(&author_pubkey, move |pubkey_str| {
+        spawn(async move {
+            if let Ok(pubkey) = PublicKey::parse(&pubkey_str) {
+                let filter = Filter::new().author(pubkey).kind(Kind::Metadata).limit(1);
+                if let Ok(events) =
+                    nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await
+                {
+                    if let Some(event) = events.into_iter().next() {
+                        if let Ok(metadata) =
+                            serde_json::from_str::<nostr_sdk::Metadata>(&event.content)
                         {
-                            if let Some(event) = events.into_iter().next() {
-                                if let Ok(metadata) = serde_json::from_str::<
-                                    nostr_sdk::Metadata,
-                                >(&event.content) {
-                                    author_metadata.set(Some(metadata));
-                                }
-                            }
+                            author_metadata.set(Some(metadata));
                         }
                     }
-                });
-            },
-        ),
-    );
+                }
+            }
+        });
+    }));
     use_effect(move || {
         let hovering = *is_hovering.read();
         let id = video_element_id_for_effect.clone();
         spawn(async move {
+            #[cfg(feature = "web")]
             if let Some(window) = web_sys::window() {
                 if let Some(document) = window.document() {
                     if let Some(element) = document.get_element_by_id(&id) {
-                        if let Ok(video) = element
-                            .dyn_into::<web_sys::HtmlVideoElement>()
-                        {
+                        if let Ok(video) = element.dyn_into::<web_sys::HtmlVideoElement>() {
                             if hovering {
                                 let _ = video.play();
                             } else {
@@ -518,6 +515,8 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
                     }
                 }
             }
+            #[cfg(not(feature = "web"))]
+            let _ = (&id, hovering);
         });
     });
     let display_name = author_metadata
@@ -605,12 +604,11 @@ fn VertsVideoCard(event: Event, feed_type: FeedType) -> Element {
         let hovering = *is_hovering.read();
         let id = video_element_id_for_effect.clone();
         spawn(async move {
+            #[cfg(feature = "web")]
             if let Some(window) = web_sys::window() {
                 if let Some(document) = window.document() {
                     if let Some(element) = document.get_element_by_id(&id) {
-                        if let Ok(video) = element
-                            .dyn_into::<web_sys::HtmlVideoElement>()
-                        {
+                        if let Ok(video) = element.dyn_into::<web_sys::HtmlVideoElement>() {
                             if hovering {
                                 let _ = video.play();
                             } else {
@@ -621,6 +619,8 @@ fn VertsVideoCard(event: Event, feed_type: FeedType) -> Element {
                     }
                 }
             }
+            #[cfg(not(feature = "web"))]
+            let _ = (&id, hovering);
         });
     });
     let video_id = event.id.to_hex();
@@ -753,16 +753,15 @@ async fn load_featured_content() -> Result<Vec<Event>, String> {
                         filter,
                         Duration::from_secs(10),
                         20,
-                        |batch| { all_events.extend(batch); },
+                        |batch| {
+                            all_events.extend(batch);
+                        },
                     )
                     .await
                     .unwrap_or(0);
                     all_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
                     let deduped = dedupe_videos_by_url(all_events);
-                    let landscape_vec: Vec<Event> = deduped
-                        .into_iter()
-                        .take(3)
-                        .collect();
+                    let landscape_vec: Vec<Event> = deduped.into_iter().take(3).collect();
                     if !landscape_vec.is_empty() {
                         return Ok(landscape_vec);
                     }
@@ -778,7 +777,9 @@ async fn load_featured_content() -> Result<Vec<Event>, String> {
         filter,
         Duration::from_secs(10),
         20,
-        |batch| { all_events.extend(batch); },
+        |batch| {
+            all_events.extend(batch);
+        },
     )
     .await
     .unwrap_or(0);
@@ -808,7 +809,9 @@ async fn load_recent_verts() -> Result<Vec<Event>, String> {
                     filter,
                     Duration::from_secs(10),
                     20,
-                    |batch| { all_events.extend(batch); },
+                    |batch| {
+                        all_events.extend(batch);
+                    },
                 )
                 .await
                 .unwrap_or(0);
@@ -841,11 +844,18 @@ where
     F: FnMut(Vec<Event>),
 {
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    log::info!("Loading following videos feed for {} (until: {:?})", pubkey_str, until);
+    log::info!(
+        "Loading following videos feed for {} (until: {:?})",
+        pubkey_str,
+        until
+    );
     let contacts = match nostr_client::fetch_contacts(pubkey_str.clone()).await {
         Ok(contacts) => contacts,
         Err(e) => {
-            log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
+            log::warn!(
+                "Failed to fetch contacts: {}, falling back to global feed",
+                e
+            );
             let (events, has_more) = load_global_videos(until, |_| {}).await?;
             return Ok((events, has_more, true));
         }
@@ -869,10 +879,7 @@ where
     }
     let mut kinds = all_video_kinds();
     kinds.push(Kind::Custom(30311)); // livestreams
-    let mut filter = Filter::new()
-        .kinds(kinds)
-        .authors(authors)
-        .limit(50);
+    let mut filter = Filter::new().kinds(kinds).authors(authors).limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts.saturating_sub(1)));
     }
@@ -896,7 +903,10 @@ where
     // Remove ended livestreams (only show live ones on the videos page)
     events.retain(|e| e.kind != Kind::Custom(30311) || is_live_stream(e));
     let deduped = dedupe_videos_by_url(events);
-    log::info!("Loaded {} video events from following (after dedup)", deduped.len());
+    log::info!(
+        "Loaded {} video events from following (after dedup)",
+        deduped.len()
+    );
     let has_more = count >= 50;
     Ok((deduped, has_more, false))
 }
@@ -910,9 +920,7 @@ where
     log::info!("Loading global videos feed (until: {:?})...", until);
     let mut kinds = all_video_kinds();
     kinds.push(Kind::Custom(30311));
-    let mut filter = Filter::new()
-        .kinds(kinds)
-        .limit(50);
+    let mut filter = Filter::new().kinds(kinds).limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts.saturating_sub(1)));
     }

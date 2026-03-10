@@ -16,6 +16,7 @@ use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 use std::collections::HashMap;
 use std::time::Duration;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 #[derive(Clone, PartialEq, Debug, Eq, Hash)]
 enum MediaSubTab {
@@ -72,8 +73,8 @@ fn default_tab_data_map() -> HashMap<ProfileTab, TabData> {
 fn dedupe_articles_by_address(articles: Vec<NostrEvent>) -> Vec<NostrEvent> {
     let mut address_map: HashMap<String, NostrEvent> = HashMap::new();
     for article in articles {
-        let identifier = get_identifier(&article)
-            .unwrap_or_else(|| format!("id-{}", article.id.to_hex()));
+        let identifier =
+            get_identifier(&article).unwrap_or_else(|| format!("id-{}", article.id.to_hex()));
         let address = format!(
             "{}:{}:{}",
             article.kind.as_u16(),
@@ -133,382 +134,323 @@ pub fn Profile(pubkey: String) -> Element {
         .and_then(|pk| PublicKey::parse(pk).ok())
         .and_then(|user_pk| parsed_pubkey.map(|profile_pk| user_pk == profile_pk))
         .unwrap_or(false);
-    use_effect(
-        use_reactive(
-            &pubkey,
-            move |_new_pubkey| {
-                profile_data.set(None);
+    use_effect(use_reactive(&pubkey, move |_new_pubkey| {
+        profile_data.set(None);
+        loading.set(true);
+        error.set(None);
+        active_tab.set(ProfileTab::Posts);
+        tab_data.set(default_tab_data_map());
+        loading_events.set(false);
+        current_tab_has_more.set(true);
+        is_following.set(false);
+        follows_you.set(false);
+        following_count.set(0);
+        followers_count.set(0);
+        post_count.set(0);
+        pinned_events.set(Vec::new());
+        pinned_loading.set(true);
+    }));
+    use_effect(use_reactive(
+        (
+            &pubkey_for_pinned,
+            &*nostr_client::CLIENT_INITIALIZED.read(),
+        ),
+        move |(pubkey_str, client_initialized)| {
+            if !client_initialized {
+                return;
+            }
+            pinned_loading.set(true);
+            spawn(async move {
+                match pinned_notes::fetch_pinned_notes_for_user(&pubkey_str).await {
+                    Ok((pin_ids, events)) => {
+                        let mut sorted_events = Vec::new();
+                        for pin_id in pin_ids {
+                            if let Some(event) = events.iter().find(|e| e.id.to_hex() == pin_id) {
+                                sorted_events.push(event.clone());
+                            }
+                        }
+                        pinned_events.set(sorted_events);
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to fetch pinned notes: {}", e);
+                        pinned_events.set(Vec::new());
+                    }
+                }
+                pinned_loading.set(false);
+            });
+        },
+    ));
+    use_effect(use_reactive(
+        (&pubkey, &*nostr_client::CLIENT_INITIALIZED.read()),
+        move |(pubkey_str, client_initialized)| {
+            if !client_initialized {
+                return;
+            }
+            spawn(async move {
                 loading.set(true);
                 error.set(None);
-                active_tab.set(ProfileTab::Posts);
-                tab_data.set(default_tab_data_map());
-                loading_events.set(false);
-                current_tab_has_more.set(true);
-                is_following.set(false);
-                follows_you.set(false);
-                following_count.set(0);
-                followers_count.set(0);
-                post_count.set(0);
-                pinned_events.set(Vec::new());
-                pinned_loading.set(true);
-            },
-        ),
-    );
-    use_effect(
-        use_reactive(
-            (&pubkey_for_pinned, &*nostr_client::CLIENT_INITIALIZED.read()),
-            move |(pubkey_str, client_initialized)| {
-                if !client_initialized {
-                    return;
-                }
-                pinned_loading.set(true);
-                spawn(async move {
-                    match pinned_notes::fetch_pinned_notes_for_user(&pubkey_str).await {
-                        Ok((pin_ids, events)) => {
-                            let mut sorted_events = Vec::new();
-                            for pin_id in pin_ids {
-                                if let Some(event) = events
-                                    .iter()
-                                    .find(|e| e.id.to_hex() == pin_id)
-                                {
-                                    sorted_events.push(event.clone());
-                                }
-                            }
-                            pinned_events.set(sorted_events);
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to fetch pinned notes: {}", e);
-                            pinned_events.set(Vec::new());
-                        }
-                    }
-                    pinned_loading.set(false);
-                });
-            },
-        ),
-    );
-    use_effect(
-        use_reactive(
-            (&pubkey, &*nostr_client::CLIENT_INITIALIZED.read()),
-            move |(pubkey_str, client_initialized)| {
-                if !client_initialized {
-                    return;
-                }
-                spawn(async move {
-                    loading.set(true);
-                    error.set(None);
-                    let public_key = match PublicKey::from_bech32(&pubkey_str)
-                        .or_else(|_| PublicKey::from_hex(&pubkey_str))
-                    {
-                        Ok(pk) => pk,
-                        Err(e) => {
-                            error.set(Some(format!("Invalid public key: {}", e)));
-                            loading.set(false);
-                            return;
-                        }
-                    };
-                    let client = match nostr_client::get_client() {
-                        Some(c) => c,
-                        None => {
-                            error.set(Some("Client not initialized".to_string()));
-                            loading.set(false);
-                            return;
-                        }
-                    };
-                    if let Ok(Some(metadata)) = client
-                        .database()
-                        .metadata(public_key)
-                        .await
-                    {
-                        log::debug!("Loaded profile metadata from database cache");
-                        profile_data.set(Some(metadata));
+                let public_key = match PublicKey::from_bech32(&pubkey_str)
+                    .or_else(|_| PublicKey::from_hex(&pubkey_str))
+                {
+                    Ok(pk) => pk,
+                    Err(e) => {
+                        error.set(Some(format!("Invalid public key: {}", e)));
                         loading.set(false);
                         return;
                     }
-                    match client.fetch_metadata(public_key, Duration::from_secs(5)).await
-                    {
-                        Ok(Some(metadata)) => {
-                            log::debug!("Fetched profile metadata from relays");
-                            profile_data.set(Some(metadata));
-                        }
-                        Ok(None) => {
-                            log::debug!("No metadata found, using empty profile");
-                            profile_data.set(Some(nostr_sdk::Metadata::new()));
-                        }
-                        Err(e) => {
-                            log::error!("Failed to fetch profile metadata: {}", e);
-                            profile_data.set(Some(nostr_sdk::Metadata::new()));
-                        }
+                };
+                let client = match nostr_client::get_client() {
+                    Some(c) => c,
+                    None => {
+                        error.set(Some("Client not initialized".to_string()));
+                        loading.set(false);
+                        return;
                     }
+                };
+                if let Ok(Some(metadata)) = client.database().metadata(public_key).await {
+                    log::debug!("Loaded profile metadata from database cache");
+                    profile_data.set(Some(metadata));
                     loading.set(false);
-                });
-            },
-        ),
-    );
-    use_effect(
-        use_reactive(
-            (&pubkey, &*active_tab.read(), &*nostr_client::CLIENT_INITIALIZED.read()),
-            move |(pubkey_str, tab, client_initialized)| {
-                if !client_initialized {
                     return;
                 }
-                let already_loaded = tab_data
+                match client
+                    .fetch_metadata(public_key, Duration::from_secs(5))
+                    .await
+                {
+                    Ok(Some(metadata)) => {
+                        log::debug!("Fetched profile metadata from relays");
+                        profile_data.set(Some(metadata));
+                    }
+                    Ok(None) => {
+                        log::debug!("No metadata found, using empty profile");
+                        profile_data.set(Some(nostr_sdk::Metadata::new()));
+                    }
+                    Err(e) => {
+                        log::error!("Failed to fetch profile metadata: {}", e);
+                        profile_data.set(Some(nostr_sdk::Metadata::new()));
+                    }
+                }
+                loading.set(false);
+            });
+        },
+    ));
+    use_effect(use_reactive(
+        (
+            &pubkey,
+            &*active_tab.read(),
+            &*nostr_client::CLIENT_INITIALIZED.read(),
+        ),
+        move |(pubkey_str, tab, client_initialized)| {
+            if !client_initialized {
+                return;
+            }
+            let already_loaded = tab_data.read().get(&tab).map(|d| d.loaded).unwrap_or(false);
+            if already_loaded {
+                let has_more = tab_data
                     .read()
                     .get(&tab)
-                    .map(|d| d.loaded)
-                    .unwrap_or(false);
-                if already_loaded {
-                    let has_more = tab_data
-                        .read()
-                        .get(&tab)
-                        .map(|d| d.has_more)
-                        .unwrap_or(true);
-                    current_tab_has_more.set(has_more);
-                    return;
+                    .map(|d| d.has_more)
+                    .unwrap_or(true);
+                current_tab_has_more.set(has_more);
+                return;
+            }
+            loading_events.set(true);
+            let pubkey_for_relay = pubkey_str.clone();
+            let tab_for_relay = tab.clone();
+            spawn(async move {
+                match load_tab_events_db(&pubkey_str, &tab, None).await {
+                    Ok(db_outcome) => {
+                        let oldest_ts = db_outcome.oldest_cursor.map(|ts| ts.saturating_sub(1));
+                        let has_more = true;
+                        if matches!(tab, ProfileTab::Posts) {
+                            post_count.set(db_outcome.events.len());
+                        }
+                        let mut data_map = tab_data.read().clone();
+                        data_map.insert(
+                            tab.clone(),
+                            TabData {
+                                events: db_outcome.events.clone(),
+                                oldest_timestamp: oldest_ts,
+                                has_more,
+                                loaded: true,
+                            },
+                        );
+                        tab_data.set(data_map);
+                        current_tab_has_more.set(has_more);
+                        if !db_outcome.events.is_empty() {
+                            loading_events.set(false);
+                        }
+                        log::info!(
+                            "Phase 1 complete: showing {} events from DB instantly",
+                            db_outcome.events.len()
+                        );
+                        let db_events_for_metadata = expand_events_for_prefetch(&db_outcome.events);
+                        spawn(async move {
+                            prefetch_author_metadata(&db_events_for_metadata).await;
+                        });
+                    }
+                    Err(e) => {
+                        log::warn!("DB phase failed: {}, will try relays", e);
+                    }
                 }
-                loading_events.set(true);
-                let pubkey_for_relay = pubkey_str.clone();
-                let tab_for_relay = tab.clone();
                 spawn(async move {
-                    match load_tab_events_db(&pubkey_str, &tab, None).await {
-                        Ok(db_outcome) => {
-                            let oldest_ts = db_outcome
-                                .oldest_cursor
-                                .map(|ts| ts.saturating_sub(1));
-                            let has_more = true;
-                            if matches!(tab, ProfileTab::Posts) {
-                                post_count.set(db_outcome.events.len());
-                            }
+                    match load_tab_events_relays(&pubkey_for_relay, &tab_for_relay, None).await {
+                        Ok(relay_outcome) => {
                             let mut data_map = tab_data.read().clone();
-                            data_map
-                                .insert(
-                                    tab.clone(),
+                            let existing_data =
+                                data_map.get(&tab_for_relay).cloned().unwrap_or_default();
+                            let existing_ids: std::collections::HashSet<_> =
+                                existing_data.events.iter().map(|e| e.id).collect();
+                            let new_events: Vec<_> = relay_outcome
+                                .events
+                                .into_iter()
+                                .filter(|e| !existing_ids.contains(&e.id))
+                                .collect();
+                            let has_more = relay_outcome.relay_count >= 100;
+                            if !new_events.is_empty() {
+                                log::info!(
+                                    "Phase 2: found {} new events from relays (has_more: {})",
+                                    new_events.len(),
+                                    has_more
+                                );
+                                let mut merged = existing_data.events;
+                                merged.extend(new_events.clone());
+                                if matches!(tab_for_relay, ProfileTab::Articles) {
+                                    merged = dedupe_articles_by_address(merged);
+                                }
+                                if matches!(tab_for_relay, ProfileTab::Articles) {
+                                    merged.sort_by_key(|e| std::cmp::Reverse(get_published_at(e)));
+                                } else {
+                                    merged.sort_by_key(|e| std::cmp::Reverse(e.created_at));
+                                }
+                                let oldest_ts = if matches!(tab_for_relay, ProfileTab::Articles) {
+                                    merged.last().map(|e| get_published_at(e).saturating_sub(1))
+                                } else {
+                                    merged
+                                        .last()
+                                        .map(|e| e.created_at.as_secs().saturating_sub(1))
+                                };
+                                data_map.insert(
+                                    tab_for_relay.clone(),
                                     TabData {
-                                        events: db_outcome.events.clone(),
+                                        events: merged.clone(),
                                         oldest_timestamp: oldest_ts,
                                         has_more,
                                         loaded: true,
                                     },
                                 );
-                            tab_data.set(data_map);
-                            current_tab_has_more.set(has_more);
-                            if !db_outcome.events.is_empty() {
-                                loading_events.set(false);
-                            }
-                            log::info!(
-                                "Phase 1 complete: showing {} events from DB instantly",
-                                db_outcome.events.len()
-                            );
-                            let db_events_for_metadata = expand_events_for_prefetch(
-                                &db_outcome.events,
-                            );
-                            spawn(async move {
-                                prefetch_author_metadata(&db_events_for_metadata).await;
-                            });
-                        }
-                        Err(e) => {
-                            log::warn!("DB phase failed: {}, will try relays", e);
-                        }
-                    }
-                    spawn(async move {
-                        match load_tab_events_relays(
-                                &pubkey_for_relay,
-                                &tab_for_relay,
-                                None,
-                            )
-                            .await
-                        {
-                            Ok(relay_outcome) => {
-                                let mut data_map = tab_data.read().clone();
-                                let existing_data = data_map
-                                    .get(&tab_for_relay)
-                                    .cloned()
-                                    .unwrap_or_default();
-                                let existing_ids: std::collections::HashSet<_> = existing_data
-                                    .events
-                                    .iter()
-                                    .map(|e| e.id)
-                                    .collect();
-                                let new_events: Vec<_> = relay_outcome
-                                    .events
-                                    .into_iter()
-                                    .filter(|e| !existing_ids.contains(&e.id))
-                                    .collect();
-                                let has_more = relay_outcome.relay_count >= 100;
-                                if !new_events.is_empty() {
-                                    log::info!(
-                                        "Phase 2: found {} new events from relays (has_more: {})",
-                                        new_events.len(), has_more
-                                    );
-                                    let mut merged = existing_data.events;
-                                    merged.extend(new_events.clone());
-                                    if matches!(tab_for_relay, ProfileTab::Articles) {
-                                        merged = dedupe_articles_by_address(merged);
-                                    }
-                                    if matches!(tab_for_relay, ProfileTab::Articles) {
-                                        merged
-                                            .sort_by_key(|e| std::cmp::Reverse(get_published_at(e)));
-                                    } else {
-                                        merged.sort_by_key(|e| std::cmp::Reverse(e.created_at));
-                                    }
-                                    let oldest_ts = if matches!(
-                                        tab_for_relay,
-                                        ProfileTab::Articles
-                                    ) {
-                                        merged.last().map(|e| get_published_at(e).saturating_sub(1))
-                                    } else {
-                                        merged
-                                            .last()
-                                            .map(|e| e.created_at.as_secs().saturating_sub(1))
-                                    };
-                                    data_map
-                                        .insert(
-                                            tab_for_relay.clone(),
-                                            TabData {
-                                                events: merged.clone(),
-                                                oldest_timestamp: oldest_ts,
-                                                has_more,
-                                                loaded: true,
-                                            },
-                                        );
-                                    tab_data.set(data_map);
-                                    current_tab_has_more.set(has_more);
-                                    if matches!(tab_for_relay, ProfileTab::Posts) {
-                                        post_count.set(merged.len());
-                                    }
-                                    let events_for_prefetch = expand_events_for_prefetch(
-                                        &new_events,
-                                    );
-                                    spawn(async move {
-                                        prefetch_author_metadata(&events_for_prefetch).await;
-                                    });
-                                } else {
-                                    log::info!(
+                                tab_data.set(data_map);
+                                current_tab_has_more.set(has_more);
+                                if matches!(tab_for_relay, ProfileTab::Posts) {
+                                    post_count.set(merged.len());
+                                }
+                                let events_for_prefetch = expand_events_for_prefetch(&new_events);
+                                spawn(async move {
+                                    prefetch_author_metadata(&events_for_prefetch).await;
+                                });
+                            } else {
+                                log::info!(
                                         "Phase 2: no new events from relays (all already in DB, has_more: {})",
                                         has_more
                                     );
-                                    let mut data_map = tab_data.read().clone();
-                                    data_map
-                                        .insert(
-                                            tab_for_relay.clone(),
-                                            TabData {
-                                                events: existing_data.events,
-                                                oldest_timestamp: existing_data.oldest_timestamp,
-                                                has_more,
-                                                loaded: true,
-                                            },
-                                        );
-                                    tab_data.set(data_map);
-                                    current_tab_has_more.set(has_more);
-                                }
-                            }
-                            Err(e) => {
-                                log::warn!(
-                                    "Relay phase failed: {}, using DB results only", e
-                                );
                                 let mut data_map = tab_data.read().clone();
-                                let existing_data = data_map
-                                    .get(&tab_for_relay)
-                                    .cloned()
-                                    .unwrap_or_default();
-                                if !existing_data.loaded {
-                                    data_map
-                                        .insert(
-                                            tab_for_relay.clone(),
-                                            TabData {
-                                                events: existing_data.events,
-                                                oldest_timestamp: existing_data.oldest_timestamp,
-                                                has_more: false,
-                                                loaded: true,
-                                            },
-                                        );
-                                    tab_data.set(data_map);
-                                    current_tab_has_more.set(false);
-                                }
+                                data_map.insert(
+                                    tab_for_relay.clone(),
+                                    TabData {
+                                        events: existing_data.events,
+                                        oldest_timestamp: existing_data.oldest_timestamp,
+                                        has_more,
+                                        loaded: true,
+                                    },
+                                );
+                                tab_data.set(data_map);
+                                current_tab_has_more.set(has_more);
                             }
-                        }
-                        loading_events.set(false);
-                    });
-                });
-            },
-        ),
-    );
-    use_effect(
-        use_reactive(
-            &pubkey,
-            move |pubkey_str| {
-                let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-                if !client_initialized || !auth_store::is_authenticated() {
-                    return;
-                }
-                spawn(async move {
-                    let hex_pubkey = if let Ok(pk) = PublicKey::from_bech32(
-                        &pubkey_str,
-                    ) {
-                        pk.to_hex()
-                    } else if let Ok(pk) = PublicKey::from_hex(&pubkey_str) {
-                        pk.to_hex()
-                    } else {
-                        return;
-                    };
-                    match nostr_client::is_following(hex_pubkey).await {
-                        Ok(following) => {
-                            is_following.set(following);
                         }
                         Err(e) => {
-                            log::error!("Failed to check following status: {}", e);
-                        }
-                    }
-                });
-            },
-        ),
-    );
-    use_effect(
-        use_reactive(
-            &pubkey,
-            move |pubkey_str| {
-                let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-                if !client_initialized {
-                    return;
-                }
-                let is_authenticated = auth_store::is_authenticated();
-                let my_pubkey = auth_store::get_pubkey();
-                spawn(async move {
-                    let hex_pubkey = if let Ok(pk) = PublicKey::from_bech32(
-                        &pubkey_str,
-                    ) {
-                        pk.to_hex()
-                    } else if let Ok(pk) = PublicKey::from_hex(&pubkey_str) {
-                        pk.to_hex()
-                    } else {
-                        return;
-                    };
-                    let contacts_future = nostr_client::fetch_contacts(
-                        hex_pubkey.clone(),
-                    );
-                    let stats_future = profile_stats::fetch_profile_stats(&hex_pubkey);
-                    let (contacts_result, stats_result) = futures::join!(
-                        contacts_future, stats_future
-                    );
-                    if let Ok(contacts) = contacts_result {
-                        following_count.set(contacts.len());
-                        if is_authenticated {
-                            if let Some(ref my_pk) = my_pubkey {
-                                if let Ok(pk) = PublicKey::parse(my_pk) {
-                                    let my_hex = pk.to_hex();
-                                    follows_you.set(contacts.contains(&my_hex));
-                                }
+                            log::warn!("Relay phase failed: {}, using DB results only", e);
+                            let mut data_map = tab_data.read().clone();
+                            let existing_data =
+                                data_map.get(&tab_for_relay).cloned().unwrap_or_default();
+                            if !existing_data.loaded {
+                                data_map.insert(
+                                    tab_for_relay.clone(),
+                                    TabData {
+                                        events: existing_data.events,
+                                        oldest_timestamp: existing_data.oldest_timestamp,
+                                        has_more: false,
+                                        loaded: true,
+                                    },
+                                );
+                                tab_data.set(data_map);
+                                current_tab_has_more.set(false);
                             }
                         }
                     }
-                    if let Ok(stats) = stats_result {
-                        if let Some(count) = stats.followers_pubkey_count {
-                            followers_count.set(count as usize);
+                    loading_events.set(false);
+                });
+            });
+        },
+    ));
+    use_effect(use_reactive(&pubkey, move |pubkey_str| {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized || !auth_store::is_authenticated() {
+            return;
+        }
+        spawn(async move {
+            let hex_pubkey = if let Ok(pk) = PublicKey::from_bech32(&pubkey_str) {
+                pk.to_hex()
+            } else if let Ok(pk) = PublicKey::from_hex(&pubkey_str) {
+                pk.to_hex()
+            } else {
+                return;
+            };
+            match nostr_client::is_following(hex_pubkey).await {
+                Ok(following) => {
+                    is_following.set(following);
+                }
+                Err(e) => {
+                    log::error!("Failed to check following status: {}", e);
+                }
+            }
+        });
+    }));
+    use_effect(use_reactive(&pubkey, move |pubkey_str| {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            return;
+        }
+        let is_authenticated = auth_store::is_authenticated();
+        let my_pubkey = auth_store::get_pubkey();
+        spawn(async move {
+            let hex_pubkey = if let Ok(pk) = PublicKey::from_bech32(&pubkey_str) {
+                pk.to_hex()
+            } else if let Ok(pk) = PublicKey::from_hex(&pubkey_str) {
+                pk.to_hex()
+            } else {
+                return;
+            };
+            let contacts_future = nostr_client::fetch_contacts(hex_pubkey.clone());
+            let stats_future = profile_stats::fetch_profile_stats(&hex_pubkey);
+            let (contacts_result, stats_result) = futures::join!(contacts_future, stats_future);
+            if let Ok(contacts) = contacts_result {
+                following_count.set(contacts.len());
+                if is_authenticated {
+                    if let Some(ref my_pk) = my_pubkey {
+                        if let Ok(pk) = PublicKey::parse(my_pk) {
+                            let my_hex = pk.to_hex();
+                            follows_you.set(contacts.contains(&my_hex));
                         }
                     }
-                });
-            },
-        ),
-    );
+                }
+            }
+            if let Ok(stats) = stats_result {
+                if let Some(count) = stats.followers_pubkey_count {
+                    followers_count.set(count as usize);
+                }
+            }
+        });
+    }));
     let load_more = move || {
         let tab = active_tab.read().clone();
         log::info!("load_more called for tab {:?}", tab);
@@ -518,8 +460,10 @@ pub fn Profile(pubkey: String) -> Element {
             (tab_state.has_more, tab_state.oldest_timestamp)
         };
         log::info!(
-            "load_more: has_more={}, loading={}, until={:?}", has_more, * loading_events
-            .read(), until
+            "load_more: has_more={}, loading={}, until={:?}",
+            has_more,
+            *loading_events.read(),
+            until
         );
         if *loading_events.read() || !has_more {
             log::info!("load_more: bailing early");
@@ -534,16 +478,15 @@ pub fn Profile(pubkey: String) -> Element {
                     let oldest_ts = outcome.oldest_cursor.map(|ts| ts.saturating_sub(1));
                     let has_more_val = !outcome.events.is_empty();
                     log::info!(
-                        "load_more: got {} new events, has_more={}", outcome.events
-                        .len(), has_more_val
+                        "load_more: got {} new events, has_more={}",
+                        outcome.events.len(),
+                        has_more_val
                     );
                     let mut data_map = tab_data.read().clone();
                     if let Some(data) = data_map.get_mut(&tab) {
                         data.events.extend(outcome.events.clone());
                         if matches!(tab, ProfileTab::Articles) {
-                            data.events = dedupe_articles_by_address(
-                                data.events.clone(),
-                            );
+                            data.events = dedupe_articles_by_address(data.events.clone());
                             data.events
                                 .sort_by_key(|e| std::cmp::Reverse(get_published_at(e)));
                         }
@@ -555,9 +498,7 @@ pub fn Profile(pubkey: String) -> Element {
                     }
                     tab_data.set(data_map);
                     current_tab_has_more.set(has_more_val);
-                    let events_for_prefetch = expand_events_for_prefetch(
-                        &outcome.events,
-                    );
+                    let events_for_prefetch = expand_events_for_prefetch(&outcome.events);
                     spawn(async move {
                         prefetch_author_metadata(&events_for_prefetch).await;
                     });
@@ -575,11 +516,7 @@ pub fn Profile(pubkey: String) -> Element {
             loading_events.set(false);
         });
     };
-    let sentinel_id = use_infinite_scroll(
-        load_more,
-        current_tab_has_more,
-        loading_events,
-    );
+    let sentinel_id = use_infinite_scroll(load_more, current_tab_has_more, loading_events);
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
@@ -1221,6 +1158,7 @@ pub fn Profile(pubkey: String) -> Element {
                                 button {
                                     class: "px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition",
                                     onclick: move |_| {
+                                        #[cfg(feature = "web")]
                                         if let Ok(pk) = PublicKey::from_bech32(&pubkey_for_info)
                                             .or_else(|_| PublicKey::from_hex(&pubkey_for_info))
                                         {
@@ -1245,6 +1183,7 @@ pub fn Profile(pubkey: String) -> Element {
                                         button {
                                             class: "px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition",
                                             onclick: move |_| {
+                                                #[cfg(feature = "web")]
                                                 if let Some(metadata) = profile_data.read().as_ref() {
                                                     if let Some(lud16) = &metadata.lud16 {
                                                         if let Some(window) = web_sys::window() {
@@ -1262,6 +1201,7 @@ pub fn Profile(pubkey: String) -> Element {
                         if is_own_profile {
                             if let Ok(p2pk_pubkey) = crate::stores::cashu::get_wallet_pubkey() {
                                 {
+                                    #[allow(unused_variables)]
                                     let pubkey_for_copy = p2pk_pubkey.clone();
                                     rsx! {
                                         div {
@@ -1276,6 +1216,7 @@ pub fn Profile(pubkey: String) -> Element {
                                                 button {
                                                     class: "px-3 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 transition",
                                                     onclick: move |_| {
+                                                        #[cfg(feature = "web")]
                                                         if let Some(window) = web_sys::window() {
                                                             let _ = window.navigator().clipboard().write_text(&pubkey_for_copy);
                                                         }
@@ -1366,32 +1307,28 @@ fn VertsVideoCard(event: NostrEvent) -> Element {
     let mut is_hovering = use_signal(|| false);
     let video_element_id = format!("preview-vert-{}", &event.id.to_hex()[..12]);
     let video_element_id_for_effect = video_element_id.clone();
-    use_effect(
-        use_reactive(
-            &*is_hovering.read(),
-            move |hovering| {
-                let id = video_element_id_for_effect.clone();
-                spawn(async move {
-                    if let Some(window) = web_sys::window() {
-                        if let Some(document) = window.document() {
-                            if let Some(element) = document.get_element_by_id(&id) {
-                                if let Ok(video) = element
-                                    .dyn_into::<web_sys::HtmlVideoElement>()
-                                {
-                                    if hovering {
-                                        let _ = video.play();
-                                    } else {
-                                        let _ = video.pause();
-                                        video.set_current_time(0.0);
-                                    }
-                                }
+    use_effect(use_reactive(&*is_hovering.read(), move |hovering| {
+        let id = video_element_id_for_effect.clone();
+        spawn(async move {
+            #[cfg(feature = "web")]
+            if let Some(window) = web_sys::window() {
+                if let Some(document) = window.document() {
+                    if let Some(element) = document.get_element_by_id(&id) {
+                        if let Ok(video) = element.dyn_into::<web_sys::HtmlVideoElement>() {
+                            if hovering {
+                                let _ = video.play();
+                            } else {
+                                let _ = video.pause();
+                                video.set_current_time(0.0);
                             }
                         }
                     }
-                });
-            },
-        ),
-    );
+                }
+            }
+            #[cfg(not(feature = "web"))]
+            let _ = (&id, hovering);
+        });
+    }));
     let video_id = event.id.to_hex();
     rsx! {
         div {
@@ -1446,30 +1383,34 @@ fn build_tab_filter(
     limit: usize,
 ) -> Filter {
     let mut filter = match tab {
-        ProfileTab::Posts => {
-            Filter::new()
-                .author(public_key)
-                .kinds(vec![Kind::TextNote, Kind::Repost])
-                .limit(limit)
-        }
-        ProfileTab::Replies => {
-            Filter::new().author(public_key).kind(Kind::TextNote).limit(limit)
-        }
-        ProfileTab::Articles => {
-            Filter::new().author(public_key).kind(Kind::LongFormTextNote).limit(limit)
-        }
-        ProfileTab::Media(MediaSubTab::Photos) => {
-            Filter::new().author(public_key).kind(Kind::Custom(20)).limit(limit)
-        }
-        ProfileTab::Media(MediaSubTab::Videos) => {
-            Filter::new().author(public_key).kinds(horizontal_kinds()).limit(limit)
-        }
-        ProfileTab::Media(MediaSubTab::Verts) => {
-            Filter::new().author(public_key).kinds(vertical_kinds()).limit(limit)
-        }
-        ProfileTab::Likes => {
-            Filter::new().author(public_key).kind(Kind::Reaction).limit(limit)
-        }
+        ProfileTab::Posts => Filter::new()
+            .author(public_key)
+            .kinds(vec![Kind::TextNote, Kind::Repost])
+            .limit(limit),
+        ProfileTab::Replies => Filter::new()
+            .author(public_key)
+            .kind(Kind::TextNote)
+            .limit(limit),
+        ProfileTab::Articles => Filter::new()
+            .author(public_key)
+            .kind(Kind::LongFormTextNote)
+            .limit(limit),
+        ProfileTab::Media(MediaSubTab::Photos) => Filter::new()
+            .author(public_key)
+            .kind(Kind::Custom(20))
+            .limit(limit),
+        ProfileTab::Media(MediaSubTab::Videos) => Filter::new()
+            .author(public_key)
+            .kinds(horizontal_kinds())
+            .limit(limit),
+        ProfileTab::Media(MediaSubTab::Verts) => Filter::new()
+            .author(public_key)
+            .kinds(vertical_kinds())
+            .limit(limit),
+        ProfileTab::Likes => Filter::new()
+            .author(public_key)
+            .kind(Kind::Reaction)
+            .limit(limit),
     };
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
@@ -1479,25 +1420,19 @@ fn build_tab_filter(
 /// Filter and process events based on tab type
 fn process_tab_events(events: Vec<NostrEvent>, tab: &ProfileTab) -> Vec<NostrEvent> {
     match tab {
-        ProfileTab::Posts => {
-            events
-                .into_iter()
-                .filter(|e| {
-                    if e.kind == Kind::Repost {
-                        return true;
-                    }
-                    e.tags.event_ids().next().is_none()
-                })
-                .collect()
-        }
-        ProfileTab::Replies => {
-            events
-                .into_iter()
-                .filter(|e| {
-                    e.kind != Kind::Repost && e.tags.event_ids().next().is_some()
-                })
-                .collect()
-        }
+        ProfileTab::Posts => events
+            .into_iter()
+            .filter(|e| {
+                if e.kind == Kind::Repost {
+                    return true;
+                }
+                e.tags.event_ids().next().is_none()
+            })
+            .collect(),
+        ProfileTab::Replies => events
+            .into_iter()
+            .filter(|e| e.kind != Kind::Repost && e.tags.event_ids().next().is_some())
+            .collect(),
         ProfileTab::Articles => dedupe_articles_by_address(events),
         _ => events,
     }
@@ -1547,11 +1482,8 @@ async fn load_tab_events_relays(
         return load_likes_relays(public_key, until).await;
     }
     let filter = build_tab_filter(public_key, tab, until, 100);
-    let events = nostr_client::fetch_profile_events_from_relays(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await?;
+    let events =
+        nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10)).await?;
     let relay_count = events.len();
     let mut processed = process_tab_events(events, tab);
     if matches!(tab, ProfileTab::Articles) {
@@ -1567,7 +1499,9 @@ async fn load_tab_events_relays(
         processed.last().map(|e| e.created_at.as_secs())
     };
     log::info!(
-        "Relay Phase: fetched {} {:?} events (raw: {})", processed.len(), tab,
+        "Relay Phase: fetched {} {:?} events (raw: {})",
+        processed.len(),
+        tab,
         relay_count
     );
     Ok(LoadOutcome {
@@ -1587,7 +1521,10 @@ where
     F: Fn(Filter) -> Fut,
     Fut: std::future::Future<Output = std::result::Result<Vec<NostrEvent>, String>>,
 {
-    let mut filter = Filter::new().author(public_key).kind(Kind::Reaction).limit(50);
+    let mut filter = Filter::new()
+        .author(public_key)
+        .kind(Kind::Reaction)
+        .limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
@@ -1601,7 +1538,8 @@ where
         });
     }
     let mut liked_event_ids = Vec::new();
-    let mut reaction_times: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    let mut reaction_times: std::collections::HashMap<String, u64> =
+        std::collections::HashMap::new();
     for reaction in reactions.iter() {
         for event_id in reaction.tags.event_ids() {
             liked_event_ids.push(*event_id);
@@ -1618,12 +1556,11 @@ where
     let liked_filter = Filter::new().ids(liked_event_ids).limit(500);
     let liked_events = fetch_events(liked_filter).await?;
     let mut event_vec: Vec<NostrEvent> = liked_events;
-    event_vec
-        .sort_by(|a, b| {
-            let time_a = reaction_times.get(&a.id.to_hex()).copied().unwrap_or(0);
-            let time_b = reaction_times.get(&b.id.to_hex()).copied().unwrap_or(0);
-            time_b.cmp(&time_a)
-        });
+    event_vec.sort_by(|a, b| {
+        let time_a = reaction_times.get(&a.id.to_hex()).copied().unwrap_or(0);
+        let time_b = reaction_times.get(&b.id.to_hex()).copied().unwrap_or(0);
+        time_b.cmp(&time_a)
+    });
     let oldest_cursor = event_vec
         .last()
         .and_then(|e| reaction_times.get(&e.id.to_hex()).copied());
@@ -1637,12 +1574,10 @@ async fn load_likes_db(
     public_key: PublicKey,
     until: Option<u64>,
 ) -> std::result::Result<LoadOutcome, String> {
-    load_likes_common(
-            public_key,
-            until,
-            |filter| { nostr_client::fetch_profile_events_db(filter) },
-        )
-        .await
+    load_likes_common(public_key, until, |filter| {
+        nostr_client::fetch_profile_events_db(filter)
+    })
+    .await
 }
 async fn load_likes_relays(
     public_key: PublicKey,
@@ -1656,11 +1591,8 @@ async fn load_likes_relays(
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
-    let reactions = nostr_client::fetch_profile_events_from_relays(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await?;
+    let reactions =
+        nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10)).await?;
     let relay_count = if reactions.len() >= REACTIONS_LIMIT {
         REACTIONS_LIMIT
     } else {
@@ -1674,7 +1606,8 @@ async fn load_likes_relays(
         });
     }
     let mut liked_event_ids = Vec::new();
-    let mut reaction_times: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    let mut reaction_times: std::collections::HashMap<String, u64> =
+        std::collections::HashMap::new();
     for reaction in reactions.iter() {
         for event_id in reaction.tags.event_ids() {
             liked_event_ids.push(*event_id);
@@ -1689,15 +1622,10 @@ async fn load_likes_relays(
         });
     }
     let liked_filter = Filter::new().ids(liked_event_ids.clone()).limit(500);
-    let mut event_vec: Vec<NostrEvent> = nostr_client::fetch_events_from_connected_relays(
-            liked_filter,
-            Duration::from_secs(10),
-        )
-        .await?;
-    let found_ids: std::collections::HashSet<_> = event_vec
-        .iter()
-        .map(|e| e.id)
-        .collect();
+    let mut event_vec: Vec<NostrEvent> =
+        nostr_client::fetch_events_from_connected_relays(liked_filter, Duration::from_secs(10))
+            .await?;
+    let found_ids: std::collections::HashSet<_> = event_vec.iter().map(|e| e.id).collect();
     let missing_ids: Vec<_> = liked_event_ids
         .iter()
         .filter(|id| !found_ids.contains(id))
@@ -1705,13 +1633,11 @@ async fn load_likes_relays(
         .collect();
     if !missing_ids.is_empty() {
         log::info!(
-            "Fetching {} missing liked events via gossip fallback", missing_ids.len()
+            "Fetching {} missing liked events via gossip fallback",
+            missing_ids.len()
         );
         let gossip_filter = Filter::new().ids(missing_ids).limit(100);
-        match nostr_client::fetch_profile_events_from_relays(
-                gossip_filter,
-                Duration::from_secs(10),
-            )
+        match nostr_client::fetch_profile_events_from_relays(gossip_filter, Duration::from_secs(10))
             .await
         {
             Ok(gossip_events) => {
@@ -1729,12 +1655,11 @@ async fn load_likes_relays(
             }
         }
     }
-    event_vec
-        .sort_by(|a, b| {
-            let time_a = reaction_times.get(&a.id.to_hex()).copied().unwrap_or(0);
-            let time_b = reaction_times.get(&b.id.to_hex()).copied().unwrap_or(0);
-            time_b.cmp(&time_a)
-        });
+    event_vec.sort_by(|a, b| {
+        let time_a = reaction_times.get(&a.id.to_hex()).copied().unwrap_or(0);
+        let time_b = reaction_times.get(&b.id.to_hex()).copied().unwrap_or(0);
+        time_b.cmp(&time_a)
+    });
     let oldest_cursor = event_vec
         .last()
         .and_then(|e| reaction_times.get(&e.id.to_hex()).copied());
@@ -1768,12 +1693,10 @@ async fn load_tab_events(
                 if let Some(until_ts) = current_until {
                     filter = filter.until(Timestamp::from(until_ts));
                 }
-                let events = nostr_client::fetch_profile_events_from_relays(
-                        filter,
-                        Duration::from_secs(10),
-                    )
-                    .await
-                    .map_err(|e| format!("Failed to fetch events: {}", e))?;
+                let events =
+                    nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
+                        .await
+                        .map_err(|e| format!("Failed to fetch events: {}", e))?;
                 let events_len = events.len();
                 if events_len == 0 {
                     hit_end = true;
@@ -1783,9 +1706,7 @@ async fn load_tab_events(
                 let oldest_event_ts = events.last().map(|e| e.created_at.as_secs());
                 let posts: Vec<NostrEvent> = events
                     .into_iter()
-                    .filter(|e| {
-                        e.kind == Kind::Repost || e.tags.event_ids().next().is_none()
-                    })
+                    .filter(|e| e.kind == Kind::Repost || e.tags.event_ids().next().is_none())
                     .collect();
                 all_posts.extend(posts);
                 if let Some(ts) = oldest_event_ts {
@@ -1800,8 +1721,10 @@ async fn load_tab_events(
             let mut seen_ids = std::collections::HashSet::new();
             all_posts.retain(|e| seen_ids.insert(e.id));
             log::info!(
-                "Loaded {} posts (fetched {} total events, hit_end={})", all_posts.len(),
-                total_fetched, hit_end
+                "Loaded {} posts (fetched {} total events, hit_end={})",
+                all_posts.len(),
+                total_fetched,
+                hit_end
             );
             let oldest_cursor = all_posts.last().map(|e| e.created_at.as_secs());
             Ok(LoadOutcome {
@@ -1823,12 +1746,10 @@ async fn load_tab_events(
                 if let Some(until_ts) = current_until {
                     filter = filter.until(Timestamp::from(until_ts));
                 }
-                let events = nostr_client::fetch_profile_events_from_relays(
-                        filter,
-                        Duration::from_secs(10),
-                    )
-                    .await
-                    .map_err(|e| format!("Failed to fetch events: {}", e))?;
+                let events =
+                    nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
+                        .await
+                        .map_err(|e| format!("Failed to fetch events: {}", e))?;
                 let events_len = events.len();
                 if events_len == 0 {
                     hit_end = true;
@@ -1853,8 +1774,10 @@ async fn load_tab_events(
             let mut seen_ids = std::collections::HashSet::new();
             all_replies.retain(|e| seen_ids.insert(e.id));
             log::info!(
-                "Loaded {} replies (fetched {} total events, hit_end={})", all_replies
-                .len(), total_fetched, hit_end
+                "Loaded {} replies (fetched {} total events, hit_end={})",
+                all_replies.len(),
+                total_fetched,
+                hit_end
             );
             let oldest_cursor = all_replies.last().map(|e| e.created_at.as_secs());
             Ok(LoadOutcome {
@@ -1871,12 +1794,10 @@ async fn load_tab_events(
             if let Some(until_ts) = until {
                 filter = filter.until(Timestamp::from(until_ts));
             }
-            let events = nostr_client::fetch_profile_events_from_relays(
-                    filter,
-                    Duration::from_secs(10),
-                )
-                .await
-                .map_err(|e| format!("Failed to fetch events: {}", e))?;
+            let events =
+                nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
+                    .await
+                    .map_err(|e| format!("Failed to fetch events: {}", e))?;
             let relay_count = events.len();
             let event_vec: Vec<NostrEvent> = events.into_iter().collect();
             let mut deduplicated = dedupe_articles_by_address(event_vec);
@@ -1897,12 +1818,10 @@ async fn load_tab_events(
             if let Some(until_ts) = until {
                 filter = filter.until(Timestamp::from(until_ts));
             }
-            let events = nostr_client::fetch_profile_events_from_relays(
-                    filter,
-                    Duration::from_secs(10),
-                )
-                .await
-                .map_err(|e| format!("Failed to fetch events: {}", e))?;
+            let events =
+                nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
+                    .await
+                    .map_err(|e| format!("Failed to fetch events: {}", e))?;
             let relay_count = events.len();
             let mut event_vec: Vec<NostrEvent> = events.into_iter().collect();
             event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
@@ -1922,12 +1841,10 @@ async fn load_tab_events(
             if let Some(until_ts) = until {
                 filter = filter.until(Timestamp::from(until_ts));
             }
-            let events = nostr_client::fetch_profile_events_from_relays(
-                    filter,
-                    Duration::from_secs(10),
-                )
-                .await
-                .map_err(|e| format!("Failed to fetch events: {}", e))?;
+            let events =
+                nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
+                    .await
+                    .map_err(|e| format!("Failed to fetch events: {}", e))?;
             let relay_count = events.len();
             let mut event_vec: Vec<NostrEvent> = events.into_iter().collect();
             event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
@@ -1947,12 +1864,10 @@ async fn load_tab_events(
             if let Some(until_ts) = until {
                 filter = filter.until(Timestamp::from(until_ts));
             }
-            let events = nostr_client::fetch_profile_events_from_relays(
-                    filter,
-                    Duration::from_secs(10),
-                )
-                .await
-                .map_err(|e| format!("Failed to fetch events: {}", e))?;
+            let events =
+                nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
+                    .await
+                    .map_err(|e| format!("Failed to fetch events: {}", e))?;
             let relay_count = events.len();
             let mut event_vec: Vec<NostrEvent> = events.into_iter().collect();
             event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
@@ -1972,12 +1887,10 @@ async fn load_tab_events(
             if let Some(until_ts) = until {
                 filter = filter.until(Timestamp::from(until_ts));
             }
-            let reactions = nostr_client::fetch_profile_events_from_relays(
-                    filter,
-                    Duration::from_secs(10),
-                )
-                .await
-                .map_err(|e| format!("Failed to fetch reactions: {}", e))?;
+            let reactions =
+                nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
+                    .await
+                    .map_err(|e| format!("Failed to fetch reactions: {}", e))?;
             let relay_count = reactions.len();
             if reactions.is_empty() {
                 return Ok(LoadOutcome {
@@ -2002,31 +1915,24 @@ async fn load_tab_events(
             }
             let liked_filter = Filter::new().ids(liked_event_ids).limit(500);
             let liked_events = nostr_client::fetch_profile_events_from_relays(
-                    liked_filter,
-                    Duration::from_secs(10),
-                )
-                .await
-                .map_err(|e| format!("Failed to fetch liked events: {}", e))?;
-            let mut reaction_times: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+                liked_filter,
+                Duration::from_secs(10),
+            )
+            .await
+            .map_err(|e| format!("Failed to fetch liked events: {}", e))?;
+            let mut reaction_times: std::collections::HashMap<String, u64> =
+                std::collections::HashMap::new();
             for reaction in reactions.iter() {
                 for event_id in reaction.tags.event_ids() {
-                    reaction_times
-                        .insert(event_id.to_hex(), reaction.created_at.as_secs());
+                    reaction_times.insert(event_id.to_hex(), reaction.created_at.as_secs());
                 }
             }
             let mut event_vec: Vec<NostrEvent> = liked_events.into_iter().collect();
-            event_vec
-                .sort_by(|a, b| {
-                    let time_a = reaction_times
-                        .get(&a.id.to_hex())
-                        .copied()
-                        .unwrap_or(0);
-                    let time_b = reaction_times
-                        .get(&b.id.to_hex())
-                        .copied()
-                        .unwrap_or(0);
-                    time_b.cmp(&time_a)
-                });
+            event_vec.sort_by(|a, b| {
+                let time_a = reaction_times.get(&a.id.to_hex()).copied().unwrap_or(0);
+                let time_b = reaction_times.get(&b.id.to_hex()).copied().unwrap_or(0);
+                time_b.cmp(&time_a)
+            });
             log::info!("Loaded {} liked events", event_vec.len());
             let oldest_cursor = event_vec
                 .last()
@@ -2045,8 +1951,7 @@ fn get_display_name(metadata: &nostr_sdk::Metadata, pubkey: &str) -> String {
         .clone()
         .or_else(|| metadata.name.clone())
         .unwrap_or_else(|| {
-            if let Ok(pk) = PublicKey::from_hex(pubkey)
-                .or_else(|_| PublicKey::from_bech32(pubkey))
+            if let Ok(pk) = PublicKey::from_hex(pubkey).or_else(|_| PublicKey::from_bech32(pubkey))
             {
                 let hex = pk.to_hex();
                 format!("{}...{}", &hex[..8], &hex[hex.len() - 4..])
@@ -2056,23 +1961,18 @@ fn get_display_name(metadata: &nostr_sdk::Metadata, pubkey: &str) -> String {
         })
 }
 fn get_username(metadata: &nostr_sdk::Metadata, pubkey: &str) -> String {
-    metadata
-        .name
-        .clone()
-        .unwrap_or_else(|| {
-            if let Ok(pk) = PublicKey::from_hex(pubkey)
-                .or_else(|_| PublicKey::from_bech32(pubkey))
-            {
-                let npub = pk.to_bech32().expect("to_bech32 is infallible");
-                if npub.len() > 18 {
-                    format!("{}...{}", &npub[..12], &npub[npub.len() - 6..])
-                } else {
-                    npub
-                }
+    metadata.name.clone().unwrap_or_else(|| {
+        if let Ok(pk) = PublicKey::from_hex(pubkey).or_else(|_| PublicKey::from_bech32(pubkey)) {
+            let npub = pk.to_bech32().expect("to_bech32 is infallible");
+            if npub.len() > 18 {
+                format!("{}...{}", &npub[..12], &npub[npub.len() - 6..])
             } else {
-                "unknown".to_string()
+                npub
             }
-        })
+        } else {
+            "unknown".to_string()
+        }
+    })
 }
 fn get_avatar_initial(metadata: &nostr_sdk::Metadata) -> String {
     metadata

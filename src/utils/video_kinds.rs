@@ -122,7 +122,10 @@ pub fn dedupe_videos_by_url(events: Vec<nostr_sdk::Event>) -> Vec<nostr_sdk::Eve
                     }
                 }
                 std::collections::hash_map::Entry::Vacant(entry) => {
-                    entry.insert(DedupVal { first_idx: idx, best_idx: idx });
+                    entry.insert(DedupVal {
+                        first_idx: idx,
+                        best_idx: idx,
+                    });
                 }
             }
         }
@@ -132,7 +135,11 @@ pub fn dedupe_videos_by_url(events: Vec<nostr_sdk::Event>) -> Vec<nostr_sdk::Eve
     let mut new_list: Vec<Option<nostr_sdk::Event>> = vec![None; events.len()];
     let mut used_indices: HashSet<usize> = HashSet::new();
 
-    for DedupVal { first_idx, best_idx } in url_map.into_values() {
+    for DedupVal {
+        first_idx,
+        best_idx,
+    } in url_map.into_values()
+    {
         new_list[first_idx] = Some(events[best_idx].clone());
         used_indices.insert(first_idx);
         used_indices.insert(best_idx);

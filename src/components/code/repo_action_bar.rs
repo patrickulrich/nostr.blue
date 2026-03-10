@@ -3,8 +3,6 @@
 //! Displays action buttons for a repository: Watch, Star, Fork, Zap, Share.
 //! Desktop: horizontal button row. Mobile: dropdown menu.
 //! Styled to match gittr's layout-client.tsx action bar pattern.
-use dioxus::prelude::*;
-use nostr_sdk::prelude::*;
 use crate::components::code::qr_share_modal::QrShareModal;
 use crate::components::code::zap_distribution::ZapDistribution;
 use crate::components::icons;
@@ -16,7 +14,9 @@ use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::nip34::Repository;
 use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
+use nostr_sdk::prelude::*;
 /// Generate a kebab-case d-tag identifier from the fork name
 fn generate_fork_id(name: &str, fallback_id: &str) -> String {
     let slug: String = name
@@ -31,7 +31,11 @@ fn generate_fork_id(name: &str, fallback_id: &str) -> String {
         .collect::<Vec<_>>()
         .join("-");
     if slug.is_empty() {
-        format!("{}-fork-{}", fallback_id, nostr_sdk::Timestamp::now().as_secs())
+        format!(
+            "{}-fork-{}",
+            fallback_id,
+            nostr_sdk::Timestamp::now().as_secs()
+        )
     } else {
         format!("{}-{}", slug, nostr_sdk::Timestamp::now().as_secs())
     }
@@ -91,7 +95,9 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                 spawn(async move {
                     match check_user_star(&coord).await {
                         Ok(starred) => {
-                            if *star_gen.peek() != gen { return; }
+                            if *star_gen.peek() != gen {
+                                return;
+                            }
                             is_starred.set(starred);
                         }
                         Err(e) => log::debug!("Failed to check star status: {}", e),
@@ -101,18 +107,14 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
         }
     });
     use_effect(move || {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
             let pubkey = repo_pubkey_signal.read().clone();
             let id = repo_id_signal.read().clone();
             if let Some(window) = web_sys::window() {
                 if let Ok(Some(storage)) = window.local_storage() {
-                    if let Ok(Some(watched_json)) = storage
-                        .get_item("nostr_blue_watched_repos")
-                    {
-                        if let Ok(watched) = serde_json::from_str::<
-                            Vec<String>,
-                        >(&watched_json) {
+                    if let Ok(Some(watched_json)) = storage.get_item("nostr_blue_watched_repos") {
+                        if let Ok(watched) = serde_json::from_str::<Vec<String>>(&watched_json) {
                             let coord_str = format!("{}:{}", pubkey, id);
                             is_watching.set(watched.contains(&coord_str));
                             return;
@@ -133,11 +135,10 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
             star_gen.set(current_gen);
             if !*HAS_SIGNER.read() {
                 star_loading.set(false);
-                toast
-                    .warning(
-                        "Sign in to star repositories".to_string(),
-                        ToastOptions::new(),
-                    );
+                toast.warning(
+                    "Sign in to star repositories".to_string(),
+                    ToastOptions::new(),
+                );
                 return;
             }
             let coord = match coordinate.read().clone() {
@@ -171,11 +172,7 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                     }
                     Err(e) => {
                         log::error!("Star action failed: {}", e);
-                        toast
-                            .error(
-                                format!("Failed to update star: {}", e),
-                                ToastOptions::new(),
-                            );
+                        toast.error(format!("Failed to update star: {}", e), ToastOptions::new());
                     }
                 }
                 star_loading.set(false);
@@ -185,13 +182,10 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
     let handle_watch = {
         move |_| {
             let currently_watching = *is_watching.read();
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "web")]
             {
-                let repo_coord = format!(
-                    "{}:{}",
-                    repo_pubkey_signal.read(),
-                    repo_id_signal.read(),
-                );
+                let repo_coord =
+                    format!("{}:{}", repo_pubkey_signal.read(), repo_id_signal.read(),);
                 if let Some(window) = web_sys::window() {
                     if let Ok(Some(storage)) = window.local_storage() {
                         let mut watched: Vec<String> = storage
@@ -252,7 +246,10 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
     let mut fork_form_clone_urls = use_signal(String::new);
     let handle_fork = move |_| {
         if !*HAS_SIGNER.read() {
-            toast.warning("Sign in to fork repositories".to_string(), ToastOptions::new());
+            toast.warning(
+                "Sign in to fork repositories".to_string(),
+                ToastOptions::new(),
+            );
             return;
         }
         // Pre-fill form fields from parent repo when opening modal
@@ -263,7 +260,7 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
         fork_form_name.set(
             name.as_deref()
                 .map(|n| format!("{} (fork)", n))
-                .unwrap_or_else(|| format!("{}-fork", id))
+                .unwrap_or_else(|| format!("{}-fork", id)),
         );
         fork_form_desc.set(desc.unwrap_or_default());
         fork_form_clone_urls.set(urls.join("\n"));
@@ -281,8 +278,16 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
         let form_urls_raw = fork_form_clone_urls.read().clone();
         spawn(async move {
             let fork_id = generate_fork_id(&form_name, &id);
-            let fork_name = if form_name.trim().is_empty() { None } else { Some(form_name.trim().to_string()) };
-            let fork_desc = if form_desc.trim().is_empty() { None } else { Some(form_desc.trim().to_string()) };
+            let fork_name = if form_name.trim().is_empty() {
+                None
+            } else {
+                Some(form_name.trim().to_string())
+            };
+            let fork_desc = if form_desc.trim().is_empty() {
+                None
+            } else {
+                Some(form_desc.trim().to_string())
+            };
             let urls: Vec<String> = form_urls_raw
                 .lines()
                 .map(|l| l.trim().to_string())
@@ -294,7 +299,9 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                             let after_at = &url[at_pos + 1..];
                             let colon_offset = if after_at.starts_with('[') {
                                 after_at.find(']').and_then(|bracket_end| {
-                                    after_at[bracket_end + 1..].find(':').map(|c| bracket_end + 1 + c)
+                                    after_at[bracket_end + 1..]
+                                        .find(':')
+                                        .map(|c| bracket_end + 1 + c)
                                 })
                             } else {
                                 after_at.find(':')
@@ -311,7 +318,10 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                 })
                 .collect();
             if urls.is_empty() {
-                toast.error("At least one clone URL is required".to_string(), ToastOptions::new());
+                toast.error(
+                    "At least one clone URL is required".to_string(),
+                    ToastOptions::new(),
+                );
                 fork_loading.set(false);
                 return;
             }
@@ -319,7 +329,10 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                 match url::Url::parse(url) {
                     Ok(parsed) if ["http", "https", "git", "ssh"].contains(&parsed.scheme()) => {}
                     Ok(_) => {
-                        toast.error(format!("Unsupported URL scheme: {}", url), ToastOptions::new());
+                        toast.error(
+                            format!("Unsupported URL scheme: {}", url),
+                            ToastOptions::new(),
+                        );
                         fork_loading.set(false);
                         return;
                     }
@@ -337,9 +350,14 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                 fork_name.as_deref(),
                 fork_desc.as_deref(),
                 &url_refs,
-            ).await {
+            )
+            .await
+            {
                 Ok(_event_id) => {
-                    toast.success("Repository forked! Redirecting...".to_string(), ToastOptions::new());
+                    toast.success(
+                        "Repository forked! Redirecting...".to_string(),
+                        ToastOptions::new(),
+                    );
                     show_fork_modal.set(false);
                     // Navigate to the new fork
                     if let Some(client) = crate::stores::nostr_client::get_client() {
@@ -348,7 +366,8 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                                 let coordinate = nostr_sdk::prelude::Coordinate::new(
                                     nostr_sdk::prelude::Kind::GitRepoAnnouncement,
                                     pubkey,
-                                ).identifier(&fork_id);
+                                )
+                                .identifier(&fork_id);
                                 if let Ok(naddr) = coordinate.to_bech32() {
                                     let nav = navigator();
                                     nav.push(crate::routes::Route::CodeRepo { naddr });
@@ -366,14 +385,24 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
     };
     let handle_zap = move |_| {
         if !*HAS_SIGNER.read() {
-            toast
-                .warning("Sign in to zap repositories".to_string(), ToastOptions::new());
+            toast.warning(
+                "Sign in to zap repositories".to_string(),
+                ToastOptions::new(),
+            );
             return;
         }
         show_zap_modal.set(true);
     };
-    let star_text = if *is_starred.read() { "Starred" } else { "Star" };
-    let watch_text = if *is_watching.read() { "Unwatch" } else { "Watch" };
+    let star_text = if *is_starred.read() {
+        "Starred"
+    } else {
+        "Star"
+    };
+    let watch_text = if *is_watching.read() {
+        "Unwatch"
+    } else {
+        "Watch"
+    };
     rsx! {
         div { class: "flex items-center gap-2",
             div { class: "hidden lg:flex items-center gap-2",
@@ -706,10 +735,8 @@ fn ActionButton(
 fn MobileMenuItem(
     icon: &'static str,
     label: String,
-    #[props(default = false)]
-    disabled: bool,
-    #[props(default = false)]
-    loading: bool,
+    #[props(default = false)] disabled: bool,
+    #[props(default = false)] loading: bool,
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
     let is_disabled = disabled || loading;

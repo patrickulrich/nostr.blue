@@ -3,13 +3,10 @@
 use super::card::CitationCardCompact;
 use crate::components::icons::{SearchIcon, XIcon};
 use crate::stores::auth_store;
-use crate::stores::citation_store::{
-    fetch_citations_by_author, CachedCitation, USER_CITATIONS,
-};
+use crate::stores::citation_store::{fetch_citations_by_author, CachedCitation, USER_CITATIONS};
 use crate::utils::nkbip03::CitationStyle;
 use dioxus::prelude::*;
 use dioxus_core::Task;
-use nostr_sdk::ToBech32;
 /// Citation selection result
 #[derive(Clone, Debug)]
 pub struct CitationSelection {
@@ -44,39 +41,53 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
     let mut selected_citation = use_signal(|| None::<CachedCitation>);
     let mut selected_style = use_signal(|| CitationStyle::End);
     let mut loading = use_signal(|| false);
+    let mut load_version = use_signal(|| 0u64);
     let user_pubkey = auth_store::get_pubkey();
-    use_effect(
-        use_reactive(
-            (&*props.show.read(), &user_pubkey),
-            move |(is_shown, pubkey)| {
-                if is_shown {
-                    if let Some(pk) = pubkey {
-                        loading.set(true);
-                        let pk_clone = pk.clone();
-                        spawn(async move {
-                            if let Err(e) = fetch_citations_by_author(&pk_clone, 100)
-                                .await
-                            {
-                                crate::utils::log_fetch_error("citations", e);
-                            }
+    use_effect(use_reactive(
+        (&*props.show.read(), &user_pubkey),
+        move |(is_shown, pubkey)| {
+            if is_shown {
+                let version = load_version.with_mut(|v| {
+                    *v = v.wrapping_add(1);
+                    *v
+                });
+                if let Some(pk) = pubkey {
+                    loading.set(true);
+                    let pk_clone = pk.clone();
+                    spawn(async move {
+                        if let Err(e) = fetch_citations_by_author(&pk_clone, 100).await {
+                            crate::utils::log_fetch_error("citations", e);
+                        }
+                        if *load_version.peek() == version && *props.show.peek() {
                             loading.set(false);
-                        });
-                    }
-                    selected_citation.set(None);
-                    selected_style.set(CitationStyle::End);
-                    search_query.set(String::new());
-                    search_results.set(Vec::new());
+                        }
+                    });
                 } else {
-                    // Cleanup on hide - reset all modal state
                     loading.set(false);
-                    selected_citation.set(None);
-                    selected_style.set(CitationStyle::End);
-                    search_query.set(String::new());
-                    search_results.set(Vec::new());
                 }
-            },
-        ),
-    );
+                selected_citation.set(None);
+                selected_style.set(CitationStyle::End);
+                if let Some(task) = search_task.take() {
+                    task.cancel();
+                }
+                is_searching.set(false);
+                search_query.set(String::new());
+                search_results.set(Vec::new());
+            } else {
+                load_version.with_mut(|v| *v = v.wrapping_add(1));
+                // Cleanup on hide - reset all modal state
+                if let Some(task) = search_task.take() {
+                    task.cancel();
+                }
+                loading.set(false);
+                is_searching.set(false);
+                selected_citation.set(None);
+                selected_style.set(CitationStyle::End);
+                search_query.set(String::new());
+                search_results.set(Vec::new());
+            }
+        },
+    ));
     let mut handle_search = move |new_query: String| {
         search_query.set(new_query.clone());
         if let Some(task) = search_task.take() {
@@ -91,16 +102,8 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
         let query_snapshot = new_query.clone();
         let query_lower = query_snapshot.to_lowercase();
         let new_task = spawn(async move {
-            #[cfg(target_family = "wasm")]
-            {
-                gloo_timers::future::TimeoutFuture::new(150).await;
-            }
-            #[cfg(not(target_family = "wasm"))]
-            {
-                use std::time::Duration;
-                tokio::time::sleep(Duration::from_millis(150)).await;
-            }
-            if search_query.read().as_str() == query_snapshot.as_str() {
+            crate::platform::timer::sleep_ms(150).await;
+            if search_query.peek().as_str() == query_snapshot.as_str() {
                 let all_citations = USER_CITATIONS.read().all();
                 let filtered: Vec<CachedCitation> = all_citations
                     .into_iter()
@@ -127,17 +130,7 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
     });
     let markup_preview = use_memo(move || {
         if let Some(ref citation) = *selected_citation.read() {
-            let identifier = citation
-                .naddr
-                .as_ref()
-                .cloned()
-                .unwrap_or_else(|| {
-                    citation
-                        .event
-                        .id
-                        .to_bech32()
-                        .unwrap_or_else(|_| citation.event.id.to_hex())
-                });
+            let identifier = citation.identifier();
             let style = *selected_style.read();
             format!("{}{}", style.markup_prefix(), identifier)
         } else {
@@ -160,26 +153,14 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
                 task.cancel();
             }
             is_searching.set(false);
-            let identifier = citation
-                .naddr
-                .as_ref()
-                .cloned()
-                .unwrap_or_else(|| {
-                    citation
-                        .event
-                        .id
-                        .to_bech32()
-                        .unwrap_or_else(|_| citation.event.id.to_hex())
-                });
+            let identifier = citation.identifier();
             let style = *selected_style.read();
             let markup = format!("{}{}", style.markup_prefix(), identifier);
-            props
-                .on_select
-                .call(CitationSelection {
-                    identifier,
-                    style,
-                    markup,
-                });
+            props.on_select.call(CitationSelection {
+                identifier,
+                style,
+                markup,
+            });
             props.show.set(false);
         }
     };

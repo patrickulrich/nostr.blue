@@ -1,14 +1,14 @@
+use crate::services::profile_search::{
+    get_contact_pubkeys, search_cached_profiles, search_profiles, ProfileSearchResult,
+};
+use crate::utils::is_valid_http_url;
 use dioxus::prelude::Event as DioxusEvent;
 use dioxus::prelude::*;
 use dioxus_core::Task;
 use nostr_sdk::prelude::*;
 use std::rc::Rc;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
-use crate::services::profile_search::{
-    get_contact_pubkeys, search_cached_profiles, search_profiles, ProfileSearchResult,
-};
-use crate::utils::is_valid_http_url;
 /// Groups autocomplete-related signals to reduce parameter count in helper functions
 #[derive(Clone, Copy)]
 struct AutocompleteState {
@@ -68,9 +68,7 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
     let mut show_below = use_signal(|| true);
     #[allow(unused_mut)]
     let mut is_mobile = use_signal(|| false);
-    let textarea_id = use_signal(|| Rc::new(
-        format!("mention-textarea-{}", uuid::Uuid::new_v4()),
-    ));
+    let textarea_id = use_signal(|| Rc::new(format!("mention-textarea-{}", uuid::Uuid::new_v4())));
     let mut contact_pubkeys = use_signal(Vec::<PublicKey>::new);
     use_effect(move || {
         spawn(async move {
@@ -117,15 +115,13 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
                 if current < max {
                     let new_index = current + 1;
                     autocomplete.selected_index.set(new_index);
-                    #[cfg(target_family = "wasm")]
+                    #[cfg(feature = "web")]
                     {
                         use dioxus::document;
-                        let _ = document::eval(
-                            &format!(
-                                r#"document.getElementById('mention-option-{}')?.scrollIntoView({{ block: 'nearest', behavior: 'smooth' }})"#,
-                                new_index,
-                            ),
-                        );
+                        let _ = document::eval(&format!(
+                            r#"document.getElementById('mention-option-{}')?.scrollIntoView({{ block: 'nearest', behavior: 'smooth' }})"#,
+                            new_index,
+                        ));
                     }
                 }
             }
@@ -135,15 +131,13 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
                 if current > 0 {
                     let new_index = current - 1;
                     autocomplete.selected_index.set(new_index);
-                    #[cfg(target_family = "wasm")]
+                    #[cfg(feature = "web")]
                     {
                         use dioxus::document;
-                        let _ = document::eval(
-                            &format!(
-                                r#"document.getElementById('mention-option-{}')?.scrollIntoView({{ block: 'nearest', behavior: 'smooth' }})"#,
-                                new_index,
-                            ),
-                        );
+                        let _ = document::eval(&format!(
+                            r#"document.getElementById('mention-option-{}')?.scrollIntoView({{ block: 'nearest', behavior: 'smooth' }})"#,
+                            new_index,
+                        ));
                     }
                 }
             }
@@ -242,6 +236,12 @@ fn detect_mention(
         let after_at = &before_cursor[at_pos + 1..];
         if after_at.contains(char::is_whitespace) {
             state.show.set(false);
+            // Cancel any pending search task
+            if let Some(task) = state.relay_search_task.read().as_ref() {
+                task.cancel();
+            }
+            state.relay_search_task.write().take();
+            state.is_searching.set(false);
             return;
         }
         let query = after_at.to_string();
@@ -250,16 +250,13 @@ fn detect_mention(
         state.show.set(true);
         state.selected_index.set(0);
         let contacts = contact_pubkeys.read().clone();
-        let cached_results = search_cached_profiles(
-            &query,
-            10,
-            &contacts,
-            thread_pubkeys,
-        );
+        let cached_results = search_cached_profiles(&query, 10, &contacts, thread_pubkeys);
         state.results.set(cached_results.clone());
         log::debug!(
             "Autocomplete search for '{}': found {} results ({} thread participants)",
-            query, cached_results.len(), thread_pubkeys.len()
+            query,
+            cached_results.len(),
+            thread_pubkeys.len()
         );
         if query.len() >= 3 && cached_results.len() < 5 {
             state.is_searching.set(true);
@@ -271,26 +268,41 @@ fn detect_mention(
             let mut results_signal = state.results;
             let mut searching_signal = state.is_searching;
             let mut task_signal = state.relay_search_task;
+            let thread_pubkeys_for_relay = thread_pubkeys.to_vec();
             let new_task = spawn(async move {
-                #[cfg(target_family = "wasm")]
-                {
-                    gloo_timers::future::TimeoutFuture::new(300).await;
-                }
-                #[cfg(not(target_family = "wasm"))]
-                {
-                    use std::time::Duration;
-                    tokio::time::sleep(Duration::from_millis(300)).await;
-                }
+                crate::platform::timer::sleep_ms(300).await;
                 let query_relays = query_snapshot.len() >= 3;
                 match search_profiles(&query_snapshot, 10, query_relays).await {
                     Ok(results) => {
                         if query_signal.read().as_str() == query_snapshot.as_str() {
-                            results_signal.set(results);
+                            let merged: Vec<_> = results
+                                .into_iter()
+                                .map(|mut r| {
+                                    // Check cached results for thread participant flag
+                                    if cached_results
+                                        .iter()
+                                        .any(|c| c.pubkey == r.pubkey && c.is_thread_participant)
+                                    {
+                                        r.is_thread_participant = true;
+                                        r.relevance += 2000;
+                                    }
+                                    // Also check thread_pubkeys directly
+                                    if thread_pubkeys_for_relay.contains(&r.pubkey)
+                                        && !r.is_thread_participant
+                                    {
+                                        r.is_thread_participant = true;
+                                        r.relevance += 2000;
+                                    }
+                                    r
+                                })
+                                .collect();
+                            results_signal.set(merged);
                             searching_signal.set(false);
                         } else {
                             log::debug!(
                                 "Ignoring stale search results for '{}' (current query: '{}')",
-                                query_snapshot, query_signal.read()
+                                query_snapshot,
+                                query_signal.read()
                             );
                         }
                     }
@@ -304,9 +316,18 @@ fn detect_mention(
             });
             task_signal.set(Some(new_task));
         } else {
+            if let Some(task) = state.relay_search_task.read().as_ref() {
+                task.cancel();
+            }
+            state.relay_search_task.write().take();
             state.is_searching.set(false);
         }
     } else {
+        // Cancel any pending search task before hiding
+        if let Some(task) = state.relay_search_task.read().as_ref() {
+            task.cancel();
+        }
+        state.relay_search_task.write().take();
         state.show.set(false);
     }
 }
@@ -318,8 +339,7 @@ fn insert_mention(
     on_input: EventHandler<String>,
     mention_start_pos: usize,
     query_len: usize,
-    #[allow(unused_variables)]
-    textarea_id: String,
+    #[allow(unused_variables)] textarea_id: String,
     mut show_autocomplete: Signal<bool>,
     external_cursor_position: Option<Signal<usize>>,
 ) {
@@ -329,9 +349,9 @@ fn insert_mention(
             "wss://nos.lol",
             "wss://relay.snort.social",
         ]
-            .iter()
-            .filter_map(|r| nostr_sdk::RelayUrl::parse(r).ok())
-            .collect();
+        .iter()
+        .filter_map(|r| nostr_sdk::RelayUrl::parse(r).ok())
+        .collect();
         let nprofile = nips::nip19::Nip19Profile::new(profile.pubkey, relay_hints);
         let mention = match nprofile.to_bech32() {
             Ok(bech32) => format!("nostr:{}", bech32),
@@ -346,7 +366,8 @@ fn insert_mention(
         {
             log::warn!(
                 "Mention start position {} is invalid for content of length {}",
-                mention_start_pos, current_content.len()
+                mention_start_pos,
+                current_content.len()
             );
             show_autocomplete.set(false);
             return;
@@ -369,23 +390,16 @@ fn insert_mention(
         if let Some(mut signal) = external_cursor_position {
             signal.set(new_cursor_byte_pos);
         }
-        #[cfg(target_family = "wasm")]
+        #[cfg(feature = "web")]
         {
             if let Some(window) = web_sys::window() {
                 if let Some(document) = window.document() {
                     if let Some(element) = document.get_element_by_id(&textarea_id) {
-                        if let Ok(textarea) = element
-                            .dyn_into::<web_sys::HtmlTextAreaElement>()
-                        {
-                            let new_cursor_utf16_pos = utf8_to_utf16_index(
-                                &new_content,
-                                new_cursor_byte_pos,
-                            ) as u32;
+                        if let Ok(textarea) = element.dyn_into::<web_sys::HtmlTextAreaElement>() {
+                            let new_cursor_utf16_pos =
+                                utf8_to_utf16_index(&new_content, new_cursor_byte_pos) as u32;
                             let _ = textarea
-                                .set_selection_range(
-                                    new_cursor_utf16_pos,
-                                    new_cursor_utf16_pos,
-                                );
+                                .set_selection_range(new_cursor_utf16_pos, new_cursor_utf16_pos);
                             let _ = textarea.focus();
                         }
                     }
@@ -425,16 +439,13 @@ fn utf8_to_utf16_index(text: &str, utf8_index: usize) -> usize {
 /// Get cursor position from textarea
 #[allow(unused_variables)]
 fn get_cursor_position(textarea_id: &str) -> usize {
-    #[cfg(target_family = "wasm")]
+    #[cfg(feature = "web")]
     {
         if let Some(window) = web_sys::window() {
             if let Some(document) = window.document() {
                 if let Some(element) = document.get_element_by_id(textarea_id) {
-                    if let Ok(textarea) = element
-                        .dyn_into::<web_sys::HtmlTextAreaElement>()
-                    {
-                        return textarea.selection_start().unwrap_or(None).unwrap_or(0)
-                            as usize;
+                    if let Ok(textarea) = element.dyn_into::<web_sys::HtmlTextAreaElement>() {
+                        return textarea.selection_start().unwrap_or(None).unwrap_or(0) as usize;
                     }
                 }
             }
@@ -451,7 +462,7 @@ fn update_dropdown_position(
     show_below: &mut Signal<bool>,
     is_mobile: &mut Signal<bool>,
 ) {
-    #[cfg(target_family = "wasm")]
+    #[cfg(feature = "web")]
     {
         if let Some(window) = web_sys::window() {
             if let Some(document) = window.document() {
@@ -474,19 +485,14 @@ fn update_dropdown_position(
                     let dropdown_height = if is_mobile_view { 200.0 } else { 300.0 };
                     if bottom_space >= dropdown_height {
                         show_below.set(true);
-                        dropdown_top
-                            .set(rect.bottom() + window.scroll_y().unwrap_or(0.0));
+                        dropdown_top.set(rect.bottom() + window.scroll_y().unwrap_or(0.0));
                     } else if top_space >= dropdown_height {
                         show_below.set(false);
                         dropdown_top
-                            .set(
-                                rect.top() + window.scroll_y().unwrap_or(0.0)
-                                    - dropdown_height,
-                            );
+                            .set(rect.top() + window.scroll_y().unwrap_or(0.0) - dropdown_height);
                     } else {
                         show_below.set(true);
-                        dropdown_top
-                            .set(rect.bottom() + window.scroll_y().unwrap_or(0.0));
+                        dropdown_top.set(rect.bottom() + window.scroll_y().unwrap_or(0.0));
                     }
                     dropdown_left.set(rect.left() + window.scroll_x().unwrap_or(0.0));
                 }

@@ -1,14 +1,13 @@
 //! Publication Detail Route
 //! View NKBIP-01 publication with TOC (Kind 30040/30041)
 use crate::components::icons::{
-    AlertTriangleIcon, ArrowLeftIcon, BookOpenIcon, BookmarkIcon, CheckIcon, CopyIcon,
-    Link2Icon, RefreshIcon, ShareIcon,
+    AlertTriangleIcon, ArrowLeftIcon, BookOpenIcon, BookmarkIcon, CheckIcon, CopyIcon, Link2Icon,
+    RefreshIcon, ShareIcon,
 };
 use crate::components::{
-    CitationMetadata, PublicationProgress, PublicationSectionContent,
-    PublicationSectionSkeleton, PublicationTocDynamic, PublicationTocHorizontal,
-    PublicationTocSkeleton, SectionMetadata, SectionNavigation, SectionOutline,
-    ShareModal,
+    CitationMetadata, PublicationProgress, PublicationSectionContent, PublicationSectionSkeleton,
+    PublicationTocDynamic, PublicationTocHorizontal, PublicationTocSkeleton, SectionMetadata,
+    SectionNavigation, SectionOutline, ShareModal,
 };
 use crate::routes::Route;
 use crate::stores::publication_store::{self, PublicationSection, PublicationTree};
@@ -46,8 +45,7 @@ pub fn PublicationDetail(naddr: String) -> Element {
             match publication_store::fetch_publication_tree(&addr).await {
                 Ok(t) => {
                     if !t.root.section_addresses.is_empty() {
-                        selected_section
-                            .set(Some(t.root.section_addresses[0].address.clone()));
+                        selected_section.set(Some(t.root.section_addresses[0].address.clone()));
                     }
                     tree.set(Some(t));
                     loading.set(false);
@@ -75,17 +73,14 @@ pub fn PublicationDetail(naddr: String) -> Element {
         selected_section.set(Some(address));
     };
     let mut dynamic_sections = use_signal(|| {
-        LruCache::<
-            String,
-            publication_store::PublicationSection,
-        >::new(NonZeroUsize::new(DYNAMIC_SECTIONS_CACHE_SIZE).unwrap())
+        LruCache::<String, publication_store::PublicationSection>::new(
+            NonZeroUsize::new(DYNAMIC_SECTIONS_CACHE_SIZE).unwrap(),
+        )
     });
     use_drop(move || {
         dynamic_sections.write().clear();
     });
-    let mut section_load_errors = use_signal(
-        std::collections::HashMap::<String, String>::new,
-    );
+    let mut section_load_errors = use_signal(std::collections::HashMap::<String, String>::new);
     let mut section_loading = use_signal(std::collections::HashSet::<String>::new);
     let current_section = use_memo(move || {
         let sel = selected_section.read().clone();
@@ -125,9 +120,7 @@ pub fn PublicationDetail(naddr: String) -> Element {
                     let parts: Vec<&str> = addr.split(':').collect();
                     if parts.len() >= 3 {
                         let kind_result = parts[0].parse::<u16>();
-                        let pubkey_result = nostr_sdk::prelude::PublicKey::from_hex(
-                            parts[1],
-                        );
+                        let pubkey_result = nostr_sdk::prelude::PublicKey::from_hex(parts[1]);
                         match (kind_result, pubkey_result) {
                             (Ok(kind), Ok(pubkey)) => {
                                 let d_tag = parts[2..].join(":");
@@ -137,10 +130,10 @@ pub fn PublicationDetail(naddr: String) -> Element {
                                     .identifier(&d_tag);
                                 let start = instant::Instant::now();
                                 match nostr_client::fetch_events_aggregated(
-                                        filter,
-                                        std::time::Duration::from_secs(10),
-                                    )
-                                    .await
+                                    filter,
+                                    std::time::Duration::from_secs(10),
+                                )
+                                .await
                                 {
                                     Ok(events) => {
                                         let current_sel = selected_section.read().clone();
@@ -157,9 +150,9 @@ pub fn PublicationDetail(naddr: String) -> Element {
                                             return;
                                         }
                                         if let Some(event) = events.first() {
-                                            if let Some(section) = publication_store::parse_publication_section(
-                                                event,
-                                            ) {
+                                            if let Some(section) =
+                                                publication_store::parse_publication_section(event)
+                                            {
                                                 dynamic_sections.write().put(addr.clone(), section);
                                                 section_load_errors.write().remove(&addr_for_error);
                                             } else {
@@ -167,61 +160,58 @@ pub fn PublicationDetail(naddr: String) -> Element {
                                                     "Failed to parse publication section for addr={}",
                                                     addr_for_log
                                                 );
-                                                section_load_errors
-                                                    .write()
-                                                    .insert(
-                                                        addr_for_error.clone(),
-                                                        "Failed to parse section content".to_string(),
-                                                    );
+                                                section_load_errors.write().insert(
+                                                    addr_for_error.clone(),
+                                                    "Failed to parse section content".to_string(),
+                                                );
                                             }
                                         } else {
                                             log::warn!(
                                                 "No events found for section addr={} (took {:?})",
-                                                addr_for_log, start.elapsed()
+                                                addr_for_log,
+                                                start.elapsed()
                                             );
-                                            section_load_errors
-                                                .write()
-                                                .insert(
-                                                    addr_for_error.clone(),
-                                                    "Section not found".to_string(),
-                                                );
+                                            section_load_errors.write().insert(
+                                                addr_for_error.clone(),
+                                                "Section not found".to_string(),
+                                            );
                                         }
                                     }
                                     Err(e) => {
                                         log::warn!(
                                             "Failed to fetch section addr={}: {} (took {:?})",
-                                            addr_for_log, e, start.elapsed()
+                                            addr_for_log,
+                                            e,
+                                            start.elapsed()
                                         );
-                                        section_load_errors
-                                            .write()
-                                            .insert(
-                                                addr_for_error.clone(),
-                                                format!("Network error: {}", e),
-                                            );
+                                        section_load_errors.write().insert(
+                                            addr_for_error.clone(),
+                                            format!("Network error: {}", e),
+                                        );
                                     }
                                 }
                             }
                             (Err(e), _) => {
                                 log::warn!(
-                                    "Failed to parse kind from addr={}: {}", addr_for_log, e
+                                    "Failed to parse kind from addr={}: {}",
+                                    addr_for_log,
+                                    e
                                 );
-                                section_load_errors
-                                    .write()
-                                    .insert(
-                                        addr_for_error.clone(),
-                                        format!("Invalid section address: {}", e),
-                                    );
+                                section_load_errors.write().insert(
+                                    addr_for_error.clone(),
+                                    format!("Invalid section address: {}", e),
+                                );
                             }
                             (_, Err(e)) => {
                                 log::warn!(
-                                    "Failed to parse pubkey from addr={}: {}", addr_for_log, e
+                                    "Failed to parse pubkey from addr={}: {}",
+                                    addr_for_log,
+                                    e
                                 );
-                                section_load_errors
-                                    .write()
-                                    .insert(
-                                        addr_for_error.clone(),
-                                        format!("Invalid author key: {}", e),
-                                    );
+                                section_load_errors.write().insert(
+                                    addr_for_error.clone(),
+                                    format!("Invalid author key: {}", e),
+                                );
                             }
                         }
                     } else {
@@ -231,10 +221,7 @@ pub fn PublicationDetail(naddr: String) -> Element {
                         );
                         section_load_errors
                             .write()
-                            .insert(
-                                addr_for_error.clone(),
-                                "Invalid address format".to_string(),
-                            );
+                            .insert(addr_for_error.clone(), "Invalid address format".to_string());
                     }
                     section_loading.write().remove(&addr_for_loading);
                 });
@@ -299,15 +286,13 @@ pub fn PublicationDetail(naddr: String) -> Element {
                     } else {
                         current_toc_parent.set(None);
                         if !t.root.section_addresses.is_empty() {
-                            selected_section
-                                .set(Some(t.root.section_addresses[0].address.clone()));
+                            selected_section.set(Some(t.root.section_addresses[0].address.clone()));
                         }
                     }
                 } else {
                     current_toc_parent.set(None);
                     if !t.root.section_addresses.is_empty() {
-                        selected_section
-                            .set(Some(t.root.section_addresses[0].address.clone()));
+                        selected_section.set(Some(t.root.section_addresses[0].address.clone()));
                     }
                 }
             }
@@ -389,7 +374,7 @@ pub fn PublicationDetail(naddr: String) -> Element {
                                                 Ok(_) => {
                                                     copied.set(true);
                                                     spawn(async move {
-                                                        gloo_timers::future::TimeoutFuture::new(2000).await;
+                                                        crate::platform::timer::sleep_ms(2000).await;
                                                         copied.set(false);
                                                     });
                                                 }

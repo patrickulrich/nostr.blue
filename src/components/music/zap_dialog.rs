@@ -7,13 +7,17 @@ use crate::stores::profiles;
 use crate::stores::relay::DEFAULT_RELAYS;
 use crate::utils::podcast::ValueBlock;
 use dioxus::prelude::*;
-use gloo_net::http::Request;
 use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::{PublicKey, RelayUrl};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "web")]
+use wasm_bindgen::JsCast;
 /// Convert DEFAULT_RELAYS to parsed RelayUrls
 fn default_relay_urls() -> Vec<RelayUrl> {
-    DEFAULT_RELAYS.iter().filter_map(|s| RelayUrl::parse(s).ok()).collect()
+    DEFAULT_RELAYS
+        .iter()
+        .filter_map(|s| RelayUrl::parse(s).ok())
+        .collect()
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LnurlPayParams {
@@ -56,9 +60,7 @@ pub fn MusicZapDialog() -> Element {
     let track = track.unwrap();
     let is_nostr_track = matches!(
         track.source,
-        TrackSource::Nostr { .. }
-        | TrackSource::NostrPodcast { .. }
-        | TrackSource::Radio { .. }
+        TrackSource::Nostr { .. } | TrackSource::NostrPodcast { .. } | TrackSource::Radio { .. }
     );
     let is_v4v_track = matches!(
         track.source,
@@ -104,37 +106,39 @@ pub fn MusicZapDialog() -> Element {
         spawn(async move {
             let result = match track_source {
                 TrackSource::Wavlake { .. } => {
-                    generate_wavlake_lnurl_invoice(
-                            &track_id,
-                            amount_value,
-                            &comment_value,
-                        )
-                        .await
+                    generate_wavlake_lnurl_invoice(&track_id, amount_value, &comment_value).await
                 }
-                TrackSource::Nostr { ref pubkey, ref coordinate, .. } => {
+                TrackSource::Nostr {
+                    ref pubkey,
+                    ref coordinate,
+                    ..
+                } => {
                     generate_nostr_zap_invoice(
-                            pubkey,
-                            Some(coordinate),
-                            profile.as_ref(),
-                            amount_value,
-                            &comment_value,
-                        )
-                        .await
+                        pubkey,
+                        Some(coordinate),
+                        profile.as_ref(),
+                        amount_value,
+                        &comment_value,
+                    )
+                    .await
                 }
-                TrackSource::NostrPodcast { ref pubkey, ref coordinate, .. } => {
+                TrackSource::NostrPodcast {
+                    ref pubkey,
+                    ref coordinate,
+                    ..
+                } => {
                     generate_nostr_zap_invoice(
-                            pubkey,
-                            Some(coordinate),
-                            profile.as_ref(),
-                            amount_value,
-                            &comment_value,
-                        )
-                        .await
+                        pubkey,
+                        Some(coordinate),
+                        profile.as_ref(),
+                        amount_value,
+                        &comment_value,
+                    )
+                    .await
                 }
                 TrackSource::RssPodcast { .. } => {
                     if let Some(ref value_block) = track_value_block {
-                        generate_v4v_invoice(value_block, amount_value, &comment_value)
-                            .await
+                        generate_v4v_invoice(value_block, amount_value, &comment_value).await
                     } else {
                         Err(
                             "This podcast doesn't have V4V payment info configured. Contact the podcast creator to enable Lightning payments."
@@ -144,8 +148,7 @@ pub fn MusicZapDialog() -> Element {
                 }
                 TrackSource::RssMusic { .. } => {
                     if let Some(ref value_block) = track_value_block {
-                        generate_v4v_invoice(value_block, amount_value, &comment_value)
-                            .await
+                        generate_v4v_invoice(value_block, amount_value, &comment_value).await
                     } else {
                         Err(
                             "This music doesn't have V4V payment info configured. Contact the artist to enable Lightning payments."
@@ -153,15 +156,19 @@ pub fn MusicZapDialog() -> Element {
                         )
                     }
                 }
-                TrackSource::Radio { ref pubkey, ref coordinate, .. } => {
+                TrackSource::Radio {
+                    ref pubkey,
+                    ref coordinate,
+                    ..
+                } => {
                     generate_nostr_zap_invoice(
-                            pubkey,
-                            Some(coordinate),
-                            profile.as_ref(),
-                            amount_value,
-                            &comment_value,
-                        )
-                        .await
+                        pubkey,
+                        Some(coordinate),
+                        profile.as_ref(),
+                        amount_value,
+                        &comment_value,
+                    )
+                    .await
                 }
             };
             match result {
@@ -183,28 +190,86 @@ pub fn MusicZapDialog() -> Element {
         e.stop_propagation();
         if let Some(inv) = invoice.read().clone() {
             spawn(async move {
-                let script = format!(
-                    r#"
-                    (async function() {{
-                        if (typeof window.webln !== 'undefined') {{
-                            try {{
-                                await window.webln.enable();
-                                const result = await window.webln.sendPayment('{}');
-                                return {{ success: true, preimage: result.preimage }};
-                            }} catch (e) {{
-                                return {{ success: false, error: e.message }};
-                            }}
-                        }} else {{
-                            return {{ success: false, error: 'WebLN not available' }};
-                        }}
-                    }})()
-                    "#,
-                    inv,
-                );
-                match js_sys::eval(&script) {
-                    Ok(_) => log::info!("WebLN payment initiated"),
-                    Err(e) => log::error!("WebLN payment failed: {:?}", e),
+                #[cfg(feature = "web")]
+                {
+                    error_msg.set(None);
+                    let webln = match js_sys::Reflect::get(&js_sys::global(), &"webln".into()) {
+                        Ok(webln) if !webln.is_undefined() && !webln.is_null() => webln,
+                        _ => {
+                            error_msg.set(Some("WebLN not available".to_string()));
+                            return;
+                        }
+                    };
+                    let enable_fn = match js_sys::Reflect::get(&webln, &"enable".into())
+                        .ok()
+                        .and_then(|value| value.dyn_into::<js_sys::Function>().ok())
+                    {
+                        Some(function) => function,
+                        None => {
+                            error_msg.set(Some("WebLN enable() is not available".to_string()));
+                            return;
+                        }
+                    };
+                    let send_payment_fn = match js_sys::Reflect::get(&webln, &"sendPayment".into())
+                        .ok()
+                        .and_then(|value| value.dyn_into::<js_sys::Function>().ok())
+                    {
+                        Some(function) => function,
+                        None => {
+                            error_msg.set(Some("WebLN sendPayment() is not available".to_string()));
+                            return;
+                        }
+                    };
+                    let enable_result = enable_fn.call0(&webln);
+                    let payment_result = match enable_result {
+                        Ok(enable_promise) => {
+                            match wasm_bindgen_futures::JsFuture::from(js_sys::Promise::from(
+                                enable_promise,
+                            ))
+                            .await
+                            {
+                                Ok(_) => {
+                                    let inv_js = wasm_bindgen::JsValue::from_str(&inv);
+                                    send_payment_fn.call1(&webln, &inv_js)
+                                }
+                                Err(e) => Err(e),
+                            }
+                        }
+                        Err(e) => Err(e),
+                    };
+                    match payment_result {
+                        Ok(payment_promise) => match wasm_bindgen_futures::JsFuture::from(
+                            js_sys::Promise::from(payment_promise),
+                        )
+                        .await
+                        {
+                            Ok(result) => {
+                                let js_error = js_sys::Reflect::get(&result, &"error".into())
+                                    .ok()
+                                    .and_then(|v| v.as_string());
+                                if let Some(js_error) = js_error {
+                                    log::warn!("WebLN payment returned error: {}", js_error);
+                                    error_msg.set(Some(js_error));
+                                } else {
+                                    error_msg.set(None);
+                                    log::info!("WebLN payment completed successfully");
+                                }
+                            }
+                            Err(e) => {
+                                let err_str = format!("{:?}", e);
+                                log::error!("WebLN payment rejected: {}", err_str);
+                                error_msg.set(Some(err_str));
+                            }
+                        },
+                        Err(e) => {
+                            let err_str = format!("{:?}", e);
+                            log::error!("WebLN invocation failed: {}", err_str);
+                            error_msg.set(Some(err_str));
+                        }
+                    }
                 }
+                #[cfg(not(feature = "web"))]
+                let _ = inv;
             });
         }
     };
@@ -337,25 +402,37 @@ pub fn MusicZapDialog() -> Element {
                                     }
                                 }
                                 div { class: "space-y-2",
-                                    button {
-                                        class: "w-full py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors",
-                                        onclick: pay_with_webln,
-                                        "⚡ Pay with WebLN"
-                                    }
-                                    button {
-                                        class: "w-full py-2 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/80 transition-colors",
-                                        onclick: {
-                                            let inv = invoice.read().clone();
-                                            move |e: Event<MouseData>| {
-                                                e.stop_propagation();
-                                                if let Some(invoice_str) = inv.as_ref() {
-                                                    let url = format!("lightning:{}", invoice_str);
-                                                    let _ = web_sys::window()
-                                                        .and_then(|w| w.open_with_url_and_target(&url, "_blank").ok());
+                                    if cfg!(feature = "web") {
+                                        button {
+                                            class: "w-full py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors",
+                                            onclick: pay_with_webln,
+                                            "⚡ Pay with WebLN"
+                                        }
+                                        button {
+                                            class: "w-full py-2 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/80 transition-colors",
+                                            onclick: {
+                                                let inv = invoice.read().clone();
+                                                move |e: Event<MouseData>| {
+                                                    e.stop_propagation();
+                                                    if let Some(invoice_str) = inv.as_ref() {
+                                                        let url = format!("lightning:{}", invoice_str);
+                                                        #[cfg(feature = "web")]
+                                                        {
+                                                            let _ = web_sys::window()
+                                                                .and_then(|w| w.open_with_url_and_target(&url, "_blank").ok());
+                                                        }
+                                                        #[cfg(not(feature = "web"))]
+                                                        let _ = url;
+                                                    }
                                                 }
-                                            }
-                                        },
-                                        "Open in Wallet"
+                                            },
+                                            "Open in Wallet"
+                                        }
+                                    } else {
+                                        p {
+                                            class: "text-sm text-muted-foreground text-center py-2",
+                                            "Copy the invoice above to pay with your Lightning wallet."
+                                        }
                                     }
                                     button {
                                         class: "w-full py-2 bg-muted text-foreground rounded-md hover:bg-muted/80 transition-colors",
@@ -383,7 +460,9 @@ async fn generate_wavlake_lnurl_invoice(
 ) -> Result<(String, String), String> {
     let track_id = track_id.trim();
     log::info!(
-        "Starting invoice flow for track: {}, amount: {} sats", track_id, amount_sats
+        "Starting invoice flow for track: {}, amount: {} sats",
+        track_id,
+        amount_sats
     );
     let api = WavlakeAPI::new();
     let lnurl_response = api
@@ -395,26 +474,37 @@ async fn generate_wavlake_lnurl_invoice(
         .map_err(|e| format!("Failed to decode LNURL: {}", e))?;
     log::info!("Decoded LNURL to: {}", lnurl_pay_url);
     log::info!("Fetching LNURL-pay parameters from: {}", lnurl_pay_url);
-    let params: LnurlPayParams = Request::get(&lnurl_pay_url)
+    let response = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(&lnurl_pay_url)
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch LNURL-pay params: {}", e))?
+        .map_err(|e| format!("Failed to fetch LNURL-pay params: {}", e))?;
+    let params: LnurlPayParams = response
+        .error_for_status()
+        .map_err(|e| format!("LNURL-pay server error: {}", e))?
         .json()
         .await
         .map_err(|e| format!("Failed to parse LNURL-pay params: {}", e))?;
     log::info!(
-        "LNURL-pay params received. Callback: {}, min: {}, max: {}", params.callback,
-        params.min_sendable, params.max_sendable
+        "LNURL-pay params received. Callback: {}, min: {}, max: {}",
+        params.callback,
+        params.min_sendable,
+        params.max_sendable
     );
-    let amount_millisats = amount_sats * 1000;
+    let amount_millisats = amount_sats
+        .checked_mul(1000)
+        .ok_or_else(|| "Amount overflow - too many sats".to_string())?;
+    let min_sats = params.min_sendable.div_ceil(1000);
+    let max_sats = params.max_sendable / 1000;
+    if min_sats > max_sats {
+        return Err("No whole-sat amount fits the server bounds".to_string());
+    }
     if amount_millisats < params.min_sendable || amount_millisats > params.max_sendable {
-        return Err(
-            format!(
-                "Amount must be between {} and {} sats",
-                params.min_sendable / 1000,
-                params.max_sendable / 1000,
-            ),
-        );
+        return Err(format!(
+            "Amount must be between {} and {} sats",
+            min_sats, max_sats,
+        ));
     }
     let mut callback_url = params.callback.clone();
     let separator = if callback_url.contains('?') { "&" } else { "?" };
@@ -422,51 +512,52 @@ async fn generate_wavlake_lnurl_invoice(
     if !comment.is_empty() {
         if let Some(max_comment) = params.comment_allowed {
             if comment.len() <= max_comment as usize {
-                callback_url
-                    .push_str(&format!("&comment={}", urlencoding::encode(comment)));
+                callback_url.push_str(&format!("&comment={}", urlencoding::encode(comment)));
             }
         }
     }
     log::info!("Requesting invoice from callback: {}", callback_url);
-    let response = Request::get(&callback_url)
+    let response = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(&callback_url)
         .send()
         .await
-        .map_err(|e| format!("Failed to request invoice: {}", e))?;
+        .map_err(|e| format!("Failed to request invoice: {}", e))?
+        .error_for_status()
+        .map_err(|e| format!("Invoice request failed: {}", e))?;
     let response_text = response
         .text()
         .await
         .map_err(|e| format!("Failed to read response body: {}", e))?;
     log::info!("Invoice callback response: {}", response_text);
-    let invoice_response: InvoiceResponse = serde_json::from_str(&response_text)
-        .map_err(|e| {
-            format!(
-                "Failed to parse invoice response: {}. Response body: {}",
-                e,
-                response_text,
-            )
-        })?;
+    let invoice_response: InvoiceResponse = serde_json::from_str(&response_text).map_err(|e| {
+        format!(
+            "Failed to parse invoice response: {}. Response body: {}",
+            e, response_text,
+        )
+    })?;
     if let Some(error) = &invoice_response.error {
         return Err(format!("Invoice generation failed: {}", error));
     }
     if let Some(status) = &invoice_response.status {
         if status.to_uppercase() == "ERROR" {
-            let reason = invoice_response.reason.as_deref().unwrap_or("Unknown error");
+            let reason = invoice_response
+                .reason
+                .as_deref()
+                .unwrap_or("Unknown error");
             return Err(format!("Invoice generation failed: {}", reason));
         }
     }
     let pr = invoice_response
         .pr
-        .ok_or_else(|| {
-            format!("No invoice in response. Response body: {}", response_text)
-        })?;
-    let qr_code_url = generate_qr_code(&pr)
-        .map_err(|e| format!("Failed to generate QR code: {}", e))?;
+        .ok_or_else(|| format!("No invoice in response. Response body: {}", response_text))?;
+    let qr_code_url =
+        generate_qr_code(&pr).map_err(|e| format!("Failed to generate QR code: {}", e))?;
     Ok((pr, qr_code_url))
 }
 /// Decode bech32 LNURL to HTTPS URL
 fn decode_lnurl(lnurl: &str) -> Result<String, String> {
-    let (_, data) = bech32::decode(lnurl)
-        .map_err(|e| format!("Bech32 decode error: {}", e))?;
+    let (_, data) = bech32::decode(lnurl).map_err(|e| format!("Bech32 decode error: {}", e))?;
     String::from_utf8(data).map_err(|e| format!("UTF-8 conversion error: {}", e))
 }
 /// Generate QR code as data URL
@@ -477,8 +568,7 @@ fn generate_qr_code(invoice: &str) -> Result<String, String> {
     let code = QrCode::new(invoice.to_uppercase())
         .map_err(|e| format!("QR code generation error: {}", e))?;
     let svg_string = code.render::<svg::Color>().min_dimensions(256, 256).build();
-    let encoded = base64::engine::general_purpose::STANDARD
-        .encode(svg_string.as_bytes());
+    let encoded = base64::engine::general_purpose::STANDARD.encode(svg_string.as_bytes());
     Ok(format!("data:image/svg+xml;base64,{}", encoded))
 }
 /// Generate invoice for Nostr tracks using NIP-57 zap flow
@@ -490,7 +580,8 @@ async fn generate_nostr_zap_invoice(
     comment: &str,
 ) -> Result<(String, String), String> {
     log::info!(
-        "Starting NIP-57 zap flow for artist: {}, amount: {} sats", artist_pubkey,
+        "Starting NIP-57 zap flow for artist: {}, amount: {} sats",
+        artist_pubkey,
         amount_sats
     );
     let profile = profile.ok_or_else(|| "Artist profile not loaded yet".to_string())?;
@@ -501,9 +592,12 @@ async fn generate_nostr_zap_invoice(
     let (pay_info, amount_msats) = lnurl::prepare_zap(Some(lud16), None, amount_sats)
         .await
         .map_err(|e| format!("Failed to prepare zap: {}", e))?;
-    log::info!("LNURL pay info received for nostr zap. Callback: {}", pay_info.callback);
-    let recipient_pubkey = PublicKey::parse(artist_pubkey)
-        .map_err(|e| format!("Invalid artist pubkey: {}", e))?;
+    log::info!(
+        "LNURL pay info received for nostr zap. Callback: {}",
+        pay_info.callback
+    );
+    let recipient_pubkey =
+        PublicKey::parse(artist_pubkey).map_err(|e| format!("Invalid artist pubkey: {}", e))?;
     let relays: Vec<RelayUrl> = {
         if let Some(client) = nostr_client::get_client() {
             let client_relays = client.relays().await;
@@ -518,9 +612,12 @@ async fn generate_nostr_zap_invoice(
             default_relay_urls()
         }
     };
-    let message = if comment.is_empty() { None } else { Some(comment.to_string()) };
-    let event_coordinate = track_coordinate
-        .and_then(|coord| Coordinate::parse(coord).ok());
+    let message = if comment.is_empty() {
+        None
+    } else {
+        Some(comment.to_string())
+    };
+    let event_coordinate = track_coordinate.and_then(|coord| Coordinate::parse(coord).ok());
     let builder = lnurl::create_zap_request_unsigned(
         recipient_pubkey,
         relays,
@@ -529,21 +626,17 @@ async fn generate_nostr_zap_invoice(
         None,
         event_coordinate,
     );
-    let client = nostr_client::get_client()
-        .ok_or_else(|| "Nostr client not available".to_string())?;
+    let client =
+        nostr_client::get_client().ok_or_else(|| "Nostr client not available".to_string())?;
     let zap_request = client
         .sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign zap request: {}", e))?;
     log::info!("Zap request event created: {}", zap_request.id.to_hex());
-    let invoice_response = lnurl::request_zap_invoice(
-            &pay_info.callback,
-            amount_msats,
-            &zap_request,
-            None,
-        )
-        .await
-        .map_err(|e| format!("Failed to get zap invoice: {}", e))?;
+    let invoice_response =
+        lnurl::request_zap_invoice(&pay_info.callback, amount_msats, &zap_request, None)
+            .await
+            .map_err(|e| format!("Failed to get zap invoice: {}", e))?;
     let qr_code_url = generate_qr_code(&invoice_response.pr)
         .map_err(|e| format!("Failed to generate QR code: {}", e))?;
     Ok((invoice_response.pr, qr_code_url))
@@ -557,7 +650,8 @@ async fn generate_v4v_invoice(
     comment: &str,
 ) -> Result<(String, String), String> {
     log::info!(
-        "Starting V4V payment flow for {} sats with {} recipients", amount_sats,
+        "Starting V4V payment flow for {} sats with {} recipients",
+        amount_sats,
         value_block.recipients.len()
     );
     if value_block.recipients.is_empty() {
@@ -575,25 +669,18 @@ async fn generate_v4v_invoice(
         .recipients
         .iter()
         .find(|r| r.recipient_type == "lnaddress" || r.address.contains('@'));
-    let primary_recipient = lnaddress_recipient
-        .or_else(|| {
-            log::debug!(
-                "[V4V] No lnaddress recipient found, falling back to first recipient"
-            );
-            value_block.recipients.first()
-        });
-    let recipient = primary_recipient
-        .ok_or_else(|| "No valid recipient found".to_string())?;
-    let is_lnaddress = recipient.recipient_type == "lnaddress"
-        || recipient.address.contains('@');
+    let primary_recipient = lnaddress_recipient.or_else(|| {
+        log::debug!("[V4V] No lnaddress recipient found, falling back to first recipient");
+        value_block.recipients.first()
+    });
+    let recipient = primary_recipient.ok_or_else(|| "No valid recipient found".to_string())?;
+    let is_lnaddress = recipient.recipient_type == "lnaddress" || recipient.address.contains('@');
     if !is_lnaddress {
-        return Err(
-            format!(
-                "Direct keysend payments to node {} not yet supported in browser. \
+        return Err(format!(
+            "Direct keysend payments to node {} not yet supported in browser. \
             The podcast creator can add a Lightning Address for web payments.",
-                recipient.address,
-            ),
-        );
+            recipient.address,
+        ));
     }
     let lnaddress = &recipient.address;
     let recipient_share = amount_sats
@@ -605,24 +692,24 @@ async fn generate_v4v_invoice(
     let recipient_name = recipient.name.as_deref().unwrap_or("Podcast Creator");
     let split_percentage = (recipient.split as f64 * 100.0) / total_split as f64;
     log::info!(
-        "Generating invoice for {} ({}) - {} sats ({:.1}% split)", recipient_name,
-        lnaddress, recipient_share, split_percentage
+        "Generating invoice for {} ({}) - {} sats ({:.1}% split)",
+        recipient_name,
+        lnaddress,
+        recipient_share,
+        split_percentage
     );
     let full_comment = if comment.is_empty() {
         format!("V4V boost to {}", recipient_name)
     } else {
         comment.to_string()
     };
-    let (pay_info, amount_msats) = lnurl::prepare_zap(
-            Some(lnaddress),
-            None,
-            recipient_share,
-        )
+    let (pay_info, amount_msats) = lnurl::prepare_zap(Some(lnaddress), None, recipient_share)
         .await
-        .map_err(|e| {
-            format!("Failed to resolve Lightning Address '{}': {}", lnaddress, e)
-        })?;
-    log::info!("Lightning Address resolved. Callback: {}", pay_info.callback);
+        .map_err(|e| format!("Failed to resolve Lightning Address '{}': {}", lnaddress, e))?;
+    log::info!(
+        "Lightning Address resolved. Callback: {}",
+        pay_info.callback
+    );
     let mut callback_url = pay_info.callback.clone();
     let separator = if callback_url.contains('?') { "&" } else { "?" };
     callback_url.push_str(&format!("{}amount={}", separator, amount_msats));
@@ -631,22 +718,24 @@ async fn generate_v4v_invoice(
             let max = max_comment as usize;
             let char_count = full_comment.chars().count();
             if char_count <= max {
-                callback_url
-                    .push_str(
-                        &format!("&comment={}", urlencoding::encode(&full_comment)),
-                    );
+                callback_url.push_str(&format!("&comment={}", urlencoding::encode(&full_comment)));
             } else {
                 let truncated: String = full_comment.chars().take(max).collect();
-                callback_url
-                    .push_str(&format!("&comment={}", urlencoding::encode(&truncated)));
+                callback_url.push_str(&format!("&comment={}", urlencoding::encode(&truncated)));
             }
         }
     }
     log::info!("Requesting invoice from: {}", callback_url);
-    let response = Request::get(&callback_url)
+    let client = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?;
+    let response = client
+        .get(&callback_url)
         .send()
         .await
         .map_err(|e| format!("Failed to request invoice: {}", e))?;
+    let response = response
+        .error_for_status()
+        .map_err(|e| format!("Invoice request failed: {}", e))?;
     let invoice_response: InvoiceResponse = response
         .json()
         .await
@@ -656,12 +745,17 @@ async fn generate_v4v_invoice(
     }
     if let Some(status) = &invoice_response.status {
         if status.to_uppercase() == "ERROR" {
-            let reason = invoice_response.reason.as_deref().unwrap_or("Unknown error");
+            let reason = invoice_response
+                .reason
+                .as_deref()
+                .unwrap_or("Unknown error");
             return Err(format!("Invoice generation failed: {}", reason));
         }
     }
-    let pr = invoice_response.pr.ok_or_else(|| "No invoice in response".to_string())?;
-    let qr_code_url = generate_qr_code(&pr)
-        .map_err(|e| format!("Failed to generate QR code: {}", e))?;
+    let pr = invoice_response
+        .pr
+        .ok_or_else(|| "No invoice in response".to_string())?;
+    let qr_code_url =
+        generate_qr_code(&pr).map_err(|e| format!("Failed to generate QR code: {}", e))?;
     Ok((pr, qr_code_url))
 }

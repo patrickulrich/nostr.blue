@@ -48,7 +48,11 @@ pub fn normalize_wiki_dtag(input: &str) -> String {
     input
         .chars()
         .map(|c| {
-            if c.is_alphabetic() { c.to_lowercase().next().unwrap_or('-') } else { '-' }
+            if c.is_alphabetic() {
+                c.to_lowercase().next().unwrap_or('-')
+            } else {
+                '-'
+            }
         })
         .collect::<String>()
         .split('-')
@@ -91,7 +95,10 @@ pub fn extract_wikilinks(content: &str) -> Vec<WikiLink> {
     WIKILINK_REGEX
         .captures_iter(content)
         .map(|cap| {
-            let raw = cap.get(0).map(|m| m.as_str().to_string()).unwrap_or_default();
+            let raw = cap
+                .get(0)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default();
             let target_raw = cap.get(1).map(|m| m.as_str()).unwrap_or("");
             let display = cap.get(2).map(|m| m.as_str().to_string());
             WikiLink {
@@ -112,7 +119,10 @@ pub fn wikilinks_to_tags(links: &[WikiLink]) -> Vec<Tag> {
         .iter()
         .filter_map(|link| {
             if seen.insert(&link.target) {
-                Some(Tag::custom(TagKind::Custom("w".into()), vec![link.target.clone()]))
+                Some(Tag::custom(
+                    TagKind::Custom("w".into()),
+                    vec![link.target.clone()],
+                ))
             } else {
                 None
             }
@@ -124,20 +134,17 @@ pub fn wikilinks_to_tags(links: &[WikiLink]) -> Vec<Tag> {
 /// Converts `[[Target Page]]` to `<a href="/wiki/target-page">Target Page</a>`
 pub fn render_wikilinks_to_html(content: &str) -> String {
     WIKILINK_REGEX
-        .replace_all(
-            content,
-            |caps: &regex::Captures| {
-                let target_raw = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                let display = caps.get(2).map(|m| m.as_str()).unwrap_or(target_raw);
-                let target = normalize_wiki_dtag(target_raw);
-                format!(
-                    r#"<a href="/wiki/{}" class="wikilink" data-target="{}">{}</a>"#,
-                    target,
-                    target,
-                    html_escape(display),
-                )
-            },
-        )
+        .replace_all(content, |caps: &regex::Captures| {
+            let target_raw = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let display = caps.get(2).map(|m| m.as_str()).unwrap_or(target_raw);
+            let target = normalize_wiki_dtag(target_raw);
+            format!(
+                r#"<a href="/wiki/{}" class="wikilink" data-target="{}">{}</a>"#,
+                target,
+                target,
+                html_escape(display),
+            )
+        })
         .to_string()
 }
 /// A wiki article parsed from a Kind 30818 event
@@ -205,13 +212,14 @@ pub struct WikiMergeRequest {
 /// Parse a wiki article from a Kind 30818 event
 pub fn parse_wiki_article(event: &Event) -> Result<WikiArticle, String> {
     if event.kind.as_u16() != KIND_WIKI_ARTICLE {
-        return Err(
-            format!("Expected kind {}, got {}", KIND_WIKI_ARTICLE, event.kind.as_u16()),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_WIKI_ARTICLE,
+            event.kind.as_u16()
+        ));
     }
     let pubkey = event.pubkey.to_hex();
-    let identifier = get_tag_value(event, "d")
-        .ok_or("Missing required 'd' tag (identifier)")?;
+    let identifier = get_tag_value(event, "d").ok_or("Missing required 'd' tag (identifier)")?;
     if !is_normalized_dtag(&identifier) {
         log::warn!("Wiki article d-tag is not normalized: {}", identifier);
     }
@@ -223,8 +231,8 @@ pub fn parse_wiki_article(event: &Event) -> Result<WikiArticle, String> {
         .into_iter()
         .map(|w| w.target)
         .collect();
-    let fork_source = get_tag_with_marker(event, "a", "fork")
-        .or_else(|| get_tag_with_marker(event, "e", "fork"));
+    let fork_source =
+        get_tag_with_marker(event, "a", "fork").or_else(|| get_tag_with_marker(event, "e", "fork"));
     let defer_to = get_tag_with_marker(event, "a", "defer")
         .or_else(|| get_tag_with_marker(event, "e", "defer"));
     Ok(WikiArticle {
@@ -245,9 +253,11 @@ pub fn parse_wiki_article(event: &Event) -> Result<WikiArticle, String> {
 /// Parse a wiki redirect from a Kind 30819 event
 pub fn parse_wiki_redirect(event: &Event) -> Result<WikiRedirect, String> {
     if event.kind.as_u16() != KIND_WIKI_REDIRECT {
-        return Err(
-            format!("Expected kind {}, got {}", KIND_WIKI_REDIRECT, event.kind.as_u16()),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_WIKI_REDIRECT,
+            event.kind.as_u16()
+        ));
     }
     let pubkey = event.pubkey.to_hex();
     let from = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
@@ -269,17 +279,18 @@ pub fn parse_wiki_redirect(event: &Event) -> Result<WikiRedirect, String> {
 /// Parse a merge request from a Kind 818 event
 pub fn parse_merge_request(event: &Event) -> Result<WikiMergeRequest, String> {
     if event.kind.as_u16() != KIND_MERGE_REQUEST {
-        return Err(
-            format!("Expected kind {}, got {}", KIND_MERGE_REQUEST, event.kind.as_u16()),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_MERGE_REQUEST,
+            event.kind.as_u16()
+        ));
     }
     let pubkey = event.pubkey.to_hex();
-    let destination = get_tag_value(event, "a")
-        .ok_or("Missing required 'a' tag (destination)")?;
-    let destination_author = get_tag_value(event, "p")
-        .ok_or("Missing required 'p' tag (destination author)")?;
-    let source_event_id = get_tag_with_marker(event, "e", "source")
-        .ok_or("Missing source event ID")?;
+    let destination = get_tag_value(event, "a").ok_or("Missing required 'a' tag (destination)")?;
+    let destination_author =
+        get_tag_value(event, "p").ok_or("Missing required 'p' tag (destination author)")?;
+    let source_event_id =
+        get_tag_with_marker(event, "e", "source").ok_or("Missing source event ID")?;
     let base_version = get_first_e_tag_without_marker(event);
     Ok(WikiMergeRequest {
         event_id: event.id.to_hex(),
@@ -295,14 +306,15 @@ pub fn parse_merge_request(event: &Event) -> Result<WikiMergeRequest, String> {
 /// Build a NIP-19 naddr for a wiki article
 pub fn build_wiki_naddr(pubkey: &str, identifier: &str) -> Option<String> {
     let pk = PublicKey::from_hex(pubkey).ok()?;
-    let coordinate = Coordinate::new(Kind::Custom(KIND_WIKI_ARTICLE), pk)
-        .identifier(identifier);
+    let coordinate = Coordinate::new(Kind::Custom(KIND_WIKI_ARTICLE), pk).identifier(identifier);
     let nip19 = Nip19Coordinate::new(coordinate, vec![]);
     nip19.to_bech32().ok()
 }
 /// Build a filter for wiki articles
 pub fn wiki_articles_filter(limit: usize) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_WIKI_ARTICLE)).limit(limit)
+    Filter::new()
+        .kind(Kind::Custom(KIND_WIKI_ARTICLE))
+        .limit(limit)
 }
 /// Build a filter for backlinks (articles linking to a target)
 pub fn wiki_backlinks_filter(identifier: &str, limit: usize) -> Filter {
@@ -358,7 +370,10 @@ mod tests {
     #[test]
     fn test_normalize_wiki_dtag() {
         assert_eq!(normalize_wiki_dtag("Hello World!"), "hello-world");
-        assert_eq!(normalize_wiki_dtag("Bitcoin & Lightning"), "bitcoin-lightning");
+        assert_eq!(
+            normalize_wiki_dtag("Bitcoin & Lightning"),
+            "bitcoin-lightning"
+        );
         assert_eq!(normalize_wiki_dtag("NIP-54"), "nip");
         assert_eq!(normalize_wiki_dtag("  Spaces  "), "spaces");
         assert_eq!(normalize_wiki_dtag("CamelCase"), "camelcase");

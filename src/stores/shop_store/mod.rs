@@ -13,21 +13,20 @@ use lru::LruCache;
 use nostr::Event as NostrEvent;
 use nostr_sdk::prelude::*;
 type Result<T> = std::result::Result<T, String>;
-use std::collections::{HashMap, HashSet};
-use std::num::NonZeroUsize;
-use std::time::Duration;
 use crate::stores::indexeddb_database::IndexedDbDatabase;
 use crate::stores::nostr_client;
 use crate::utils::format::truncate_pubkey;
 use crate::utils::nip99::{
-    now_secs, parse_collection, parse_product, parse_review, parse_shipping, CartItem,
-    OrderItem, OrderMessageType, OrderStatus, Product, ProductCollection, ProductFormat,
-    ProductReview, ProductVisibility, ShippingOption, ShippingStatus, ShopOrder,
-    KIND_COLLECTION, KIND_ORDER_MESSAGE, KIND_PAYMENT_RECEIPT, KIND_PRODUCT, KIND_REVIEW,
-    KIND_SHIPPING,
+    now_secs, parse_collection, parse_product, parse_review, parse_shipping, CartItem, OrderItem,
+    OrderMessageType, OrderStatus, Product, ProductCollection, ProductFormat, ProductReview,
+    ProductVisibility, ShippingOption, ShippingStatus, ShopOrder, KIND_COLLECTION,
+    KIND_ORDER_MESSAGE, KIND_PAYMENT_RECEIPT, KIND_PRODUCT, KIND_REVIEW, KIND_SHIPPING,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::time::Duration;
 
 mod cart;
 mod filters;
@@ -42,8 +41,8 @@ const SHIPPING_CACHE_SIZE: usize = 100;
 const PROCESSED_EVENTS_CACHE_SIZE: usize = 1000;
 
 /// Product cache (keyed by naddr string)
-pub static PRODUCTS_CACHE: GlobalSignal<LruCache<String, Product>> = GlobalSignal::new(||
-LruCache::new(NonZeroUsize::new(PRODUCT_CACHE_SIZE).unwrap()));
+pub static PRODUCTS_CACHE: GlobalSignal<LruCache<String, Product>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(PRODUCT_CACHE_SIZE).unwrap()));
 
 /// Whether the shop store has been initialized
 pub static SHOP_INITIALIZED: GlobalSignal<bool> = GlobalSignal::new(|| false);
@@ -52,13 +51,12 @@ pub static SHOP_INITIALIZED: GlobalSignal<bool> = GlobalSignal::new(|| false);
 pub static LOADING_PRODUCTS: GlobalSignal<bool> = GlobalSignal::new(|| false);
 
 /// Shipping options cache (keyed by naddr string)
-pub static SHIPPING_CACHE: GlobalSignal<LruCache<String, ShippingOption>> = GlobalSignal::new(||
-LruCache::new(NonZeroUsize::new(SHIPPING_CACHE_SIZE).unwrap()));
+pub static SHIPPING_CACHE: GlobalSignal<LruCache<String, ShippingOption>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(SHIPPING_CACHE_SIZE).unwrap()));
 
 /// Reviews cache (keyed by product coordinate -> Vec<Review>)
-pub static REVIEWS_CACHE: GlobalSignal<HashMap<String, Vec<ProductReview>>> = GlobalSignal::new(
-    HashMap::new,
-);
+pub static REVIEWS_CACHE: GlobalSignal<HashMap<String, Vec<ProductReview>>> =
+    GlobalSignal::new(HashMap::new);
 
 /// Shopping cart items (local, not persisted to Nostr)
 pub static CART_ITEMS: GlobalSignal<Vec<CartItem>> = GlobalSignal::new(Vec::new);
@@ -73,21 +71,18 @@ pub static BUYER_ORDERS: GlobalSignal<Vec<ShopOrder>> = GlobalSignal::new(Vec::n
 pub static SELLER_ORDERS: GlobalSignal<Vec<ShopOrder>> = GlobalSignal::new(Vec::new);
 
 /// IndexedDB database handle for order persistence
-pub static SHOP_DB: GlobalSignal<Option<Arc<IndexedDbDatabase>>> = GlobalSignal::new(|| {
-    None
-});
+pub static SHOP_DB: GlobalSignal<Option<Arc<IndexedDbDatabase>>> = GlobalSignal::new(|| None);
 
 /// Processed gift wrap event IDs to prevent duplicate order message processing
 /// This prevents the same order update from being applied multiple times
 /// Uses LRU cache to prevent unbounded memory growth
-pub static PROCESSED_ORDER_EVENTS: GlobalSignal<LruCache<String, ()>> = GlobalSignal::new(||
-LruCache::new(NonZeroUsize::new(PROCESSED_EVENTS_CACHE_SIZE).unwrap()));
+pub static PROCESSED_ORDER_EVENTS: GlobalSignal<LruCache<String, ()>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(PROCESSED_EVENTS_CACHE_SIZE).unwrap()));
 
 /// Flag to track if orders have been loaded from DB for this session
 /// Prevents skipping reload when BUYER_ORDERS/SELLER_ORDERS happen to be empty
-static ORDERS_LOADED_FROM_DB: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(
-    false,
-);
+static ORDERS_LOADED_FROM_DB: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// Current user's products (for merchant dashboard)
 pub static MY_PRODUCTS: GlobalSignal<Vec<Product>> = GlobalSignal::new(Vec::new);
@@ -96,9 +91,7 @@ pub static MY_PRODUCTS: GlobalSignal<Vec<Product>> = GlobalSignal::new(Vec::new)
 pub static LOADING_MY_PRODUCTS: GlobalSignal<bool> = GlobalSignal::new(|| false);
 
 /// Current user's collections (Kind 30405)
-pub static MY_COLLECTIONS: GlobalSignal<Vec<ProductCollection>> = GlobalSignal::new(
-    Vec::new,
-);
+pub static MY_COLLECTIONS: GlobalSignal<Vec<ProductCollection>> = GlobalSignal::new(Vec::new);
 
 /// Loading state for collections
 pub static LOADING_MY_COLLECTIONS: GlobalSignal<bool> = GlobalSignal::new(|| false);
@@ -135,9 +128,7 @@ pub fn cache_shipping(shipping: ShippingOption) {
 
 /// Fetch shipping options by coordinates (e.g., "30406:pubkey:d-tag")
 /// Returns parsed ShippingOption objects with display methods available
-pub async fn fetch_shipping_options(
-    coordinates: &[String],
-) -> Result<Vec<ShippingOption>> {
+pub async fn fetch_shipping_options(coordinates: &[String]) -> Result<Vec<ShippingOption>> {
     if coordinates.is_empty() {
         return Ok(vec![]);
     }
@@ -153,10 +144,7 @@ pub async fn fetch_shipping_options(
                     .author(pubkey)
                     .identifier(&d_tag)
                     .limit(1);
-                if let Ok(events) = client
-                    .fetch_events(filter, Duration::from_secs(5))
-                    .await
-                {
+                if let Ok(events) = client.fetch_events(filter, Duration::from_secs(5)).await {
                     for event in events.iter() {
                         if let Ok(shipping) = parse_shipping(event) {
                             cache_shipping(shipping.clone());
@@ -172,7 +160,11 @@ pub async fn fetch_shipping_options(
 
 /// Get reviews for a product by coordinate
 pub fn get_product_reviews(product_coordinate: &str) -> Vec<ProductReview> {
-    REVIEWS_CACHE.read().get(product_coordinate).cloned().unwrap_or_default()
+    REVIEWS_CACHE
+        .read()
+        .get(product_coordinate)
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// Cache a review
@@ -208,11 +200,8 @@ pub fn get_product_average_rating(product_coordinate: &str) -> Option<f64> {
 pub async fn fetch_products(limit: usize) -> Result<Vec<Product>> {
     *LOADING_PRODUCTS.write() = true;
     let filter = products_filter(limit);
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(15),
-        )
-        .await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
     *LOADING_PRODUCTS.write() = false;
     match result {
         Ok(events) => {
@@ -228,16 +217,10 @@ pub async fn fetch_products(limit: usize) -> Result<Vec<Product>> {
 }
 
 /// Fetch products with pagination support
-pub async fn fetch_products_paginated(
-    limit: usize,
-    until: Option<u64>,
-) -> Result<Vec<Product>> {
+pub async fn fetch_products_paginated(limit: usize, until: Option<u64>) -> Result<Vec<Product>> {
     let filter = products_filter_paginated(limit, until);
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(15),
-        )
-        .await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
     match result {
         Ok(events) => {
             cache_product_events(&events);
@@ -252,19 +235,14 @@ pub async fn fetch_products_paginated(
 }
 
 /// Fetch products by merchant
-pub async fn fetch_products_by_merchant(
-    pubkey: &str,
-    limit: usize,
-) -> Result<Vec<Product>> {
+pub async fn fetch_products_by_merchant(pubkey: &str, limit: usize) -> Result<Vec<Product>> {
     let pk = PublicKey::from_hex(pubkey)
         .or_else(|_| PublicKey::from_bech32(pubkey))
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = products_filter_by_author(pk, limit);
-    let events = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
     cache_product_events(&events);
     let products: Vec<Product> = events
         .iter()
@@ -278,17 +256,14 @@ pub async fn fetch_product_by_naddr(naddr: &str) -> Result<Option<Product>> {
     if let Some(cached) = get_cached_product(naddr) {
         return Ok(Some(cached));
     }
-    let nip19 = Nip19Coordinate::from_bech32(naddr)
-        .map_err(|e| format!("Invalid naddr: {}", e))?;
+    let nip19 = Nip19Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
     let coordinate = nip19.coordinate;
     let pk = coordinate.public_key;
     let identifier = coordinate.identifier.clone();
     let filter = product_filter_by_coordinate(pk, &identifier);
-    let events = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
     if let Some(event) = events.first() {
         if let Ok(product) = parse_product(event) {
             cache_product(product.clone());
@@ -314,15 +289,11 @@ pub async fn fetch_my_products() -> Result<Vec<Product>> {
 }
 
 /// Fetch reviews for a product (limit defaults to 50)
-pub async fn fetch_product_reviews(
-    product_coordinate: &str,
-) -> Result<Vec<ProductReview>> {
+pub async fn fetch_product_reviews(product_coordinate: &str) -> Result<Vec<ProductReview>> {
     let filter = reviews_filter_for_product(product_coordinate, 50);
-    let events = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
     cache_review_events(&events);
     Ok(get_product_reviews(product_coordinate))
 }
@@ -420,9 +391,10 @@ pub async fn publish_product(data: ProductFormData) -> Result<String> {
         ),
     ];
     if !data.description.is_empty() {
-        tags.push(
-            Tag::custom(TagKind::custom("summary"), vec![data.description.clone()]),
-        );
+        tags.push(Tag::custom(
+            TagKind::custom("summary"),
+            vec![data.description.clone()],
+        ));
     }
     for img_url in &data.images {
         tags.push(Tag::custom(TagKind::custom("image"), vec![img_url.clone()]));
@@ -430,36 +402,54 @@ pub async fn publish_product(data: ProductFormData) -> Result<String> {
     for cat in &data.categories {
         tags.push(Tag::hashtag(cat));
     }
-    let format = if data.is_digital { "digital" } else { "physical" };
-    tags.push(Tag::custom(TagKind::custom("format"), vec![format.to_string()]));
+    let format = if data.is_digital {
+        "digital"
+    } else {
+        "physical"
+    };
+    tags.push(Tag::custom(
+        TagKind::custom("format"),
+        vec![format.to_string()],
+    ));
     if let Some(stock) = data.stock {
-        tags.push(Tag::custom(TagKind::custom("stock"), vec![stock.to_string()]));
+        tags.push(Tag::custom(
+            TagKind::custom("stock"),
+            vec![stock.to_string()],
+        ));
     }
     for (key, value) in &data.specs {
-        tags.push(
-            Tag::custom(TagKind::custom("spec"), vec![key.clone(), value.clone()]),
-        );
+        tags.push(Tag::custom(
+            TagKind::custom("spec"),
+            vec![key.clone(), value.clone()],
+        ));
     }
     if !data.is_digital {
         for region in &data.shipping_regions {
-            tags.push(Tag::custom(TagKind::custom("shipping"), vec![region.clone()]));
+            tags.push(Tag::custom(
+                TagKind::custom("shipping"),
+                vec![region.clone()],
+            ));
         }
     }
     if let Some(ref condition) = data.condition {
         if !condition.is_empty() {
-            tags.push(
-                Tag::custom(TagKind::custom("condition"), vec![condition.clone()]),
-            );
+            tags.push(Tag::custom(
+                TagKind::custom("condition"),
+                vec![condition.clone()],
+            ));
         }
     }
     let content = data.description.clone();
-    let event_builder = EventBuilder::new(Kind::Custom(KIND_PRODUCT), content)
-        .tags(tags);
+    let event_builder = EventBuilder::new(Kind::Custom(KIND_PRODUCT), content).tags(tags);
     let output = client
         .send_event_builder(event_builder)
         .await
         .map_err(|e| format!("Failed to publish product: {}", e))?;
-    log::info!("Published product: {} (event: {:?})", data.title, output.val);
+    log::info!(
+        "Published product: {} (event: {:?})",
+        data.title,
+        output.val
+    );
     spawn(async {
         if let Err(e) = fetch_my_products().await {
             log::error!("Failed to refresh my products: {}", e);
@@ -497,59 +487,51 @@ pub async fn publish_review(
         ),
     ];
     if let Some(v) = value_rating {
-        tags.push(
-            Tag::custom(
-                TagKind::custom("rating"),
-                vec![format!("{:.1}", v), "value".to_string()],
-            ),
-        );
+        tags.push(Tag::custom(
+            TagKind::custom("rating"),
+            vec![format!("{:.1}", v), "value".to_string()],
+        ));
     }
     if let Some(q) = quality_rating {
-        tags.push(
-            Tag::custom(
-                TagKind::custom("rating"),
-                vec![format!("{:.1}", q), "quality".to_string()],
-            ),
-        );
+        tags.push(Tag::custom(
+            TagKind::custom("rating"),
+            vec![format!("{:.1}", q), "quality".to_string()],
+        ));
     }
     if let Some(d) = delivery_rating {
-        tags.push(
-            Tag::custom(
-                TagKind::custom("rating"),
-                vec![format!("{:.1}", d), "delivery".to_string()],
-            ),
-        );
+        tags.push(Tag::custom(
+            TagKind::custom("rating"),
+            vec![format!("{:.1}", d), "delivery".to_string()],
+        ));
     }
     if let Some(c) = communication_rating {
-        tags.push(
-            Tag::custom(
-                TagKind::custom("rating"),
-                vec![format!("{:.1}", c), "communication".to_string()],
-            ),
-        );
+        tags.push(Tag::custom(
+            TagKind::custom("rating"),
+            vec![format!("{:.1}", c), "communication".to_string()],
+        ));
     }
     let event_builder = EventBuilder::new(Kind::Custom(KIND_REVIEW), content).tags(tags);
     let output = client
         .send_event_builder(event_builder)
         .await
         .map_err(|e| format!("Failed to publish review: {}", e))?;
-    log::info!("Published review for {}: {:?}", product_coordinate, output.val);
+    log::info!(
+        "Published review for {}: {:?}",
+        product_coordinate,
+        output.val
+    );
     Ok(d_tag)
 }
 
 /// Fetch a collection by naddr
-pub async fn fetch_collection_by_naddr(
-    naddr: &str,
-) -> Result<Option<ProductCollection>> {
+pub async fn fetch_collection_by_naddr(naddr: &str) -> Result<Option<ProductCollection>> {
     if nostr_client::NOSTR_CLIENT.read().is_none() {
         return Err("Client not initialized".to_string());
     }
     let coordinate = nostr_sdk::nips::nip19::Nip19::from_bech32(naddr)
         .map_err(|e| format!("Invalid naddr: {}", e))?;
     let (pubkey, d_tag) = match &coordinate {
-        nostr_sdk::nips::nip19::Nip19::Coordinate(c) => {
-            (c.public_key, c.identifier.clone())
-        }
+        nostr_sdk::nips::nip19::Nip19::Coordinate(c) => (c.public_key, c.identifier.clone()),
         _ => return Err("Not a valid collection address".to_string()),
     };
     let filter = Filter::new()
@@ -574,9 +556,7 @@ pub async fn fetch_collection_by_naddr(
 }
 
 /// Fetch products in a collection
-pub async fn fetch_collection_products(
-    collection: &ProductCollection,
-) -> Result<Vec<Product>> {
+pub async fn fetch_collection_products(collection: &ProductCollection) -> Result<Vec<Product>> {
     let mut products = Vec::new();
     for coord in &collection.products {
         let parts: Vec<&str> = coord.splitn(3, ':').collect();
@@ -589,11 +569,8 @@ pub async fn fetch_collection_products(
                     .author(pk)
                     .identifier(d_tag)
                     .limit(1);
-                if let Ok(events) = nostr_client::fetch_events_aggregated(
-                        filter,
-                        Duration::from_secs(5),
-                    )
-                    .await
+                if let Ok(events) =
+                    nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await
                 {
                     if let Some(event) = events.first() {
                         if let Ok(product) = parse_product(event) {
@@ -619,8 +596,8 @@ pub struct CollectionFormData {
 
 /// Fetch current user's collections
 pub async fn fetch_my_collections() -> Result<Vec<ProductCollection>> {
-    let pubkey = nostr_client::get_cached_pubkey()
-        .map_err(|e| format!("Not authenticated: {}", e))?;
+    let pubkey =
+        nostr_client::get_cached_pubkey().map_err(|e| format!("Not authenticated: {}", e))?;
     *LOADING_MY_COLLECTIONS.write() = true;
     let client = nostr_client::NOSTR_CLIENT
         .read()
@@ -670,9 +647,10 @@ pub async fn publish_collection(
         Tag::custom(TagKind::custom("title"), vec![data.title.clone()]),
     ];
     if !data.description.trim().is_empty() {
-        tags.push(
-            Tag::custom(TagKind::custom("summary"), vec![data.description.clone()]),
-        );
+        tags.push(Tag::custom(
+            TagKind::custom("summary"),
+            vec![data.description.clone()],
+        ));
     }
     if let Some(ref img) = data.image {
         if !img.trim().is_empty() {
@@ -683,12 +661,12 @@ pub async fn publish_collection(
         tags.push(Tag::custom(TagKind::a(), vec![coord.clone()]));
     }
     for shipping in &data.shipping_options {
-        tags.push(
-            Tag::custom(TagKind::custom("shipping_option"), vec![shipping.clone()]),
-        );
+        tags.push(Tag::custom(
+            TagKind::custom("shipping_option"),
+            vec![shipping.clone()],
+        ));
     }
-    let builder = EventBuilder::new(Kind::Custom(KIND_COLLECTION), &data.description)
-        .tags(tags);
+    let builder = EventBuilder::new(Kind::Custom(KIND_COLLECTION), &data.description).tags(tags);
     let output = client
         .send_event_builder(builder)
         .await
@@ -711,8 +689,8 @@ pub async fn delete_collection(d_tag: &str) -> Result<()> {
         .find(|c| c.d_tag == d_tag)
         .cloned()
         .ok_or("Collection not found")?;
-    let event_id = EventId::parse(&collection.event_id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
+    let event_id =
+        EventId::parse(&collection.event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
     use nostr::nips::nip09::EventDeletionRequest;
     let deletion_request = EventDeletionRequest::new().id(event_id);
     let delete_builder = EventBuilder::delete(deletion_request);
@@ -732,11 +710,15 @@ pub async fn search_products(query: &str, limit: usize) -> Result<Vec<Product>> 
         .kind(Kind::Custom(KIND_PRODUCT))
         .search(query)
         .limit(limit);
-    let search_result = client.fetch_events(search_filter, Duration::from_secs(5)).await;
+    let search_result = client
+        .fetch_events(search_filter, Duration::from_secs(5))
+        .await;
     if let Ok(events) = search_result {
         if !events.is_empty() {
             log::debug!(
-                "NIP-50 search returned {} products for '{}'", events.len(), query
+                "NIP-50 search returned {} products for '{}'",
+                events.len(),
+                query
             );
             let products: Vec<Product> = events
                 .iter()
@@ -747,7 +729,8 @@ pub async fn search_products(query: &str, limit: usize) -> Result<Vec<Product>> 
         }
     }
     log::debug!(
-        "NIP-50 search returned no results, falling back to local filter for '{}'", query
+        "NIP-50 search returned no results, falling back to local filter for '{}'",
+        query
     );
     let all_products = fetch_products(200).await?;
     let query_lower = query.to_lowercase();
@@ -756,13 +739,11 @@ pub async fn search_products(query: &str, limit: usize) -> Result<Vec<Product>> 
         .filter(|p| {
             p.is_visible()
                 && (p.title.to_lowercase().contains(&query_lower)
-                    || p
-                        .description
+                    || p.description
                         .as_ref()
                         .map(|d| d.to_lowercase().contains(&query_lower))
                         .unwrap_or(false)
-                    || p
-                        .categories
+                    || p.categories
                         .iter()
                         .any(|c| c.to_lowercase().contains(&query_lower)))
         })
@@ -833,9 +814,10 @@ pub async fn update_product(d_tag: &str, data: ProductFormData) -> Result<String
         ),
     ];
     if !data.description.is_empty() {
-        tags.push(
-            Tag::custom(TagKind::custom("summary"), vec![data.description.clone()]),
-        );
+        tags.push(Tag::custom(
+            TagKind::custom("summary"),
+            vec![data.description.clone()],
+        ));
     }
     for img in data.images.iter() {
         if !img.is_empty() {
@@ -848,29 +830,42 @@ pub async fn update_product(d_tag: &str, data: ProductFormData) -> Result<String
         }
     }
     if let Some(stock) = data.stock {
-        tags.push(Tag::custom(TagKind::custom("stock"), vec![stock.to_string()]));
+        tags.push(Tag::custom(
+            TagKind::custom("stock"),
+            vec![stock.to_string()],
+        ));
     }
-    let format = if data.is_digital { "digital" } else { "physical" };
-    tags.push(Tag::custom(TagKind::custom("format"), vec![format.to_string()]));
+    let format = if data.is_digital {
+        "digital"
+    } else {
+        "physical"
+    };
+    tags.push(Tag::custom(
+        TagKind::custom("format"),
+        vec![format.to_string()],
+    ));
     for (key, value) in &data.specs {
-        tags.push(
-            Tag::custom(TagKind::custom("spec"), vec![key.clone(), value.clone()]),
-        );
+        tags.push(Tag::custom(
+            TagKind::custom("spec"),
+            vec![key.clone(), value.clone()],
+        ));
     }
     if !data.is_digital {
         for region in data.shipping_regions.iter() {
             if !region.is_empty() {
-                tags.push(
-                    Tag::custom(TagKind::custom("shipping"), vec![region.clone()]),
-                );
+                tags.push(Tag::custom(
+                    TagKind::custom("shipping"),
+                    vec![region.clone()],
+                ));
             }
         }
     }
     if let Some(ref condition) = data.condition {
         if !condition.is_empty() {
-            tags.push(
-                Tag::custom(TagKind::custom("condition"), vec![condition.clone()]),
-            );
+            tags.push(Tag::custom(
+                TagKind::custom("condition"),
+                vec![condition.clone()],
+            ));
         }
     }
     let signer = client

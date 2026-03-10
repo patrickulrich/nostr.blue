@@ -29,10 +29,6 @@
 //!
 //! Currently marked as dead_code - functions not yet wired to UI.
 #![allow(dead_code)]
-use cdk::nuts::SpendingConditions;
-use dioxus::prelude::ReadableExt;
-use nostr_sdk::signer::NostrSigner;
-use nostr_sdk::{EventId, Kind, PublicKey};
 use super::denomination::DenominationStrategy;
 use super::events::{queue_signed_event_for_retry, update_token_event_id};
 use super::internal::get_or_create_wallet;
@@ -40,14 +36,18 @@ use super::proofs::{
     cdk_proof_to_proof_data, get_event_ids_for_proofs, proof_data_to_cdk_proof,
     register_proofs_in_event_map,
 };
+use super::signals::InFlightGuard;
 use super::signals::{try_acquire_mint_lock, WALLET_TOKENS};
 use super::types::{
-    ExtendedCashuProof, ExtendedTokenEvent, InFlightSendRequest, PendingEventType,
-    ProofData, TokenData, WalletTokensStoreStoreExt,
+    ExtendedCashuProof, ExtendedTokenEvent, InFlightSendRequest, PendingEventType, ProofData,
+    TokenData, WalletTokensStoreStoreExt,
 };
 use super::utils::{mint_matches, normalize_mint_url, now_secs};
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
-use super::signals::InFlightGuard;
+use cdk::nuts::SpendingConditions;
+use dioxus::prelude::ReadableExt;
+use nostr_sdk::signer::NostrSigner;
+use nostr_sdk::{EventId, Kind, PublicKey};
 /// Options for swap operations
 #[derive(Debug, Clone, Default)]
 pub struct SwapOptions {
@@ -120,7 +120,10 @@ pub async fn execute_swap(
         .map(|p| p.amount)
         .fold(0u64, |acc, amt| acc.saturating_add(amt));
     log::info!(
-        "Executing swap: {} proofs ({} sats) at {}", input_count, input_value, mint_url
+        "Executing swap: {} proofs ({} sats) at {}",
+        input_count,
+        input_value,
+        mint_url
     );
     let cdk_proofs: Vec<cdk::nuts::Proof> = input_proofs
         .iter()
@@ -130,7 +133,13 @@ pub async fn execute_swap(
     let amount = options.amount.map(cdk::Amount::from);
     let split_target = options.denomination.to_split_target();
     let output_proofs = wallet
-        .swap(amount, split_target, cdk_proofs, options.conditions, options.include_fee)
+        .swap(
+            amount,
+            split_target,
+            cdk_proofs,
+            options.conditions,
+            options.include_fee,
+        )
         .await
         .map_err(|e| format!("Swap failed: {}", e))?;
     let output_proofs = output_proofs.ok_or("Swap returned no proofs")?;
@@ -139,12 +148,11 @@ pub async fn execute_swap(
         .map(|p| u64::from(p.amount))
         .fold(0u64, |acc, amt| acc.saturating_add(amt));
     let fee_paid = input_value.saturating_sub(output_value);
-    let proof_data: Vec<ProofData> = output_proofs
-        .iter()
-        .map(cdk_proof_to_proof_data)
-        .collect();
+    let proof_data: Vec<ProofData> = output_proofs.iter().map(cdk_proof_to_proof_data).collect();
     log::info!(
-        "Swap complete: {} -> {} proofs, fee {} sats", input_count, proof_data.len(),
+        "Swap complete: {} -> {} proofs, fee {} sats",
+        input_count,
+        proof_data.len(),
         fee_paid
     );
     Ok(SwapResult {
@@ -188,24 +196,18 @@ pub async fn execute_swap_with_nip60(
         .ok_or_else(|| format!("Another operation in progress for {}", mint_url))?;
     let all_spendable = get_proofs_for_mint(&mint_url)?;
     if input_proofs.len() != all_spendable.len() {
-        return Err(
-            format!(
-                "Incomplete proof set: got {} proofs, wallet has {} spendable proofs for {}. \
+        return Err(format!(
+            "Incomplete proof set: got {} proofs, wallet has {} spendable proofs for {}. \
              Use get_proofs_for_mint() or a high-level function like swap_refresh().",
-                input_proofs.len(),
-                all_spendable.len(),
-                mint_url,
-            ),
-        );
+            input_proofs.len(),
+            all_spendable.len(),
+            mint_url,
+        ));
     }
-    let input_secrets_set: std::collections::HashSet<_> = input_proofs
-        .iter()
-        .map(|p| &p.secret)
-        .collect();
-    let wallet_secrets: std::collections::HashSet<_> = all_spendable
-        .iter()
-        .map(|p| &p.secret)
-        .collect();
+    let input_secrets_set: std::collections::HashSet<_> =
+        input_proofs.iter().map(|p| &p.secret).collect();
+    let wallet_secrets: std::collections::HashSet<_> =
+        all_spendable.iter().map(|p| &p.secret).collect();
     if input_secrets_set != wallet_secrets {
         return Err(
             "Proof set mismatch: input proofs don't match wallet's spendable proofs. \
@@ -213,10 +215,7 @@ pub async fn execute_swap_with_nip60(
                 .to_string(),
         );
     }
-    let input_secrets: Vec<String> = input_proofs
-        .iter()
-        .map(|p| p.secret.clone())
-        .collect();
+    let input_secrets: Vec<String> = input_proofs.iter().map(|p| p.secret.clone()).collect();
     let event_ids_to_delete = get_event_ids_for_proofs(&input_secrets);
     let cdk_proofs: Vec<cdk::nuts::Proof> = input_proofs
         .iter()
@@ -235,14 +234,13 @@ pub async fn execute_swap_with_nip60(
         .collect::<Result<HashSet<_>, _>>()
         .map_err(|e| format!("Failed to compute Y value for input proof: {}", e))?;
     log::info!(
-        "Executing NIP-60 swap: {} proofs ({} sats) at {}", input_count, input_value,
+        "Executing NIP-60 swap: {} proofs ({} sats) at {}",
+        input_count,
+        input_value,
         mint_url
     );
     let tx_id = format!("swap_{}", uuid::Uuid::new_v4());
-    let proof_secrets: Vec<String> = cdk_proofs
-        .iter()
-        .map(|p| p.secret.to_string())
-        .collect();
+    let proof_secrets: Vec<String> = cdk_proofs.iter().map(|p| p.secret.to_string()).collect();
     let in_flight = InFlightSendRequest {
         transaction_id: tx_id.clone(),
         mint_url: mint_url.clone(),
@@ -263,7 +261,10 @@ pub async fn execute_swap_with_nip60(
         .map(|p| p.y().map(|y| y.to_string()))
         .collect::<Result<HashSet<_>, _>>()
         .map_err(|e| format!("Failed to compute Y for pre-swap proof: {}", e))?;
-    log::debug!("Pre-swap snapshot: {} existing unspent proofs", pre_swap_ys.len());
+    log::debug!(
+        "Pre-swap snapshot: {} existing unspent proofs",
+        pre_swap_ys.len()
+    );
     let amount = options.amount.map(cdk::Amount::from);
     let split_target = options.denomination.to_split_target();
     let swap_result = wallet
@@ -314,7 +315,8 @@ pub async fn execute_swap_with_nip60(
                 .collect();
             if merged.len() > send_proofs.len() {
                 log::info!(
-                    "Swap produced {} send proofs + {} change proofs", send_proofs.len(),
+                    "Swap produced {} send proofs + {} change proofs",
+                    send_proofs.len(),
                     merged.len() - send_proofs.len()
                 );
             }
@@ -336,9 +338,7 @@ pub async fn execute_swap_with_nip60(
                             e,
                         )
                     })?;
-                if !input_ys.contains(&y.to_string())
-                    && !pre_swap_ys.contains(&y.to_string())
-                {
+                if !input_ys.contains(&y.to_string()) && !pre_swap_ys.contains(&y.to_string()) {
                     new_proofs.push(p);
                 }
             }
@@ -361,12 +361,12 @@ pub async fn execute_swap_with_nip60(
     in_flight_guard.dismiss();
     super::signals::remove_in_flight_send_request(&tx_id);
     let final_event_id = match publish_swap_events(
-            &mint_url,
-            &output_proofs,
-            &event_ids_to_delete,
-            &pending_event_id,
-        )
-        .await
+        &mint_url,
+        &output_proofs,
+        &event_ids_to_delete,
+        &pending_event_id,
+    )
+    .await
     {
         Ok(real_id) => {
             update_token_event_id(&pending_event_id, &real_id);
@@ -388,13 +388,9 @@ pub async fn execute_swap_with_nip60(
         .cloned()
         .collect();
     if !valid_created.is_empty() {
-        if let Err(e) = super::events::create_history_event(
-                "in",
-                output_value,
-                valid_created,
-                valid_destroyed,
-            )
-            .await
+        if let Err(e) =
+            super::events::create_history_event("in", output_value, valid_created, valid_destroyed)
+                .await
         {
             log::error!("Failed to create history event: {}", e);
         }
@@ -402,13 +398,12 @@ pub async fn execute_swap_with_nip60(
     if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
         log::warn!("Failed to sync wallet state: {}", e);
     }
-    let proof_data: Vec<ProofData> = output_proofs
-        .iter()
-        .map(cdk_proof_to_proof_data)
-        .collect();
+    let proof_data: Vec<ProofData> = output_proofs.iter().map(cdk_proof_to_proof_data).collect();
     log::info!(
-        "NIP-60 swap complete: {} -> {} proofs, fee {} sats", input_count, proof_data
-        .len(), fee_paid
+        "NIP-60 swap complete: {} -> {} proofs, fee {} sats",
+        input_count,
+        proof_data.len(),
+        fee_paid
     );
     Ok(SwapResult {
         proofs: proof_data,
@@ -431,10 +426,7 @@ fn update_local_state_after_swap(
     if output_proofs.is_empty() {
         return Err("Cannot update state with empty output proofs".to_string());
     }
-    let proof_data: Vec<ProofData> = output_proofs
-        .iter()
-        .map(cdk_proof_to_proof_data)
-        .collect();
+    let proof_data: Vec<ProofData> = output_proofs.iter().map(cdk_proof_to_proof_data).collect();
     let new_token = TokenData {
         event_id: new_event_id.to_string(),
         mint: normalize_mint_url(mint_url),
@@ -442,13 +434,13 @@ fn update_local_state_after_swap(
         proofs: proof_data.clone(),
         created_at: now_secs(),
     };
-    let new_balance = super::signals::atomic_token_replace(
-        vec![new_token],
-        event_ids_to_delete,
-    )?;
+    let new_balance = super::signals::atomic_token_replace(vec![new_token], event_ids_to_delete)?;
     super::proofs::rebuild_proof_event_map();
     register_proofs_in_event_map(new_event_id, &proof_data);
-    log::info!("Local state updated after swap. Balance: {} sats", new_balance);
+    log::info!(
+        "Local state updated after swap. Balance: {} sats",
+        new_balance
+    );
     Ok(())
 }
 /// Publish swap events to Nostr using nostr-sdk NIP-60 types
@@ -465,17 +457,13 @@ async fn publish_swap_events(
         .ok_or("No signer available")?
         .as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pubkey = PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-    let proof_data: Vec<ProofData> = output_proofs
-        .iter()
-        .map(cdk_proof_to_proof_data)
-        .collect();
+    let proof_data: Vec<ProofData> = output_proofs.iter().map(cdk_proof_to_proof_data).collect();
     let extended_proofs: Vec<ExtendedCashuProof> = proof_data
         .iter()
         .map(|p| ExtendedCashuProof::from(p.clone()))
@@ -530,34 +518,39 @@ async fn publish_swap_events(
                 } else {
                     log::warn!(
                         "No relays accepted swap token event (failed: {:?}), queuing for retry",
-                        output.failed.keys().collect::< Vec < _ >> ()
+                        output.failed.keys().collect::<Vec<_>>()
                     );
                     queue_signed_event_for_retry(
-                            signed_event,
-                            PendingEventType::TokenEvent,
-                            Some(pending_event_id.to_string()),
-                            Some(mint_url.to_string()),
-                        )
-                        .await;
+                        signed_event,
+                        PendingEventType::TokenEvent,
+                        Some(pending_event_id.to_string()),
+                        Some(mint_url.to_string()),
+                    )
+                    .await;
                     return Err("No relays accepted swap token event".to_string());
                 }
             } else {
                 log::info!(
-                    "Published swap token event: {} (to {}/{} relays)", event_id_hex,
-                    output.success.len(), output.success.len() + output.failed.len()
+                    "Published swap token event: {} (to {}/{} relays)",
+                    event_id_hex,
+                    output.success.len(),
+                    output.success.len() + output.failed.len()
                 );
                 publish_deletion_events(&client, &valid_del_ids).await;
             }
         }
         Err(e) => {
-            log::warn!("Failed to publish swap token event, queuing for retry: {}", e);
+            log::warn!(
+                "Failed to publish swap token event, queuing for retry: {}",
+                e
+            );
             queue_signed_event_for_retry(
-                    signed_event,
-                    PendingEventType::TokenEvent,
-                    Some(pending_event_id.to_string()),
-                    Some(mint_url.to_string()),
-                )
-                .await;
+                signed_event,
+                PendingEventType::TokenEvent,
+                Some(pending_event_id.to_string()),
+                Some(mint_url.to_string()),
+            )
+            .await;
             return Err(format!("Failed to publish swap token event: {}", e));
         }
     }
@@ -571,7 +564,10 @@ fn build_deletion_tags(event_ids: &[EventId]) -> Vec<nostr_sdk::Tag> {
         .iter()
         .map(|eid| nostr_sdk::Tag::event(*eid))
         .collect();
-    tags.push(nostr_sdk::Tag::custom(nostr_sdk::TagKind::custom("k"), ["7375"]));
+    tags.push(nostr_sdk::Tag::custom(
+        nostr_sdk::TagKind::custom("k"),
+        ["7375"],
+    ));
     tags
 }
 /// Publish deletion events for consumed token events
@@ -580,10 +576,7 @@ fn build_deletion_tags(event_ids: &[EventId]) -> Vec<nostr_sdk::Tag> {
 /// published to at least one relay. This prevents the race condition where deletions
 /// could be replayed before the token is accepted. If publishing fails, this function
 /// handles its own retry logic via queue_event_for_retry.
-async fn publish_deletion_events(
-    client: &nostr_sdk::Client,
-    event_ids_to_delete: &[String],
-) {
+async fn publish_deletion_events(client: &nostr_sdk::Client, event_ids_to_delete: &[String]) {
     if event_ids_to_delete.is_empty() {
         return;
     }
@@ -595,36 +588,36 @@ async fn publish_deletion_events(
         return;
     }
     let tags = build_deletion_tags(&valid_event_ids);
-    let deletion_builder = nostr_sdk::EventBuilder::new(Kind::from(5), "Swapped token")
-        .tags(tags);
+    let deletion_builder = nostr_sdk::EventBuilder::new(Kind::from(5), "Swapped token").tags(tags);
     match client.send_event_builder(deletion_builder.clone()).await {
         Ok(output) => {
             if output.success.is_empty() {
                 log::warn!("No relays accepted deletion event, queuing for retry");
                 super::events::queue_event_for_retry(
-                        deletion_builder,
-                        PendingEventType::DeletionEvent,
-                        None,
-                        None,
-                    )
-                    .await;
-            } else {
-                log::info!(
-                    "Published deletion events for {} token events (to {}/{} relays)",
-                    valid_event_ids.len(), output.success.len(), output.success.len() +
-                    output.failed.len()
-                );
-            }
-        }
-        Err(e) => {
-            log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
-            super::events::queue_event_for_retry(
                     deletion_builder,
                     PendingEventType::DeletionEvent,
                     None,
                     None,
                 )
                 .await;
+            } else {
+                log::info!(
+                    "Published deletion events for {} token events (to {}/{} relays)",
+                    valid_event_ids.len(),
+                    output.success.len(),
+                    output.success.len() + output.failed.len()
+                );
+            }
+        }
+        Err(e) => {
+            log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
+            super::events::queue_event_for_retry(
+                deletion_builder,
+                PendingEventType::DeletionEvent,
+                None,
+                None,
+            )
+            .await;
         }
     }
     let invalid_count = event_ids_to_delete.len() - valid_event_ids.len();
@@ -664,7 +657,10 @@ pub async fn swap_to_locked(
         .try_fold(0u64, |acc, amt| acc.checked_add(amt))
         .ok_or("Balance overflow")?;
     if total < amount {
-        return Err(format!("Insufficient funds: have {} sats, need {}", total, amount));
+        return Err(format!(
+            "Insufficient funds: have {} sats, need {}",
+            total, amount
+        ));
     }
     let options = SwapOptions::amount(amount)
         .with_conditions(conditions)
@@ -698,10 +694,7 @@ fn get_proofs_for_mint(mint_url: &str) -> Result<Vec<ProofData>, String> {
 }
 /// Estimate fee for a swap operation based on proof count
 /// Note: For full swap fee estimation with FeeEstimate struct, use fees::estimate_swap_fee
-pub async fn estimate_swap_proof_fee(
-    mint_url: &str,
-    proof_count: usize,
-) -> Result<u64, String> {
+pub async fn estimate_swap_proof_fee(mint_url: &str, proof_count: usize) -> Result<u64, String> {
     let wallet = get_or_create_wallet(mint_url).await?;
     let active_keyset = wallet
         .get_active_keyset()

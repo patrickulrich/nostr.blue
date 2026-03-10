@@ -80,7 +80,7 @@ pub fn Lists() -> Element {
                         button {
                             class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors",
                             onclick: move |_| {
-                                web_sys::window().and_then(|w| w.location().reload().ok());
+                                refresh_trigger.with_mut(|val| *val = val.wrapping_add(1));
                             },
                             "Try Again"
                         }

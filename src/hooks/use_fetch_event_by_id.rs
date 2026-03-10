@@ -2,11 +2,11 @@
 //!
 //! Reusable hook for fetching Nostr events by ID (nevent, note, hex) with proper state management.
 //! Uses `use_resource` for automatic cancellation when the id changes.
+use crate::stores::nostr_client;
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip19::Nip19;
 use nostr_sdk::{Event as NostrEvent, EventId, Filter, FromBech32};
 use std::time::Duration;
-use crate::stores::nostr_client;
 /// Wrapper struct for ID-based event fetching with custom not-found message.
 ///
 /// Uses `Resource` internally for automatic cancellation of inflight fetches.
@@ -46,13 +46,11 @@ fn parse_event_id(id: &str) -> Option<EventId> {
     if let Ok(event_id) = EventId::from_hex(normalized) {
         return Some(event_id);
     }
-    Nip19::from_bech32(normalized)
-        .ok()
-        .and_then(|n| match n {
-            Nip19::Event(e) => Some(e.event_id),
-            Nip19::EventId(id) => Some(id),
-            _ => None,
-        })
+    Nip19::from_bech32(normalized).ok().and_then(|n| match n {
+        Nip19::Event(e) => Some(e.event_id),
+        Nip19::EventId(id) => Some(id),
+        _ => None,
+    })
 }
 /// Async helper to fetch event by ID with optional kind validation
 async fn fetch_event_by_id_inner(
@@ -108,10 +106,13 @@ pub fn use_fetch_event_by_id(
     not_found_message: &'static str,
 ) -> UseFetchEventById {
     let mut id_signal = use_signal(|| id.clone());
-    use_effect(use_reactive!(| id | { id_signal.set(id); }));
-    let resource = use_resource(move || async move {
-        fetch_event_by_id_inner(&id_signal(), valid_kinds).await
-    });
+    use_effect(use_reactive!(|id| {
+        id_signal.set(id);
+    }));
+    let resource =
+        use_resource(
+            move || async move { fetch_event_by_id_inner(&id_signal(), valid_kinds).await },
+        );
     UseFetchEventById {
         resource,
         not_found_message,
@@ -152,9 +153,7 @@ pub fn use_fetch_event_by_id_resource(
     id: ReadSignal<String>,
     valid_kinds: &'static [u16],
 ) -> Resource<Result<Option<NostrEvent>, String>> {
-    use_resource(move || async move {
-        fetch_event_by_id_inner(&id(), valid_kinds).await
-    })
+    use_resource(move || async move { fetch_event_by_id_inner(&id(), valid_kinds).await })
 }
 /// Fetch a Nostr event by its ID reactively without kind validation.
 ///

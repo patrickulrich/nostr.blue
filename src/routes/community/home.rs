@@ -1,8 +1,8 @@
 //! Community Detail Page
 //! Displays a single community with threaded posts, moderation queue, and about info
 use crate::components::{
-    ClientInitializing, CommunityPostCard, CommunityPostCardSkeleton,
-    CommunityPostComposerInline, JoinButton, UserRoleBadge,
+    ClientInitializing, CommunityPostCard, CommunityPostCardSkeleton, CommunityPostComposerInline,
+    JoinButton, UserRoleBadge,
 };
 use crate::hooks::use_infinite_scroll;
 use crate::services::aggregation::{
@@ -11,10 +11,9 @@ use crate::services::aggregation::{
 };
 use crate::stores::auth_store;
 use crate::stores::community_store::{
-    build_community_thread_tree, can_moderate, fetch_community_by_a_tag,
-    fetch_community_posts, fetch_pending_posts, flatten_thread_tree,
-    get_membership_status, get_user_role, Community, CommunityPost, CommunityThread,
-    MembershipStatus, UserRole,
+    build_community_thread_tree, can_moderate, fetch_community_by_a_tag, fetch_community_posts,
+    fetch_pending_posts, flatten_thread_tree, get_membership_status, get_user_role, Community,
+    CommunityPost, CommunityThread, MembershipStatus, UserRole,
 };
 use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::stores::profiles::{fetch_profiles_batch, get_cached_profile};
@@ -41,8 +40,8 @@ pub fn CommunityPage(a_tag: String) -> Element {
     let mut has_more = use_signal(|| true);
     let mut refresh_trigger = use_signal(|| 0u32);
     let mut interaction_counts = use_signal(HashMap::<String, InteractionCounts>::new);
-    let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> = use_signal(||
-    None);
+    let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> =
+        use_signal(|| None);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let mut pagination_loading = use_signal(|| false);
     let mut show_threaded = use_signal(|| true);
@@ -51,30 +50,26 @@ pub fn CommunityPage(a_tag: String) -> Element {
     let current_pubkey_for_role = current_pubkey.clone();
     let current_pubkey_for_mod = current_pubkey.clone();
     let user_role = use_memo(move || {
-        if let (Some(comm), Some(pk)) = (
-            community.read().as_ref(),
-            current_pubkey_for_role.as_ref(),
-        ) {
+        if let (Some(comm), Some(pk)) =
+            (community.read().as_ref(), current_pubkey_for_role.as_ref())
+        {
             get_user_role(pk, comm)
         } else {
             UserRole::Visitor
         }
     });
     let is_moderator = use_memo(move || {
-        if let (Some(comm), Some(pk)) = (
-            community.read().as_ref(),
-            current_pubkey_for_mod.as_ref(),
-        ) {
+        if let (Some(comm), Some(pk)) = (community.read().as_ref(), current_pubkey_for_mod.as_ref())
+        {
             can_moderate(pk, comm)
         } else {
             false
         }
     });
     let membership_status = use_memo(move || {
-        if let (Some(comm), Some(pk)) = (
-            community.read().as_ref(),
-            auth_store::get_pubkey().as_ref(),
-        ) {
+        if let (Some(comm), Some(pk)) =
+            (community.read().as_ref(), auth_store::get_pubkey().as_ref())
+        {
             get_membership_status(pk, comm)
         } else {
             MembershipStatus::None
@@ -150,19 +145,19 @@ pub fn CommunityPage(a_tag: String) -> Element {
                         if !event_ids.is_empty() {
                             spawn(async move {
                                 match fetch_interaction_counts_batch(
-                                        event_ids.clone(),
-                                        std::time::Duration::from_secs(5),
-                                    )
-                                    .await
+                                    event_ids.clone(),
+                                    std::time::Duration::from_secs(5),
+                                )
+                                .await
                                 {
                                     Ok(counts) => {
                                         interaction_counts.set(counts);
                                         if let Ok(handle) = stream_interaction_counts(
-                                                event_ids,
-                                                interaction_counts,
-                                                Some(600),
-                                            )
-                                            .await
+                                            event_ids,
+                                            interaction_counts,
+                                            Some(600),
+                                        )
+                                        .await
                                         {
                                             interaction_stream_handle.set(Some(handle));
                                         }

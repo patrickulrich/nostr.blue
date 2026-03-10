@@ -2,8 +2,9 @@
 //!
 //! Fetches Bitcoin transaction and address data from mempool.space.
 //! Supports custom endpoints for self-hosted instances.
-use gloo_net::http::Request;
+use crate::platform::http::http_client;
 use serde::{Deserialize, Serialize};
+
 /// Default mempool.space API endpoint
 pub const DEFAULT_ENDPOINT: &str = "https://mempool.space/api";
 /// Transaction data from mempool.space
@@ -98,17 +99,16 @@ pub struct AddressStats {
     pub tx_count: u64,
 }
 /// Fetch transaction details
-pub async fn get_transaction(
-    endpoint: &str,
-    txid: &str,
-) -> Result<BitcoinTransaction, String> {
+pub async fn get_transaction(endpoint: &str, txid: &str) -> Result<BitcoinTransaction, String> {
     let url = format!("{}/tx/{}", endpoint.trim_end_matches('/'), txid);
-    let response = Request::get(&url)
+    let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(&url)
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if !response.ok() {
-        return Err(format!("HTTP {}: {}", response.status(), response.status_text()));
+    if !response.status().is_success() {
+        return Err(format!("HTTP {}", response.status()));
     }
     response
         .json::<BitcoinTransaction>()
@@ -116,17 +116,16 @@ pub async fn get_transaction(
         .map_err(|e| format!("Failed to parse response: {}", e))
 }
 /// Fetch address information
-pub async fn get_address(
-    endpoint: &str,
-    address: &str,
-) -> Result<BitcoinAddress, String> {
+pub async fn get_address(endpoint: &str, address: &str) -> Result<BitcoinAddress, String> {
     let url = format!("{}/address/{}", endpoint.trim_end_matches('/'), address);
-    let response = Request::get(&url)
+    let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(&url)
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if !response.ok() {
-        return Err(format!("HTTP {}: {}", response.status(), response.status_text()));
+    if !response.status().is_success() {
+        return Err(format!("HTTP {}", response.status()));
     }
     response
         .json::<BitcoinAddress>()

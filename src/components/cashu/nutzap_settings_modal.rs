@@ -25,7 +25,7 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
         my_info
             .as_ref()
             .map(|info| info.relays.join("\n"))
-            .unwrap_or_else(|| { "wss://relay.damus.io\nwss://nos.lol".to_string() })
+            .unwrap_or_else(|| "wss://relay.damus.io\nwss://nos.lol".to_string())
     });
     let mut auto_redeem_enabled = use_signal(|| auto_redeem);
     let mut is_publishing = use_signal(|| false);
@@ -82,13 +82,9 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
             .filter(|r| seen_relays.insert(r.clone()))
             .collect();
         if relays.is_empty() {
-            error_message
-                .set(
-                    Some(
-                        "Please enter at least one valid relay URL (wss:// or ws://)"
-                            .to_string(),
-                    ),
-                );
+            error_message.set(Some(
+                "Please enter at least one valid relay URL (wss:// or ws://)".to_string(),
+            ));
             return;
         }
         let auto_redeem_setting = *auto_redeem_enabled.read();
@@ -98,24 +94,23 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
         spawn(async move {
             match cashu::publish_nutzap_info(mints, relays).await {
                 Ok(event_id) => {
-                    *cashu::NUTZAP_AUTO_REDEEM.write() = auto_redeem_setting;
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        use gloo_storage::{LocalStorage, Storage};
-                        let _ = LocalStorage::set(
-                            "nostr_nutzap_auto_redeem",
-                            auto_redeem_setting,
+                    if let Err(e) = crate::platform::storage::set(
+                        "nostr_nutzap_auto_redeem",
+                        &auto_redeem_setting,
+                    ) {
+                        let msg = format!(
+                            "Published nutzap info, but failed to save auto-redeem preference locally: {}",
+                            e
                         );
+                        log::error!("{msg}");
+                        error_message.set(Some(msg));
+                    } else {
+                        *cashu::NUTZAP_AUTO_REDEEM.write() = auto_redeem_setting;
+                        success_message.set(Some(format!(
+                            "Nutzap info published! Event: {}...",
+                            &event_id[..12.min(event_id.len())],
+                        )));
                     }
-                    success_message
-                        .set(
-                            Some(
-                                format!(
-                                    "Nutzap info published! Event: {}...",
-                                    &event_id[..12.min(event_id.len())],
-                                ),
-                            ),
-                        );
                     if let Err(e) = cashu::start_nutzap_subscription().await {
                         log::warn!("Failed to start nutzap subscription: {}", e);
                     }
@@ -129,7 +124,7 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
     };
     rsx! {
         div {
-            class: "fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4",
+            class: "fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4",
             onclick: move |_| on_close.call(()),
             div {
                 class: "bg-card border border-border rounded-lg max-w-lg w-full shadow-xl max-h-[90vh] overflow-y-auto",

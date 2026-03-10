@@ -4,8 +4,7 @@ use crate::components::shop::{
 };
 use crate::routes::Route;
 use crate::stores::shop_store::{
-    add_to_cart, fetch_product_by_naddr, fetch_product_reviews, fetch_shipping_options,
-    CART_ITEMS,
+    add_to_cart, fetch_product_by_naddr, fetch_product_reviews, fetch_shipping_options, CART_ITEMS,
 };
 use crate::utils::nip99::{Product, ProductReview, ShippingOption};
 use dioxus::prelude::*;
@@ -37,9 +36,7 @@ pub fn ShopProductDetail(naddr: String) -> Element {
                     reviews_loading.set(false);
                     if !p.format.is_digital() && !p.shipping_options.is_empty() {
                         shipping_loading.set(true);
-                        if let Ok(opts) = fetch_shipping_options(&p.shipping_options)
-                            .await
-                        {
+                        if let Ok(opts) = fetch_shipping_options(&p.shipping_options).await {
                             shipping_opts.set(opts);
                         }
                         shipping_loading.set(false);

@@ -45,11 +45,7 @@ pub fn ReplyComposer(
     let content_len = content.read().len();
     let media_len = if !uploaded_media.read().is_empty() {
         let separator_len = if content_len > 0 { 2 } else { 0 };
-        let urls_with_newlines: usize = uploaded_media
-            .read()
-            .iter()
-            .map(|url| url.len() + 1)
-            .sum();
+        let urls_with_newlines: usize = uploaded_media.read().iter().map(|url| url.len() + 1).sum();
         separator_len + urls_with_newlines
     } else {
         0
@@ -60,8 +56,7 @@ pub fn ReplyComposer(
     let show_warning = remaining < 100 && !is_over_limit;
 
     let has_signer = *HAS_SIGNER.read();
-    let can_publish =
-        char_count > 0 && !is_over_limit && !*is_publishing.read() && has_signer;
+    let can_publish = char_count > 0 && !is_over_limit && !*is_publishing.read() && has_signer;
 
     let counter_color = if is_over_limit {
         "text-red-500"

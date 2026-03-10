@@ -57,36 +57,31 @@ pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
         .unwrap_or_else(|| event.pubkey.to_string());
     let author_pubkey_for_fetch = author_pubkey.clone();
     let host_verified = stream_meta.host_verified;
-    let coord = Coordinate::new(Kind::from(30311), event.pubkey)
-        .identifier(&stream_meta.d_tag);
+    let coord = Coordinate::new(Kind::from(30311), event.pubkey).identifier(&stream_meta.d_tag);
     let naddr = coord
         .to_bech32()
         .unwrap_or_else(|_| format!("30311:{}:{}", event.pubkey, stream_meta.d_tag));
-    let mut author_metadata = use_signal(move || profiles::get_profile(
-        &author_pubkey_for_fetch,
-    ));
-    use_effect(
-        use_reactive(
-            (&author_pubkey, &*CLIENT_INITIALIZED.read()),
-            move |(pk, client_initialized)| {
-                if !client_initialized {
-                    return;
+    let mut author_metadata = use_signal(move || profiles::get_profile(&author_pubkey_for_fetch));
+    use_effect(use_reactive(
+        (&author_pubkey, &*CLIENT_INITIALIZED.read()),
+        move |(pk, client_initialized)| {
+            if !client_initialized {
+                return;
+            }
+            spawn(async move {
+                if profiles::fetch_profile(pk.clone()).await.is_ok() {
+                    author_metadata.set(profiles::get_profile(&pk));
                 }
-                spawn(async move {
-                    if profiles::fetch_profile(pk.clone()).await.is_ok() {
-                        author_metadata.set(profiles::get_profile(&pk));
-                    }
-                });
-            },
-        ),
-    );
+            });
+        },
+    ));
     let display_name = author_metadata
         .read()
         .as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
     let format_time_ago = |timestamp: u64| -> String {
-        let now = (js_sys::Date::now() / 1000.0) as u64;
+        let now = crate::platform::timestamp::now_secs();
         let diff = now.saturating_sub(timestamp);
         match diff {
             0..=59 => "just now".to_string(),

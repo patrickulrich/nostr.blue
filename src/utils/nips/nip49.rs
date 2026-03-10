@@ -49,22 +49,21 @@ pub fn encrypt_secret_key_with_security(
     key_security: KeySecurity,
 ) -> Result<String, EncryptionError> {
     let encrypted = EncryptedSecretKey::new_with_rng(
-            &mut OsRng,
-            secret_key,
-            password,
-            DEFAULT_LOG_N,
-            key_security,
-        )
-        .map_err(|e| EncryptionError::EncryptionFailed(e.to_string()))?;
-    encrypted.to_bech32().map_err(|e| EncryptionError::EncryptionFailed(e.to_string()))
+        &mut OsRng,
+        secret_key,
+        password,
+        DEFAULT_LOG_N,
+        key_security,
+    )
+    .map_err(|e| EncryptionError::EncryptionFailed(e.to_string()))?;
+    encrypted
+        .to_bech32()
+        .map_err(|e| EncryptionError::EncryptionFailed(e.to_string()))
 }
 /// Decrypt an ncryptsec string with a password
 ///
 /// Returns the Keys struct on success.
-pub fn decrypt_ncryptsec(
-    ncryptsec: &str,
-    password: &str,
-) -> Result<Keys, EncryptionError> {
+pub fn decrypt_ncryptsec(ncryptsec: &str, password: &str) -> Result<Keys, EncryptionError> {
     let encrypted = EncryptedSecretKey::from_bech32(ncryptsec)
         .map_err(|e| EncryptionError::InvalidFormat(e.to_string()))?;
     let secret_key = encrypted
@@ -89,7 +88,8 @@ pub fn validate_password(password: &str) -> Option<String> {
 mod tests {
     use super::*;
     const TEST_NCRYPTSEC: &str = "ncryptsec1qgg9947rlpvqu76pj5ecreduf9jxhselq2nae2kghhvd5g7dgjtcxfqtd67p9m0w57lspw8gsq6yphnm8623nsl8xn9j4jdzz84zm3frztj3z7s35vpzmqf6ksu8r89qk5z2zxfmu5gv8th8wclt0h4p";
-    const TEST_SECRET_KEY: &str = "3501454135014541350145413501453fefb02227e449e57cf4d3a3ce05378683";
+    const TEST_SECRET_KEY: &str =
+        "3501454135014541350145413501453fefb02227e449e57cf4d3a3ce05378683";
     const TEST_PASSWORD: &str = "nostr";
     #[test]
     fn test_decrypt_ncryptsec() {

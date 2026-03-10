@@ -30,13 +30,11 @@ pub fn RadialMenu(props: RadialMenuProps) -> Element {
         let y = (radians.sin() * radius as f64) as i32;
         (x, y)
     };
-    let render_radial_button = |
-        position: f64,
-        icon: Element,
-        color_class: &str,
-        title: &str,
-        on_click: EventHandler<()>|
-    {
+    let render_radial_button = |position: f64,
+                                icon: Element,
+                                color_class: &str,
+                                title: &str,
+                                on_click: EventHandler<()>| {
         let (x, y) = calculate_position(position);
         rsx! {
             button {

@@ -1,12 +1,12 @@
 //! Custom NIPs (kind 30817)
 //!
 //! Functions for community NIP proposals - addressable events for custom NIPs.
-use dioxus::prelude::ReadableExt;
-use nostr_sdk::prelude::*;
-use std::time::Duration;
 use super::fetching::{fetch_events_aggregated, get_client};
 use super::signals::HAS_SIGNER;
 use super::types::PublishResult;
+use dioxus::prelude::ReadableExt;
+use nostr_sdk::prelude::*;
+use std::time::Duration;
 /// Kind 30817 - Custom NIP (addressable event)
 ///
 /// A community-driven event type for proposing and discussing custom NIPs.
@@ -49,7 +49,9 @@ pub async fn fetch_custom_nips(
     until: Option<u64>,
 ) -> std::result::Result<Vec<nostr::Event>, String> {
     let filter = {
-        let mut f = Filter::new().kind(Kind::Custom(KIND_CUSTOM_NIP)).limit(limit);
+        let mut f = Filter::new()
+            .kind(Kind::Custom(KIND_CUSTOM_NIP))
+            .limit(limit);
         if let Some(until_ts) = until {
             f = f.until(Timestamp::from(until_ts));
         }
@@ -67,13 +69,11 @@ pub async fn fetch_custom_nip_by_naddr(
         Nip19::Coordinate(nip19_coord) => {
             let coord = nip19_coord.coordinate;
             if coord.kind != Kind::Custom(KIND_CUSTOM_NIP) {
-                return Err(
-                    format!(
-                        "Invalid kind for custom NIP: expected {}, got {}",
-                        KIND_CUSTOM_NIP,
-                        coord.kind.as_u16(),
-                    ),
-                );
+                return Err(format!(
+                    "Invalid kind for custom NIP: expected {}, got {}",
+                    KIND_CUSTOM_NIP,
+                    coord.kind.as_u16(),
+                ));
             }
             let filter = Filter::new()
                 .kind(coord.kind)
@@ -111,13 +111,10 @@ pub async fn publish_custom_nip_tracked(
         .tag(Tag::title(title))
         .tag(Tag::alt(format!("Custom NIP proposal: {}", title)));
     for kind in related_kinds {
-        builder = builder
-            .tag(
-                Tag::custom(
-                    TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::K)),
-                    vec![kind.to_string()],
-                ),
-            );
+        builder = builder.tag(Tag::custom(
+            TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::K)),
+            vec![kind.to_string()],
+        ));
     }
     let output = client
         .send_event_builder(builder)
@@ -125,8 +122,10 @@ pub async fn publish_custom_nip_tracked(
         .map_err(|e| format!("Failed to publish custom NIP: {}", e))?;
     let result = PublishResult::from_output(output);
     log::info!(
-        "Custom NIP published: {} ({}/{} relays succeeded)", result.event_id, result
-        .success_count(), result.total_attempted()
+        "Custom NIP published: {} ({}/{} relays succeeded)",
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
     );
     if result.has_failures() {
         for (relay, error) in &result.failed_relays {
@@ -157,8 +156,7 @@ pub fn generate_custom_nip_naddr(
     if identifier.trim().is_empty() {
         return Err("Identifier cannot be empty or whitespace".to_string());
     }
-    let coordinate = Coordinate::new(Kind::Custom(KIND_CUSTOM_NIP), *pubkey)
-        .identifier(identifier);
+    let coordinate = Coordinate::new(Kind::Custom(KIND_CUSTOM_NIP), *pubkey).identifier(identifier);
     let mut failed_count = 0;
     let relay_urls: Vec<nostr::RelayUrl> = relays
         .iter()
@@ -174,7 +172,9 @@ pub fn generate_custom_nip_naddr(
         log::warn!("{} relay URL(s) failed to parse for naddr", failed_count);
     }
     let nip19_coord = Nip19Coordinate::new(coordinate, relay_urls);
-    nip19_coord.to_bech32().map_err(|e| format!("Failed to generate naddr: {}", e))
+    nip19_coord
+        .to_bech32()
+        .map_err(|e| format!("Failed to generate naddr: {}", e))
 }
 /// Search custom NIPs using NIP-50 full-text search
 ///
@@ -197,35 +197,25 @@ pub async fn search_custom_nips(
     let results = fetch_events_aggregated(filter, timeout).await?;
     if results.is_empty() {
         log::info!("NIP-50 search returned empty, trying client-side filter");
-        let fallback_filter = Filter::new()
-            .kind(Kind::Custom(KIND_CUSTOM_NIP))
-            .limit(200);
+        let fallback_filter = Filter::new().kind(Kind::Custom(KIND_CUSTOM_NIP)).limit(200);
         let all_events = fetch_events_aggregated(fallback_filter, timeout).await?;
         let query_lower = query.to_lowercase();
-        return Ok(
-            all_events
-                .into_iter()
-                .filter(|e| {
-                    let content_matches = e.content.contains(query)
-                        || e.content.to_lowercase().contains(&query_lower);
-                    let title_matches = e
-                        .tags
-                        .iter()
-                        .any(|tag| {
-                            if let Some(nostr::TagStandard::Title(title)) = tag
-                                .as_standardized()
-                            {
-                                title.contains(query)
-                                    || title.to_lowercase().contains(&query_lower)
-                            } else {
-                                false
-                            }
-                        });
-                    content_matches || title_matches
-                })
-                .take(limit)
-                .collect(),
-        );
+        return Ok(all_events
+            .into_iter()
+            .filter(|e| {
+                let content_matches =
+                    e.content.contains(query) || e.content.to_lowercase().contains(&query_lower);
+                let title_matches = e.tags.iter().any(|tag| {
+                    if let Some(nostr::TagStandard::Title(title)) = tag.as_standardized() {
+                        title.contains(query) || title.to_lowercase().contains(&query_lower)
+                    } else {
+                        false
+                    }
+                });
+                content_matches || title_matches
+            })
+            .take(limit)
+            .collect());
     }
     Ok(results)
 }

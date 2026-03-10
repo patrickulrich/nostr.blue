@@ -49,15 +49,12 @@ pub fn CashuMintDiscoveryModal(
             .read()
             .iter()
             .map(|mint| {
-                let display_name = mint
-                    .name
-                    .clone()
-                    .unwrap_or_else(|| {
-                        url::Url::parse(&mint.url)
-                            .ok()
-                            .and_then(|u| u.host_str().map(|h| h.to_string()))
-                            .unwrap_or_else(|| mint.url.clone())
-                    });
+                let display_name = mint.name.clone().unwrap_or_else(|| {
+                    url::Url::parse(&mint.url)
+                        .ok()
+                        .and_then(|u| u.host_str().map(|h| h.to_string()))
+                        .unwrap_or_else(|| mint.url.clone())
+                });
                 (mint.clone(), display_name)
             })
             .collect::<Vec<_>>()

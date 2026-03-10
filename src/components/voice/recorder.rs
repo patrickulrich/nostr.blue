@@ -1,5 +1,4 @@
 use dioxus::prelude::*;
-use gloo_timers::future::TimeoutFuture;
 use js_sys::Reflect;
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
@@ -7,7 +6,7 @@ const MAX_DURATION_SECONDS: f64 = 60.0;
 #[derive(Clone, PartialEq)]
 enum RecorderState {
     Idle,
-    Recording { started_at: f64 },
+    Recording,
     Stopped { duration: f64 },
     Error { message: String },
 }
@@ -17,19 +16,30 @@ pub fn VoiceRecorder(
 ) -> Element {
     let mut state = use_signal(|| RecorderState::Idle);
     let mut current_time = use_signal(|| 0.0);
-    let is_mounted = use_signal(|| true);
+    let mut is_mounted = use_signal(|| true);
     let mut is_playing_preview = use_signal(|| false);
     let mut blob_url_cache = use_signal(|| None::<String>);
     let recorder_id = use_signal(|| Uuid::new_v4().to_string());
+    use_drop(move || {
+        is_mounted.set(false);
+        if let Some(ref url) = *blob_url_cache.peek() {
+            let _ = js_sys::eval(&format!("URL.revokeObjectURL('{}')", url));
+        }
+        let cleanup_script = format!(
+            "if (window.voiceRecorderManager) {{ window.voiceRecorderManager.cleanup('{}'); }}",
+            recorder_id.read()
+        );
+        let _ = js_sys::eval(&cleanup_script);
+    });
     let start_recording_handler = {
         let recorder_id = recorder_id.read().clone();
         move |_| {
             let recorder_id = recorder_id.clone();
-            log::info!("Start recording button clicked, recorder_id: {}", recorder_id);
-            state
-                .set(RecorderState::Recording {
-                    started_at: js_sys::Date::now() / 1000.0,
-                });
+            log::info!(
+                "Start recording button clicked, recorder_id: {}",
+                recorder_id
+            );
+            state.set(RecorderState::Recording);
             log::debug!("State set to Recording");
             spawn(async move {
                 let start_script = format!(
@@ -48,23 +58,18 @@ pub fn VoiceRecorder(
                         let promise = js_sys::Promise::from(promise_val);
                         match wasm_bindgen_futures::JsFuture::from(promise).await {
                             Ok(result) => {
-                                if let Ok(success) = Reflect::get(
-                                    &result,
-                                    &JsValue::from_str("success"),
-                                ) {
+                                if let Ok(success) =
+                                    Reflect::get(&result, &JsValue::from_str("success"))
+                                {
                                     if !success.as_bool().unwrap_or(false) {
-                                        if let Ok(error) = Reflect::get(
-                                            &result,
-                                            &JsValue::from_str("error"),
-                                        ) {
+                                        if let Ok(error) =
+                                            Reflect::get(&result, &JsValue::from_str("error"))
+                                        {
                                             let error_msg = error
                                                 .as_string()
                                                 .unwrap_or_else(|| "Unknown error".to_string());
                                             log::error!("Failed to start recording: {}", error_msg);
-                                            state
-                                                .set(RecorderState::Error {
-                                                    message: error_msg,
-                                                });
+                                            state.set(RecorderState::Error { message: error_msg });
                                             return;
                                         }
                                     }
@@ -75,11 +80,12 @@ pub fn VoiceRecorder(
                                 let monitor_state = state;
                                 let monitor_is_mounted = is_mounted;
                                 spawn(async move {
-                                    let started_at = js_sys::Date::now() / 1000.0;
+                                    let started_at =
+                                        crate::platform::timestamp::now_millis() as f64;
                                     log::info!("Monitoring loop started at: {}", started_at);
                                     let mut last_logged_second: i32 = -1;
                                     loop {
-                                        TimeoutFuture::new(100).await;
+                                        crate::platform::timer::sleep_ms(100).await;
                                         if !*monitor_is_mounted.read() {
                                             log::debug!(
                                                 "Component unmounted, stopping monitoring loop"
@@ -87,8 +93,11 @@ pub fn VoiceRecorder(
                                             break;
                                         }
                                         let current_state = monitor_state.read().clone();
-                                        if let RecorderState::Recording { .. } = current_state {
-                                            let elapsed = (js_sys::Date::now() / 1000.0) - started_at;
+                                        if let RecorderState::Recording = current_state {
+                                            let elapsed = (crate::platform::timestamp::now_millis()
+                                                as f64
+                                                - started_at)
+                                                / 1000.0;
                                             monitor_current_time.set(elapsed);
                                             let current_second = elapsed as i32;
                                             if current_second != last_logged_second {
@@ -96,14 +105,18 @@ pub fn VoiceRecorder(
                                                 last_logged_second = current_second;
                                             }
                                             if elapsed >= MAX_DURATION_SECONDS {
-                                                log::info!("Max duration reached, stopping recording");
+                                                log::info!(
+                                                    "Max duration reached, stopping recording"
+                                                );
                                                 let stop_script = format!(
                                                     "window.voiceRecorderManager.stopRecording('{}')",
                                                     monitor_recorder_id,
                                                 );
                                                 match js_sys::eval(&stop_script) {
                                                     Ok(_) => log::debug!("Auto-stop requested"),
-                                                    Err(e) => log::error!("Failed to auto-stop: {:?}", e),
+                                                    Err(e) => {
+                                                        log::error!("Failed to auto-stop: {:?}", e)
+                                                    }
                                                 }
                                                 break;
                                             }
@@ -115,19 +128,17 @@ pub fn VoiceRecorder(
                             }
                             Err(e) => {
                                 log::error!("Failed to start recording: {:?}", e);
-                                state
-                                    .set(RecorderState::Error {
-                                        message: format!("Failed to start recording: {:?}", e),
-                                    });
+                                state.set(RecorderState::Error {
+                                    message: format!("Failed to start recording: {:?}", e),
+                                });
                             }
                         }
                     }
                     Err(e) => {
                         log::error!("Failed to eval start script: {:?}", e);
-                        state
-                            .set(RecorderState::Error {
-                                message: "Failed to initialize recording".to_string(),
-                            });
+                        state.set(RecorderState::Error {
+                            message: "Failed to initialize recording".to_string(),
+                        });
                     }
                 }
             });
@@ -149,14 +160,13 @@ pub fn VoiceRecorder(
                         let mut attempts = 0;
                         const MAX_ATTEMPTS: u32 = 50;
                         loop {
-                            TimeoutFuture::new(200).await;
+                            crate::platform::timer::sleep_ms(200).await;
                             attempts += 1;
                             if attempts > MAX_ATTEMPTS {
                                 log::error!("Timeout waiting for recording result");
-                                state
-                                    .set(RecorderState::Error {
-                                        message: "Timeout waiting for recording".to_string(),
-                                    });
+                                state.set(RecorderState::Error {
+                                    message: "Timeout waiting for recording".to_string(),
+                                });
                                 break;
                             }
                             let get_result_script = format!(
@@ -165,10 +175,9 @@ pub fn VoiceRecorder(
                             );
                             if let Ok(result) = js_sys::eval(&get_result_script) {
                                 if !result.is_null() && !result.is_undefined() {
-                                    if let Ok(success) = Reflect::get(
-                                        &result,
-                                        &JsValue::from_str("success"),
-                                    ) {
+                                    if let Ok(success) =
+                                        Reflect::get(&result, &JsValue::from_str("success"))
+                                    {
                                         if success.as_bool().unwrap_or(false) {
                                             let dur = if let Ok(dur_val) = Reflect::get(
                                                 &result,
@@ -179,10 +188,7 @@ pub fn VoiceRecorder(
                                                 duration
                                             };
                                             log::info!("Recording completed: {}s", dur);
-                                            state
-                                                .set(RecorderState::Stopped {
-                                                    duration: dur,
-                                                });
+                                            state.set(RecorderState::Stopped { duration: dur });
                                             let create_blob_script = format!(
                                                 r#"
                                                 (function() {{
@@ -205,18 +211,14 @@ pub fn VoiceRecorder(
                                                 }
                                             }
                                             break;
-                                        } else if let Ok(error) = Reflect::get(
-                                            &result,
-                                            &JsValue::from_str("error"),
-                                        ) {
+                                        } else if let Ok(error) =
+                                            Reflect::get(&result, &JsValue::from_str("error"))
+                                        {
                                             let error_msg = error
                                                 .as_string()
                                                 .unwrap_or_else(|| "Unknown error".to_string());
                                             log::error!("Recording error: {}", error_msg);
-                                            state
-                                                .set(RecorderState::Error {
-                                                    message: error_msg,
-                                                });
+                                            state.set(RecorderState::Error { message: error_msg });
                                             break;
                                         }
                                     }
@@ -226,10 +228,9 @@ pub fn VoiceRecorder(
                     }
                     Err(e) => {
                         log::error!("Failed to stop recording: {:?}", e);
-                        state
-                            .set(RecorderState::Error {
-                                message: format!("Failed to stop recording: {:?}", e),
-                            });
+                        state.set(RecorderState::Error {
+                            message: format!("Failed to stop recording: {:?}", e),
+                        });
                     }
                 }
             });
@@ -292,20 +293,17 @@ pub fn VoiceRecorder(
                         return true;
                     }})();
                     "#,
-                    audio_id,
-                    !is_playing,
+                    audio_id, !is_playing,
                 );
                 match js_sys::eval(&script) {
                     Ok(result) => {
                         if result.as_bool() == Some(true) {
-                            TimeoutFuture::new(100).await;
+                            crate::platform::timer::sleep_ms(100).await;
                             let check_script = "window.__voice_preview_playing === true";
                             if let Ok(playing) = js_sys::eval(check_script) {
                                 let actual_playing = playing.as_bool().unwrap_or(false);
                                 is_playing_preview.set(actual_playing);
-                                log::debug!(
-                                    "Preview playback state updated: {}", actual_playing
-                                );
+                                log::debug!("Preview playback state updated: {}", actual_playing);
                             }
                         } else {
                             log::error!(
@@ -326,13 +324,12 @@ pub fn VoiceRecorder(
         let recorder_id = recorder_id.read().clone();
         if let RecorderState::Stopped { duration } = state.read().clone() {
             log::info!(
-                "Use recording clicked, retrieving data for recorder: {}", recorder_id
+                "Use recording clicked, retrieving data for recorder: {}",
+                recorder_id
             );
             spawn(async move {
-                let get_result_script = format!(
-                    "window.voiceRecorderManager.getResult('{}')",
-                    recorder_id,
-                );
+                let get_result_script =
+                    format!("window.voiceRecorderManager.getResult('{}')", recorder_id,);
                 match js_sys::eval(&get_result_script) {
                     Ok(result) => {
                         if result.is_null() || result.is_undefined() {
@@ -343,56 +340,48 @@ pub fn VoiceRecorder(
                             return;
                         }
                         match Reflect::get(&result, &JsValue::from_str("bytes")) {
-                            Ok(bytes_val) => {
-                                match bytes_val.dyn_into::<js_sys::Uint8Array>() {
-                                    Ok(bytes_array) => {
-                                        let bytes = bytes_array.to_vec();
-                                        let waveform = if let Ok(wf_val) = Reflect::get(
-                                            &result,
-                                            &JsValue::from_str("waveform"),
-                                        ) {
-                                            js_sys::Array::from(&wf_val)
-                                                .to_vec()
-                                                .into_iter()
-                                                .map(|v| v.as_f64().unwrap_or(0.0) as u8)
-                                                .collect::<Vec<_>>()
-                                        } else {
-                                            log::warn!("Failed to extract waveform, using placeholder");
-                                            vec![0u8; 100]
-                                        };
-                                        let mime_type = if let Ok(mime_val) = Reflect::get(
-                                            &result,
-                                            &JsValue::from_str("mimeType"),
-                                        ) {
-                                            mime_val
-                                                .as_string()
-                                                .unwrap_or_else(|| "audio/webm".to_string())
-                                        } else {
-                                            log::warn!("Failed to extract MIME type, using default");
-                                            "audio/webm".to_string()
-                                        };
-                                        log::info!(
+                            Ok(bytes_val) => match bytes_val.dyn_into::<js_sys::Uint8Array>() {
+                                Ok(bytes_array) => {
+                                    let bytes = bytes_array.to_vec();
+                                    let waveform = if let Ok(wf_val) =
+                                        Reflect::get(&result, &JsValue::from_str("waveform"))
+                                    {
+                                        js_sys::Array::from(&wf_val)
+                                            .to_vec()
+                                            .into_iter()
+                                            .map(|v| v.as_f64().unwrap_or(0.0) as u8)
+                                            .collect::<Vec<_>>()
+                                    } else {
+                                        log::warn!("Failed to extract waveform, using placeholder");
+                                        vec![0u8; 100]
+                                    };
+                                    let mime_type = if let Ok(mime_val) =
+                                        Reflect::get(&result, &JsValue::from_str("mimeType"))
+                                    {
+                                        mime_val
+                                            .as_string()
+                                            .unwrap_or_else(|| "audio/webm".to_string())
+                                    } else {
+                                        log::warn!("Failed to extract MIME type, using default");
+                                        "audio/webm".to_string()
+                                    };
+                                    log::info!(
                                             "Recording ready: {} bytes, duration: {}s, waveform points: {}, MIME: {}",
                                             bytes.len(), duration, waveform.len(), mime_type
                                         );
-                                        if let Some(url) = blob_url_cache.read().clone() {
-                                            let revoke_script = format!(
-                                                "URL.revokeObjectURL('{}')",
-                                                url,
-                                            );
-                                            let _ = js_sys::eval(&revoke_script);
-                                        }
-                                        blob_url_cache.set(None);
-                                        on_recording_complete
-                                            .call((bytes, duration, waveform, mime_type));
+                                    if let Some(url) = blob_url_cache.read().clone() {
+                                        let revoke_script =
+                                            format!("URL.revokeObjectURL('{}')", url,);
+                                        let _ = js_sys::eval(&revoke_script);
                                     }
-                                    Err(e) => {
-                                        log::error!(
-                                            "Failed to convert bytes to Uint8Array: {:?}", e
-                                        );
-                                    }
+                                    blob_url_cache.set(None);
+                                    on_recording_complete
+                                        .call((bytes, duration, waveform, mime_type));
                                 }
-                            }
+                                Err(e) => {
+                                    log::error!("Failed to convert bytes to Uint8Array: {:?}", e);
+                                }
+                            },
                             Err(e) => {
                                 log::error!("Failed to get bytes from result: {:?}", e);
                             }
@@ -413,8 +402,7 @@ pub fn VoiceRecorder(
         format!("{:02}:{:02}", mins, secs)
     };
     let remaining_time = MAX_DURATION_SECONDS - *current_time.read();
-    let progress_percent = (*current_time.read() / MAX_DURATION_SECONDS * 100.0)
-        .min(100.0);
+    let progress_percent = (*current_time.read() / MAX_DURATION_SECONDS * 100.0).min(100.0);
     let blob_url = blob_url_cache.read().clone();
     rsx! {
         div { class: "bg-muted/30 rounded-lg p-6 space-y-4",
@@ -423,7 +411,7 @@ pub fn VoiceRecorder(
                     RecorderState::Idle => rsx! {
                         div { class: "text-muted-foreground", "Ready to record voice message" }
                     },
-                    RecorderState::Recording { .. } => rsx! {
+                    RecorderState::Recording => rsx! {
                         div { class: "space-y-2",
                             div { class: "flex items-center justify-center gap-2 text-red-500 font-bold",
                                 div { class: "w-3 h-3 bg-red-500 rounded-full animate-pulse" }
@@ -449,7 +437,7 @@ pub fn VoiceRecorder(
             }
             div { class: "h-20 bg-muted rounded flex items-center justify-center",
                 match state.read().clone() {
-                    RecorderState::Recording { .. } => rsx! {
+                    RecorderState::Recording => rsx! {
                         div { class: "flex items-center gap-1",
                             for i in 0..40 {
                                 div {
@@ -498,7 +486,7 @@ pub fn VoiceRecorder(
                             }
                         }
                     },
-                    RecorderState::Recording { .. } => rsx! {
+                    RecorderState::Recording => rsx! {
                         button {
                             class: "w-16 h-16 rounded-full bg-gray-700 hover:bg-gray-800 text-white flex items-center justify-center transition shadow-lg",
                             onclick: move |_| stop_recording(()),

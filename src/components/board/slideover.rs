@@ -1,13 +1,11 @@
 //! Board Slideover Modal Component
 //! Right-sliding panel for viewing board details
 //! Uses two-stage loading: board metadata first, then pins
-use dioxus::prelude::*;
-use dioxus_core::Task;
-use crate::components::icons::PinIcon;
 use super::card::HashtagBadge;
 use super::item_card::PinCard;
 use super::item_selector::PinToBoardModal;
 use super::pin_menu::PinToBoardRequest;
+use crate::components::icons::PinIcon;
 use crate::components::{ConfirmModal, ShareModal, ZapModal};
 use crate::hooks::use_author_metadata;
 use crate::routes::Route;
@@ -18,14 +16,12 @@ use crate::stores::pin_boards_store::{
 };
 use crate::utils::truncate_pubkey;
 use crate::utils::validation::is_valid_http_url;
+use dioxus::prelude::*;
+use dioxus_core::Task;
 /// Right-side sliding panel for viewing board details
 /// Opens over the current page, can be closed to return
 #[component]
-pub fn BoardSlideover(
-    board: Pinboard,
-    show: Signal<bool>,
-    on_close: EventHandler<()>,
-) -> Element {
+pub fn BoardSlideover(board: Pinboard, show: Signal<bool>, on_close: EventHandler<()>) -> Element {
     let title = board.title.clone();
     let description = board.description.clone();
     let cover_image = board.image.clone();
@@ -45,10 +41,9 @@ pub fn BoardSlideover(
     let mut show_delete_confirm = use_signal(|| false);
     let mut delete_task_id = use_signal(|| 0u32);
     let mut delete_task: Signal<Option<Task>> = use_signal(|| None);
+    let mut pins_task: Signal<Option<Task>> = use_signal(|| None);
     let mut delete_error = use_signal(|| None::<String>);
-    let mut pin_to_board_request: Signal<Option<PinToBoardRequest>> = use_signal(|| {
-        None
-    });
+    let mut pin_to_board_request: Signal<Option<PinToBoardRequest>> = use_signal(|| None);
     use_effect(move || {
         if !*show.read() {
             show_zap_modal.set(false);
@@ -57,13 +52,16 @@ pub fn BoardSlideover(
             if let Some(task) = delete_task.take() {
                 task.cancel();
             }
+            if let Some(task) = pins_task.take() {
+                task.cancel();
+            }
             delete_task_id.set(0);
             delete_error.set(None);
             pin_to_board_request.set(None);
             pins.set(Vec::new());
             pins_loading.set(true);
             pins_error.set(None);
-            let next = request_id.read().wrapping_add(1);
+            let next = request_id.peek().wrapping_add(1);
             request_id.set(if next == 0 { 1 } else { next });
         }
     });
@@ -73,67 +71,84 @@ pub fn BoardSlideover(
         .as_ref()
         .map(|pk| pk == &board.pubkey)
         .unwrap_or(false);
-    let display_name = use_memo(move || {
-        author_metadata
-            .read()
-            .as_ref()
-            .and_then(|m| m.display_name.clone().or(m.name.clone()))
-            .unwrap_or_else(|| truncate_pubkey(&author_pubkey))
-    });
-    let profile_picture = use_memo(move || {
-        author_metadata.read().as_ref().and_then(|m| m.picture.clone())
-    });
+    let display_name = use_memo(use_reactive(
+        (&author_pubkey, &*author_metadata.read()),
+        move |(author_pubkey, author_metadata)| {
+            author_metadata
+                .as_ref()
+                .and_then(|m| m.display_name.clone().or(m.name.clone()))
+                .unwrap_or_else(|| truncate_pubkey(&author_pubkey))
+        },
+    ));
+    let profile_picture = use_memo(use_reactive(
+        (&author_pubkey, &*author_metadata.read()),
+        move |(_author_pubkey, author_metadata)| {
+            author_metadata.as_ref().and_then(|m| m.picture.clone())
+        },
+    ));
     let avatar_letter = use_memo(move || {
-        display_name().chars().next().unwrap_or('?').to_uppercase().to_string()
+        display_name()
+            .chars()
+            .next()
+            .unwrap_or('?')
+            .to_uppercase()
+            .to_string()
     });
     let is_collaborative = board.collaborative;
     let owner_pubkey_for_pins = board.pubkey.clone();
     let show_signal = show;
     let mut request_id_mut = request_id;
     let mut retry_trigger_mut = retry_trigger;
-    use_effect(
-        use_reactive!(
-            |(show_signal, board_a_tag, owner_pubkey_for_pins, is_collaborative, retry_trigger,)| {
-                let _ = *retry_trigger.read();
-                let shown = *show_signal.read();
-                if !shown {
-                    return;
-                }
-                let a_tag = board_a_tag.clone();
-                let owner_pk = owner_pubkey_for_pins.clone();
-                let current_request = {
-                    let next = request_id_mut.read().wrapping_add(1);
-                    if next == 0 { 1 } else { next }
-                };
-                request_id_mut.set(current_request);
-                pins_loading.set(true);
-                pins_error.set(None);
-                spawn(async move {
-                    let result = if is_collaborative {
-                        fetch_pins_for_board_filtered(&a_tag, None, None).await
-                    } else {
-                        fetch_pins_for_board_filtered(&a_tag, Some(&owner_pk), None).await
-                    };
-                    // Use .peek() in async callback - doesn't subscribe (Dioxus pattern)
-                    let current = *request_id_mut.peek();
-                    if current != current_request {
-                        return;
-                    }
-                    match result {
-                        Ok(fetched_pins) => {
-                            pins.set(fetched_pins);
-                            pins_error.set(None);
-                        }
-                        Err(e) => {
-                            log::error!("Failed to fetch pins: {}", e);
-                            pins_error.set(Some(format!("Failed to load pins: {}", e)));
-                        }
-                    }
-                    pins_loading.set(false);
-                });
+    let mut pins_task_mut = pins_task;
+    use_effect(use_reactive!(|(
+        show_signal,
+        board_a_tag,
+        owner_pubkey_for_pins,
+        is_collaborative,
+        retry_trigger,
+    )| {
+        let _ = *retry_trigger.read();
+        let shown = *show_signal.read();
+        if !shown {
+            return;
+        }
+        if let Some(task) = pins_task_mut.take() {
+            task.cancel();
+        }
+        let a_tag = board_a_tag.clone();
+        let owner_pk = owner_pubkey_for_pins.clone();
+        let current_request = request_id_mut.with_mut(|request_id| {
+            let next = request_id.wrapping_add(1);
+            *request_id = if next == 0 { 1 } else { next };
+            *request_id
+        });
+        pins_loading.set(true);
+        pins_error.set(None);
+        let task = spawn(async move {
+            let result = if is_collaborative {
+                fetch_pins_for_board_filtered(&a_tag, None, None).await
+            } else {
+                fetch_pins_for_board_filtered(&a_tag, Some(&owner_pk), None).await
+            };
+            // Use .peek() in async callback - doesn't subscribe (Dioxus pattern)
+            let current = *request_id_mut.peek();
+            if current != current_request {
+                return;
             }
-        ),
-    );
+            match result {
+                Ok(fetched_pins) => {
+                    pins.set(fetched_pins);
+                    pins_error.set(None);
+                }
+                Err(e) => {
+                    log::error!("Failed to fetch pins: {}", e);
+                    pins_error.set(Some(format!("Failed to load pins: {}", e)));
+                }
+            }
+            pins_loading.set(false);
+        });
+        pins_task_mut.set(Some(task));
+    }));
     let nav = navigator();
     let on_close_for_delete = on_close;
     let handle_delete = move |_| {
@@ -192,14 +207,14 @@ pub fn BoardSlideover(
             tabindex: "-1",
             onclick: move |e| e.stop_propagation(),
             onmounted: move |evt| {
-                #[cfg(target_arch = "wasm32")]
+                #[cfg(feature = "web")]
                 {
                     let element = evt.data();
                     if let Some(html_element) = element.downcast::<web_sys::HtmlElement>() {
                         let _ = html_element.focus();
                     }
                 }
-                #[cfg(not(target_arch = "wasm32"))]
+                #[cfg(not(feature = "web"))]
                 let _ = evt;
             },
             onkeydown: move |evt: KeyboardEvent| {

@@ -1,6 +1,6 @@
 use crate::components::icons::{
-    ArrowLeftIcon, BarChartIcon, BookOpenIcon, CameraIcon, CheckIcon, CopyIcon,
-    Link2Icon, MessageCircleIcon, MusicIcon, RssIcon, SendIcon, ShareIcon,
+    ArrowLeftIcon, BarChartIcon, BookOpenIcon, CameraIcon, CheckIcon, CopyIcon, Link2Icon,
+    MessageCircleIcon, MusicIcon, RssIcon, SendIcon, ShareIcon,
 };
 use crate::components::{EmojiPicker, GifPicker, MediaUploader, PollCreatorModal};
 use crate::stores::nostr_client::HAS_SIGNER;
@@ -9,7 +9,7 @@ use crate::utils::clipboard::copy_to_clipboard;
 use dioxus::prelude::*;
 use nostr_sdk::{EventBuilder, PublicKey};
 use std::sync::atomic::{AtomicU32, Ordering};
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 /// Global counter for generating unique modal IDs
 static CONTENT_SHARE_MODAL_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -26,7 +26,6 @@ pub enum ContentType {
     PodcastEpisode,
     MusicAlbum,
     MusicTrack,
-    #[cfg(target_arch = "wasm32")]
     BibleVerse,
 }
 impl ContentType {
@@ -36,7 +35,6 @@ impl ContentType {
             ContentType::PodcastEpisode => "Episode",
             ContentType::MusicAlbum => "Album",
             ContentType::MusicTrack => "Track",
-            #[cfg(target_arch = "wasm32")]
             ContentType::BibleVerse => "Bible",
         }
     }
@@ -46,7 +44,6 @@ impl ContentType {
             ContentType::PodcastEpisode => "Share Episode",
             ContentType::MusicAlbum => "Share Album",
             ContentType::MusicTrack => "Share Track",
-            #[cfg(target_arch = "wasm32")]
             ContentType::BibleVerse => "Share Verses",
         }
     }
@@ -56,7 +53,6 @@ impl ContentType {
             ContentType::PodcastEpisode => "Share your thoughts about this episode...",
             ContentType::MusicAlbum => "Share your thoughts about this album...",
             ContentType::MusicTrack => "Share your thoughts about this track...",
-            #[cfg(target_arch = "wasm32")]
             ContentType::BibleVerse => "Share your thoughts about these verses...",
         }
     }
@@ -74,7 +70,6 @@ impl ContentType {
             ContentType::MusicTrack => {
                 format!("Check out this track on nostr.blue: {}", url)
             }
-            #[cfg(target_arch = "wasm32")]
             ContentType::BibleVerse => {
                 format!("Check out this Bible passage on nostr.blue: {}", url)
             }
@@ -98,9 +93,7 @@ pub fn ContentShareModal(
     /// Handler to close the modal
     on_close: EventHandler<()>,
 ) -> Element {
-    let modal_id = use_signal(|| {
-        CONTENT_SHARE_MODAL_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
-    });
+    let modal_id = use_signal(|| CONTENT_SHARE_MODAL_ID_COUNTER.fetch_add(1, Ordering::Relaxed));
     let mut share_mode = use_signal(|| ShareMode::Main);
     let mut copied = use_signal(|| false);
     let mut nostr_text = use_signal(String::new);
@@ -113,25 +106,21 @@ pub fn ContentShareModal(
     let mut cursor_position = use_signal(|| 0usize);
     let textarea_id = use_signal(|| format!("content-share-textarea-{}", modal_id()));
     #[allow(unused_variables)]
-    fn get_cursor_position(textarea_id: &str) -> usize {
-        #[cfg(target_arch = "wasm32")]
+    fn get_cursor_position(textarea_id: &str, current_text: &str) -> usize {
+        #[cfg(feature = "web")]
         {
             if let Some(window) = web_sys::window() {
                 if let Some(document) = window.document() {
                     if let Some(element) = document.get_element_by_id(textarea_id) {
-                        if let Some(textarea) = element
-                            .dyn_ref::<web_sys::HtmlTextAreaElement>()
-                        {
-                            return textarea
-                                .selection_start()
-                                .unwrap_or(Some(0))
-                                .unwrap_or(0) as usize;
+                        if let Some(textarea) = element.dyn_ref::<web_sys::HtmlTextAreaElement>() {
+                            return textarea.selection_start().unwrap_or(Some(0)).unwrap_or(0)
+                                as usize;
                         }
                     }
                 }
             }
         }
-        0
+        current_text.encode_utf16().count()
     }
     fn utf16_to_utf8_index(text: &str, utf16_index: usize) -> usize {
         let mut utf8_index = 0;
@@ -155,7 +144,10 @@ pub fn ContentShareModal(
             let safe_pos = if current.is_char_boundary(pos) {
                 pos
             } else {
-                (0..=pos).rev().find(|&i| current.is_char_boundary(i)).unwrap_or(0)
+                (0..=pos)
+                    .rev()
+                    .find(|&i| current.is_char_boundary(i))
+                    .unwrap_or(0)
             };
             if safe_pos > 0 {
                 if let Some(prev_char) = current[..safe_pos].chars().last() {
@@ -180,7 +172,10 @@ pub fn ContentShareModal(
             let safe_pos = if current.is_char_boundary(pos) {
                 pos
             } else {
-                (0..=pos).rev().find(|&i| current.is_char_boundary(i)).unwrap_or(0)
+                (0..=pos)
+                    .rev()
+                    .find(|&i| current.is_char_boundary(i))
+                    .unwrap_or(0)
             };
             current.insert_str(safe_pos, &text);
             nostr_text.set(current);
@@ -201,18 +196,12 @@ pub fn ContentShareModal(
         show_poll_modal.set(false);
     };
     let handle_copy_link = {
-        #[cfg(target_arch = "wasm32")]
         let copy_text = if matches!(content_type, ContentType::BibleVerse) {
-            if let Some(ref text) = content {
-                format!("{}\n\n— {}", text, title)
-            } else {
-                url.clone()
-            }
+            // For Bible verses, copy the URL (canonical reference), not the verse text
+            url.clone()
         } else {
             url.clone()
         };
-        #[cfg(not(target_arch = "wasm32"))]
-        let copy_text = url.clone();
         move |_| {
             let text_to_copy = copy_text.clone();
             spawn(async move {
@@ -221,15 +210,7 @@ pub fn ContentShareModal(
                         copied.set(true);
                         log::info!("Content copied to clipboard");
                         spawn(async move {
-                            #[cfg(target_arch = "wasm32")]
-                            {
-                                gloo_timers::future::TimeoutFuture::new(2000).await;
-                            }
-                            #[cfg(not(target_arch = "wasm32"))]
-                            {
-                                tokio::time::sleep(std::time::Duration::from_millis(2000))
-                                    .await;
-                            }
+                            crate::platform::timer::sleep_ms(2000).await;
                             copied.set(false);
                         });
                     }
@@ -243,8 +224,9 @@ pub fn ContentShareModal(
     let handle_share_to_nostr = move |_| {
         if !*HAS_SIGNER.read() {
             log::error!("Attempted to share to Nostr without a signer");
-            nostr_error
-                .set(Some("No signer available. Please log in first.".to_string()));
+            nostr_error.set(Some(
+                "No signer available. Please log in first.".to_string(),
+            ));
             return;
         }
         let text = nostr_text.read().trim().to_string();
@@ -257,8 +239,7 @@ pub fn ContentShareModal(
                 Some(c) => c,
                 None => {
                     log::error!("Client not initialized");
-                    nostr_error
-                        .set(Some("Failed to initialize Nostr client".to_string()));
+                    nostr_error.set(Some("Failed to initialize Nostr client".to_string()));
                     is_publishing.set(false);
                     return;
                 }
@@ -285,6 +266,14 @@ pub fn ContentShareModal(
         let url_dm = url.clone();
         let content_type_dm = content_type;
         move |_| {
+            // Guard: check signer availability before proceeding
+            if !*HAS_SIGNER.read() {
+                log::error!("Attempted to send DM without a signer");
+                dm_error.set(Some(
+                    "No signer available. Please log in first.".to_string(),
+                ));
+                return;
+            }
             let manual_recipient = dm_recipient.read().trim().to_string();
             if manual_recipient.is_empty() {
                 return;
@@ -295,14 +284,11 @@ pub fn ContentShareModal(
                 let recipient_hex = match PublicKey::parse(&manual_recipient) {
                     Ok(pubkey) => pubkey.to_hex(),
                     Err(_) => {
-                        log::error!("Invalid recipient pubkey: {}", manual_recipient);
-                        dm_error
-                            .set(
-                                Some(
-                                    "Invalid recipient. Please enter a valid npub, hex, or nostr: URI."
-                                        .to_string(),
-                                ),
-                            );
+                        log::error!("Invalid recipient pubkey supplied");
+                        dm_error.set(Some(
+                            "Invalid recipient. Please enter a valid npub, hex, or nostr: URI."
+                                .to_string(),
+                        ));
                         is_publishing.set(false);
                         return;
                     }
@@ -310,7 +296,7 @@ pub fn ContentShareModal(
                 let message = content_type_dm.dm_message(&url_clone);
                 match dms::send_dm(recipient_hex.clone(), message).await {
                     Ok(_) => {
-                        log::info!("Sent DM to {}", recipient_hex);
+                        log::info!("Sent DM successfully");
                         dm_error.set(None);
                         dm_recipient.set(String::new());
                         share_mode.set(ShareMode::Main);
@@ -318,7 +304,7 @@ pub fn ContentShareModal(
                         on_close.call(());
                     }
                     Err(e) => {
-                        log::error!("Failed to send DM to {}: {}", recipient_hex, e);
+                        log::error!("Failed to send DM: {}", e);
                         dm_error.set(Some(format!("Failed to send message: {}", e)));
                         is_publishing.set(false);
                     }
@@ -375,7 +361,6 @@ pub fn ContentShareModal(
                                         ContentType::MusicAlbum | ContentType::MusicTrack => rsx! {
                                             MusicIcon { class: "w-6 h-6 text-white" }
                                         },
-                                        #[cfg(target_arch = "wasm32")]
                                         ContentType::BibleVerse => rsx! {
                                             BookOpenIcon { class: "w-6 h-6 text-white" }
                                         },
@@ -465,19 +450,19 @@ pub fn ContentShareModal(
                                 oninput: move |e| {
                                     nostr_text.set(e.value().clone());
                                     nostr_error.set(None);
-                                    let pos = get_cursor_position(&textarea_id.read());
+                                    let pos = get_cursor_position(&textarea_id.read(), &e.value());
                                     let utf8_pos = utf16_to_utf8_index(&e.value(), pos);
                                     cursor_position.set(utf8_pos);
                                 },
                                 onclick: move |_| {
-                                    let pos = get_cursor_position(&textarea_id.read());
                                     let text = nostr_text.read();
+                                    let pos = get_cursor_position(&textarea_id.read(), &text);
                                     let utf8_pos = utf16_to_utf8_index(&text, pos);
                                     cursor_position.set(utf8_pos);
                                 },
                                 onkeyup: move |_| {
-                                    let pos = get_cursor_position(&textarea_id.read());
                                     let text = nostr_text.read();
+                                    let pos = get_cursor_position(&textarea_id.read(), &text);
                                     let utf8_pos = utf16_to_utf8_index(&text, pos);
                                     cursor_position.set(utf8_pos);
                                 },
@@ -489,10 +474,7 @@ pub fn ContentShareModal(
                             }
                             div { class: "flex flex-wrap gap-2",
                                 {
-                                    #[cfg(target_arch = "wasm32")]
                                     let show_verse_button = matches!(content_type, ContentType::BibleVerse);
-                                    #[cfg(not(target_arch = "wasm32"))]
-                                    let show_verse_button = false;
                                     if show_verse_button {
                                         if let Some(ref verse_content) = content {
                                             let verse_text = verse_content.clone();

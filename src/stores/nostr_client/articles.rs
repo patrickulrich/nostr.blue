@@ -1,13 +1,13 @@
 //! Long-form (kind 30023)
 //!
 //! Functions for fetching and publishing long-form articles (NIP-23).
-use dioxus::prelude::ReadableExt;
-use nostr_sdk::prelude::*;
-use std::time::Duration;
 use super::fetching::{fetch_events_aggregated, get_client};
 use super::signals::HAS_SIGNER;
 use super::types::PublishResult;
 use crate::stores::relay;
+use dioxus::prelude::ReadableExt;
+use nostr_sdk::prelude::*;
+use std::time::Duration;
 /// Fetch articles (kind 30023 - NIP-23 long-form content)
 /// Returns events sorted by created_at descending (newest first)
 pub async fn fetch_articles(
@@ -65,13 +65,7 @@ pub async fn fetch_event_by_coordinate_with_relays(
     relay_hints: Vec<String>,
 ) -> std::result::Result<Option<nostr::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
-    relay::fetch_event_by_coordinate_with_relays(
-            &client,
-            kind,
-            &pubkey,
-            &identifier,
-            relay_hints,
-        )
+    relay::fetch_event_by_coordinate_with_relays(&client, kind, &pubkey, &identifier, relay_hints)
         .await
 }
 /// Publish a long-form article (Kind 30023) with relay feedback
@@ -105,25 +99,22 @@ pub async fn publish_article_tracked(
         Tag::title(title.to_string()),
     ];
     if !summary.is_empty() {
-        tags.push(
-            Tag::custom(
-                nostr::TagKind::Custom("summary".into()),
-                vec![summary.to_string()],
-            ),
-        );
+        tags.push(Tag::custom(
+            nostr::TagKind::Custom("summary".into()),
+            vec![summary.to_string()],
+        ));
     }
     if !cover_image.is_empty() {
-        tags.push(
-            Tag::custom(
-                nostr::TagKind::Custom("image".into()),
-                vec![cover_image.to_string()],
-            ),
-        );
+        tags.push(Tag::custom(
+            nostr::TagKind::Custom("image".into()),
+            vec![cover_image.to_string()],
+        ));
     }
     let timestamp = nostr_sdk::Timestamp::now().as_secs().to_string();
-    tags.push(
-        Tag::custom(nostr::TagKind::Custom("published_at".into()), vec![timestamp]),
-    );
+    tags.push(Tag::custom(
+        nostr::TagKind::Custom("published_at".into()),
+        vec![timestamp],
+    ));
     use std::collections::HashSet;
     let mut seen = HashSet::new();
     let sanitized: Vec<String> = hashtags
@@ -134,16 +125,18 @@ pub async fn publish_article_tracked(
     for hashtag in sanitized {
         tags.push(Tag::hashtag(hashtag));
     }
-    let builder = nostr::EventBuilder::new(nostr::Kind::LongFormTextNote, content)
-        .tags(tags);
+    let builder = nostr::EventBuilder::new(nostr::Kind::LongFormTextNote, content).tags(tags);
     let output = client
         .send_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to publish article: {}", e))?;
     let result = PublishResult::from_output(output);
     log::info!(
-        "Article '{}' published: {} ({}/{} relays succeeded)", title, result.event_id,
-        result.success_count(), result.total_attempted()
+        "Article '{}' published: {} ({}/{} relays succeeded)",
+        title,
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
     );
     if result.has_failures() {
         for (relay, error) in &result.failed_relays {

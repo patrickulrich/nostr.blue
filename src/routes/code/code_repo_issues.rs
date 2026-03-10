@@ -1,7 +1,7 @@
 //! Repository Issues Page
 //!
 //! View issues for a repository with filtering by status, search, and labels.
-use crate::components::code::{FilterBar, StatusFilter, filter_issues};
+use crate::components::code::{filter_issues, FilterBar, StatusFilter};
 use crate::components::{icons, CodeIssueRow};
 use crate::routes::Route;
 use crate::services::git_hosting::fetch_repo_issues;
@@ -36,12 +36,16 @@ pub fn CodeRepoIssues(naddr: String) -> Element {
         spawn(async move {
             match fetch_repo_issues(&n).await {
                 Ok(fetched) => {
-                    if *fetch_gen.peek() != gen { return; }
+                    if *fetch_gen.peek() != gen {
+                        return;
+                    }
                     all_issues.set(fetched);
                     error.set(None);
                 }
                 Err(e) => {
-                    if *fetch_gen.peek() != gen { return; }
+                    if *fetch_gen.peek() != gen {
+                        return;
+                    }
                     error.set(Some(e));
                 }
             }

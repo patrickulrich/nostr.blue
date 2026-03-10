@@ -42,14 +42,12 @@ pub struct PopularChef {
     pub recipe_count: usize,
 }
 /// Recipe cache (keyed by a_tag: "30023:pubkey:d_tag")
-pub static RECIPES_CACHE: GlobalSignal<LruCache<String, CachedRecipe>> = GlobalSignal::new(||
-LruCache::new(NonZeroUsize::new(RECIPE_CACHE_SIZE).unwrap()));
+pub static RECIPES_CACHE: GlobalSignal<LruCache<String, CachedRecipe>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(RECIPE_CACHE_SIZE).unwrap()));
 /// Popular chefs cache
 pub static POPULAR_CHEFS: GlobalSignal<Vec<PopularChef>> = GlobalSignal::new(Vec::new);
 /// Trending recipes cache (recent recipes with high engagement)
-pub static TRENDING_RECIPES: GlobalSignal<Vec<CachedRecipe>> = GlobalSignal::new(
-    Vec::new,
-);
+pub static TRENDING_RECIPES: GlobalSignal<Vec<CachedRecipe>> = GlobalSignal::new(Vec::new);
 /// Loading states
 pub static LOADING_RECIPES: GlobalSignal<bool> = GlobalSignal::new(|| false);
 pub static LOADING_CHEFS: GlobalSignal<bool> = GlobalSignal::new(|| false);
@@ -62,7 +60,10 @@ pub fn get_cached_recipe(a_tag: &str) -> Option<CachedRecipe> {
 /// Get a recipe from cache by naddr
 pub fn get_cached_recipe_by_naddr(naddr: &str) -> Option<CachedRecipe> {
     let cache = RECIPES_CACHE.read();
-    cache.iter().find(|(_, r)| r.naddr == naddr).map(|(_, r)| r.clone())
+    cache
+        .iter()
+        .find(|(_, r)| r.naddr == naddr)
+        .map(|(_, r)| r.clone())
 }
 /// Cache a recipe
 pub fn cache_recipe(recipe: CachedRecipe) {
@@ -119,17 +120,16 @@ pub fn recipes_filters(limit: usize) -> Vec<Filter> {
     RECIPE_TAG_PREFIXES
         .iter()
         .map(|prefix| {
-            Filter::new().kind(Kind::LongFormTextNote).hashtag(*prefix).limit(limit)
+            Filter::new()
+                .kind(Kind::LongFormTextNote)
+                .hashtag(*prefix)
+                .limit(limit)
         })
         .collect()
 }
 /// Build filters for recipes by category tag (one per supported prefix)
 /// e.g., category = "italian" -> #t = "nostrcooking-italian" and #t = "zapcooking-italian"
-pub fn recipes_by_tag_filters(
-    tag: &str,
-    limit: usize,
-    until: Option<u64>,
-) -> Vec<Filter> {
+pub fn recipes_by_tag_filters(tag: &str, limit: usize, until: Option<u64>) -> Vec<Filter> {
     let tag_slug = tag.to_lowercase().replace(' ', "-");
     RECIPE_TAG_PREFIXES
         .iter()
@@ -169,7 +169,10 @@ pub fn recipes_by_author_filters(
 }
 /// Build filter for a specific recipe by coordinate
 pub fn recipe_by_coord_filter(pubkey: PublicKey, identifier: &str) -> Filter {
-    Filter::new().kind(Kind::LongFormTextNote).author(pubkey).identifier(identifier)
+    Filter::new()
+        .kind(Kind::LongFormTextNote)
+        .author(pubkey)
+        .identifier(identifier)
 }
 /// Build filter for recipe reactions (kind 7)
 pub fn recipe_reactions_filter(a_tag: &str, limit: usize) -> Filter {
@@ -218,14 +221,11 @@ async fn fetch_with_multiple_filters(
     let mut seen_ids = HashSet::new();
     let mut errors: Vec<String> = Vec::new();
     let results = futures::future::join_all(
-            filters
-                .into_iter()
-                .map(|filter| crate::stores::nostr_client::fetch_events_aggregated(
-                    filter,
-                    timeout,
-                )),
-        )
-        .await;
+        filters
+            .into_iter()
+            .map(|filter| crate::stores::nostr_client::fetch_events_aggregated(filter, timeout)),
+    )
+    .await;
     for result in results {
         match result {
             Ok(events) => {
@@ -246,7 +246,9 @@ async fn fetch_with_multiple_filters(
     }
     if !errors.is_empty() {
         log::warn!(
-            "Partial recipe fetch failures ({}): {}", errors.len(), errors.join("; ")
+            "Partial recipe fetch failures ({}): {}",
+            errors.len(),
+            errors.join("; ")
         );
     }
     all_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
@@ -263,10 +265,8 @@ pub async fn fetch_recipes(
     *LOADING_RECIPES.write() = false;
     match result {
         Ok(events) => {
-            let mut recipes: Vec<CachedRecipe> = events
-                .iter()
-                .filter_map(parse_recipe_event)
-                .collect();
+            let mut recipes: Vec<CachedRecipe> =
+                events.iter().filter_map(parse_recipe_event).collect();
             recipes.sort_by(|a, b| b.event.created_at.cmp(&a.event.created_at));
             recipes.truncate(limit);
             cache_recipes(&recipes);
@@ -292,10 +292,8 @@ pub async fn fetch_recipes_by_tag(
     *LOADING_RECIPES.write() = false;
     match result {
         Ok(events) => {
-            let mut recipes: Vec<CachedRecipe> = events
-                .iter()
-                .filter_map(parse_recipe_event)
-                .collect();
+            let mut recipes: Vec<CachedRecipe> =
+                events.iter().filter_map(parse_recipe_event).collect();
             recipes.sort_by(|a, b| b.event.created_at.cmp(&a.event.created_at));
             recipes.truncate(limit);
             cache_recipes(&recipes);
@@ -314,18 +312,15 @@ pub async fn fetch_recipes_by_author(
     limit: usize,
     until: Option<u64>,
 ) -> StdResult<Vec<CachedRecipe>, String> {
-    let pubkey = PublicKey::from_hex(pubkey_hex)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::from_hex(pubkey_hex).map_err(|e| format!("Invalid pubkey: {}", e))?;
     *LOADING_RECIPES.write() = true;
     let filters = recipes_by_author_filters(pubkey, limit, until);
     let result = fetch_with_multiple_filters(filters, Duration::from_secs(15)).await;
     *LOADING_RECIPES.write() = false;
     match result {
         Ok(events) => {
-            let mut recipes: Vec<CachedRecipe> = events
-                .iter()
-                .filter_map(parse_recipe_event)
-                .collect();
+            let mut recipes: Vec<CachedRecipe> =
+                events.iter().filter_map(parse_recipe_event).collect();
             recipes.sort_by(|a, b| b.event.created_at.cmp(&a.event.created_at));
             recipes.truncate(limit);
             cache_recipes(&recipes);
@@ -339,20 +334,15 @@ pub async fn fetch_recipes_by_author(
     }
 }
 /// Fetch a specific recipe by naddr
-pub async fn fetch_recipe_by_naddr(
-    naddr: &str,
-) -> StdResult<Option<CachedRecipe>, String> {
+pub async fn fetch_recipe_by_naddr(naddr: &str) -> StdResult<Option<CachedRecipe>, String> {
     if let Some(cached) = get_cached_recipe_by_naddr(naddr) {
         return Ok(Some(cached));
     }
-    let coord = Coordinate::from_bech32(naddr)
-        .map_err(|e| format!("Invalid naddr: {}", e))?;
+    let coord = Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
     let filter = recipe_by_coord_filter(coord.public_key, &coord.identifier);
-    let events = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
     if let Some(event) = events.first() {
         if let Some(recipe) = parse_recipe_event(event) {
             cache_recipe(recipe.clone());
@@ -362,19 +352,20 @@ pub async fn fetch_recipe_by_naddr(
     Ok(None)
 }
 /// Fetch recipe engagement stats
-pub async fn fetch_recipe_engagement(
-    a_tag: &str,
-) -> StdResult<RecipeEngagement, String> {
+pub async fn fetch_recipe_engagement(a_tag: &str) -> StdResult<RecipeEngagement, String> {
     let reactions_filter = recipe_reactions_filter(a_tag, 500);
     let comments_filter = recipe_comments_filter(a_tag, 200);
     let zaps_filter = recipe_zaps_filter(a_tag, 100);
     let (reactions_result, comments_result, zaps_result) = futures::join!(
-        crate ::stores::nostr_client::fetch_events_aggregated(reactions_filter,
-        Duration::from_secs(5)), crate
-        ::stores::nostr_client::fetch_events_aggregated(comments_filter,
-        Duration::from_secs(5)), crate
-        ::stores::nostr_client::fetch_events_aggregated(zaps_filter,
-        Duration::from_secs(5)),
+        crate::stores::nostr_client::fetch_events_aggregated(
+            reactions_filter,
+            Duration::from_secs(5)
+        ),
+        crate::stores::nostr_client::fetch_events_aggregated(
+            comments_filter,
+            Duration::from_secs(5)
+        ),
+        crate::stores::nostr_client::fetch_events_aggregated(zaps_filter, Duration::from_secs(5)),
     );
     let likes = reactions_result
         .map(|events| {
@@ -382,7 +373,9 @@ pub async fn fetch_recipe_engagement(
                 .iter()
                 .filter(|e| {
                     let content = &e.content;
-                    content.is_empty() || content == "+" || content == "like"
+                    content.is_empty()
+                        || content == "+"
+                        || content == "like"
                         || content
                             .chars()
                             .next()
@@ -421,7 +414,8 @@ pub async fn fetch_popular_chefs(limit: usize) -> StdResult<Vec<PopularChef>, St
     *LOADING_CHEFS.write() = false;
     match result {
         Ok(events) => {
-            let mut author_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+            let mut author_counts: std::collections::HashMap<String, usize> =
+                std::collections::HashMap::new();
             for event in &events {
                 if is_recipe_event(event) {
                     let pubkey = event.pubkey.to_hex();
@@ -448,9 +442,7 @@ pub async fn fetch_popular_chefs(limit: usize) -> StdResult<Vec<PopularChef>, St
     }
 }
 /// Fetch trending/discover recipes (recent with validation)
-pub async fn fetch_discover_recipes(
-    limit: usize,
-) -> StdResult<Vec<CachedRecipe>, String> {
+pub async fn fetch_discover_recipes(limit: usize) -> StdResult<Vec<CachedRecipe>, String> {
     let recipes = fetch_recipes(limit * 2, None).await?;
     let valid_recipes: Vec<CachedRecipe> = recipes
         .into_iter()
@@ -462,34 +454,26 @@ pub async fn fetch_discover_recipes(
 }
 /// Fetch trending recipes (recent valid recipes with images)
 /// Prioritizes recipes with images and valid parsed content
-pub async fn fetch_trending_recipes(
-    limit: usize,
-) -> StdResult<Vec<CachedRecipe>, String> {
+pub async fn fetch_trending_recipes(limit: usize) -> StdResult<Vec<CachedRecipe>, String> {
     let recipes = fetch_recipes(limit * 3, None).await?;
-    let mut valid_recipes: Vec<CachedRecipe> = recipes
-        .into_iter()
-        .filter(|r| r.parsed.is_some())
-        .collect();
-    valid_recipes
-        .sort_by(|a, b| {
-            let a_has_image = !a.metadata.images.is_empty();
-            let b_has_image = !b.metadata.images.is_empty();
-            match (a_has_image, b_has_image) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                _ => b.event.created_at.cmp(&a.event.created_at),
-            }
-        });
+    let mut valid_recipes: Vec<CachedRecipe> =
+        recipes.into_iter().filter(|r| r.parsed.is_some()).collect();
+    valid_recipes.sort_by(|a, b| {
+        let a_has_image = !a.metadata.images.is_empty();
+        let b_has_image = !b.metadata.images.is_empty();
+        match (a_has_image, b_has_image) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => b.event.created_at.cmp(&a.event.created_at),
+        }
+    });
     valid_recipes.truncate(limit);
     *TRENDING_RECIPES.write() = valid_recipes.clone();
     Ok(valid_recipes)
 }
 /// Search recipes by title, summary, or content
 /// Supports tag aliases (e.g., searching "bbq" matches "Barbecue")
-pub async fn search_recipes(
-    query: &str,
-    limit: usize,
-) -> StdResult<Vec<CachedRecipe>, String> {
+pub async fn search_recipes(query: &str, limit: usize) -> StdResult<Vec<CachedRecipe>, String> {
     let query_lower = query.to_lowercase();
     let normalized_query = crate::utils::recipe_tags::normalize_tag(query);
     let normalized_lower = normalized_query.to_lowercase();
@@ -510,9 +494,7 @@ pub async fn search_recipes(
                 if tag_lower.contains(&query_lower) {
                     return true;
                 }
-                if normalized_lower != query_lower
-                    && tag_lower.contains(&normalized_lower)
-                {
+                if normalized_lower != query_lower && tag_lower.contains(&normalized_lower) {
                     return true;
                 }
             }
@@ -524,7 +506,9 @@ pub async fn search_recipes(
         .take(limit)
         .collect();
     log::info!(
-        "Search '{}' found {} recipes (normalized: '{}')", query, matching_recipes.len(),
+        "Search '{}' found {} recipes (normalized: '{}')",
+        query,
+        matching_recipes.len(),
         normalized_query
     );
     Ok(matching_recipes)
@@ -537,8 +521,7 @@ pub async fn publish_recipe(
     content: &str,
     tags: Vec<String>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -556,8 +539,10 @@ pub async fn publish_recipe(
         ),
     ];
     if let Some(s) = summary {
-        event_tags
-            .push(Tag::custom(TagKind::Custom("summary".into()), vec![s.to_string()]));
+        event_tags.push(Tag::custom(
+            TagKind::Custom("summary".into()),
+            vec![s.to_string()],
+        ));
     }
     for img in image_urls {
         if let Ok(url) = Url::parse(img) {
@@ -567,7 +552,10 @@ pub async fn publish_recipe(
     for tag in tags {
         let tag_slug = tag.to_lowercase().replace(' ', "-");
         event_tags.push(Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX, tag_slug)));
-        event_tags.push(Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX_ALT, tag_slug)));
+        event_tags.push(Tag::hashtag(format!(
+            "{}-{}",
+            RECIPE_TAG_PREFIX_ALT, tag_slug
+        )));
     }
     let builder = EventBuilder::long_form_text_note(content).tags(event_tags);
     let output = client
@@ -576,12 +564,8 @@ pub async fn publish_recipe(
         .map_err(|e| format!("Failed to publish recipe: {}", e))?;
     log::info!("Recipe published: {}", output.id().to_hex());
     let pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
-    let naddr = crate::stores::nostr_client::make_naddr_with_hints(
-            KIND_RECIPE,
-            &pubkey,
-            &slug,
-        )
-        .await?;
+    let naddr =
+        crate::stores::nostr_client::make_naddr_with_hints(KIND_RECIPE, &pubkey, &slug).await?;
     Ok(naddr)
 }
 /// Fork (copy) an existing recipe for editing
@@ -591,8 +575,7 @@ pub async fn fork_recipe(
     new_content: &str,
     new_tags: Vec<String>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -608,7 +591,10 @@ pub async fn fork_recipe(
             TagKind::Custom("published_at".into()),
             vec![Timestamp::now().as_secs().to_string()],
         ),
-        Tag::custom(TagKind::Custom("forked-from".into()), vec![original.a_tag.clone()]),
+        Tag::custom(
+            TagKind::Custom("forked-from".into()),
+            vec![original.a_tag.clone()],
+        ),
         Tag::public_key(original.event.pubkey),
     ];
     for img in &original.metadata.images {
@@ -619,7 +605,10 @@ pub async fn fork_recipe(
     for tag in new_tags {
         let tag_slug = tag.to_lowercase().replace(' ', "-");
         event_tags.push(Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX, tag_slug)));
-        event_tags.push(Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX_ALT, tag_slug)));
+        event_tags.push(Tag::hashtag(format!(
+            "{}-{}",
+            RECIPE_TAG_PREFIX_ALT, tag_slug
+        )));
     }
     let builder = EventBuilder::long_form_text_note(new_content).tags(event_tags);
     let output = client
@@ -628,12 +617,8 @@ pub async fn fork_recipe(
         .map_err(|e| format!("Failed to fork recipe: {}", e))?;
     log::info!("Recipe forked: {}", output.id().to_hex());
     let pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
-    let naddr = crate::stores::nostr_client::make_naddr_with_hints(
-            KIND_RECIPE,
-            &pubkey,
-            &slug,
-        )
-        .await?;
+    let naddr =
+        crate::stores::nostr_client::make_naddr_with_hints(KIND_RECIPE, &pubkey, &slug).await?;
     Ok(naddr)
 }
 /// Update an existing recipe (republish with same d-tag)
@@ -645,8 +630,7 @@ pub async fn update_recipe(
     content: &str,
     tags: Vec<String>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -663,8 +647,10 @@ pub async fn update_recipe(
         ),
     ];
     if let Some(s) = summary {
-        event_tags
-            .push(Tag::custom(TagKind::Custom("summary".into()), vec![s.to_string()]));
+        event_tags.push(Tag::custom(
+            TagKind::Custom("summary".into()),
+            vec![s.to_string()],
+        ));
     }
     for img in image_urls {
         if let Ok(url) = Url::parse(img) {
@@ -674,7 +660,10 @@ pub async fn update_recipe(
     for tag in tags {
         let tag_slug = tag.to_lowercase().replace(' ', "-");
         event_tags.push(Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX, tag_slug)));
-        event_tags.push(Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX_ALT, tag_slug)));
+        event_tags.push(Tag::hashtag(format!(
+            "{}-{}",
+            RECIPE_TAG_PREFIX_ALT, tag_slug
+        )));
     }
     let builder = EventBuilder::long_form_text_note(content).tags(event_tags);
     let output = client
@@ -683,18 +672,14 @@ pub async fn update_recipe(
         .map_err(|e| format!("Failed to update recipe: {}", e))?;
     log::info!("Recipe updated: {}", output.id().to_hex());
     let pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
-    let naddr = crate::stores::nostr_client::make_naddr_with_hints(
-            KIND_RECIPE,
-            &pubkey,
-            original_slug,
-        )
-        .await?;
+    let naddr =
+        crate::stores::nostr_client::make_naddr_with_hints(KIND_RECIPE, &pubkey, original_slug)
+            .await?;
     Ok(naddr)
 }
 /// Delete a recipe (publish deletion event)
 pub async fn delete_recipe(recipe: &CachedRecipe) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -715,18 +700,17 @@ pub async fn delete_recipe(recipe: &CachedRecipe) -> StdResult<String, String> {
     Ok(output.id().to_hex())
 }
 /// Post a comment on a recipe
-pub async fn comment_on_recipe(
-    recipe: &CachedRecipe,
-    content: &str,
-) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+pub async fn comment_on_recipe(recipe: &CachedRecipe, content: &str) -> StdResult<String, String> {
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
-    let d_tag = recipe.metadata.identifier.as_deref().ok_or("Recipe has no identifier")?;
-    let coord = Coordinate::new(Kind::LongFormTextNote, recipe.event.pubkey)
-        .identifier(d_tag);
+    let d_tag = recipe
+        .metadata
+        .identifier
+        .as_deref()
+        .ok_or("Recipe has no identifier")?;
+    let coord = Coordinate::new(Kind::LongFormTextNote, recipe.event.pubkey).identifier(d_tag);
     let tags: Vec<Tag> = vec![
         Tag::coordinate(coord, None),
         Tag::public_key(recipe.event.pubkey),
@@ -742,21 +726,16 @@ pub async fn comment_on_recipe(
 /// Recipe bookmark list kind (NIP-51)
 pub const KIND_BOOKMARK_LIST: u16 = 30001;
 /// Fetch user's recipe bookmarks
-pub async fn fetch_recipe_bookmarks(
-    user_pubkey: &str,
-) -> StdResult<Vec<String>, String> {
-    let pubkey = PublicKey::from_hex(user_pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+pub async fn fetch_recipe_bookmarks(user_pubkey: &str) -> StdResult<Vec<String>, String> {
+    let pubkey = PublicKey::from_hex(user_pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = Filter::new()
         .kind(Kind::Custom(KIND_BOOKMARK_LIST))
         .author(pubkey)
         .hashtag(RECIPE_TAG_PREFIX)
         .limit(1);
-    let events = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(5),
-        )
-        .await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5))
+            .await?;
     if let Some(event) = events.first() {
         let bookmarks: Vec<String> = event
             .tags
@@ -771,8 +750,7 @@ pub async fn fetch_recipe_bookmarks(
 }
 /// Toggle recipe bookmark
 pub async fn toggle_recipe_bookmark(recipe: &CachedRecipe) -> StdResult<bool, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -784,10 +762,7 @@ pub async fn toggle_recipe_bookmark(recipe: &CachedRecipe) -> StdResult<bool, St
     } else {
         bookmarks.push(recipe.a_tag.clone());
     }
-    let mut tags: Vec<Tag> = vec![
-        Tag::identifier("recipes"),
-        Tag::hashtag(RECIPE_TAG_PREFIX),
-    ];
+    let mut tags: Vec<Tag> = vec![Tag::identifier("recipes"), Tag::hashtag(RECIPE_TAG_PREFIX)];
     for bookmark in &bookmarks {
         tags.push(Tag::custom(TagKind::a(), vec![bookmark.clone()]));
     }
@@ -796,7 +771,7 @@ pub async fn toggle_recipe_bookmark(recipe: &CachedRecipe) -> StdResult<bool, St
         .send_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to update bookmarks: {}", e))?;
-    log::info!("Bookmark toggled for {}: {}", recipe.a_tag, ! is_bookmarked);
+    log::info!("Bookmark toggled for {}: {}", recipe.a_tag, !is_bookmarked);
     Ok(!is_bookmarked)
 }
 /// Check if recipe is bookmarked
@@ -860,14 +835,13 @@ pub async fn fetch_collections_with_images() -> Vec<Collection> {
     let mut collections = Vec::new();
     for (id, title, subtitle, tag) in STATIC_COLLECTIONS {
         let image_url = fetch_collection_image(tag).await.ok().flatten();
-        collections
-            .push(Collection {
-                id: id.to_string(),
-                title: title.to_string(),
-                subtitle: subtitle.to_string(),
-                tag: tag.to_string(),
-                image_url,
-            });
+        collections.push(Collection {
+            id: id.to_string(),
+            title: title.to_string(),
+            subtitle: subtitle.to_string(),
+            tag: tag.to_string(),
+            image_url,
+        });
     }
     collections
 }

@@ -1,12 +1,13 @@
 //! Modal for customizing sidebar navigation layout
 //! Supports drag-to-reorder with visual page boundary dividers
 use crate::components::icons::{
-    self as icons, BellIcon, BookOpenIcon, BookmarkIcon, CameraIcon, CompassIcon,
-    HomeIcon, MailIcon, MessageCircleIcon, PinIcon, SettingsIcon, ShoppingBagIcon, UserIcon, UsersIcon, VideoIcon,
+    self as icons, BellIcon, BookOpenIcon, BookmarkIcon, CameraIcon, CompassIcon, HomeIcon,
+    MailIcon, MessageCircleIcon, PinIcon, SettingsIcon, ShoppingBagIcon, UserIcon, UsersIcon,
+    VideoIcon,
 };
 use crate::stores::sidebar_store::{
-    default_sidebar_items, save_sidebar_preferences, SidebarItem,
-    DEFAULT_MAIN_SIDEBAR_SLOTS, MAX_MAIN_SIDEBAR_SLOTS, SIDEBAR_ITEMS, SIDEBAR_SLOT_COUNT,
+    default_sidebar_items, save_sidebar_preferences, SidebarItem, DEFAULT_MAIN_SIDEBAR_SLOTS,
+    MAX_MAIN_SIDEBAR_SLOTS, SIDEBAR_ITEMS, SIDEBAR_SLOT_COUNT,
 };
 use dioxus::prelude::*;
 #[derive(Props, Clone, PartialEq)]
@@ -25,16 +26,18 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
     let mut touch_over_index = use_signal(|| None::<usize>);
     let mut is_touch_dragging = use_signal(|| false);
     let mut reorder_items = move |from_idx: usize, to_idx: usize| {
-        local_items
-            .with_mut(|items| {
-                if from_idx != to_idx && from_idx < items.len() && to_idx <= items.len()
-                {
-                    let item = items.remove(from_idx);
-                    let insert_idx = if from_idx < to_idx { to_idx - 1 } else { to_idx };
-                    let insert_idx = insert_idx.min(items.len());
-                    items.insert(insert_idx, item);
-                }
-            });
+        local_items.with_mut(|items| {
+            if from_idx != to_idx && from_idx < items.len() && to_idx <= items.len() {
+                let item = items.remove(from_idx);
+                let insert_idx = if from_idx < to_idx {
+                    to_idx - 1
+                } else {
+                    to_idx
+                };
+                let insert_idx = insert_idx.min(items.len());
+                items.insert(insert_idx, item);
+            }
+        });
     };
     let handle_save = move |_| {
         saving.set(true);
@@ -60,7 +63,11 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
     };
     let total_count = local_items.read().len();
     let slot_count = (*local_slot_count.read()).max(1);
-    let total_pages = if slot_count > 0 { total_count.div_ceil(slot_count) } else { 1 };
+    let total_pages = if slot_count > 0 {
+        total_count.div_ceil(slot_count)
+    } else {
+        1
+    };
     rsx! {
         div {
             class: "fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4",
@@ -183,7 +190,7 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
                                             return;
                                         }
                                         e.prevent_default();
-                                        #[cfg(target_family = "wasm")]
+                                        #[cfg(feature = "web")]
                                         if let Some(touch) = e.touches().first() {
                                             let coords = touch.client_coordinates();
                                             let x = coords.x;

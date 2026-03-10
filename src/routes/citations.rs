@@ -2,16 +2,15 @@
 //!
 //! Discovery/management page for NKBIP-03 citations.
 //! Shows user's citations grouped by type with search and filtering.
-use dioxus::prelude::*;
 use crate::components::citation::card::{CitationCard, CitationCardSkeleton};
 use crate::components::citation::editor_modal::CitationEditorModal;
 use crate::components::icons::{PenSquareIcon, SearchIcon};
 use crate::components::ClientInitializing;
 use crate::stores::citation_store::{
-    fetch_citations_by_author, search_citations, CachedCitation, CitationGroup,
-    USER_CITATIONS,
+    fetch_citations_by_author, search_citations, CachedCitation, CitationGroup, USER_CITATIONS,
 };
 use crate::stores::{auth_store, nostr_client};
+use dioxus::prelude::*;
 /// Tab selection for the Citations page
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum CitationsTab {
@@ -71,35 +70,33 @@ pub fn CitationsHome() -> Element {
     let mut show_editor_modal = use_signal(|| false);
     let is_authenticated = auth_store::is_authenticated();
     let user_pubkey = auth_store::get_pubkey();
-    use_effect(
-        use_reactive(
-            (&user_pubkey, &*nostr_client::CLIENT_INITIALIZED.read()),
-            move |(pubkey, client_initialized)| {
-                if !client_initialized {
-                    return;
-                }
-                if let Some(pk) = pubkey {
-                    loading.set(true);
-                    error.set(None);
-                    let pk_clone = pk.clone();
-                    spawn(async move {
-                        match fetch_citations_by_author(&pk_clone, 200).await {
-                            Ok(_) => {
-                                loading.set(false);
-                            }
-                            Err(e) => {
-                                log::warn!("Failed to fetch citations: {}", e);
-                                error.set(Some(e));
-                                loading.set(false);
-                            }
+    use_effect(use_reactive(
+        (&user_pubkey, &*nostr_client::CLIENT_INITIALIZED.read()),
+        move |(pubkey, client_initialized)| {
+            if !client_initialized {
+                return;
+            }
+            if let Some(pk) = pubkey {
+                loading.set(true);
+                error.set(None);
+                let pk_clone = pk.clone();
+                spawn(async move {
+                    match fetch_citations_by_author(&pk_clone, 200).await {
+                        Ok(_) => {
+                            loading.set(false);
                         }
-                    });
-                } else {
-                    loading.set(false);
-                }
-            },
-        ),
-    );
+                        Err(e) => {
+                            log::warn!("Failed to fetch citations: {}", e);
+                            error.set(Some(e));
+                            loading.set(false);
+                        }
+                    }
+                });
+            } else {
+                loading.set(false);
+            }
+        },
+    ));
     let mut handle_search = move |query: String| {
         search_query.set(query.clone());
         if query.is_empty() {

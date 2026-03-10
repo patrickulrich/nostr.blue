@@ -18,12 +18,8 @@ pub fn TrendingNotes() -> Element {
             error.set(false);
             match get_trending_notes(Some(15)).await {
                 Ok(notes) => {
-                    let blocked_users = nostr_client::get_blocked_users()
-                        .await
-                        .unwrap_or_default();
-                    let muted_posts = nostr_client::get_muted_posts()
-                        .await
-                        .unwrap_or_default();
+                    let blocked_users = nostr_client::get_blocked_users().await.unwrap_or_default();
+                    let muted_posts = nostr_client::get_muted_posts().await.unwrap_or_default();
                     let filtered_notes: Vec<TrendingNote> = notes
                         .into_iter()
                         .filter(|note| {

@@ -2,12 +2,12 @@ use crate::components::icons::{BookmarkIcon, MessageCircleIcon, Repeat2Icon, Zap
 use crate::components::{ReactionButton, ZapModal};
 use crate::hooks::use_reaction;
 use crate::routes::Route;
+use crate::services::aggregation::InteractionCounts;
 use crate::stores::bookmarks;
 use crate::stores::nostr_client::{
-    get_client, publish_note_tracked, publish_repost, HAS_SIGNER,
+    get_client, publish_note_tracked, publish_repost, CLIENT_INITIALIZED, HAS_SIGNER,
 };
 use crate::stores::signer::SIGNER_INFO;
-use crate::services::aggregation::InteractionCounts;
 use crate::utils::{format_relative_time_or, format_sats_compact, truncate_pubkey};
 use dioxus::prelude::*;
 use nostr_sdk::{Event, Filter, FromBech32, Kind, PublicKey};
@@ -96,8 +96,7 @@ pub fn get_title(event: &Event) -> Option<String> {
 #[component]
 pub fn PhotoCard(
     event: Event,
-    #[props(default = None)]
-    precomputed_counts: Option<InteractionCounts>,
+    #[props(default = None)] precomputed_counts: Option<InteractionCounts>,
 ) -> Element {
     let images = parse_imeta_tags(&event);
     let title = get_title(&event);
@@ -122,7 +121,11 @@ pub fn PhotoCard(
     let mut is_bookmarking = use_signal(|| false);
     let is_bookmarked = bookmarks::is_bookmarked(&event_id_memo);
     let has_signer = *HAS_SIGNER.read();
-    let reaction = use_reaction(event_id_like.clone(), author_pubkey_like.clone(), precomputed_counts.as_ref());
+    let reaction = use_reaction(
+        event_id_like.clone(),
+        author_pubkey_like.clone(),
+        precomputed_counts.as_ref(),
+    );
     let mut current_image_index = use_signal(|| 0usize);
     let mut reply_count = use_signal(|| 0usize);
     let mut repost_count = use_signal(|| 0usize);
@@ -133,238 +136,238 @@ pub fn PhotoCard(
     let mut comment_text = use_signal(String::new);
     let mut is_posting_comment = use_signal(|| false);
     let mut show_zap_modal = use_signal(|| false);
+    let mut counts_fetch_gen = use_signal(|| 0u32);
+    let mut author_fetch_gen = use_signal(|| 0u32);
     if images.is_empty() {
         return rsx! {
             div { class: "hidden" }
         };
     }
-    use_effect(
-        use_reactive(
-            &precomputed_counts,
-            move |counts_opt| {
-                if let Some(counts) = counts_opt {
-                    reply_count.set(counts.replies);
-                    repost_count.set(counts.reposts);
-                    zap_amount_sats.set(counts.zap_amount_sats);
-                    is_reposted.set(counts.user_reposted.unwrap_or(false));
-                    is_zapped.set(counts.user_zapped.unwrap_or(false));
-                }
-            },
-        ),
-    );
+    use_effect(use_reactive(&precomputed_counts, move |counts_opt| {
+        if let Some(counts) = counts_opt {
+            reply_count.set(counts.replies);
+            repost_count.set(counts.reposts);
+            zap_amount_sats.set(counts.zap_amount_sats);
+            is_reposted.set(counts.user_reposted.unwrap_or(false));
+            is_zapped.set(counts.user_zapped.unwrap_or(false));
+        }
+    }));
     let has_precomputed = precomputed_counts.is_some();
-    use_effect(
-        use_reactive(
-            &(event_id_counts, has_precomputed),
-            move |(event_id_for_counts, has_precomputed)| {
-                if has_precomputed {
+    let client_initialized = *CLIENT_INITIALIZED.read();
+    use_effect(use_reactive(
+        &(event_id_counts, has_precomputed, client_initialized),
+        move |(event_id_for_counts, has_precomputed, client_ready)| {
+            if has_precomputed || !client_ready {
+                return;
+            }
+            let fetch_gen = counts_fetch_gen.with_mut(|gen| {
+                *gen = gen.wrapping_add(1);
+                *gen
+            });
+            spawn(async move {
+                let client = match get_client() {
+                    Some(c) => c,
+                    None => return,
+                };
+                let event_id_parsed = match nostr_sdk::EventId::from_hex(&event_id_for_counts) {
+                    Ok(id) => id,
+                    Err(_) => return,
+                };
+                let event_id_hex = event_id_parsed.to_hex();
+                let reply_filter_lower = Filter::new()
+                    .kinds(vec![Kind::TextNote, Kind::Comment, Kind::Repost])
+                    .event(event_id_parsed)
+                    .limit(500);
+                let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
+                let reply_filter_upper = Filter::new()
+                    .kind(Kind::Comment)
+                    .custom_tag(upper_e_tag, event_id_hex)
+                    .limit(500);
+                let mut all_replies = Vec::new();
+                if let Ok(lower_replies) = client
+                    .fetch_events(reply_filter_lower, Duration::from_secs(5))
+                    .await
+                {
+                    all_replies.extend(lower_replies.into_iter());
+                }
+                if let Ok(upper_replies) = client
+                    .fetch_events(reply_filter_upper, Duration::from_secs(5))
+                    .await
+                {
+                    all_replies.extend(upper_replies.into_iter());
+                }
+                let mut seen_ids = std::collections::HashSet::new();
+                let unique_events: Vec<_> = all_replies
+                    .into_iter()
+                    .filter(|event| seen_ids.insert(event.id))
+                    .collect();
+                let current_user_pubkey = SIGNER_INFO
+                    .read()
+                    .as_ref()
+                    .map(|info| info.public_key.clone());
+                let mut replies = 0usize;
+                let mut reposts = 0usize;
+                let mut user_has_reposted = false;
+                for event in unique_events.iter() {
+                    match event.kind {
+                        Kind::TextNote | Kind::Comment => replies += 1,
+                        Kind::Repost => {
+                            reposts += 1;
+                            if let Some(ref user_pk) = current_user_pubkey {
+                                if event.pubkey.to_string() == *user_pk {
+                                    user_has_reposted = true;
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if *counts_fetch_gen.peek() != fetch_gen {
                     return;
                 }
-                spawn(async move {
-                    let client = match get_client() {
-                        Some(c) => c,
-                        None => return,
-                    };
-                    let event_id_parsed = match nostr_sdk::EventId::from_hex(
-                        &event_id_for_counts,
-                    ) {
-                        Ok(id) => id,
-                        Err(_) => return,
-                    };
-                    let event_id_hex = event_id_parsed.to_hex();
-                    let reply_filter_lower = Filter::new()
-                        .kinds(vec![Kind::TextNote, Kind::Comment, Kind::Repost])
-                        .event(event_id_parsed)
-                        .limit(500);
-                    let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(
-                        nostr_sdk::Alphabet::E,
-                    );
-                    let reply_filter_upper = Filter::new()
-                        .kind(Kind::Comment)
-                        .custom_tag(upper_e_tag, event_id_hex)
-                        .limit(500);
-                    let mut all_replies = Vec::new();
-                    if let Ok(lower_replies) = client
-                        .fetch_events(reply_filter_lower, Duration::from_secs(5))
-                        .await
-                    {
-                        all_replies.extend(lower_replies.into_iter());
-                    }
-                    if let Ok(upper_replies) = client
-                        .fetch_events(reply_filter_upper, Duration::from_secs(5))
-                        .await
-                    {
-                        all_replies.extend(upper_replies.into_iter());
-                    }
-                    let mut seen_ids = std::collections::HashSet::new();
-                    let unique_events: Vec<_> = all_replies
-                        .into_iter()
-                        .filter(|event| seen_ids.insert(event.id))
-                        .collect();
+                reply_count.set(replies);
+                repost_count.set(reposts);
+                is_reposted.set(user_has_reposted);
+                let zap_filter = Filter::new()
+                    .kind(Kind::ZapReceipt)
+                    .event(event_id_parsed)
+                    .limit(500);
+                if let Ok(zaps) = client
+                    .fetch_events(zap_filter, Duration::from_secs(5))
+                    .await
+                {
                     let current_user_pubkey = SIGNER_INFO
                         .read()
                         .as_ref()
                         .map(|info| info.public_key.clone());
-                    let mut replies = 0usize;
-                    let mut reposts = 0usize;
-                    let mut user_has_reposted = false;
-                    for event in unique_events.iter() {
-                        match event.kind {
-                            Kind::TextNote | Kind::Comment => replies += 1,
-                            Kind::Repost => {
-                                reposts += 1;
-                                if let Some(ref user_pk) = current_user_pubkey {
-                                    if event.pubkey.to_string() == *user_pk {
-                                        user_has_reposted = true;
+                    let mut user_has_zapped = false;
+                    let total_sats: u64 = zaps
+                        .iter()
+                        .filter_map(|zap_event| {
+                            if let Some(ref user_pk) = current_user_pubkey {
+                                let mut zap_sender_pubkey = zap_event.tags.iter().find_map(|tag| {
+                                    let tag_vec = tag.clone().to_vec();
+                                    if tag_vec.len() >= 2 && tag_vec.first()?.as_str() == "P" {
+                                        Some(tag_vec.get(1)?.as_str().to_string())
+                                    } else {
+                                        None
                                     }
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    reply_count.set(replies);
-                    repost_count.set(reposts);
-                    is_reposted.set(user_has_reposted);
-                    let zap_filter = Filter::new()
-                        .kind(Kind::ZapReceipt)
-                        .event(event_id_parsed)
-                        .limit(500);
-                    if let Ok(zaps) = client
-                        .fetch_events(zap_filter, Duration::from_secs(5))
-                        .await
-                    {
-                        let current_user_pubkey = SIGNER_INFO
-                            .read()
-                            .as_ref()
-                            .map(|info| info.public_key.clone());
-                        let mut user_has_zapped = false;
-                        let total_sats: u64 = zaps
-                            .iter()
-                            .filter_map(|zap_event| {
-                                if let Some(ref user_pk) = current_user_pubkey {
-                                    let mut zap_sender_pubkey = zap_event
-                                        .tags
-                                        .iter()
-                                        .find_map(|tag| {
-                                            let tag_vec = tag.clone().to_vec();
-                                            if tag_vec.len() >= 2 && tag_vec.first()?.as_str() == "P" {
-                                                Some(tag_vec.get(1)?.as_str().to_string())
-                                            } else {
-                                                None
-                                            }
-                                        });
-                                    if zap_sender_pubkey.is_none() {
-                                        zap_sender_pubkey = zap_event
-                                            .tags
-                                            .iter()
-                                            .find_map(|tag| {
-                                                let tag_vec = tag.clone().to_vec();
-                                                if tag_vec.first()?.as_str() == "description" {
-                                                    let zap_request_json = tag_vec.get(1)?.as_str();
-                                                    if let Ok(zap_request) = serde_json::from_str::<
-                                                        serde_json::Value,
-                                                    >(zap_request_json) {
-                                                        return zap_request
-                                                            .get("pubkey")
-                                                            .and_then(|p| p.as_str())
-                                                            .map(|s| s.to_string());
-                                                    }
-                                                }
-                                                None
-                                            });
-                                    }
-                                    if let Some(zap_sender) = zap_sender_pubkey {
-                                        if zap_sender == *user_pk {
-                                            user_has_zapped = true;
-                                        }
-                                    }
-                                }
-                                zap_event
-                                    .tags
-                                    .iter()
-                                    .find_map(|tag| {
+                                });
+                                if zap_sender_pubkey.is_none() {
+                                    zap_sender_pubkey = zap_event.tags.iter().find_map(|tag| {
                                         let tag_vec = tag.clone().to_vec();
                                         if tag_vec.first()?.as_str() == "description" {
                                             let zap_request_json = tag_vec.get(1)?.as_str();
-                                            if let Ok(zap_request) = serde_json::from_str::<
-                                                serde_json::Value,
-                                            >(zap_request_json) {
-                                                if let Some(tags) = zap_request
-                                                    .get("tags")
-                                                    .and_then(|t| t.as_array())
-                                                {
-                                                    for tag_array in tags {
-                                                        if let Some(tag_vals) = tag_array.as_array() {
-                                                            if tag_vals.first().and_then(|v| v.as_str())
-                                                                == Some("amount")
+                                            if let Ok(zap_request) =
+                                                serde_json::from_str::<serde_json::Value>(
+                                                    zap_request_json,
+                                                )
+                                            {
+                                                return zap_request
+                                                    .get("pubkey")
+                                                    .and_then(|p| p.as_str())
+                                                    .map(|s| s.to_string());
+                                            }
+                                        }
+                                        None
+                                    });
+                                }
+                                if let Some(zap_sender) = zap_sender_pubkey {
+                                    if zap_sender == *user_pk {
+                                        user_has_zapped = true;
+                                    }
+                                }
+                            }
+                            zap_event.tags.iter().find_map(|tag| {
+                                let tag_vec = tag.clone().to_vec();
+                                if tag_vec.first()?.as_str() == "description" {
+                                    let zap_request_json = tag_vec.get(1)?.as_str();
+                                    if let Ok(zap_request) =
+                                        serde_json::from_str::<serde_json::Value>(zap_request_json)
+                                    {
+                                        if let Some(tags) =
+                                            zap_request.get("tags").and_then(|t| t.as_array())
+                                        {
+                                            for tag_array in tags {
+                                                if let Some(tag_vals) = tag_array.as_array() {
+                                                    if tag_vals.first().and_then(|v| v.as_str())
+                                                        == Some("amount")
+                                                    {
+                                                        if let Some(amount_str) =
+                                                            tag_vals.get(1).and_then(|v| v.as_str())
+                                                        {
+                                                            if let Ok(millisats) =
+                                                                amount_str.parse::<u64>()
                                                             {
-                                                                if let Some(amount_str) = tag_vals
-                                                                    .get(1)
-                                                                    .and_then(|v| v.as_str())
-                                                                {
-                                                                    if let Ok(millisats) = amount_str.parse::<u64>() {
-                                                                        return Some(millisats / 1000);
-                                                                    }
-                                                                }
+                                                                return Some(millisats / 1000);
                                                             }
                                                         }
                                                     }
                                                 }
                                             }
                                         }
-                                        None
-                                    })
+                                    }
+                                }
+                                None
                             })
-                            .sum();
-                        zap_amount_sats.set(total_sats);
-                        is_zapped.set(user_has_zapped);
+                        })
+                        .sum();
+                    if *counts_fetch_gen.peek() != fetch_gen {
+                        return;
                     }
-                });
-            },
-        ),
-    );
-    use_effect(
-        use_reactive(
-            &author_pubkey_for_fetch,
-            move |pubkey_str| {
-                spawn(async move {
-                    let pubkey = match PublicKey::from_hex(&pubkey_str)
-                        .or_else(|_| PublicKey::from_bech32(&pubkey_str))
-                    {
-                        Ok(pk) => pk,
-                        Err(_) => return,
-                    };
-                    let client = match get_client() {
-                        Some(c) => c,
-                        None => return,
-                    };
-                    let filter = Filter::new()
-                        .author(pubkey)
-                        .kind(Kind::Metadata)
-                        .limit(1);
-                    if let Ok(events) = client
-                        .fetch_events(filter, Duration::from_secs(5))
-                        .await
-                    {
-                        if let Some(event) = events.into_iter().next() {
-                            if let Ok(metadata) = serde_json::from_str::<
-                                nostr_sdk::Metadata,
-                            >(&event.content) {
-                                author_metadata.set(Some(metadata));
+                    zap_amount_sats.set(total_sats);
+                    is_zapped.set(user_has_zapped);
+                }
+            });
+        },
+    ));
+    use_effect(use_reactive(
+        &(author_pubkey_for_fetch, client_initialized),
+        move |(pubkey_str, client_ready)| {
+            if !client_ready {
+                return;
+            }
+            let fetch_gen = author_fetch_gen.with_mut(|gen| {
+                *gen = gen.wrapping_add(1);
+                *gen
+            });
+            spawn(async move {
+                let pubkey = match PublicKey::from_hex(&pubkey_str)
+                    .or_else(|_| PublicKey::from_bech32(&pubkey_str))
+                {
+                    Ok(pk) => pk,
+                    Err(_) => return,
+                };
+                let client = match get_client() {
+                    Some(c) => c,
+                    None => return,
+                };
+                let filter = Filter::new().author(pubkey).kind(Kind::Metadata).limit(1);
+                if let Ok(events) = client.fetch_events(filter, Duration::from_secs(5)).await {
+                    if let Some(event) = events.into_iter().next() {
+                        if let Ok(metadata) =
+                            serde_json::from_str::<nostr_sdk::Metadata>(&event.content)
+                        {
+                            if *author_fetch_gen.peek() != fetch_gen {
+                                return;
                             }
+                            author_metadata.set(Some(metadata));
                         }
                     }
-                });
-            },
-        ),
-    );
+                }
+            });
+        },
+    ));
     let timestamp = format_relative_time_or(created_at.as_secs(), "just now");
     let display_name = author_metadata
         .read()
         .as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
-    let picture_url = author_metadata.read().as_ref().and_then(|m| m.picture.clone());
+    let picture_url = author_metadata
+        .read()
+        .as_ref()
+        .and_then(|m| m.picture.clone());
     let nav = use_navigator();
     let event_id_nav = event_id.clone();
     rsx! {

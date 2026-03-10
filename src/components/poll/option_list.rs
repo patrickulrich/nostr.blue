@@ -13,11 +13,10 @@ pub fn PollOptionList(
     let add_option = move |_| {
         let mut current = options.read().clone();
         if current.len() < 10 {
-            current
-                .push(PollOptionData {
-                    id: generate_option_id(),
-                    text: String::new(),
-                });
+            current.push(PollOptionData {
+                id: generate_option_id(),
+                text: String::new(),
+            });
             on_change.call(current);
         }
     };
@@ -58,7 +57,7 @@ pub fn PollOptionList(
                                     update_option(option_index, evt.value().clone());
                                 },
                                 onmounted: move |_evt| {
-                                    #[cfg(target_arch = "wasm32")]
+                                    #[cfg(feature = "web")]
                                     {
                                         if let Some(element) = _evt.data.downcast::<web_sys::HtmlTextAreaElement>() {
                                             let _ = element.set_attribute("style", "height: auto;");

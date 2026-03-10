@@ -1,13 +1,13 @@
 //! User Pins Page
 //! View and search your pinned content and boards
-use dioxus::prelude::*;
-use std::collections::HashMap;
 use crate::components::board::item_selector::PinToBoardModal;
 use crate::components::{PinBoardMosaicGrid, PinMosaicGrid, PinToBoardRequest};
 use crate::routes::Route;
 use crate::stores::auth_store;
 use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::stores::pin_boards_store::{self, Pin, PinMetadata, Pinboard};
+use dioxus::prelude::*;
+use std::collections::HashMap;
 /// Tab selection for the user pins page
 #[derive(Clone, PartialEq, Default)]
 pub enum UserPinsTab {
@@ -24,9 +24,7 @@ pub fn UserPins() -> Element {
     let mut metadata_map = use_signal(HashMap::<String, PinMetadata>::new);
     let mut pins_loading = use_signal(|| true);
     let mut boards_loading = use_signal(|| true);
-    let mut pin_to_board_request: Signal<Option<PinToBoardRequest>> = use_signal(|| {
-        None
-    });
+    let mut pin_to_board_request: Signal<Option<PinToBoardRequest>> = use_signal(|| None);
     let is_authenticated = auth_store::get_pubkey().is_some();
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -41,8 +39,7 @@ pub fn UserPins() -> Element {
         spawn(async move {
             match pin_boards_store::fetch_my_pins().await {
                 Ok(user_pins) => {
-                    let enriched = pin_boards_store::enrich_pins_metadata(&user_pins)
-                        .await;
+                    let enriched = pin_boards_store::enrich_pins_metadata(&user_pins).await;
                     metadata_map.set(enriched);
                     pins.set(user_pins);
                 }
@@ -73,21 +70,19 @@ pub fn UserPins() -> Element {
             pins.read()
                 .iter()
                 .filter(|p| {
-                    p.title.as_ref().is_some_and(|t| t.to_lowercase().contains(&query))
+                    p.title
+                        .as_ref()
+                        .is_some_and(|t| t.to_lowercase().contains(&query))
                         || p.content.to_lowercase().contains(&query)
                         || p.tags.iter().any(|t| t.to_lowercase().contains(&query))
-                        || meta
-                            .get(&p.event_id)
-                            .is_some_and(|m| {
-                                m
-                                    .title
+                        || meta.get(&p.event_id).is_some_and(|m| {
+                            m.title
+                                .as_ref()
+                                .is_some_and(|t| t.to_lowercase().contains(&query))
+                                || m.summary
                                     .as_ref()
-                                    .is_some_and(|t| t.to_lowercase().contains(&query))
-                                    || m
-                                        .summary
-                                        .as_ref()
-                                        .is_some_and(|s| s.to_lowercase().contains(&query))
-                            })
+                                    .is_some_and(|s| s.to_lowercase().contains(&query))
+                        })
                 })
                 .cloned()
                 .collect()
@@ -103,8 +98,7 @@ pub fn UserPins() -> Element {
                 .iter()
                 .filter(|b| {
                     b.title.to_lowercase().contains(&query)
-                        || b
-                            .description
+                        || b.description
                             .as_ref()
                             .is_some_and(|d| d.to_lowercase().contains(&query))
                         || b.tags.iter().any(|t| t.to_lowercase().contains(&query))

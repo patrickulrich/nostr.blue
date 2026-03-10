@@ -1,9 +1,7 @@
 //! Community Post Composer Component
 //! Modal for creating new posts or replies in a community
 use crate::components::RichContent;
-use crate::stores::community_store::{
-    post_to_community, reply_to_post, Community, CommunityPost,
-};
+use crate::stores::community_store::{post_to_community, reply_to_post, Community, CommunityPost};
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
@@ -11,11 +9,9 @@ use dioxus::prelude::*;
 #[component]
 pub fn CommunityPostComposer(
     community: Community,
-    #[props(default)]
-    reply_to: Option<CommunityPost>,
+    #[props(default)] reply_to: Option<CommunityPost>,
     on_close: EventHandler<()>,
-    #[props(default)]
-    on_success: Option<EventHandler<String>>,
+    #[props(default)] on_success: Option<EventHandler<String>>,
 ) -> Element {
     let mut content = use_signal(String::new);
     let mut posting = use_signal(|| false);
@@ -63,14 +59,32 @@ pub fn CommunityPostComposer(
         });
     };
     let on_close_backdrop = on_close;
-    let confirm_close = move |handler: EventHandler<()>| {
+    #[allow(unused_mut)]
+    let mut confirm_close = move |handler: EventHandler<()>| {
         let has_content = !content.read().trim().is_empty();
         if has_content {
-            let confirmed = web_sys::window()
-                .and_then(|w| {
-                    w.confirm_with_message("You have unsaved content. Discard it?").ok()
-                })
-                .unwrap_or(false);
+            let confirmed = {
+                #[cfg(feature = "web")]
+                {
+                    web_sys::window()
+                        .and_then(|w| {
+                            w.confirm_with_message("You have unsaved content. Discard it?")
+                                .ok()
+                        })
+                        .unwrap_or(false)
+                }
+                #[cfg(not(feature = "web"))]
+                {
+                    // TODO: Implement crate::platform::dialog::confirm_discard for native
+                    // For now, require manual content deletion to prevent accidental data loss
+                    // Show user-visible feedback
+                    error.set(Some(
+                        "Discard not supported on this platform — please delete content manually"
+                            .to_string(),
+                    ));
+                    false
+                }
+            };
             if confirmed {
                 handler.call(());
             }
@@ -83,7 +97,7 @@ pub fn CommunityPostComposer(
     let on_close_for_cancel = on_close;
     rsx! {
         div {
-            class: "fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4",
+            class: "fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4",
             onclick: move |_| confirm_close(on_close_for_backdrop),
             div {
                 class: "bg-background rounded-lg p-6 max-w-lg w-full shadow-xl max-h-[90vh] overflow-y-auto",
@@ -285,8 +299,7 @@ pub fn CommunityPostComposer(
 #[component]
 pub fn CommunityPostComposerInline(
     community: Community,
-    #[props(default)]
-    on_success: Option<EventHandler<String>>,
+    #[props(default)] on_success: Option<EventHandler<String>>,
 ) -> Element {
     let mut content = use_signal(String::new);
     let mut posting = use_signal(|| false);

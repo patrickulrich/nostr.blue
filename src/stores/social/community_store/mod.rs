@@ -20,6 +20,7 @@ mod publish;
 pub use fetch::*;
 pub use publish::*;
 
+use crate::utils::format::truncate_pubkey;
 use dioxus::prelude::*;
 use lru::LruCache;
 use nostr::Event as NostrEvent;
@@ -28,7 +29,6 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::time::Duration;
-use crate::utils::format::truncate_pubkey;
 
 pub const KIND_COMMUNITY_DEFINITION: u16 = 34550;
 pub const KIND_COMMUNITY_POST: u16 = 1111;
@@ -120,9 +120,16 @@ pub enum MembershipStatus {
     Owner,
     Moderator,
     Member,
-    Pending { request_id: String, requested_at: u64 },
-    Declined { reason: Option<String> },
-    Banned { reason: Option<String> },
+    Pending {
+        request_id: String,
+        requested_at: u64,
+    },
+    Declined {
+        reason: Option<String>,
+    },
+    Banned {
+        reason: Option<String>,
+    },
     None,
 }
 
@@ -155,47 +162,39 @@ pub struct CommunityThread {
 }
 
 /// Community definitions cache (keyed by a_tag)
-pub static COMMUNITIES_CACHE: GlobalSignal<LruCache<String, Community>> = GlobalSignal::new(||
-LruCache::new(NonZeroUsize::new(COMMUNITY_CACHE_SIZE).unwrap()));
+pub static COMMUNITIES_CACHE: GlobalSignal<LruCache<String, Community>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(COMMUNITY_CACHE_SIZE).unwrap()));
 
 /// Posts cache (keyed by event_id)
-pub static POSTS_CACHE: GlobalSignal<LruCache<String, CommunityPost>> = GlobalSignal::new(||
-LruCache::new(NonZeroUsize::new(POST_CACHE_SIZE).unwrap()));
+pub static POSTS_CACHE: GlobalSignal<LruCache<String, CommunityPost>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(POST_CACHE_SIZE).unwrap()));
 
 /// Approvals cache (keyed by post event_id -> Vec<Approval>)
-pub static APPROVALS_CACHE: GlobalSignal<HashMap<String, Vec<Approval>>> = GlobalSignal::new(
-    HashMap::new,
-);
+pub static APPROVALS_CACHE: GlobalSignal<HashMap<String, Vec<Approval>>> =
+    GlobalSignal::new(HashMap::new);
 
 /// Removals cache (keyed by post event_id -> Removal)
-pub static REMOVALS_CACHE: GlobalSignal<HashMap<String, Removal>> = GlobalSignal::new(
-    HashMap::new,
-);
+pub static REMOVALS_CACHE: GlobalSignal<HashMap<String, Removal>> = GlobalSignal::new(HashMap::new);
 
 /// Approved members by community (a_tag -> Set of pubkeys)
-pub static APPROVED_MEMBERS_CACHE: GlobalSignal<HashMap<String, HashSet<String>>> = GlobalSignal::new(
-    HashMap::new,
-);
+pub static APPROVED_MEMBERS_CACHE: GlobalSignal<HashMap<String, HashSet<String>>> =
+    GlobalSignal::new(HashMap::new);
 
 /// Pending join requests by community (a_tag -> Vec<JoinRequest>)
-pub static PENDING_JOIN_REQUESTS_CACHE: GlobalSignal<
-    HashMap<String, Vec<JoinRequest>>,
-> = GlobalSignal::new(HashMap::new);
+pub static PENDING_JOIN_REQUESTS_CACHE: GlobalSignal<HashMap<String, Vec<JoinRequest>>> =
+    GlobalSignal::new(HashMap::new);
 
 /// User's own pending join requests (a_tag -> JoinRequest)
-pub static USER_PENDING_REQUESTS: GlobalSignal<HashMap<String, JoinRequest>> = GlobalSignal::new(
-    HashMap::new,
-);
+pub static USER_PENDING_REQUESTS: GlobalSignal<HashMap<String, JoinRequest>> =
+    GlobalSignal::new(HashMap::new);
 
 /// Declined members by community (a_tag -> Set of pubkeys)
-pub static DECLINED_MEMBERS_CACHE: GlobalSignal<HashMap<String, HashSet<String>>> = GlobalSignal::new(
-    HashMap::new,
-);
+pub static DECLINED_MEMBERS_CACHE: GlobalSignal<HashMap<String, HashSet<String>>> =
+    GlobalSignal::new(HashMap::new);
 
 /// Banned members by community (a_tag -> Set of pubkeys)
-pub static BANNED_MEMBERS_CACHE: GlobalSignal<HashMap<String, HashSet<String>>> = GlobalSignal::new(
-    HashMap::new,
-);
+pub static BANNED_MEMBERS_CACHE: GlobalSignal<HashMap<String, HashSet<String>>> =
+    GlobalSignal::new(HashMap::new);
 
 /// Whether community store is initialized
 pub static COMMUNITY_INITIALIZED: GlobalSignal<bool> = GlobalSignal::new(|| false);
@@ -212,12 +211,17 @@ pub fn get_cached_community(a_tag: &str) -> Option<Community> {
 /// Get a community from cache by naddr
 pub fn get_cached_community_by_naddr(naddr: &str) -> Option<Community> {
     let cache = COMMUNITIES_CACHE.read();
-    cache.iter().find(|(_, comm)| comm.naddr == naddr).map(|(_, comm)| comm.clone())
+    cache
+        .iter()
+        .find(|(_, comm)| comm.naddr == naddr)
+        .map(|(_, comm)| comm.clone())
 }
 
 /// Cache a community
 pub fn cache_community(community: Community) {
-    COMMUNITIES_CACHE.write().put(community.a_tag.clone(), community);
+    COMMUNITIES_CACHE
+        .write()
+        .put(community.a_tag.clone(), community);
 }
 
 /// Cache multiple communities
@@ -261,9 +265,7 @@ pub fn parse_community_event(event: &NostrEvent) -> Option<Community> {
     let d_tag = event
         .tags
         .iter()
-        .find(|t| {
-            t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D))
-        })
+        .find(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)))
         .and_then(|t| t.content())
         .map(|s| s.to_string())?;
     let name = extract_tag_value(&event.tags, "name");
@@ -287,10 +289,7 @@ pub fn parse_community_event(event: &NostrEvent) -> Option<Community> {
         event.pubkey.to_hex(),
         d_tag,
     );
-    let naddr = match Coordinate::new(
-            Kind::Custom(KIND_COMMUNITY_DEFINITION),
-            event.pubkey,
-        )
+    let naddr = match Coordinate::new(Kind::Custom(KIND_COMMUNITY_DEFINITION), event.pubkey)
         .identifier(&d_tag)
         .to_bech32()
     {
@@ -315,10 +314,7 @@ pub fn parse_community_event(event: &NostrEvent) -> Option<Community> {
 }
 
 /// Parse community post (kind 1111 or 1)
-pub fn parse_community_post(
-    event: &NostrEvent,
-    community_a_tag: &str,
-) -> Option<CommunityPost> {
+pub fn parse_community_post(event: &NostrEvent, community_a_tag: &str) -> Option<CommunityPost> {
     let kind = event.kind.as_u16();
     if kind != KIND_COMMUNITY_POST && kind != 1 {
         return None;
@@ -334,8 +330,8 @@ pub fn parse_community_post(
     if post_community != Some(&community_a_tag.to_string()) {
         return None;
     }
-    let is_top_level = big_a_tag == small_a_tag
-        || event.tags.iter().all(|t| t.kind() != TagKind::e());
+    let is_top_level =
+        big_a_tag == small_a_tag || event.tags.iter().all(|t| t.kind() != TagKind::e());
     let parent_id = event
         .tags
         .iter()
@@ -484,16 +480,11 @@ pub fn get_user_role(user_pubkey: &str, community: &Community) -> UserRole {
 }
 
 /// Check if a post should be auto-approved based on author's role
-pub fn compute_approval_status(
-    post: &CommunityPost,
-    community: &Community,
-) -> ApprovalStatus {
+pub fn compute_approval_status(post: &CommunityPost, community: &Community) -> ApprovalStatus {
     let role = get_user_role(&post.pubkey, community);
     match role {
         UserRole::Owner => ApprovalStatus::AutoApproved(AutoApprovalReason::Owner),
-        UserRole::Moderator => {
-            ApprovalStatus::AutoApproved(AutoApprovalReason::Moderator)
-        }
+        UserRole::Moderator => ApprovalStatus::AutoApproved(AutoApprovalReason::Moderator),
         UserRole::ApprovedMember => {
             ApprovalStatus::AutoApproved(AutoApprovalReason::ApprovedMember)
         }
@@ -531,10 +522,7 @@ pub fn can_moderate(user_pubkey: &str, community: &Community) -> bool {
 
 /// Get detailed membership status for a user in a community
 /// Checks: Owner > Moderator > Member > Banned > Declined > Pending > None
-pub fn get_membership_status(
-    user_pubkey: &str,
-    community: &Community,
-) -> MembershipStatus {
+pub fn get_membership_status(user_pubkey: &str, community: &Community) -> MembershipStatus {
     if community.pubkey == user_pubkey {
         return MembershipStatus::Owner;
     }
@@ -551,18 +539,14 @@ pub fn get_membership_status(
     let banned_members = BANNED_MEMBERS_CACHE.read();
     if let Some(banned) = banned_members.get(&community.a_tag) {
         if banned.contains(user_pubkey) {
-            return MembershipStatus::Banned {
-                reason: None,
-            };
+            return MembershipStatus::Banned { reason: None };
         }
     }
     drop(banned_members);
     let declined_members = DECLINED_MEMBERS_CACHE.read();
     if let Some(declined) = declined_members.get(&community.a_tag) {
         if declined.contains(user_pubkey) {
-            return MembershipStatus::Declined {
-                reason: None,
-            };
+            return MembershipStatus::Declined { reason: None };
         }
     }
     drop(declined_members);
@@ -622,41 +606,42 @@ pub fn sort_communities_by_membership(
             }
         })
         .collect();
-    result
-        .sort_by(|a, b| {
-            match (a.is_pinned, b.is_pinned) {
-                (true, false) => return std::cmp::Ordering::Less,
-                (false, true) => return std::cmp::Ordering::Greater,
-                _ => {}
+    result.sort_by(|a, b| {
+        match (a.is_pinned, b.is_pinned) {
+            (true, false) => return std::cmp::Ordering::Less,
+            (false, true) => return std::cmp::Ordering::Greater,
+            _ => {}
+        }
+        let priority = |status: &MembershipStatus| -> u8 {
+            match status {
+                MembershipStatus::Owner => 0,
+                MembershipStatus::Moderator => 1,
+                MembershipStatus::Member => 2,
+                MembershipStatus::Pending { .. } => 3,
+                MembershipStatus::Declined { .. } => 4,
+                MembershipStatus::Banned { .. } => 5,
+                MembershipStatus::None => 6,
             }
-            let priority = |status: &MembershipStatus| -> u8 {
-                match status {
-                    MembershipStatus::Owner => 0,
-                    MembershipStatus::Moderator => 1,
-                    MembershipStatus::Member => 2,
-                    MembershipStatus::Pending { .. } => 3,
-                    MembershipStatus::Declined { .. } => 4,
-                    MembershipStatus::Banned { .. } => 5,
-                    MembershipStatus::None => 6,
-                }
-            };
-            let a_priority = priority(&a.membership_status);
-            let b_priority = priority(&b.membership_status);
-            match a_priority.cmp(&b_priority) {
-                std::cmp::Ordering::Equal => {
-                    let a_name = a.community.name.as_ref().unwrap_or(&a.community.d_tag);
-                    let b_name = b.community.name.as_ref().unwrap_or(&b.community.d_tag);
-                    a_name.to_lowercase().cmp(&b_name.to_lowercase())
-                }
-                other => other,
+        };
+        let a_priority = priority(&a.membership_status);
+        let b_priority = priority(&b.membership_status);
+        match a_priority.cmp(&b_priority) {
+            std::cmp::Ordering::Equal => {
+                let a_name = a.community.name.as_ref().unwrap_or(&a.community.d_tag);
+                let b_name = b.community.name.as_ref().unwrap_or(&b.community.d_tag);
+                a_name.to_lowercase().cmp(&b_name.to_lowercase())
             }
-        });
+            other => other,
+        }
+    });
     result
 }
 
 /// Build filter for fetching communities (with optional limit)
 pub fn communities_filter(limit: usize) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_COMMUNITY_DEFINITION)).limit(limit)
+    Filter::new()
+        .kind(Kind::Custom(KIND_COMMUNITY_DEFINITION))
+        .limit(limit)
 }
 
 /// Build filter for a specific community by coordinate
@@ -694,11 +679,7 @@ pub fn top_level_posts_filter(community_a_tag: &str, limit: usize) -> Filter {
 }
 
 /// Build filter for replies to a specific post
-pub fn replies_filter(
-    parent_event_id: &str,
-    community_a_tag: &str,
-    limit: usize,
-) -> Filter {
+pub fn replies_filter(parent_event_id: &str, community_a_tag: &str, limit: usize) -> Filter {
     Filter::new()
         .kinds(vec![Kind::Comment, Kind::TextNote])
         .custom_tag(SingleLetterTag::uppercase(Alphabet::A), community_a_tag)
@@ -725,11 +706,17 @@ pub fn removals_filter_by_community(community_a_tag: &str) -> Filter {
 pub fn approved_members_filter(community_a_tag: &str) -> Filter {
     let parts: Vec<&str> = community_a_tag.splitn(3, ':').collect();
     if parts.len() != 3 {
-        return Filter::new().kind(Kind::Custom(KIND_APPROVED_MEMBERS)).limit(0);
+        return Filter::new()
+            .kind(Kind::Custom(KIND_APPROVED_MEMBERS))
+            .limit(0);
     }
     let pubkey = match PublicKey::from_hex(parts[1]) {
         Ok(pk) => pk,
-        Err(_) => return Filter::new().kind(Kind::Custom(KIND_APPROVED_MEMBERS)).limit(0),
+        Err(_) => {
+            return Filter::new()
+                .kind(Kind::Custom(KIND_APPROVED_MEMBERS))
+                .limit(0)
+        }
     };
     Filter::new()
         .kind(Kind::Custom(KIND_APPROVED_MEMBERS))
@@ -743,7 +730,10 @@ pub fn approved_members_filter(community_a_tag: &str) -> Filter {
 pub fn build_community_thread_tree(posts: Vec<CommunityPost>) -> Vec<CommunityThread> {
     let mut children_map: HashMap<Option<String>, Vec<CommunityPost>> = HashMap::new();
     for post in posts {
-        children_map.entry(post.parent_id.clone()).or_default().push(post);
+        children_map
+            .entry(post.parent_id.clone())
+            .or_default()
+            .push(post);
     }
     for posts_vec in children_map.values_mut() {
         posts_vec.sort_by(|a, b| a.created_at.cmp(&b.created_at));
@@ -763,12 +753,7 @@ pub fn build_community_thread_tree(posts: Vec<CommunityPost>) -> Vec<CommunityTh
                     .iter()
                     .map(|post| CommunityThread {
                         post: post.clone(),
-                        replies: build_tree(
-                            Some(post.id.clone()),
-                            map,
-                            depth + 1,
-                            max_depth,
-                        ),
+                        replies: build_tree(Some(post.id.clone()), map, depth + 1, max_depth),
                         depth,
                     })
                     .collect()
@@ -783,10 +768,7 @@ pub fn build_community_thread_tree(posts: Vec<CommunityPost>) -> Vec<CommunityTh
 /// Flatten a thread tree back to a list (for sequential rendering with depth)
 pub fn flatten_thread_tree(tree: Vec<CommunityThread>) -> Vec<(CommunityPost, usize)> {
     let mut result = Vec::new();
-    fn flatten_recursive(
-        threads: Vec<CommunityThread>,
-        result: &mut Vec<(CommunityPost, usize)>,
-    ) {
+    fn flatten_recursive(threads: Vec<CommunityThread>, result: &mut Vec<(CommunityPost, usize)>) {
         for thread in threads {
             result.push((thread.post, thread.depth));
             flatten_recursive(thread.replies, result);

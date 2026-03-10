@@ -2,10 +2,6 @@
 //!
 //! Functions for initializing the wallet, checking/accepting terms,
 //! and creating new wallets.
-use std::time::Duration;
-use dioxus::prelude::*;
-use nostr_sdk::signer::NostrSigner;
-use nostr_sdk::{Event, EventBuilder, Filter, Kind, PublicKey, SecretKey, Tag, Url};
 use super::events::{fetch_tokens, start_pending_events_processor};
 use super::history::fetch_history;
 use super::internal::{init_multi_mint_wallet, inject_nip60_proofs_to_cdk};
@@ -14,6 +10,10 @@ use super::signals::{TERMS_ACCEPTED, TERMS_D_TAG, WALLET_STATE, WALLET_STATUS};
 use super::types::{WalletState, WalletStatus};
 use super::utils::normalize_mint_url;
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
+use dioxus::prelude::*;
+use nostr_sdk::signer::NostrSigner;
+use nostr_sdk::{Event, EventBuilder, Filter, Kind, PublicKey, SecretKey, Tag, Url};
+use std::time::Duration;
 struct WalletEvent {
     privkey: String,
     mints: Vec<Url>,
@@ -28,8 +28,7 @@ impl WalletEvent {
 pub async fn check_terms_accepted() -> Result<bool, String> {
     log::info!("Checking Cashu wallet terms acceptance (NIP-78)...");
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pubkey = PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
@@ -45,8 +44,8 @@ pub async fn check_terms_accepted() -> Result<bool, String> {
         Ok(events) => {
             let accepted = !events.is_empty();
             log::info!(
-                "Terms acceptance check: {}", if accepted { "accepted" } else {
-                "not accepted" }
+                "Terms acceptance check: {}",
+                if accepted { "accepted" } else { "not accepted" }
             );
             *TERMS_ACCEPTED.write() = Some(accepted);
             Ok(accepted)
@@ -69,10 +68,9 @@ pub async fn accept_terms() -> Result<(), String> {
         .ok_or("Client not initialized")?
         .clone();
     nostr_client::ensure_relays_ready(&client).await;
-    let now = (js_sys::Date::now() / 1000.0) as u64;
+    let now = crate::platform::timestamp::now_secs();
     let content = serde_json::json!({ "accepted_at" : now, "version" : 1 }).to_string();
-    let builder = EventBuilder::new(Kind::from(30078), content)
-        .tag(Tag::identifier(TERMS_D_TAG));
+    let builder = EventBuilder::new(Kind::from(30078), content).tag(Tag::identifier(TERMS_D_TAG));
     client
         .send_event_builder(builder)
         .await
@@ -89,7 +87,7 @@ pub async fn init_wallet() -> Result<(), String> {
             *status,
             WalletStatus::Loading | WalletStatus::Ready | WalletStatus::Recovering
         ) {
-            log::debug!("Wallet init skipped - already {:?}", * status);
+            log::debug!("Wallet init skipped - already {:?}", *status);
             return Ok(());
         }
         *status = WalletStatus::Loading;
@@ -100,19 +98,19 @@ pub async fn init_wallet() -> Result<(), String> {
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-    let pubkey = PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     log::info!("Loading Cashu wallet for {}", pubkey_str);
-    let filter = Filter::new().author(pubkey).kind(Kind::from(17375)).limit(1);
+    let filter = Filter::new()
+        .author(pubkey)
+        .kind(Kind::from(17375))
+        .limit(1);
     nostr_client::ensure_relays_ready(&client).await;
     match client.fetch_events(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             if let Some(wallet_event) = events.into_iter().next() {
                 match decrypt_wallet_event(&wallet_event).await {
                     Ok(wallet_data) => {
-                        log::info!(
-                            "Wallet loaded with {} mints", wallet_data.mints.len()
-                        );
+                        log::info!("Wallet loaded with {} mints", wallet_data.mints.len());
                         *WALLET_STATE.write() = Some(WalletState {
                             privkey: Some(wallet_data.privkey.clone()),
                             mints: wallet_data
@@ -122,8 +120,7 @@ pub async fn init_wallet() -> Result<(), String> {
                                 .collect(),
                             initialized: true,
                         });
-                        if let Err(e) = init_multi_mint_wallet(&wallet_data.mints).await
-                        {
+                        if let Err(e) = init_multi_mint_wallet(&wallet_data.mints).await {
                             log::error!("Failed to initialize MultiMintWallet: {}", e);
                         }
                         if let Err(e) = fetch_tokens().await {
@@ -146,12 +143,9 @@ pub async fn init_wallet() -> Result<(), String> {
                         start_pending_events_processor();
                         *WALLET_STATUS.write() = WalletStatus::Recovering;
                         spawn(async move {
-                            #[cfg(target_arch = "wasm32")]
-                            gloo_timers::future::TimeoutFuture::new(500).await;
+                            crate::platform::timer::sleep_ms(500).await;
                             super::signals::cleanup_expired_pending_secrets().await;
-                            match super::recovery::sync_orphaned_cdk_proofs_to_nostr()
-                                .await
-                            {
+                            match super::recovery::sync_orphaned_cdk_proofs_to_nostr().await {
                                 Ok(result) => {
                                     if result.proofs_recovered > 0 {
                                         log::info!(
@@ -169,23 +163,20 @@ pub async fn init_wallet() -> Result<(), String> {
                                     log::warn!("Orphan sync failed: {}", e);
                                 }
                             }
-                            log::info!(
-                                "Starting wallet recovery - syncing with mints..."
-                            );
+                            log::info!("Starting wallet recovery - syncing with mints...");
                             if let Err(e) = sync_state_with_all_mints().await {
                                 log::warn!("Mint sync during recovery failed: {}", e);
                             }
                             if let Err(e) = recover_pending_operations().await {
                                 log::warn!("Pending operation recovery failed: {}", e);
                             }
-                            match super::recovery::recover_all_pending_melt_quotes()
-                                .await
-                            {
+                            match super::recovery::recover_all_pending_melt_quotes().await {
                                 Ok(result) => {
                                     if result.quotes_paid > 0 || result.change_recovered > 0 {
                                         log::info!(
                                             "In-flight melt recovery: {} paid, {} sats recovered",
-                                            result.quotes_paid, result.change_recovered
+                                            result.quotes_paid,
+                                            result.change_recovered
                                         );
                                     }
                                     if !result.errors.is_empty() {
@@ -198,13 +189,14 @@ pub async fn init_wallet() -> Result<(), String> {
                                     log::warn!("In-flight melt quote recovery failed: {}", e);
                                 }
                             }
-                            let result = super::proof_recovery::run_full_recovery()
-                                .await;
+                            let result = super::proof_recovery::run_full_recovery().await;
                             if result.recovered_count > 0 || result.spent_count > 0 {
                                 log::info!(
                                     "Proof recovery: {} recovered ({} sats), {} spent ({} sats)",
-                                    result.recovered_count, result.recovered_value, result
-                                    .spent_count, result.spent_value
+                                    result.recovered_count,
+                                    result.recovered_value,
+                                    result.spent_count,
+                                    result.spent_value
                                 );
                             }
                             if !result.errors.is_empty() {
@@ -212,15 +204,15 @@ pub async fn init_wallet() -> Result<(), String> {
                                     log::warn!("Proof recovery error: {}", err);
                                 }
                             }
-                            if let Some(multi_wallet) = cashu_cdk_bridge::MULTI_WALLET
-                                .read()
-                                .as_ref()
+                            if let Some(multi_wallet) =
+                                cashu_cdk_bridge::MULTI_WALLET.read().as_ref()
                             {
                                 match multi_wallet.check_all_mint_quotes(None).await {
                                     Ok(amount) => {
                                         if u64::from(amount) > 0 {
                                             log::info!(
-                                                "Recovered {} sats from paid mint quotes", u64::from(amount)
+                                                "Recovered {} sats from paid mint quotes",
+                                                u64::from(amount)
                                             );
                                             let _ = cashu_cdk_bridge::sync_wallet_state().await;
                                         }
@@ -266,9 +258,7 @@ pub async fn init_wallet() -> Result<(), String> {
 /// Create a new wallet with generated P2PK key
 pub async fn create_wallet(mints: Vec<String>) -> Result<(), String> {
     if is_wallet_initialized() {
-        return Err(
-            "Wallet already exists. Cannot overwrite existing wallet.".to_string(),
-        );
+        return Err("Wallet already exists. Cannot overwrite existing wallet.".to_string());
     }
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
@@ -282,8 +272,7 @@ pub async fn create_wallet(mints: Vec<String>) -> Result<(), String> {
         .ok_or("No signer available")?
         .as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pubkey = PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let wallet_secret = SecretKey::generate();
     let wallet_privkey = wallet_secret.to_secret_hex();
     log::info!("Creating new wallet with {} mints", mints.len());
@@ -330,7 +319,11 @@ pub async fn create_wallet(mints: Vec<String>) -> Result<(), String> {
 }
 /// Check if wallet is initialized
 pub fn is_wallet_initialized() -> bool {
-    WALLET_STATE.read().as_ref().map(|w| w.initialized).unwrap_or(false)
+    WALLET_STATE
+        .read()
+        .as_ref()
+        .map(|w| w.initialized)
+        .unwrap_or(false)
 }
 /// Decrypt wallet event (kind 17375)
 ///
@@ -351,7 +344,8 @@ async fn decrypt_wallet_event(event: &Event) -> Result<WalletEvent, String> {
     for pair in pairs {
         if pair.len() != 2 {
             log::warn!(
-                "Skipping malformed wallet event entry with {} elements", pair.len()
+                "Skipping malformed wallet event entry with {} elements",
+                pair.len()
             );
             continue;
         }
@@ -363,29 +357,23 @@ async fn decrypt_wallet_event(event: &Event) -> Result<WalletEvent, String> {
                     privkey = pair[1].clone();
                 }
             }
-            "mint" => {
-                match Url::parse(&pair[1]) {
-                    Ok(mint_url) => mints.push(mint_url),
-                    Err(e) => {
-                        log::warn!("Skipping invalid mint URL '{}': {}", pair[1], e);
-                    }
+            "mint" => match Url::parse(&pair[1]) {
+                Ok(mint_url) => mints.push(mint_url),
+                Err(e) => {
+                    log::warn!("Skipping invalid mint URL '{}': {}", pair[1], e);
                 }
-            }
+            },
             _ => {}
         }
     }
     if found_multiple_privkeys {
-        return Err(
-            "Wallet event contains multiple privkeys (invalid per NIP-60)".to_string(),
-        );
+        return Err("Wallet event contains multiple privkeys (invalid per NIP-60)".to_string());
     }
     if privkey.is_empty() {
         return Err("Missing required field: privkey".to_string());
     }
     if mints.is_empty() {
-        return Err(
-            "Missing required field: mint (at least one mint URL required)".to_string(),
-        );
+        return Err("Missing required field: mint (at least one mint URL required)".to_string());
     }
     Ok(WalletEvent::new(privkey, mints))
 }
@@ -406,7 +394,10 @@ async fn load_pending_events() -> Result<(), String> {
         log::debug!("No pending events found in IndexedDB");
         return Ok(());
     }
-    log::info!("Loaded {} pending events from IndexedDB", pending_events.len());
+    log::info!(
+        "Loaded {} pending events from IndexedDB",
+        pending_events.len()
+    );
     let mut events = PENDING_NOSTR_EVENTS.write();
     for event in pending_events {
         if !events.iter().any(|e| e.id == event.id) {

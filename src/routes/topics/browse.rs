@@ -1,9 +1,7 @@
 //! Topics Browse Page
 //! Grid of TopicCards for discovery with search and subscribe
 use crate::components::{TopicCard, TopicSidebar};
-use crate::stores::topic_store::{
-    discover_topics, is_topic_subscribed, TopicInfo,
-};
+use crate::stores::topic_store::{discover_topics, is_topic_subscribed, TopicInfo};
 use dioxus::prelude::*;
 
 #[component]

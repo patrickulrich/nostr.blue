@@ -142,8 +142,7 @@ pub fn CodeRepoEditFile(naddr: String, git_ref: String, path: Vec<String>) -> El
                                     if *gen.peek() != current_gen {
                                         return;
                                     }
-                                    error_message
-                                        .set(Some(format!("Failed to load file: {}", e)));
+                                    error_message.set(Some(format!("Failed to load file: {}", e)));
                                     file_load_failed.set(true);
                                 }
                             }
@@ -153,10 +152,7 @@ pub fn CodeRepoEditFile(naddr: String, git_ref: String, path: Vec<String>) -> El
                             if *gen.peek() != current_gen {
                                 return;
                             }
-                            error_message.set(Some(format!(
-                                "Failed to load repository: {}",
-                                e
-                            )));
+                            error_message.set(Some(format!("Failed to load repository: {}", e)));
                             repo_result.set(Some(Err(e)));
                             loading.set(false);
                             file_loading.set(false);
@@ -453,9 +449,14 @@ async fn submit_edit_file(
     }
 
     // Validate path (interpolated into diff header)
-    if path.contains('\n') || path.contains('\r') || path.contains('\0')
-        || path.split('/').any(|s| s == ".." || s == "." || s.is_empty())
-        || path.starts_with('/') || path.contains('\\')
+    if path.contains('\n')
+        || path.contains('\r')
+        || path.contains('\0')
+        || path
+            .split('/')
+            .any(|s| s == ".." || s == "." || s.is_empty())
+        || path.starts_with('/')
+        || path.contains('\\')
     {
         return Err("Invalid file path".to_string());
     }
@@ -480,8 +481,13 @@ async fn submit_edit_file(
         .await
         .map_err(|e| format!("Failed to get public key: {}", e))?;
 
-    let diff_content =
-        build_edit_file_diff(path, old_content, new_content, &pubkey.to_hex(), commit_message);
+    let diff_content = build_edit_file_diff(
+        path,
+        old_content,
+        new_content,
+        &pubkey.to_hex(),
+        commit_message,
+    );
 
     let builder = EventBuilder::new(Kind::GitPatch, &diff_content)
         .tag(Tag::coordinate(coordinate.clone(), None))

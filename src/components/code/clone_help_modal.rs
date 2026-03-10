@@ -1,9 +1,13 @@
 //! Clone Help Modal Component
 //!
 //! Shows tabbed clone instructions for SSH, HTTPS, and Nostr protocols.
-use dioxus::prelude::*;
 use crate::utils::clipboard::copy_to_clipboard;
+use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
+
+fn is_ssh_clone_url(url: &str) -> bool {
+    url.starts_with("ssh://") || (url.contains('@') && url.contains(':') && !url.contains("://"))
+}
 
 /// Clone help modal with tabbed URL display
 #[component]
@@ -12,16 +16,19 @@ pub fn CloneHelpModal(
     naddr: String,
     on_close: EventHandler<()>,
 ) -> Element {
-    let initial_tab = if clone_urls.iter().any(|u| u.starts_with("https://") || u.starts_with("http://")) {
+    let initial_tab = if clone_urls
+        .iter()
+        .any(|u| u.starts_with("https://") || u.starts_with("http://"))
+    {
         "https"
-    } else if clone_urls.iter().any(|u| u.starts_with("ssh://") || u.starts_with("git@")) {
+    } else if clone_urls.iter().any(|u| is_ssh_clone_url(u)) {
         "ssh"
     } else if clone_urls.iter().any(|u| u.starts_with("git://")) {
         "git"
     } else if clone_urls.iter().any(|u| u.starts_with("nostr:")) {
         "nostr"
     } else if let Some(first) = clone_urls.first() {
-        if first.starts_with("ssh://") || first.contains('@') {
+        if is_ssh_clone_url(first) {
             "ssh"
         } else if first.starts_with("git://") {
             "git"
@@ -34,12 +41,15 @@ pub fn CloneHelpModal(
     let mut active_tab = use_signal(move || initial_tab);
 
     // Categorize URLs
-    let ssh_urls: Vec<&String> = clone_urls.iter().filter(|u| {
-        u.starts_with("ssh://")
-            || (u.contains('@') && u.contains(':') && !u.contains("://"))
-    }).collect();
-    let https_urls: Vec<&String> = clone_urls.iter().filter(|u| u.starts_with("https://") || u.starts_with("http://")).collect();
-    let git_urls: Vec<&String> = clone_urls.iter().filter(|u| u.starts_with("git://")).collect();
+    let ssh_urls: Vec<&String> = clone_urls.iter().filter(|u| is_ssh_clone_url(u)).collect();
+    let https_urls: Vec<&String> = clone_urls
+        .iter()
+        .filter(|u| u.starts_with("https://") || u.starts_with("http://"))
+        .collect();
+    let git_urls: Vec<&String> = clone_urls
+        .iter()
+        .filter(|u| u.starts_with("git://"))
+        .collect();
     let nostr_url = format!("nostr:{}", naddr);
 
     rsx! {
@@ -153,7 +163,11 @@ pub fn CloneHelpModal(
 }
 
 #[component]
-fn TabButton(label: &'static str, tab_id: &'static str, active_tab: Signal<&'static str>) -> Element {
+fn TabButton(
+    label: &'static str,
+    tab_id: &'static str,
+    active_tab: Signal<&'static str>,
+) -> Element {
     let is_active = *active_tab.read() == tab_id;
     let class = if is_active {
         "px-3 py-2 text-sm font-medium text-primary border-b-2 border-primary -mb-px"

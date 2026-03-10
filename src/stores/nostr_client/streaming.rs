@@ -1,14 +1,14 @@
 //! Progressive event streaming
 //!
 //! Functions for streaming events with callbacks for progressive UI updates.
-use crate::error::NostrBlueError;
-use dioxus::prelude::ReadableExt;
-use nostr_sdk::prelude::*;
-use std::time::Duration;
 use super::fetching::{ensure_relays_ready, fetch_events_aggregated_outbox, get_client};
 use super::platform_sleep_ms;
 use super::signals::HAS_SIGNER;
+use crate::error::NostrBlueError;
 use crate::stores::relay::USER_RELAYS_APPLIED;
+use dioxus::prelude::ReadableExt;
+use nostr_sdk::prelude::*;
+use std::time::Duration;
 /// Stream events progressively with a callback for each event
 ///
 /// Unlike fetch_events which waits for all events, this function calls the
@@ -34,8 +34,10 @@ where
     use futures::StreamExt;
     let client = get_client().ok_or("Client not initialized")?;
     crate::stores::relay::wait_for_user_relays(
-        Duration::from_millis(500), "stream_events_with_callback"
-    ).await;
+        Duration::from_millis(500),
+        "stream_events_with_callback",
+    )
+    .await;
     ensure_relays_ready(&client).await;
     let mut stream = client
         .stream_events(filter, timeout)
@@ -81,8 +83,10 @@ where
     }
     let client = get_client().ok_or("Client not initialized")?;
     crate::stores::relay::wait_for_user_relays(
-        Duration::from_millis(500), "stream_events_with_batches"
-    ).await;
+        Duration::from_millis(500),
+        "stream_events_with_batches",
+    )
+    .await;
     ensure_relays_ready(&client).await;
     let filter_authors = filter.authors.clone();
     let author_set: Option<std::collections::HashSet<_>> = filter_authors
@@ -116,10 +120,14 @@ where
     if filtered_count > 0 {
         log::info!(
             "Stream completed: {} accepted events ({} filtered out from non-matching authors)",
-            accepted_count, filtered_count
+            accepted_count,
+            filtered_count
         );
     } else {
-        log::info!("Stream completed: received {} events in batches", accepted_count);
+        log::info!(
+            "Stream completed: received {} events in batches",
+            accepted_count
+        );
     }
     Ok(accepted_count)
 }
@@ -158,8 +166,8 @@ where
         return stream_events_batched(filter, timeout, batch_size, on_batch).await;
     }
     log::info!(
-        "Fast streaming from {} connected relays (bypassing gossip)", connected_urls
-        .len()
+        "Fast streaming from {} connected relays (bypassing gossip)",
+        connected_urls.len()
     );
     let filter_authors = filter.authors.clone();
     let author_set: Option<std::collections::HashSet<_>> = filter_authors
@@ -193,11 +201,13 @@ where
     if filtered_count > 0 {
         log::info!(
             "Fast stream completed: {} accepted events ({} filtered out from non-followed authors)",
-            accepted_count, filtered_count
+            accepted_count,
+            filtered_count
         );
     } else {
         log::info!(
-            "Fast stream completed: {} events from connected relays", accepted_count
+            "Fast stream completed: {} events from connected relays",
+            accepted_count
         );
     }
     Ok(accepted_count)
@@ -223,8 +233,10 @@ where
 
     // Wait for user relay lists if signer is present
     crate::stores::relay::wait_for_user_relays(
-        Duration::from_millis(500), "stream_events_immediate"
-    ).await;
+        Duration::from_millis(500),
+        "stream_events_immediate",
+    )
+    .await;
     ensure_relays_ready(&client).await;
 
     let relays = client.relays().await;
@@ -242,9 +254,7 @@ where
             .as_ref()
             .map(|authors| authors.iter().collect());
 
-        let mut stream = client
-            .stream_events(filter, timeout)
-            .await?;
+        let mut stream = client.stream_events(filter, timeout).await?;
 
         let mut count = 0;
         while let Some(event) = stream.next().await {

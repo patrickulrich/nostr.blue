@@ -1,13 +1,11 @@
 use crate::components::icons::ArrowLeftIcon;
 use crate::components::{
-    AlbumCard, AlbumCardSkeleton, ArtistCard, ArtistCardSkeleton, TrackCard,
-    UnifiedTrackCard, UnifiedTrackCardSkeleton,
+    AlbumCard, AlbumCardSkeleton, ArtistCard, ArtistCardSkeleton, TrackCard, UnifiedTrackCard,
+    UnifiedTrackCardSkeleton,
 };
 use crate::routes::Route;
 use crate::services::podcast_index;
-use crate::services::wavlake::{
-    WavlakeAPI, WavlakePlaylist, WavlakeSearchResult, WavlakeTrack,
-};
+use crate::services::wavlake::{WavlakeAPI, WavlakePlaylist, WavlakeSearchResult, WavlakeTrack};
 use crate::stores::music_player::{self, MusicTrack};
 use crate::stores::nostr_music;
 use crate::stores::profiles;
@@ -54,67 +52,156 @@ pub fn MusicSearch(q: String) -> Element {
     let mut playlist = use_signal(|| None::<WavlakePlaylist>);
     let mut playlist_loading = use_signal(|| false);
     let mut playlist_error = use_signal(|| None::<String>);
-    use_effect(
-        use_reactive!(
-            | q | { let search_query = q.clone(); if search_query.is_empty() {
-            wavlake_tracks.set(Vec::new()); nostr_tracks.set(Vec::new());
-            rss_music_tracks.set(Vec::new()); artist_results.set(Vec::new());
-            nostr_artist_results.set(Vec::new()); album_results.set(Vec::new()); loading
-            .set(false); nostr_loading.set(false); nostr_artist_loading.set(false);
-            rss_loading.set(false); return; } loading.set(true); nostr_loading.set(true);
-            nostr_artist_loading.set(true); rss_loading.set(true); error.set(None); let
-            query_for_wavlake = search_query.clone(); let query_for_nostr = search_query
-            .clone(); let query_for_nostr_artists = search_query.clone(); let
-            query_for_rss = search_query.clone(); spawn(async move {
-            log::info!("Wavlake search for: {}", query_for_wavlake); let api =
-            WavlakeAPI::new(); match api.search_content(& query_for_wavlake). await {
-            Ok(results) => { let mut tracks = Vec::new(); let mut artists = Vec::new();
-            let mut albums = Vec::new(); for result in results { match result.result_type
-            .as_str() { "track" => tracks.push(result), "artist" => artists.push(result
-            .clone()), "album" => albums.push(result.clone()), _ => {} } }
-            log::info!("Found {} Wavlake tracks, {} artists, {} albums", tracks.len(),
-            artists.len(), albums.len()); let api =
-            std::sync::Arc::new(WavlakeAPI::new()); let track_futures : Vec < _ > =
-            tracks.into_iter().map(| track_result | { let api = api.clone(); async move {
-            match api.get_track(& track_result.id). await { Ok(track) => Some(track),
-            Err(e) => { log::warn!("Failed to fetch track {}: {}", track_result.id, e);
-            None } } } }).collect(); let full_tracks : Vec < WavlakeTrack > =
-            futures::future::join_all(track_futures). await .into_iter().flatten()
-            .collect(); let wavlake_music_tracks : Vec < MusicTrack > = full_tracks
-            .into_iter().map(| t | t.into()).collect(); wavlake_tracks
-            .set(wavlake_music_tracks); artist_results.set(artists); album_results
-            .set(albums); loading.set(false); } Err(e) => {
-            log::error!("Wavlake search failed: {}", e); error
-            .set(Some(format!("Search failed: {}", e))); loading.set(false); } } });
-            spawn(async move { if crate ::stores::nostr_client::get_client().is_none() {
-            log::debug!("Nostr client not initialized, skipping nostr search");
-            nostr_loading.set(false); return; } log::info!("Nostr music search for: {}",
-            query_for_nostr); match nostr_music::search_nostr_tracks(& query_for_nostr,
-            100). await { Ok(tracks) => { log::info!("Found {} nostr tracks", tracks
-            .len()); let nostr_music_tracks : Vec < MusicTrack > = tracks.into_iter()
-            .map(| t | t.into()).collect(); nostr_tracks.set(nostr_music_tracks);
-            nostr_loading.set(false); } Err(e) => { log::warn!("Nostr search failed: {}",
-            e); nostr_loading.set(false); } } }); spawn(async move { if crate
-            ::stores::nostr_client::get_client().is_none() {
-            log::debug!("Nostr client not initialized, skipping nostr artist search");
-            nostr_artist_loading.set(false); return; }
-            log::info!("Nostr artist search for: {}", query_for_nostr_artists); match
-            nostr_music::search_nostr_artists(& query_for_nostr_artists, 50). await {
-            Ok(artists) => { log::info!("Found {} nostr artists", artists.len());
-            nostr_artist_results.set(artists); nostr_artist_loading.set(false); } Err(e)
-            => { log::warn!("Nostr artist search failed: {}", e); nostr_artist_loading
-            .set(false); } } }); spawn(async move {
-            log::info!("RSS music search for: {}", query_for_rss); match
-            podcast_index::search_music(& query_for_rss, Some(20)). await { Ok(albums) =>
-            { log::info!("Found {} RSS music albums", albums.len()); let mut tracks =
-            Vec::new(); for album in albums.iter().take(10) { if let Ok(episodes) =
-            podcast_index::get_episodes_by_feed_id(album.id, Some(3), None). await { for ep in
-            & episodes { tracks.push(MusicTrack::from_rss_music_track(ep, album)); } } }
-            rss_music_tracks.set(tracks); rss_loading.set(false); } Err(e) => {
-            log::warn!("RSS music search failed: {}", e); rss_loading.set(false); } } });
+    use_effect(use_reactive!(|q| {
+        let search_query = q.clone();
+        if search_query.is_empty() {
+            wavlake_tracks.set(Vec::new());
+            nostr_tracks.set(Vec::new());
+            rss_music_tracks.set(Vec::new());
+            artist_results.set(Vec::new());
+            nostr_artist_results.set(Vec::new());
+            album_results.set(Vec::new());
+            loading.set(false);
+            nostr_loading.set(false);
+            nostr_artist_loading.set(false);
+            rss_loading.set(false);
+            return;
+        }
+        loading.set(true);
+        nostr_loading.set(true);
+        nostr_artist_loading.set(true);
+        rss_loading.set(true);
+        error.set(None);
+        let query_for_wavlake = search_query.clone();
+        let query_for_nostr = search_query.clone();
+        let query_for_nostr_artists = search_query.clone();
+        let query_for_rss = search_query.clone();
+        spawn(async move {
+            log::info!("Wavlake search for: {}", query_for_wavlake);
+            let api = WavlakeAPI::new();
+            match api.search_content(&query_for_wavlake).await {
+                Ok(results) => {
+                    let mut tracks = Vec::new();
+                    let mut artists = Vec::new();
+                    let mut albums = Vec::new();
+                    for result in results {
+                        match result.result_type.as_str() {
+                            "track" => tracks.push(result),
+                            "artist" => artists.push(result.clone()),
+                            "album" => albums.push(result.clone()),
+                            _ => {}
+                        }
+                    }
+                    log::info!(
+                        "Found {} Wavlake tracks, {} artists, {} albums",
+                        tracks.len(),
+                        artists.len(),
+                        albums.len()
+                    );
+                    let api = std::sync::Arc::new(WavlakeAPI::new());
+                    let track_futures: Vec<_> = tracks
+                        .into_iter()
+                        .map(|track_result| {
+                            let api = api.clone();
+                            async move {
+                                match api.get_track(&track_result.id).await {
+                                    Ok(track) => Some(track),
+                                    Err(e) => {
+                                        log::warn!(
+                                            "Failed to fetch track {}: {}",
+                                            track_result.id,
+                                            e
+                                        );
+                                        None
+                                    }
+                                }
+                            }
+                        })
+                        .collect();
+                    let full_tracks: Vec<WavlakeTrack> = futures::future::join_all(track_futures)
+                        .await
+                        .into_iter()
+                        .flatten()
+                        .collect();
+                    let wavlake_music_tracks: Vec<MusicTrack> =
+                        full_tracks.into_iter().map(|t| t.into()).collect();
+                    wavlake_tracks.set(wavlake_music_tracks);
+                    artist_results.set(artists);
+                    album_results.set(albums);
+                    loading.set(false);
+                }
+                Err(e) => {
+                    log::error!("Wavlake search failed: {}", e);
+                    error.set(Some(format!("Search failed: {}", e)));
+                    loading.set(false);
+                }
             }
-        ),
-    );
+        });
+        spawn(async move {
+            if crate::stores::nostr_client::get_client().is_none() {
+                log::debug!("Nostr client not initialized, skipping nostr search");
+                nostr_loading.set(false);
+                return;
+            }
+            log::info!("Nostr music search for: {}", query_for_nostr);
+            match nostr_music::search_nostr_tracks(&query_for_nostr, 100).await {
+                Ok(tracks) => {
+                    log::info!("Found {} nostr tracks", tracks.len());
+                    let nostr_music_tracks: Vec<MusicTrack> =
+                        tracks.into_iter().map(|t| t.into()).collect();
+                    nostr_tracks.set(nostr_music_tracks);
+                    nostr_loading.set(false);
+                }
+                Err(e) => {
+                    log::warn!("Nostr search failed: {}", e);
+                    nostr_loading.set(false);
+                }
+            }
+        });
+        spawn(async move {
+            if crate::stores::nostr_client::get_client().is_none() {
+                log::debug!("Nostr client not initialized, skipping nostr artist search");
+                nostr_artist_loading.set(false);
+                return;
+            }
+            log::info!("Nostr artist search for: {}", query_for_nostr_artists);
+            match nostr_music::search_nostr_artists(&query_for_nostr_artists, 50).await {
+                Ok(artists) => {
+                    log::info!("Found {} nostr artists", artists.len());
+                    nostr_artist_results.set(artists);
+                    nostr_artist_loading.set(false);
+                }
+                Err(e) => {
+                    log::warn!("Nostr artist search failed: {}", e);
+                    nostr_artist_loading.set(false);
+                }
+            }
+        });
+        spawn(async move {
+            log::info!("RSS music search for: {}", query_for_rss);
+            match podcast_index::search_music(&query_for_rss, Some(20)).await {
+                Ok(albums) => {
+                    log::info!("Found {} RSS music albums", albums.len());
+                    let mut tracks = Vec::new();
+                    for album in albums.iter().take(10) {
+                        if let Ok(episodes) =
+                            podcast_index::get_episodes_by_feed_id(album.id, Some(3), None).await
+                        {
+                            for ep in &episodes {
+                                tracks.push(MusicTrack::from_rss_music_track(ep, album));
+                            }
+                        }
+                    }
+                    rss_music_tracks.set(tracks);
+                    rss_loading.set(false);
+                }
+                Err(e) => {
+                    log::warn!("RSS music search failed: {}", e);
+                    rss_loading.set(false);
+                }
+            }
+        });
+    }));
     let tabs = [
         MusicSearchTab::Tracks,
         MusicSearchTab::Artists,
@@ -371,12 +458,12 @@ pub fn MusicSearch(q: String) -> Element {
 #[component]
 fn NostrArtistCard(pubkey: String, profile: profiles::Profile) -> Element {
     let artist_name = profile.get_display_name();
-    let artist_image = profile
-        .picture
-        .clone()
-        .unwrap_or_else(|| {
-            format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", &pubkey)
-        });
+    let artist_image = profile.picture.clone().unwrap_or_else(|| {
+        format!(
+            "https://api.dicebear.com/7.x/identicon/svg?seed={}",
+            &pubkey
+        )
+    });
     rsx! {
         Link {
             to: Route::MusicArtist {

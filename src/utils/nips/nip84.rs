@@ -36,9 +36,15 @@ pub struct Highlight {
 #[derive(Clone, Debug, PartialEq)]
 pub enum HighlightSource {
     /// Nostr article reference (from "a" tag) - format: "kind:pubkey:identifier"
-    Article { coordinate: String, relay_hint: Option<String> },
+    Article {
+        coordinate: String,
+        relay_hint: Option<String>,
+    },
     /// Nostr event reference (from "e" tag)
-    Event { event_id: String, relay_hint: Option<String> },
+    Event {
+        event_id: String,
+        relay_hint: Option<String>,
+    },
     /// URL reference (from "r" tag)
     Url(String),
     /// No source specified
@@ -132,44 +138,36 @@ fn parse_highlight_source(event: &NostrEvent) -> HighlightSource {
 }
 /// Helper to extract a tag value by name
 fn get_tag_value(event: &NostrEvent, tag_name: &str) -> Option<String> {
-    event
-        .tags
-        .iter()
-        .find_map(|tag| {
-            let slice = tag.as_slice();
-            if slice.first().map(|s| s.as_str()) == Some(tag_name) {
-                slice.get(1).map(|s| s.to_string())
-            } else {
-                None
-            }
-        })
+    event.tags.iter().find_map(|tag| {
+        let slice = tag.as_slice();
+        if slice.first().map(|s| s.as_str()) == Some(tag_name) {
+            slice.get(1).map(|s| s.to_string())
+        } else {
+            None
+        }
+    })
 }
 /// Check if event has a specific hashtag
 pub fn has_hashtag(event: &NostrEvent, hashtag: &str) -> bool {
-    event
-        .tags
-        .iter()
-        .any(|tag| {
-            let slice = tag.as_slice();
-            slice.first().map(|s| s.as_str()) == Some("t")
-                && slice.get(1).map(|s| s.as_str()) == Some(hashtag)
-        })
+    event.tags.iter().any(|tag| {
+        let slice = tag.as_slice();
+        slice.first().map(|s| s.as_str()) == Some("t")
+            && slice.get(1).map(|s| s.as_str()) == Some(hashtag)
+    })
 }
 /// Fetch highlights by a specific user
-pub async fn fetch_user_highlights(
-    pubkey: &PublicKey,
-) -> Result<Vec<Highlight>, String> {
+pub async fn fetch_user_highlights(pubkey: &PublicKey) -> Result<Vec<Highlight>, String> {
     let client = nostr_client::get_client().ok_or("Nostr client not initialized")?;
     nostr_client::ensure_relays_ready(&client).await;
-    let filter = Filter::new().author(*pubkey).kind(highlight_kind()).limit(100);
+    let filter = Filter::new()
+        .author(*pubkey)
+        .kind(highlight_kind())
+        .limit(100);
     let events = client
         .fetch_events(filter, Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch highlights: {}", e))?;
-    let mut highlights: Vec<Highlight> = events
-        .iter()
-        .filter_map(parse_highlight)
-        .collect();
+    let mut highlights: Vec<Highlight> = events.iter().filter_map(parse_highlight).collect();
     highlights.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     Ok(highlights)
 }
@@ -177,15 +175,15 @@ pub async fn fetch_user_highlights(
 pub async fn fetch_highlights_by_url(url: &str) -> Result<Vec<Highlight>, String> {
     let client = nostr_client::get_client().ok_or("Nostr client not initialized")?;
     nostr_client::ensure_relays_ready(&client).await;
-    let filter = Filter::new().kind(highlight_kind()).reference(url).limit(100);
+    let filter = Filter::new()
+        .kind(highlight_kind())
+        .reference(url)
+        .limit(100);
     let events = client
         .fetch_events(filter, Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch highlights: {}", e))?;
-    let mut highlights: Vec<Highlight> = events
-        .iter()
-        .filter_map(parse_highlight)
-        .collect();
+    let mut highlights: Vec<Highlight> = events.iter().filter_map(parse_highlight).collect();
     highlights.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     Ok(highlights)
 }
@@ -199,7 +197,10 @@ pub async fn fetch_highlights_by_authors(
 ) -> Result<Vec<Highlight>, String> {
     let client = nostr_client::get_client().ok_or("Nostr client not initialized")?;
     nostr_client::ensure_relays_ready(&client).await;
-    let mut filter = Filter::new().authors(authors).kind(highlight_kind()).limit(limit);
+    let mut filter = Filter::new()
+        .authors(authors)
+        .kind(highlight_kind())
+        .limit(limit);
     if let Some(ts) = until {
         filter = filter.until(Timestamp::from_secs(ts));
     }
@@ -214,15 +215,15 @@ pub async fn fetch_highlights_by_authors(
         client.fetch_events(filter, Duration::from_secs(10)).await
     } else {
         log::info!(
-            "Fast fetching highlights from {} connected relays", connected_urls.len()
+            "Fast fetching highlights from {} connected relays",
+            connected_urls.len()
         );
-        client.fetch_events_from(connected_urls, filter, Duration::from_secs(10)).await
+        client
+            .fetch_events_from(connected_urls, filter, Duration::from_secs(10))
+            .await
     }
-        .map_err(|e| format!("Failed to fetch highlights: {}", e))?;
-    let mut highlights: Vec<Highlight> = events
-        .iter()
-        .filter_map(parse_highlight)
-        .collect();
+    .map_err(|e| format!("Failed to fetch highlights: {}", e))?;
+    let mut highlights: Vec<Highlight> = events.iter().filter_map(parse_highlight).collect();
     highlights.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     Ok(highlights)
 }
@@ -241,10 +242,7 @@ pub async fn fetch_global_highlights(
         .fetch_events(filter, Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch highlights: {}", e))?;
-    let mut highlights: Vec<Highlight> = events
-        .iter()
-        .filter_map(parse_highlight)
-        .collect();
+    let mut highlights: Vec<Highlight> = events.iter().filter_map(parse_highlight).collect();
     highlights.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     Ok(highlights)
 }
@@ -264,7 +262,10 @@ pub async fn create_highlight(
     nostr_client::ensure_relays_ready(&client).await;
     let mut tags = Vec::new();
     match &source {
-        HighlightSource::Article { coordinate, relay_hint } => {
+        HighlightSource::Article {
+            coordinate,
+            relay_hint,
+        } => {
             let mut tag_parts = vec!["a".to_string(), coordinate.clone()];
             if let Some(relay) = relay_hint {
                 tag_parts.push(relay.clone());
@@ -272,7 +273,10 @@ pub async fn create_highlight(
             tag_parts.push("source".to_string());
             tags.push(Tag::parse(&tag_parts).map_err(|e| e.to_string())?);
         }
-        HighlightSource::Event { event_id, relay_hint } => {
+        HighlightSource::Event {
+            event_id,
+            relay_hint,
+        } => {
             let mut tag_parts = vec!["e".to_string(), event_id.clone()];
             if let Some(relay) = relay_hint {
                 tag_parts.push(relay.clone());
@@ -281,33 +285,27 @@ pub async fn create_highlight(
             tags.push(Tag::parse(&tag_parts).map_err(|e| e.to_string())?);
         }
         HighlightSource::Url(url) => {
-            tags.push(
-                Tag::custom(
-                    TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R)),
-                    vec![url.as_str(), "source"],
-                ),
-            );
+            tags.push(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R)),
+                vec![url.as_str(), "source"],
+            ));
         }
         HighlightSource::Unknown => {}
     }
     if let Some(ctx) = context {
         if !ctx.trim().is_empty() {
-            tags.push(
-                Tag::custom(
-                    TagKind::Custom(Cow::Owned("context".to_string())),
-                    [ctx.to_string()],
-                ),
-            );
+            tags.push(Tag::custom(
+                TagKind::Custom(Cow::Owned("context".to_string())),
+                [ctx.to_string()],
+            ));
         }
     }
     if let Some(cmt) = comment {
         if !cmt.trim().is_empty() {
-            tags.push(
-                Tag::custom(
-                    TagKind::Custom(Cow::Owned("comment".to_string())),
-                    [cmt.to_string()],
-                ),
-            );
+            tags.push(Tag::custom(
+                TagKind::Custom(Cow::Owned("comment".to_string())),
+                [cmt.to_string()],
+            ));
         }
     }
     for hashtag in hashtags {

@@ -3,11 +3,11 @@
 //! Functions for publishing events to specific relays.
 //! Note: With NIP-65 gossip routing, SDK handles relay selection automatically.
 //! These functions are available for advanced use cases but not typically needed.
-use dioxus::prelude::ReadableExt;
-use nostr_sdk::prelude::*;
 use super::fetching::get_client;
 use super::signals::HAS_SIGNER;
 use super::types::PublishResult;
+use dioxus::prelude::ReadableExt;
+use nostr_sdk::prelude::*;
 /// Parse relay URLs with validation logging and deduplication
 ///
 /// Returns validated, deduplicated URLs and logs warnings for any invalid URLs.
@@ -57,8 +57,10 @@ pub async fn publish_note_to_relays(
         .map_err(|e| format!("Failed to publish: {}", e))?;
     let result = PublishResult::from_output(output);
     log::info!(
-        "Note published to specific relays: {} ({}/{} relays succeeded)", result
-        .event_id, result.success_count(), result.total_attempted()
+        "Note published to specific relays: {} ({}/{} relays succeeded)",
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
     );
     if result.has_failures() {
         for (relay, error) in &result.failed_relays {
@@ -86,8 +88,7 @@ pub async fn publish_reaction_to_relays(
             Ok(Nip19::EventId(id)) => id,
             Ok(Nip19::Event(e)) => e.event_id,
             _ => {
-                nostr::EventId::parse(&event_id)
-                    .map_err(|e| format!("Invalid event ID: {}", e))?
+                nostr::EventId::parse(&event_id).map_err(|e| format!("Invalid event ID: {}", e))?
             }
         }
     };
@@ -108,8 +109,10 @@ pub async fn publish_reaction_to_relays(
         .map_err(|e| format!("Failed to publish reaction: {}", e))?;
     let result = PublishResult::from_output(output);
     log::info!(
-        "Reaction published to specific relays: {} ({}/{} relays succeeded)", result
-        .event_id, result.success_count(), result.total_attempted()
+        "Reaction published to specific relays: {} ({}/{} relays succeeded)",
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
     );
     if result.has_failures() {
         for (relay, error) in &result.failed_relays {
@@ -134,8 +137,10 @@ pub async fn send_presigned_event_to_relays(
         .map_err(|e| format!("Failed to send event: {}", e))?;
     let result = PublishResult::from_output(output);
     log::info!(
-        "Pre-signed event sent to specific relays: {} ({}/{} relays succeeded)", result
-        .event_id, result.success_count(), result.total_attempted()
+        "Pre-signed event sent to specific relays: {} ({}/{} relays succeeded)",
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
     );
     if result.has_failures() {
         for (relay, error) in &result.failed_relays {

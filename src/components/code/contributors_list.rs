@@ -11,10 +11,8 @@ use std::collections::HashSet;
 pub fn ContributorsList(
     owner: String,
     maintainers: Vec<String>,
-    #[props(default = None)]
-    issue_count: Option<u32>,
-    #[props(default = None)]
-    pr_count: Option<u32>,
+    #[props(default = None)] issue_count: Option<u32>,
+    #[props(default = None)] pr_count: Option<u32>,
 ) -> Element {
     // Deduplicate maintainers while preserving original order, excluding the owner
     let mut seen = HashSet::new();
@@ -81,7 +79,8 @@ fn ContributorRow(pk: String, role: String, role_class: String) -> Element {
     let display_name = profile
         .as_ref()
         .and_then(|p| {
-            p.display_name.as_ref()
+            p.display_name
+                .as_ref()
                 .filter(|s| !s.trim().is_empty())
                 .or(p.name.as_ref().filter(|s| !s.trim().is_empty()))
         })

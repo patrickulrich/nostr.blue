@@ -40,7 +40,11 @@ pub fn DiscoverRecipeCard(recipe: CachedRecipe) -> Element {
         .read()
         .as_ref()
         .and_then(|m| m.picture.clone());
-    let avatar_letter = display_name.chars().next().unwrap_or('?').to_ascii_uppercase();
+    let avatar_letter = display_name
+        .chars()
+        .next()
+        .unwrap_or('?')
+        .to_ascii_uppercase();
     rsx! {
         div { class: "group relative rounded-xl overflow-hidden hover:scale-[1.02] transition-transform duration-200 w-56 h-72 shrink-0 cursor-pointer",
             Link {

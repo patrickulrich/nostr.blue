@@ -9,7 +9,10 @@ pub fn is_repost(event: &Event) -> bool {
 /// original event in their content field
 pub fn extract_reposted_event(repost: &Event) -> Result<Event, String> {
     if !is_repost(repost) {
-        return Err(format!("Event is not a repost (kind {})", repost.kind.as_u16()));
+        return Err(format!(
+            "Event is not a repost (kind {})",
+            repost.kind.as_u16()
+        ));
     }
     Event::from_json(&repost.content)
         .map_err(|e| format!("Failed to parse repost content as event JSON: {}", e))
@@ -41,16 +44,20 @@ impl FeedItem {
     pub fn sort_timestamp(&self) -> Timestamp {
         match self {
             FeedItem::OriginalPost(event) => event.created_at,
-            FeedItem::Repost { repost_timestamp, .. } => *repost_timestamp,
+            FeedItem::Repost {
+                repost_timestamp, ..
+            } => *repost_timestamp,
         }
     }
     /// Get repost metadata if this is a repost
     pub fn repost_info(&self) -> Option<(PublicKey, Timestamp)> {
         match self {
             FeedItem::OriginalPost(_) => None,
-            FeedItem::Repost { reposted_by, repost_timestamp, .. } => {
-                Some((*reposted_by, *repost_timestamp))
-            }
+            FeedItem::Repost {
+                reposted_by,
+                repost_timestamp,
+                ..
+            } => Some((*reposted_by, *repost_timestamp)),
         }
     }
 }
@@ -82,9 +89,7 @@ pub fn process_events_to_feed_items(events: Vec<Event>) -> Vec<FeedItem> {
             if !is_reply {
                 feed_items.push(FeedItem::OriginalPost(event));
             }
-        } else if event.kind == Kind::Comment
-            && crate::stores::topic_store::is_topic_post(&event)
-        {
+        } else if event.kind == Kind::Comment && crate::stores::topic_store::is_topic_post(&event) {
             // Include topic posts (kind 1111 with NIP-73 hashtag I tags) in the feed
             // Only root topic posts (not replies)
             let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
@@ -121,7 +126,9 @@ mod tests {
     }
     fn create_test_event(kind: Kind, content: &str) -> Event {
         let keys = test_keys();
-        EventBuilder::new(kind, content).sign_with_keys(&keys).unwrap()
+        EventBuilder::new(kind, content)
+            .sign_with_keys(&keys)
+            .unwrap()
     }
     #[test]
     fn test_is_repost_kind_6() {

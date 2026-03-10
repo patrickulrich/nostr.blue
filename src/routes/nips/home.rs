@@ -73,9 +73,7 @@ pub fn NipsHome() -> Element {
                     match github_nips::fetch_nips_readme().await {
                         Ok(readme) => {
                             let nips = github_nips::parse_nips_from_readme(&readme);
-                            let kinds = github_nips::parse_event_kinds_from_readme(
-                                &readme,
-                            );
+                            let kinds = github_nips::parse_event_kinds_from_readme(&readme);
                             official_nips.set(nips);
                             event_kinds.set(kinds);
                         }
@@ -85,47 +83,41 @@ pub fn NipsHome() -> Element {
                         }
                     }
                 }
-                DocsTab::NUTs => {
-                    match github_nips::fetch_nuts_readme().await {
-                        Ok(readme) => {
-                            let parsed = github_nips::parse_nuts_from_readme(&readme);
-                            nuts.set(parsed);
-                        }
-                        Err(e) => {
-                            log::error!("Failed to fetch NUTs README: {}", e);
-                            error.set(Some(e));
-                        }
+                DocsTab::NUTs => match github_nips::fetch_nuts_readme().await {
+                    Ok(readme) => {
+                        let parsed = github_nips::parse_nuts_from_readme(&readme);
+                        nuts.set(parsed);
                     }
-                }
-                DocsTab::BUDs => {
-                    match github_nips::fetch_buds_readme().await {
-                        Ok(readme) => {
-                            let parsed = github_nips::parse_buds_from_readme(&readme);
-                            buds.set(parsed);
-                        }
-                        Err(e) => {
-                            log::error!("Failed to fetch BUDs README: {}", e);
-                            error.set(Some(e));
-                        }
+                    Err(e) => {
+                        log::error!("Failed to fetch NUTs README: {}", e);
+                        error.set(Some(e));
                     }
-                }
+                },
+                DocsTab::BUDs => match github_nips::fetch_buds_readme().await {
+                    Ok(readme) => {
+                        let parsed = github_nips::parse_buds_from_readme(&readme);
+                        buds.set(parsed);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to fetch BUDs README: {}", e);
+                        error.set(Some(e));
+                    }
+                },
                 DocsTab::NKBIPs => {
                     // NKBIPs README has no structured list — synchronous hardcoded
                     // parse avoids a network fetch, so no loading state is needed.
                     let parsed = github_nips::parse_nkbips_from_readme("");
                     nkbips.set(parsed);
                 }
-                DocsTab::Market => {
-                    match github_nips::fetch_market_spec().await {
-                        Ok(content) => {
-                            market_spec_content.set(Some(content));
-                        }
-                        Err(e) => {
-                            log::error!("Failed to fetch market spec: {}", e);
-                            error.set(Some(e));
-                        }
+                DocsTab::Market => match github_nips::fetch_market_spec().await {
+                    Ok(content) => {
+                        market_spec_content.set(Some(content));
                     }
-                }
+                    Err(e) => {
+                        log::error!("Failed to fetch market spec: {}", e);
+                        error.set(Some(e));
+                    }
+                },
                 DocsTab::Custom => {
                     if client_initialized {
                         match nostr_client::fetch_custom_nips(50, None).await {
@@ -148,8 +140,7 @@ pub fn NipsHome() -> Element {
         });
     });
     let load_more = move || {
-        if *loading.read() || !*has_more.read() || *active_tab.read() != DocsTab::Custom
-        {
+        if *loading.read() || !*has_more.read() || *active_tab.read() != DocsTab::Custom {
             return;
         }
         let until = *oldest_timestamp.read();
@@ -212,8 +203,7 @@ pub fn NipsHome() -> Element {
             .read()
             .iter()
             .filter(|n| {
-                n.title.to_lowercase().contains(&query)
-                    || n.number.to_lowercase().contains(&query)
+                n.title.to_lowercase().contains(&query) || n.number.to_lowercase().contains(&query)
             })
             .cloned()
             .collect::<Vec<_>>()
@@ -227,8 +217,7 @@ pub fn NipsHome() -> Element {
             .read()
             .iter()
             .filter(|n| {
-                n.title.to_lowercase().contains(&query)
-                    || n.number.to_lowercase().contains(&query)
+                n.title.to_lowercase().contains(&query) || n.number.to_lowercase().contains(&query)
             })
             .cloned()
             .collect::<Vec<_>>()
@@ -284,8 +273,7 @@ pub fn NipsHome() -> Element {
         nuts.read()
             .iter()
             .filter(|n| {
-                n.title.to_lowercase().contains(&query)
-                    || n.number.to_lowercase().contains(&query)
+                n.title.to_lowercase().contains(&query) || n.number.to_lowercase().contains(&query)
             })
             .cloned()
             .collect::<Vec<_>>()
@@ -298,8 +286,7 @@ pub fn NipsHome() -> Element {
         buds.read()
             .iter()
             .filter(|b| {
-                b.title.to_lowercase().contains(&query)
-                    || b.number.to_lowercase().contains(&query)
+                b.title.to_lowercase().contains(&query) || b.number.to_lowercase().contains(&query)
             })
             .cloned()
             .collect::<Vec<_>>()
@@ -313,8 +300,7 @@ pub fn NipsHome() -> Element {
             .read()
             .iter()
             .filter(|n| {
-                n.title.to_lowercase().contains(&query)
-                    || n.number.to_lowercase().contains(&query)
+                n.title.to_lowercase().contains(&query) || n.number.to_lowercase().contains(&query)
             })
             .cloned()
             .collect::<Vec<_>>()
@@ -659,11 +645,7 @@ pub fn NipsHome() -> Element {
 }
 /// Empty state component
 #[component]
-fn EmptyState(
-    icon: &'static str,
-    title: &'static str,
-    description: &'static str,
-) -> Element {
+fn EmptyState(icon: &'static str, title: &'static str, description: &'static str) -> Element {
     rsx! {
         div { class: "text-center py-12",
             div { class: "text-6xl mb-4", "{icon}" }
@@ -676,9 +658,7 @@ fn EmptyState(
 #[component]
 pub fn NipNew() -> Element {
     let navigator = navigator();
-    let is_authenticated = use_memo(move || {
-        auth_store::AUTH_STATE.read().is_authenticated
-    });
+    let is_authenticated = use_memo(move || auth_store::AUTH_STATE.read().is_authenticated);
     use_effect(move || {
         if !*is_authenticated.read() {
             navigator.push(crate::routes::Route::NipsHome {});
@@ -711,8 +691,10 @@ pub fn NipNew() -> Element {
             .collect()
     };
     let can_publish = use_memo(move || {
-        !title.read().is_empty() && !identifier.read().is_empty()
-            && !content.read().is_empty() && !*is_publishing.read()
+        !title.read().is_empty()
+            && !identifier.read().is_empty()
+            && !content.read().is_empty()
+            && !*is_publishing.read()
     });
     let handle_publish = move |_| {
         if !*can_publish.read() {
@@ -726,12 +708,12 @@ pub fn NipNew() -> Element {
         error.set(None);
         spawn(async move {
             match nostr_client::publish_custom_nip(
-                    title_val,
-                    content_val,
-                    identifier_val.clone(),
-                    related_kinds,
-                )
-                .await
+                title_val,
+                content_val,
+                identifier_val.clone(),
+                related_kinds,
+            )
+            .await
             {
                 Ok(_event_id) => {
                     is_publishing.set(false);
@@ -742,10 +724,7 @@ pub fn NipNew() -> Element {
                                 &identifier_val,
                                 vec![],
                             ) {
-                                navigator
-                                    .push(crate::routes::Route::NipDetail {
-                                        nip_id: naddr,
-                                    });
+                                navigator.push(crate::routes::Route::NipDetail { nip_id: naddr });
                                 return;
                             }
                         }

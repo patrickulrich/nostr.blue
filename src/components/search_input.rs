@@ -1,11 +1,11 @@
-use dioxus::prelude::Event as DioxusEvent;
-use dioxus::prelude::*;
-use dioxus_core::Task;
-use nostr_sdk::prelude::*;
 use crate::routes::Route;
 use crate::services::profile_search::{
     get_contact_pubkeys, search_cached_profiles, search_profiles, ProfileSearchResult,
 };
+use dioxus::prelude::Event as DioxusEvent;
+use dioxus::prelude::*;
+use dioxus_core::Task;
+use nostr_sdk::prelude::*;
 #[component]
 pub fn SearchInput() -> Element {
     let mut query = use_signal(String::new);
@@ -41,15 +41,7 @@ pub fn SearchInput() -> Element {
             }
             let query_snapshot = new_value.clone();
             let new_task = spawn(async move {
-                #[cfg(target_family = "wasm")]
-                {
-                    gloo_timers::future::TimeoutFuture::new(300).await;
-                }
-                #[cfg(not(target_family = "wasm"))]
-                {
-                    use std::time::Duration;
-                    tokio::time::sleep(Duration::from_millis(300)).await;
-                }
+                crate::platform::timer::sleep_ms(300).await;
                 let query_relays = query_snapshot.len() >= 3;
                 match search_profiles(&query_snapshot, 10, query_relays).await {
                     Ok(results) => {
@@ -97,10 +89,7 @@ pub fn SearchInput() -> Element {
                         let selected = results.get(*selected_index.read());
                         if let Some(profile) = selected {
                             let pubkey_hex = profile.pubkey.to_hex();
-                            navigator
-                                .push(Route::Profile {
-                                    pubkey: pubkey_hex,
-                                });
+                            navigator.push(Route::Profile { pubkey: pubkey_hex });
                             query.set(String::new());
                             show_dropdown.set(false);
                         }

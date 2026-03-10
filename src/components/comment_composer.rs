@@ -28,11 +28,7 @@ pub fn CommentComposer(
     let content_len = content.read().len();
     let media_len = if !uploaded_media.read().is_empty() {
         let separator_len = if content_len > 0 { 2 } else { 0 };
-        let urls_with_newlines: usize = uploaded_media
-            .read()
-            .iter()
-            .map(|url| url.len() + 1)
-            .sum();
+        let urls_with_newlines: usize = uploaded_media.read().iter().map(|url| url.len() + 1).sum();
         separator_len + urls_with_newlines
     } else {
         0

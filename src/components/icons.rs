@@ -1437,10 +1437,7 @@ pub fn PrinterIcon(props: IconProps) -> Element {
 }
 /// Nostr.blue mini logo - small "N" in blue circle for minicard previews
 #[component]
-pub fn NostrBlueMiniLogo(
-    #[props(default = "w-3 h-3".to_string())]
-    class: String,
-) -> Element {
+pub fn NostrBlueMiniLogo(#[props(default = "w-3 h-3".to_string())] class: String) -> Element {
     rsx! {
         svg {
             class: "{class} opacity-50 hover:opacity-100 cursor-pointer transition-opacity",

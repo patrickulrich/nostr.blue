@@ -8,9 +8,8 @@ use crate::stores::{dms, nostr_client};
 use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, EventBuilder, FromBech32, Kind, PublicKey};
 use std::sync::atomic::{AtomicU32, Ordering};
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
-use wasm_bindgen::JsValue;
 /// Global counter for generating unique modal IDs
 static LIVE_SHARE_MODAL_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
 #[derive(Clone, Copy, PartialEq)]
@@ -31,9 +30,7 @@ pub fn LiveStreamShareModal(
     /// Handler to close the modal
     on_close: EventHandler<()>,
 ) -> Element {
-    let modal_id = use_signal(|| {
-        LIVE_SHARE_MODAL_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
-    });
+    let modal_id = use_signal(|| LIVE_SHARE_MODAL_ID_COUNTER.fetch_add(1, Ordering::Relaxed));
     let mut share_mode = use_signal(|| ShareMode::Main);
     let mut copied = use_signal(|| false);
     let mut nostr_text = use_signal(String::new);
@@ -48,18 +45,14 @@ pub fn LiveStreamShareModal(
     let has_signer = use_memo(move || *HAS_SIGNER.read());
     #[allow(unused_variables)]
     fn get_cursor_position(textarea_id: &str) -> usize {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
             if let Some(window) = web_sys::window() {
                 if let Some(document) = window.document() {
                     if let Some(element) = document.get_element_by_id(textarea_id) {
-                        if let Some(textarea) = element
-                            .dyn_ref::<web_sys::HtmlTextAreaElement>()
-                        {
-                            return textarea
-                                .selection_start()
-                                .unwrap_or(Some(0))
-                                .unwrap_or(0) as usize;
+                        if let Some(textarea) = element.dyn_ref::<web_sys::HtmlTextAreaElement>() {
+                            return textarea.selection_start().unwrap_or(Some(0)).unwrap_or(0)
+                                as usize;
                         }
                     }
                 }
@@ -84,16 +77,14 @@ pub fn LiveStreamShareModal(
     }
     #[allow(unused_variables, dead_code)]
     fn set_cursor_position(textarea_id: &str, utf16_pos: usize) {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
             if let Some(window) = web_sys::window() {
                 if let Some(document) = window.document() {
                     if let Some(element) = document.get_element_by_id(textarea_id) {
-                        if let Some(textarea) = element
-                            .dyn_ref::<web_sys::HtmlTextAreaElement>()
-                        {
-                            let _ = textarea
-                                .set_selection_range(utf16_pos as u32, utf16_pos as u32);
+                        if let Some(textarea) = element.dyn_ref::<web_sys::HtmlTextAreaElement>() {
+                            let _ =
+                                textarea.set_selection_range(utf16_pos as u32, utf16_pos as u32);
                         }
                     }
                 }
@@ -102,7 +93,7 @@ pub fn LiveStreamShareModal(
     }
     #[allow(unused_variables)]
     fn set_cursor_position_deferred(textarea_id: String, utf16_pos: usize) {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
             use wasm_bindgen::prelude::*;
             if let Some(window) = web_sys::window() {
@@ -122,7 +113,10 @@ pub fn LiveStreamShareModal(
             let safe_pos = if current.is_char_boundary(pos) {
                 pos
             } else {
-                (0..=pos).rev().find(|&i| current.is_char_boundary(i)).unwrap_or(0)
+                (0..=pos)
+                    .rev()
+                    .find(|&i| current.is_char_boundary(i))
+                    .unwrap_or(0)
             };
             current.insert_str(safe_pos, &text);
             let new_cursor_pos = safe_pos + text.len();
@@ -173,21 +167,20 @@ pub fn LiveStreamShareModal(
         insert_with_spacing(nevent_ref);
         show_poll_modal.set(false);
     };
-    let content_title = title
-        .unwrap_or_else(|| {
-            event
-                .tags
-                .iter()
-                .find(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("title"))
-                .and_then(|tag| tag.as_slice().get(1).map(|s| s.to_string()))
-                .unwrap_or_else(|| "Check out this livestream".to_string())
-        });
+    let content_title = title.unwrap_or_else(|| {
+        event
+            .tags
+            .iter()
+            .find(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("title"))
+            .and_then(|tag| tag.as_slice().get(1).map(|s| s.to_string()))
+            .unwrap_or_else(|| "Check out this livestream".to_string())
+    });
     use nostr_sdk::prelude::Coordinate;
     use nostr_sdk::ToBech32;
     let coord = Coordinate::new(Kind::from(30311), event.pubkey).identifier(&d_tag);
     let naddr_bech32 = coord
         .to_bech32()
-        .unwrap_or_else(|_| { format!("30311:{}:{}", event.pubkey, d_tag) });
+        .unwrap_or_else(|_| format!("30311:{}:{}", event.pubkey, d_tag));
     let stream_url = format!("https://nostr.blue/videos/live/{}", naddr_bech32);
     let stream_nip19 = format!("nostr:{}", naddr_bech32);
     let handle_copy_link = {
@@ -200,7 +193,7 @@ pub fn LiveStreamShareModal(
                         copied.set(true);
                         log::info!("Link copied to clipboard");
                         spawn(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            crate::platform::timer::sleep_ms(2000).await;
                             copied.set(false);
                         });
                     }
@@ -227,14 +220,12 @@ pub fn LiveStreamShareModal(
                 Some(c) => c,
                 None => {
                     log::error!("Client not initialized");
-                    nostr_error
-                        .set(Some("Failed to initialize Nostr client".to_string()));
+                    nostr_error.set(Some("Failed to initialize Nostr client".to_string()));
                     is_publishing.set(false);
                     return;
                 }
             };
-            let builder = EventBuilder::text_note(&text)
-                .tag(nostr_sdk::Tag::event(event_id));
+            let builder = EventBuilder::text_note(&text).tag(nostr_sdk::Tag::event(event_id));
             match client.send_event_builder(builder).await {
                 Ok(output) => {
                     log::info!("Shared to Nostr: {:?}", output.val);
@@ -265,21 +256,16 @@ pub fn LiveStreamShareModal(
             is_publishing.set(true);
             let stream_url_clone = stream_url.clone();
             spawn(async move {
-                let recipient_hex = if let Ok(pubkey) = PublicKey::from_bech32(
-                    &manual_recipient,
-                ) {
+                let recipient_hex = if let Ok(pubkey) = PublicKey::from_bech32(&manual_recipient) {
                     pubkey.to_hex()
                 } else if let Ok(pubkey) = PublicKey::parse(&manual_recipient) {
                     pubkey.to_hex()
                 } else {
                     log::error!("Invalid recipient pubkey: {}", manual_recipient);
-                    dm_error
-                        .set(
-                            Some(
-                                "Invalid recipient. Please enter a valid npub or hex public key."
-                                    .to_string(),
-                            ),
-                        );
+                    dm_error.set(Some(
+                        "Invalid recipient. Please enter a valid npub or hex public key."
+                            .to_string(),
+                    ));
                     is_publishing.set(false);
                     return;
                 };
@@ -573,9 +559,6 @@ pub fn LiveStreamShareModal(
         PollCreatorModal { show: show_poll_modal, on_poll_created: handle_poll_created }
     }
 }
-async fn copy_to_clipboard(text: &str) -> Result<(), JsValue> {
-    let window = web_sys::window().ok_or_else(|| JsValue::from_str("No window"))?;
-    let navigator = window.navigator();
-    let clipboard = navigator.clipboard();
-    wasm_bindgen_futures::JsFuture::from(clipboard.write_text(text)).await.map(|_| ())
+async fn copy_to_clipboard(text: &str) -> Result<(), String> {
+    crate::platform::clipboard::copy_to_clipboard(text).await
 }

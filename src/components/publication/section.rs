@@ -63,33 +63,69 @@ fn NestedIndexContent(
     let mut fetch_task: Signal<Option<dioxus::dioxus_core::Task>> = use_signal(|| None);
     let mut current_addresses: Signal<Vec<String>> = use_signal(Vec::new);
     let child_addresses = section.child_addresses.clone();
-    let addresses_key: Vec<String> = child_addresses
-        .iter()
-        .map(|a| a.address.clone())
-        .collect();
-    use_effect(
-        use_reactive!(
-            | addresses_key | { if let Some(existing_task) = fetch_task.write().take() {
-            existing_task.cancel(); } current_addresses.set(addresses_key.clone()); let
-            expected_addresses = addresses_key.clone(); let addresses = child_addresses
-            .clone(); let task = spawn(async move { loading.set(true); fetch_error
-            .set(None); let filters = sections_by_addresses_filter(& addresses); let mut
-            loaded_sections = Vec::new(); let mut errors = Vec::new(); for filter in
-            filters { match nostr_client::fetch_events_aggregated(filter,
-            Duration::from_secs(10)). await { Ok(events) => { for event in events { if
-            let Some(section) = parse_publication_section(& event) { loaded_sections
-            .push(section); } } } Err(e) => { errors.push(e); } } } if *
-            current_addresses.read() != expected_addresses {
-            log::debug!("Discarding stale publication section fetch"); return; } let mut
-            seen = std::collections::HashSet::new(); loaded_sections.retain(| s | seen
-            .insert(s.a_tag.clone())); let address_order : std::collections::HashMap < _,
-            _ > = addresses.iter().enumerate().map(| (i, a) | (a.address.clone(), i))
-            .collect(); loaded_sections.sort_by_key(| s | address_order.get(& s.a_tag)
-            .copied().unwrap_or(usize::MAX)); child_sections.set(loaded_sections); if !
-            errors.is_empty() { log::warn!("Some section fetches failed: {:?}", errors);
-            } loading.set(false); }); fetch_task.set(Some(task)); }
-        ),
-    );
+    let addresses_key: Vec<String> = child_addresses.iter().map(|a| a.address.clone()).collect();
+    use_effect(use_reactive!(|addresses_key| {
+        if let Some(existing_task) = fetch_task.write().take() {
+            existing_task.cancel();
+        }
+        current_addresses.set(addresses_key.clone());
+        let expected_addresses = addresses_key.clone();
+        let addresses = child_addresses.clone();
+        let task = spawn(async move {
+            loading.set(true);
+            fetch_error.set(None);
+            let filters = sections_by_addresses_filter(&addresses);
+            let mut loaded_sections = Vec::new();
+            let mut errors = Vec::new();
+            for filter in filters {
+                match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+                    Ok(events) => {
+                        for event in events {
+                            if let Some(section) = parse_publication_section(&event) {
+                                loaded_sections.push(section);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        errors.push(e);
+                    }
+                }
+            }
+            if *current_addresses.read() != expected_addresses {
+                log::debug!("Discarding stale publication section fetch");
+                return;
+            }
+            let mut seen = std::collections::HashSet::new();
+            loaded_sections.retain(|s| seen.insert(s.a_tag.clone()));
+            let address_order: std::collections::HashMap<_, _> = addresses
+                .iter()
+                .enumerate()
+                .map(|(i, a)| (a.address.clone(), i))
+                .collect();
+            loaded_sections
+                .sort_by_key(|s| address_order.get(&s.a_tag).copied().unwrap_or(usize::MAX));
+
+            if loaded_sections.is_empty() && !errors.is_empty() {
+                let error_msg = if errors.len() == 1 {
+                    format!("Failed to load sections: {}", errors[0])
+                } else {
+                    format!("Failed to load sections: {} errors occurred", errors.len())
+                };
+                log::error!("{}", error_msg);
+                fetch_error.set(Some(error_msg));
+                loading.set(false);
+                return;
+            }
+
+            fetch_error.set(None);
+            child_sections.set(loaded_sections);
+            if !errors.is_empty() {
+                log::warn!("Some section fetches failed: {:?}", errors);
+            }
+            loading.set(false);
+        });
+        fetch_task.set(Some(task));
+    }));
     rsx! {
         article { class: "publication-section",
             if show_header {
@@ -248,11 +284,8 @@ fn estimate_reading_time(content: &str) -> usize {
 }
 /// Section outline (headings extracted from content)
 #[component]
-pub fn SectionOutline(
-    content: String,
-    on_heading_click: EventHandler<String>,
-) -> Element {
-    let headings = use_memo(move || extract_headings(&content));
+pub fn SectionOutline(content: String, on_heading_click: EventHandler<String>) -> Element {
+    let headings = use_memo(use_reactive(&content, |c| extract_headings(&c)));
     if headings.read().is_empty() {
         return rsx! {};
     }
@@ -285,7 +318,10 @@ fn extract_headings(content: &str) -> Vec<(usize, String, String)> {
         .captures_iter(content)
         .map(|cap| {
             let level = cap.get(1).map(|m| m.as_str().len()).unwrap_or(1);
-            let text = cap.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
+            let text = cap
+                .get(2)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default();
             let id = slug_from_text(&text);
             (level, text, id)
         })

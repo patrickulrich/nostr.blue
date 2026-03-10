@@ -2,9 +2,7 @@
 //!
 //! Displays a list of podcast episodes with optional filtering
 //! and continuous playback support.
-use super::episode_card::{
-    DisplayEpisode, PodcastEpisodeCard, PodcastEpisodeCardSkeleton,
-};
+use super::episode_card::{DisplayEpisode, PodcastEpisodeCard, PodcastEpisodeCardSkeleton};
 use crate::stores::music_player::MusicTrack;
 use dioxus::prelude::*;
 use std::rc::Rc;
@@ -31,15 +29,17 @@ pub struct PodcastEpisodeListProps {
 /// Podcast episode list component
 #[component]
 pub fn PodcastEpisodeList(props: PodcastEpisodeListProps) -> Element {
+    let all_episodes = props.episodes.clone();
     let episodes: Vec<_> = if let Some(limit) = props.limit {
         props.episodes.iter().take(limit).cloned().collect()
     } else {
         props.episodes.clone()
     };
-    let playlist: Option<Rc<Vec<MusicTrack>>> = if props.enable_playlist
-        && !episodes.is_empty()
-    {
-        Some(Rc::new(episodes.iter().map(|ep| ep.to_music_track()).collect()))
+    let playlist: Option<Rc<Vec<MusicTrack>>> =
+        if props.enable_playlist && !all_episodes.is_empty() {
+        Some(Rc::new(
+            all_episodes.iter().map(|ep| ep.to_music_track()).collect(),
+        ))
     } else {
         None
     };

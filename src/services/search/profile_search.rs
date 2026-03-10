@@ -1,9 +1,9 @@
-use dioxus::prelude::*;
-use nostr_sdk::prelude::*;
-use std::time::Duration;
 use super::search_relays::get_connected_search_relays;
 use crate::stores::nostr_client::NOSTR_CLIENT;
 use crate::stores::profiles::PROFILE_CACHE;
+use dioxus::prelude::*;
+use nostr_sdk::prelude::*;
+use std::time::Duration;
 /// Result type for profile search
 #[derive(Clone, Debug)]
 pub struct ProfileSearchResult {
@@ -103,23 +103,24 @@ pub fn search_cached_profiles(
                 relevance += 40;
             }
         }
-        results
-            .push(ProfileSearchResult {
-                pubkey,
-                name: profile.name.clone(),
-                display_name: profile.display_name.clone(),
-                picture: profile.picture.clone(),
-                nip05: profile.nip05.clone(),
-                is_contact,
-                is_thread_participant,
-                relevance,
-            });
+        results.push(ProfileSearchResult {
+            pubkey,
+            name: profile.name.clone(),
+            display_name: profile.display_name.clone(),
+            picture: profile.picture.clone(),
+            nip05: profile.nip05.clone(),
+            is_contact,
+            is_thread_participant,
+            relevance,
+        });
     }
     drop(cache);
     results.sort_by(|a, b| b.relevance.cmp(&a.relevance));
     results.truncate(limit);
     log::debug!(
-        "Cached profile search for '{}' returned {} results", query, results.len()
+        "Cached profile search for '{}' returned {} results",
+        query,
+        results.len()
     );
     results
 }
@@ -167,7 +168,9 @@ pub async fn search_profiles(
         let fetch_result = if search_urls.is_empty() {
             client.fetch_events(filter, Duration::from_secs(3)).await
         } else {
-            client.fetch_events_from(search_urls, filter, Duration::from_secs(3)).await
+            client
+                .fetch_events_from(search_urls, filter, Duration::from_secs(3))
+                .await
         };
         match fetch_result {
             Ok(events) => {
@@ -203,17 +206,16 @@ pub async fn search_profiles(
                                 relevance += 20;
                             }
                         }
-                        results
-                            .push(ProfileSearchResult {
-                                pubkey,
-                                name: metadata.name.clone(),
-                                display_name: metadata.display_name.clone(),
-                                picture: metadata.picture.clone(),
-                                nip05: metadata.nip05.clone(),
-                                is_contact,
-                                is_thread_participant,
-                                relevance,
-                            });
+                        results.push(ProfileSearchResult {
+                            pubkey,
+                            name: metadata.name.clone(),
+                            display_name: metadata.display_name.clone(),
+                            picture: metadata.picture.clone(),
+                            nip05: metadata.nip05.clone(),
+                            is_contact,
+                            is_thread_participant,
+                            relevance,
+                        });
                     }
                 }
             }
@@ -224,7 +226,11 @@ pub async fn search_profiles(
     }
     results.sort_by(|a, b| b.relevance.cmp(&a.relevance));
     results.truncate(limit);
-    log::debug!("Profile search for '{}' returned {} results", query, results.len());
+    log::debug!(
+        "Profile search for '{}' returned {} results",
+        query,
+        results.len()
+    );
     Ok(results)
 }
 /// Get contact list public keys
@@ -234,7 +240,10 @@ pub async fn get_contact_pubkeys() -> Vec<PublicKey> {
         Some(c) => c,
         None => return Vec::new(),
     };
-    match client.get_contact_list_public_keys(Duration::from_secs(5)).await {
+    match client
+        .get_contact_list_public_keys(Duration::from_secs(5))
+        .await
+    {
         Ok(pubkeys) => pubkeys,
         Err(e) => {
             log::warn!("Failed to fetch contact list: {}", e);
@@ -256,7 +265,11 @@ pub async fn get_user_relays() -> Vec<String> {
         .map(|url| url.to_string())
         .take(3)
         .collect();
-    if relay_urls.is_empty() { get_default_relays() } else { relay_urls }
+    if relay_urls.is_empty() {
+        get_default_relays()
+    } else {
+        relay_urls
+    }
 }
 /// Get default relay URLs
 #[allow(dead_code)]

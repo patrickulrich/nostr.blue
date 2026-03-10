@@ -7,21 +7,23 @@ use dioxus::prelude::*;
 #[component]
 pub fn P2PStatusBadge(status: OrderStatus) -> Element {
     let (class, label) = match status {
-        OrderStatus::Pending => {
-            ("bg-yellow-500/20 text-yellow-600 dark:text-yellow-400", "Pending")
-        }
-        OrderStatus::InProgress => {
-            ("bg-blue-500/20 text-blue-600 dark:text-blue-400", "In Progress")
-        }
-        OrderStatus::Success => {
-            ("bg-green-500/20 text-green-600 dark:text-green-400", "Completed")
-        }
-        OrderStatus::Canceled => {
-            ("bg-gray-500/20 text-gray-600 dark:text-gray-400", "Canceled")
-        }
-        OrderStatus::Expired => {
-            ("bg-red-500/20 text-red-600 dark:text-red-400", "Expired")
-        }
+        OrderStatus::Pending => (
+            "bg-yellow-500/20 text-yellow-600 dark:text-yellow-400",
+            "Pending",
+        ),
+        OrderStatus::InProgress => (
+            "bg-blue-500/20 text-blue-600 dark:text-blue-400",
+            "In Progress",
+        ),
+        OrderStatus::Success => (
+            "bg-green-500/20 text-green-600 dark:text-green-400",
+            "Completed",
+        ),
+        OrderStatus::Canceled => (
+            "bg-gray-500/20 text-gray-600 dark:text-gray-400",
+            "Canceled",
+        ),
+        OrderStatus::Expired => ("bg-red-500/20 text-red-600 dark:text-red-400", "Expired"),
     };
     rsx! {
         span { class: "px-2 py-0.5 text-xs font-medium rounded-full {class}", "{label}" }
@@ -57,12 +59,14 @@ pub fn P2PLayerBadge(layer: Layer) -> Element {
 #[component]
 pub fn P2PNetworkBadge(network: Network) -> Element {
     let (class, label) = match network {
-        Network::Mainnet => {
-            ("bg-orange-500/20 text-orange-600 dark:text-orange-400", "Mainnet")
-        }
-        Network::Testnet => {
-            ("bg-purple-500/20 text-purple-600 dark:text-purple-400", "Testnet")
-        }
+        Network::Mainnet => (
+            "bg-orange-500/20 text-orange-600 dark:text-orange-400",
+            "Mainnet",
+        ),
+        Network::Testnet => (
+            "bg-purple-500/20 text-purple-600 dark:text-purple-400",
+            "Testnet",
+        ),
         Network::Signet => ("bg-cyan-500/20 text-cyan-600 dark:text-cyan-400", "Signet"),
     };
     rsx! {

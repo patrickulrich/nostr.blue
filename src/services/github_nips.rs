@@ -1,17 +1,46 @@
-use gloo_net::http::Request;
+//! GitHub-based NIP documentation service
+//!
+//! Provides fetching of NIPs, NUTs, and other protocol documentation
+//! from locally-served paths (web) or bundled assets (native).
+//!
+//! This module is primarily designed for web builds where documentation
+//! is served from the app's static assets.
+
+#[cfg(all(feature = "web", feature = "native"))]
+compile_error!("Cannot enable both 'web' and 'native' features simultaneously");
+
+#[cfg(not(any(feature = "web", feature = "native")))]
+compile_error!("Must enable either 'web' or 'native' feature");
+
+#[cfg(feature = "web")]
+use crate::platform::http::http_client;
 use regex::Regex;
-/// Base URL for locally-served NIPs documentation
+
+#[cfg(feature = "web")]
 const NIPS_BASE: &str = "/docs/nips";
-/// Base URL for Cashu NUTs documentation
+#[cfg(feature = "web")]
 const NUTS_BASE: &str = "/docs/nuts";
-/// Base URL for Blossom BUDs documentation
+#[cfg(feature = "web")]
 const BUDS_BASE: &str = "/docs/blossom/buds";
-/// Blossom README path
+#[cfg(feature = "web")]
 const BUDS_README: &str = "/docs/blossom/README.md";
-/// Base URL for NKBIPs documentation
+#[cfg(feature = "web")]
 const NKBIPS_BASE: &str = "/docs/NKBIPs";
-/// Market specification path
+#[cfg(feature = "web")]
 const MARKET_SPEC_PATH: &str = "/docs/market-spec/spec.md";
+
+static LINK_REGEX: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r"\[([0-9A-Fa-f]{2,3})\]").unwrap());
+
+static SIMPLE_REGEX: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r"([0-9A-Fa-f]{2,3})").unwrap());
+
+static NUT_NUM_REGEX: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r"^\|\s*\[(\d{2})\]").unwrap());
+
+static BUD_REGEX: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r"^\s*-\s*\[BUD-(\d{2}):\s*([^\]]+)\]").unwrap());
+
 /// Represents an official NIP from the nostr-protocol repository
 #[derive(Debug, Clone, PartialEq)]
 pub struct OfficialNip {
@@ -34,37 +63,67 @@ pub struct EventKindInfo {
     /// Which NIP defines this kind
     pub nip: String,
 }
+
+#[cfg(feature = "web")]
+fn validate_hex_number(number: &str, label: &str) -> Result<String, String> {
+    let trimmed = number.trim();
+    if trimmed.len() < 2 || trimmed.len() > 3 {
+        return Err(format!(
+            "Invalid {} number length: expected 2-3 characters, got {}",
+            label,
+            trimmed.len()
+        ));
+    }
+    if !trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(format!(
+            "Invalid {} number: must be hex characters, got '{}'",
+            label, trimmed
+        ));
+    }
+    Ok(trimmed.to_ascii_uppercase())
+}
+
+#[cfg(feature = "web")]
+async fn fetch_text(url: &str, context: &str) -> Result<String, String> {
+    let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch {}: {}", context, e))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Failed to fetch {}: HTTP {}",
+            context,
+            response.status()
+        ));
+    }
+    response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read {} response: {}", context, e))
+}
+
 /// Fetch the README.md from the NIPs documentation
+#[cfg(feature = "web")]
 pub async fn fetch_nips_readme() -> Result<String, String> {
     let url = format!("{}/README.md", NIPS_BASE);
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch NIPs README: {}", e))?;
-    if !response.ok() {
-        return Err(format!("Failed to fetch NIPs README: HTTP {}", response.status()));
-    }
-    response.text().await.map_err(|e| format!("Failed to read response: {}", e))
+    fetch_text(&url, "NIPs README").await
 }
 /// Fetch the content of a specific NIP by its number
+#[cfg(feature = "web")]
 pub async fn fetch_nip_content(number: &str) -> Result<String, String> {
-    let url = format!("{}/{}.md", NIPS_BASE, number);
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch NIP-{}: {}", number, e))?;
-    if !response.ok() {
-        return Err(format!("NIP-{} not found (HTTP {})", number, response.status()));
-    }
-    response.text().await.map_err(|e| format!("Failed to read NIP-{}: {}", number, e))
+    let validated = validate_hex_number(number, "NIP")?;
+    let url = format!("{}/{}.md", NIPS_BASE, validated);
+    fetch_text(&url, &format!("NIP-{}", validated)).await
 }
 /// Parse the NIP list from the README content
 pub fn parse_nips_from_readme(content: &str) -> Vec<OfficialNip> {
     let mut nips = Vec::new();
     let nip_regex = Regex::new(
-            r"^\s*-\s*\[NIP-([0-9A-Fa-f]{2,3}):\s*([^\]]+)\]\(([0-9A-Fa-f]{2,3})\.md\)(.*)$",
-        )
-        .unwrap();
+        r"^\s*-\s*\[NIP-([0-9A-Fa-f]{2,3}):\s*([^\]]+)\]\(([0-9A-Fa-f]{2,3})\.md\)(.*)$",
+    )
+    .unwrap();
     for line in content.lines() {
         if let Some(caps) = nip_regex.captures(line) {
             let number = caps
@@ -98,9 +157,7 @@ pub fn parse_event_kinds_from_readme(content: &str) -> Vec<EventKindInfo> {
             in_event_kinds_section = true;
             continue;
         }
-        if in_event_kinds_section && line.starts_with("## ")
-            && !line.contains("Event Kinds")
-        {
+        if in_event_kinds_section && line.starts_with("## ") && !line.contains("Event Kinds") {
             break;
         }
         if !in_event_kinds_section {
@@ -124,12 +181,11 @@ pub fn parse_event_kinds_from_readme(content: &str) -> Vec<EventKindInfo> {
                 let nip_part = parts[3].trim();
                 let nip = extract_nip_number(nip_part);
                 if !kind.is_empty() && !description.is_empty() {
-                    kinds
-                        .push(EventKindInfo {
-                            kind,
-                            description,
-                            nip,
-                        });
+                    kinds.push(EventKindInfo {
+                        kind,
+                        description,
+                        nip,
+                    });
                 }
             }
         }
@@ -138,17 +194,17 @@ pub fn parse_event_kinds_from_readme(content: &str) -> Vec<EventKindInfo> {
 }
 /// Extract NIP number from a reference like "[01](01.md)" or "01"
 fn extract_nip_number(text: &str) -> String {
-    let link_regex = Regex::new(r"\[([0-9A-Fa-f]{2,3})\]").ok();
-    if let Some(regex) = link_regex {
-        if let Some(caps) = regex.captures(text) {
-            return caps.get(1).map(|m| m.as_str().to_uppercase()).unwrap_or_default();
-        }
+    if let Some(caps) = LINK_REGEX.captures(text) {
+        return caps
+            .get(1)
+            .map(|m| m.as_str().to_uppercase())
+            .unwrap_or_default();
     }
-    let simple_regex = Regex::new(r"([0-9A-Fa-f]{2,3})").ok();
-    if let Some(regex) = simple_regex {
-        if let Some(caps) = regex.captures(text) {
-            return caps.get(1).map(|m| m.as_str().to_uppercase()).unwrap_or_default();
-        }
+    if let Some(caps) = SIMPLE_REGEX.captures(text) {
+        return caps
+            .get(1)
+            .map(|m| m.as_str().to_uppercase())
+            .unwrap_or_default();
     }
     String::new()
 }
@@ -163,81 +219,88 @@ pub struct DocSpec {
     pub category: Option<String>,
 }
 /// Fetch the NUTs README
+#[cfg(feature = "web")]
 pub async fn fetch_nuts_readme() -> Result<String, String> {
     let url = format!("{}/README.md", NUTS_BASE);
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch NUTs README: {}", e))?;
-    if !response.ok() {
-        return Err(format!("Failed to fetch NUTs README: HTTP {}", response.status()));
-    }
-    response.text().await.map_err(|e| format!("Failed to read response: {}", e))
+    fetch_text(&url, "NUTs README").await
 }
 /// Fetch the Blossom README
+#[cfg(feature = "web")]
 pub async fn fetch_buds_readme() -> Result<String, String> {
-    let response = Request::get(BUDS_README)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch BUDs README: {}", e))?;
-    if !response.ok() {
-        return Err(format!("Failed to fetch BUDs README: HTTP {}", response.status()));
-    }
-    response.text().await.map_err(|e| format!("Failed to read response: {}", e))
+    fetch_text(BUDS_README, "BUDs README").await
 }
 /// Fetch a specific NUT by number
+#[cfg(feature = "web")]
 pub async fn fetch_nut_content(number: &str) -> Result<String, String> {
-    let url = format!("{}/{}.md", NUTS_BASE, number);
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch NUT-{}: {}", number, e))?;
-    if !response.ok() {
-        return Err(format!("NUT-{} not found (HTTP {})", number, response.status()));
-    }
-    response.text().await.map_err(|e| format!("Failed to read NUT-{}: {}", number, e))
+    let validated = validate_hex_number(number, "NUT")?;
+    let url = format!("{}/{}.md", NUTS_BASE, validated);
+    fetch_text(&url, &format!("NUT-{}", validated)).await
 }
 /// Fetch a specific BUD by number
+#[cfg(feature = "web")]
 pub async fn fetch_bud_content(number: &str) -> Result<String, String> {
-    let url = format!("{}/{}.md", BUDS_BASE, number);
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch BUD-{}: {}", number, e))?;
-    if !response.ok() {
-        return Err(format!("BUD-{} not found (HTTP {})", number, response.status()));
-    }
-    response.text().await.map_err(|e| format!("Failed to read BUD-{}: {}", number, e))
+    let validated = validate_hex_number(number, "BUD")?;
+    let url = format!("{}/{}.md", BUDS_BASE, validated);
+    fetch_text(&url, &format!("BUD-{}", validated)).await
 }
 /// Fetch a specific NKBIP by number
+#[cfg(feature = "web")]
 pub async fn fetch_nkbip_content(number: &str) -> Result<String, String> {
-    let url = format!("{}/{}.md", NKBIPS_BASE, number);
-    let response = Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch NKBIP-{}: {}", number, e))?;
-    if !response.ok() {
-        return Err(format!("NKBIP-{} not found (HTTP {})", number, response.status()));
-    }
-    response.text().await.map_err(|e| format!("Failed to read NKBIP-{}: {}", number, e))
+    let validated = validate_hex_number(number, "NKBIP")?;
+    let url = format!("{}/{}.md", NKBIPS_BASE, validated);
+    fetch_text(&url, &format!("NKBIP-{}", validated)).await
 }
-/// Fetch the market specification document
+/// Fetch the market specification
+#[cfg(feature = "web")]
 pub async fn fetch_market_spec() -> Result<String, String> {
-    let response = Request::get(MARKET_SPEC_PATH)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch market spec: {}", e))?;
-    if !response.ok() {
-        return Err(format!("Market spec not found (HTTP {})", response.status()));
-    }
-    response.text().await.map_err(|e| format!("Failed to read market spec: {}", e))
+    fetch_text(MARKET_SPEC_PATH, "Market spec").await
 }
+
+#[cfg(not(feature = "web"))]
+pub async fn fetch_nips_readme() -> Result<String, String> {
+    Err("NIP documentation not available on native builds".to_string())
+}
+
+#[cfg(not(feature = "web"))]
+pub async fn fetch_nuts_readme() -> Result<String, String> {
+    Err("NUT documentation not available on native builds".to_string())
+}
+
+#[cfg(not(feature = "web"))]
+pub async fn fetch_buds_readme() -> Result<String, String> {
+    Err("BUD documentation not available on native builds".to_string())
+}
+
+#[cfg(not(feature = "web"))]
+pub async fn fetch_nut_content(_number: &str) -> Result<String, String> {
+    Err("NUT documentation not available on native builds".to_string())
+}
+
+#[cfg(not(feature = "web"))]
+pub async fn fetch_bud_content(_number: &str) -> Result<String, String> {
+    Err("BUD documentation not available on native builds".to_string())
+}
+
+#[cfg(not(feature = "web"))]
+pub async fn fetch_nkbip_content(_number: &str) -> Result<String, String> {
+    Err("NKBIP documentation not available on native builds".to_string())
+}
+
+#[cfg(not(feature = "web"))]
+pub async fn fetch_market_spec() -> Result<String, String> {
+    Err("Market specification not available on native builds".to_string())
+}
+
+#[cfg(not(feature = "web"))]
+pub async fn fetch_nip_content(_number: &str) -> Result<String, String> {
+    Err("NIP documentation not available on native builds".to_string())
+}
+
 /// Parse NUT entries from the README content.
 /// The format has two tables (Mandatory / Optional) with rows like `| [00][00] | Description |`
 pub fn parse_nuts_from_readme(content: &str) -> Vec<DocSpec> {
     let mut nuts = Vec::new();
     let mut current_category: Option<String> = None;
-    let num_regex = Regex::new(r"^\|\s*\[(\d{2})\]").unwrap();
     for line in content.lines() {
         if line.starts_with("### ") {
             let heading = line.trim_start_matches('#').trim().to_string();
@@ -249,8 +312,11 @@ pub fn parse_nuts_from_readme(content: &str) -> Vec<DocSpec> {
         if line.starts_with("#### ") {
             break;
         }
-        if let Some(caps) = num_regex.captures(line) {
-            let number = caps.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
+        if let Some(caps) = NUT_NUM_REGEX.captures(line) {
+            let number = caps
+                .get(1)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default();
             // Extract description from the second column
             let parts: Vec<&str> = line.split('|').collect();
             let description = if parts.len() >= 3 {
@@ -271,11 +337,16 @@ pub fn parse_nuts_from_readme(content: &str) -> Vec<DocSpec> {
 /// The format is bullet lines like `- [BUD-00: Title](./buds/00.md)`
 pub fn parse_buds_from_readme(content: &str) -> Vec<DocSpec> {
     let mut buds = Vec::new();
-    let bud_regex = Regex::new(r"^\s*-\s*\[BUD-(\d{2}):\s*([^\]]+)\]").unwrap();
     for line in content.lines() {
-        if let Some(caps) = bud_regex.captures(line) {
-            let number = caps.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
-            let title = caps.get(2).map(|m| m.as_str().trim().to_string()).unwrap_or_default();
+        if let Some(caps) = BUD_REGEX.captures(line) {
+            let number = caps
+                .get(1)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default();
+            let title = caps
+                .get(2)
+                .map(|m| m.as_str().trim().to_string())
+                .unwrap_or_default();
             buds.push(DocSpec {
                 number,
                 title,

@@ -15,13 +15,12 @@ use mentions::{EventMentionRenderer, MentionRenderer};
 use nostr_blue_renderers::{
     NostrBlueArticleRenderer, NostrBlueBadgeRenderer, NostrBlueCalendarEventRenderer,
     NostrBlueChannelRenderer, NostrBlueCodeRepoRenderer, NostrBlueCommunityRenderer,
-    NostrBlueLiveStreamRenderer,
-    NostrBlueMusicPlaylistRenderer, NostrBlueNoteRenderer, NostrBluePhotoRenderer,
-    NostrBluePinboardRenderer, NostrBluePodcastEpisodeRenderer, NostrBluePodcastShowRenderer,
-    NostrBlueProductRenderer, NostrBlueProfileRenderer, NostrBluePublicationRenderer,
-    NostrBlueRadioStationRenderer, NostrBlueRecipeRenderer, NostrBlueRssPodcastEpisodeRenderer,
-    NostrBlueRssPodcastShowRenderer, NostrBlueVideoRenderer, NostrBlueVoiceRenderer,
-    NostrBlueWikiRenderer,
+    NostrBlueLiveStreamRenderer, NostrBlueMusicPlaylistRenderer, NostrBlueNoteRenderer,
+    NostrBluePhotoRenderer, NostrBluePinboardRenderer, NostrBluePodcastEpisodeRenderer,
+    NostrBluePodcastShowRenderer, NostrBlueProductRenderer, NostrBlueProfileRenderer,
+    NostrBluePublicationRenderer, NostrBlueRadioStationRenderer, NostrBlueRecipeRenderer,
+    NostrBlueRssPodcastEpisodeRenderer, NostrBlueRssPodcastShowRenderer, NostrBlueVideoRenderer,
+    NostrBlueVoiceRenderer, NostrBlueWikiRenderer,
 };
 
 use crate::components::CashuTokenCard;
@@ -33,8 +32,7 @@ use nostr_sdk::Tag;
 pub fn RichContent(
     content: String,
     tags: Vec<Tag>,
-    #[props(default = false)]
-    collapsible: bool,
+    #[props(default = false)] collapsible: bool,
 ) -> Element {
     let tokens = parse_content(&content, &tags);
     let mut is_expanded = use_signal(|| false);
@@ -46,37 +44,37 @@ pub fn RichContent(
                 matches!(
                     t,
                     ContentToken::Image(_)
-                    | ContentToken::Video(_)
-                    | ContentToken::WavlakeTrack(_)
-                    | ContentToken::WavlakeAlbum(_)
-                    | ContentToken::TwitterTweet(_)
-                    | ContentToken::TwitchStream(_)
-                    | ContentToken::TwitchClip(_)
-                    | ContentToken::TwitchVod(_)
-                    | ContentToken::EventMention(_)
-                    | ContentToken::CashuToken(_)
-                    | ContentToken::NostrBlueLiveStream(_)
-                    | ContentToken::NostrBlueVideo(_)
-                    | ContentToken::NostrBluePhoto(_)
-                    | ContentToken::NostrBluePodcastShow(_)
-                    | ContentToken::NostrBluePodcastEpisode(_)
-                    | ContentToken::NostrBlueArticle(_)
-                    | ContentToken::NostrBlueRecipe(_)
-                    | ContentToken::NostrBlueWiki(_)
-                    | ContentToken::NostrBluePublication(_)
-                    | ContentToken::NostrBluePinboard(_)
-                    | ContentToken::NostrBlueProduct(_)
-                    | ContentToken::NostrBlueCodeRepo(_)
-                    | ContentToken::NostrBlueVoice(_)
-                    | ContentToken::NostrBlueMusicPlaylist(_)
-                    | ContentToken::NostrBlueRadioStation(_)
-                    | ContentToken::NostrBlueNote(_)
-                    | ContentToken::NostrBlueProfile(_)
-                    | ContentToken::NostrBlueCalendarEvent(_)
-                    | ContentToken::NostrBlueBadge(_)
-                    | ContentToken::NostrBlueChannel(_)
-                    | ContentToken::NostrBlueRssPodcastEpisode(_, _)
-                    | ContentToken::NostrBlueRssPodcastShow(_)
+                        | ContentToken::Video(_)
+                        | ContentToken::WavlakeTrack(_)
+                        | ContentToken::WavlakeAlbum(_)
+                        | ContentToken::TwitterTweet(_)
+                        | ContentToken::TwitchStream(_)
+                        | ContentToken::TwitchClip(_)
+                        | ContentToken::TwitchVod(_)
+                        | ContentToken::EventMention(_)
+                        | ContentToken::CashuToken(_)
+                        | ContentToken::NostrBlueLiveStream(_)
+                        | ContentToken::NostrBlueVideo(_)
+                        | ContentToken::NostrBluePhoto(_)
+                        | ContentToken::NostrBluePodcastShow(_)
+                        | ContentToken::NostrBluePodcastEpisode(_)
+                        | ContentToken::NostrBlueArticle(_)
+                        | ContentToken::NostrBlueRecipe(_)
+                        | ContentToken::NostrBlueWiki(_)
+                        | ContentToken::NostrBluePublication(_)
+                        | ContentToken::NostrBluePinboard(_)
+                        | ContentToken::NostrBlueProduct(_)
+                        | ContentToken::NostrBlueCodeRepo(_)
+                        | ContentToken::NostrBlueVoice(_)
+                        | ContentToken::NostrBlueMusicPlaylist(_)
+                        | ContentToken::NostrBlueRadioStation(_)
+                        | ContentToken::NostrBlueNote(_)
+                        | ContentToken::NostrBlueProfile(_)
+                        | ContentToken::NostrBlueCalendarEvent(_)
+                        | ContentToken::NostrBlueBadge(_)
+                        | ContentToken::NostrBlueChannel(_)
+                        | ContentToken::NostrBlueRssPodcastEpisode(_, _)
+                        | ContentToken::NostrBlueRssPodcastShow(_)
                 )
             })
             .count();
@@ -153,9 +151,9 @@ fn is_inline_token(token: &ContentToken) -> bool {
     matches!(
         token,
         ContentToken::Text(_)
-        | ContentToken::Link(_)
-        | ContentToken::Mention(_)
-        | ContentToken::Hashtag(_)
+            | ContentToken::Link(_)
+            | ContentToken::Mention(_)
+            | ContentToken::Hashtag(_)
     )
 }
 /// Represents a group of tokens for rendering purposes
@@ -320,7 +318,9 @@ fn render_token(token: &ContentToken) -> Element {
             }
         }
         ContentToken::Link(url) => {
-            let is_safe = url.starts_with("http://") || url.starts_with("https://") || url.starts_with("nostr:");
+            let is_safe = url.starts_with("http://")
+                || url.starts_with("https://")
+                || url.starts_with("nostr:");
             if is_safe {
                 rsx! {
                     a {
@@ -718,8 +718,7 @@ mod tests {
             ContentToken::PodcastFeed("guid123".to_string()),
             ContentToken::PodcastEpisode("ep-guid".to_string()),
             ContentToken::BitcoinTx(
-                "a1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d"
-                    .to_string(),
+                "a1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d".to_string(),
             ),
             ContentToken::BitcoinAddress("bc1qtest".to_string()),
             ContentToken::Geohash("u4pruydqqvj".to_string()),
@@ -744,10 +743,7 @@ mod tests {
             ContentToken::NostrBlueCodeRepo("naddr1test".to_string()),
             ContentToken::NostrBlueCommunity("34550:pubkey:community-name".to_string()),
             ContentToken::NostrBlueChannel("channel-id".to_string()),
-            ContentToken::NostrBlueRssPodcastEpisode(
-                "podcast123".to_string(),
-                "ep456".to_string(),
-            ),
+            ContentToken::NostrBlueRssPodcastEpisode("podcast123".to_string(), "ep456".to_string()),
             ContentToken::NostrBlueRssPodcastShow("podcast123".to_string()),
         ];
         assert_eq!(
@@ -773,8 +769,7 @@ mod tests {
         let key1 = token_key(&token1, 0);
         let key2 = token_key(&token2, 1);
         assert_ne!(
-            key1,
-            key2,
+            key1, key2,
             "Same Image URL at different positions should have unique keys",
         );
         let hashtag = "nostr";
@@ -783,8 +778,7 @@ mod tests {
         let key3 = token_key(&token3, 0);
         let key4 = token_key(&token4, 1);
         assert_ne!(
-            key3,
-            key4,
+            key3, key4,
             "Same Hashtag at different positions should have unique keys",
         );
         let youtube_url = "https://youtube.com/watch?v=abc123";
@@ -793,8 +787,7 @@ mod tests {
         let key5 = token_key(&token5, 0);
         let key6 = token_key(&token6, 1);
         assert_ne!(
-            key5,
-            key6,
+            key5, key6,
             "Same YouTube URL at different positions should have unique keys",
         );
         let note_id = "note1abc123def456";
@@ -803,25 +796,19 @@ mod tests {
         let key7 = token_key(&token7, 0);
         let key8 = token_key(&token8, 1);
         assert_ne!(
-            key7,
-            key8,
+            key7, key8,
             "Same NostrBlueNote at different positions should have unique keys",
         );
         let feed_url = "https://example.com/feed.xml";
         let guid = "episode-123";
-        let token9 = ContentToken::NostrBlueRssPodcastEpisode(
-            feed_url.to_string(),
-            guid.to_string(),
-        );
-        let token10 = ContentToken::NostrBlueRssPodcastEpisode(
-            feed_url.to_string(),
-            guid.to_string(),
-        );
+        let token9 =
+            ContentToken::NostrBlueRssPodcastEpisode(feed_url.to_string(), guid.to_string());
+        let token10 =
+            ContentToken::NostrBlueRssPodcastEpisode(feed_url.to_string(), guid.to_string());
         let key9 = token_key(&token9, 0);
         let key10 = token_key(&token10, 1);
         assert_ne!(
-            key9,
-            key10,
+            key9, key10,
             "Same NostrBlueRssPodcastEpisode at different positions should have unique keys",
         );
     }

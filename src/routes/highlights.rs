@@ -53,9 +53,7 @@ pub fn Highlights() -> Element {
         spawn(async move {
             let result = match current_feed_type {
                 FeedType::Following => load_following_highlights(None).await,
-                FeedType::Global => {
-                    load_global_highlights(None).await.map(|h| (h, false))
-                }
+                FeedType::Global => load_global_highlights(None).await.map(|h| (h, false)),
             };
             if *request_id.peek() != current_id {
                 log::debug!("Discarding stale highlights result");
@@ -92,21 +90,19 @@ pub fn Highlights() -> Element {
         request_id.set(current_id);
         spawn(async move {
             let result = match current_feed_type {
-                FeedType::Following => {
-                    match load_following_highlights(until).await {
-                        Ok((highlights, did_fallback)) => {
-                            if did_fallback {
-                                log::info!(
+                FeedType::Following => match load_following_highlights(until).await {
+                    Ok((highlights, did_fallback)) => {
+                        if did_fallback {
+                            log::info!(
                                     "Pagination fallback detected, returning empty to preserve feed type"
                                 );
-                                Ok(Vec::new())
-                            } else {
-                                Ok(highlights)
-                            }
+                            Ok(Vec::new())
+                        } else {
+                            Ok(highlights)
                         }
-                        Err(e) => Err(e),
                     }
-                }
+                    Err(e) => Err(e),
+                },
                 FeedType::Global => load_global_highlights(until).await,
             };
             if *request_id.peek() != current_id {
@@ -115,11 +111,8 @@ pub fn Highlights() -> Element {
             }
             match result {
                 Ok(new_highlights) => {
-                    let existing_ids: std::collections::HashSet<_> = highlights
-                        .read()
-                        .iter()
-                        .map(|h| h.event.id)
-                        .collect();
+                    let existing_ids: std::collections::HashSet<_> =
+                        highlights.read().iter().map(|h| h.event.id).collect();
                     let unique: Vec<_> = new_highlights
                         .iter()
                         .filter(|h| !existing_ids.contains(&h.event.id))
@@ -241,9 +234,7 @@ pub fn Highlights() -> Element {
 }
 /// Load highlights from people the user follows
 /// Returns (highlights, did_fallback) where did_fallback is true if we fell back to global
-async fn load_following_highlights(
-    until: Option<u64>,
-) -> Result<(Vec<Highlight>, bool), String> {
+async fn load_following_highlights(until: Option<u64>) -> Result<(Vec<Highlight>, bool), String> {
     let pubkey_hex = match auth_store::get_pubkey() {
         Some(pk) => pk,
         None => {
@@ -255,7 +246,10 @@ async fn load_following_highlights(
     let contacts = match nostr_client::fetch_contacts(pubkey_hex.clone()).await {
         Ok(contacts) => contacts,
         Err(e) => {
-            log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
+            log::warn!(
+                "Failed to fetch contacts: {}, falling back to global feed",
+                e
+            );
             let highlights = load_global_highlights(until).await?;
             return Ok((highlights, true));
         }

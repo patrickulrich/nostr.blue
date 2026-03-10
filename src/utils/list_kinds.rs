@@ -8,12 +8,7 @@ pub const NAMED_RELAYS: u16 = 30002;
 pub const NAMED_BOOKMARKS: u16 = 30003;
 pub const NAMED_CURATIONS: u16 = 30004;
 /// All NIP-51 list kinds
-pub const LIST_KINDS: &[u16] = &[
-    NAMED_PEOPLE,
-    NAMED_RELAYS,
-    NAMED_BOOKMARKS,
-    NAMED_CURATIONS,
-];
+pub const LIST_KINDS: &[u16] = &[NAMED_PEOPLE, NAMED_RELAYS, NAMED_BOOKMARKS, NAMED_CURATIONS];
 /// Get human-readable list type name from kind
 pub fn get_list_type_name(kind: u16) -> &'static str {
     match kind {
@@ -40,8 +35,10 @@ pub fn get_item_count(tags: &[nostr_sdk::Tag]) -> usize {
     tags.iter()
         .filter(|tag| {
             let kind = tag.kind();
-            kind == nostr_sdk::TagKind::p() || kind == nostr_sdk::TagKind::e()
-                || kind == nostr_sdk::TagKind::t() || kind == nostr_sdk::TagKind::a()
+            kind == nostr_sdk::TagKind::p()
+                || kind == nostr_sdk::TagKind::e()
+                || kind == nostr_sdk::TagKind::t()
+                || kind == nostr_sdk::TagKind::a()
         })
         .count()
 }
@@ -49,7 +46,9 @@ pub fn get_item_count(tags: &[nostr_sdk::Tag]) -> usize {
 /// nostr-sdk pattern: filter_standardized(TagKind::p()) for people lists
 /// Used for NAMED_PEOPLE (kind 30000) to count only member pubkeys
 pub fn get_p_tag_count(tags: &[nostr_sdk::Tag]) -> usize {
-    tags.iter().filter(|tag| tag.kind() == nostr_sdk::TagKind::p()).count()
+    tags.iter()
+        .filter(|tag| tag.kind() == nostr_sdk::TagKind::p())
+        .count()
 }
 #[cfg(test)]
 mod tests {

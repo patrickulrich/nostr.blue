@@ -1,8 +1,6 @@
 //! Publication New/Edit Route
 //! Create NKBIP-01 publications (Kind 30040/30041)
-use crate::components::icons::{
-    AlertTriangleIcon, ArrowLeftIcon, CheckIcon, PenSquareIcon,
-};
+use crate::components::icons::{AlertTriangleIcon, ArrowLeftIcon, CheckIcon, PenSquareIcon};
 use crate::routes::Route;
 use crate::stores::publication_store::{self, PublicationType};
 use crate::stores::{auth_store, nostr_client};
@@ -112,41 +110,39 @@ pub fn PublicationNew() -> Element {
             let mut section_refs = Vec::new();
             for (idx, section) in sections_val.iter().enumerate() {
                 match publication_store::publish_publication_section(
-                        &section.title,
-                        &section.content,
-                        Some(&format!("{}-{}", identifier_val, idx)),
-                    )
-                    .await
+                    &section.title,
+                    &section.content,
+                    Some(&format!("{}-{}", identifier_val, idx)),
+                )
+                .await
                 {
                     Ok(address) => {
-                        section_refs
-                            .push(publication_store::SectionReference {
-                                address,
-                                relay_hint: None,
-                                event_id: None,
-                            });
+                        section_refs.push(publication_store::SectionReference {
+                            address,
+                            relay_hint: None,
+                            event_id: None,
+                        });
                     }
                     Err(e) => {
-                        error
-                            .set(
-                                Some(
-                                    format!("Failed to publish section {}: {}", idx + 1, e),
-                                ),
-                            );
+                        error.set(Some(format!(
+                            "Failed to publish section {}: {}",
+                            idx + 1,
+                            e
+                        )));
                         saving.set(false);
                         return;
                     }
                 }
             }
             match publication_store::publish_publication_index(
-                    &title_val,
-                    summary_opt,
-                    cover_opt,
-                    type_val,
-                    &[],
-                    &section_refs,
-                )
-                .await
+                &title_val,
+                summary_opt,
+                cover_opt,
+                type_val,
+                &[],
+                &section_refs,
+            )
+            .await
             {
                 Ok(naddr) => {
                     log::info!("Published publication: {}", naddr);

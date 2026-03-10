@@ -21,12 +21,9 @@ pub fn FilterBar(
     on_search_change: EventHandler<String>,
     open_count: usize,
     closed_count: usize,
-    #[props(default = vec![])]
-    available_labels: Vec<String>,
-    #[props(default = vec![])]
-    selected_labels: Vec<String>,
-    #[props(default = None)]
-    on_label_toggle: Option<EventHandler<String>>,
+    #[props(default = vec![])] available_labels: Vec<String>,
+    #[props(default = vec![])] selected_labels: Vec<String>,
+    #[props(default = None)] on_label_toggle: Option<EventHandler<String>>,
 ) -> Element {
     let search_query = search_query.clone();
     rsx! {
@@ -189,7 +186,9 @@ pub fn filter_issues(
             if selected_labels.is_empty() {
                 return true;
             }
-            selected_labels.iter().any(|sel| issue.labels.iter().any(|il| il.eq_ignore_ascii_case(sel)))
+            selected_labels
+                .iter()
+                .any(|sel| issue.labels.iter().any(|il| il.eq_ignore_ascii_case(sel)))
         })
         .cloned()
         .collect()
@@ -204,16 +203,12 @@ pub fn filter_prs(
 ) -> Vec<crate::utils::nip34::PullRequest> {
     let q = query.to_lowercase();
     prs.iter()
-        .filter(|pr| {
-            match status {
-                StatusFilter::Open => {
-                    pr.status == IssueStatus::Open || pr.status == IssueStatus::Draft
-                }
-                StatusFilter::Closed => {
-                    pr.status == IssueStatus::Closed || pr.status == IssueStatus::Applied
-                }
-                StatusFilter::All => true,
+        .filter(|pr| match status {
+            StatusFilter::Open => pr.status == IssueStatus::Open || pr.status == IssueStatus::Draft,
+            StatusFilter::Closed => {
+                pr.status == IssueStatus::Closed || pr.status == IssueStatus::Applied
             }
+            StatusFilter::All => true,
         })
         .filter(|pr| {
             if q.is_empty() {
@@ -227,7 +222,9 @@ pub fn filter_prs(
             if selected_labels.is_empty() {
                 return true;
             }
-            selected_labels.iter().any(|sel| pr.labels.iter().any(|il| il.eq_ignore_ascii_case(sel)))
+            selected_labels
+                .iter()
+                .any(|sel| pr.labels.iter().any(|il| il.eq_ignore_ascii_case(sel)))
         })
         .cloned()
         .collect()

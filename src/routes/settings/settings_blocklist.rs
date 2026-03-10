@@ -10,52 +10,44 @@ pub fn SettingsBlocklist() -> Element {
     let mut loading = use_signal(|| true);
     let mut error_msg = use_signal(|| None::<String>);
     let refresh_trigger = use_signal(|| 0);
-    use_effect(
-        use_reactive(
-            &*refresh_trigger.read(),
-            move |_| {
-                loading.set(true);
-                spawn(async move {
-                    match nostr_client::get_blocked_users().await {
-                        Ok(users) => {
-                            blocked_users.set(users.clone());
-                            loading.set(false);
-                            if !users.is_empty() {
-                                match profiles::fetch_profiles_batch(users).await {
-                                    Ok(profiles_map) => {
-                                        user_profiles.set(profiles_map);
-                                    }
-                                    Err(e) => {
-                                        log::warn!("Failed to fetch profiles: {}", e);
-                                    }
-                                }
+    use_effect(use_reactive(&*refresh_trigger.read(), move |_| {
+        loading.set(true);
+        spawn(async move {
+            match nostr_client::get_blocked_users().await {
+                Ok(users) => {
+                    blocked_users.set(users.clone());
+                    loading.set(false);
+                    if !users.is_empty() {
+                        match profiles::fetch_profiles_batch(users).await {
+                            Ok(profiles_map) => {
+                                user_profiles.set(profiles_map);
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to fetch profiles: {}", e);
                             }
                         }
-                        Err(e) => {
-                            log::error!("Failed to fetch blocked users: {}", e);
-                            error_msg
-                                .set(Some(format!("Failed to load blocked users: {}", e)));
-                            loading.set(false);
-                        }
                     }
-                });
-            },
-        ),
-    );
+                }
+                Err(e) => {
+                    log::error!("Failed to fetch blocked users: {}", e);
+                    error_msg.set(Some(format!("Failed to load blocked users: {}", e)));
+                    loading.set(false);
+                }
+            }
+        });
+    }));
     let handle_unblock = move |pubkey: String| {
         let pubkey_clone = pubkey.clone();
         spawn(async move {
             match nostr_client::unblock_user(pubkey).await {
                 Ok(_) => {
                     log::info!("User unblocked successfully");
-                    blocked_users
-                        .with_mut(|users| {
-                            users.retain(|u| u != &pubkey_clone);
-                        });
-                    user_profiles
-                        .with_mut(|profiles_map| {
-                            profiles_map.remove(&pubkey_clone);
-                        });
+                    blocked_users.with_mut(|users| {
+                        users.retain(|u| u != &pubkey_clone);
+                    });
+                    user_profiles.with_mut(|profiles_map| {
+                        profiles_map.remove(&pubkey_clone);
+                    });
                 }
                 Err(e) => {
                     log::error!("Failed to unblock user: {}", e);

@@ -6,9 +6,9 @@
 //! - Error details for failed transactions
 //! - Transaction descriptions from quotes
 #![allow(dead_code)]
+use super::types::HistoryItem;
 use nostr_sdk::nips::nip60::TransactionDirection;
 use serde::{Deserialize, Serialize};
-use super::types::HistoryItem;
 /// Direction enum that can be serialized (wraps TransactionDirection)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Direction {
@@ -361,16 +361,14 @@ pub fn create_swap_history(
         },
         fee_paid: Some(fee_paid),
         fee_percent: None,
-        description: Some(
-            match reason {
-                SwapReason::Consolidation => "Proof consolidation".to_string(),
-                SwapReason::Optimization => "Denomination optimization".to_string(),
-                SwapReason::Migration => "Keyset migration".to_string(),
-                SwapReason::Privacy => "Privacy refresh".to_string(),
-                SwapReason::Split => "Amount split".to_string(),
-                SwapReason::Other => "Swap".to_string(),
-            },
-        ),
+        description: Some(match reason {
+            SwapReason::Consolidation => "Proof consolidation".to_string(),
+            SwapReason::Optimization => "Denomination optimization".to_string(),
+            SwapReason::Migration => "Keyset migration".to_string(),
+            SwapReason::Privacy => "Privacy refresh".to_string(),
+            SwapReason::Split => "Amount split".to_string(),
+            SwapReason::Other => "Swap".to_string(),
+        }),
         mint_url: Some(mint_url),
         tx_type: Some(TransactionType::Swap),
         error: None,
@@ -393,7 +391,10 @@ mod tests {
     use super::*;
     #[test]
     fn test_transaction_type_display() {
-        assert_eq!(TransactionType::LightningSend.display_name(), "Lightning Send");
+        assert_eq!(
+            TransactionType::LightningSend.display_name(),
+            "Lightning Send"
+        );
         assert_eq!(TransactionType::P2pkReceive.display_name(), "P2PK Receive");
     }
     #[test]

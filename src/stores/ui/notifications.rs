@@ -1,8 +1,8 @@
+use crate::platform::storage;
 use crate::stores::{auth_store, nostr_client, settings_store, subscription_manager};
 use crate::utils::notification_nip78;
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
-use gloo_storage::{LocalStorage, Storage};
 use nostr_sdk::{Filter, FromBech32, Kind, PublicKey, SubscriptionId};
 const NOTIFICATIONS_CHECKED_AT_KEY: &str = "notifications_checked_at";
 /// Minimum interval between NIP-78 publishes (10 minutes)
@@ -10,9 +10,7 @@ const PUBLISH_THROTTLE_SECONDS: i64 = 10 * 60;
 /// Global signal to track unread notification count
 pub static UNREAD_COUNT: GlobalSignal<usize> = Signal::global(|| 0);
 /// Track the current real-time subscription ID
-pub static SUBSCRIPTION_ID: GlobalSignal<Option<SubscriptionId>> = Signal::global(|| {
-    None
-});
+pub static SUBSCRIPTION_ID: GlobalSignal<Option<SubscriptionId>> = Signal::global(|| None);
 /// Global signal to track when notifications were last checked
 /// Timestamp in Unix seconds (i64)
 pub static NOTIFICATIONS_CHECKED_AT: GlobalSignal<i64> = Signal::global(|| 0);
@@ -38,9 +36,12 @@ pub fn increment_unread_count() {
 }
 /// Load the last checked timestamp from localStorage and update the signal
 pub fn load_checked_at() {
-    let timestamp = LocalStorage::get::<i64>(NOTIFICATIONS_CHECKED_AT_KEY).unwrap_or(0);
+    let timestamp = storage::get::<i64>(NOTIFICATIONS_CHECKED_AT_KEY).unwrap_or(0);
     *NOTIFICATIONS_CHECKED_AT.write() = timestamp;
-    log::debug!("Loaded notifications checked_at from localStorage: {}", timestamp);
+    log::debug!(
+        "Loaded notifications checked_at from localStorage: {}",
+        timestamp
+    );
 }
 /// Get the current checked_at timestamp
 pub fn get_checked_at() -> i64 {
@@ -50,7 +51,7 @@ pub fn get_checked_at() -> i64 {
 /// Optionally publishes to NIP-78 if sync is enabled (throttled to once per 10 min)
 pub fn set_checked_at(timestamp: i64) {
     *NOTIFICATIONS_CHECKED_AT.write() = timestamp;
-    if let Err(e) = LocalStorage::set(NOTIFICATIONS_CHECKED_AT_KEY, timestamp) {
+    if let Err(e) = storage::set(NOTIFICATIONS_CHECKED_AT_KEY, &timestamp) {
         log::error!("Failed to save checked_at to localStorage: {}", e);
     }
     log::debug!("Set notifications checked_at: {}", timestamp);
@@ -75,7 +76,8 @@ async fn publish_checked_at_if_enabled(timestamp: i64) {
     let time_since_last = timestamp - last_published;
     if last_published > 0 && time_since_last < PUBLISH_THROTTLE_SECONDS {
         log::debug!(
-            "Throttled NIP-78 publish (last: {} seconds ago, need: {})", time_since_last,
+            "Throttled NIP-78 publish (last: {} seconds ago, need: {})",
+            time_since_last,
             PUBLISH_THROTTLE_SECONDS
         );
         return;
@@ -90,7 +92,10 @@ async fn publish_checked_at_if_enabled(timestamp: i64) {
     let builder = notification_nip78::create_checked_at_event(timestamp);
     match client.send_event_builder(builder).await {
         Ok(output) => {
-            log::info!("Published notification checked_at to NIP-78: {}", output.id());
+            log::info!(
+                "Published notification checked_at to NIP-78: {}",
+                output.id()
+            );
             *LAST_PUBLISHED_AT.write() = timestamp;
         }
         Err(e) => {
@@ -141,24 +146,26 @@ pub async fn fetch_and_merge_from_nip78() {
         .identifier("notifications_checked_at")
         .limit(1);
     nostr_client::ensure_relays_ready(&client).await;
-    match client.fetch_events(filter, std::time::Duration::from_secs(5)).await {
+    match client
+        .fetch_events(filter, std::time::Duration::from_secs(5))
+        .await
+    {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
-                if let Some(relay_timestamp) = notification_nip78::parse_checked_at_event(
-                    &event,
-                ) {
+                if let Some(relay_timestamp) = notification_nip78::parse_checked_at_event(&event) {
                     let local_timestamp = get_checked_at();
                     let merged_timestamp = relay_timestamp.max(local_timestamp);
                     log::info!(
                         "Fetched NIP-78 checked_at: relay={}, local={}, merged={}",
-                        relay_timestamp, local_timestamp, merged_timestamp
+                        relay_timestamp,
+                        local_timestamp,
+                        merged_timestamp
                     );
                     if merged_timestamp > local_timestamp {
                         *NOTIFICATIONS_CHECKED_AT.write() = merged_timestamp;
-                        if let Err(e) = LocalStorage::set(
-                            NOTIFICATIONS_CHECKED_AT_KEY,
-                            merged_timestamp,
-                        ) {
+                        if let Err(e) =
+                            storage::set(NOTIFICATIONS_CHECKED_AT_KEY, &merged_timestamp)
+                        {
                             log::error!("Failed to save merged checked_at: {}", e);
                         }
                     }
@@ -214,8 +221,10 @@ pub async fn start_realtime_subscription() {
     };
     // Wait for user relay lists before subscribing (prevents empty subscriptions on NIP-46 mobile)
     crate::stores::relay::wait_for_user_relays(
-        std::time::Duration::from_secs(5), "start_realtime_subscription"
-    ).await;
+        std::time::Duration::from_secs(5),
+        "start_realtime_subscription",
+    )
+    .await;
     // Re-check after await: another call may have started, or user may have logged out
     if SUBSCRIPTION_ID.read().is_some() {
         log::debug!("Notification subscription started by another call during relay wait");
@@ -227,16 +236,17 @@ pub async fn start_realtime_subscription() {
     }
     nostr_client::ensure_relays_ready(&client).await;
     let filter = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Reaction, Kind::ZapReceipt])
+        .kinds(vec![
+            Kind::TextNote,
+            Kind::Repost,
+            Kind::Reaction,
+            Kind::ZapReceipt,
+        ])
         .pubkey(my_pubkey)
         .limit(20);
     log::info!("Starting real-time notification subscription using gossip (limit: 20)");
-    let subscription_result = subscription_manager::subscribe_realtime(
-            &client,
-            filter.clone(),
-            Some(600),
-        )
-        .await;
+    let subscription_result =
+        subscription_manager::subscribe_realtime(&client, filter.clone(), Some(600)).await;
     match subscription_result {
         Ok(sub_id) => {
             SUBSCRIPTION_ID.write().replace(sub_id.clone());
@@ -249,7 +259,8 @@ pub async fn start_realtime_subscription() {
                         subscription_id,
                         event,
                         ..
-                    } = notification {
+                    } = notification
+                    {
                         if subscription_id != sub_id {
                             continue;
                         }
@@ -261,7 +272,9 @@ pub async fn start_realtime_subscription() {
                         if event_timestamp > checked_at {
                             log::debug!(
                                 "New notification received: kind={}, from={}, created_at={}",
-                                event.kind, event.pubkey, event_timestamp
+                                event.kind,
+                                event.pubkey,
+                                event_timestamp
                             );
                             increment_unread_count();
                         }

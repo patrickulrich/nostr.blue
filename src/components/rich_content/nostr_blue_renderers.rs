@@ -185,11 +185,8 @@ pub(super) fn NostrBluePodcastEpisodeRenderer(id: String) -> Element {
 fn render_podcast_episode_card(event: &Event, naddr: &str) -> Element {
     match parse_podcast_episode(event) {
         Ok(episode) => {
-            let display_episode = DisplayEpisode::from_nostr_episode(
-                &episode,
-                "Podcast Episode",
-                None,
-            );
+            let display_episode =
+                DisplayEpisode::from_nostr_episode(&episode, "Podcast Episode", None);
             rsx! {
                 PodcastEpisodeCard { episode: display_episode, show_description: false }
             }
@@ -227,30 +224,28 @@ pub(super) fn NostrBlueRssPodcastEpisodeRenderer(
             let feed_id = podcast_id
                 .parse::<u64>()
                 .map_err(|_| "Invalid podcast ID format".to_string())?;
-            let create_minimal_feed = |
-                ep: &podcast_index::Episode,
-                feed_id: u64,
-            | -> podcast_index::PodcastFeed {
-                podcast_index::PodcastFeed {
-                    id: feed_id,
-                    title: ep.feed_title.clone().unwrap_or_default(),
-                    url: ep.feed_url.clone().unwrap_or_default(),
-                    original_url: None,
-                    link: None,
-                    description: None,
-                    author: None,
-                    owner_name: None,
-                    image: ep.feed_image.clone(),
-                    artwork: None,
-                    language: None,
-                    itunes_id: None,
-                    podcast_guid: ep.podcast_guid.clone(),
-                    categories: None,
-                    episode_count: None,
-                    trending_score: None,
-                    value: None,
-                }
-            };
+            let create_minimal_feed =
+                |ep: &podcast_index::Episode, feed_id: u64| -> podcast_index::PodcastFeed {
+                    podcast_index::PodcastFeed {
+                        id: feed_id,
+                        title: ep.feed_title.clone().unwrap_or_default(),
+                        url: ep.feed_url.clone().unwrap_or_default(),
+                        original_url: None,
+                        link: None,
+                        description: None,
+                        author: None,
+                        owner_name: None,
+                        image: ep.feed_image.clone(),
+                        artwork: None,
+                        language: None,
+                        itunes_id: None,
+                        podcast_guid: ep.podcast_guid.clone(),
+                        categories: None,
+                        episode_count: None,
+                        trending_score: None,
+                        value: None,
+                    }
+                };
             if let Ok(ep_id) = decoded_episode_id.parse::<u64>() {
                 if let Ok(ep) = podcast_index::get_episode_by_id(ep_id).await {
                     let feed = podcast_index::get_podcast_by_id(feed_id)
@@ -262,33 +257,24 @@ pub(super) fn NostrBlueRssPodcastEpisodeRenderer(
                     return Ok(DisplayEpisode::from_podcast_index_episode(&ep, &feed));
                 }
                 log::debug!("Direct episode fetch failed, falling back to search");
-            } else if let Ok((ep, feed_opt)) = podcast_index::get_episode_by_guid(
-                    &decoded_episode_id,
-                    None,
-                )
-                .await
+            } else if let Ok((ep, feed_opt)) =
+                podcast_index::get_episode_by_guid(&decoded_episode_id, None).await
             {
                 if ep.feed_id == Some(feed_id) {
                     let feed = match feed_opt {
                         Some(f) => f,
-                        None => {
-                            podcast_index::get_podcast_by_id(feed_id)
-                                .await
-                                .unwrap_or_else(|_| create_minimal_feed(&ep, feed_id))
-                        }
+                        None => podcast_index::get_podcast_by_id(feed_id)
+                            .await
+                            .unwrap_or_else(|_| create_minimal_feed(&ep, feed_id)),
                     };
-                    return Ok(
-                        DisplayEpisode::from_podcast_index_episode(&ep, &feed),
-                    );
+                    return Ok(DisplayEpisode::from_podcast_index_episode(&ep, &feed));
                 } else {
                     log::debug!(
                         "GUID lookup returned episode from different feed, falling back to search"
                     );
                 }
             } else {
-                log::debug!(
-                    "GUID-based episode fetch failed, falling back to search"
-                );
+                log::debug!("GUID-based episode fetch failed, falling back to search");
             }
             let feed = podcast_index::get_podcast_by_id(feed_id)
                 .await
@@ -297,14 +283,15 @@ pub(super) fn NostrBlueRssPodcastEpisodeRenderer(
             const PAGE_SIZE: u32 = 100;
             for page in 0..MAX_PAGES {
                 let fetch_count = PAGE_SIZE * (page + 1);
-                let episodes = podcast_index::get_episodes_by_feed_id(
-                        feed_id,
-                        Some(fetch_count),
-                        None,
-                    )
-                    .await
-                    .map_err(|e| format!("Failed to fetch episodes: {}", e))?;
-                let start_idx = if page == 0 { 0 } else { (PAGE_SIZE * page) as usize };
+                let episodes =
+                    podcast_index::get_episodes_by_feed_id(feed_id, Some(fetch_count), None)
+                        .await
+                        .map_err(|e| format!("Failed to fetch episodes: {}", e))?;
+                let start_idx = if page == 0 {
+                    0
+                } else {
+                    (PAGE_SIZE * page) as usize
+                };
                 let episodes_to_check = if start_idx < episodes.len() {
                     &episodes[start_idx..]
                 } else {
@@ -320,12 +307,10 @@ pub(super) fn NostrBlueRssPodcastEpisodeRenderer(
                     break;
                 }
             }
-            Err(
-                format!(
-                    "Episode not found (searched {} episodes)",
-                    MAX_PAGES * PAGE_SIZE,
-                ),
-            )
+            Err(format!(
+                "Episode not found (searched {} episodes)",
+                MAX_PAGES * PAGE_SIZE,
+            ))
         }
     });
     rsx! {
@@ -367,41 +352,38 @@ pub(super) fn NostrBlueRssPodcastShowRenderer(podcast_id: String) -> Element {
             let feed = podcast_index::get_podcast_by_id(feed_id)
                 .await
                 .map_err(|e| e.to_string())?;
-            let value = feed
-                .value
-                .as_ref()
-                .and_then(|v| {
-                    let model = v.model.as_ref()?;
-                    Some(crate::utils::podcast::ValueBlock {
-                        value_type: model
-                            .model_type
-                            .clone()
-                            .unwrap_or_else(|| "lightning".to_string()),
-                        method: model
-                            .method
-                            .clone()
-                            .unwrap_or_else(|| "keysend".to_string()),
-                        suggested: model.suggested.as_ref().and_then(|s| s.parse().ok()),
-                        recipients: v
-                            .destinations
-                            .iter()
-                            .filter_map(|d| {
-                                Some(crate::utils::podcast::ValueRecipient {
-                                    name: d.name.clone(),
-                                    custom_key: None,
-                                    custom_value: None,
-                                    recipient_type: d
-                                        .dest_type
-                                        .clone()
-                                        .unwrap_or_else(|| "node".to_string()),
-                                    address: d.address.clone()?,
-                                    split: d.split.unwrap_or(0),
-                                    fee: None,
-                                })
+            let value = feed.value.as_ref().and_then(|v| {
+                let model = v.model.as_ref()?;
+                Some(crate::utils::podcast::ValueBlock {
+                    value_type: model
+                        .model_type
+                        .clone()
+                        .unwrap_or_else(|| "lightning".to_string()),
+                    method: model
+                        .method
+                        .clone()
+                        .unwrap_or_else(|| "keysend".to_string()),
+                    suggested: model.suggested.as_ref().and_then(|s| s.parse().ok()),
+                    recipients: v
+                        .destinations
+                        .iter()
+                        .filter_map(|d| {
+                            Some(crate::utils::podcast::ValueRecipient {
+                                name: d.name.clone(),
+                                custom_key: None,
+                                custom_value: None,
+                                recipient_type: d
+                                    .dest_type
+                                    .clone()
+                                    .unwrap_or_else(|| "node".to_string()),
+                                address: d.address.clone()?,
+                                split: d.split.unwrap_or(0),
+                                fee: None,
                             })
-                            .collect(),
-                    })
-                });
+                        })
+                        .collect(),
+                })
+            });
             Ok(PodcastShow {
                 id: feed.id.to_string(),
                 title: feed.title.clone(),
@@ -479,10 +461,7 @@ pub(super) fn NostrBlueMusicPlaylistRenderer(id: String) -> Element {
 #[component]
 pub(super) fn NostrBlueRadioStationRenderer(id: String) -> Element {
     let id_for_link = id.clone();
-    let fetch = use_fetch_event_by_coordinate_with_message(
-        id,
-        "Radio station not found",
-    );
+    let fetch = use_fetch_event_by_coordinate_with_message(id, "Radio station not found");
     rsx! {
         div { class: "my-2", onclick: move |e: MouseEvent| e.stop_propagation(),
             if fetch.is_loading() {
@@ -562,8 +541,8 @@ fn render_recipe_from_event(event: &Event, naddr: &str) -> Element {
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| {
             log::debug!(
-                "Recipe event {} has empty identifier, using event ID as fallback", event
-                .id
+                "Recipe event {} has empty identifier, using event ID as fallback",
+                event.id
             );
             event.id.to_hex()
         });
@@ -795,8 +774,8 @@ fn NostrBlueWikiNaddrRenderer(id: String) -> Element {
 fn render_wiki_card(event: &Event, identifier: &str) -> Element {
     use crate::stores::wiki_store::CachedWikiPage;
     if let Ok(article) = parse_wiki_article(event) {
-        let coord = Coordinate::new(Kind::from(30818), event.pubkey)
-            .identifier(&article.identifier);
+        let coord =
+            Coordinate::new(Kind::from(30818), event.pubkey).identifier(&article.identifier);
         let naddr = coord.to_bech32().unwrap_or_else(|_| identifier.to_string());
         let a_tag = format!("30818:{}:{}", event.pubkey.to_hex(), article.identifier);
         let cached = CachedWikiPage {
@@ -968,11 +947,7 @@ fn render_product_card(event: &Event, naddr: &str) -> Element {
     if let Ok(product) = parse_product(event) {
         let title = product.title.clone();
         let image_url = product.images.first().map(|img| img.url.clone());
-        let price_display = format!(
-            "{} {}",
-            product.price.amount,
-            product.price.currency,
-        );
+        let price_display = format!("{} {}", product.price.amount, product.price.currency,);
         rsx! {
             Link {
                 to: Route::ShopProductDetail {
@@ -1043,8 +1018,10 @@ pub(super) fn NostrBlueCodeRepoRenderer(id: String) -> Element {
 pub(super) fn NostrBlueCommunityRenderer(id: String) -> Element {
     let id_for_link = id.clone();
     let parts: Vec<&str> = id.splitn(3, ':').collect();
-    let is_valid = parts.len() == 3 && parts[0].parse::<u32>().is_ok()
-        && PublicKey::from_hex(parts[1]).is_ok() && !parts[2].is_empty();
+    let is_valid = parts.len() == 3
+        && parts[0].parse::<u32>().is_ok()
+        && PublicKey::from_hex(parts[1]).is_ok()
+        && !parts[2].is_empty();
     rsx! {
         div { class: "my-2", onclick: move |e: MouseEvent| e.stop_propagation(),
             if is_valid {

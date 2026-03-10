@@ -150,8 +150,7 @@ pub fn PublicationCardSkeleton() -> Element {
 #[component]
 pub fn PublicationGrid(
     publications: Vec<PublicationIndex>,
-    #[props(default = false)]
-    loading: bool,
+    #[props(default = false)] loading: bool,
 ) -> Element {
     rsx! {
         div { class: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4",

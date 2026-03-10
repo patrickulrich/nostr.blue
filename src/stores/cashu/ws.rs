@@ -7,33 +7,47 @@
 //! - Explicit close() for resource cleanup
 //! - Subscribe sent in onopen callback (no timing races)
 #![allow(dead_code)]
+
+#[cfg(all(feature = "web", feature = "native"))]
+compile_error!("Cannot enable both 'web' and 'native' features simultaneously");
+
+#[cfg(not(any(feature = "web", feature = "native")))]
+compile_error!("Must enable either 'web' or 'native' feature");
+
+use crate::platform::http::http_client;
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "web")]
 use std::cell::RefCell;
 use std::collections::HashMap;
+#[cfg(feature = "web")]
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::mpsc;
+#[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
+#[cfg(feature = "web")]
 use web_sys::{CloseEvent, ErrorEvent, MessageEvent, WebSocket};
 /// Global counter for JSON-RPC request IDs
+#[cfg(feature = "web")]
 static REQUEST_ID: AtomicU64 = AtomicU64::new(0);
 /// Global signal tracking active WebSocket connections by mint URL
-pub static WS_CONNECTIONS: GlobalSignal<HashMap<String, WsConnectionState>> = GlobalSignal::new(
-    HashMap::new,
-);
+pub static WS_CONNECTIONS: GlobalSignal<HashMap<String, WsConnectionState>> =
+    GlobalSignal::new(HashMap::new);
 /// Cache for mint NUT-17 WebSocket support: mint_url -> (timestamp_ms, supports_ws)
 /// TTL is 5 minutes (300,000 ms)
-pub static MINT_WS_SUPPORT_CACHE: GlobalSignal<HashMap<String, (f64, bool)>> = GlobalSignal::new(
-    HashMap::new,
-);
+pub static MINT_WS_SUPPORT_CACHE: GlobalSignal<HashMap<String, (f64, bool)>> =
+    GlobalSignal::new(HashMap::new);
 const MINT_WS_CACHE_TTL_MS: f64 = 300_000.0;
+#[cfg(feature = "web")]
 thread_local! {
     static WS_CLOSURES: RefCell<HashMap<String, WsClosures>> = RefCell::new(
         HashMap::new(),
     );
 }
 /// Stored closures for a WebSocket connection
+#[cfg(feature = "web")]
 struct WsClosures {
     #[allow(dead_code)]
     onopen: Closure<dyn FnMut(web_sys::Event)>,
@@ -51,25 +65,61 @@ pub struct WsConnectionState {
     pub connected: bool,
     /// Active subscriptions (sub_id -> quote_id)
     pub subscriptions: HashMap<String, String>,
-    /// WebSocket handle for explicit cleanup (WebSocket is Clone - it's a JS handle)
-    pub ws: Option<WebSocket>,
+    /// WebSocket handles for explicit cleanup (WebSocket is Clone - it's a JS handle)
+    #[cfg(feature = "web")]
+    pub websockets: HashMap<String, WebSocket>,
+}
+
+#[cfg(feature = "web")]
+fn cleanup_subscription_state(mint_url: &str, sub_id: &str) -> bool {
+    let mut should_remove_connection = false;
+    {
+        let mut connections = WS_CONNECTIONS.write();
+        if let Some(state) = connections.get_mut(mint_url) {
+            state.subscriptions.remove(sub_id);
+            if let Some(ws) = state.websockets.remove(sub_id) {
+                let _ = ws.close();
+            }
+            if state.subscriptions.is_empty() {
+                state.connected = false;
+                should_remove_connection = true;
+            }
+        }
+        if should_remove_connection {
+            connections.remove(mint_url);
+        }
+    }
+    WS_CLOSURES.with(|closures| {
+        closures.borrow_mut().remove(sub_id);
+    });
+    should_remove_connection
 }
 /// Close a WebSocket connection and clean up all resources
+#[cfg(feature = "web")]
 pub fn close_connection(mint_url: &str) {
     let mut connections = WS_CONNECTIONS.write();
     if let Some(state) = connections.remove(mint_url) {
-        if let Some(ws) = state.ws {
+        for (_, ws) in state.websockets {
             if let Err(e) = ws.close() {
                 log::error!("Failed to close WebSocket for {}: {:?}", mint_url, e);
             } else {
                 log::debug!("WebSocket connection closed for {}", mint_url);
             }
         }
-    }
-    WS_CLOSURES
-        .with(|closures| {
-            closures.borrow_mut().remove(mint_url);
+        WS_CLOSURES.with(|closures| {
+            let mut map = closures.borrow_mut();
+            for sub_id in state.subscriptions.keys() {
+                map.remove(sub_id);
+            }
         });
+    }
+    log::info!("Cleaned up WebSocket resources for {}", mint_url);
+}
+
+#[cfg(not(feature = "web"))]
+pub fn close_connection(mint_url: &str) {
+    let mut connections = WS_CONNECTIONS.write();
+    connections.remove(mint_url);
     log::info!("Cleaned up WebSocket resources for {}", mint_url);
 }
 /// Subscription kind for NUT-17
@@ -144,9 +194,21 @@ pub struct QuotePayload {
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum WsMessage {
-    Notification { jsonrpc: String, method: String, params: QuoteNotification },
-    Response { jsonrpc: String, result: serde_json::Value, id: u64 },
-    Error { jsonrpc: String, error: WsJsonRpcError, id: u64 },
+    Notification {
+        jsonrpc: String,
+        method: String,
+        params: QuoteNotification,
+    },
+    Response {
+        jsonrpc: String,
+        result: serde_json::Value,
+        id: u64,
+    },
+    Error {
+        jsonrpc: String,
+        error: WsJsonRpcError,
+        id: u64,
+    },
 }
 #[derive(Debug, Deserialize)]
 struct WsJsonRpcError {
@@ -225,9 +287,7 @@ pub struct ProofStateNotification {
 }
 /// Proof state callback type
 #[allow(dead_code)]
-pub type ProofStateCallback = Box<
-    dyn Fn(ProofStateNotification) + Send + Sync + 'static,
->;
+pub type ProofStateCallback = Box<dyn Fn(ProofStateNotification) + Send + Sync + 'static>;
 /// Subscribe to quote status updates via WebSocket
 ///
 /// Returns a channel receiver for status updates. Falls back to HTTP polling
@@ -237,6 +297,7 @@ pub type ProofStateCallback = Box<
 /// - No Closure::forget() - closures stored in thread_local for cleanup
 /// - Subscribe sent in onopen callback (no timing races)
 /// - WebSocket stored for explicit cleanup
+#[cfg(feature = "web")]
 pub async fn subscribe_to_quote(
     mint_url: String,
     quote_id: String,
@@ -245,130 +306,115 @@ pub async fn subscribe_to_quote(
     let (tx, rx) = mpsc::channel(16);
     let ws_url = mint_url_to_ws(&mint_url)?;
     let sub_id = uuid::Uuid::new_v4().to_string();
-    let ws = WebSocket::new(&ws_url)
-        .map_err(|e| format!("Failed to create WebSocket: {:?}", e))?;
+    let ws = WebSocket::new(&ws_url).map_err(|e| format!("Failed to create WebSocket: {:?}", e))?;
     ws.set_binary_type(web_sys::BinaryType::Arraybuffer);
     let ws_for_onopen = ws.clone();
     let sub_id_for_onopen = sub_id.clone();
     let quote_id_for_onopen = quote_id.clone();
     let mint_url_for_onopen = mint_url.clone();
     let kind_str = kind.as_str().to_string();
-    let onopen_callback = Closure::wrap(
-        Box::new(move |_: web_sys::Event| {
-            log::info!("WebSocket connected to {}", mint_url_for_onopen);
-            let mut connections = WS_CONNECTIONS.write();
-            let state = connections
-                .entry(mint_url_for_onopen.clone())
-                .or_insert_with(|| WsConnectionState {
-                    connected: false,
-                    subscriptions: HashMap::new(),
-                    ws: None,
-                });
-            state.connected = true;
-            state
-                .subscriptions
-                .insert(sub_id_for_onopen.clone(), quote_id_for_onopen.clone());
-            drop(connections);
-            let request = SubscribeRequest {
-                jsonrpc: "2.0",
-                method: "subscribe",
-                params: SubscribeParams {
-                    kind: kind_str.clone(),
-                    sub_id: sub_id_for_onopen.clone(),
-                    filters: vec![quote_id_for_onopen.clone()],
-                },
-                id: REQUEST_ID.fetch_add(1, Ordering::SeqCst),
-            };
-            match serde_json::to_string(&request) {
-                Ok(json) => {
-                    if let Err(e) = ws_for_onopen.send_with_str(&json) {
-                        log::error!("Failed to send subscribe request: {:?}", e);
-                    } else {
-                        log::debug!(
-                            "Sent subscribe request for quote {}", quote_id_for_onopen
-                        );
-                    }
+    let onopen_callback = Closure::wrap(Box::new(move |_: web_sys::Event| {
+        log::info!("WebSocket connected to {}", mint_url_for_onopen);
+        let mut connections = WS_CONNECTIONS.write();
+        let state = connections
+            .entry(mint_url_for_onopen.clone())
+            .or_insert_with(|| WsConnectionState {
+                connected: false,
+                subscriptions: HashMap::new(),
+                websockets: HashMap::new(),
+            });
+        state.connected = true;
+        state
+            .subscriptions
+            .insert(sub_id_for_onopen.clone(), quote_id_for_onopen.clone());
+        drop(connections);
+        let request = SubscribeRequest {
+            jsonrpc: "2.0",
+            method: "subscribe",
+            params: SubscribeParams {
+                kind: kind_str.clone(),
+                sub_id: sub_id_for_onopen.clone(),
+                filters: vec![quote_id_for_onopen.clone()],
+            },
+            id: REQUEST_ID.fetch_add(1, Ordering::SeqCst),
+        };
+        match serde_json::to_string(&request) {
+            Ok(json) => {
+                if let Err(e) = ws_for_onopen.send_with_str(&json) {
+                    log::error!("Failed to send subscribe request: {:?}", e);
+                } else {
+                    log::debug!("Sent subscribe request for quote {}", quote_id_for_onopen);
                 }
-                Err(e) => log::error!("Failed to serialize subscribe request: {}", e),
             }
-        }) as Box<dyn FnMut(web_sys::Event)>,
-    );
+            Err(e) => log::error!("Failed to serialize subscribe request: {}", e),
+        }
+    }) as Box<dyn FnMut(web_sys::Event)>);
     ws.set_onopen(Some(onopen_callback.as_ref().unchecked_ref()));
     let sub_id_for_msg = sub_id.clone();
     let tx_for_msg = tx.clone();
-    let onmessage_callback = Closure::wrap(
-        Box::new(move |e: MessageEvent| {
-            if let Ok(text) = e.data().dyn_into::<js_sys::JsString>() {
-                let text: String = text.into();
-                match serde_json::from_str::<WsMessage>(&text) {
-                    Ok(WsMessage::Notification { params, .. }) => {
-                        if params.sub_id == sub_id_for_msg {
-                            let status = QuoteStatus::from(
-                                params.payload.state.as_str(),
+    let onmessage_callback = Closure::wrap(Box::new(move |e: MessageEvent| {
+        if let Ok(text) = e.data().dyn_into::<js_sys::JsString>() {
+            let text: String = text.into();
+            match serde_json::from_str::<WsMessage>(&text) {
+                Ok(WsMessage::Notification { params, .. }) => {
+                    if params.sub_id == sub_id_for_msg {
+                        let status = QuoteStatus::from(params.payload.state.as_str());
+                        if let Err(e) = tx_for_msg.try_send(status) {
+                            log::warn!(
+                                "Channel full, dropping quote status update for {}: {:?}",
+                                sub_id_for_msg,
+                                e
                             );
-                            if let Err(e) = tx_for_msg.try_send(status) {
-                                log::warn!(
-                                    "Channel full, dropping quote status update for {}: {:?}",
-                                    sub_id_for_msg, e
-                                );
-                            }
                         }
                     }
-                    Ok(WsMessage::Response { .. }) => {
-                        log::debug!("Received WebSocket response");
-                    }
-                    Ok(WsMessage::Error { error, .. }) => {
-                        log::error!(
-                            "WebSocket error: {} (code: {})", error.message, error.code
-                        );
-                    }
-                    Err(e) => {
-                        log::debug!("Failed to parse WebSocket message: {}", e);
-                    }
+                }
+                Ok(WsMessage::Response { .. }) => {
+                    log::debug!("Received WebSocket response");
+                }
+                Ok(WsMessage::Error { error, .. }) => {
+                    log::error!("WebSocket error: {} (code: {})", error.message, error.code);
+                }
+                Err(e) => {
+                    log::debug!("Failed to parse WebSocket message: {}", e);
                 }
             }
-        }) as Box<dyn FnMut(MessageEvent)>,
-    );
+        }
+    }) as Box<dyn FnMut(MessageEvent)>);
     ws.set_onmessage(Some(onmessage_callback.as_ref().unchecked_ref()));
     let mint_url_for_error = mint_url.clone();
-    let onerror_callback = Closure::wrap(
-        Box::new(move |e: ErrorEvent| {
-            log::error!("WebSocket error for {}: {:?}", mint_url_for_error, e.message());
-        }) as Box<dyn FnMut(ErrorEvent)>,
-    );
+    let sub_id_for_error = sub_id.clone();
+    let onerror_callback = Closure::wrap(Box::new(move |e: ErrorEvent| {
+        log::error!(
+            "WebSocket error for {}: {:?}",
+            mint_url_for_error,
+            e.message()
+        );
+        cleanup_subscription_state(&mint_url_for_error, &sub_id_for_error);
+    }) as Box<dyn FnMut(ErrorEvent)>);
     ws.set_onerror(Some(onerror_callback.as_ref().unchecked_ref()));
     let mint_url_for_close = mint_url.clone();
     let sub_id_for_close = sub_id.clone();
-    let onclose_callback = Closure::wrap(
-        Box::new(move |e: CloseEvent| {
-            log::info!(
-                "WebSocket closed for {}: code={}, reason={}", mint_url_for_close, e
-                .code(), e.reason()
-            );
-            let mut connections = WS_CONNECTIONS.write();
-            if let Some(state) = connections.get_mut(&mint_url_for_close) {
-                state.subscriptions.remove(&sub_id_for_close);
-                if state.subscriptions.is_empty() {
-                    state.connected = false;
-                }
-            }
-        }) as Box<dyn FnMut(CloseEvent)>,
-    );
+    let onclose_callback = Closure::wrap(Box::new(move |e: CloseEvent| {
+        log::info!(
+            "WebSocket closed for {}: code={}, reason={}",
+            mint_url_for_close,
+            e.code(),
+            e.reason()
+        );
+        cleanup_subscription_state(&mint_url_for_close, &sub_id_for_close);
+    }) as Box<dyn FnMut(CloseEvent)>);
     ws.set_onclose(Some(onclose_callback.as_ref().unchecked_ref()));
-    WS_CLOSURES
-        .with(|closures| {
-            closures
-                .borrow_mut()
-                .insert(
-                    mint_url.clone(),
-                    WsClosures {
-                        onopen: onopen_callback,
-                        onmessage: onmessage_callback,
-                        onerror: onerror_callback,
-                        onclose: onclose_callback,
-                    },
-                );
-        });
+    WS_CLOSURES.with(|closures| {
+        closures.borrow_mut().insert(
+            sub_id.clone(),
+            WsClosures {
+                onopen: onopen_callback,
+                onmessage: onmessage_callback,
+                onerror: onerror_callback,
+                onclose: onclose_callback,
+            },
+        );
+    });
     {
         let mut connections = WS_CONNECTIONS.write();
         let state = connections
@@ -376,47 +422,43 @@ pub async fn subscribe_to_quote(
             .or_insert_with(|| WsConnectionState {
                 connected: false,
                 subscriptions: HashMap::new(),
-                ws: None,
+                websockets: HashMap::new(),
             });
-        state.ws = Some(ws);
+        state.websockets.insert(sub_id.clone(), ws);
     }
     Ok(rx)
 }
+
+/// Subscribe to quote status updates (native stub - WebSocket not available)
+#[cfg(not(feature = "web"))]
+pub async fn subscribe_to_quote(
+    _mint_url: String,
+    _quote_id: String,
+    _kind: SubscriptionKind,
+) -> Result<mpsc::Receiver<QuoteStatus>, String> {
+    Err("WebSocket subscriptions not available on native".to_string())
+}
+
 /// Unsubscribe from quote updates
 ///
 /// If this is the last subscription for this mint, closes the connection
 /// and cleans up all resources (following nostr-sdk pattern).
 #[allow(dead_code)]
+#[cfg(feature = "web")]
 pub fn unsubscribe(mint_url: &str, sub_id: &str) {
-    let should_close = {
-        let mut connections = WS_CONNECTIONS.write();
-        if let Some(state) = connections.get_mut(mint_url) {
-            state.subscriptions.remove(sub_id);
-            state.subscriptions.is_empty()
-        } else {
-            false
-        }
-    };
+    let should_close = cleanup_subscription_state(mint_url, sub_id);
     if should_close {
         close_connection(mint_url);
     }
 }
-/// Check if WebSocket subscriptions are supported for a mint
+
 #[allow(dead_code)]
-pub async fn check_ws_support(mint_url: &str) -> bool {
-    let ws_url = match mint_url_to_ws(mint_url) {
-        Ok(url) => url,
-        Err(_) => return false,
-    };
-    match WebSocket::new(&ws_url) {
-        Ok(ws) => {
-            let _ = ws.close();
-            true
-        }
-        Err(_) => false,
-    }
+#[cfg(not(feature = "web"))]
+pub fn unsubscribe(mint_url: &str, _sub_id: &str) {
+    close_connection(mint_url);
 }
 /// Convert HTTP mint URL to WebSocket URL
+#[cfg(feature = "web")]
 fn mint_url_to_ws(mint_url: &str) -> Result<String, String> {
     let mut url = mint_url.trim_end_matches('/').to_string();
     if url.starts_with("https://") {
@@ -436,22 +478,35 @@ pub async fn poll_quote_status(
     is_mint_quote: bool,
 ) -> Result<QuoteStatus, String> {
     let endpoint = if is_mint_quote {
-        format!("{}/v1/mint/quote/bolt11/{}", mint_url.trim_end_matches('/'), quote_id)
+        format!(
+            "{}/v1/mint/quote/bolt11/{}",
+            mint_url.trim_end_matches('/'),
+            quote_id
+        )
     } else {
-        format!("{}/v1/melt/quote/bolt11/{}", mint_url.trim_end_matches('/'), quote_id)
+        format!(
+            "{}/v1/melt/quote/bolt11/{}",
+            mint_url.trim_end_matches('/'),
+            quote_id
+        )
     };
-    let response = gloo_net::http::Request::get(&endpoint)
+    let response = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(&endpoint)
         .send()
         .await
         .map_err(|e| format!("HTTP request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("HTTP error: {}", response.status()));
     }
     let json: serde_json::Value = response
         .json()
         .await
         .map_err(|e| format!("Failed to parse response: {}", e))?;
-    let state = json.get("state").and_then(|v| v.as_str()).unwrap_or("UNKNOWN");
+    let state = json
+        .get("state")
+        .and_then(|v| v.as_str())
+        .unwrap_or("UNKNOWN");
     Ok(QuoteStatus::from(state))
 }
 /// Subscribe to proof state updates via WebSocket
@@ -463,6 +518,7 @@ pub async fn poll_quote_status(
 /// - Detecting when sent proofs are redeemed
 /// - Monitoring pending swap/melt operations
 /// - Recovery workflows to check proof validity
+#[cfg(feature = "web")]
 pub async fn subscribe_to_proof_states(
     mint_url: String,
     y_values: Vec<String>,
@@ -473,84 +529,80 @@ pub async fn subscribe_to_proof_states(
     let (tx, rx) = mpsc::channel(64);
     let ws_url = mint_url_to_ws(&mint_url)?;
     let sub_id = uuid::Uuid::new_v4().to_string();
-    let ws = WebSocket::new(&ws_url)
-        .map_err(|e| format!("Failed to create WebSocket: {:?}", e))?;
+    let ws = WebSocket::new(&ws_url).map_err(|e| format!("Failed to create WebSocket: {:?}", e))?;
     ws.set_binary_type(web_sys::BinaryType::Arraybuffer);
     let ws_for_onopen = ws.clone();
     let sub_id_for_onopen = sub_id.clone();
     let mint_url_for_onopen = mint_url.clone();
     let y_values_clone = y_values.clone();
-    let onopen_callback = Closure::wrap(
-        Box::new(move |_: web_sys::Event| {
-            log::info!(
-                "WebSocket connected for proof state subscription to {}",
-                mint_url_for_onopen
-            );
-            let mut connections = WS_CONNECTIONS.write();
-            let state = connections
-                .entry(mint_url_for_onopen.clone())
-                .or_insert_with(|| WsConnectionState {
-                    connected: false,
-                    subscriptions: HashMap::new(),
-                    ws: None,
-                });
-            state.connected = true;
-            state
-                .subscriptions
-                .insert(sub_id_for_onopen.clone(), "proof_states".to_string());
-            drop(connections);
-            let request = SubscribeRequest {
-                jsonrpc: "2.0",
-                method: "subscribe",
-                params: SubscribeParams {
-                    kind: SubscriptionKind::ProofState.as_str().to_string(),
-                    sub_id: sub_id_for_onopen.clone(),
-                    filters: y_values_clone.clone(),
-                },
-                id: REQUEST_ID.fetch_add(1, Ordering::SeqCst),
-            };
-            match serde_json::to_string(&request) {
-                Ok(json) => {
-                    if let Err(e) = ws_for_onopen.send_with_str(&json) {
-                        log::error!(
-                            "Failed to send proof state subscribe request: {:?}", e
-                        );
-                    } else {
-                        log::debug!(
-                            "Sent proof state subscribe request for {} proofs",
-                            y_values_clone.len()
-                        );
-                    }
+    let onopen_callback = Closure::wrap(Box::new(move |_: web_sys::Event| {
+        log::info!(
+            "WebSocket connected for proof state subscription to {}",
+            mint_url_for_onopen
+        );
+        let mut connections = WS_CONNECTIONS.write();
+        let state = connections
+            .entry(mint_url_for_onopen.clone())
+            .or_insert_with(|| WsConnectionState {
+                connected: false,
+                subscriptions: HashMap::new(),
+                websockets: HashMap::new(),
+            });
+        state.connected = true;
+        state
+            .subscriptions
+            .insert(sub_id_for_onopen.clone(), "proof_states".to_string());
+        drop(connections);
+        let request = SubscribeRequest {
+            jsonrpc: "2.0",
+            method: "subscribe",
+            params: SubscribeParams {
+                kind: SubscriptionKind::ProofState.as_str().to_string(),
+                sub_id: sub_id_for_onopen.clone(),
+                filters: y_values_clone.clone(),
+            },
+            id: REQUEST_ID.fetch_add(1, Ordering::SeqCst),
+        };
+        match serde_json::to_string(&request) {
+            Ok(json) => {
+                if let Err(e) = ws_for_onopen.send_with_str(&json) {
+                    log::error!("Failed to send proof state subscribe request: {:?}", e);
+                } else {
+                    log::debug!(
+                        "Sent proof state subscribe request for {} proofs",
+                        y_values_clone.len()
+                    );
                 }
-                Err(e) => log::error!("Failed to serialize subscribe request: {}", e),
             }
-        }) as Box<dyn FnMut(web_sys::Event)>,
-    );
+            Err(e) => log::error!("Failed to serialize subscribe request: {}", e),
+        }
+    }) as Box<dyn FnMut(web_sys::Event)>);
     ws.set_onopen(Some(onopen_callback.as_ref().unchecked_ref()));
     let sub_id_for_msg = sub_id.clone();
     let tx_for_msg = tx.clone();
-    let onmessage_callback = Closure::wrap(
-        Box::new(move |e: MessageEvent| {
-            if let Ok(text) = e.data().dyn_into::<js_sys::JsString>() {
-                let text: String = text.into();
-                if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&text) {
-                    if msg.get("method").and_then(|v| v.as_str()) == Some("subscribe") {
-                        if let Some(params) = msg.get("params") {
-                            let sub_id_match = params
-                                .get("subId")
-                                .and_then(|v| v.as_str())
-                                .map(|s| s == sub_id_for_msg)
-                                .unwrap_or(false);
-                            if sub_id_match {
-                                if let Some(payload) = params.get("payload") {
-                                    if let Ok(notification) = serde_json::from_value::<
-                                        ProofStateNotification,
-                                    >(payload.clone()) {
-                                        if let Err(e) = tx_for_msg.try_send(notification) {
-                                            log::warn!(
-                                                "Channel full, dropping proof state update: {:?}", e
-                                            );
-                                        }
+    let onmessage_callback = Closure::wrap(Box::new(move |e: MessageEvent| {
+        if let Ok(text) = e.data().dyn_into::<js_sys::JsString>() {
+            let text: String = text.into();
+            if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&text) {
+                if msg.get("method").and_then(|v| v.as_str()) == Some("subscribe") {
+                    if let Some(params) = msg.get("params") {
+                        let sub_id_match = params
+                            .get("subId")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s == sub_id_for_msg)
+                            .unwrap_or(false);
+                        if sub_id_match {
+                            if let Some(payload) = params.get("payload") {
+                                if let Ok(notification) =
+                                    serde_json::from_value::<ProofStateNotification>(
+                                        payload.clone(),
+                                    )
+                                {
+                                    if let Err(e) = tx_for_msg.try_send(notification) {
+                                        log::warn!(
+                                            "Channel full, dropping proof state update: {:?}",
+                                            e
+                                        );
                                     }
                                 }
                             }
@@ -558,48 +610,43 @@ pub async fn subscribe_to_proof_states(
                     }
                 }
             }
-        }) as Box<dyn FnMut(MessageEvent)>,
-    );
+        }
+    }) as Box<dyn FnMut(MessageEvent)>);
     ws.set_onmessage(Some(onmessage_callback.as_ref().unchecked_ref()));
     let mint_url_for_error = mint_url.clone();
-    let onerror_callback = Closure::wrap(
-        Box::new(move |e: ErrorEvent| {
-            log::error!("WebSocket error for {}: {:?}", mint_url_for_error, e.message());
-        }) as Box<dyn FnMut(ErrorEvent)>,
-    );
+    let sub_id_for_error = sub_id.clone();
+    let onerror_callback = Closure::wrap(Box::new(move |e: ErrorEvent| {
+        log::error!(
+            "WebSocket error for {}: {:?}",
+            mint_url_for_error,
+            e.message()
+        );
+        cleanup_subscription_state(&mint_url_for_error, &sub_id_for_error);
+    }) as Box<dyn FnMut(ErrorEvent)>);
     ws.set_onerror(Some(onerror_callback.as_ref().unchecked_ref()));
     let mint_url_for_close = mint_url.clone();
     let sub_id_for_close = sub_id.clone();
-    let onclose_callback = Closure::wrap(
-        Box::new(move |e: CloseEvent| {
-            log::info!(
-                "WebSocket closed for {}: code={}, reason={}", mint_url_for_close, e
-                .code(), e.reason()
-            );
-            let mut connections = WS_CONNECTIONS.write();
-            if let Some(state) = connections.get_mut(&mint_url_for_close) {
-                state.subscriptions.remove(&sub_id_for_close);
-                if state.subscriptions.is_empty() {
-                    state.connected = false;
-                }
-            }
-        }) as Box<dyn FnMut(CloseEvent)>,
-    );
+    let onclose_callback = Closure::wrap(Box::new(move |e: CloseEvent| {
+        log::info!(
+            "WebSocket closed for {}: code={}, reason={}",
+            mint_url_for_close,
+            e.code(),
+            e.reason()
+        );
+        cleanup_subscription_state(&mint_url_for_close, &sub_id_for_close);
+    }) as Box<dyn FnMut(CloseEvent)>);
     ws.set_onclose(Some(onclose_callback.as_ref().unchecked_ref()));
-    WS_CLOSURES
-        .with(|closures| {
-            closures
-                .borrow_mut()
-                .insert(
-                    format!("{}:proof_states", mint_url),
-                    WsClosures {
-                        onopen: onopen_callback,
-                        onmessage: onmessage_callback,
-                        onerror: onerror_callback,
-                        onclose: onclose_callback,
-                    },
-                );
-        });
+    WS_CLOSURES.with(|closures| {
+        closures.borrow_mut().insert(
+            sub_id.clone(),
+            WsClosures {
+                onopen: onopen_callback,
+                onmessage: onmessage_callback,
+                onerror: onerror_callback,
+                onclose: onclose_callback,
+            },
+        );
+    });
     {
         let mut connections = WS_CONNECTIONS.write();
         let state = connections
@@ -607,12 +654,22 @@ pub async fn subscribe_to_proof_states(
             .or_insert_with(|| WsConnectionState {
                 connected: false,
                 subscriptions: HashMap::new(),
-                ws: None,
+                websockets: HashMap::new(),
             });
-        state.ws = Some(ws);
+        state.websockets.insert(sub_id.clone(), ws);
     }
     Ok(rx)
 }
+
+/// Subscribe to proof state updates (native stub - WebSocket not available)
+#[cfg(not(feature = "web"))]
+pub async fn subscribe_to_proof_states(
+    _mint_url: String,
+    _y_values: Vec<String>,
+) -> Result<mpsc::Receiver<ProofStateNotification>, String> {
+    Err("WebSocket subscriptions not available on native".to_string())
+}
+
 /// Poll proof states via HTTP (fallback when WebSocket not available)
 ///
 /// Uses the /v1/checkstate endpoint to query proof states.
@@ -626,14 +683,14 @@ pub async fn poll_proof_states(
     }
     let endpoint = format!("{}/v1/checkstate", mint_url.trim_end_matches('/'));
     let request_body = serde_json::json!({ "Ys" : y_values });
-    let response = gloo_net::http::Request::post(&endpoint)
-        .header("Content-Type", "application/json")
-        .body(request_body.to_string())
-        .map_err(|e| format!("Failed to build request: {}", e))?
+    let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .post(&endpoint)
+        .json(&request_body)
         .send()
         .await
         .map_err(|e| format!("HTTP request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("HTTP error: {}", response.status()));
     }
     let json: serde_json::Value = response
@@ -659,12 +716,11 @@ pub async fn poll_proof_states(
             .get("witness")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
-        notifications
-            .push(ProofStateNotification {
-                y,
-                state: ProofState::from(state_str),
-                witness,
-            });
+        notifications.push(ProofStateNotification {
+            y,
+            state: ProofState::from(state_str),
+            witness,
+        });
     }
     Ok(notifications)
 }
@@ -747,10 +803,13 @@ where
             Err(e) => {
                 log::warn!(
                     "WebSocket subscription failed for quote {}: {}, using polling",
-                    quote_id, e
+                    quote_id,
+                    e
                 );
-                for _ in 0..60 {
-                    gloo_timers::future::TimeoutFuture::new(10_000).await;
+                for attempt in 0..60 {
+                    if attempt > 0 {
+                        crate::platform::timer::sleep_ms(10_000).await;
+                    }
                     match poll_quote_status(&mint_url, &quote_id, true).await {
                         Ok(status) => {
                             if matches!(status, QuoteStatus::Paid) {
@@ -802,34 +861,35 @@ where
             Err(e) => {
                 log::warn!(
                     "WebSocket subscription failed for melt quote {}: {}, using polling",
-                    quote_id, e
+                    quote_id,
+                    e
                 );
                 for _ in 0..6 {
-                    gloo_timers::future::TimeoutFuture::new(10_000).await;
+                    crate::platform::timer::sleep_ms(10_000).await;
                     match poll_quote_status(&mint_url, &quote_id, false).await {
-                        Ok(status) => {
-                            match status {
-                                QuoteStatus::Paid => {
-                                    log::info!("Melt quote {} paid! (via polling)", quote_id);
-                                    on_completed(quote_id.clone(), true);
-                                    return;
-                                }
-                                QuoteStatus::Expired => {
-                                    log::info!("Melt quote {} expired (via polling)", quote_id);
-                                    on_completed(quote_id.clone(), false);
-                                    return;
-                                }
-                                _ => {}
+                        Ok(status) => match status {
+                            QuoteStatus::Paid => {
+                                log::info!("Melt quote {} paid! (via polling)", quote_id);
+                                on_completed(quote_id.clone(), true);
+                                return;
                             }
-                        }
+                            QuoteStatus::Expired => {
+                                log::info!("Melt quote {} expired (via polling)", quote_id);
+                                on_completed(quote_id.clone(), false);
+                                return;
+                            }
+                            _ => {}
+                        },
                         Err(e) => {
                             log::warn!("Failed to poll melt quote {}: {}", quote_id, e);
                         }
                     }
                 }
                 log::warn!(
-                    "Polling timeout for melt quote {} without resolution", quote_id
+                    "Polling timeout for melt quote {} without resolution",
+                    quote_id
                 );
+                on_completed(quote_id.clone(), false);
             }
         }
     });
@@ -839,7 +899,7 @@ where
 /// Checks the mint info's `nuts.nut17.supported` array. Results are cached
 /// for 5 minutes to reduce network requests.
 pub async fn mint_supports_websocket(mint_url: &str) -> bool {
-    let now = js_sys::Date::now();
+    let now = crate::platform::timestamp::now_millis() as f64;
     {
         let cache = MINT_WS_SUPPORT_CACHE.read();
         if let Some((timestamp, supports)) = cache.get(mint_url) {
@@ -849,7 +909,9 @@ pub async fn mint_supports_websocket(mint_url: &str) -> bool {
         }
     }
     let supports = fetch_mint_ws_support(mint_url).await;
-    MINT_WS_SUPPORT_CACHE.write().insert(mint_url.to_string(), (now, supports));
+    MINT_WS_SUPPORT_CACHE
+        .write()
+        .insert(mint_url.to_string(), (now, supports));
     supports
 }
 /// Internal function to fetch NUT-17 WebSocket support from mint info

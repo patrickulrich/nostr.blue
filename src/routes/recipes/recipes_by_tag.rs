@@ -59,8 +59,7 @@ pub fn RecipesByTag(tag: String) -> Element {
             let until = *oldest_timestamp.peek();
             let tag_for_fetch = tag_clone.clone();
             spawn(async move {
-                match recipe_store::fetch_recipes_by_tag(&tag_for_fetch, 50, until).await
-                {
+                match recipe_store::fetch_recipes_by_tag(&tag_for_fetch, 50, until).await {
                     Ok(new_recipes) => {
                         if new_recipes.is_empty() {
                             has_more.set(false);
@@ -81,7 +80,11 @@ pub fn RecipesByTag(tag: String) -> Element {
         }
     };
     let recipe_count = recipes.read().len();
-    let recipe_text = if recipe_count == 1 { "recipe" } else { "recipes" };
+    let recipe_text = if recipe_count == 1 {
+        "recipe"
+    } else {
+        "recipes"
+    };
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",

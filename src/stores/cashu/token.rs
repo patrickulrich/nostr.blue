@@ -63,12 +63,9 @@ pub fn get_token_info(token_str: &str) -> Result<TokenInfo, String> {
     let trimmed = token_str.trim();
     let format = TokenFormat::detect(trimmed);
     if matches!(format, TokenFormat::Unknown) {
-        return Err(
-            "Invalid token format - must start with 'cashuA' or 'cashuB'".to_string(),
-        );
+        return Err("Invalid token format - must start with 'cashuA' or 'cashuB'".to_string());
     }
-    let token = Token::from_str(trimmed)
-        .map_err(|e| format!("Failed to parse token: {}", e))?;
+    let token = Token::from_str(trimmed).map_err(|e| format!("Failed to parse token: {}", e))?;
     let mint_url = token.mint_url().ok().map(|u| u.to_string());
     let value = token.value().ok().map(u64::from);
     let unit = token.unit().map(|u| u.to_string());
@@ -96,8 +93,7 @@ pub fn create_token(
     if proofs.is_empty() {
         return Err("Cannot create token with no proofs".to_string());
     }
-    let mint_url = MintUrl::from_str(mint_url)
-        .map_err(|e| format!("Invalid mint URL: {}", e))?;
+    let mint_url = MintUrl::from_str(mint_url).map_err(|e| format!("Invalid mint URL: {}", e))?;
     let token = Token::new(mint_url, proofs, memo, CurrencyUnit::Sat);
     Ok(token.to_string())
 }
@@ -112,15 +108,14 @@ pub fn convert_to_v4(token_str: &str) -> Result<String, String> {
     if matches!(TokenFormat::detect(trimmed), TokenFormat::V4) {
         return Ok(trimmed.to_string());
     }
-    let token_v3 = TokenV3::from_str(trimmed)
-        .map_err(|e| format!("Failed to parse V3 token: {}", e))?;
-    let token_v4 = TokenV4::try_from(token_v3)
-        .map_err(|e| {
-            format!(
-                "Cannot convert to V4 format: {} (multi-mint tokens not supported in V4)",
-                e,
-            )
-        })?;
+    let token_v3 =
+        TokenV3::from_str(trimmed).map_err(|e| format!("Failed to parse V3 token: {}", e))?;
+    let token_v4 = TokenV4::try_from(token_v3).map_err(|e| {
+        format!(
+            "Cannot convert to V4 format: {} (multi-mint tokens not supported in V4)",
+            e,
+        )
+    })?;
     Ok(token_v4.to_string())
 }
 /// Validate a token string can be parsed
@@ -132,9 +127,7 @@ pub fn validate_token(token_str: &str) -> Result<(), String> {
     }
     let format = TokenFormat::detect(trimmed);
     if matches!(format, TokenFormat::Unknown) {
-        return Err(
-            "Invalid token format - must start with 'cashuA' or 'cashuB'".to_string(),
-        );
+        return Err("Invalid token format - must start with 'cashuA' or 'cashuB'".to_string());
     }
     Token::from_str(trimmed).map_err(|e| format!("Invalid token: {}", e))?;
     Ok(())
@@ -142,8 +135,7 @@ pub fn validate_token(token_str: &str) -> Result<(), String> {
 /// Check if a string looks like a valid Cashu token
 pub fn is_token(s: &str) -> bool {
     let trimmed = s.trim();
-    (trimmed.starts_with("cashuA") || trimmed.starts_with("cashuB"))
-        && trimmed.len() > 10
+    (trimmed.starts_with("cashuA") || trimmed.starts_with("cashuB")) && trimmed.len() > 10
 }
 #[cfg(test)]
 mod tests {

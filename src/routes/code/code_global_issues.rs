@@ -4,7 +4,7 @@
 //! Shows issues created by, assigned to, or mentioning the user.
 use crate::components::{icons, CodeIssueRow};
 use crate::routes::Route;
-use crate::services::git_hosting::{fetch_user_issues, fetch_issues_assigned_to};
+use crate::services::git_hosting::{fetch_issues_assigned_to, fetch_user_issues};
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip34::{Issue, IssueStatus};
 use dioxus::prelude::*;
@@ -42,56 +42,63 @@ pub fn CodeGlobalIssues() -> Element {
     };
     let client_init = *nostr_client::CLIENT_INITIALIZED.read();
 
-    use_effect(use_reactive((&user_pubkey, &client_init), move |(pk_hex, initialized)| {
-        let gen = request_gen.peek().wrapping_add(1);
-        request_gen.set(gen);
-        if !initialized || pk_hex.is_empty() {
-            loading.set(false);
+    use_effect(use_reactive(
+        (&user_pubkey, &client_init),
+        move |(pk_hex, initialized)| {
+            let gen = request_gen.peek().wrapping_add(1);
+            request_gen.set(gen);
+            if !initialized || pk_hex.is_empty() {
+                loading.set(false);
+                created_issues.set(Vec::new());
+                assigned_issues.set(Vec::new());
+                label_filter.set(None);
+                error_msg.set(None);
+                return;
+            }
             created_issues.set(Vec::new());
             assigned_issues.set(Vec::new());
             label_filter.set(None);
             error_msg.set(None);
-            return;
-        }
-        created_issues.set(Vec::new());
-        assigned_issues.set(Vec::new());
-        label_filter.set(None);
-        error_msg.set(None);
-        loading.set(true);
-        spawn(async move {
-            let pk = match PublicKey::from_hex(&pk_hex) {
-                Ok(pk) => pk,
-                Err(e) => {
-                    if *request_gen.peek() != gen { return; }
-                    error_msg.set(Some(format!("Invalid public key: {e}")));
-                    loading.set(false);
+            loading.set(true);
+            spawn(async move {
+                let pk = match PublicKey::from_hex(&pk_hex) {
+                    Ok(pk) => pk,
+                    Err(e) => {
+                        if *request_gen.peek() != gen {
+                            return;
+                        }
+                        error_msg.set(Some(format!("Invalid public key: {e}")));
+                        loading.set(false);
+                        return;
+                    }
+                };
+                let (created_res, assigned_res) = futures::join!(
+                    fetch_user_issues(&pk, 100),
+                    fetch_issues_assigned_to(&pk, 100)
+                );
+                if *request_gen.peek() != gen {
                     return;
                 }
-            };
-            let (created_res, assigned_res) = futures::join!(
-                fetch_user_issues(&pk, 100),
-                fetch_issues_assigned_to(&pk, 100)
-            );
-            if *request_gen.peek() != gen { return; }
-            let mut errors = Vec::new();
-            match created_res {
-                Ok(fetched) => created_issues.set(fetched),
-                Err(e) => {
-                    errors.push(format!("Created: {}", e));
+                let mut errors = Vec::new();
+                match created_res {
+                    Ok(fetched) => created_issues.set(fetched),
+                    Err(e) => {
+                        errors.push(format!("Created: {}", e));
+                    }
                 }
-            }
-            match assigned_res {
-                Ok(fetched) => assigned_issues.set(fetched),
-                Err(e) => {
-                    errors.push(format!("Assigned: {}", e));
+                match assigned_res {
+                    Ok(fetched) => assigned_issues.set(fetched),
+                    Err(e) => {
+                        errors.push(format!("Assigned: {}", e));
+                    }
                 }
-            }
-            if !errors.is_empty() {
-                error_msg.set(Some(errors.join("; ")));
-            }
-            loading.set(false);
-        });
-    }));
+                if !errors.is_empty() {
+                    error_msg.set(Some(errors.join("; ")));
+                }
+                loading.set(false);
+            });
+        },
+    ));
 
     if !auth_store::AUTH_STATE.read().is_authenticated {
         return rsx! { NotAuthenticatedState {} };
@@ -135,7 +142,8 @@ pub fn CodeGlobalIssues() -> Element {
             }
             let title = i.display_title().to_lowercase();
             let content = i.content.to_lowercase();
-            title.contains(&query) || content.contains(&query)
+            title.contains(&query)
+                || content.contains(&query)
                 || i.labels.iter().any(|l| l.to_lowercase().contains(&query))
         })
         .filter(|i| match label_filter.read().as_deref() {

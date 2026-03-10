@@ -4,8 +4,8 @@ use crate::hooks::use_infinite_scroll::use_infinite_scroll;
 use crate::routes::Route;
 use crate::stores::nostr_client::{fetch_contacts, get_cached_pubkey};
 use crate::stores::shop_store::{
-    fetch_products, fetch_products_paginated, filter_products, get_cart_count,
-    sort_products, ProductSortBy, ShopFilterState,
+    fetch_products, fetch_products_paginated, filter_products, get_cart_count, sort_products,
+    ProductSortBy, ShopFilterState,
 };
 use crate::utils::nip99::{Product, ProductFormat};
 use dioxus::prelude::*;
@@ -60,7 +60,11 @@ pub fn ShopHome() -> Element {
         ShopFilterState {
             min_price_sats: *min_price.read(),
             max_price_sats: *max_price.read(),
-            category: if cats.is_empty() { None } else { cats.first().cloned() },
+            category: if cats.is_empty() {
+                None
+            } else {
+                cats.first().cloned()
+            },
             format: if digital {
                 Some(ProductFormat::Digital)
             } else if physical {
@@ -99,11 +103,8 @@ pub fn ShopHome() -> Element {
                         if new_products.is_empty() {
                             has_more.set(false);
                         } else {
-                            let existing_ids: HashSet<_> = products
-                                .peek()
-                                .iter()
-                                .map(|p| p.naddr.clone())
-                                .collect();
+                            let existing_ids: HashSet<_> =
+                                products.peek().iter().map(|p| p.naddr.clone()).collect();
                             let unique: Vec<_> = new_products
                                 .into_iter()
                                 .filter(|p| !existing_ids.contains(&p.naddr))
@@ -111,11 +112,7 @@ pub fn ShopHome() -> Element {
                             if unique.is_empty() {
                                 has_more.set(false);
                             } else {
-                                if let Some(oldest) = unique
-                                    .iter()
-                                    .map(|p| p.created_at)
-                                    .min()
-                                {
+                                if let Some(oldest) = unique.iter().map(|p| p.created_at).min() {
                                     oldest_timestamp.set(Some(oldest));
                                 }
                                 products.write().extend(unique);

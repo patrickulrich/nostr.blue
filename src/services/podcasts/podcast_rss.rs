@@ -10,11 +10,12 @@
 //! - podcast:funding
 //!
 //! Reference: https://github.com/Podcastindex-org/podcast-namespace
+use crate::platform::http::http_client;
 use crate::utils::podcast::{
     ChaptersFile, FundingLink, Person, Soundbite, TranscriptRef, ValueBlock,
 };
-use gloo_net::http::Request;
 use serde::{Deserialize, Serialize};
+
 /// Full Podcasting 2.0 podcast representation
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RssPodcast {
@@ -149,19 +150,14 @@ pub async fn fetch_podcast_feed(url: &str) -> Result<RssPodcast, String> {
     } else {
         url.to_string()
     };
-    let response = Request::get(&fetch_url)
+    let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(&fetch_url)
         .send()
         .await
         .map_err(|e| format!("Failed to fetch RSS feed from {}: {}", fetch_url, e))?;
-    if !response.ok() {
-        return Err(
-            format!(
-                "HTTP {} from {}: {}",
-                response.status(),
-                fetch_url,
-                response.status_text(),
-            ),
-        );
+    if !response.status().is_success() {
+        return Err(format!("HTTP {} from {}", response.status(), fetch_url,));
     }
     let xml = response
         .text()
@@ -262,9 +258,8 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
                             for attr in e.attributes().flatten() {
                                 let key = String::from_utf8_lossy(attr.key.as_ref());
                                 if key == "url" {
-                                    ep.chapters_url = Some(
-                                        String::from_utf8_lossy(&attr.value).to_string(),
-                                    );
+                                    ep.chapters_url =
+                                        Some(String::from_utf8_lossy(&attr.value).to_string());
                                 }
                             }
                         }
@@ -388,15 +383,13 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
                 let text = String::from_utf8_lossy(e.as_ref()).to_string();
                 if in_item {
                     if let Some(ref mut ep) = current_episode {
-                        if current_element == "description"
-                            || current_element == "content:encoded"
+                        if current_element == "description" || current_element == "content:encoded"
                         {
                             ep.description = Some(text);
                         }
                     }
                 } else if in_channel
-                    && (current_element == "description"
-                        || current_element == "content:encoded")
+                    && (current_element == "description" || current_element == "content:encoded")
                 {
                     podcast.description = Some(text);
                 }
@@ -421,12 +414,14 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
 /// Note: For browser use, prefer podcast_index::fetch_chapters_proxied
 #[allow(dead_code)]
 pub async fn fetch_chapters(url: &str) -> Result<ChaptersFile, String> {
-    let response = Request::get(url)
+    let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(url)
         .send()
         .await
         .map_err(|e| format!("Failed to fetch chapters: {}", e))?;
-    if !response.ok() {
-        return Err(format!("HTTP {}: {}", response.status(), response.status_text()));
+    if !response.status().is_success() {
+        return Err(format!("HTTP {}", response.status()));
     }
     response
         .json::<ChaptersFile>()
@@ -437,14 +432,19 @@ pub async fn fetch_chapters(url: &str) -> Result<ChaptersFile, String> {
 /// Note: For browser use, prefer podcast_index::fetch_transcript_proxied
 #[allow(dead_code)]
 pub async fn fetch_transcript(transcript: &TranscriptRef) -> Result<String, String> {
-    let response = Request::get(&transcript.url)
+    let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(&transcript.url)
         .send()
         .await
         .map_err(|e| format!("Failed to fetch transcript: {}", e))?;
-    if !response.ok() {
-        return Err(format!("HTTP {}: {}", response.status(), response.status_text()));
+    if !response.status().is_success() {
+        return Err(format!("HTTP {}", response.status()));
     }
-    response.text().await.map_err(|e| format!("Failed to read transcript: {}", e))
+    response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read transcript: {}", e))
 }
 /// Parse duration string to seconds
 /// Supports formats: "HH:MM:SS", "MM:SS", "SS", or numeric seconds
@@ -586,9 +586,7 @@ fn parse_trailer_element(e: &quick_xml::events::BytesStart<'_>) -> TrailerInfo {
     }
     trailer
 }
-fn parse_alternate_enclosure_element(
-    e: &quick_xml::events::BytesStart<'_>,
-) -> AlternateEnclosure {
+fn parse_alternate_enclosure_element(e: &quick_xml::events::BytesStart<'_>) -> AlternateEnclosure {
     let mut enclosure = AlternateEnclosure {
         url: String::new(),
         enclosure_type: "audio/mpeg".to_string(),

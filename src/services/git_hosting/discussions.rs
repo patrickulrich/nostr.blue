@@ -2,30 +2,31 @@
 //!
 //! Handles fetching and publishing Kind 9805 discussion events for git repositories.
 #![allow(dead_code)]
+use crate::stores::code_store::{cache_discussion_events, get_cached_discussion};
+use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
+use crate::utils::nip34::{decode_event_id, Discussion, GitComment};
 use dioxus::signals::ReadableExt;
 use nostr_sdk::prelude::*;
 use std::borrow::Cow;
 use std::time::Duration;
-use crate::stores::code_store::{cache_discussion_events, get_cached_discussion};
-use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
-use crate::utils::nip34::{decode_event_id, Discussion, GitComment};
 /// Default timeout for fetching events
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 /// Fetch a discussion by its event ID (hex, note1, or nevent1)
 pub async fn fetch_discussion(event_ref: &str) -> Result<Discussion, String> {
-    let event_id = EventId::parse(event_ref)
-        .map_err(|e| format!("Invalid event reference: {}", e))?;
+    let event_id =
+        EventId::parse(event_ref).map_err(|e| format!("Invalid event reference: {}", e))?;
     let hex_id = event_id.to_hex();
     if let Some(discussion) = get_cached_discussion(&hex_id) {
         return Ok(discussion);
     }
-    let filter = Filter::new().id(event_id).kind(Kind::Custom(Discussion::KIND));
+    let filter = Filter::new()
+        .id(event_id)
+        .kind(Kind::Custom(Discussion::KIND));
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
         .map_err(|e| format!("Failed to fetch discussion: {}", e))?;
     cache_discussion_events(&events);
-    get_cached_discussion(&hex_id)
-        .ok_or_else(|| "Discussion not found".to_string())
+    get_cached_discussion(&hex_id).ok_or_else(|| "Discussion not found".to_string())
 }
 /// Fetch discussions for a repository by naddr
 pub async fn fetch_repo_discussions(naddr: &str) -> Result<Vec<Discussion>, String> {
@@ -56,10 +57,7 @@ pub async fn publish_discussion(
     let mut builder = EventBuilder::new(Kind::Custom(Discussion::KIND), content)
         .tag(Tag::coordinate(repository.clone(), None));
     if let Some(s) = subject {
-        builder = builder.tag(Tag::custom(
-            TagKind::Custom(Cow::Borrowed("subject")),
-            [s],
-        ));
+        builder = builder.tag(Tag::custom(TagKind::Custom(Cow::Borrowed("subject")), [s]));
     }
     if let Some(cat) = category {
         builder = builder.tag(Tag::hashtag(cat));
@@ -107,9 +105,7 @@ pub async fn publish_discussion_comment(
     Ok(*output.id())
 }
 /// Fetch comments for a discussion (by EventId)
-pub async fn fetch_discussion_comments(
-    discussion_id: EventId,
-) -> Result<Vec<GitComment>, String> {
+pub async fn fetch_discussion_comments(discussion_id: EventId) -> Result<Vec<GitComment>, String> {
     let filter = Filter::new().kind(Kind::Comment).event(discussion_id);
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
@@ -135,18 +131,16 @@ pub async fn publish_discussion_comment_by_id(
     author_hex: &str,
     content: &str,
 ) -> Result<String, String> {
-    let event_id = decode_event_id(event_ref)
-        .map_err(|e| format!("Invalid event reference: {}", e))?;
-    let discussion_author = PublicKey::from_hex(author_hex)
-        .map_err(|e| format!("Invalid author pubkey: {}", e))?;
+    let event_id =
+        decode_event_id(event_ref).map_err(|e| format!("Invalid event reference: {}", e))?;
+    let discussion_author =
+        PublicKey::from_hex(author_hex).map_err(|e| format!("Invalid author pubkey: {}", e))?;
     let result = publish_discussion_comment(event_id, discussion_author, None, content).await?;
     Ok(result.to_hex())
 }
 /// Fetch comments for discussion by event ID string
-pub async fn fetch_discussion_comments_by_id(
-    event_ref: &str,
-) -> Result<Vec<GitComment>, String> {
-    let event_id = decode_event_id(event_ref)
-        .map_err(|e| format!("Invalid event reference: {}", e))?;
+pub async fn fetch_discussion_comments_by_id(event_ref: &str) -> Result<Vec<GitComment>, String> {
+    let event_id =
+        decode_event_id(event_ref).map_err(|e| format!("Invalid event reference: {}", e))?;
     fetch_discussion_comments(event_id).await
 }

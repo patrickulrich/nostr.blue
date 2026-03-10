@@ -49,11 +49,7 @@ pub fn RecipeTagChip(
 }
 /// Small tag chip for use in cards
 #[component]
-pub fn RecipeTagChipSmall(
-    tag: String,
-    #[props(default = true)]
-    clickable: bool,
-) -> Element {
+pub fn RecipeTagChipSmall(tag: String, #[props(default = true)] clickable: bool) -> Element {
     let tag_info = find_tag(&tag);
     let emoji = tag_info.and_then(|t| t.emoji);
     let display = if let Some(e) = emoji {
@@ -119,10 +115,8 @@ pub fn RecipeTagChipEditable(tag: String, on_remove: EventHandler<String>) -> El
 #[component]
 pub fn RecipeTagChipExplore(
     tag: String,
-    #[props(default)]
-    count: Option<usize>,
-    #[props(default = true)]
-    clickable: bool,
+    #[props(default)] count: Option<usize>,
+    #[props(default = true)] clickable: bool,
 ) -> Element {
     let tag_info = find_tag(&tag);
     let emoji = tag_info.and_then(|t| t.emoji);

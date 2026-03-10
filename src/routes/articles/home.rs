@@ -66,11 +66,7 @@ pub fn Articles() -> Element {
             }
             let pubkey_str = auth_store::get_pubkey().unwrap_or_default();
             let cache_key = match current_feed_type {
-                FeedType::Following => {
-                    FeedCacheKey::Articles {
-                        pubkey: pubkey_str,
-                    }
-                }
+                FeedType::Following => FeedCacheKey::Articles { pubkey: pubkey_str },
                 FeedType::Global => FeedCacheKey::ArticlesGlobal,
             };
             let cached_items = feed_cache::load_cached_feed(&cache_key, 100)
@@ -82,10 +78,8 @@ pub fn Articles() -> Element {
             }
             if !cached_items.is_empty() {
                 log::info!("Loaded {} articles from cache", cached_items.len());
-                let cached_events: Vec<Event> = cached_items
-                    .iter()
-                    .map(|i| i.event().clone())
-                    .collect();
+                let cached_events: Vec<Event> =
+                    cached_items.iter().map(|i| i.event().clone()).collect();
                 if let Some(oldest) = cached_events.iter().map(|e| e.created_at).min() {
                     oldest_timestamp.set(Some(oldest.as_secs().saturating_sub(1)));
                 }
@@ -116,11 +110,8 @@ pub fn Articles() -> Element {
                         .map(|e| FeedItem::OriginalPost(e.clone()))
                         .collect();
                     spawn(async move {
-                        let _ = feed_cache::store_feed_items(
-                                &effective_cache_key,
-                                &feed_items,
-                            )
-                            .await;
+                        let _ =
+                            feed_cache::store_feed_items(&effective_cache_key, &feed_items).await;
                         let _ = feed_cache::run_eviction_if_needed().await;
                     });
                     has_more.set(feed_events.len() >= 20);
@@ -147,21 +138,19 @@ pub fn Articles() -> Element {
         loading.set(true);
         spawn(async move {
             let result = match current_feed_type {
-                FeedType::Following => {
-                    match load_following_articles(until).await {
-                        Ok((events, did_fallback)) => {
-                            if did_fallback {
-                                log::info!(
+                FeedType::Following => match load_following_articles(until).await {
+                    Ok((events, did_fallback)) => {
+                        if did_fallback {
+                            log::info!(
                                     "Pagination fallback detected, returning empty to preserve feed type"
                                 );
-                                Ok(Vec::new())
-                            } else {
-                                Ok(events)
-                            }
+                            Ok(Vec::new())
+                        } else {
+                            Ok(events)
                         }
-                        Err(e) => Err(e),
                     }
-                }
+                    Err(e) => Err(e),
+                },
                 FeedType::Global => load_articles(until).await,
             };
             match result {
@@ -342,15 +331,20 @@ async fn load_articles(until: Option<u64>) -> Result<Vec<Event>, String> {
 }
 /// Load articles from followed users with deduplication by address
 /// Returns (articles, did_fallback) where did_fallback indicates if we fell back to global.
-async fn load_following_articles(
-    until: Option<u64>,
-) -> Result<(Vec<Event>, bool), String> {
+async fn load_following_articles(until: Option<u64>) -> Result<(Vec<Event>, bool), String> {
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    log::info!("Loading following articles for {} (until: {:?})", pubkey_str, until);
+    log::info!(
+        "Loading following articles for {} (until: {:?})",
+        pubkey_str,
+        until
+    );
     let contacts = match nostr_client::fetch_contacts(pubkey_str.clone()).await {
         Ok(contacts) => contacts,
         Err(e) => {
-            log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
+            log::warn!(
+                "Failed to fetch contacts: {}, falling back to global feed",
+                e
+            );
             let global = load_articles(until).await?;
             return Ok((global, true));
         }
@@ -380,15 +374,19 @@ async fn load_following_articles(
         filter = filter.until(Timestamp::from(until_ts));
     }
     log::info!(
-        "Fetching articles from {} followed accounts", filter.authors.as_ref().map(| a |
-        a.len()).unwrap_or(0)
+        "Fetching articles from {} followed accounts",
+        filter.authors.as_ref().map(|a| a.len()).unwrap_or(0)
     );
     match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(raw_articles) => {
-            log::info!("Loaded {} raw articles from following feed", raw_articles.len());
+            log::info!(
+                "Loaded {} raw articles from following feed",
+                raw_articles.len()
+            );
             let raw_articles_vec: Vec<Event> = raw_articles.into_iter().collect();
             log::info!(
-                "Processing {} articles for deduplication", raw_articles_vec.len()
+                "Processing {} articles for deduplication",
+                raw_articles_vec.len()
             );
             let mut address_map: HashMap<String, Event> = HashMap::new();
             let mut articles_without_identifier = 0;
@@ -420,7 +418,10 @@ async fn load_following_articles(
             }
             let mut deduplicated: Vec<Event> = address_map.into_values().collect();
             deduplicated.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-            log::info!("After deduplication: {} unique articles", deduplicated.len());
+            log::info!(
+                "After deduplication: {} unique articles",
+                deduplicated.len()
+            );
             if deduplicated.is_empty() {
                 log::info!("No articles from followed users");
                 return Ok((Vec::new(), false));
@@ -429,7 +430,8 @@ async fn load_following_articles(
         }
         Err(e) => {
             log::error!(
-                "Failed to fetch following articles: {}, falling back to global", e
+                "Failed to fetch following articles: {}, falling back to global",
+                e
             );
             let global = load_articles(until).await?;
             Ok((global, true))

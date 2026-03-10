@@ -2,12 +2,12 @@
 //!
 //! Handles fetching and publishing NIP-34 Git patch events (Kind 1617).
 #![allow(dead_code)]
-use dioxus::signals::ReadableExt;
-use nostr_sdk::prelude::*;
-use std::time::Duration;
 use crate::stores::code_store::{cache_pr_events, get_cached_pr, update_pr_statuses};
 use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
 use crate::utils::nip34::{decode_event_id, GitComment, IssueStatus, PullRequest};
+use dioxus::signals::ReadableExt;
+use nostr_sdk::prelude::*;
+use std::time::Duration;
 /// Default timeout for fetching events
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -33,26 +33,22 @@ pub async fn fetch_pull_request(event_ref: &str) -> Result<PullRequest, String> 
     if let Some(pr) = get_cached_pr(event_ref) {
         return Ok(pr);
     }
-    let event_id = decode_event_id(event_ref)
-        .map_err(|e| format!("Invalid event reference: {}", e))?;
+    let event_id =
+        decode_event_id(event_ref).map_err(|e| format!("Invalid event reference: {}", e))?;
     let filter = Filter::new().id(event_id).kind(Kind::GitPatch);
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
         .map_err(|e| format!("Failed to fetch pull request: {}", e))?;
     cache_pr_events(&events);
     let status_filter = Filter::new()
-        .kinds(
-            vec![
-                Kind::GitStatusOpen,
-                Kind::GitStatusApplied,
-                Kind::GitStatusClosed,
-                Kind::GitStatusDraft,
-            ],
-        )
+        .kinds(vec![
+            Kind::GitStatusOpen,
+            Kind::GitStatusApplied,
+            Kind::GitStatusClosed,
+            Kind::GitStatusDraft,
+        ])
         .event(event_id);
-    if let Ok(status_events) = fetch_events_aggregated(status_filter, FETCH_TIMEOUT)
-        .await
-    {
+    if let Ok(status_events) = fetch_events_aggregated(status_filter, FETCH_TIMEOUT).await {
         update_pr_statuses(&status_events);
     }
     get_cached_pr(&event_id.to_hex()).ok_or_else(|| "Pull request not found".to_string())
@@ -70,7 +66,10 @@ pub async fn fetch_repository_prs(
 ) -> Result<Vec<PullRequest>, String> {
     let filter = Filter::new()
         .kind(Kind::GitPatch)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), coordinate.to_string())
+        .custom_tag(
+            SingleLetterTag::lowercase(Alphabet::A),
+            coordinate.to_string(),
+        )
         .limit(limit);
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
@@ -125,11 +124,11 @@ pub async fn search_prs(query: Option<&str>, limit: usize) -> Result<Vec<PullReq
     Ok(events.iter().filter_map(PullRequest::from_event).collect())
 }
 /// Fetch pull requests by author
-pub async fn fetch_user_prs(
-    pubkey: &PublicKey,
-    limit: usize,
-) -> Result<Vec<PullRequest>, String> {
-    let filter = Filter::new().kind(Kind::GitPatch).author(*pubkey).limit(limit);
+pub async fn fetch_user_prs(pubkey: &PublicKey, limit: usize) -> Result<Vec<PullRequest>, String> {
+    let filter = Filter::new()
+        .kind(Kind::GitPatch)
+        .author(*pubkey)
+        .limit(limit);
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
         .map_err(|e| format!("Failed to fetch pull requests: {}", e))?;
@@ -158,22 +157,16 @@ pub async fn publish_patch(
         .tag(Tag::coordinate(repository.clone(), None))
         .tag(Tag::public_key(repository.public_key));
     if let Some(hash) = commit {
-        builder = builder
-            .tag(
-                Tag::custom(
-                    TagKind::Custom(std::borrow::Cow::Borrowed("commit")),
-                    [hash],
-                ),
-            );
+        builder = builder.tag(Tag::custom(
+            TagKind::Custom(std::borrow::Cow::Borrowed("commit")),
+            [hash],
+        ));
     }
     if let Some(hash) = parent_commit {
-        builder = builder
-            .tag(
-                Tag::custom(
-                    TagKind::Custom(std::borrow::Cow::Borrowed("parent-commit")),
-                    [hash],
-                ),
-            );
+        builder = builder.tag(Tag::custom(
+            TagKind::Custom(std::borrow::Cow::Borrowed("parent-commit")),
+            [hash],
+        ));
     }
     if is_cover_letter {
         builder = builder.tag(Tag::hashtag("cover-letter"));
@@ -200,7 +193,12 @@ pub async fn publish_patch(
     for eid in &parsed_issue_ids {
         builder = builder.tag(Tag::custom(
             TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
-            [eid.to_hex(), String::new(), String::new(), "closes".to_string()],
+            [
+                eid.to_hex(),
+                String::new(),
+                String::new(),
+                "closes".to_string(),
+            ],
         ));
     }
     // Add branch name tag
@@ -241,20 +239,16 @@ pub async fn publish_pr_update(
         .tag(Tag::coordinate(repository.clone(), None))
         .tag(Tag::public_key(repository.public_key));
     if let Some(hash) = commit {
-        builder = builder.tag(
-            Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("commit")),
-                [hash],
-            ),
-        );
+        builder = builder.tag(Tag::custom(
+            TagKind::Custom(std::borrow::Cow::Borrowed("commit")),
+            [hash],
+        ));
     }
     if let Some(hash) = parent_commit {
-        builder = builder.tag(
-            Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("parent-commit")),
-                [hash],
-            ),
-        );
+        builder = builder.tag(Tag::custom(
+            TagKind::Custom(std::borrow::Cow::Borrowed("parent-commit")),
+            [hash],
+        ));
     }
     let output = client
         .send_event_builder(builder)
@@ -272,18 +266,15 @@ pub async fn publish_pr_update_by_id(
     parent_commit: Option<&str>,
 ) -> Result<String, String> {
     use crate::utils::nip34::decode_naddr;
-    let event_id = decode_event_id(event_ref)
-        .map_err(|e| format!("Invalid event reference: {}", e))?;
+    let event_id =
+        decode_event_id(event_ref).map_err(|e| format!("Invalid event reference: {}", e))?;
     let coord = decode_naddr(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
     let result = publish_pr_update(event_id, &coord, content, commit, parent_commit).await?;
     Ok(result.to_hex())
 }
 
 /// Update PR status (Kind 1630-1633)
-pub async fn update_pr_status(
-    pr_id: EventId,
-    status: IssueStatus,
-) -> Result<EventId, String> {
+pub async fn update_pr_status(pr_id: EventId, status: IssueStatus) -> Result<EventId, String> {
     let client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
@@ -347,16 +338,16 @@ pub async fn publish_patch_by_naddr(
     use crate::utils::nip34::decode_naddr;
     let coord = decode_naddr(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
     let result = publish_patch(
-            &coord,
-            content,
-            commit,
-            parent_commit,
-            is_cover_letter,
-            labels,
-            closes_issues,
-            branch_name,
-        )
-        .await?;
+        &coord,
+        content,
+        commit,
+        parent_commit,
+        is_cover_letter,
+        labels,
+        closes_issues,
+        branch_name,
+    )
+    .await?;
     Ok(result.to_hex())
 }
 /// Update PR status by event ID string
@@ -364,8 +355,8 @@ pub async fn update_pr_status_by_id(
     event_ref: &str,
     status: IssueStatus,
 ) -> Result<String, String> {
-    let event_id = decode_event_id(event_ref)
-        .map_err(|e| format!("Invalid event reference: {}", e))?;
+    let event_id =
+        decode_event_id(event_ref).map_err(|e| format!("Invalid event reference: {}", e))?;
     let result = update_pr_status(event_id, status).await?;
     Ok(result.to_hex())
 }
@@ -376,19 +367,17 @@ pub async fn publish_pr_comment_by_id(
     content: &str,
 ) -> Result<String, String> {
     use nostr_sdk::prelude::PublicKey;
-    let event_id = decode_event_id(event_ref)
-        .map_err(|e| format!("Invalid event reference: {}", e))?;
-    let author = PublicKey::from_hex(author_hex)
-        .map_err(|e| format!("Invalid author pubkey: {}", e))?;
+    let event_id =
+        decode_event_id(event_ref).map_err(|e| format!("Invalid event reference: {}", e))?;
+    let author =
+        PublicKey::from_hex(author_hex).map_err(|e| format!("Invalid author pubkey: {}", e))?;
     let result = publish_pr_comment(event_id, author, None, content).await?;
     Ok(result.to_hex())
 }
 /// Fetch comments for PR by event ID string
-pub async fn fetch_pr_comments_by_id(
-    event_ref: &str,
-) -> Result<Vec<GitComment>, String> {
-    let event_id = decode_event_id(event_ref)
-        .map_err(|e| format!("Invalid event reference: {}", e))?;
+pub async fn fetch_pr_comments_by_id(event_ref: &str) -> Result<Vec<GitComment>, String> {
+    let event_id =
+        decode_event_id(event_ref).map_err(|e| format!("Invalid event reference: {}", e))?;
     fetch_pr_comments(event_id).await
 }
 
@@ -493,19 +482,17 @@ pub async fn publish_line_comment_by_id(
     file_path: &str,
     line_number: usize,
 ) -> Result<String, String> {
-    let event_id = decode_event_id(event_ref)
-        .map_err(|e| format!("Invalid event reference: {}", e))?;
-    let author = PublicKey::from_hex(author_hex)
-        .map_err(|e| format!("Invalid author pubkey: {}", e))?;
+    let event_id =
+        decode_event_id(event_ref).map_err(|e| format!("Invalid event reference: {}", e))?;
+    let author =
+        PublicKey::from_hex(author_hex).map_err(|e| format!("Invalid author pubkey: {}", e))?;
     let result = publish_line_comment(event_id, author, content, file_path, line_number).await?;
     Ok(result.to_hex())
 }
 
 /// Fetch line comments for a PR by event ID string
-pub async fn fetch_line_comments_by_id(
-    event_ref: &str,
-) -> Result<Vec<LineComment>, String> {
-    let event_id = decode_event_id(event_ref)
-        .map_err(|e| format!("Invalid event reference: {}", e))?;
+pub async fn fetch_line_comments_by_id(event_ref: &str) -> Result<Vec<LineComment>, String> {
+    let event_id =
+        decode_event_id(event_ref).map_err(|e| format!("Invalid event reference: {}", e))?;
     fetch_line_comments(event_id).await
 }

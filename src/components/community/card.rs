@@ -9,9 +9,7 @@ use crate::stores::community_store::{
     membership_status_to_role, submit_join_request, Community, CommunityWithMembership,
     MembershipStatus,
 };
-use crate::stores::pinned_communities::{
-    is_community_pinned, pin_community, unpin_community,
-};
+use crate::stores::pinned_communities::{is_community_pinned, pin_community, unpin_community};
 use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 /// Join button with multiple states based on membership status
@@ -43,15 +41,9 @@ pub fn JoinButton(community: Community, membership_status: MembershipStatus) -> 
         });
     };
     let (button_class, button_text, is_disabled) = match &membership_status {
-        MembershipStatus::Owner => {
-            ("bg-purple-500 cursor-default opacity-75", "Owner", true)
-        }
-        MembershipStatus::Moderator => {
-            ("bg-blue-500 cursor-default opacity-75", "Moderator", true)
-        }
-        MembershipStatus::Member => {
-            ("bg-green-500 cursor-default opacity-75", "Member", true)
-        }
+        MembershipStatus::Owner => ("bg-purple-500 cursor-default opacity-75", "Owner", true),
+        MembershipStatus::Moderator => ("bg-blue-500 cursor-default opacity-75", "Moderator", true),
+        MembershipStatus::Member => ("bg-green-500 cursor-default opacity-75", "Member", true),
         MembershipStatus::Pending { .. } => {
             ("bg-orange-500 cursor-default opacity-75", "Pending", true)
         }
@@ -63,9 +55,17 @@ pub fn JoinButton(community: Community, membership_status: MembershipStatus) -> 
         }
         MembershipStatus::None => {
             if !is_logged_in {
-                ("bg-gray-400 cursor-not-allowed opacity-50", "Log in to join", true)
+                (
+                    "bg-gray-400 cursor-not-allowed opacity-50",
+                    "Log in to join",
+                    true,
+                )
             } else if !has_signer {
-                ("bg-gray-400 cursor-not-allowed opacity-50", "No signer", true)
+                (
+                    "bg-gray-400 cursor-not-allowed opacity-50",
+                    "No signer",
+                    true,
+                )
             } else if *is_loading.read() {
                 ("bg-green-500 opacity-75", "Joining...", true)
             } else {

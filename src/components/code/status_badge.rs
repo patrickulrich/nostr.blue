@@ -12,115 +12,123 @@ pub enum BadgeSize {
     Default,
     Large,
 }
+
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum StatusDisplayContext {
+    #[default]
+    Issue,
+    PullRequest,
+}
 /// Status badge component
 #[component]
 pub fn CodeStatusBadge(
     status: IssueStatus,
-    #[props(default)]
-    size: BadgeSize,
+    #[props(default)] size: BadgeSize,
+    #[props(default)] context: StatusDisplayContext,
 ) -> Element {
+    let icon_class = match size {
+        BadgeSize::Small => "w-3 h-3",
+        BadgeSize::Default => "w-3.5 h-3.5",
+        BadgeSize::Large => "w-4 h-4",
+    };
+    let applied_text = match context {
+        StatusDisplayContext::Issue => "Applied",
+        StatusDisplayContext::PullRequest => "Merged",
+    };
     let (bg_class, text, icon) = match status {
-        IssueStatus::Open => {
-            (
-                "bg-green-500/10 text-green-500 border-green-500/20",
-                "Open",
-                rsx! {
-                    svg {
-                        class: "w-3.5 h-3.5",
-                        xmlns: "http://www.w3.org/2000/svg",
-                        width: "24",
-                        height: "24",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "2",
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        circle { cx: "12", cy: "12", r: "10" }
+        IssueStatus::Open => (
+            "bg-green-500/10 text-green-500 border-green-500/20",
+            "Open",
+            rsx! {
+                svg {
+                    class: "{icon_class}",
+                    xmlns: "http://www.w3.org/2000/svg",
+                    width: "24",
+                    height: "24",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    circle { cx: "12", cy: "12", r: "10" }
+                }
+            },
+        ),
+        IssueStatus::Applied => (
+            "bg-purple-500/10 text-purple-500 border-purple-500/20",
+            applied_text,
+            rsx! {
+                svg {
+                    class: "{icon_class}",
+                    xmlns: "http://www.w3.org/2000/svg",
+                    width: "24",
+                    height: "24",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    circle { cx: "18", cy: "18", r: "3" }
+                    circle { cx: "6", cy: "6", r: "3" }
+                    path { d: "M6 21V9a9 9 0 0 0 9 9" }
+                }
+            },
+        ),
+        IssueStatus::Closed => (
+            "bg-red-500/10 text-red-500 border-red-500/20",
+            "Closed",
+            rsx! {
+                svg {
+                    class: "{icon_class}",
+                    xmlns: "http://www.w3.org/2000/svg",
+                    width: "24",
+                    height: "24",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    circle { cx: "12", cy: "12", r: "10" }
+                    line {
+                        x1: "15",
+                        y1: "9",
+                        x2: "9",
+                        y2: "15",
                     }
-                },
-            )
-        }
-        IssueStatus::Applied => {
-            (
-                "bg-purple-500/10 text-purple-500 border-purple-500/20",
-                "Merged",
-                rsx! {
-                    svg {
-                        class: "w-3.5 h-3.5",
-                        xmlns: "http://www.w3.org/2000/svg",
-                        width: "24",
-                        height: "24",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "2",
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        circle { cx: "18", cy: "18", r: "3" }
-                        circle { cx: "6", cy: "6", r: "3" }
-                        path { d: "M6 21V9a9 9 0 0 0 9 9" }
+                    line {
+                        x1: "9",
+                        y1: "9",
+                        x2: "15",
+                        y2: "15",
                     }
-                },
-            )
-        }
-        IssueStatus::Closed => {
-            (
-                "bg-red-500/10 text-red-500 border-red-500/20",
-                "Closed",
-                rsx! {
-                    svg {
-                        class: "w-3.5 h-3.5",
-                        xmlns: "http://www.w3.org/2000/svg",
-                        width: "24",
-                        height: "24",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "2",
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        circle { cx: "12", cy: "12", r: "10" }
-                        line {
-                            x1: "15",
-                            y1: "9",
-                            x2: "9",
-                            y2: "15",
-                        }
-                        line {
-                            x1: "9",
-                            y1: "9",
-                            x2: "15",
-                            y2: "15",
-                        }
+                }
+            },
+        ),
+        IssueStatus::Draft => (
+            "bg-yellow-500/10 text-yellow-500 border-yellow-500/20",
+            "Draft",
+            rsx! {
+                svg {
+                    class: "{icon_class}",
+                    xmlns: "http://www.w3.org/2000/svg",
+                    width: "24",
+                    height: "24",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    path {
+                        d: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z",
+                        stroke_dasharray: "4 4",
                     }
-                },
-            )
-        }
-        IssueStatus::Draft => {
-            (
-                "bg-gray-500/10 text-gray-500 border-gray-500/20",
-                "Draft",
-                rsx! {
-                    svg {
-                        class: "w-3.5 h-3.5",
-                        xmlns: "http://www.w3.org/2000/svg",
-                        width: "24",
-                        height: "24",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "2",
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        path {
-                            d: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z",
-                            stroke_dasharray: "4 4",
-                        }
-                    }
-                },
-            )
-        }
+                }
+            },
+        ),
     };
     let size_class = match size {
         BadgeSize::Small => "px-1.5 py-0.5 text-xs gap-1",
@@ -137,9 +145,12 @@ pub fn CodeStatusBadge(
 /// Simple text-only status indicator
 #[allow(dead_code)]
 #[component]
-pub fn CodeStatusText(status: IssueStatus) -> Element {
+pub fn CodeStatusText(
+    status: IssueStatus,
+    #[props(default)] context: StatusDisplayContext,
+) -> Element {
     rsx! {
-        span { class: "font-medium {status_color_class(status)}", "{status_text(status)}" }
+        span { class: "font-medium {status_color_class(status)}", "{status_text(status, context)}" }
     }
 }
 /// Get the color class for a status (for use in custom styling)
@@ -148,14 +159,17 @@ pub fn status_color_class(status: IssueStatus) -> &'static str {
         IssueStatus::Open => "text-green-500",
         IssueStatus::Applied => "text-purple-500",
         IssueStatus::Closed => "text-red-500",
-        IssueStatus::Draft => "text-gray-500",
+        IssueStatus::Draft => "text-yellow-500",
     }
 }
 /// Get the display text for a status
-pub fn status_text(status: IssueStatus) -> &'static str {
+pub fn status_text(status: IssueStatus, context: StatusDisplayContext) -> &'static str {
     match status {
         IssueStatus::Open => "Open",
-        IssueStatus::Applied => "Merged",
+        IssueStatus::Applied => match context {
+            StatusDisplayContext::Issue => "Applied",
+            StatusDisplayContext::PullRequest => "Merged",
+        },
         IssueStatus::Closed => "Closed",
         IssueStatus::Draft => "Draft",
     }

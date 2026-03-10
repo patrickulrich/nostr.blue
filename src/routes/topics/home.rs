@@ -5,9 +5,8 @@ use crate::hooks::use_infinite_scroll;
 use crate::stores::auth_store;
 use crate::stores::profiles::prefetch_profiles;
 use crate::stores::topic_store::{
-    fetch_recent_posts, fetch_subscribed_feed, fetch_subscriptions,
-    fetch_votes_batch, get_subscribed_topic_names, TopicPost, VoteCounts,
-    LOADING_TOPIC_POSTS,
+    fetch_recent_posts, fetch_subscribed_feed, fetch_subscriptions, fetch_votes_batch,
+    get_subscribed_topic_names, TopicPost, VoteCounts, LOADING_TOPIC_POSTS,
 };
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
@@ -57,8 +56,7 @@ pub fn TopicsHome() -> Element {
                     .iter()
                     .filter_map(|p| EventId::from_hex(&p.id).ok())
                     .collect();
-                let user_pk = auth_store::get_pubkey()
-                    .and_then(|pk| PublicKey::from_hex(&pk).ok());
+                let user_pk = auth_store::get_pubkey().and_then(|pk| PublicKey::from_hex(&pk).ok());
                 if let Ok(votes) = fetch_votes_batch(event_ids, user_pk).await {
                     vote_counts.write().extend(votes);
                 }
@@ -92,8 +90,7 @@ pub fn TopicsHome() -> Element {
                     .iter()
                     .filter_map(|p| EventId::from_hex(&p.id).ok())
                     .collect();
-                let user_pk = auth_store::get_pubkey()
-                    .and_then(|pk| PublicKey::from_hex(&pk).ok());
+                let user_pk = auth_store::get_pubkey().and_then(|pk| PublicKey::from_hex(&pk).ok());
                 if let Ok(votes) = fetch_votes_batch(event_ids, user_pk).await {
                     vote_counts.write().extend(votes);
                 }

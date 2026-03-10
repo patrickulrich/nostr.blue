@@ -66,22 +66,18 @@ pub fn MusicPlaylistNew() -> Element {
             } else {
                 Some(image_url_val)
             };
-            let d_tag = format!(
-                "{}-{}",
-                slugify(&title_val),
-                chrono::Utc::now().timestamp(),
-            );
+            let d_tag = format!("{}-{}", slugify(&title_val), chrono::Utc::now().timestamp(),);
             match nostr_music::publish_playlist(
-                    d_tag,
-                    title_val,
-                    description,
-                    image,
-                    Vec::new(),
-                    categories_val,
-                    is_public_val,
-                    is_collaborative_val,
-                )
-                .await
+                d_tag,
+                title_val,
+                description,
+                image,
+                Vec::new(),
+                categories_val,
+                is_public_val,
+                is_collaborative_val,
+            )
+            .await
             {
                 Ok(_event_id) => {
                     navigator.push(crate::routes::Route::MusicHome {});

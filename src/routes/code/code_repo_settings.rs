@@ -3,15 +3,17 @@
 //! Manage repository settings for NIP-34 repositories.
 use crate::components::icons;
 use crate::routes::Route;
+use crate::services::git_hosting::milestones::{
+    generate_milestone_id, milestones_to_tags, Milestone,
+};
 use crate::services::git_hosting::{fetch_repository, publish_repository_with_extras};
-use crate::services::git_hosting::milestones::{milestones_to_tags, Milestone, generate_milestone_id};
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip34::Repository;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
-use nostr_sdk::{PublicKey, RelayUrl};
 use nostr_sdk::prelude::{Tag, TagKind};
+use nostr_sdk::{PublicKey, RelayUrl};
 use std::borrow::Cow;
 /// Repository settings page component
 #[component]
@@ -36,7 +38,8 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
     let mut zap_splits = use_signal(Vec::<(String, String, u32)>::new);
     let mut new_split_pubkey = use_signal(String::new);
     let mut new_split_weight = use_signal(|| 50u32);
-    let mut milestones = use_signal(Vec::<crate::services::git_hosting::milestones::Milestone>::new);
+    let mut milestones =
+        use_signal(Vec::<crate::services::git_hosting::milestones::Milestone>::new);
     let mut new_milestone_name = use_signal(String::new);
     let mut required_approvals = use_signal(|| 0u32);
     let mut topics_list = use_signal(Vec::<String>::new);
@@ -98,7 +101,10 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
         }
     }
     let is_owner = if let Some(Ok(r)) = repo_result.read().as_ref() {
-        auth.pubkey.as_ref().map(|pk| pk == &r.pubkey).unwrap_or(false)
+        auth.pubkey
+            .as_ref()
+            .map(|pk| pk == &r.pubkey)
+            .unwrap_or(false)
     } else {
         false
     };
@@ -115,7 +121,9 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
     let handle_save = {
         let _naddr = naddr.clone();
         move |_| {
-            if *is_saving.peek() { return; }
+            if *is_saving.peek() {
+                return;
+            }
             let repo_data = match repo_result.read().as_ref() {
                 Some(Ok(r)) => r.clone(),
                 _ => return,
@@ -128,7 +136,10 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
             // Validate relay URLs before starting save
             for relay in &relay_snapshot {
                 if RelayUrl::parse(relay).is_err() {
-                    save_error.set(Some(format!("Invalid relay URL: '{}'. Must start with wss:// or ws://", relay)));
+                    save_error.set(Some(format!(
+                        "Invalid relay URL: '{}'. Must start with wss:// or ws://",
+                        relay
+                    )));
                     return;
                 }
             }
@@ -160,7 +171,11 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                         return;
                     }
                 };
-                let name_opt = if name.is_empty() { None } else { Some(name.as_str()) };
+                let name_opt = if name.is_empty() {
+                    None
+                } else {
+                    Some(name.as_str())
+                };
                 let desc_opt = if description.is_empty() {
                     None
                 } else {
@@ -177,24 +192,34 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                 }
                 let total_weight: u32 = splits_snapshot.iter().map(|(_, _, w)| *w).sum();
                 if !splits_snapshot.is_empty() && total_weight != 100 {
-                    save_error.set(Some(format!("Zap split weights must total 100% (currently {}%)", total_weight)));
+                    save_error.set(Some(format!(
+                        "Zap split weights must total 100% (currently {}%)",
+                        total_weight
+                    )));
                     is_saving.set(false);
                     return;
                 }
                 // Build extra tags for zap splits, milestones, required approvals
                 let mut extra_tags: Vec<Tag> = Vec::new();
                 // Zap split tags — use each split's stored relay, falling back to first repo relay
-                let default_relay = relay_snapshot.first()
+                let default_relay = relay_snapshot
+                    .first()
                     .map(|r| r.to_string())
                     .unwrap_or_default();
                 for (pubkey, relay, weight) in &splits_snapshot {
                     if let Ok(pk) = PublicKey::parse(pubkey) {
                         let mut tag_values = vec![pk.to_hex()];
-                        let relay_to_use = if relay.is_empty() { default_relay.clone() } else { relay.clone() };
+                        let relay_to_use = if relay.is_empty() {
+                            default_relay.clone()
+                        } else {
+                            relay.clone()
+                        };
                         if !relay_to_use.is_empty() {
                             if RelayUrl::parse(&relay_to_use).is_ok() {
                                 tag_values.push(relay_to_use);
-                            } else if !default_relay.is_empty() && RelayUrl::parse(&default_relay).is_ok() {
+                            } else if !default_relay.is_empty()
+                                && RelayUrl::parse(&default_relay).is_ok()
+                            {
                                 tag_values.push(default_relay.clone());
                             }
                         }
@@ -228,16 +253,16 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                     ));
                 }
                 match publish_repository_with_extras(
-                        &repo_data.id,
-                        name_opt,
-                        desc_opt,
-                        &clone_urls,
-                        &web_urls,
-                        &relays,
-                        &maintainer_keys,
-                        &extra_tags,
-                    )
-                    .await
+                    &repo_data.id,
+                    name_opt,
+                    desc_opt,
+                    &clone_urls,
+                    &web_urls,
+                    &relays,
+                    &maintainer_keys,
+                    &extra_tags,
+                )
+                .await
                 {
                     Ok(_) => {
                         save_success.set(true);

@@ -4,6 +4,7 @@
 use super::code_repo_commits::{short_hash, split_commit_message};
 use crate::components::code::{DiffViewer, RepoTabNav};
 use crate::components::icons;
+use crate::platform::http::http_client;
 use crate::routes::Route;
 use crate::services::git_hosting::{
     fetch_repository,
@@ -11,7 +12,6 @@ use crate::services::git_hosting::{
 };
 use crate::stores::nostr_client;
 use dioxus::prelude::*;
-use gloo_net::http::Request;
 use serde::Deserialize;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -74,62 +74,66 @@ pub fn CodeRepoCommit(naddr: String, sha: String) -> Element {
     let mut request_id = use_signal(|| 0u32);
 
     let client_ready = *nostr_client::CLIENT_INITIALIZED.read();
-    use_effect(
-        use_reactive(
-            (&naddr, &sha, &client_ready),
-            move |(n, s, initialized)| {
-                if !initialized {
+    use_effect(use_reactive(
+        (&naddr, &sha, &client_ready),
+        move |(n, s, initialized)| {
+            if !initialized {
+                return;
+            }
+            let current_id = request_id.peek().wrapping_add(1);
+            request_id.set(current_id);
+            commit_result.set(None);
+            spawn(async move {
+                let result = fetch_repository(&n).await;
+                if *request_id.peek() != current_id {
                     return;
                 }
-                let current_id = request_id.peek().wrapping_add(1);
-                request_id.set(current_id);
-                commit_result.set(None);
-                spawn(async move {
-                    let result = fetch_repository(&n).await;
-                    if *request_id.peek() != current_id {
-                        return;
-                    }
-                    match &result {
-                        Ok(repo) => {
-                            let mut found = false;
-                            let mut parsed_any = false;
-                            let mut last_err = String::new();
-                            for url in repo.clone.iter().chain(repo.web.iter()) {
-                                if let Some((owner, repo_name)) = parse_github_url(url) {
-                                    parsed_any = true;
-                                    match fetch_commit_detail(&owner, &repo_name, &s).await {
-                                        Ok(detail) => {
-                                            if *request_id.peek() != current_id {
-                                                return;
-                                            }
-                                            commit_result.set(Some(Ok(detail)));
-                                            found = true;
-                                            break;
+                match &result {
+                    Ok(repo) => {
+                        let mut found = false;
+                        let mut parsed_any = false;
+                        let mut last_err = String::new();
+                        for url in repo.clone.iter().chain(repo.web.iter()) {
+                            if let Some((owner, repo_name)) = parse_github_url(url) {
+                                parsed_any = true;
+                                match fetch_commit_detail(&owner, &repo_name, &s).await {
+                                    Ok(detail) => {
+                                        if *request_id.peek() != current_id {
+                                            return;
                                         }
-                                        Err(e) => { last_err = e; continue; }
+                                        commit_result.set(Some(Ok(detail)));
+                                        found = true;
+                                        break;
+                                    }
+                                    Err(e) => {
+                                        last_err = e;
+                                        continue;
                                     }
                                 }
                             }
-                            if !found {
-                                if *request_id.peek() != current_id { return; }
-                                let msg = if parsed_any && !last_err.is_empty() {
-                                    last_err
-                                } else {
-                                    "No GitHub URL found for this repository".to_string()
-                                };
-                                commit_result.set(Some(Err(msg)));
-                            }
                         }
-                        Err(e) => {
-                            if *request_id.peek() != current_id { return; }
-                            commit_result
-                                .set(Some(Err(format!("Failed to fetch repository: {}", e))));
+                        if !found {
+                            if *request_id.peek() != current_id {
+                                return;
+                            }
+                            let msg = if parsed_any && !last_err.is_empty() {
+                                last_err
+                            } else {
+                                "No GitHub URL found for this repository".to_string()
+                            };
+                            commit_result.set(Some(Err(msg)));
                         }
                     }
-                });
-            },
-        ),
-    );
+                    Err(e) => {
+                        if *request_id.peek() != current_id {
+                            return;
+                        }
+                        commit_result.set(Some(Err(format!("Failed to fetch repository: {}", e))));
+                    }
+                }
+            });
+        },
+    ));
 
     rsx! {
         div { class: "min-h-screen",
@@ -301,16 +305,9 @@ thread_local! {
 }
 
 /// Fetch commit detail from GitHub API
-async fn fetch_commit_detail(
-    owner: &str,
-    repo: &str,
-    sha: &str,
-) -> Result<CommitDetail, String> {
+async fn fetch_commit_detail(owner: &str, repo: &str, sha: &str) -> Result<CommitDetail, String> {
     // Validate SHA: must be 7-64 hex characters, no path traversal
-    if sha.len() < 7
-        || sha.len() > 64
-        || !sha.chars().all(|c| c.is_ascii_hexdigit())
-    {
+    if sha.len() < 7 || sha.len() > 64 || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err(format!("Invalid commit SHA: {}", sha));
     }
 
@@ -336,14 +333,16 @@ async fn fetch_commit_detail(
     );
 
     // Fetch JSON metadata (includes files[].patch for diff)
-    let meta_resp = Request::get(&api_url)
+    let meta_resp = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(&api_url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
 
-    if !meta_resp.ok() {
+    if !meta_resp.status().is_success() {
         return Err(format!("GitHub API error: {}", meta_resp.status()));
     }
 
@@ -375,11 +374,17 @@ async fn fetch_commit_detail(
             if let Some(ref patch) = file.patch {
                 parts.push(patch.clone());
             } else {
-                parts.push(format!("Binary file or content unchanged ({})", file.status));
+                parts.push(format!(
+                    "Binary file or content unchanged ({})",
+                    file.status
+                ));
             }
         }
         if parts.is_empty() {
-            (String::new(), Some("No patch data found in commit".to_string()))
+            (
+                String::new(),
+                Some("No patch data found in commit".to_string()),
+            )
         } else {
             (parts.join("\n"), None)
         }
@@ -395,11 +400,7 @@ async fn fetch_commit_detail(
         .unwrap_or_else(|| json.commit.author.name.clone());
 
     let stats = json.stats.as_ref();
-    let files_changed = json
-        .files
-        .as_ref()
-        .map(|f| f.len() as u32)
-        .unwrap_or(0);
+    let files_changed = json.files.as_ref().map(|f| f.len() as u32).unwrap_or(0);
 
     let detail = CommitDetail {
         message: json.commit.message,

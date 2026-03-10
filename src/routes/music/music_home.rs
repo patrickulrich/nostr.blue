@@ -1,6 +1,4 @@
-use crate::components::{
-    DiscoveryTab, DiscoveryTabs, UnifiedTrackCard, UnifiedTrackCardSkeleton,
-};
+use crate::components::{DiscoveryTab, DiscoveryTabs, UnifiedTrackCard, UnifiedTrackCardSkeleton};
 use crate::services::podcast_index;
 use crate::services::wavlake::WavlakeAPI;
 use crate::stores::auth_store;
@@ -55,8 +53,7 @@ pub fn MusicHome() -> Element {
             let should_fetch_wavlake = platform == "all" || platform == "wavlake";
             let nostr_client_ready = crate::stores::nostr_client::get_client().is_some();
             let should_fetch_nostr = nostr_client_ready
-                && (platform == "all" || platform == "nostr"
-                    || tab == DiscoveryTab::Following);
+                && (platform == "all" || platform == "nostr" || tab == DiscoveryTab::Following);
             if should_fetch_wavlake {
                 let api = WavlakeAPI::new();
                 let genre_filter = if genre == "all" {
@@ -94,18 +91,11 @@ pub fn MusicHome() -> Element {
                 } else {
                     Some(genre.as_str())
                 };
-                match nostr_music::fetch_nostr_tracks(nostr_filter, 30, nostr_genre)
-                    .await
-                {
+                match nostr_music::fetch_nostr_tracks(nostr_filter, 30, nostr_genre).await {
                     Ok(nostr_tracks) => {
-                        let coords: Vec<String> = nostr_tracks
-                            .iter()
-                            .map(|t| t.coordinate.clone())
-                            .collect();
-                        let zap_totals = nostr_music::fetch_track_zap_totals(
-                                coords,
-                                Some(days),
-                            )
+                        let coords: Vec<String> =
+                            nostr_tracks.iter().map(|t| t.coordinate.clone()).collect();
+                        let zap_totals = nostr_music::fetch_track_zap_totals(coords, Some(days))
                             .await
                             .unwrap_or_default();
                         for nt in nostr_tracks {
@@ -122,21 +112,15 @@ pub fn MusicHome() -> Element {
             match tab {
                 DiscoveryTab::Trending => {
                     all_tracks
-                        .sort_by(|a, b| {
-                            b.msat_total.unwrap_or(0).cmp(&a.msat_total.unwrap_or(0))
-                        });
+                        .sort_by(|a, b| b.msat_total.unwrap_or(0).cmp(&a.msat_total.unwrap_or(0)));
                 }
                 DiscoveryTab::New => {
                     all_tracks
-                        .sort_by(|a, b| {
-                            b.created_at.unwrap_or(0).cmp(&a.created_at.unwrap_or(0))
-                        });
+                        .sort_by(|a, b| b.created_at.unwrap_or(0).cmp(&a.created_at.unwrap_or(0)));
                 }
                 DiscoveryTab::Following => {
                     all_tracks
-                        .sort_by(|a, b| {
-                            b.created_at.unwrap_or(0).cmp(&a.created_at.unwrap_or(0))
-                        });
+                        .sort_by(|a, b| b.created_at.unwrap_or(0).cmp(&a.created_at.unwrap_or(0)));
                 }
                 DiscoveryTab::Playlists | DiscoveryTab::Rss => {}
             }
@@ -168,11 +152,11 @@ pub fn MusicHome() -> Element {
                             let album = album.clone();
                             async move {
                                 match podcast_index::get_episodes_by_feed_id(
-                                        album.id,
-                                        Some(5),
-                                        None,
-                                    )
-                                    .await
+                                    album.id,
+                                    Some(5),
+                                    None,
+                                )
+                                .await
                                 {
                                     Ok(episodes) => {
                                         let tracks: Vec<MusicTrack> = episodes
@@ -183,7 +167,9 @@ pub fn MusicHome() -> Element {
                                     }
                                     Err(e) => {
                                         log::warn!(
-                                            "Failed to fetch tracks for album {}: {}", album.id, e
+                                            "Failed to fetch tracks for album {}: {}",
+                                            album.id,
+                                            e
                                         );
                                         None
                                     }
@@ -192,11 +178,7 @@ pub fn MusicHome() -> Element {
                         })
                         .collect();
                     let results = futures::future::join_all(fetch_futures).await;
-                    let tracks: Vec<MusicTrack> = results
-                        .into_iter()
-                        .flatten()
-                        .flatten()
-                        .collect();
+                    let tracks: Vec<MusicTrack> = results.into_iter().flatten().flatten().collect();
                     rss_music_tracks.set(tracks);
                     rss_error.set(None);
                 }
@@ -212,15 +194,11 @@ pub fn MusicHome() -> Element {
         let query = search_query.read().trim().to_string();
         if !query.is_empty() {
             let encoded_query = urlencoding::encode(&query).to_string();
-            navigator
-                .push(crate::routes::Route::MusicSearch {
-                    q: encoded_query,
-                });
+            navigator.push(crate::routes::Route::MusicSearch { q: encoded_query });
         }
     };
     let current_tab = discovery_tab.read().clone();
-    let show_filters = current_tab != DiscoveryTab::Playlists
-        && current_tab != DiscoveryTab::Rss;
+    let show_filters = current_tab != DiscoveryTab::Playlists && current_tab != DiscoveryTab::Rss;
     rsx! {
         div { class: "max-w-5xl mx-auto p-4 space-y-6",
             div { class: "flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4",
@@ -499,16 +477,26 @@ pub fn MusicHome() -> Element {
 fn PlaylistSection(platform_filter: String) -> Element {
     let mut playlists = use_signal(Vec::<nostr_music::NostrPlaylist>::new);
     let mut loading = use_signal(|| true);
-    use_effect(
-        use_reactive!(
-            | platform_filter | { let platform = platform_filter.clone(); loading
-            .set(true); spawn(async move { let should_fetch = platform == "all" ||
-            platform == "nostr"; if should_fetch { match
-            nostr_music::fetch_playlists(None, 20). await { Ok(result) => { playlists
-            .set(result); } Err(e) => { log::error!("Failed to fetch playlists: {}", e);
-            } } } else { playlists.set(Vec::new()); } loading.set(false); }); }
-        ),
-    );
+    use_effect(use_reactive!(|platform_filter| {
+        let platform = platform_filter.clone();
+        loading.set(true);
+        spawn(async move {
+            let should_fetch = platform == "all" || platform == "nostr";
+            if should_fetch {
+                match nostr_music::fetch_playlists(None, 20).await {
+                    Ok(result) => {
+                        playlists.set(result);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to fetch playlists: {}", e);
+                    }
+                }
+            } else {
+                playlists.set(Vec::new());
+            }
+            loading.set(false);
+        });
+    }));
     rsx! {
         if *loading.read() {
             div { class: "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4",

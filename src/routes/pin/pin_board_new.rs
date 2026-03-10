@@ -270,10 +270,7 @@ pub fn PinBoardEdit(naddr: String) -> Element {
         spawn(async move {
             match pin_boards_store::publish_pinboard(input, Some(&d_tag)).await {
                 Ok(new_naddr) => {
-                    navigator
-                        .push(Route::PinBoardDetail {
-                            naddr: new_naddr,
-                        });
+                    navigator.push(Route::PinBoardDetail { naddr: new_naddr });
                 }
                 Err(e) => {
                     error.set(Some(e));

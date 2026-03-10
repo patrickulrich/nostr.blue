@@ -15,9 +15,7 @@ pub fn NoteNew(quote: Option<String>) -> Element {
     let mut content = use_signal(move || initial_content);
     let mut is_publishing = use_signal(|| false);
     let mut show_image_uploader = use_signal(|| false);
-    let is_authenticated = use_memo(move || {
-        auth_store::AUTH_STATE.read().is_authenticated
-    });
+    let is_authenticated = use_memo(move || auth_store::AUTH_STATE.read().is_authenticated);
     let char_count = content.read().chars().count();
     let remaining = MAX_LENGTH.saturating_sub(char_count);
     let is_over_limit = char_count > MAX_LENGTH;
@@ -41,10 +39,9 @@ pub fn NoteNew(quote: Option<String>) -> Element {
                 Ok(event_id) => {
                     log::info!("Note published successfully: {}", event_id);
                     is_publishing.set(false);
-                    navigator
-                        .push(crate::routes::Route::Home {
-                            list: String::new(),
-                        });
+                    navigator.push(crate::routes::Route::Home {
+                        list: String::new(),
+                    });
                 }
                 Err(e) => {
                     log::error!("Failed to publish note: {}", e);
@@ -80,10 +77,9 @@ pub fn NoteNew(quote: Option<String>) -> Element {
     };
     use_effect(move || {
         if !*is_authenticated.read() {
-            navigator
-                .push(crate::routes::Route::Home {
-                    list: String::new(),
-                });
+            navigator.push(crate::routes::Route::Home {
+                list: String::new(),
+            });
         }
     });
     if !*is_authenticated.read() {

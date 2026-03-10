@@ -12,11 +12,9 @@ pub fn PhotoNew() -> Element {
     let mut is_publishing = use_signal(|| false);
     let mut show_image_uploader = use_signal(|| true);
     let mut error_message = use_signal(|| Option::<String>::None);
-    let is_authenticated = use_memo(move || {
-        auth_store::AUTH_STATE.read().is_authenticated
-    });
-    let can_publish = title.read().chars().count() > 0 && !image_urls.read().is_empty()
-        && !*is_publishing.read();
+    let is_authenticated = use_memo(move || auth_store::AUTH_STATE.read().is_authenticated);
+    let can_publish =
+        title.read().chars().count() > 0 && !image_urls.read().is_empty() && !*is_publishing.read();
     let handle_close = move |_| {
         navigator.go_back();
     };
@@ -49,13 +47,13 @@ pub fn PhotoNew() -> Element {
                 .filter(|s| !s.is_empty())
                 .collect();
             match crate::stores::nostr_client::publish_picture(
-                    title_val,
-                    caption_val,
-                    image_urls_val,
-                    tags_vec,
-                    location_val,
-                )
-                .await
+                title_val,
+                caption_val,
+                image_urls_val,
+                tags_vec,
+                location_val,
+            )
+            .await
             {
                 Ok(event_id) => {
                     log::info!("Picture post published successfully: {}", event_id);
@@ -72,10 +70,9 @@ pub fn PhotoNew() -> Element {
     };
     use_effect(move || {
         if !*is_authenticated.read() {
-            navigator
-                .push(crate::routes::Route::Home {
-                    list: String::new(),
-                });
+            navigator.push(crate::routes::Route::Home {
+                list: String::new(),
+            });
         }
     });
     if !*is_authenticated.read() {

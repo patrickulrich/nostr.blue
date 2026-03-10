@@ -4,10 +4,10 @@ use crate::routes::Route;
 use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
 use crate::stores::profiles;
 use crate::stores::social::channel_store::{
-    cache_channel, cache_channel_metadata, channel_creation_by_id_filter,
-    channel_messages_filter, channel_messages_realtime_filter, channel_metadata_filter,
-    decode_channel_id, get_cached_channel, get_channel_display_info, get_channel_relay_url,
-    parse_channel_creation, parse_channel_metadata, send_channel_message, Channel,
+    cache_channel, cache_channel_metadata, channel_creation_by_id_filter, channel_messages_filter,
+    channel_messages_realtime_filter, channel_metadata_filter, decode_channel_id,
+    get_cached_channel, get_channel_display_info, get_channel_relay_url, parse_channel_creation,
+    parse_channel_metadata, send_channel_message, Channel,
 };
 use crate::utils::profile_prefetch;
 use crate::utils::truncate_pubkey;
@@ -17,10 +17,11 @@ use dioxus_core::use_drop;
 use dioxus_core::Task;
 use nostr_sdk::{Event, PublicKey, RelayPoolNotification, RelayUrl, SubscriptionId};
 use std::time::Duration;
+#[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
 
-#[wasm_bindgen(
-    inline_js = r#"
+#[cfg(feature = "web")]
+#[wasm_bindgen(inline_js = r#"
 export function scrollChannelChatToBottom(elementId) {
     const element = document.getElementById(elementId);
     if (element) {
@@ -36,8 +37,7 @@ export function isChannelChatScrolledNearBottom(elementId, threshold) {
     const clientHeight = element.clientHeight;
     return scrollHeight - scrollTop - clientHeight < threshold;
 }
-"#
-)]
+"#)]
 extern "C" {
     fn scrollChannelChatToBottom(element_id: &str);
     fn isChannelChatScrolledNearBottom(element_id: &str, threshold: f64) -> bool;
@@ -101,7 +101,9 @@ pub fn ChannelChat(channel_id: String) -> Element {
 
             // Resolve relay URL for sending
             let relay = get_channel_relay_url(&relay_hints).await;
-            if is_stale() { return; }
+            if is_stale() {
+                return;
+            }
             relay_url_for_send.set(Some(relay));
 
             // Fetch channel creation event (kind 40)
@@ -115,7 +117,9 @@ pub fn ChannelChat(channel_id: String) -> Element {
                 .await
                 {
                     Ok(events) => {
-                        if is_stale() { return; }
+                        if is_stale() {
+                            return;
+                        }
                         if let Some(event) = events.first() {
                             if let Some(ch) = parse_channel_creation(event) {
                                 cache_channel(ch.clone());
@@ -136,7 +140,9 @@ pub fn ChannelChat(channel_id: String) -> Element {
                 .await
                 {
                     Ok(events) => {
-                        if is_stale() { return; }
+                        if is_stale() {
+                            return;
+                        }
                         if let Some(event) = events.first() {
                             if let Some(meta) = parse_channel_metadata(event, &ch.pubkey) {
                                 cache_channel_metadata(meta);
@@ -155,7 +161,9 @@ pub fn ChannelChat(channel_id: String) -> Element {
             .await
             {
                 Ok(events) => {
-                    if is_stale() { return; }
+                    if is_stale() {
+                        return;
+                    }
                     let mut sorted = events;
                     sorted.sort_by(|a, b| a.created_at.cmp(&b.created_at));
                     messages.set(sorted);
@@ -164,7 +172,9 @@ pub fn ChannelChat(channel_id: String) -> Element {
                 Err(e) => log::error!("Failed to fetch channel messages: {}", e),
             }
 
-            if is_stale() { return; }
+            if is_stale() {
+                return;
+            }
             loading.set(false);
 
             // Set up real-time subscription
@@ -220,19 +230,64 @@ pub fn ChannelChat(channel_id: String) -> Element {
     // Auto-scroll
     let chat_container_id_for_scroll = chat_container_id.clone();
     let mut is_first_load = use_signal(|| true);
+    let mut channel_scroll_gen = use_signal(|| 0u32);
     use_effect(use_reactive(&channel_id, move |_| {
         is_first_load.set(true);
+        channel_scroll_gen.with_mut(|gen| *gen = gen.wrapping_add(1));
     }));
     use_effect(move || {
         let msg_count = messages.read().len();
         let container_id = chat_container_id_for_scroll.clone();
+        let scroll_gen = channel_scroll_gen.with_mut(|gen| {
+            *gen = gen.wrapping_add(1);
+            *gen
+        });
         spawn(async move {
-            gloo_timers::future::TimeoutFuture::new(50).await;
-            if *is_first_load.peek() && msg_count > 0 {
-                scrollChannelChatToBottom(&container_id);
-                is_first_load.set(false);
-            } else if isChannelChatScrolledNearBottom(&container_id, 100.0) {
-                scrollChannelChatToBottom(&container_id);
+            crate::platform::timer::sleep_ms(50).await;
+            #[cfg(feature = "web")]
+            {
+                let mut did_scroll = false;
+                let should_scroll = msg_count > 0
+                    && (*is_first_load.peek()
+                        || isChannelChatScrolledNearBottom(&container_id, 100.0));
+                if should_scroll {
+                    scrollChannelChatToBottom(&container_id);
+                    did_scroll = true;
+                }
+                if did_scroll && msg_count > 0 && *channel_scroll_gen.read() == scroll_gen {
+                    is_first_load.set(false);
+                }
+            }
+            #[cfg(not(feature = "web"))]
+            {
+                let mut did_scroll = false;
+                if msg_count > 0 {
+                    let element_id =
+                        serde_json::to_string(&container_id).unwrap_or_else(|_| "\"\"".to_string());
+                    let near_bottom_script = format!(
+                        "(() => {{ const el = document.getElementById({}); if (!el) return false; return (el.scrollHeight - (el.scrollTop + el.clientHeight)) <= 100; }})()",
+                        element_id
+                    );
+                    let near_bottom = document::eval(&near_bottom_script)
+                        .await
+                        .ok()
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    if *is_first_load.peek() || near_bottom {
+                        let scroll_script = format!(
+                            "(() => {{ const el = document.getElementById({}); if (el) {{ el.scrollTop = el.scrollHeight; return true; }} return false; }})()",
+                            element_id
+                        );
+                        did_scroll = document::eval(&scroll_script)
+                            .await
+                            .ok()
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                    }
+                }
+                if did_scroll && *channel_scroll_gen.read() == scroll_gen {
+                    is_first_load.set(false);
+                }
             }
         });
     });
@@ -302,14 +357,20 @@ pub fn ChannelChat(channel_id: String) -> Element {
 
     // Channel display info
     let channel_name = use_memo(move || {
-        channel_info.read().as_ref().map(|ch| {
-            let (name, _, _) = get_channel_display_info(ch);
-            name.unwrap_or_else(|| "Unnamed Channel".to_string())
-        }).unwrap_or_else(|| "Channel".to_string())
+        channel_info
+            .read()
+            .as_ref()
+            .map(|ch| {
+                let (name, _, _) = get_channel_display_info(ch);
+                name.unwrap_or_else(|| "Unnamed Channel".to_string())
+            })
+            .unwrap_or_else(|| "Channel".to_string())
     });
 
     // Escape key handler
+    #[cfg(feature = "web")]
     let mut escape_cb = use_signal(|| None::<Closure<dyn FnMut(web_sys::KeyboardEvent)>>);
+    #[cfg(feature = "web")]
     use_effect(move || {
         let Some(window) = web_sys::window() else {
             return;
@@ -324,6 +385,7 @@ pub fn ChannelChat(channel_id: String) -> Element {
             .ok();
         escape_cb.set(Some(cb));
     });
+    #[cfg(feature = "web")]
     use_drop(move || {
         if let Some(cb) = escape_cb.peek().as_ref() {
             if let Some(window) = web_sys::window() {
@@ -457,9 +519,7 @@ fn ChannelChatMessage(event: Event) -> Element {
             truncate_pubkey(&author_pk_for_name)
         }
     });
-    let author_picture = use_memo(move || {
-        metadata.read().as_ref().and_then(|m| m.picture.clone())
-    });
+    let author_picture = use_memo(move || metadata.read().as_ref().and_then(|m| m.picture.clone()));
 
     rsx! {
         div { class: "flex gap-3",

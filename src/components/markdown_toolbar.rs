@@ -89,12 +89,12 @@ impl MarkdownFormat {
         matches!(
             self,
             Self::Bold
-            | Self::Italic
-            | Self::Strikethrough
-            | Self::InlineCode
-            | Self::CodeBlock
-            | Self::Link
-            | Self::Image
+                | Self::Italic
+                | Self::Strikethrough
+                | Self::InlineCode
+                | Self::CodeBlock
+                | Self::Link
+                | Self::Image
         )
     }
     /// Whether this format should be inserted at line start
@@ -102,11 +102,11 @@ impl MarkdownFormat {
         matches!(
             self,
             Self::Heading1
-            | Self::Heading2
-            | Self::Heading3
-            | Self::BulletList
-            | Self::NumberedList
-            | Self::Quote
+                | Self::Heading2
+                | Self::Heading3
+                | Self::BulletList
+                | Self::NumberedList
+                | Self::Quote
         )
     }
 }
@@ -555,14 +555,13 @@ pub fn apply_markdown_format(
     }
 }
 /// Set cursor position in a textarea element (WASM only)
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub fn set_textarea_cursor(textarea_id: &str, position: usize, content: &str) {
     use wasm_bindgen::JsCast;
     if let Some(window) = web_sys::window() {
         if let Some(document) = window.document() {
             if let Some(element) = document.get_element_by_id(textarea_id) {
-                if let Ok(textarea) = element.dyn_into::<web_sys::HtmlTextAreaElement>()
-                {
+                if let Ok(textarea) = element.dyn_into::<web_sys::HtmlTextAreaElement>() {
                     let utf16_pos = utf8_to_utf16_index(content, position) as u32;
                     let _ = textarea.set_selection_range(utf16_pos, utf16_pos);
                     let _ = textarea.focus();
@@ -571,21 +570,18 @@ pub fn set_textarea_cursor(textarea_id: &str, position: usize, content: &str) {
         }
     }
 }
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 pub fn set_textarea_cursor(_textarea_id: &str, _position: usize, _content: &str) {}
 /// Get cursor position from a textarea element (WASM only)
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub fn get_textarea_cursor(textarea_id: &str, content: &str) -> (usize, usize) {
     use wasm_bindgen::JsCast;
     if let Some(window) = web_sys::window() {
         if let Some(document) = window.document() {
             if let Some(element) = document.get_element_by_id(textarea_id) {
-                if let Ok(textarea) = element.dyn_into::<web_sys::HtmlTextAreaElement>()
-                {
-                    let start = textarea.selection_start().ok().flatten().unwrap_or(0)
-                        as usize;
-                    let end = textarea.selection_end().ok().flatten().unwrap_or(0)
-                        as usize;
+                if let Ok(textarea) = element.dyn_into::<web_sys::HtmlTextAreaElement>() {
+                    let start = textarea.selection_start().ok().flatten().unwrap_or(0) as usize;
+                    let end = textarea.selection_end().ok().flatten().unwrap_or(0) as usize;
                     let start_utf8 = utf16_to_utf8_index(content, start);
                     let end_utf8 = utf16_to_utf8_index(content, end);
                     return (start_utf8, end_utf8);
@@ -595,12 +591,13 @@ pub fn get_textarea_cursor(textarea_id: &str, content: &str) -> (usize, usize) {
     }
     (0, 0)
 }
-#[cfg(not(target_arch = "wasm32"))]
-pub fn get_textarea_cursor(_textarea_id: &str, _content: &str) -> (usize, usize) {
-    (0, 0)
+#[cfg(not(feature = "web"))]
+pub fn get_textarea_cursor(_textarea_id: &str, content: &str) -> (usize, usize) {
+    let end = content.len();
+    (end, end)
 }
 /// Convert UTF-16 code unit index (from DOM) to UTF-8 byte index (for Rust string slicing)
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 fn utf16_to_utf8_index(text: &str, utf16_index: usize) -> usize {
     let mut utf16_count = 0;
     let mut utf8_byte_index = 0;
@@ -614,7 +611,7 @@ fn utf16_to_utf8_index(text: &str, utf16_index: usize) -> usize {
     utf8_byte_index.min(text.len())
 }
 /// Convert UTF-8 byte index (from Rust string) to UTF-16 code unit index (for DOM)
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 fn utf8_to_utf16_index(text: &str, utf8_index: usize) -> usize {
     let utf8_index = utf8_index.min(text.len());
     let mut utf16_count = 0;
@@ -634,72 +631,42 @@ mod tests {
     #[test]
     fn test_bold_format_empty_selection() {
         let content = "hello world";
-        let (result, cursor) = apply_markdown_format(
-            content,
-            6,
-            6,
-            MarkdownFormat::Bold,
-        );
+        let (result, cursor) = apply_markdown_format(content, 6, 6, MarkdownFormat::Bold);
         assert_eq!(result, "hello **text**world");
         assert_eq!(cursor, 14);
     }
     #[test]
     fn test_bold_format_with_selection() {
         let content = "hello world";
-        let (result, cursor) = apply_markdown_format(
-            content,
-            0,
-            5,
-            MarkdownFormat::Bold,
-        );
+        let (result, cursor) = apply_markdown_format(content, 0, 5, MarkdownFormat::Bold);
         assert_eq!(result, "**hello** world");
         assert_eq!(cursor, 9);
     }
     #[test]
     fn test_heading_format() {
         let content = "hello world";
-        let (result, cursor) = apply_markdown_format(
-            content,
-            6,
-            6,
-            MarkdownFormat::Heading1,
-        );
+        let (result, cursor) = apply_markdown_format(content, 6, 6, MarkdownFormat::Heading1);
         assert_eq!(result, "# hello world");
         assert_eq!(cursor, 8);
     }
     #[test]
     fn test_heading_format_middle_of_line() {
         let content = "line one\nline two";
-        let (result, cursor) = apply_markdown_format(
-            content,
-            12,
-            12,
-            MarkdownFormat::Heading2,
-        );
+        let (result, cursor) = apply_markdown_format(content, 12, 12, MarkdownFormat::Heading2);
         assert_eq!(result, "line one\n## line two");
         assert_eq!(cursor, 15);
     }
     #[test]
     fn test_code_block_format() {
         let content = "hello world";
-        let (result, cursor) = apply_markdown_format(
-            content,
-            6,
-            11,
-            MarkdownFormat::CodeBlock,
-        );
+        let (result, cursor) = apply_markdown_format(content, 6, 11, MarkdownFormat::CodeBlock);
         assert_eq!(result, "hello ```\nworld\n```");
         assert_eq!(cursor, 19);
     }
     #[test]
     fn test_link_format() {
         let content = "check this out";
-        let (result, cursor) = apply_markdown_format(
-            content,
-            6,
-            10,
-            MarkdownFormat::Link,
-        );
+        let (result, cursor) = apply_markdown_format(content, 6, 10, MarkdownFormat::Link);
         assert_eq!(result, "check [this](url) out");
         assert_eq!(cursor, 13);
     }

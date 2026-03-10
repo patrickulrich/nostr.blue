@@ -1,26 +1,30 @@
-use crate::components::icons::{MessageCircleIcon, Repeat2Icon, ZapIcon};
 use super::reply_composer::VoiceReplyComposer;
+use crate::components::icons::{MessageCircleIcon, Repeat2Icon, ZapIcon};
 use crate::components::{ReactionButton, ZapModal};
 use crate::hooks::use_reaction;
 use crate::routes::Route;
+use crate::services::aggregation::InteractionCounts;
 use crate::stores::nostr_client::get_client;
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::signer::SIGNER_INFO;
 use crate::stores::{nostr_client, voice_messages_store};
-use crate::services::aggregation::InteractionCounts;
 use crate::utils::truncate_pubkey;
 use dioxus::events::{MediaData, MouseData};
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
 use dioxus::web::WebEventExt;
-use js_sys;
 use nostr_sdk::{Event as NostrEvent, EventId, Filter, Kind, PublicKey};
 use std::time::Duration;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
+
+#[cfg(feature = "web")]
+const INTERACTIVE_ELEMENT_SELECTOR: &str =
+    "a, button, input, textarea, select, summary, audio, [role=\"button\"], [tabindex], [contenteditable=\"true\"]";
 #[component]
 pub fn VoiceMessageCard(
     event: NostrEvent,
-    #[props(default = None)]
-    precomputed_counts: Option<InteractionCounts>,
+    #[props(default = None)] precomputed_counts: Option<InteractionCounts>,
 ) -> Element {
     let author_pubkey = event.pubkey.to_string();
     let audio_url = event.content.clone();
@@ -29,14 +33,20 @@ pub fn VoiceMessageCard(
     let event_id_str = event_id.to_string();
     let event_clone = event.clone();
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+    #[allow(unused_mut)]
     let mut duration = use_signal(|| 0.0);
     let mut current_time = use_signal(|| 0.0);
+    #[allow(unused_variables, unused_mut)]
     let mut is_loading = use_signal(|| true);
     let mut show_reply_modal = use_signal(|| false);
     let mut show_zap_modal = use_signal(|| false);
     let mut is_reposting = use_signal(|| false);
     let has_signer = *HAS_SIGNER.read();
-    let reaction = use_reaction(event_id_str.clone(), author_pubkey.clone(), precomputed_counts.as_ref());
+    let reaction = use_reaction(
+        event_id_str.clone(),
+        author_pubkey.clone(),
+        precomputed_counts.as_ref(),
+    );
     let mut reply_count = use_signal(|| 0usize);
     let mut repost_count = use_signal(|| 0usize);
     let mut zap_amount_sats = use_signal(|| 0u64);
@@ -52,244 +62,228 @@ pub fn VoiceMessageCard(
             if fields.len() < 2 {
                 return None;
             }
-            fields
-                .iter()
-                .skip(1)
-                .find_map(|field| {
-                    let field_str = field.as_str();
-                    if field_str.starts_with("duration ") {
-                        field_str
-                            .strip_prefix("duration ")
-                            .and_then(|d| d.parse::<f64>().ok())
-                    } else if field_str.starts_with("duration=") {
-                        field_str
-                            .strip_prefix("duration=")
-                            .and_then(|d| d.parse::<f64>().ok())
-                    } else {
-                        None
-                    }
-                })
+            fields.iter().skip(1).find_map(|field| {
+                let field_str = field.as_str();
+                if field_str.starts_with("duration ") {
+                    field_str
+                        .strip_prefix("duration ")
+                        .and_then(|d| d.parse::<f64>().ok())
+                } else if field_str.starts_with("duration=") {
+                    field_str
+                        .strip_prefix("duration=")
+                        .and_then(|d| d.parse::<f64>().ok())
+                } else {
+                    None
+                }
+            })
         });
-    use_effect(
-        use_reactive(
-            (&author_pubkey, &*nostr_client::CLIENT_INITIALIZED.read()),
-            move |(pubkey, client_ready)| {
-                if !client_ready {
-                    return;
-                }
-                spawn(async move {
-                    match PublicKey::parse(&pubkey) {
-                        Ok(pk) => {
-                            if let Some(client) = nostr_client::get_client() {
-                                if let Ok(Some(metadata)) = client
-                                    .fetch_metadata(pk, Duration::from_secs(5))
-                                    .await
-                                {
-                                    author_metadata.set(Some(metadata));
-                                }
+    use_effect(use_reactive(
+        (&author_pubkey, &*nostr_client::CLIENT_INITIALIZED.read()),
+        move |(pubkey, client_ready)| {
+            if !client_ready {
+                return;
+            }
+            spawn(async move {
+                match PublicKey::parse(&pubkey) {
+                    Ok(pk) => {
+                        if let Some(client) = nostr_client::get_client() {
+                            if let Ok(Some(metadata)) =
+                                client.fetch_metadata(pk, Duration::from_secs(5)).await
+                            {
+                                author_metadata.set(Some(metadata));
                             }
                         }
-                        Err(e) => {
-                            log::error!(
-                                "Failed to parse author_pubkey '{}': {}", pubkey, e
-                            );
-                        }
                     }
-                });
-            },
-        ),
-    );
-    use_effect(
-        use_reactive(
-            &precomputed_counts,
-            move |counts_opt| {
-                if let Some(counts) = counts_opt {
-                    reply_count.set(counts.replies);
-                    repost_count.set(counts.reposts);
-                    zap_amount_sats.set(counts.zap_amount_sats);
-                    is_reposted.set(counts.user_reposted.unwrap_or(false));
-                    is_zapped.set(counts.user_zapped.unwrap_or(false));
+                    Err(e) => {
+                        log::error!("Failed to parse author_pubkey '{}': {}", pubkey, e);
+                    }
                 }
-            },
-        ),
-    );
+            });
+        },
+    ));
+    use_effect(use_reactive(&precomputed_counts, move |counts_opt| {
+        if let Some(counts) = counts_opt {
+            reply_count.set(counts.replies);
+            repost_count.set(counts.reposts);
+            zap_amount_sats.set(counts.zap_amount_sats);
+            is_reposted.set(counts.user_reposted.unwrap_or(false));
+            is_zapped.set(counts.user_zapped.unwrap_or(false));
+        }
+    }));
     let has_precomputed = precomputed_counts.is_some();
-    use_effect(
-        use_reactive(
-            &(event_id_str.clone(), has_precomputed),
-            move |(event_id_for_counts, has_precomputed)| {
-                if has_precomputed {
-                    return;
+    use_effect(use_reactive(
+        &(event_id_str.clone(), has_precomputed),
+        move |(event_id_for_counts, has_precomputed)| {
+            if has_precomputed {
+                return;
+            }
+            spawn(async move {
+                let client = match get_client() {
+                    Some(c) => c,
+                    None => return,
+                };
+                let event_id_parsed = match EventId::from_hex(&event_id_for_counts) {
+                    Ok(id) => id,
+                    Err(_) => return,
+                };
+                let reply_filter = Filter::new()
+                    .kind(Kind::TextNote)
+                    .event(event_id_parsed)
+                    .limit(500);
+                if let Ok(replies) = client
+                    .fetch_events(reply_filter, Duration::from_secs(5))
+                    .await
+                {
+                    reply_count.set(replies.len());
                 }
-                spawn(async move {
-                    let client = match get_client() {
-                        Some(c) => c,
-                        None => return,
-                    };
-                    let event_id_parsed = match EventId::from_hex(&event_id_for_counts) {
-                        Ok(id) => id,
-                        Err(_) => return,
-                    };
-                    let reply_filter = Filter::new()
-                        .kind(Kind::TextNote)
-                        .event(event_id_parsed)
-                        .limit(500);
-                    if let Ok(replies) = client
-                        .fetch_events(reply_filter, Duration::from_secs(5))
-                        .await
-                    {
-                        reply_count.set(replies.len());
-                    }
-                    let repost_filter = Filter::new()
-                        .kind(Kind::Repost)
-                        .event(event_id_parsed)
-                        .limit(500);
-                    if let Ok(reposts) = client
-                        .fetch_events(repost_filter, Duration::from_secs(5))
-                        .await
-                    {
-                        let current_user_pubkey = SIGNER_INFO
-                            .read()
-                            .as_ref()
-                            .map(|info| info.public_key.clone());
-                        let mut user_has_reposted = false;
-                        if let Some(ref user_pk) = current_user_pubkey {
-                            for repost in reposts.iter() {
-                                if repost.pubkey.to_string() == *user_pk {
-                                    user_has_reposted = true;
-                                    break;
-                                }
+                let repost_filter = Filter::new()
+                    .kind(Kind::Repost)
+                    .event(event_id_parsed)
+                    .limit(500);
+                if let Ok(reposts) = client
+                    .fetch_events(repost_filter, Duration::from_secs(5))
+                    .await
+                {
+                    let current_user_pubkey = SIGNER_INFO
+                        .read()
+                        .as_ref()
+                        .map(|info| info.public_key.clone());
+                    let mut user_has_reposted = false;
+                    if let Some(ref user_pk) = current_user_pubkey {
+                        for repost in reposts.iter() {
+                            if repost.pubkey.to_string() == *user_pk {
+                                user_has_reposted = true;
+                                break;
                             }
                         }
-                        repost_count.set(reposts.len());
-                        is_reposted.set(user_has_reposted);
                     }
-                    let zap_filter = Filter::new()
-                        .kind(Kind::ZapReceipt)
-                        .event(event_id_parsed)
-                        .limit(500);
-                    if let Ok(zaps) = client
-                        .fetch_events(zap_filter, Duration::from_secs(5))
-                        .await
-                    {
-                        let current_user_pubkey = SIGNER_INFO
-                            .read()
-                            .as_ref()
-                            .map(|info| info.public_key.clone());
-                        let mut user_has_zapped = false;
-                        let total_sats: u64 = zaps
-                            .iter()
-                            .filter_map(|zap_event| {
-                                if let Some(ref user_pk) = current_user_pubkey {
-                                    let zap_sender_pubkey = zap_event
-                                        .tags
-                                        .iter()
-                                        .find_map(|tag| {
-                                            let tag_vec = tag.clone().to_vec();
-                                            if tag_vec.len() >= 2 && tag_vec.first()?.as_str() == "P" {
-                                                Some(tag_vec.get(1)?.as_str().to_string())
-                                            } else {
-                                                None
-                                            }
-                                        });
-                                    if let Some(zap_sender) = zap_sender_pubkey {
-                                        if zap_sender == *user_pk {
-                                            user_has_zapped = true;
-                                        }
+                    repost_count.set(reposts.len());
+                    is_reposted.set(user_has_reposted);
+                }
+                let zap_filter = Filter::new()
+                    .kind(Kind::ZapReceipt)
+                    .event(event_id_parsed)
+                    .limit(500);
+                if let Ok(zaps) = client
+                    .fetch_events(zap_filter, Duration::from_secs(5))
+                    .await
+                {
+                    let current_user_pubkey = SIGNER_INFO
+                        .read()
+                        .as_ref()
+                        .map(|info| info.public_key.clone());
+                    let mut user_has_zapped = false;
+                    let total_sats: u64 = zaps
+                        .iter()
+                        .filter_map(|zap_event| {
+                            if let Some(ref user_pk) = current_user_pubkey {
+                                let zap_sender_pubkey = zap_event.tags.iter().find_map(|tag| {
+                                    let tag_vec = tag.clone().to_vec();
+                                    if tag_vec.len() >= 2 && tag_vec.first()?.as_str() == "P" {
+                                        Some(tag_vec.get(1)?.as_str().to_string())
+                                    } else {
+                                        None
+                                    }
+                                });
+                                if let Some(zap_sender) = zap_sender_pubkey {
+                                    if zap_sender == *user_pk {
+                                        user_has_zapped = true;
                                     }
                                 }
-                                zap_event
-                                    .tags
-                                    .iter()
-                                    .find_map(|tag| {
-                                        let tag_vec = tag.clone().to_vec();
-                                        if tag_vec.first()?.as_str() == "description" {
-                                            let zap_request_json = tag_vec.get(1)?.as_str();
-                                            if let Ok(zap_request) = serde_json::from_str::<
-                                                serde_json::Value,
-                                            >(zap_request_json) {
-                                                if let Some(tags) = zap_request
-                                                    .get("tags")
-                                                    .and_then(|t| t.as_array())
-                                                {
-                                                    for tag_array in tags {
-                                                        if let Some(tag_vals) = tag_array.as_array() {
-                                                            if tag_vals.first().and_then(|v| v.as_str())
-                                                                == Some("amount")
+                            }
+                            zap_event.tags.iter().find_map(|tag| {
+                                let tag_vec = tag.clone().to_vec();
+                                if tag_vec.first()?.as_str() == "description" {
+                                    let zap_request_json = tag_vec.get(1)?.as_str();
+                                    if let Ok(zap_request) =
+                                        serde_json::from_str::<serde_json::Value>(zap_request_json)
+                                    {
+                                        if let Some(tags) =
+                                            zap_request.get("tags").and_then(|t| t.as_array())
+                                        {
+                                            for tag_array in tags {
+                                                if let Some(tag_vals) = tag_array.as_array() {
+                                                    if tag_vals.first().and_then(|v| v.as_str())
+                                                        == Some("amount")
+                                                    {
+                                                        if let Some(amount_str) =
+                                                            tag_vals.get(1).and_then(|v| v.as_str())
+                                                        {
+                                                            if let Ok(millisats) =
+                                                                amount_str.parse::<u64>()
                                                             {
-                                                                if let Some(amount_str) = tag_vals
-                                                                    .get(1)
-                                                                    .and_then(|v| v.as_str())
-                                                                {
-                                                                    if let Ok(millisats) = amount_str.parse::<u64>() {
-                                                                        return Some(millisats / 1000);
-                                                                    }
-                                                                }
+                                                                return Some(millisats / 1000);
                                                             }
                                                         }
                                                     }
                                                 }
                                             }
                                         }
-                                        None
-                                    })
+                                    }
+                                }
+                                None
                             })
-                            .sum();
-                        zap_amount_sats.set(total_sats);
-                        is_zapped.set(user_has_zapped);
-                    }
-                });
-            },
-        ),
-    );
-    let toggle_play = move |_| {
+                        })
+                        .sum();
+                    zap_amount_sats.set(total_sats);
+                    is_zapped.set(user_has_zapped);
+                }
+            });
+        },
+    ));
+    let toggle_play = move |e: MouseEvent| {
+        e.stop_propagation();
         voice_messages_store::toggle_voice_message(event_id);
     };
     let audio_id_for_effect = audio_id.clone();
     use_effect(move || {
         let global_state = voice_messages_store::VOICE_PLAYBACK.read();
-        let is_playing = global_state.currently_playing == Some(event_id);
-        let audio_id_clone = audio_id_for_effect.clone();
-        let window = match web_sys::window() {
-            Some(w) => w,
-            None => {
-                log::error!("Failed to get window object");
-                return;
-            }
-        };
-        let document = match window.document() {
-            Some(d) => d,
-            None => {
-                log::error!("Failed to get document object");
-                return;
-            }
-        };
-        let element = match document.get_element_by_id(&audio_id_clone) {
-            Some(e) => e,
-            None => {
-                log::debug!("Audio element {} not found yet", audio_id_clone);
-                return;
-            }
-        };
-        let audio: web_sys::HtmlAudioElement = match element.dyn_into() {
-            Ok(a) => a,
-            Err(e) => {
-                log::error!("Element is not an HtmlAudioElement: {:?}", e);
-                return;
-            }
-        };
-        if is_playing {
-            let _ = audio
-                .play()
-                .map_err(|e| {
+        let _is_playing = global_state.currently_playing == Some(event_id);
+        let _audio_id_clone = audio_id_for_effect.clone();
+        #[cfg(feature = "web")]
+        {
+            let is_playing = _is_playing;
+            let audio_id_clone = _audio_id_clone;
+            let window = match web_sys::window() {
+                Some(w) => w,
+                None => {
+                    log::error!("Failed to get window object");
+                    return;
+                }
+            };
+            let document = match window.document() {
+                Some(d) => d,
+                None => {
+                    log::error!("Failed to get document object");
+                    return;
+                }
+            };
+            let element = match document.get_element_by_id(&audio_id_clone) {
+                Some(e) => e,
+                None => {
+                    log::debug!("Audio element {} not found yet", audio_id_clone);
+                    return;
+                }
+            };
+            let audio: web_sys::HtmlAudioElement = match element.dyn_into() {
+                Ok(a) => a,
+                Err(e) => {
+                    log::error!("Element is not an HtmlAudioElement: {:?}", e);
+                    return;
+                }
+            };
+            if is_playing {
+                let _ = audio.play().map_err(|e| {
                     log::debug!("Play failed: {:?}", e);
                 });
-        } else if let Err(e) = audio.pause() {
-            log::debug!("Pause failed: {:?}", e);
+            } else if let Err(e) = audio.pause() {
+                log::debug!("Pause failed: {:?}", e);
+            }
         }
     });
-    let handle_timeupdate = move |evt: Event<MediaData>| {
-        if let Some(target) = evt.data.as_web_event().target() {
+    #[cfg(feature = "web")]
+    let _handle_timeupdate = move |_evt: Event<MediaData>| {
+        if let Some(target) = _evt.data.as_web_event().target() {
             if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
                 let time = audio.current_time();
                 if !time.is_nan() {
@@ -301,8 +295,11 @@ pub fn VoiceMessageCard(
             }
         }
     };
-    let handle_loadedmetadata = move |evt: Event<MediaData>| {
-        if let Some(target) = evt.data.as_web_event().target() {
+    #[cfg(not(feature = "web"))]
+    let _handle_timeupdate = move |_: Event<MediaData>| {};
+    #[cfg(feature = "web")]
+    let _handle_loadedmetadata = move |_evt: Event<MediaData>| {
+        if let Some(target) = _evt.data.as_web_event().target() {
             if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
                 let dur = audio.duration();
                 if !dur.is_nan() {
@@ -315,12 +312,15 @@ pub fn VoiceMessageCard(
             }
         }
     };
-    let handle_ended = move |_| {
+    #[cfg(not(feature = "web"))]
+    let _handle_loadedmetadata = move |_: Event<MediaData>| {};
+    let _handle_ended = move |_: Event<MediaData>| {
         voice_messages_store::pause_voice_message();
         current_time.set(0.0);
     };
     let event_id_for_repost = event_id_str.clone();
-    let handle_repost = move |_| {
+    let handle_repost = move |e: MouseEvent| {
+        e.stop_propagation();
         let event_id_copy = event_id_for_repost.clone();
         is_reposting.set(true);
         spawn(async move {
@@ -360,7 +360,7 @@ pub fn VoiceMessageCard(
         .and_then(|m| m.picture.clone())
         .unwrap_or_default();
     let time_ago = {
-        let now = js_sys::Date::now() / 1000.0;
+        let now = crate::platform::timestamp::now_secs() as f64;
         let diff = now - created_at.as_secs() as f64;
         if diff < 60.0 {
             format!("{}s", diff as u32)
@@ -372,45 +372,107 @@ pub fn VoiceMessageCard(
             format!("{}d", (diff / 86400.0) as u32)
         }
     };
-    let navigator = use_navigator();
-    let voice_id_for_nav = event_id_str.clone();
-    let navigate_to_detail = move |evt: Event<MouseData>| {
-        if let Some(target) = evt.data.as_web_event().target() {
-            if let Some(element) = target.dyn_ref::<web_sys::Element>() {
-                let tag_name = element.tag_name().to_lowercase();
-                if tag_name == "button" || tag_name == "a" || tag_name == "audio" {
-                    return;
-                }
-                let mut current = element.clone();
-                for _ in 0..5 {
-                    if let Some(parent) = current.parent_element() {
-                        let parent_tag = parent.tag_name().to_lowercase();
-                        if parent_tag == "button" || parent_tag == "a" {
-                            return;
-                        }
-                        current = parent;
-                    } else {
-                        break;
+    let navigator: Option<std::rc::Rc<dyn Fn()>> = {
+        #[cfg(feature = "web")]
+        {
+            let nav = use_navigator();
+            let voice_id = event_id_str.clone();
+            Some(std::rc::Rc::new(move || {
+                let _ = nav.push(Route::Note {
+                    note_id: voice_id.clone(),
+                    from_voice: Some("true".to_string()),
+                });
+            }))
+        }
+        #[cfg(not(feature = "web"))]
+        {
+            None
+        }
+    };
+    #[cfg(feature = "web")]
+    let is_clickable = true;
+    #[cfg(not(feature = "web"))]
+    let is_clickable = false;
+    let card_class = if is_clickable {
+        "p-4 hover:bg-accent/50 transition cursor-pointer border-b border-border"
+    } else {
+        "p-4 border-b border-border opacity-60"
+    };
+    let tooltip_text = if !is_clickable {
+        "Not supported on this platform"
+    } else {
+        ""
+    };
+    let navigator_for_click = navigator.clone();
+    let navigator_for_keydown = navigator.clone();
+    let handle_click = move |_evt: Event<MouseData>| {
+        #[cfg(feature = "web")]
+        {
+            if let Some(target) = _evt.data.as_web_event().target() {
+                if let Some(element) = target.dyn_ref::<web_sys::Element>() {
+                    if element
+                        .closest(INTERACTIVE_ELEMENT_SELECTOR)
+                        .ok()
+                        .flatten()
+                        .is_some()
+                    {
+                        return;
                     }
                 }
             }
         }
-        navigator
-            .push(Route::Note {
-                note_id: voice_id_for_nav.clone(),
-                from_voice: Some("true".to_string()),
-            });
+        if is_clickable {
+            if let Some(nav) = navigator_for_click.as_ref() {
+                nav();
+            }
+        }
     };
     rsx! {
         div {
-            class: "p-4 hover:bg-accent/50 transition cursor-pointer border-b border-border",
-            onclick: navigate_to_detail,
+            class: "{card_class}",
+            title: "{tooltip_text}",
+            role: if is_clickable { "button" } else { "article" },
+            tabindex: if is_clickable { "0" } else { "-1" },
+            onclick: handle_click,
+            onkeydown: move |evt: KeyboardEvent| {
+                if !is_clickable {
+                    return;
+                }
+                let activate = match evt.key() {
+                    Key::Enter => true,
+                    Key::Character(c) => c == " ",
+                    _ => false,
+                };
+                if !activate {
+                    return;
+                }
+                #[cfg(feature = "web")]
+                {
+                    if let Some(target) = evt.data.as_web_event().target() {
+                        if let Some(element) = target.dyn_ref::<web_sys::Element>() {
+                            if element
+                                .closest(INTERACTIVE_ELEMENT_SELECTOR)
+                                .ok()
+                                .flatten()
+                                .is_some()
+                            {
+                                return;
+                            }
+                        }
+                    }
+                }
+                evt.prevent_default();
+                if let Some(nav) = navigator_for_keydown.as_ref() {
+                    nav();
+                }
+            },
             div { class: "flex items-start gap-3 mb-3",
                 Link {
                     to: Route::Profile {
                         pubkey: author_pubkey.clone(),
                     },
                     class: "shrink-0",
+                    onclick: |e: MouseEvent| e.stop_propagation(),
                     if !author_avatar.is_empty() {
                         img {
                             src: "{author_avatar}",
@@ -429,6 +491,7 @@ pub fn VoiceMessageCard(
                             pubkey: author_pubkey.clone(),
                         },
                         class: "hover:underline",
+                        onclick: |e: MouseEvent| e.stop_propagation(),
                         div { class: "flex items-center gap-2",
                             span { class: "font-semibold text-foreground truncate", "{author_name}" }
                             if !author_username.is_empty() && author_username != author_name {
@@ -447,59 +510,77 @@ pub fn VoiceMessageCard(
                     src: "{audio_url}",
                     preload: "metadata",
                     style: "display: none;",
-                    ontimeupdate: handle_timeupdate,
-                    onloadedmetadata: handle_loadedmetadata,
-                    onended: handle_ended,
+                    ontimeupdate: _handle_timeupdate,
+                    onloadedmetadata: _handle_loadedmetadata,
+                    onended: _handle_ended,
                 }
-                div { class: "flex items-center gap-4 bg-muted/30 rounded-lg p-3",
-                    button {
-                        class: "shrink-0 w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition flex items-center justify-center",
-                        onclick: toggle_play,
-                        if voice_messages_store::VOICE_PLAYBACK.read().currently_playing == Some(event_id) {
-                            svg {
-                                class: "w-5 h-5",
-                                view_box: "0 0 24 24",
-                                fill: "currentColor",
-                                rect {
-                                    x: "6",
-                                    y: "4",
-                                    width: "4",
-                                    height: "16",
+                if cfg!(feature = "web") {
+                    div { class: "flex items-center gap-4 bg-muted/30 rounded-lg p-3",
+                        button {
+                            class: "shrink-0 w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition flex items-center justify-center",
+                            onclick: toggle_play,
+                            if voice_messages_store::VOICE_PLAYBACK.read().currently_playing == Some(event_id) {
+                                svg {
+                                    class: "w-5 h-5",
+                                    view_box: "0 0 24 24",
+                                    fill: "currentColor",
+                                    rect {
+                                        x: "6",
+                                        y: "4",
+                                        width: "4",
+                                        height: "16",
+                                    }
+                                    rect {
+                                        x: "14",
+                                        y: "4",
+                                        width: "4",
+                                        height: "16",
+                                    }
                                 }
-                                rect {
-                                    x: "14",
-                                    y: "4",
-                                    width: "4",
-                                    height: "16",
+                            } else {
+                                svg {
+                                    class: "w-5 h-5 ml-0.5",
+                                    view_box: "0 0 24 24",
+                                    fill: "currentColor",
+                                    polygon { points: "8,5 19,12 8,19" }
                                 }
                             }
-                        } else {
-                            svg {
-                                class: "w-5 h-5 ml-0.5",
-                                view_box: "0 0 24 24",
-                                fill: "currentColor",
-                                polygon { points: "8,5 19,12 8,19" }
+                        }
+                        div { class: "flex-1",
+                            div { class: "w-full h-1 bg-muted rounded-full overflow-hidden mb-1",
+                                div {
+                                    class: "h-full bg-primary transition-all",
+                                    style: "width: {progress_percent}%",
+                                }
+                            }
+                            div { class: "flex justify-between text-xs text-muted-foreground",
+                                span { "{current_time_str}" }
+                                span { "{duration_str}" }
                             }
                         }
                     }
-                    div { class: "flex-1",
-                        div { class: "w-full h-1 bg-muted rounded-full overflow-hidden mb-1",
-                            div {
-                                class: "h-full bg-primary transition-all",
-                                style: "width: {progress_percent}%",
-                            }
+                } else {
+                    div { class: "flex items-center gap-4 bg-muted/30 rounded-lg p-3",
+                        div { class: "shrink-0 w-10 h-10 rounded-full bg-muted flex items-center justify-center",
+                            span { class: "text-muted-foreground text-xs", "N/A" }
                         }
-                        div { class: "flex justify-between text-xs text-muted-foreground",
-                            span { "{current_time_str}" }
-                            span { "{duration_str}" }
+                        div { class: "flex-1 text-sm text-muted-foreground",
+                            "Playback not supported on this platform"
                         }
                     }
                 }
             }
             div { class: "flex items-center justify-between text-muted-foreground",
                 button {
-                    class: "flex items-center gap-1 hover:text-blue-500 transition group",
-                    onclick: move |_| show_reply_modal.set(true),
+                    class: if *show_reply_modal.read() {
+                        "flex items-center gap-1 text-blue-500 transition group"
+                    } else {
+                        "flex items-center gap-1 hover:text-blue-500 transition group"
+                    },
+                    onclick: move |e: MouseEvent| {
+                        e.stop_propagation();
+                        show_reply_modal.set(true);
+                    },
                     MessageCircleIcon { class: "w-4 h-4 group-hover:scale-110 transition" }
                     if *reply_count.read() > 0 {
                         span { class: "text-sm", "{reply_count.read()}" }
@@ -522,7 +603,10 @@ pub fn VoiceMessageCard(
                 }
                 button {
                     class: if *is_zapped.read() { "flex items-center gap-1 text-yellow-500 transition group" } else { "flex items-center gap-1 hover:text-yellow-500 transition group" },
-                    onclick: move |_| show_zap_modal.set(true),
+                    onclick: move |e: MouseEvent| {
+                        e.stop_propagation();
+                        show_zap_modal.set(true);
+                    },
                     ZapIcon { class: "w-4 h-4 group-hover:scale-110 transition" }
                     if *zap_amount_sats.read() > 0 {
                         span { class: "text-sm", "{zap_amount_sats.read()}" }

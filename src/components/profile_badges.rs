@@ -2,10 +2,10 @@
 //!
 //! Displays accepted badges on a user's profile page.
 //! Clicking a badge opens the badge detail modal.
-use dioxus::prelude::*;
 use crate::components::badge_detail_modal::BadgeDetailModal;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip58::{self, BadgeDefinition};
+use dioxus::prelude::*;
 /// Profile badges section component
 /// Shows accepted badges for a user profile
 #[component]
@@ -14,57 +14,51 @@ pub fn ProfileBadgesSection(pubkey: String) -> Element {
     let mut loading = use_signal(|| true);
     let mut selected_badge = use_signal(|| None::<BadgeDefinition>);
     let mut show_modal = use_signal(|| false);
-    let is_own_profile = auth_store::get_pubkey().map(|p| p == pubkey).unwrap_or(false);
-    use_effect(
-        use_reactive(
-            &pubkey,
-            move |pk| {
-                let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-                if !client_initialized {
-                    return;
-                }
-                spawn(async move {
-                    loading.set(true);
-                    match nip58::fetch_profile_badges(&pk).await {
-                        Ok(entries) if !entries.is_empty() => {
-                            let futures: Vec<_> = entries
-                                .into_iter()
-                                .map(|entry| {
-                                    let coord = entry.definition_coordinate.clone();
-                                    async move {
-                                        match nip58::fetch_badge_by_coordinate(&coord).await {
-                                            Ok(badge) => Some(badge),
-                                            Err(e) => {
-                                                crate::utils::log_fetch_error(
-                                                    &format!("badge {}", coord),
-                                                    e,
-                                                );
-                                                None
-                                            }
-                                        }
+    let is_own_profile = auth_store::get_pubkey()
+        .map(|p| p == pubkey)
+        .unwrap_or(false);
+    use_effect(use_reactive(&pubkey, move |pk| {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            return;
+        }
+        spawn(async move {
+            loading.set(true);
+            match nip58::fetch_profile_badges(&pk).await {
+                Ok(entries) if !entries.is_empty() => {
+                    let futures: Vec<_> = entries
+                        .into_iter()
+                        .map(|entry| {
+                            let coord = entry.definition_coordinate.clone();
+                            async move {
+                                match nip58::fetch_badge_by_coordinate(&coord).await {
+                                    Ok(badge) => Some(badge),
+                                    Err(e) => {
+                                        crate::utils::log_fetch_error(
+                                            &format!("badge {}", coord),
+                                            e,
+                                        );
+                                        None
                                     }
-                                })
-                                .collect();
-                            let results = futures::future::join_all(futures).await;
-                            let badge_defs: Vec<_> = results
-                                .into_iter()
-                                .flatten()
-                                .collect();
-                            badges.set(badge_defs);
-                        }
-                        Ok(_) => {
-                            badges.set(Vec::new());
-                        }
-                        Err(e) => {
-                            crate::utils::log_fetch_error("profile badges", e);
-                            badges.set(Vec::new());
-                        }
-                    }
-                    loading.set(false);
-                });
-            },
-        ),
-    );
+                                }
+                            }
+                        })
+                        .collect();
+                    let results = futures::future::join_all(futures).await;
+                    let badge_defs: Vec<_> = results.into_iter().flatten().collect();
+                    badges.set(badge_defs);
+                }
+                Ok(_) => {
+                    badges.set(Vec::new());
+                }
+                Err(e) => {
+                    crate::utils::log_fetch_error("profile badges", e);
+                    badges.set(Vec::new());
+                }
+            }
+            loading.set(false);
+        });
+    }));
     let badge_list = badges.read();
     if badge_list.is_empty() && !*loading.read() {
         return rsx! {};
@@ -133,10 +127,7 @@ pub fn ProfileBadgesSection(pubkey: String) -> Element {
 }
 /// Individual badge thumbnail component
 #[component]
-fn BadgeThumbnail(
-    badge: BadgeDefinition,
-    on_click: EventHandler<BadgeDefinition>,
-) -> Element {
+fn BadgeThumbnail(badge: BadgeDefinition, on_click: EventHandler<BadgeDefinition>) -> Element {
     let badge_clone = badge.clone();
     rsx! {
         button {

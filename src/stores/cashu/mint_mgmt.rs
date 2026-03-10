@@ -7,13 +7,12 @@ use super::errors::CashuResult;
 use super::internal::create_ephemeral_wallet;
 use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof};
 use super::signals::{
-    try_acquire_mint_lock, COUNTER_BACKUPS, SHARED_LOCALSTORE, WALLET_STATE,
-    WALLET_TOKENS,
+    try_acquire_mint_lock, COUNTER_BACKUPS, SHARED_LOCALSTORE, WALLET_STATE, WALLET_TOKENS,
 };
 use super::types::{
-    ConsolidationResult, CounterBackup, DiscoveredMint, ExtendedCashuProof,
-    ExtendedTokenEvent, InFlightSendRequest, MintInfoDisplay, MintRecommendation,
-    OperationType, ProofData, TokenData, WalletTokensStoreStoreExt,
+    ConsolidationResult, CounterBackup, DiscoveredMint, ExtendedCashuProof, ExtendedTokenEvent,
+    InFlightSendRequest, MintInfoDisplay, MintRecommendation, OperationType, ProofData, TokenData,
+    WalletTokensStoreStoreExt,
 };
 use super::utils::{mint_matches, normalize_mint_url, now_secs};
 use crate::stores::{auth_store, nostr_client};
@@ -44,9 +43,7 @@ pub struct KeysetCollision {
 /// to be misattributed to the wrong mint.
 ///
 /// Returns a list of collisions found (empty if no collisions).
-pub async fn check_keyset_collision(
-    new_mint_url: &str,
-) -> Result<Vec<KeysetCollision>, String> {
+pub async fn check_keyset_collision(new_mint_url: &str) -> Result<Vec<KeysetCollision>, String> {
     use crate::stores::cashu_cdk_bridge;
     log::debug!("Checking for keyset collisions with {}", new_mint_url);
     let mut existing_keyset_to_mint: HashMap<String, String> = HashMap::new();
@@ -95,8 +92,7 @@ pub async fn check_keyset_collision(
         log::debug!("No existing keysets to check against");
         return Ok(vec![]);
     }
-    let new_mint_wallet = super::internal::create_ephemeral_wallet(new_mint_url, vec![])
-        .await?;
+    let new_mint_wallet = super::internal::create_ephemeral_wallet(new_mint_url, vec![]).await?;
     let new_keysets = new_mint_wallet
         .get_mint_keysets()
         .await
@@ -108,14 +104,15 @@ pub async fn check_keyset_collision(
             if existing_mint != new_mint_url {
                 log::warn!(
                     "Keyset collision detected! Keyset {} exists on both {} and {}",
-                    keyset_id, existing_mint, new_mint_url
+                    keyset_id,
+                    existing_mint,
+                    new_mint_url
                 );
-                collisions
-                    .push(KeysetCollision {
-                        keyset_id,
-                        existing_mint: existing_mint.clone(),
-                        new_mint: new_mint_url.to_string(),
-                    });
+                collisions.push(KeysetCollision {
+                    keyset_id,
+                    existing_mint: existing_mint.clone(),
+                    new_mint: new_mint_url.to_string(),
+                });
             }
         }
     }
@@ -127,19 +124,29 @@ pub async fn check_keyset_collision(
 /// Extract keyset ID from a proof's id field
 fn extract_keyset_id_from_proof(proof: &ProofData) -> Option<String> {
     let len = proof.id.len();
-    if (len == 14 || len == 64) && !proof.id.contains('_')
-        && proof.id.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Some(proof.id.clone());
-        }
+    if (len == 14 || len == 64)
+        && !proof.id.contains('_')
+        && proof.id.chars().all(|c| c.is_ascii_hexdigit())
+    {
+        return Some(proof.id.clone());
+    }
     None
 }
 /// Get total number of mints
 pub fn get_mint_count() -> usize {
-    WALLET_STATE.read().as_ref().map(|w| w.mints.len()).unwrap_or(0)
+    WALLET_STATE
+        .read()
+        .as_ref()
+        .map(|w| w.mints.len())
+        .unwrap_or(0)
 }
 /// Get mints list
 pub fn get_mints() -> Vec<String> {
-    WALLET_STATE.read().as_ref().map(|w| w.mints.clone()).unwrap_or_default()
+    WALLET_STATE
+        .read()
+        .as_ref()
+        .map(|w| w.mints.clone())
+        .unwrap_or_default()
 }
 /// Get balance for a specific mint (includes all proofs regardless of state)
 /// For spendable balance, use get_mint_spendable_balance instead
@@ -289,24 +296,16 @@ pub async fn backup_mint_counters(mint_url: &str) -> CashuResult<()> {
         log::debug!("No keysets to backup for mint {}", mint_url);
         return Ok(());
     }
-    let db = SHARED_LOCALSTORE
-        .read()
-        .as_ref()
-        .cloned()
-        .ok_or_else(|| {
-            super::errors::CashuWalletError::Database(
-                "Localstore not initialized".to_string(),
-            )
-        })?;
+    let db = SHARED_LOCALSTORE.read().as_ref().cloned().ok_or_else(|| {
+        super::errors::CashuWalletError::Database("Localstore not initialized".to_string())
+    })?;
     let mut counters = Vec::new();
     for keyset in &keysets {
         match db.increment_keyset_counter(&keyset.id, 0).await {
             Ok(counter) => {
                 if counter > 0 {
                     counters.push((keyset.id.to_string(), counter as u64));
-                    log::debug!(
-                        "Backed up counter for keyset {}: {}", keyset.id, counter
-                    );
+                    log::debug!("Backed up counter for keyset {}: {}", keyset.id, counter);
                 }
             }
             Err(e) => {
@@ -321,7 +320,7 @@ pub async fn backup_mint_counters(mint_url: &str) -> CashuResult<()> {
     let backup = CounterBackup {
         mint_url: mint_url.to_string(),
         counters,
-        created_at: js_sys::Date::now() as u64 / 1000,
+        created_at: crate::platform::timestamp::now_secs(),
     };
     let mut backups = COUNTER_BACKUPS.write();
     if let Some(existing) = backups.iter_mut().find(|b| b.mint_url == mint_url) {
@@ -350,16 +349,14 @@ pub async fn restore_mint_counters(mint_url: &str) -> CashuResult<()> {
             return Ok(());
         }
     };
-    log::info!("Restoring {} counter(s) for mint {}", backup.counters.len(), mint_url);
-    let db = SHARED_LOCALSTORE
-        .read()
-        .as_ref()
-        .cloned()
-        .ok_or_else(|| {
-            super::errors::CashuWalletError::Database(
-                "Localstore not initialized".to_string(),
-            )
-        })?;
+    log::info!(
+        "Restoring {} counter(s) for mint {}",
+        backup.counters.len(),
+        mint_url
+    );
+    let db = SHARED_LOCALSTORE.read().as_ref().cloned().ok_or_else(|| {
+        super::errors::CashuWalletError::Database("Localstore not initialized".to_string())
+    })?;
     for (keyset_id_str, target_value) in &backup.counters {
         let keyset_id = match cdk::nuts::Id::from_str(keyset_id_str) {
             Ok(id) => id,
@@ -380,20 +377,22 @@ pub async fn restore_mint_counters(mint_url: &str) -> CashuResult<()> {
             match db.increment_keyset_counter(&keyset_id, increment).await {
                 Ok(new_val) => {
                     log::info!(
-                        "Restored counter for keyset {}: {} → {}", keyset_id, current,
+                        "Restored counter for keyset {}: {} → {}",
+                        keyset_id,
+                        current,
                         new_val
                     );
                 }
                 Err(e) => {
-                    log::error!(
-                        "Failed to restore counter for keyset {}: {}", keyset_id, e
-                    );
+                    log::error!("Failed to restore counter for keyset {}: {}", keyset_id, e);
                 }
             }
         } else {
             log::debug!(
-                "Counter for keyset {} already at {} (backup was {})", keyset_id,
-                current, target_value
+                "Counter for keyset {} already at {} (backup was {})",
+                keyset_id,
+                current,
+                target_value
             );
         }
     }
@@ -414,7 +413,11 @@ pub fn remove_counter_backup(mint_url: &str) {
 }
 /// Get counter backup for a mint (if exists)
 pub fn get_counter_backup(mint_url: &str) -> Option<CounterBackup> {
-    COUNTER_BACKUPS.read().iter().find(|b| b.mint_url == mint_url).cloned()
+    COUNTER_BACKUPS
+        .read()
+        .iter()
+        .find(|b| b.mint_url == mint_url)
+        .cloned()
 }
 /// Add a mint with counter restoration and automatic proof recovery
 ///
@@ -445,25 +448,24 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
     let has_nut4 = mint_info.supported_nuts.contains(&4);
     let has_nut5 = mint_info.supported_nuts.contains(&5);
     if !has_nut4 || !has_nut5 {
-        return Err(
-            format!(
-                "Mint doesn't support required features. NUT-4: {}, NUT-5: {}",
-                has_nut4,
-                has_nut5,
-            ),
-        );
+        return Err(format!(
+            "Mint doesn't support required features. NUT-4: {}, NUT-5: {}",
+            has_nut4, has_nut5,
+        ));
     }
     match check_keyset_collision(&mint_url).await {
         Ok(collisions) if !collisions.is_empty() => {
             log::warn!(
                 "Keyset collision warning for {}: {} collision(s) detected. \
                 This is extremely rare and could indicate a configuration issue.",
-                mint_url, collisions.len()
+                mint_url,
+                collisions.len()
             );
             for collision in &collisions {
                 log::warn!(
-                    "  - Keyset {} already exists on {}", collision.keyset_id, collision
-                    .existing_mint
+                    "  - Keyset {} already exists on {}",
+                    collision.keyset_id,
+                    collision.existing_mint
                 );
             }
         }
@@ -490,7 +492,10 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
             return Err("Wallet not initialized".to_string());
         }
     }
-    let wallet_state = WALLET_STATE.read().clone().ok_or("Wallet state not available")?;
+    let wallet_state = WALLET_STATE
+        .read()
+        .clone()
+        .ok_or("Wallet state not available")?;
     let privkey = wallet_state
         .privkey
         .as_ref()
@@ -499,8 +504,7 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
         .ok_or("No signer available")?
         .as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pubkey = PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
@@ -524,7 +528,9 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
             {
                 let mut state = WALLET_STATE.write();
                 if let Some(ref mut wallet_state) = *state {
-                    wallet_state.mints.retain(|m| normalize_mint_url(m) != mint_url);
+                    wallet_state
+                        .mints
+                        .retain(|m| normalize_mint_url(m) != mint_url);
                 }
             }
             return Err(format!("Failed to publish wallet event: {}", e));
@@ -535,9 +541,24 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
         log::warn!("Failed to restore counters for {}: {}", mint_url, e);
     }
     let mint_url_owned = mint_url.clone();
+    #[cfg(feature = "web")]
     wasm_bindgen_futures::spawn_local(async move {
         if let Err(e) = restore_proofs_from_mint(&mint_url_owned).await {
-            log::warn!("Background restoration failed for {}: {}", mint_url_owned, e);
+            log::warn!(
+                "Background restoration failed for {}: {}",
+                mint_url_owned,
+                e
+            );
+        }
+    });
+    #[cfg(feature = "native")]
+    tokio::task::spawn(async move {
+        if let Err(e) = restore_proofs_from_mint(&mint_url_owned).await {
+            log::warn!(
+                "Background restoration failed for {}: {}",
+                mint_url_owned,
+                e
+            );
         }
     });
     Ok(())
@@ -549,14 +570,12 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
 pub async fn restore_proofs_from_mint(mint_url: &str) -> CashuResult<u64> {
     use crate::stores::cashu_cdk_bridge;
     log::info!("Starting proof restoration for mint: {}", mint_url);
-    let wallet = cashu_cdk_bridge::get_wallet(mint_url)
-        .await
-        .map_err(|e| {
-            super::errors::CashuWalletError::MintConnection {
-                mint_url: mint_url.to_string(),
-                message: e,
-            }
-        })?;
+    let wallet = cashu_cdk_bridge::get_wallet(mint_url).await.map_err(|e| {
+        super::errors::CashuWalletError::MintConnection {
+            mint_url: mint_url.to_string(),
+            message: e,
+        }
+    })?;
     match wallet.restore().await {
         Ok(amount) => {
             let restored_sats = u64::from(amount);
@@ -599,10 +618,7 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
             .iter()
             .filter(|t| mint_matches(&t.mint, mint_url))
             .collect();
-        let event_ids: Vec<String> = mint_tokens
-            .iter()
-            .map(|t| t.event_id.clone())
-            .collect();
+        let event_ids: Vec<String> = mint_tokens.iter().map(|t| t.event_id.clone()).collect();
         let amount: u64 = mint_tokens
             .iter()
             .flat_map(|t| &t.proofs)
@@ -611,7 +627,9 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
         (event_ids, amount, mint_tokens.len())
     };
     log::info!(
-        "Found {} token events worth {} sats to remove", token_count, total_amount
+        "Found {} token events worth {} sats to remove",
+        token_count,
+        total_amount
     );
     {
         let store = WALLET_TOKENS.read();
@@ -628,19 +646,18 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
     if !event_ids_to_delete.is_empty() {
         let mut tags = Vec::new();
         for event_id in &event_ids_to_delete {
-            tags.push(
-                nostr_sdk::Tag::event(
-                    nostr_sdk::EventId::parse(event_id)
-                        .map_err(|e| format!("Invalid event ID: {}", e))?,
-                ),
-            );
+            tags.push(nostr_sdk::Tag::event(
+                nostr_sdk::EventId::parse(event_id)
+                    .map_err(|e| format!("Invalid event ID: {}", e))?,
+            ));
         }
-        tags.push(nostr_sdk::Tag::custom(nostr_sdk::TagKind::custom("k"), ["7375"]));
-        let deletion_builder = nostr_sdk::EventBuilder::new(
-                Kind::from(5),
-                format!("Removed mint: {}", mint_url),
-            )
-            .tags(tags);
+        tags.push(nostr_sdk::Tag::custom(
+            nostr_sdk::TagKind::custom("k"),
+            ["7375"],
+        ));
+        let deletion_builder =
+            nostr_sdk::EventBuilder::new(Kind::from(5), format!("Removed mint: {}", mint_url))
+                .tags(tags);
         let client = nostr_client::NOSTR_CLIENT
             .read()
             .as_ref()
@@ -651,7 +668,8 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
             .await
             .map_err(|e| format!("Failed to publish deletion event: {}", e))?;
         log::info!(
-            "Published deletion event for {} token events", event_ids_to_delete.len()
+            "Published deletion event for {} token events",
+            event_ids_to_delete.len()
         );
     }
     {
@@ -665,8 +683,8 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
                 .ok_or("No signer available")?
                 .as_nostr_signer();
             let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-            let pubkey = PublicKey::parse(&pubkey_str)
-                .map_err(|e| format!("Invalid pubkey: {}", e))?;
+            let pubkey =
+                PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
             let client = nostr_client::NOSTR_CLIENT
                 .read()
                 .as_ref()
@@ -697,17 +715,13 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
 ///
 /// This reduces the number of proofs by swapping them for a smaller set
 /// with the same total value. Useful for optimizing wallet size.
-pub async fn consolidate_proofs(
-    mint_url: String,
-) -> Result<ConsolidationResult, String> {
+pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult, String> {
     use cdk::amount::SplitTarget;
     use cdk::Amount;
     use nostr_sdk::signer::NostrSigner;
     log::info!("Consolidating proofs for mint: {}", mint_url);
     let _lock_guard = try_acquire_mint_lock(&mint_url)
-        .ok_or_else(|| {
-            format!("Another operation is in progress for mint: {}", mint_url)
-        })?;
+        .ok_or_else(|| format!("Another operation is in progress for mint: {}", mint_url))?;
     let localstore = SHARED_LOCALSTORE
         .read()
         .as_ref()
@@ -730,13 +744,10 @@ pub async fn consolidate_proofs(
         for token in &mint_tokens {
             if let Some(ref existing) = detected_unit {
                 if &token.unit != existing {
-                    return Err(
-                        format!(
-                            "Mixed units in mint proofs: '{}' and '{}' - cannot consolidate",
-                            existing,
-                            token.unit,
-                        ),
-                    );
+                    return Err(format!(
+                        "Mixed units in mint proofs: '{}' and '{}' - cannot consolidate",
+                        existing, token.unit,
+                    ));
                 }
             } else {
                 detected_unit = Some(token.unit.clone());
@@ -762,13 +773,14 @@ pub async fn consolidate_proofs(
         .iter()
         .map(|p| u64::from(p.amount))
         .fold(0u64, |acc, amt| acc.saturating_add(amt));
-    log::info!("Consolidating {} proofs worth {} sats", proofs_before, total_amount);
+    log::info!(
+        "Consolidating {} proofs worth {} sats",
+        proofs_before,
+        total_amount
+    );
     let wallet = create_ephemeral_wallet(&mint_url, all_proofs.clone()).await?;
     let tx_id = format!("swap_{}", uuid::Uuid::new_v4());
-    let proof_secrets: Vec<String> = all_proofs
-        .iter()
-        .map(|p| p.secret.to_string())
-        .collect();
+    let proof_secrets: Vec<String> = all_proofs.iter().map(|p| p.secret.to_string()).collect();
     let in_flight = InFlightSendRequest {
         transaction_id: tx_id.clone(),
         mint_url: mint_url.clone(),
@@ -791,8 +803,11 @@ pub async fn consolidate_proofs(
             .map(|p| u64::from(p.amount))
             .fold(0u64, |acc, amt| acc.saturating_add(amt));
         log::debug!(
-            "Swapping batch {}/{} with {} proofs ({} sats)", batch_idx + 1,
-            total_batches, proof_batch.len(), batch_amount
+            "Swapping batch {}/{} with {} proofs ({} sats)",
+            batch_idx + 1,
+            total_batches,
+            proof_batch.len(),
+            batch_amount
         );
         let batch_result = match wallet
             .swap(
@@ -808,28 +823,27 @@ pub async fn consolidate_proofs(
             Err(e) => {
                 log::warn!(
                     "Swap failed on batch {}/{}, syncing proof states with mint: {}",
-                    batch_idx + 1, total_batches, e
+                    batch_idx + 1,
+                    total_batches,
+                    e
                 );
                 match wallet.check_proofs_spent(proof_batch.to_vec()).await {
                     Ok(states) => {
-                        let has_spent = states
-                            .iter()
-                            .any(|s| s.state == cdk::nuts::State::Spent);
+                        let has_spent = states.iter().any(|s| s.state == cdk::nuts::State::Spent);
                         for (proof, state) in proof_batch.iter().zip(states.iter()) {
                             if state.state == cdk::nuts::State::Spent {
                                 log::info!(
                                     "Proof (amount={}, keyset={}) was spent by mint despite error",
-                                    proof.amount, & proof.keyset_id.to_string() [..8]
+                                    proof.amount,
+                                    &proof.keyset_id.to_string()[..8]
                                 );
                             }
                         }
                         if has_spent {
-                            if let Err(sync_err) = crate::stores::cashu_cdk_bridge::sync_wallet_state()
-                                .await
+                            if let Err(sync_err) =
+                                crate::stores::cashu_cdk_bridge::sync_wallet_state().await
                             {
-                                log::warn!(
-                                    "Failed to sync after spent proofs: {}", sync_err
-                                );
+                                log::warn!("Failed to sync after spent proofs: {}", sync_err);
                             }
                             super::signals::update_wallet_balances();
                         }
@@ -843,21 +857,19 @@ pub async fn consolidate_proofs(
                         "Partial swap succeeded ({} batches); syncing wallet state",
                         batch_idx
                     );
-                    if let Err(sync_err) = crate::stores::cashu_cdk_bridge::sync_wallet_state()
-                        .await
+                    if let Err(sync_err) =
+                        crate::stores::cashu_cdk_bridge::sync_wallet_state().await
                     {
                         log::warn!("Failed to sync after partial swap: {}", sync_err);
                     }
                     super::signals::update_wallet_balances();
                 }
-                return Err(
-                    format!(
-                        "Swap failed on batch {}/{}: {}",
-                        batch_idx + 1,
-                        total_batches,
-                        e,
-                    ),
-                );
+                return Err(format!(
+                    "Swap failed on batch {}/{}: {}",
+                    batch_idx + 1,
+                    total_batches,
+                    e,
+                ));
             }
         };
         if let Some(proofs) = batch_result {
@@ -865,47 +877,44 @@ pub async fn consolidate_proofs(
                 use cdk_common::database::WalletDatabase;
                 use std::str::FromStr;
                 let currency_unit = cdk::nuts::CurrencyUnit::from_str(&unit_str)
-                    .unwrap_or_else(|_| cdk::nuts::CurrencyUnit::Custom(
-                        unit_str.clone(),
-                    ));
+                    .unwrap_or_else(|_| cdk::nuts::CurrencyUnit::Custom(unit_str.clone()));
                 let proof_infos: Vec<cdk::types::ProofInfo> = proofs
                     .iter()
                     .enumerate()
                     .map(|(i, p)| {
                         cdk::types::ProofInfo::new(
-                                p.clone(),
-                                mint_url_parsed.clone(),
-                                cdk::nuts::State::Unspent,
-                                currency_unit.clone(),
+                            p.clone(),
+                            mint_url_parsed.clone(),
+                            cdk::nuts::State::Unspent,
+                            currency_unit.clone(),
+                        )
+                        .map_err(|e| {
+                            format!(
+                                "ProofInfo conversion failed in batch {}, proof {}: {}",
+                                batch_idx + 1,
+                                i,
+                                e,
                             )
-                            .map_err(|e| {
-                                format!(
-                                    "ProofInfo conversion failed in batch {}, proof {}: {}",
-                                    batch_idx + 1,
-                                    i,
-                                    e,
-                                )
-                            })
+                        })
                     })
                     .collect::<Result<Vec<_>, String>>()?;
                 if !proof_infos.is_empty() {
-                    let consumed_ys: Vec<cdk::nuts::PublicKey> = proof_batch
-                        .iter()
-                        .filter_map(|p| p.y().ok())
-                        .collect();
-                    if let Err(e) = localstore
-                        .update_proofs(proof_infos, consumed_ys)
-                        .await
-                    {
+                    let consumed_ys: Vec<cdk::nuts::PublicKey> =
+                        proof_batch.iter().filter_map(|p| p.y().ok()).collect();
+                    if let Err(e) = localstore.update_proofs(proof_infos, consumed_ys).await {
                         log::error!(
                             "CRITICAL: Batch {}/{} persistence failed AFTER successful swap: {}",
-                            batch_idx + 1, total_batches, e
+                            batch_idx + 1,
+                            total_batches,
+                            e
                         );
                         persistence_failures.push((batch_idx + 1, e.to_string()));
                     } else {
                         log::info!(
-                            "Batch {}/{} persisted {} proofs", batch_idx + 1,
-                            total_batches, proofs.len()
+                            "Batch {}/{} persisted {} proofs",
+                            batch_idx + 1,
+                            total_batches,
+                            proofs.len()
                         );
                     }
                 }
@@ -919,10 +928,8 @@ pub async fn consolidate_proofs(
             "Consolidation had {} persistence failures. Updating in-memory state.",
             persistence_failures.len()
         );
-        let emergency_proof_data: Vec<ProofData> = new_proofs
-            .iter()
-            .map(cdk_proof_to_proof_data)
-            .collect();
+        let emergency_proof_data: Vec<ProofData> =
+            new_proofs.iter().map(cdk_proof_to_proof_data).collect();
         let temp_emergency_id = format!("recovery_{}", uuid::Uuid::new_v4());
         emergency_event_id = Some(temp_emergency_id.clone());
         let emergency_token = TokenData {
@@ -932,19 +939,19 @@ pub async fn consolidate_proofs(
             proofs: emergency_proof_data.clone(),
             created_at: now_secs(),
         };
-        if let Err(e) = super::signals::atomic_token_replace(
-            vec![emergency_token],
-            &event_ids_to_delete,
-        ) {
+        if let Err(e) =
+            super::signals::atomic_token_replace(vec![emergency_token], &event_ids_to_delete)
+        {
             log::error!("Emergency WALLET_TOKENS update failed: {}", e);
         } else {
             super::signals::update_wallet_balances();
             super::proofs::rebuild_proof_event_map();
             log::info!(
-                "Emergency recovery: {} proofs now visible in UI", new_proofs.len()
+                "Emergency recovery: {} proofs now visible in UI",
+                new_proofs.len()
             );
         }
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
             use cdk_common::database::WalletDatabase;
             use std::str::FromStr;
@@ -952,33 +959,25 @@ pub async fn consolidate_proofs(
             let retry_mint_url = mint_url_parsed.clone();
             let retry_unit_str = unit_str.clone();
             dioxus::prelude::spawn(async move {
-                for (attempt, base_delay_ms) in PERSISTENCE_RETRY_DELAYS_MS
-                    .iter()
-                    .enumerate()
-                {
-                    let jitter = (js_sys::Math::random()
-                        * PERSISTENCE_RETRY_JITTER_MS as f64) as u32;
-                    let delay = base_delay_ms
-                        .saturating_sub(PERSISTENCE_RETRY_JITTER_MS / 2) + jitter;
-                    gloo_timers::future::TimeoutFuture::new(delay).await;
+                for (attempt, base_delay_ms) in PERSISTENCE_RETRY_DELAYS_MS.iter().enumerate() {
+                    let jitter =
+                        (js_sys::Math::random() * PERSISTENCE_RETRY_JITTER_MS as f64) as u32;
+                    let delay =
+                        base_delay_ms.saturating_sub(PERSISTENCE_RETRY_JITTER_MS / 2) + jitter;
+                    crate::platform::timer::sleep_ms(delay).await;
                     let retry_localstore = match SHARED_LOCALSTORE.read().as_ref() {
                         Some(store) => store.clone(),
                         None => {
-                            log::warn!(
-                                "Background retry {}: localstore unavailable", attempt + 1
-                            );
+                            log::warn!("Background retry {}: localstore unavailable", attempt + 1);
                             continue;
                         }
                     };
-                    let currency_unit = cdk::nuts::CurrencyUnit::from_str(
-                            &retry_unit_str,
-                        )
+                    let currency_unit = cdk::nuts::CurrencyUnit::from_str(&retry_unit_str)
                         .unwrap_or_else(|_| {
                             cdk::nuts::CurrencyUnit::Custom(retry_unit_str.clone())
                         });
-                    let mut proof_infos: Vec<cdk::types::ProofInfo> = Vec::with_capacity(
-                        retry_proofs.len(),
-                    );
+                    let mut proof_infos: Vec<cdk::types::ProofInfo> =
+                        Vec::with_capacity(retry_proofs.len());
                     for p in &retry_proofs {
                         match cdk::types::ProofInfo::new(
                             p.clone(),
@@ -991,20 +990,19 @@ pub async fn consolidate_proofs(
                                 log::error!(
                                     "Background retry {}: ProofInfo conversion failed: {} \
                                      (mint: {}, unit: {}, proof_amount: {})",
-                                    attempt + 1, e, retry_mint_url, retry_unit_str, p.amount
+                                    attempt + 1,
+                                    e,
+                                    retry_mint_url,
+                                    retry_unit_str,
+                                    p.amount
                                 );
                             }
                         }
                     }
-                    if let Err(e) = retry_localstore
-                        .update_proofs(proof_infos, vec![])
-                        .await
-                    {
+                    if let Err(e) = retry_localstore.update_proofs(proof_infos, vec![]).await {
                         log::warn!("Background retry {} failed: {}", attempt + 1, e);
                     } else {
-                        log::info!(
-                            "Background retry {}: persistence succeeded", attempt + 1
-                        );
+                        log::info!("Background retry {}: persistence succeeded", attempt + 1);
                         return;
                     }
                 }
@@ -1023,28 +1021,28 @@ pub async fn consolidate_proofs(
     }
     let proofs_after = new_proofs.len();
     if persistence_failures.is_empty() {
-        log::info!("Consolidated to {} proofs (all batches persisted)", proofs_after);
+        log::info!(
+            "Consolidated to {} proofs (all batches persisted)",
+            proofs_after
+        );
     } else {
         log::info!(
             "Consolidated to {} proofs ({} batch failures; emergency recovery performed)",
-            proofs_after, persistence_failures.len()
+            proofs_after,
+            persistence_failures.len()
         );
     }
     let signer = crate::stores::signer::get_signer()
         .ok_or("No signer available")?
         .as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pubkey = PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-    let proof_data: Vec<ProofData> = new_proofs
-        .iter()
-        .map(cdk_proof_to_proof_data)
-        .collect();
+    let proof_data: Vec<ProofData> = new_proofs.iter().map(cdk_proof_to_proof_data).collect();
     let extended_proofs: Vec<ExtendedCashuProof> = proof_data
         .iter()
         .map(|p| ExtendedCashuProof::from(p.clone()))
@@ -1072,21 +1070,17 @@ pub async fn consolidate_proofs(
     let mut last_error = String::new();
     let mut retryable = true;
     let delays = [500u32, 1000, 2000];
-    for (attempt, delay_ms) in std::iter::once(0)
-        .chain(delays.iter().copied())
-        .enumerate()
-    {
+    for (attempt, delay_ms) in std::iter::once(0).chain(delays.iter().copied()).enumerate() {
         if attempt > 0 {
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "web")]
             {
                 let jitter = (js_sys::Math::random() * 200.0) as u32;
-                let actual_delay = delay_ms.saturating_sub(100) + jitter;
-                gloo_timers::future::TimeoutFuture::new(actual_delay).await;
+                let effective_delay = delay_ms.saturating_sub(100) + jitter;
+                crate::platform::timer::sleep_ms(effective_delay).await;
             }
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(feature = "native")]
             {
-                tokio::time::sleep(std::time::Duration::from_millis(delay_ms as u64))
-                    .await;
+                crate::platform::timer::sleep_ms(delay_ms).await;
             }
             log::info!("Retrying token event publish (attempt {})", attempt + 1);
         }
@@ -1094,8 +1088,10 @@ pub async fn consolidate_proofs(
             Ok(output) => {
                 if !output.success.is_empty() {
                     log::info!(
-                        "Published token event {} to {}/{} relays", pre_signed_event_id,
-                        output.success.len(), output.success.len() + output.failed.len()
+                        "Published token event {} to {}/{} relays",
+                        pre_signed_event_id,
+                        output.success.len(),
+                        output.success.len() + output.failed.len()
                     );
                     publish_succeeded = true;
                     break;
@@ -1107,8 +1103,10 @@ pub async fn consolidate_proofs(
             Err(e) => {
                 last_error = e.to_string();
                 let err_str = last_error.to_lowercase();
-                if err_str.contains("banned") || err_str.contains("invalid")
-                    || err_str.contains("malformed") || err_str.contains("too large")
+                if err_str.contains("banned")
+                    || err_str.contains("invalid")
+                    || err_str.contains("malformed")
+                    || err_str.contains("too large")
                 {
                     log::error!("Non-retryable error: {}", last_error);
                     retryable = false;
@@ -1126,11 +1124,7 @@ pub async fn consolidate_proofs(
             last_error
         );
         let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-        super::events::queue_token_event_for_retry(
-                builder,
-                pending_id.clone(),
-                mint_url.clone(),
-            )
+        super::events::queue_token_event_for_retry(builder, pending_id.clone(), mint_url.clone())
             .await;
         pending_id
     } else {
@@ -1143,18 +1137,18 @@ pub async fn consolidate_proofs(
             proofs: proof_data.clone(),
             created_at: now_secs(),
         };
-        if let Err(e) = super::signals::atomic_token_replace(
-            vec![local_token],
-            &event_ids_to_delete,
-        ) {
+        if let Err(e) =
+            super::signals::atomic_token_replace(vec![local_token], &event_ids_to_delete)
+        {
             log::error!("Failed to persist local-only token: {}", e);
         } else {
             super::proofs::register_proofs_in_event_map(&local_only_id, &proof_data);
             super::proofs::rebuild_proof_event_map();
             log::info!(
                 "Persisted {} proofs as local-only token {} (publish_error={})",
-                proof_data.len(), & local_only_id[..16.min(local_only_id.len())], &
-                last_error[..50.min(last_error.len())]
+                proof_data.len(),
+                &local_only_id[..16.min(local_only_id.len())],
+                &last_error[..50.min(last_error.len())]
             );
         }
         super::signals::update_wallet_balances();
@@ -1172,13 +1166,16 @@ pub async fn consolidate_proofs(
             vec![replacement_token],
             std::slice::from_ref(emergency_id),
         ) {
-            log::error!("Failed to replace emergency token with real event_id: {}", e);
+            log::error!(
+                "Failed to replace emergency token with real event_id: {}",
+                e
+            );
         } else {
             super::proofs::rebuild_proof_event_map();
             log::info!(
-                "Replaced emergency token {} with published event {}", &
-                emergency_id[..16.min(emergency_id.len())], & new_event_id[..16
-                .min(new_event_id.len())]
+                "Replaced emergency token {} with published event {}",
+                &emergency_id[..16.min(emergency_id.len())],
+                &new_event_id[..16.min(new_event_id.len())]
             );
         }
     } else {
@@ -1189,10 +1186,8 @@ pub async fn consolidate_proofs(
             proofs: proof_data,
             created_at: now_secs(),
         };
-        if let Err(e) = super::signals::atomic_token_replace(
-            vec![new_token],
-            &event_ids_to_delete,
-        ) {
+        if let Err(e) = super::signals::atomic_token_replace(vec![new_token], &event_ids_to_delete)
+        {
             log::error!("Failed to update WALLET_TOKENS: {}", e);
         } else {
             super::proofs::rebuild_proof_event_map();
@@ -1211,9 +1206,16 @@ pub async fn consolidate_proofs(
     }
     super::signals::update_wallet_balances();
     if let Err(e) = crate::stores::cashu_cdk_bridge::sync_wallet_state().await {
-        log::warn!("Failed to sync MultiMintWallet state after consolidation: {}", e);
+        log::warn!(
+            "Failed to sync MultiMintWallet state after consolidation: {}",
+            e
+        );
     }
-    log::info!("Consolidation complete: {} -> {} proofs", proofs_before, proofs_after);
+    log::info!(
+        "Consolidation complete: {} -> {} proofs",
+        proofs_before,
+        proofs_after
+    );
     Ok(ConsolidationResult {
         proofs_before,
         proofs_after,
@@ -1221,10 +1223,7 @@ pub async fn consolidate_proofs(
     })
 }
 /// Consolidate proofs across all mints (parallel execution)
-pub async fn consolidate_all_mints() -> Result<
-    Vec<(String, ConsolidationResult)>,
-    String,
-> {
+pub async fn consolidate_all_mints() -> Result<Vec<(String, ConsolidationResult)>, String> {
     let mints = get_mints();
     if mints.is_empty() {
         return Ok(vec![]);
@@ -1267,87 +1266,63 @@ pub async fn discover_mints() -> Result<Vec<DiscoveredMint>, String> {
         )
         .limit(100);
     let (mint_events, recommendation_events) = futures::join!(
-        client.fetch_events(mint_filter, Duration::from_secs(10)), client
-        .fetch_events(recommendation_filter, Duration::from_secs(10))
+        client.fetch_events(mint_filter, Duration::from_secs(10)),
+        client.fetch_events(recommendation_filter, Duration::from_secs(10))
     );
-    let mint_events = mint_events
-        .map_err(|e| format!("Failed to fetch mint events: {}", e))?;
-    let recommendation_events = recommendation_events
-        .map_err(|e| format!("Failed to fetch recommendations: {}", e))?;
+    let mint_events = mint_events.map_err(|e| format!("Failed to fetch mint events: {}", e))?;
+    let recommendation_events =
+        recommendation_events.map_err(|e| format!("Failed to fetch recommendations: {}", e))?;
     log::info!(
-        "Found {} mint announcements, {} recommendations", mint_events.len(),
+        "Found {} mint announcements, {} recommendations",
+        mint_events.len(),
         recommendation_events.len()
     );
     let mut mints_by_url: HashMap<String, DiscoveredMint> = HashMap::new();
     for event in mint_events.iter() {
-        let url = event
-            .tags
-            .iter()
-            .find_map(|tag| {
-                let values: Vec<&str> = tag
-                    .as_slice()
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect();
-                if values.first() == Some(&"u") {
-                    values.get(1).map(|s| s.to_string())
-                } else {
-                    None
-                }
-            });
+        let url = event.tags.iter().find_map(|tag| {
+            let values: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
+            if values.first() == Some(&"u") {
+                values.get(1).map(|s| s.to_string())
+            } else {
+                None
+            }
+        });
         let Some(url) = url else { continue };
-        let mint_pubkey = event
-            .tags
-            .iter()
-            .find_map(|tag| {
-                let values: Vec<&str> = tag
-                    .as_slice()
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect();
-                if values.first() == Some(&"d") {
-                    values.get(1).map(|s| s.to_string())
-                } else {
-                    None
-                }
-            });
-        let nuts = event
-            .tags
-            .iter()
-            .find_map(|tag| {
-                let values: Vec<&str> = tag
-                    .as_slice()
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect();
-                if values.first() == Some(&"nuts") {
-                    values.get(1).map(|s| s.to_string())
-                } else {
-                    None
-                }
-            });
-        let network = event
-            .tags
-            .iter()
-            .find_map(|tag| {
-                let values: Vec<&str> = tag
-                    .as_slice()
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect();
-                if values.first() == Some(&"n") {
-                    values.get(1).map(|s| s.to_string())
-                } else {
-                    None
-                }
-            });
+        let mint_pubkey = event.tags.iter().find_map(|tag| {
+            let values: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
+            if values.first() == Some(&"d") {
+                values.get(1).map(|s| s.to_string())
+            } else {
+                None
+            }
+        });
+        let nuts = event.tags.iter().find_map(|tag| {
+            let values: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
+            if values.first() == Some(&"nuts") {
+                values.get(1).map(|s| s.to_string())
+            } else {
+                None
+            }
+        });
+        let network = event.tags.iter().find_map(|tag| {
+            let values: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
+            if values.first() == Some(&"n") {
+                values.get(1).map(|s| s.to_string())
+            } else {
+                None
+            }
+        });
         let (name, description) = if !event.content.is_empty() {
-            if let Ok(metadata) = serde_json::from_str::<
-                serde_json::Value,
-            >(&event.content) {
+            if let Ok(metadata) = serde_json::from_str::<serde_json::Value>(&event.content) {
                 (
-                    metadata.get("name").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    metadata.get("about").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    metadata
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    metadata
+                        .get("about")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
                 )
             } else {
                 (None, None)
@@ -1355,22 +1330,21 @@ pub async fn discover_mints() -> Result<Vec<DiscoveredMint>, String> {
         } else {
             (None, None)
         };
-        mints_by_url
-            .insert(
-                url.clone(),
-                DiscoveredMint {
-                    url,
-                    name,
-                    description,
-                    nuts,
-                    network,
-                    mint_pubkey,
-                    author_pubkey: event.pubkey.to_hex(),
-                    recommendation_count: 0,
-                    recommenders: Vec::new(),
-                    recommendations: Vec::new(),
-                },
-            );
+        mints_by_url.insert(
+            url.clone(),
+            DiscoveredMint {
+                url,
+                name,
+                description,
+                nuts,
+                network,
+                mint_pubkey,
+                author_pubkey: event.pubkey.to_hex(),
+                recommendation_count: 0,
+                recommenders: Vec::new(),
+                recommendations: Vec::new(),
+            },
+        );
     }
     for event in recommendation_events.iter() {
         for tag in event.tags.iter() {
@@ -1391,22 +1365,21 @@ pub async fn discover_mints() -> Result<Vec<DiscoveredMint>, String> {
                                 mint.recommendations.push(recommendation);
                             }
                         } else {
-                            mints_by_url
-                                .insert(
-                                    url.to_string(),
-                                    DiscoveredMint {
-                                        url: url.to_string(),
-                                        name: None,
-                                        description: None,
-                                        nuts: None,
-                                        network: Some("mainnet".to_string()),
-                                        mint_pubkey: None,
-                                        author_pubkey: String::new(),
-                                        recommendation_count: 1,
-                                        recommenders: vec![recommender],
-                                        recommendations: vec![recommendation],
-                                    },
-                                );
+                            mints_by_url.insert(
+                                url.to_string(),
+                                DiscoveredMint {
+                                    url: url.to_string(),
+                                    name: None,
+                                    description: None,
+                                    nuts: None,
+                                    network: Some("mainnet".to_string()),
+                                    mint_pubkey: None,
+                                    author_pubkey: String::new(),
+                                    recommendation_count: 1,
+                                    recommenders: vec![recommender],
+                                    recommendations: vec![recommendation],
+                                },
+                            );
                         }
                     }
                 }

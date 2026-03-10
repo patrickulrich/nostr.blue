@@ -1,12 +1,12 @@
-use dioxus::prelude::*;
-use nostr_sdk::prelude::*;
 use crate::components::{NoteCard, NoteCardSkeleton, PhotoCard, VideoCard};
 use crate::hooks::use_mute_block_cache;
 use crate::services::content_search::{
-    get_contact_pubkeys, search_articles, search_photos, search_text_notes,
-    search_videos, ContentSearchResult,
+    get_contact_pubkeys, search_articles, search_photos, search_text_notes, search_videos,
+    ContentSearchResult,
 };
 use crate::stores::nostr_client;
+use dioxus::prelude::*;
+use nostr_sdk::prelude::*;
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum SearchTab {
     TextNotes,
@@ -51,7 +51,9 @@ pub fn Search(q: String) -> Element {
     let mut sort_order = use_signal(|| SortOrder::FollowingFirst);
     let mut show_sort_dropdown = use_signal(|| false);
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
-    use_effect(use_reactive!(| q | { query.set(q); }));
+    use_effect(use_reactive!(|q| {
+        query.set(q);
+    }));
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
@@ -71,21 +73,19 @@ pub fn Search(q: String) -> Element {
         let tab = *active_tab.read();
         let contacts = contact_pubkeys.read().clone();
         if q.is_empty() {
-            search_version
-                .with_mut(|v| {
-                    *v += 1;
-                });
+            search_version.with_mut(|v| {
+                *v += 1;
+            });
             results.set(Vec::new());
             loading.set(false);
             return;
         }
         loading.set(true);
         error.set(None);
-        let current_version = search_version
-            .with_mut(|v| {
-                *v += 1;
-                *v
-            });
+        let current_version = search_version.with_mut(|v| {
+            *v += 1;
+            *v
+        });
         spawn(async move {
             let search_result = match tab {
                 SearchTab::TextNotes => search_text_notes(&q, 50, &contacts).await,
@@ -124,12 +124,11 @@ pub fn Search(q: String) -> Element {
                 sorted.sort_by(|a, b| a.event.created_at.cmp(&b.event.created_at));
             }
             SortOrder::FollowingFirst => {
-                sorted
-                    .sort_by(|a, b| match (a.is_from_contact, b.is_from_contact) {
-                        (true, false) => std::cmp::Ordering::Less,
-                        (false, true) => std::cmp::Ordering::Greater,
-                        _ => b.event.created_at.cmp(&a.event.created_at),
-                    });
+                sorted.sort_by(|a, b| match (a.is_from_contact, b.is_from_contact) {
+                    (true, false) => std::cmp::Ordering::Less,
+                    (false, true) => std::cmp::Ordering::Greater,
+                    _ => b.event.created_at.cmp(&a.event.created_at),
+                });
             }
         }
         sorted

@@ -1,19 +1,17 @@
 //! P2P Store
 //! Handles NIP-69 P2P order events - caching, filtering, and state management
 #![allow(dead_code)]
+use crate::utils::nip69::{parse_p2p_order, Layer, Network, OrderStatus, OrderType, P2POrder};
 use dioxus::prelude::*;
 use lru::LruCache;
 use nostr::Event as NostrEvent;
 use nostr_sdk::prelude::*;
 use std::num::NonZeroUsize;
 use std::time::Duration;
-use crate::utils::nip69::{
-    parse_p2p_order, Layer, Network, OrderStatus, OrderType, P2POrder,
-};
 const ORDER_CACHE_SIZE: usize = 500;
 /// P2P order cache (keyed by naddr string)
-pub static P2P_ORDERS_CACHE: GlobalSignal<LruCache<String, P2POrder>> = GlobalSignal::new(||
-LruCache::new(NonZeroUsize::new(ORDER_CACHE_SIZE).unwrap()));
+pub static P2P_ORDERS_CACHE: GlobalSignal<LruCache<String, P2POrder>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(ORDER_CACHE_SIZE).unwrap()));
 /// Whether the P2P store has been initialized
 pub static P2P_INITIALIZED: GlobalSignal<bool> = GlobalSignal::new(|| false);
 /// Currently loading orders
@@ -54,7 +52,11 @@ pub fn get_active_orders() -> Vec<P2POrder> {
     cache
         .iter()
         .filter_map(|(_, order)| {
-            if order.is_active() { Some(order.clone()) } else { None }
+            if order.is_active() {
+                Some(order.clone())
+            } else {
+                None
+            }
         })
         .collect()
 }
@@ -91,10 +93,15 @@ impl Default for P2PFilterState {
 impl P2PFilterState {
     /// Check if any filters are active
     pub fn is_empty(&self) -> bool {
-        self.order_type.is_none() && self.status.is_none() && self.currency.is_none()
-            && self.payment_method.is_none() && self.layer.is_none()
-            && self.network.is_none() && self.platform.is_none()
-            && self.min_amount.is_none() && self.max_amount.is_none()
+        self.order_type.is_none()
+            && self.status.is_none()
+            && self.currency.is_none()
+            && self.payment_method.is_none()
+            && self.layer.is_none()
+            && self.network.is_none()
+            && self.platform.is_none()
+            && self.min_amount.is_none()
+            && self.max_amount.is_none()
             && self.geohash_prefix.is_none()
     }
     /// Clear all filters
@@ -149,12 +156,8 @@ pub fn filter_orders(orders: &[P2POrder], filters: &P2PFilterState) -> Vec<P2POr
                 }
             }
             if filters.min_amount.is_some() || filters.max_amount.is_some() {
-                let filter_amount = filters
-                    .max_amount
-                    .or(filters.min_amount)
-                    .unwrap_or(0.0);
-                if filter_amount > 0.0 && !order.fiat_amount.overlaps(filter_amount, 0.1)
-                {
+                let filter_amount = filters.max_amount.or(filters.min_amount).unwrap_or(0.0);
+                if filter_amount > 0.0 && !order.fiat_amount.overlaps(filter_amount, 0.1) {
                     return false;
                 }
             }
@@ -197,50 +200,38 @@ pub fn sort_orders(orders: &mut [P2POrder], sort_by: OrderSortBy) {
     match sort_by {
         OrderSortBy::Newest => orders.sort_by(|a, b| b.created_at.cmp(&a.created_at)),
         OrderSortBy::Oldest => orders.sort_by(|a, b| a.created_at.cmp(&b.created_at)),
-        OrderSortBy::PremiumLow => {
-            orders
-                .sort_by(|a, b| {
-                    let pa = a.premium.unwrap_or(0.0);
-                    let pb = b.premium.unwrap_or(0.0);
-                    pa.partial_cmp(&pb).unwrap_or(std::cmp::Ordering::Equal)
-                })
-        }
-        OrderSortBy::PremiumHigh => {
-            orders
-                .sort_by(|a, b| {
-                    let pa = a.premium.unwrap_or(0.0);
-                    let pb = b.premium.unwrap_or(0.0);
-                    pb.partial_cmp(&pa).unwrap_or(std::cmp::Ordering::Equal)
-                })
-        }
-        OrderSortBy::AmountLow => {
-            orders
-                .sort_by(|a, b| {
-                    let aa = match &a.fiat_amount {
-                        crate::utils::nip69::FiatAmount::Fixed(v) => *v,
-                        crate::utils::nip69::FiatAmount::Range { min, .. } => *min,
-                    };
-                    let ab = match &b.fiat_amount {
-                        crate::utils::nip69::FiatAmount::Fixed(v) => *v,
-                        crate::utils::nip69::FiatAmount::Range { min, .. } => *min,
-                    };
-                    aa.partial_cmp(&ab).unwrap_or(std::cmp::Ordering::Equal)
-                })
-        }
-        OrderSortBy::AmountHigh => {
-            orders
-                .sort_by(|a, b| {
-                    let aa = match &a.fiat_amount {
-                        crate::utils::nip69::FiatAmount::Fixed(v) => *v,
-                        crate::utils::nip69::FiatAmount::Range { max, .. } => *max,
-                    };
-                    let ab = match &b.fiat_amount {
-                        crate::utils::nip69::FiatAmount::Fixed(v) => *v,
-                        crate::utils::nip69::FiatAmount::Range { max, .. } => *max,
-                    };
-                    ab.partial_cmp(&aa).unwrap_or(std::cmp::Ordering::Equal)
-                })
-        }
+        OrderSortBy::PremiumLow => orders.sort_by(|a, b| {
+            let pa = a.premium.unwrap_or(0.0);
+            let pb = b.premium.unwrap_or(0.0);
+            pa.partial_cmp(&pb).unwrap_or(std::cmp::Ordering::Equal)
+        }),
+        OrderSortBy::PremiumHigh => orders.sort_by(|a, b| {
+            let pa = a.premium.unwrap_or(0.0);
+            let pb = b.premium.unwrap_or(0.0);
+            pb.partial_cmp(&pa).unwrap_or(std::cmp::Ordering::Equal)
+        }),
+        OrderSortBy::AmountLow => orders.sort_by(|a, b| {
+            let aa = match &a.fiat_amount {
+                crate::utils::nip69::FiatAmount::Fixed(v) => *v,
+                crate::utils::nip69::FiatAmount::Range { min, .. } => *min,
+            };
+            let ab = match &b.fiat_amount {
+                crate::utils::nip69::FiatAmount::Fixed(v) => *v,
+                crate::utils::nip69::FiatAmount::Range { min, .. } => *min,
+            };
+            aa.partial_cmp(&ab).unwrap_or(std::cmp::Ordering::Equal)
+        }),
+        OrderSortBy::AmountHigh => orders.sort_by(|a, b| {
+            let aa = match &a.fiat_amount {
+                crate::utils::nip69::FiatAmount::Fixed(v) => *v,
+                crate::utils::nip69::FiatAmount::Range { max, .. } => *max,
+            };
+            let ab = match &b.fiat_amount {
+                crate::utils::nip69::FiatAmount::Fixed(v) => *v,
+                crate::utils::nip69::FiatAmount::Range { max, .. } => *max,
+            };
+            ab.partial_cmp(&aa).unwrap_or(std::cmp::Ordering::Equal)
+        }),
     }
 }
 /// Build filter for fetching all P2P orders (with optional limit)
@@ -250,18 +241,25 @@ pub fn orders_filter(limit: usize) -> Filter {
 /// Build filter for fetching ALL P2P orders without limit
 /// Uses a 30-day lookback for performance
 pub fn orders_filter_all() -> Filter {
-    let now_ms = js_sys::Date::now() as u64;
-    let now_secs = now_ms / 1000;
+    let now_secs = crate::platform::timestamp::now_secs();
     let thirty_days_ago = now_secs.saturating_sub(30 * 24 * 60 * 60);
-    Filter::new().kind(Kind::PeerToPeerOrder).since(Timestamp::from(thirty_days_ago))
+    Filter::new()
+        .kind(Kind::PeerToPeerOrder)
+        .since(Timestamp::from(thirty_days_ago))
 }
 /// Build filter for fetching orders by author
 pub fn orders_filter_by_author(pubkey: PublicKey, limit: usize) -> Filter {
-    Filter::new().kind(Kind::PeerToPeerOrder).author(pubkey).limit(limit)
+    Filter::new()
+        .kind(Kind::PeerToPeerOrder)
+        .author(pubkey)
+        .limit(limit)
 }
 /// Build filter for fetching a specific order by coordinate
 pub fn order_filter_by_coordinate(pubkey: PublicKey, identifier: &str) -> Filter {
-    Filter::new().kind(Kind::PeerToPeerOrder).author(pubkey).identifier(identifier)
+    Filter::new()
+        .kind(Kind::PeerToPeerOrder)
+        .author(pubkey)
+        .identifier(identifier)
 }
 /// Build filter for orders by order type (buy/sell)
 pub fn orders_filter_by_type(order_type: OrderType, limit: usize) -> Filter {
@@ -295,11 +293,8 @@ pub fn orders_filter_by_platform(platform: &str, limit: usize) -> Filter {
 pub async fn fetch_orders(limit: usize) -> std::result::Result<Vec<P2POrder>, String> {
     *LOADING_ORDERS.write() = true;
     let filter = orders_filter(limit);
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(15),
-        )
-        .await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
     *LOADING_ORDERS.write() = false;
     match result {
         Ok(events) => {
@@ -318,11 +313,8 @@ pub async fn fetch_orders(limit: usize) -> std::result::Result<Vec<P2POrder>, St
 pub async fn fetch_all_orders() -> std::result::Result<Vec<P2POrder>, String> {
     *LOADING_ORDERS.write() = true;
     let filter = orders_filter_all();
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(30),
-        )
-        .await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(30)).await;
     *LOADING_ORDERS.write() = false;
     match result {
         Ok(events) => {
@@ -346,11 +338,9 @@ pub async fn fetch_orders_by_author(
         .or_else(|_| PublicKey::from_bech32(pubkey))
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = orders_filter_by_author(pk, limit);
-    let events = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
     cache_order_events(&events);
     let orders: Vec<P2POrder> = events
         .iter()
@@ -359,23 +349,18 @@ pub async fn fetch_orders_by_author(
     Ok(orders)
 }
 /// Fetch a specific order by naddr
-pub async fn fetch_order_by_naddr(
-    naddr: &str,
-) -> std::result::Result<Option<P2POrder>, String> {
+pub async fn fetch_order_by_naddr(naddr: &str) -> std::result::Result<Option<P2POrder>, String> {
     if let Some(cached) = get_cached_order(naddr) {
         return Ok(Some(cached));
     }
-    let nip19 = Nip19Coordinate::from_bech32(naddr)
-        .map_err(|e| format!("Invalid naddr: {}", e))?;
+    let nip19 = Nip19Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
     let coordinate = nip19.coordinate;
     let pk = coordinate.public_key;
     let identifier = coordinate.identifier.clone();
     let filter = order_filter_by_coordinate(pk, &identifier);
-    let events = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
     if let Some(event) = events.first() {
         if let Ok(order) = parse_p2p_order(event) {
             cache_order(order.clone());

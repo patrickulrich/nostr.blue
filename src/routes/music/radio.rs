@@ -2,6 +2,12 @@ use crate::routes::Route;
 use crate::services::wavlake::WavlakeAPI;
 use crate::stores::music_player::{self, MusicTrack};
 use dioxus::prelude::*;
+
+#[cfg(feature = "web")]
+use js_sys;
+#[cfg(not(feature = "web"))]
+use rand::{thread_rng, Rng};
+
 #[component]
 pub fn MusicRadio() -> Element {
     let mut selected_genre = use_signal(|| String::from("all"));
@@ -40,7 +46,11 @@ pub fn MusicRadio() -> Element {
         spawn(async move {
             log::info!("Starting radio: genre={}, days={}", genre, days);
             let api = WavlakeAPI::new();
-            let genre_filter = if genre == "all" { None } else { Some(genre.as_str()) };
+            let genre_filter = if genre == "all" {
+                None
+            } else {
+                Some(genre.as_str())
+            };
             match api
                 .get_rankings("sats", Some(days), None, None, genre_filter, Some(100))
                 .await
@@ -48,22 +58,29 @@ pub fn MusicRadio() -> Element {
                 Ok(tracks) => {
                     if !tracks.is_empty() {
                         log::info!("Loaded {} tracks for radio", tracks.len());
-                        let mut music_tracks: Vec<MusicTrack> = tracks
-                            .into_iter()
-                            .map(|t| t.into())
-                            .collect();
-                        use js_sys::Date;
-                        let seed = (Date::now() as u64) as usize;
+                        let mut music_tracks: Vec<MusicTrack> =
+                            tracks.into_iter().map(|t| t.into()).collect();
+                        #[cfg(feature = "web")]
+                        let seed = (js_sys::Date::now() as u64) as usize;
+                        #[cfg(not(feature = "web"))]
+                        let seed = match std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                        {
+                            Ok(d) => d.as_millis() as usize,
+                            Err(e) => {
+                                log::warn!(
+                                    "Failed to get system time for shuffle seed: {}, using random fallback",
+                                    e
+                                );
+                                thread_rng().gen::<usize>()
+                            }
+                        };
                         for i in (1..music_tracks.len()).rev() {
                             let j = seed.wrapping_add(i) % (i + 1);
                             music_tracks.swap(i, j);
                         }
                         if let Some(first_track) = music_tracks.first().cloned() {
-                            music_player::play_track(
-                                first_track,
-                                Some(music_tracks),
-                                Some(0),
-                            );
+                            music_player::play_track(first_track, Some(music_tracks), Some(0));
                             radio_started.set(true);
                             loading.set(false);
                         }

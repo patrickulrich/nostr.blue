@@ -2,13 +2,13 @@
 //!
 //! A full-featured markdown editor with preview modes, formatting toolbar,
 //! and keyboard shortcut support.
-use dioxus::prelude::*;
-use std::rc::Rc;
 use super::markdown_toolbar::{
     apply_markdown_format, get_textarea_cursor, set_textarea_cursor, MarkdownFormat,
     MarkdownToolbar,
 };
 use crate::utils::markdown::render_markdown;
+use dioxus::prelude::*;
+use std::rc::Rc;
 #[derive(Clone, Copy, PartialEq)]
 pub enum EditorMode {
     Edit,
@@ -53,25 +53,26 @@ pub fn MarkdownEditor(mut props: MarkdownEditorProps) -> Element {
     let handle_format = {
         let mut content = props.content;
         move |format: MarkdownFormat| {
-            let current_content = content.read().clone();
-            let id_str = (*textarea_id.read()).clone();
-            let (cursor_start, cursor_end) = get_textarea_cursor(
-                &id_str,
-                &current_content,
-            );
-            let (new_content, new_cursor) = apply_markdown_format(
-                &current_content,
-                cursor_start,
-                cursor_end,
-                format,
-            );
-            content.set(new_content.clone());
-            let id_clone = id_str.clone();
-            spawn(async move {
-                #[cfg(target_family = "wasm")]
-                gloo_timers::future::TimeoutFuture::new(10).await;
-                set_textarea_cursor(&id_clone, new_cursor, &new_content);
-            });
+            #[cfg(feature = "web")]
+            {
+                let current_content = content.read().clone();
+                let id_str = (*textarea_id.read()).clone();
+                let (cursor_start, cursor_end) = get_textarea_cursor(&id_str, &current_content);
+                let (new_content, new_cursor) =
+                    apply_markdown_format(&current_content, cursor_start, cursor_end, format);
+                content.set(new_content.clone());
+                let id_clone = id_str.clone();
+                spawn(async move {
+                    crate::platform::timer::sleep_ms(10).await;
+                    set_textarea_cursor(&id_clone, new_cursor, &new_content);
+                });
+            }
+            #[cfg(not(feature = "web"))]
+            {
+                let current_content = content.read().clone();
+                let (new_content, _) = apply_markdown_format(&current_content, 0, 0, format);
+                content.set(new_content);
+            }
         }
     };
     let handle_keydown = {
@@ -84,15 +85,9 @@ pub fn MarkdownEditor(mut props: MarkdownEditorProps) -> Element {
                 return;
             }
             let format = match key {
-                Key::Character(ref c) if c.to_lowercase() == "b" => {
-                    Some(MarkdownFormat::Bold)
-                }
-                Key::Character(ref c) if c.to_lowercase() == "i" => {
-                    Some(MarkdownFormat::Italic)
-                }
-                Key::Character(ref c) if c.to_lowercase() == "k" => {
-                    Some(MarkdownFormat::Link)
-                }
+                Key::Character(ref c) if c.to_lowercase() == "b" => Some(MarkdownFormat::Bold),
+                Key::Character(ref c) if c.to_lowercase() == "i" => Some(MarkdownFormat::Italic),
+                Key::Character(ref c) if c.to_lowercase() == "k" => Some(MarkdownFormat::Link),
                 Key::Character(ref c) if c.to_lowercase() == "`" => {
                     Some(MarkdownFormat::InlineCode)
                 }
@@ -243,11 +238,7 @@ pub fn MarkdownEditor(mut props: MarkdownEditorProps) -> Element {
 /// Insert text at the current cursor position in the editor
 ///
 /// This is useful for inserting content from external sources (e.g., image upload, mention dialog)
-pub fn insert_at_cursor(
-    content: &mut Signal<String>,
-    textarea_id: &str,
-    text_to_insert: &str,
-) {
+pub fn insert_at_cursor(content: &mut Signal<String>, textarea_id: &str, text_to_insert: &str) {
     let current_content = content.read().clone();
     let (cursor_start, _cursor_end) = get_textarea_cursor(textarea_id, &current_content);
     let before = &current_content[..cursor_start];
@@ -257,7 +248,8 @@ pub fn insert_at_cursor(
     content.set(new_content.clone());
     let id = textarea_id.to_string();
     spawn(async move {
-        #[cfg(target_family = "wasm")] gloo_timers::future::TimeoutFuture::new(10).await;
+        #[cfg(feature = "web")]
+        crate::platform::timer::sleep_ms(10).await;
         set_textarea_cursor(&id, new_cursor, &new_content);
     });
 }

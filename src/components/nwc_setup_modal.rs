@@ -17,12 +17,12 @@ pub fn NwcSetupModal(
             connection_error.set(None);
             connection_success.set(false);
             let uri = nwc_uri.read().clone();
-            match nwc_store::connect_nwc(&uri).await {
+            match nwc_store::connect_nwc(&uri, false).await {
                 Ok(()) => {
                     log::info!("NWC connected successfully");
                     connection_success.set(true);
                     spawn(async move {
-                        gloo_timers::future::TimeoutFuture::new(1500).await;
+                        crate::platform::timer::sleep_ms(1500).await;
                         on_close.call(());
                     });
                 }
@@ -41,7 +41,7 @@ pub fn NwcSetupModal(
     };
     rsx! {
         div {
-            class: "fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4",
+            class: "fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4",
             onclick: handle_backdrop_click,
             div {
                 class: "bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6",
@@ -127,7 +127,7 @@ pub fn NwcSetupModal(
                 div { class: "mt-4 p-3 bg-blue-50 dark:bg-blue-900/30 border border-blue-200
                             dark:border-blue-800 rounded-lg",
                     p { class: "text-xs text-blue-800 dark:text-blue-200",
-                        "🔒 Your connection URI is stored locally in your browser and never sent to our servers."
+                        "🔒 Your wallet connection is session-only and never sent to our servers. Reconnect after refresh."
                     }
                 }
             }

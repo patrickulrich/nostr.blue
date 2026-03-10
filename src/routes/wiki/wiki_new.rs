@@ -5,15 +5,17 @@ use crate::components::icons::{
     PenSquareIcon,
 };
 use crate::components::{
-    AsciiDocContent, BookPickerModal, BookSelection, CitationPickerModal,
-    CitationSelection, WikilinksList,
+    AsciiDocContent, BookPickerModal, BookSelection, CitationPickerModal, CitationSelection,
+    WikilinksList,
 };
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, wiki_store};
 use crate::utils::nip54::normalize_wiki_dtag;
 use dioxus::events::{KeyboardData, MouseData};
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
+#[cfg(feature = "web")]
 use web_sys::HtmlTextAreaElement;
 /// Wiki page editor
 #[component]
@@ -30,6 +32,7 @@ pub fn WikiNew() -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut show_citation_picker = use_signal(|| false);
     let mut show_book_picker = use_signal(|| false);
+    #[allow(unused_mut)]
     let mut cursor_position = use_signal(|| 0usize);
     let mut inline_trigger_prefix = use_signal(String::new);
     if auth.pubkey.is_none() {
@@ -83,12 +86,12 @@ pub fn WikiNew() -> Element {
         }
     };
     let sync_cursor_click = move |_: Event<MouseData>| {
+        #[cfg(feature = "web")]
         if let Some(window) = web_sys::window() {
             if let Some(document) = window.document() {
                 if let Some(elem) = document.get_element_by_id("wiki-content-editor") {
                     if let Some(textarea) = elem.dyn_ref::<HtmlTextAreaElement>() {
-                        let pos = textarea.selection_start().ok().flatten().unwrap_or(0)
-                            as usize;
+                        let pos = textarea.selection_start().ok().flatten().unwrap_or(0) as usize;
                         cursor_position.set(pos);
                     }
                 }
@@ -96,12 +99,12 @@ pub fn WikiNew() -> Element {
         }
     };
     let sync_cursor_keyup = move |_: Event<KeyboardData>| {
+        #[cfg(feature = "web")]
         if let Some(window) = web_sys::window() {
             if let Some(document) = window.document() {
                 if let Some(elem) = document.get_element_by_id("wiki-content-editor") {
                     if let Some(textarea) = elem.dyn_ref::<HtmlTextAreaElement>() {
-                        let pos = textarea.selection_start().ok().flatten().unwrap_or(0)
-                            as usize;
+                        let pos = textarea.selection_start().ok().flatten().unwrap_or(0) as usize;
                         cursor_position.set(pos);
                     }
                 }
@@ -112,9 +115,7 @@ pub fn WikiNew() -> Element {
         let current = content.read().clone();
         let pos = *cursor_position.read();
         let prefix = inline_trigger_prefix.read().clone();
-        let (adjusted_content, adjusted_pos) = if !prefix.is_empty()
-            && current.ends_with(&prefix)
-        {
+        let (adjusted_content, adjusted_pos) = if !prefix.is_empty() && current.ends_with(&prefix) {
             let new_content = current[..current.len() - prefix.len()].to_string();
             let new_pos = pos.saturating_sub(prefix.len());
             inline_trigger_prefix.set(String::new());
@@ -122,19 +123,23 @@ pub fn WikiNew() -> Element {
         } else {
             (current, pos)
         };
-        let (before, after) = adjusted_content
-            .split_at(adjusted_pos.min(adjusted_content.len()));
+        let (before, after) = adjusted_content.split_at(adjusted_pos.min(adjusted_content.len()));
         let new_content = format!("{}{}{}", before, text, after);
         content.set(new_content);
     };
     let handle_citation_selected = move |selection: CitationSelection| {
         log::info!(
-            "Inserting citation: {} (style: {:?})", selection.identifier, selection.style
+            "Inserting citation: {} (style: {:?})",
+            selection.identifier,
+            selection.style
         );
         insert_at_cursor(&selection.markup);
     };
     let handle_book_selected = move |selection: BookSelection| {
-        log::info!("Inserting book reference: {}", selection.reference.display_text());
+        log::info!(
+            "Inserting book reference: {}",
+            selection.reference.display_text()
+        );
         insert_at_cursor(&selection.markup);
     };
     let handle_submit = move |_| {
@@ -167,12 +172,12 @@ pub fn WikiNew() -> Element {
                 Some(summary_val)
             };
             match wiki_store::publish_wiki_page(
-                    &title_val,
-                    &content_val,
-                    Some(&identifier_val),
-                    summary_opt.as_deref(),
-                )
-                .await
+                &title_val,
+                &content_val,
+                Some(&identifier_val),
+                summary_opt.as_deref(),
+            )
+            .await
             {
                 Ok(naddr) => {
                     log::info!("Published wiki page: {}", naddr);

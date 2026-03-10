@@ -23,6 +23,10 @@ pub mod wallet_health_modal;
 pub use add_mint_modal::CashuAddMintModal;
 pub use create_request_modal::CashuCreateRequestModal;
 pub use mint_discovery_modal::CashuMintDiscoveryModal;
+pub use nutzap_inbox::{NutzapBadge, NutzapInbox};
+#[allow(unused_imports)]
+pub use nutzap_send_modal::NutzapSendModal;
+pub use nutzap_settings_modal::NutzapSettingsModal;
 pub use optimize_modal::CashuOptimizeModal;
 pub use pay_request_modal::CashuPayRequestModal;
 pub use receive_lightning_modal::CashuReceiveLightningModal;
@@ -35,7 +39,3 @@ pub use token_card::CashuTokenCard;
 pub use transfer_modal::CashuTransferModal;
 pub use wallet_health::WalletHealthIndicator;
 pub use wallet_health_modal::WalletHealthModal;
-pub use nutzap_inbox::{NutzapBadge, NutzapInbox};
-#[allow(unused_imports)]
-pub use nutzap_send_modal::NutzapSendModal;
-pub use nutzap_settings_modal::NutzapSettingsModal;

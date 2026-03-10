@@ -1,12 +1,12 @@
 use crate::components::{NwcSetupModal, ReactionDefaultsModal};
+use crate::platform::storage;
 use crate::routes::Route;
 use crate::stores::blossom_store::BlossomServersStoreStoreExt;
 use crate::stores::{
-    auth_store, blossom_store, nostr_client, nwc_store, reactions_store, relay,
-    settings_store, theme_store,
+    auth_store, blossom_store, nostr_client, nwc_store, reactions_store, relay, settings_store,
+    theme_store,
 };
 use dioxus::prelude::*;
-use gloo_storage::Storage;
 use nostr_sdk::ToBech32;
 #[component]
 pub fn Settings() -> Element {
@@ -39,8 +39,9 @@ pub fn Settings() -> Element {
             return;
         }
         if !server_url.starts_with("https://") && !server_url.starts_with("http://") {
-            server_error
-                .set(Some("Server URL must start with http:// or https://".to_string()));
+            server_error.set(Some(
+                "Server URL must start with http:// or https://".to_string(),
+            ));
             return;
         }
         blossom_store::add_server(server_url);
@@ -55,14 +56,13 @@ pub fn Settings() -> Element {
             blossom_save_status.set(Some("Publishing...".to_string()));
             match blossom_store::publish_user_servers().await {
                 Ok(_) => {
-                    blossom_save_status
-                        .set(Some("✅ Blossom servers published!".to_string()));
-                    gloo_timers::future::TimeoutFuture::new(3000).await;
+                    blossom_save_status.set(Some("✅ Blossom servers published!".to_string()));
+                    crate::platform::timer::sleep_ms(3000).await;
                     blossom_save_status.set(None);
                 }
                 Err(e) => {
                     blossom_save_status.set(Some(format!("❌ Failed: {}", e)));
-                    gloo_timers::future::TimeoutFuture::new(7000).await;
+                    crate::platform::timer::sleep_ms(7000).await;
                     blossom_save_status.set(None);
                 }
             }
@@ -287,7 +287,7 @@ pub fn Settings() -> Element {
                                                                                                                                                                                                                                                                                                                                                                                                                                                         text-red-700 dark:text-red-300 rounded-lg
                                                                                                                                                                                                                                                                                                                                                                                                                                                         hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors",
                                         onclick: move |_| {
-                                            nwc_store::disconnect_nwc();
+                                            nwc_store::disconnect_nwc(false);
                                         },
                                         "Disconnect"
                                     }
@@ -738,10 +738,10 @@ fn render_account_info() -> Element {
     let auth = auth_store::AUTH_STATE.read();
     let mut show_nsec = use_signal(|| false);
     let _show_npub_export = use_signal(|| false);
-    #[cfg_attr(not(target_arch = "wasm32"), allow(unused_mut))]
+    #[cfg_attr(not(feature = "web"), allow(unused_mut))]
     let mut copy_status = use_signal(|| None::<String>);
     let copy_to_clipboard = move |_text: String, _label: &str| {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
             use web_sys::window;
             if let Some(window) = window() {
@@ -752,7 +752,7 @@ fn render_account_info() -> Element {
                     match wasm_bindgen_futures::JsFuture::from(promise).await {
                         Ok(_) => {
                             copy_status.set(Some(format!("{} copied!", label_str)));
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            crate::platform::timer::sleep_ms(2000).await;
                             copy_status.set(None);
                         }
                         Err(_) => {
@@ -844,14 +844,14 @@ fn render_account_info() -> Element {
                             button {
                                 class: "px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition",
                                 onclick: move |_| {
-                                    if let Ok(uri) = gloo_storage::LocalStorage::get::<String>("nostr_bunker_uri") {
+                                    if let Ok(uri) = storage::get::<String>("nostr_bunker_uri") {
                                         copy_to_clipboard(uri, "Bunker URI");
                                     }
                                 },
                                 "📋 Copy"
                             }
                         }
-                        if let Ok(uri) = gloo_storage::LocalStorage::get::<String>("nostr_bunker_uri") {
+                        if let Ok(uri) = storage::get::<String>("nostr_bunker_uri") {
                             p { class: "font-mono text-xs text-gray-900 dark:text-white break-all",
                                 {
                                     if uri.len() > 60 {
@@ -871,7 +871,7 @@ fn render_account_info() -> Element {
                             button {
                                 class: "px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition",
                                 onclick: move |_| {
-                                    if let Ok(app_keys_str) = gloo_storage::LocalStorage::get::<
+                                    if let Ok(app_keys_str) = storage::get::<
                                         String,
                                     >("nostr_app_keys") {
                                         if let Ok(keys) = nostr::Keys::parse(&app_keys_str) {
@@ -883,7 +883,7 @@ fn render_account_info() -> Element {
                                 "📋 Copy"
                             }
                         }
-                        if let Ok(app_keys_str) = gloo_storage::LocalStorage::get::<String>("nostr_app_keys") {
+                        if let Ok(app_keys_str) = storage::get::<String>("nostr_app_keys") {
                             if let Ok(keys) = nostr::Keys::parse(&app_keys_str) {
                                 p { class: "font-mono text-xs text-gray-900 dark:text-white break-all",
                                     "{keys.public_key().to_bech32().unwrap()}"
@@ -908,6 +908,8 @@ fn render_account_info() -> Element {
                             "🔌 Browser Extension (NIP-07)"
                         }
                         Some(auth_store::LoginMethod::RemoteSigner) => "🔐 Remote Signer (NIP-46)",
+                        #[cfg(feature = "mobile")]
+                        Some(auth_store::LoginMethod::AndroidSigner) => "📱 Android Signer (NIP-55)",
                         None => "Unknown",
                     }
                 }
@@ -949,7 +951,7 @@ fn BitcoinSettingsSection() -> Element {
             settings_store::update_mempool_endpoint(endpoint).await;
             is_saving.set(false);
             save_status.set(Some("Mempool endpoint saved".to_string()));
-            gloo_timers::future::TimeoutFuture::new(3000).await;
+            crate::platform::timer::sleep_ms(3000).await;
             save_status.set(None);
         });
     };
@@ -961,7 +963,7 @@ fn BitcoinSettingsSection() -> Element {
             settings_store::reset_mempool_endpoint().await;
             is_saving.set(false);
             save_status.set(Some("Reset to default".to_string()));
-            gloo_timers::future::TimeoutFuture::new(3000).await;
+            crate::platform::timer::sleep_ms(3000).await;
             save_status.set(None);
         });
     };

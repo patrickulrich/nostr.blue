@@ -3,7 +3,9 @@ use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
-use nostr_sdk::{Event, Filter, Kind, PublicKey, RelayPoolNotification, SubscriptionId, TagKind, Timestamp};
+use nostr_sdk::{
+    Event, Filter, Kind, PublicKey, RelayPoolNotification, SubscriptionId, TagKind, Timestamp,
+};
 use std::collections::HashSet;
 use std::time::Duration;
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -431,9 +433,11 @@ async fn load_following_streams(
     let contacts = match nostr_client::fetch_contacts(pubkey_str.clone()).await {
         Ok(contacts) => contacts,
         Err(e) => {
-            log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
-            let (events, next_until, hit_limit) = load_global_streams(until, status)
-                .await?;
+            log::warn!(
+                "Failed to fetch contacts: {}, falling back to global feed",
+                e
+            );
+            let (events, next_until, hit_limit) = load_global_streams(until, status).await?;
             return Ok((events, next_until, hit_limit, true, None));
         }
     };
@@ -456,13 +460,9 @@ async fn load_following_streams(
         filter = filter.until(Timestamp::from(until_ts));
     }
     let mut events = Vec::new();
-    nostr_client::stream_events_immediate(
-        filter,
-        Duration::from_secs(10),
-        |event| {
-            events.push(event);
-        },
-    )
+    nostr_client::stream_events_immediate(filter, Duration::from_secs(10), |event| {
+        events.push(event);
+    })
     .await
     .map_err(|e| format!("Failed to fetch streams: {}", e))?;
     let mut seen = std::collections::HashSet::new();
@@ -491,7 +491,13 @@ async fn load_following_streams(
         })
         .collect();
     let filtered_events = filter_by_status(following_events, status);
-    Ok((filtered_events, next_until, hit_limit, false, Some(followed_pubkeys)))
+    Ok((
+        filtered_events,
+        next_until,
+        hit_limit,
+        false,
+        Some(followed_pubkeys),
+    ))
 }
 async fn load_global_streams(
     until: Option<u64>,
@@ -502,13 +508,9 @@ async fn load_global_streams(
         filter = filter.until(Timestamp::from(until_ts));
     }
     let mut all_events = Vec::new();
-    nostr_client::stream_events_immediate(
-        filter,
-        Duration::from_secs(10),
-        |event| {
-            all_events.push(event);
-        },
-    )
+    nostr_client::stream_events_immediate(filter, Duration::from_secs(10), |event| {
+        all_events.push(event);
+    })
     .await
     .map_err(|e| format!("Failed to fetch streams: {}", e))?;
     let mut seen = std::collections::HashSet::new();
@@ -522,38 +524,26 @@ async fn load_global_streams(
 fn filter_by_status(events: Vec<Event>, status: StatusFilter) -> Vec<Event> {
     match status {
         StatusFilter::All => events,
-        StatusFilter::Live => {
-            events
-                .into_iter()
-                .filter(|event| {
-                    event
-                        .tags
-                        .iter()
-                        .any(|tag| {
-                            let tag_vec = tag.clone().to_vec();
-                            tag_vec.first().map(|s| s.as_str()) == Some("status")
-                                && tag_vec.get(1).map(|s| s.to_lowercase())
-                                    == Some("live".to_string())
-                        })
+        StatusFilter::Live => events
+            .into_iter()
+            .filter(|event| {
+                event.tags.iter().any(|tag| {
+                    let tag_vec = tag.clone().to_vec();
+                    tag_vec.first().map(|s| s.as_str()) == Some("status")
+                        && tag_vec.get(1).map(|s| s.to_lowercase()) == Some("live".to_string())
                 })
-                .collect()
-        }
-        StatusFilter::Upcoming => {
-            events
-                .into_iter()
-                .filter(|event| {
-                    event
-                        .tags
-                        .iter()
-                        .any(|tag| {
-                            let tag_vec = tag.clone().to_vec();
-                            tag_vec.first().map(|s| s.as_str()) == Some("status")
-                                && tag_vec.get(1).map(|s| s.to_lowercase())
-                                    == Some("planned".to_string())
-                        })
+            })
+            .collect(),
+        StatusFilter::Upcoming => events
+            .into_iter()
+            .filter(|event| {
+                event.tags.iter().any(|tag| {
+                    let tag_vec = tag.clone().to_vec();
+                    tag_vec.first().map(|s| s.as_str()) == Some("status")
+                        && tag_vec.get(1).map(|s| s.to_lowercase()) == Some("planned".to_string())
                 })
-                .collect()
-        }
+            })
+            .collect(),
     }
 }
 
@@ -578,9 +568,9 @@ fn upsert_stream_event(
             // Event doesn't pass filter - remove it if it exists (status changed)
             let new_d_tag = get_stream_d_tag(&new_event);
             let new_pubkey = new_event.pubkey;
-            streams.write().retain(|e| {
-                !(e.pubkey == new_pubkey && get_stream_d_tag(e) == new_d_tag)
-            });
+            streams
+                .write()
+                .retain(|e| !(e.pubkey == new_pubkey && get_stream_d_tag(e) == new_d_tag));
             return;
         }
     };

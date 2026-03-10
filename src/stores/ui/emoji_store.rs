@@ -27,39 +27,31 @@ pub struct CustomEmojisStore {
 pub struct EmojiSetsStore {
     pub data: Vec<EmojiSet>,
 }
-pub static CUSTOM_EMOJIS: GlobalSignal<Store<CustomEmojisStore>> = Signal::global(|| Store::new(
-    CustomEmojisStore::default(),
-));
-pub static EMOJI_SETS: GlobalSignal<Store<EmojiSetsStore>> = Signal::global(|| Store::new(
-    EmojiSetsStore::default(),
-));
+pub static CUSTOM_EMOJIS: GlobalSignal<Store<CustomEmojisStore>> =
+    Signal::global(|| Store::new(CustomEmojisStore::default()));
+pub static EMOJI_SETS: GlobalSignal<Store<EmojiSetsStore>> =
+    Signal::global(|| Store::new(EmojiSetsStore::default()));
 pub static EMOJI_FETCH_TIME: GlobalSignal<Option<Timestamp>> = Signal::global(|| None);
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 const RECENT_EMOJIS_KEY: &str = "nostr_blue_recent_emojis";
 const MAX_RECENT: usize = 14;
-const DEFAULT_RECENT: &[&str] = &[
-    "❤️",
-    "👍",
-    "😂",
-    "🔥",
-    "😮",
-    "😢",
-    "🎉",
-];
+const DEFAULT_RECENT: &[&str] = &["❤️", "👍", "😂", "🔥", "😮", "😢", "🎉"];
 pub static RECENT_EMOJIS: GlobalSignal<Vec<String>> = Signal::global(|| {
-    load_recent_emojis()
-        .unwrap_or_else(|| DEFAULT_RECENT.iter().map(|s| s.to_string()).collect())
+    load_recent_emojis().unwrap_or_else(|| DEFAULT_RECENT.iter().map(|s| s.to_string()).collect())
 });
 /// Load recent emojis from localStorage
 pub fn load_recent_emojis() -> Option<Vec<String>> {
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
         use web_sys::window;
         let storage = window()?.local_storage().ok()??;
         let value = storage.get_item(RECENT_EMOJIS_KEY).ok()??;
         serde_json::from_str(&value).ok()
     }
-    #[cfg(not(target_arch = "wasm32"))] { None }
+    #[cfg(not(feature = "web"))]
+    {
+        None
+    }
 }
 /// Save an emoji to recents (moves to front if already exists)
 pub fn save_recent_emoji(emoji: String) {
@@ -67,15 +59,14 @@ pub fn save_recent_emoji(emoji: String) {
     recent.retain(|e| e != &emoji);
     recent.insert(0, emoji);
     recent.truncate(MAX_RECENT);
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
         use web_sys::window;
         if let Some(storage) = window().and_then(|w| w.local_storage().ok()).flatten() {
-            let _ = storage
-                .set_item(
-                    RECENT_EMOJIS_KEY,
-                    &serde_json::to_string(&*recent).unwrap_or_default(),
-                );
+            let _ = storage.set_item(
+                RECENT_EMOJIS_KEY,
+                &serde_json::to_string(&*recent).unwrap_or_default(),
+            );
         }
     }
 }
@@ -101,12 +92,15 @@ pub async fn fetch_custom_emojis(pubkey: String) {
         .author(public_key)
         .limit(1);
     let fetch_result = crate::stores::nostr_client::fetch_events_aggregated(
-            emoji_list_filter.clone(),
-            std::time::Duration::from_secs(5),
-        )
-        .await;
+        emoji_list_filter.clone(),
+        std::time::Duration::from_secs(5),
+    )
+    .await;
     if let Err(e) = fetch_result {
-        log::warn!("Failed to fetch emoji list from relays: {}, will try local DB", e);
+        log::warn!(
+            "Failed to fetch emoji list from relays: {}, will try local DB",
+            e
+        );
     }
     let emoji_list_events = match client.database().query(emoji_list_filter).await {
         Ok(events) => events,
@@ -124,18 +118,18 @@ pub async fn fetch_custom_emojis(pubkey: String) {
             if tag_slice.len() >= 3 && tag_slice[0] == "emoji" {
                 let shortcode = tag_slice[1].to_string();
                 let image_url = tag_slice[2].to_string();
-                custom_emojis
-                    .push(CustomEmoji {
-                        shortcode,
-                        image_url,
-                    });
+                custom_emojis.push(CustomEmoji {
+                    shortcode,
+                    image_url,
+                });
             } else if tag_slice.len() >= 2 && tag_slice[0] == "a" {
                 emoji_set_refs.push(tag_slice[1].to_string());
             }
         }
     }
     log::info!(
-        "Found {} direct emojis and {} emoji set references", custom_emojis.len(),
+        "Found {} direct emojis and {} emoji set references",
+        custom_emojis.len(),
         emoji_set_refs.len()
     );
     let mut emoji_sets = Vec::new();
@@ -157,14 +151,15 @@ pub async fn fetch_custom_emojis(pubkey: String) {
                 .identifier(identifier.clone())
                 .limit(1);
             let fetch_result = crate::stores::nostr_client::fetch_events_aggregated(
-                    set_filter.clone(),
-                    std::time::Duration::from_secs(5),
-                )
-                .await;
+                set_filter.clone(),
+                std::time::Duration::from_secs(5),
+            )
+            .await;
             if let Err(e) = fetch_result {
                 log::warn!(
                     "Failed to fetch emoji set {} from relays: {}, will try local DB",
-                    identifier, e
+                    identifier,
+                    e
                 );
             }
             if let Ok(set_events) = client.database().query(set_filter).await {
@@ -176,23 +171,21 @@ pub async fn fetch_custom_emojis(pubkey: String) {
                         if tag_slice.len() >= 3 && tag_slice[0] == "emoji" {
                             let shortcode = tag_slice[1].to_string();
                             let image_url = tag_slice[2].to_string();
-                            set_emojis
-                                .push(CustomEmoji {
-                                    shortcode,
-                                    image_url,
-                                });
+                            set_emojis.push(CustomEmoji {
+                                shortcode,
+                                image_url,
+                            });
                         } else if tag_slice.len() >= 2 && tag_slice[0] == "name" {
                             set_name = Some(tag_slice[1].to_string());
                         }
                     }
                     if !set_emojis.is_empty() {
-                        emoji_sets
-                            .push(EmojiSet {
-                                identifier: identifier.clone(),
-                                name: set_name,
-                                emojis: set_emojis,
-                                author: author.clone(),
-                            });
+                        emoji_sets.push(EmojiSet {
+                            identifier: identifier.clone(),
+                            name: set_name,
+                            emojis: set_emojis,
+                            author: author.clone(),
+                        });
                     }
                 }
             }

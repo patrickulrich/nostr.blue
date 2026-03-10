@@ -24,13 +24,9 @@ pub fn CommunityNew() -> Element {
             return;
         }
         if pubkey.len() != 64 || !pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
-            error
-                .set(
-                    Some(
-                        "Invalid pubkey format. Please enter a 64-character hex pubkey."
-                            .to_string(),
-                    ),
-                );
+            error.set(Some(
+                "Invalid pubkey format. Please enter a 64-character hex pubkey.".to_string(),
+            ));
             return;
         }
         if !moderators.read().contains(&pubkey) {
@@ -57,28 +53,27 @@ pub fn CommunityNew() -> Element {
             error.set(Some("Name is required".to_string()));
             return;
         }
-        if !id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
-            error
-                .set(
-                    Some(
-                        "Identifier can only contain letters, numbers, dashes, and underscores"
-                            .to_string(),
-                    ),
-                );
+        if !id
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        {
+            error.set(Some(
+                "Identifier can only contain letters, numbers, dashes, and underscores".to_string(),
+            ));
             return;
         }
         creating.set(true);
         error.set(None);
         spawn(async move {
             match create_community(
-                    &id,
-                    &n,
-                    if desc.is_empty() { None } else { Some(&desc) },
-                    if img.is_empty() { None } else { Some(&img) },
-                    if r.is_empty() { None } else { Some(&r) },
-                    mods,
-                )
-                .await
+                &id,
+                &n,
+                if desc.is_empty() { None } else { Some(&desc) },
+                if img.is_empty() { None } else { Some(&img) },
+                if r.is_empty() { None } else { Some(&r) },
+                mods,
+            )
+            .await
             {
                 Ok(_event_id) => {
                     log::info!("Community created successfully");

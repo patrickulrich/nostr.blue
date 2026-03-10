@@ -4,10 +4,6 @@
 //! Handles token events (kind 7375), history events (kind 7376), quote events (kind 7374),
 //! and deletion events (kind 5).
 #![allow(dead_code)]
-use dioxus::prelude::*;
-use nostr::nips::nip60::{SpendingHistory, TransactionDirection};
-use nostr_sdk::{EventId, Filter, Kind, PublicKey, Timestamp};
-use std::time::Duration;
 use super::proofs::rebuild_proof_event_map;
 use super::signals::{PENDING_NOSTR_EVENTS, SHARED_LOCALSTORE, SYNC_STATE, WALLET_TOKENS};
 use super::types::{
@@ -16,6 +12,10 @@ use super::types::{
 };
 use super::utils::normalize_mint_url;
 use crate::stores::{auth_store, nostr_client};
+use dioxus::prelude::*;
+use nostr::nips::nip60::{SpendingHistory, TransactionDirection};
+use nostr_sdk::{EventId, Filter, Kind, PublicKey, Timestamp};
+use std::time::Duration;
 /// Queue a Nostr event for publication (with offline support)
 ///
 /// Events are saved to IndexedDB for persistence across app restarts.
@@ -44,10 +44,15 @@ pub async fn queue_nostr_event(
         }
     }
     log::debug!(
-        "Queued {} event: {}", match event_type { PendingEventType::TokenEvent =>
-        "token", PendingEventType::DeletionEvent => "deletion",
-        PendingEventType::HistoryEvent => "history", PendingEventType::QuoteEvent =>
-        "quote", PendingEventType::NutzapEvent => "nutzap", }, event_id
+        "Queued {} event: {}",
+        match event_type {
+            PendingEventType::TokenEvent => "token",
+            PendingEventType::DeletionEvent => "deletion",
+            PendingEventType::HistoryEvent => "history",
+            PendingEventType::QuoteEvent => "quote",
+            PendingEventType::NutzapEvent => "nutzap",
+        },
+        event_id
     );
     Ok(event_id)
 }
@@ -97,34 +102,37 @@ pub async fn queue_signed_event_for_retry(
             log::warn!("Failed to persist pending event: {}", e);
         }
     }
-    log::info!("Queued signed event {} for retry: {}", event_id, pending_event.id);
+    log::info!(
+        "Queued signed event {} for retry: {}",
+        event_id,
+        pending_event.id
+    );
 }
 /// Sign an EventBuilder using the current signer
 /// Returns Ok(Event) or Err(error_message)
 pub async fn sign_event_builder(
     builder: nostr_sdk::EventBuilder,
 ) -> Result<nostr_sdk::Event, String> {
-    let signer = crate::stores::signer::get_signer()
-        .ok_or_else(|| "No signer available".to_string())?;
+    let signer =
+        crate::stores::signer::get_signer().ok_or_else(|| "No signer available".to_string())?;
     match signer {
-        crate::stores::signer::SignerType::Keys(keys) => {
-            builder
-                .sign_with_keys(&keys)
-                .map_err(|e| format!("Failed to sign event: {}", e))
-        }
+        crate::stores::signer::SignerType::Keys(keys) => builder
+            .sign_with_keys(&keys)
+            .map_err(|e| format!("Failed to sign event: {}", e)),
         #[cfg(target_family = "wasm")]
-        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
-            builder
-                .sign(&*browser_signer)
-                .await
-                .map_err(|e| format!("Failed to sign event: {}", e))
-        }
-        crate::stores::signer::SignerType::NostrConnect(remote_signer) => {
-            builder
-                .sign(&*remote_signer)
-                .await
-                .map_err(|e| format!("Failed to sign event: {}", e))
-        }
+        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => builder
+            .sign(&*browser_signer)
+            .await
+            .map_err(|e| format!("Failed to sign event: {}", e)),
+        crate::stores::signer::SignerType::NostrConnect(remote_signer) => builder
+            .sign(&*remote_signer)
+            .await
+            .map_err(|e| format!("Failed to sign event: {}", e)),
+        #[cfg(feature = "mobile")]
+        crate::stores::signer::SignerType::AndroidSigner(android_signer) => builder
+            .sign(&*android_signer)
+            .await
+            .map_err(|e| format!("Failed to sign event: {}", e)),
     }
 }
 /// Queue an EventBuilder for retry when initial publication fails
@@ -167,13 +175,16 @@ pub async fn queue_token_event_for_retry(
         }
     };
     queue_signed_event_for_retry(
-            event,
-            PendingEventType::TokenEvent,
-            Some(pending_token_id.clone()),
-            Some(mint_url),
-        )
-        .await;
-    log::info!("Queued token event for retry, pending_id={}", pending_token_id);
+        event,
+        PendingEventType::TokenEvent,
+        Some(pending_token_id.clone()),
+        Some(mint_url),
+    )
+    .await;
+    log::info!(
+        "Queued token event for retry, pending_id={}",
+        pending_token_id
+    );
 }
 /// Get count of pending events waiting to be published
 pub fn get_pending_event_count() -> usize {
@@ -190,20 +201,16 @@ pub async fn publish_quote_event(
         .ok_or("No signer available")?
         .as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pubkey = PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let encrypted = signer
         .nip44_encrypt(&pubkey, quote_id)
         .await
         .map_err(|e| format!("Failed to encrypt quote ID: {}", e))?;
     let expiration_ts = Timestamp::now() + (expiration_days * 24 * 60 * 60);
-    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletQuote, encrypted)
-        .tags(
-            vec![
-                nostr_sdk::Tag::custom(nostr_sdk::TagKind::custom("mint"), [mint_url]),
-                nostr_sdk::Tag::expiration(expiration_ts),
-            ],
-        );
+    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletQuote, encrypted).tags(vec![
+        nostr_sdk::Tag::custom(nostr_sdk::TagKind::custom("mint"), [mint_url]),
+        nostr_sdk::Tag::expiration(expiration_ts),
+    ]);
     let client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
@@ -228,15 +235,14 @@ pub async fn delete_quote_event(event_id: &str) -> Result<(), String> {
         .as_ref()
         .ok_or("Nostr client not initialized")?
         .clone();
-    let mut tags = vec![
-        nostr_sdk::Tag::event(
-            nostr_sdk::EventId::from_hex(event_id)
-                .map_err(|e| format!("Invalid event ID: {}", e))?,
-        ),
-    ];
-    tags.push(nostr_sdk::Tag::custom(nostr_sdk::TagKind::custom("k"), ["7374"]));
-    let deletion_builder = nostr_sdk::EventBuilder::new(Kind::from(5), "Quote expired")
-        .tags(tags);
+    let mut tags = vec![nostr_sdk::Tag::event(
+        nostr_sdk::EventId::from_hex(event_id).map_err(|e| format!("Invalid event ID: {}", e))?,
+    )];
+    tags.push(nostr_sdk::Tag::custom(
+        nostr_sdk::TagKind::custom("k"),
+        ["7374"],
+    ));
+    let deletion_builder = nostr_sdk::EventBuilder::new(Kind::from(5), "Quote expired").tags(tags);
     match client.send_event_builder(deletion_builder).await {
         Ok(_) => {
             log::info!("Published deletion for quote event: {}", event_id);
@@ -261,8 +267,7 @@ pub async fn fetch_tokens() -> Result<(), String> {
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-    let pubkey = PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let sync_state = if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
         match localstore.load_sync_state().await {
             Ok(Some(state)) => {
@@ -301,16 +306,15 @@ pub async fn fetch_tokens() -> Result<(), String> {
     {
         for del_event in deletion_events {
             for tag in del_event.tags.iter() {
-                if let Some(nostr::TagStandard::Event { event_id, .. }) = tag
-                    .as_standardized()
-                {
+                if let Some(nostr::TagStandard::Event { event_id, .. }) = tag.as_standardized() {
                     deleted_event_ids.insert(event_id.to_hex());
                 }
             }
         }
         if !deleted_event_ids.is_empty() {
             log::info!(
-                "Found {} deleted token events via kind-5", deleted_event_ids.len()
+                "Found {} deleted token events via kind-5",
+                deleted_event_ids.len()
             );
         }
     }
@@ -333,13 +337,8 @@ pub async fn fetch_tokens() -> Result<(), String> {
                 if deleted_event_ids.contains(&event.id.to_hex()) {
                     continue;
                 }
-                if let Ok(decrypted) = signer
-                    .nip44_decrypt(&event.pubkey, &event.content)
-                    .await
-                {
-                    if let Ok(token_event) = serde_json::from_str::<
-                        TokenEventData,
-                    >(&decrypted) {
+                if let Ok(decrypted) = signer.nip44_decrypt(&event.pubkey, &event.content).await {
+                    if let Ok(token_event) = serde_json::from_str::<TokenEventData>(&decrypted) {
                         for del_event_id in &token_event.del {
                             deleted_via_del_field.insert(del_event_id.clone());
                         }
@@ -348,8 +347,8 @@ pub async fn fetch_tokens() -> Result<(), String> {
             }
             if !deleted_via_del_field.is_empty() {
                 log::info!(
-                    "Found {} deleted token events via del field", deleted_via_del_field
-                    .len()
+                    "Found {} deleted token events via del field",
+                    deleted_via_del_field.len()
                 );
             }
             let all_deleted_events: HashSet<String> = deleted_event_ids
@@ -365,64 +364,58 @@ pub async fn fetch_tokens() -> Result<(), String> {
                     continue;
                 }
                 match signer.nip44_decrypt(&event.pubkey, &event.content).await {
-                    Ok(decrypted) => {
-                        match serde_json::from_str::<TokenEventData>(&decrypted) {
-                            Ok(token_event) => {
-                                let proofs: Vec<ProofData> = token_event
-                                    .proofs
+                    Ok(decrypted) => match serde_json::from_str::<TokenEventData>(&decrypted) {
+                        Ok(token_event) => {
+                            let proofs: Vec<ProofData> = token_event
+                                .proofs
+                                .iter()
+                                .map(|p| ProofData {
+                                    id: if p.id.is_empty() {
+                                        format!("{}_{}", p.secret, p.amount)
+                                    } else {
+                                        p.id.clone()
+                                    },
+                                    amount: p.amount,
+                                    secret: p.secret.clone(),
+                                    c: p.c.clone(),
+                                    witness: p.witness.clone(),
+                                    dleq: p.dleq.clone(),
+                                    state: ProofState::Unspent,
+                                    transaction_id: None,
+                                    state_set_at: None,
+                                })
+                                .collect();
+                            if !proofs.is_empty() {
+                                let token_balance: u64 = proofs
                                     .iter()
-                                    .map(|p| ProofData {
-                                        id: if p.id.is_empty() {
-                                            format!("{}_{}", p.secret, p.amount)
-                                        } else {
-                                            p.id.clone()
-                                        },
-                                        amount: p.amount,
-                                        secret: p.secret.clone(),
-                                        c: p.c.clone(),
-                                        witness: p.witness.clone(),
-                                        dleq: p.dleq.clone(),
-                                        state: ProofState::Unspent,
-                                        transaction_id: None,
-                                        state_set_at: None,
-                                    })
-                                    .collect();
-                                if !proofs.is_empty() {
-                                    let token_balance: u64 = proofs
-                                        .iter()
-                                        .map(|p| p.amount)
-                                        .try_fold(0u64, |acc, amount| acc.checked_add(amount))
-                                        .ok_or_else(|| {
-                                            format!(
-                                                "Proof amount overflow in token event {}",
-                                                event_id_hex,
-                                            )
-                                        })?;
-                                    total_balance = total_balance
-                                        .checked_add(token_balance)
-                                        .ok_or_else(|| {
-                                            format!(
-                                                "Balance overflow when adding token event {}",
-                                                event_id_hex,
-                                            )
-                                        })?;
-                                    tokens
-                                        .push(TokenData {
-                                            event_id: event_id_hex,
-                                            mint: normalize_mint_url(&token_event.mint),
-                                            unit: token_event.unit.clone(),
-                                            proofs,
-                                            created_at: event.created_at.as_secs(),
-                                        });
-                                }
-                            }
-                            Err(e) => {
-                                log::error!(
-                                    "Failed to parse token event {}: {}", event.id, e
-                                );
+                                    .map(|p| p.amount)
+                                    .try_fold(0u64, |acc, amount| acc.checked_add(amount))
+                                    .ok_or_else(|| {
+                                        format!(
+                                            "Proof amount overflow in token event {}",
+                                            event_id_hex,
+                                        )
+                                    })?;
+                                total_balance =
+                                    total_balance.checked_add(token_balance).ok_or_else(|| {
+                                        format!(
+                                            "Balance overflow when adding token event {}",
+                                            event_id_hex,
+                                        )
+                                    })?;
+                                tokens.push(TokenData {
+                                    event_id: event_id_hex,
+                                    mint: normalize_mint_url(&token_event.mint),
+                                    unit: token_event.unit.clone(),
+                                    proofs,
+                                    created_at: event.created_at.as_secs(),
+                                });
                             }
                         }
-                    }
+                        Err(e) => {
+                            log::error!("Failed to parse token event {}: {}", event.id, e);
+                        }
+                    },
                     Err(e) => {
                         log::error!("Failed to decrypt token event {}: {}", event.id, e);
                     }
@@ -431,10 +424,8 @@ pub async fn fetch_tokens() -> Result<(), String> {
             if is_incremental {
                 let new_token_count = tokens.len();
                 let existing_tokens = WALLET_TOKENS.read().data().read().clone();
-                let existing_event_ids: HashSet<String> = existing_tokens
-                    .iter()
-                    .map(|t| t.event_id.clone())
-                    .collect();
+                let existing_event_ids: HashSet<String> =
+                    existing_tokens.iter().map(|t| t.event_id.clone()).collect();
                 let mut merged_tokens: Vec<TokenData> = existing_tokens
                     .into_iter()
                     .filter(|t| !all_deleted_events.contains(&t.event_id))
@@ -452,12 +443,15 @@ pub async fn fetch_tokens() -> Result<(), String> {
                     .ok_or("Balance calculation overflow in merge")?;
                 log::info!(
                     "Incremental sync: {} total tokens, {} sats (fetched {} new events)",
-                    merged_tokens.len(), total_balance, new_token_count
+                    merged_tokens.len(),
+                    total_balance,
+                    new_token_count
                 );
                 *WALLET_TOKENS.read().data().write() = merged_tokens;
             } else {
                 log::info!(
-                    "Full sync: {} token events with {} sats", tokens.len(),
+                    "Full sync: {} token events with {} sats",
+                    tokens.len(),
                     total_balance
                 );
                 *WALLET_TOKENS.read().data().write() = tokens;
@@ -505,14 +499,7 @@ pub async fn create_history_event(
     created_tokens: Vec<String>,
     destroyed_tokens: Vec<String>,
 ) -> Result<(), String> {
-    create_history_event_full(
-            direction,
-            amount,
-            created_tokens,
-            destroyed_tokens,
-            vec![],
-        )
-        .await
+    create_history_event_full(direction, amount, created_tokens, destroyed_tokens, vec![]).await
 }
 /// Create a history event with full control over all fields
 pub async fn create_history_event_full(
@@ -527,8 +514,7 @@ pub async fn create_history_event_full(
         .ok_or("No signer available")?
         .as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pubkey = PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let direction_enum = match direction {
         "in" => TransactionDirection::In,
         "out" => TransactionDirection::Out,
@@ -557,31 +543,28 @@ pub async fn create_history_event_full(
         }
     }
     let mut content_data: Vec<Vec<String>> = vec![
-        vec!["direction".to_string(), spending_history.direction.to_string()],
+        vec![
+            "direction".to_string(),
+            spending_history.direction.to_string(),
+        ],
         vec!["amount".to_string(), spending_history.amount.to_string()],
         vec!["unit".to_string(), "sat".to_string()],
     ];
     for event_id in &spending_history.created {
-        content_data
-            .push(
-                vec![
-                    "e".to_string(),
-                    event_id.to_hex(),
-                    String::new(),
-                    "created".to_string(),
-                ],
-            );
+        content_data.push(vec![
+            "e".to_string(),
+            event_id.to_hex(),
+            String::new(),
+            "created".to_string(),
+        ]);
     }
     for event_id in &spending_history.destroyed {
-        content_data
-            .push(
-                vec![
-                    "e".to_string(),
-                    event_id.to_hex(),
-                    String::new(),
-                    "destroyed".to_string(),
-                ],
-            );
+        content_data.push(vec![
+            "e".to_string(),
+            event_id.to_hex(),
+            String::new(),
+            "destroyed".to_string(),
+        ]);
     }
     let json_content = serde_json::to_string(&content_data)
         .map_err(|e| format!("Failed to serialize history event: {}", e))?;
@@ -593,19 +576,16 @@ pub async fn create_history_event_full(
     for event_id in &spending_history.redeemed {
         tags.push(
             nostr_sdk::Tag::parse([
-                    "e".to_string(),
-                    event_id.to_hex(),
-                    String::new(),
-                    "redeemed".to_string(),
-                ])
-                .map_err(|e| format!("Failed to create redeemed tag: {}", e))?,
+                "e".to_string(),
+                event_id.to_hex(),
+                String::new(),
+                "redeemed".to_string(),
+            ])
+            .map_err(|e| format!("Failed to create redeemed tag: {}", e))?,
         );
     }
-    let builder = nostr_sdk::EventBuilder::new(
-            Kind::CashuWalletSpendingHistory,
-            encrypted,
-        )
-        .tags(tags);
+    let builder =
+        nostr_sdk::EventBuilder::new(Kind::CashuWalletSpendingHistory, encrypted).tags(tags);
     let client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
@@ -637,14 +617,18 @@ async fn publish_pending_event(event: &PendingNostrEvent) -> Result<String, Stri
             .values()
             .all(|err| err.to_lowercase().starts_with("duplicate:"));
         if all_duplicates && !output.failed.is_empty() {
-            log::debug!("Event {} already exists on all relays (duplicate)", event_id);
+            log::debug!(
+                "Event {} already exists on all relays (duplicate)",
+                event_id
+            );
             return Ok(event_id);
         }
         return Err(format!("All {} relays failed", output.failed.len()));
     }
     log::debug!(
-        "Published to {}/{} relays", output.success.len(), output.success.len() + output
-        .failed.len()
+        "Published to {}/{} relays",
+        output.success.len(),
+        output.success.len() + output.failed.len()
     );
     Ok(event_id)
 }
@@ -653,9 +637,7 @@ async fn publish_pending_event(event: &PendingNostrEvent) -> Result<String, Stri
 /// Uses nostr-sdk pattern: adaptive multiplier with jitter to prevent synchronized retries.
 pub async fn process_pending_events() -> Result<usize, String> {
     if nostr_client::NOSTR_CLIENT.read().as_ref().is_none() {
-        log::debug!(
-            "Nostr client not yet initialized, skipping pending events processing"
-        );
+        log::debug!("Nostr client not yet initialized, skipping pending events processing");
         return Ok(0);
     }
     const MAX_RETRIES: u32 = 5;
@@ -678,7 +660,9 @@ pub async fn process_pending_events() -> Result<usize, String> {
         let retry_delay = adaptive_delay.min(MAX_RETRY_DELAY_SECS);
         if elapsed < retry_delay {
             log::debug!(
-                "Event {} not ready for retry yet ({}s < {}s)", event.id, elapsed,
+                "Event {} not ready for retry yet ({}s < {}s)",
+                event.id,
+                elapsed,
                 retry_delay
             );
             continue;
@@ -686,7 +670,9 @@ pub async fn process_pending_events() -> Result<usize, String> {
         match publish_pending_event(&event).await {
             Ok(nostr_event_id) => {
                 log::info!(
-                    "Published pending event: {} -> nostr:{}", event.id, nostr_event_id
+                    "Published pending event: {} -> nostr:{}",
+                    event.id,
+                    nostr_event_id
                 );
                 if event.event_type == PendingEventType::TokenEvent {
                     if let Some(ref pending_id) = event.pending_token_id {
@@ -722,7 +708,8 @@ pub async fn process_pending_events() -> Result<usize, String> {
                         };
                         if let Some(old_id) = matched_token {
                             log::info!(
-                                "Found pending token by mint fallback: {} -> {}", old_id,
+                                "Found pending token by mint fallback: {} -> {}",
+                                old_id,
                                 nostr_event_id
                             );
                             update_token_event_id(&old_id, &nostr_event_id);
@@ -763,13 +750,17 @@ pub(crate) fn update_token_event_id(pending_id: &str, real_event_id: &str) {
     if let Err(e) = super::signals::atomic_token_update(|tokens| {
         if let Some(token) = tokens.iter_mut().find(|t| t.event_id == pending_id_owned) {
             log::info!(
-                "Updating token event_id: {} -> {}", pending_id_owned,
+                "Updating token event_id: {} -> {}",
+                pending_id_owned,
                 real_event_id_owned
             );
             token.event_id = real_event_id_owned.clone();
             Ok(())
         } else {
-            Err(format!("Token with pending_id {} not found", pending_id_owned))
+            Err(format!(
+                "Token with pending_id {} not found",
+                pending_id_owned
+            ))
         }
     }) {
         log::warn!("Failed to update token event_id: {}", e);
@@ -794,8 +785,7 @@ pub async fn reconcile_pending_event_ids() -> Result<usize, String> {
         .ok_or("No signer available")?
         .as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pubkey = PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
@@ -805,22 +795,24 @@ pub async fn reconcile_pending_event_ids() -> Result<usize, String> {
         let store = WALLET_TOKENS.read();
         let data = store.data();
         let tokens = data.read();
-        tokens.iter().filter(|t| t.event_id.starts_with("pending_")).cloned().collect()
+        tokens
+            .iter()
+            .filter(|t| t.event_id.starts_with("pending_"))
+            .cloned()
+            .collect()
     };
     if pending_tokens.is_empty() {
         return Ok(0);
     }
     log::info!(
-        "Found {} tokens with pending event IDs to reconcile", pending_tokens.len()
+        "Found {} tokens with pending event IDs to reconcile",
+        pending_tokens.len()
     );
     let mut reconciled = 0;
     for token in pending_tokens {
         let old_event_id = token.event_id.clone();
-        let proof_secrets: std::collections::HashSet<&str> = token
-            .proofs
-            .iter()
-            .map(|p| p.secret.as_str())
-            .collect();
+        let proof_secrets: std::collections::HashSet<&str> =
+            token.proofs.iter().map(|p| p.secret.as_str()).collect();
         let existing_real_event = {
             let store = WALLET_TOKENS.read();
             let data = store.data();
@@ -829,18 +821,16 @@ pub async fn reconcile_pending_event_ids() -> Result<usize, String> {
                 .iter()
                 .filter(|t| !t.event_id.starts_with("pending_"))
                 .find(|t| {
-                    let t_secrets: std::collections::HashSet<&str> = t
-                        .proofs
-                        .iter()
-                        .map(|p| p.secret.as_str())
-                        .collect();
+                    let t_secrets: std::collections::HashSet<&str> =
+                        t.proofs.iter().map(|p| p.secret.as_str()).collect();
                     !proof_secrets.is_empty() && proof_secrets == t_secrets
                 })
                 .map(|t| t.event_id.clone())
         };
         if let Some(real_event_id) = existing_real_event {
             log::info!(
-                "Found existing real event {} for pending token {}", real_event_id,
+                "Found existing real event {} for pending token {}",
+                real_event_id,
                 old_event_id
             );
             update_token_event_id(&old_event_id, &real_event_id);
@@ -872,17 +862,16 @@ pub async fn reconcile_pending_event_ids() -> Result<usize, String> {
                 continue;
             }
         };
-        let builder = nostr_sdk::EventBuilder::new(
-            Kind::CashuWalletUnspentProof,
-            encrypted,
-        );
+        let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
         match client.send_event_builder(builder).await {
             Ok(output) => {
                 if !output.success.is_empty() {
                     let real_event_id = output.id().to_hex();
                     log::info!(
                         "Reconciled pending token: {} -> {} (to {} relays)",
-                        old_event_id, real_event_id, output.success.len()
+                        old_event_id,
+                        real_event_id,
+                        output.success.len()
                     );
                     update_token_event_id(&old_event_id, &real_event_id);
                     reconciled += 1;
@@ -895,7 +884,9 @@ pub async fn reconcile_pending_event_ids() -> Result<usize, String> {
             }
             Err(e) => {
                 log::warn!(
-                    "Failed to publish reconciliation event for {}: {}", old_event_id, e
+                    "Failed to publish reconciliation event for {}: {}",
+                    old_event_id,
+                    e
                 );
             }
         }
@@ -936,8 +927,7 @@ pub async fn publish_orphaned_proofs_event(
         .ok_or("No signer available")?
         .as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pubkey = PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
@@ -989,7 +979,8 @@ pub async fn publish_orphaned_proofs_event(
                 update_token_event_id(&pending_id, &real_event_id);
                 log::info!(
                     "Published orphaned proofs token event: {} (to {} relays)",
-                    real_event_id, output.success.len()
+                    real_event_id,
+                    output.success.len()
                 );
                 Ok(real_event_id)
             } else {
@@ -998,33 +989,34 @@ pub async fn publish_orphaned_proofs_event(
                     pending_id
                 );
                 queue_signed_event_for_retry(
-                        signed_event,
-                        PendingEventType::TokenEvent,
-                        Some(pending_id.clone()),
-                        Some(mint_url.to_string()),
-                    )
-                    .await;
-                Ok(pending_id)
-            }
-        }
-        Err(e) => {
-            log::warn!("Failed to publish orphaned proofs, queuing for retry: {}", e);
-            queue_signed_event_for_retry(
                     signed_event,
                     PendingEventType::TokenEvent,
                     Some(pending_id.clone()),
                     Some(mint_url.to_string()),
                 )
                 .await;
+                Ok(pending_id)
+            }
+        }
+        Err(e) => {
+            log::warn!(
+                "Failed to publish orphaned proofs, queuing for retry: {}",
+                e
+            );
+            queue_signed_event_for_retry(
+                signed_event,
+                PendingEventType::TokenEvent,
+                Some(pending_id.clone()),
+                Some(mint_url.to_string()),
+            )
+            .await;
             Ok(pending_id)
         }
     }
 }
 /// Guard to prevent multiple processor spawns
 #[cfg(target_arch = "wasm32")]
-static PROCESSOR_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(
-    false,
-);
+static PROCESSOR_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// Start background task to process pending events periodically
 ///
 /// Uses AtomicBool guard to ensure only one processor runs at a time.
@@ -1070,8 +1062,7 @@ pub fn start_pending_events_processor() {
                 }
                 spawn(async {
                     use futures::FutureExt;
-                    let recovery_future = super::proof_recovery::run_full_recovery()
-                        .fuse();
+                    let recovery_future = super::proof_recovery::run_full_recovery().fuse();
                     let timeout_future = TimeoutFuture::new(180_000).fuse();
                     futures::pin_mut!(recovery_future, timeout_future);
                     futures::select! {
@@ -1093,8 +1084,75 @@ pub fn start_pending_events_processor() {
         "Started pending events background processor (adaptive interval + periodic recovery)"
     );
 }
-/// No-op on non-WASM targets (gloo_timers is WASM-only)
+/// Start background pending-event processing on native targets.
+///
+/// Runs continuously in the background, retries pending events with adaptive
+/// sleep intervals, and periodically performs maintenance/recovery when the
+/// queue stays empty. The loop is singleton-guarded and stops with process
+/// termination.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn start_pending_events_processor() {
-    log::debug!("Pending events processor only runs in WASM");
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static PROCESSOR_RUNNING_NATIVE: AtomicBool = AtomicBool::new(false);
+    if PROCESSOR_RUNNING_NATIVE
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        log::debug!("Pending events processor already running on native");
+        return;
+    }
+    dioxus_core::spawn_forever(async move {
+        let mut recovery_counter: u8 = 0;
+        loop {
+            if let Err(e) = process_pending_events().await {
+                log::error!("Error processing pending events: {}", e);
+            }
+            let pending_count = PENDING_NOSTR_EVENTS.read().len();
+            if pending_count == 0 {
+                recovery_counter = recovery_counter.saturating_add(1);
+            } else {
+                recovery_counter = 0;
+            }
+            if recovery_counter >= 6 {
+                recovery_counter = 0;
+                super::signals::cleanup_expired_pending_secrets().await;
+                match reconcile_pending_event_ids().await {
+                    Ok(count) if count > 0 => {
+                        log::info!("Native reconciled {} pending event IDs", count);
+                    }
+                    Err(e) => {
+                        log::debug!("Native pending event ID reconciliation error: {}", e);
+                    }
+                    _ => {}
+                }
+                dioxus_core::spawn_forever(async {
+                    use futures::FutureExt;
+                    let recovery_future = super::proof_recovery::run_full_recovery().fuse();
+                    let timeout_future = crate::platform::timer::sleep_ms(180_000).fuse();
+                    futures::pin_mut!(recovery_future, timeout_future);
+                    futures::select! {
+                        result = recovery_future => {
+                            if result.recovered_count > 0 || result.spent_count > 0 {
+                                log::info!(
+                                    "Native periodic recovery: {} recovered, {} spent",
+                                    result.recovered_count, result.spent_count
+                                );
+                            }
+                            if !result.errors.is_empty() {
+                                for err in result.errors {
+                                    log::debug!("Native periodic recovery error: {}", err);
+                                }
+                            }
+                        }
+                        _ = timeout_future => {
+                            log::warn!("Native periodic recovery timed out after 3 minutes");
+                        }
+                    }
+                });
+            }
+            let interval_ms = if pending_count > 0 { 30_000 } else { 60_000 };
+            crate::platform::timer::sleep_ms(interval_ms).await;
+        }
+    });
+    log::info!("Started pending events processor on native");
 }

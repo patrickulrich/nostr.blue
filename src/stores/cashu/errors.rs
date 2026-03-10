@@ -94,15 +94,15 @@ impl NutErrorCode {
     pub fn is_recoverable(&self) -> bool {
         matches!(
             self,
-            Self::TokenPending
-            | Self::QuotePending
-            | Self::LightningError
-            | Self::Unknown
+            Self::TokenPending | Self::QuotePending | Self::LightningError | Self::Unknown
         )
     }
     /// Check if error indicates tokens are unusable
     pub fn is_token_lost(&self) -> bool {
-        matches!(self, Self::TokenAlreadySpent | Self::BlindedMessageAlreadySigned)
+        matches!(
+            self,
+            Self::TokenAlreadySpent | Self::BlindedMessageAlreadySigned
+        )
     }
 }
 impl fmt::Display for NutErrorCode {
@@ -145,19 +145,41 @@ pub enum CashuWalletError {
     SeedDerivation(String),
     SignerUnavailable,
     TermsNotAccepted,
-    MintNotFound { mint_url: String },
-    MintConnection { mint_url: String, message: String },
-    MintOperationLocked { mint_url: String },
-    MintFeatureNotSupported { feature: String },
-    InvalidToken { reason: String },
+    MintNotFound {
+        mint_url: String,
+    },
+    MintConnection {
+        mint_url: String,
+        message: String,
+    },
+    MintOperationLocked {
+        mint_url: String,
+    },
+    MintFeatureNotSupported {
+        feature: String,
+    },
+    InvalidToken {
+        reason: String,
+    },
     TokenAlreadySpent,
     TokenPending,
-    InsufficientFunds { available: u64, required: u64 },
+    InsufficientFunds {
+        available: u64,
+        required: u64,
+    },
     NoSpendableProofs,
-    QuoteNotFound { quote_id: String },
-    QuoteExpired { quote_id: String },
-    QuoteUnpaid { quote_id: String },
-    QuoteFailed { message: String },
+    QuoteNotFound {
+        quote_id: String,
+    },
+    QuoteExpired {
+        quote_id: String,
+    },
+    QuoteUnpaid {
+        quote_id: String,
+    },
+    QuoteFailed {
+        message: String,
+    },
     /// DLEQ proofs are missing from token (mint may not support NUT-12)
     DleqProofMissing,
     /// DLEQ proof verification failed (invalid signature)
@@ -171,8 +193,13 @@ pub enum CashuWalletError {
     Database(String),
     IndexedDb(String),
     Cdk(CdkError),
-    TransactionNotFound { tx_id: u64 },
-    InvalidTransactionState { expected: String, actual: String },
+    TransactionNotFound {
+        tx_id: u64,
+    },
+    InvalidTransactionState {
+        expected: String,
+        actual: String,
+    },
     Internal(String),
     Cancelled,
     Timeout(String),
@@ -199,12 +226,14 @@ impl fmt::Display for CashuWalletError {
             }
             Self::TokenAlreadySpent => write!(f, "Token already spent"),
             Self::TokenPending => write!(f, "Token pending at mint"),
-            Self::InsufficientFunds { available, required } => {
+            Self::InsufficientFunds {
+                available,
+                required,
+            } => {
                 write!(
                     f,
                     "Insufficient funds: available={}, required={}",
-                    available,
-                    required,
+                    available, required,
                 )
             }
             Self::NoSpendableProofs => write!(f, "No spendable proofs available"),
@@ -215,7 +244,10 @@ impl fmt::Display for CashuWalletError {
             Self::QuoteUnpaid { quote_id } => write!(f, "Quote unpaid: {}", quote_id),
             Self::QuoteFailed { message } => write!(f, "Quote failed: {}", message),
             Self::DleqProofMissing => {
-                write!(f, "Token does not contain DLEQ proofs for offline verification")
+                write!(
+                    f,
+                    "Token does not contain DLEQ proofs for offline verification"
+                )
             }
             Self::DleqVerificationFailed => {
                 write!(f, "DLEQ proof verification failed - invalid signature")
@@ -240,8 +272,7 @@ impl fmt::Display for CashuWalletError {
                 write!(
                     f,
                     "Transaction in invalid state: expected {}, got {}",
-                    expected,
-                    actual,
+                    expected, actual,
                 )
             }
             Self::Internal(msg) => write!(f, "Internal error: {}", msg),
@@ -270,15 +301,14 @@ impl CashuWalletError {
     pub fn is_token_spent(&self) -> bool {
         matches!(
             self,
-            Self::TokenAlreadySpent
-            | Self::TokenPending
-            | Self::Cdk(CdkError::TokenAlreadySpent)
+            Self::TokenAlreadySpent | Self::TokenPending | Self::Cdk(CdkError::TokenAlreadySpent)
         ) || self.is_token_spent_string()
     }
     /// Check error string for spent indicators (fallback)
     fn is_token_spent_string(&self) -> bool {
         let msg = self.to_string().to_lowercase();
-        msg.contains("already spent") || msg.contains("already redeemed")
+        msg.contains("already spent")
+            || msg.contains("already redeemed")
             || msg.contains("token pending")
     }
     /// Check if this is an insufficient funds error
@@ -286,8 +316,8 @@ impl CashuWalletError {
         matches!(
             self,
             Self::InsufficientFunds { .. }
-            | Self::NoSpendableProofs
-            | Self::Cdk(CdkError::InsufficientFunds)
+                | Self::NoSpendableProofs
+                | Self::Cdk(CdkError::InsufficientFunds)
         ) || self.to_string().to_lowercase().contains("insufficient")
     }
     /// Check if this is a quote expiry error
@@ -346,7 +376,8 @@ pub fn is_token_already_spent_error(error: &CdkError) -> bool {
 /// Helper function to check if an error message indicates tokens are already spent
 pub fn is_token_spent_error_string(error_msg: &str) -> bool {
     let msg = error_msg.to_lowercase();
-    msg.contains("already spent") || msg.contains("already redeemed")
+    msg.contains("already spent")
+        || msg.contains("already redeemed")
         || msg.contains("token pending")
 }
 /// Helper function to check if a CDK error indicates insufficient funds
@@ -411,10 +442,14 @@ impl CashuWalletError {
     }
     /// Check if error is recoverable based on NUT error code
     pub fn is_recoverable(&self) -> bool {
-        self.nut_error_code().map(|code| code.is_recoverable()).unwrap_or(true)
+        self.nut_error_code()
+            .map(|code| code.is_recoverable())
+            .unwrap_or(true)
     }
     /// Check if tokens involved in this error are lost (cannot be recovered)
     pub fn are_tokens_lost(&self) -> bool {
-        self.nut_error_code().map(|code| code.is_token_lost()).unwrap_or(false)
+        self.nut_error_code()
+            .map(|code| code.is_token_lost())
+            .unwrap_or(false)
     }
 }

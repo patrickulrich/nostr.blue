@@ -15,21 +15,20 @@ pub fn LiveStreamNew() -> Element {
     let mut status = use_signal(|| "planned".to_string());
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
-    let is_authenticated = use_memo(move || {
-        auth_store::AUTH_STATE.read().is_authenticated
-    });
+    let is_authenticated = use_memo(move || auth_store::AUTH_STATE.read().is_authenticated);
     let can_publish = {
         let title_val = title.read();
         let stream_url_val = stream_url.read();
         let is_pub = *is_publishing.read();
-        !title_val.is_empty() && !stream_url_val.is_empty()
+        !title_val.is_empty()
+            && !stream_url_val.is_empty()
             && Url::parse(&stream_url_val)
                 .map(|u| {
                     let scheme = u.scheme();
-                    scheme == "http" || scheme == "https" || scheme == "rtmp"
-                        || scheme == "rtmps"
+                    scheme == "http" || scheme == "https" || scheme == "rtmp" || scheme == "rtmps"
                 })
-                .unwrap_or(false) && !is_pub
+                .unwrap_or(false)
+            && !is_pub
     };
     let handle_close = move |_| {
         navigator.push(Route::VideosLive {});
@@ -48,22 +47,19 @@ pub fn LiveStreamNew() -> Element {
         error_message.set(None);
         spawn(async move {
             match publish_live_stream(
-                    title_val,
-                    summary_val,
-                    image_url_val,
-                    stream_url_val,
-                    hashtags_val,
-                    status_val,
-                )
-                .await
+                title_val,
+                summary_val,
+                image_url_val,
+                stream_url_val,
+                hashtags_val,
+                status_val,
+            )
+            .await
             {
                 Ok(naddr) => {
                     log::info!("Live stream published successfully: {}", naddr);
                     is_publishing.set(false);
-                    navigator
-                        .push(Route::LiveStreamDetail {
-                            note_id: naddr,
-                        });
+                    navigator.push(Route::LiveStreamDetail { note_id: naddr });
                 }
                 Err(e) => {
                     log::error!("Failed to publish live stream: {}", e);
@@ -75,7 +71,9 @@ pub fn LiveStreamNew() -> Element {
     };
     use_effect(move || {
         if !*is_authenticated.read() {
-            navigator.push(Route::Home { list: String::new() });
+            navigator.push(Route::Home {
+                list: String::new(),
+            });
         }
     });
     if !*is_authenticated.read() {
@@ -220,8 +218,7 @@ async fn publish_live_stream(
     hashtags: String,
     status: String,
 ) -> Result<String, String> {
-    let client = nostr_client::get_client()
-        .ok_or_else(|| "Client not initialized".to_string())?;
+    let client = nostr_client::get_client().ok_or_else(|| "Client not initialized".to_string())?;
     let now = chrono::Utc::now();
     let timestamp_ms = now.timestamp_millis();
     let random_component = uuid::Uuid::new_v4()
@@ -235,24 +232,32 @@ async fn publish_live_stream(
     builder = builder.tag(Tag::custom(TagKind::d(), vec![d_tag.clone()]));
     builder = builder.tag(Tag::custom(TagKind::custom("title"), vec![title.clone()]));
     if !summary.is_empty() {
-        builder = builder
-            .tag(Tag::custom(TagKind::custom("summary"), vec![summary.clone()]));
+        builder = builder.tag(Tag::custom(
+            TagKind::custom("summary"),
+            vec![summary.clone()],
+        ));
     }
     if !image_url.is_empty() {
-        builder = builder
-            .tag(Tag::custom(TagKind::custom("image"), vec![image_url.clone()]));
+        builder = builder.tag(Tag::custom(
+            TagKind::custom("image"),
+            vec![image_url.clone()],
+        ));
     }
-    builder = builder
-        .tag(Tag::custom(TagKind::custom("streaming"), vec![stream_url.clone()]));
+    builder = builder.tag(Tag::custom(
+        TagKind::custom("streaming"),
+        vec![stream_url.clone()],
+    ));
     builder = builder.tag(Tag::custom(TagKind::custom("status"), vec![status.clone()]));
     let now = Timestamp::now().as_secs();
-    builder = builder.tag(Tag::custom(TagKind::custom("starts"), vec![now.to_string()]));
+    builder = builder.tag(Tag::custom(
+        TagKind::custom("starts"),
+        vec![now.to_string()],
+    ));
     if !hashtags.is_empty() {
         for tag in hashtags.split(',') {
             let trimmed = tag.trim();
             if !trimmed.is_empty() {
-                builder = builder
-                    .tag(Tag::custom(TagKind::t(), vec![trimmed.to_string()]));
+                builder = builder.tag(Tag::custom(TagKind::t(), vec![trimmed.to_string()]));
             }
         }
     }

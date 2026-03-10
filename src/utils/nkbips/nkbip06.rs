@@ -58,12 +58,7 @@ pub struct NostrMimeType {
 }
 impl NostrMimeType {
     /// Create a new NostrMimeType
-    pub fn new(
-        standard: &str,
-        category: &str,
-        use_case: &str,
-        replaceability: &str,
-    ) -> Self {
+    pub fn new(standard: &str, category: &str, use_case: &str, replaceability: &str) -> Self {
         Self {
             standard: standard.to_string(),
             category: category.to_string(),
@@ -73,7 +68,10 @@ impl NostrMimeType {
     }
     /// Get the M tag value (category/use-case/replaceability)
     pub fn m_tag_value(&self) -> String {
-        format!("{}/{}/{}", self.category, self.use_case, self.replaceability)
+        format!(
+            "{}/{}/{}",
+            self.category, self.use_case, self.replaceability
+        )
     }
     /// Create tags for this MIME type
     pub fn to_tags(&self) -> Vec<Tag> {
@@ -86,142 +84,108 @@ impl NostrMimeType {
 /// Get NostrMimeType for a given event kind
 pub fn mime_type_for_kind(kind: u16) -> NostrMimeType {
     match kind {
-        1 => {
-            NostrMimeType::new(
-                "text/plain",
-                CATEGORY_NOTE,
-                USE_MICROBLOG,
-                REPLACEABILITY_NONREPLACEABLE,
-            )
-        }
-        1111 => {
-            NostrMimeType::new(
-                "text/plain",
-                CATEGORY_NOTE,
-                USE_COMMENT,
-                REPLACEABILITY_NONREPLACEABLE,
-            )
-        }
-        1987 => {
-            NostrMimeType::new(
-                "application/json",
-                CATEGORY_METADATA,
-                USE_EMBEDDING,
-                REPLACEABILITY_NONREPLACEABLE,
-            )
-        }
-        30 => {
-            NostrMimeType::new(
-                "text/plain",
-                CATEGORY_METADATA,
-                USE_CITATION,
-                REPLACEABILITY_REPLACEABLE,
-            )
-        }
-        31 => {
-            NostrMimeType::new(
-                "text/plain",
-                CATEGORY_METADATA,
-                USE_CITATION,
-                REPLACEABILITY_REPLACEABLE,
-            )
-        }
-        32 => {
-            NostrMimeType::new(
-                "text/plain",
-                CATEGORY_METADATA,
-                USE_CITATION,
-                REPLACEABILITY_REPLACEABLE,
-            )
-        }
-        33 => {
-            NostrMimeType::new(
-                "text/plain",
-                CATEGORY_METADATA,
-                USE_CITATION,
-                REPLACEABILITY_REPLACEABLE,
-            )
-        }
-        30023 => {
-            NostrMimeType::new(
-                "text/plain",
-                CATEGORY_ARTICLE,
-                USE_LONGFORM,
-                REPLACEABILITY_REPLACEABLE,
-            )
-        }
-        30040 => {
-            NostrMimeType::new(
-                "application/json",
-                CATEGORY_METADATA,
-                USE_INDEX,
-                REPLACEABILITY_REPLACEABLE,
-            )
-        }
-        30041 => {
-            NostrMimeType::new(
-                "text/plain",
-                CATEGORY_ARTICLE,
-                USE_PUBLICATION_CONTENT,
-                REPLACEABILITY_REPLACEABLE,
-            )
-        }
-        30042 => {
-            NostrMimeType::new(
-                "application/json",
-                CATEGORY_METADATA,
-                USE_DIRECTORY,
-                REPLACEABILITY_REPLACEABLE,
-            )
-        }
-        30043 => {
-            NostrMimeType::new(
-                "application/json",
-                CATEGORY_METADATA,
-                USE_DIRECTORY,
-                REPLACEABILITY_REPLACEABLE,
-            )
-        }
-        30044 => {
-            NostrMimeType::new(
-                "application/json",
-                CATEGORY_METADATA,
-                USE_DIRECTORY,
-                REPLACEABILITY_REPLACEABLE,
-            )
-        }
-        30045 => {
-            NostrMimeType::new(
-                "application/json",
-                CATEGORY_METADATA,
-                USE_DIRECTORY,
-                REPLACEABILITY_REPLACEABLE,
-            )
-        }
-        30818 => {
-            NostrMimeType::new(
-                "text/plain",
-                CATEGORY_ARTICLE,
-                USE_WIKI,
-                REPLACEABILITY_REPLACEABLE,
-            )
-        }
-        30009 => {
-            NostrMimeType::new(
-                "application/json",
-                CATEGORY_METADATA,
-                USE_BADGE,
-                REPLACEABILITY_REPLACEABLE,
-            )
-        }
-        8 => {
-            NostrMimeType::new(
-                "application/json",
-                CATEGORY_SOCIAL,
-                USE_BADGE,
-                REPLACEABILITY_NONREPLACEABLE,
-            )
-        }
+        1 => NostrMimeType::new(
+            "text/plain",
+            CATEGORY_NOTE,
+            USE_MICROBLOG,
+            REPLACEABILITY_NONREPLACEABLE,
+        ),
+        1111 => NostrMimeType::new(
+            "text/plain",
+            CATEGORY_NOTE,
+            USE_COMMENT,
+            REPLACEABILITY_NONREPLACEABLE,
+        ),
+        1987 => NostrMimeType::new(
+            "application/json",
+            CATEGORY_METADATA,
+            USE_EMBEDDING,
+            REPLACEABILITY_NONREPLACEABLE,
+        ),
+        30 => NostrMimeType::new(
+            "text/plain",
+            CATEGORY_METADATA,
+            USE_CITATION,
+            REPLACEABILITY_REPLACEABLE,
+        ),
+        31 => NostrMimeType::new(
+            "text/plain",
+            CATEGORY_METADATA,
+            USE_CITATION,
+            REPLACEABILITY_REPLACEABLE,
+        ),
+        32 => NostrMimeType::new(
+            "text/plain",
+            CATEGORY_METADATA,
+            USE_CITATION,
+            REPLACEABILITY_REPLACEABLE,
+        ),
+        33 => NostrMimeType::new(
+            "text/plain",
+            CATEGORY_METADATA,
+            USE_CITATION,
+            REPLACEABILITY_REPLACEABLE,
+        ),
+        30023 => NostrMimeType::new(
+            "text/plain",
+            CATEGORY_ARTICLE,
+            USE_LONGFORM,
+            REPLACEABILITY_REPLACEABLE,
+        ),
+        30040 => NostrMimeType::new(
+            "application/json",
+            CATEGORY_METADATA,
+            USE_INDEX,
+            REPLACEABILITY_REPLACEABLE,
+        ),
+        30041 => NostrMimeType::new(
+            "text/plain",
+            CATEGORY_ARTICLE,
+            USE_PUBLICATION_CONTENT,
+            REPLACEABILITY_REPLACEABLE,
+        ),
+        30042 => NostrMimeType::new(
+            "application/json",
+            CATEGORY_METADATA,
+            USE_DIRECTORY,
+            REPLACEABILITY_REPLACEABLE,
+        ),
+        30043 => NostrMimeType::new(
+            "application/json",
+            CATEGORY_METADATA,
+            USE_DIRECTORY,
+            REPLACEABILITY_REPLACEABLE,
+        ),
+        30044 => NostrMimeType::new(
+            "application/json",
+            CATEGORY_METADATA,
+            USE_DIRECTORY,
+            REPLACEABILITY_REPLACEABLE,
+        ),
+        30045 => NostrMimeType::new(
+            "application/json",
+            CATEGORY_METADATA,
+            USE_DIRECTORY,
+            REPLACEABILITY_REPLACEABLE,
+        ),
+        30818 => NostrMimeType::new(
+            "text/plain",
+            CATEGORY_ARTICLE,
+            USE_WIKI,
+            REPLACEABILITY_REPLACEABLE,
+        ),
+        30009 => NostrMimeType::new(
+            "application/json",
+            CATEGORY_METADATA,
+            USE_BADGE,
+            REPLACEABILITY_REPLACEABLE,
+        ),
+        8 => NostrMimeType::new(
+            "application/json",
+            CATEGORY_SOCIAL,
+            USE_BADGE,
+            REPLACEABILITY_NONREPLACEABLE,
+        ),
         _ => {
             let replaceability = if is_replaceable_kind(kind) {
                 REPLACEABILITY_REPLACEABLE
@@ -269,11 +233,7 @@ pub fn generate_nostr_m_tag(kind: u16) -> Tag {
 /// let tag_value = build_mime_filter_tag("article", "wiki", true);
 /// // Returns "article/wiki/replaceable"
 /// ```
-pub fn build_mime_filter_tag(
-    category: &str,
-    use_case: &str,
-    replaceable: bool,
-) -> String {
+pub fn build_mime_filter_tag(category: &str, use_case: &str, replaceable: bool) -> String {
     let replaceability = if replaceable {
         REPLACEABILITY_REPLACEABLE
     } else {
@@ -316,13 +276,12 @@ pub fn extract_mime_from_event(event: &Event) -> Option<NostrMimeType> {
             _ => {}
         }
     }
-    nostr_mime
-        .map(|mut mime| {
-            if let Some(std) = standard {
-                mime.standard = std;
-            }
-            mime
-        })
+    nostr_mime.map(|mut mime| {
+        if let Some(std) = standard {
+            mime.standard = std;
+        }
+        mime
+    })
 }
 #[cfg(test)]
 mod tests {

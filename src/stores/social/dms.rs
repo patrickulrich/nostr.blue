@@ -25,7 +25,9 @@ static DECRYPT_CACHE: OnceLock<Mutex<LruCache<EventId, DecryptResult>>> = OnceLo
 
 fn get_decrypt_cache() -> &'static Mutex<LruCache<EventId, DecryptResult>> {
     DECRYPT_CACHE.get_or_init(|| {
-        Mutex::new(LruCache::new(NonZeroUsize::new(MAX_DECRYPT_CACHE_SIZE).unwrap()))
+        Mutex::new(LruCache::new(
+            NonZeroUsize::new(MAX_DECRYPT_CACHE_SIZE).unwrap(),
+        ))
     })
 }
 
@@ -34,7 +36,10 @@ const RETRY_COOLDOWN_SECS: u64 = 10;
 /// Clear DM caches (called on logout/account switch)
 pub fn clear_caches() {
     CONVERSATIONS.read().data().write().clear();
-    get_decrypt_cache().lock().unwrap_or_else(|e| e.into_inner()).clear();
+    get_decrypt_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
 }
 
 /// Represents a message in a conversation, handling NIP-04 and NIP-17
@@ -43,7 +48,11 @@ pub enum ConversationMessage {
     /// NIP-04 legacy encrypted direct message
     Nip04 { event: Event },
     /// NIP-17 gift wrap message with unwrapped data
-    Nip17 { gift_wrap: Event, rumor: UnsignedEvent, sender: PublicKey },
+    Nip17 {
+        gift_wrap: Event,
+        rumor: UnsignedEvent,
+        sender: PublicKey,
+    },
 }
 impl ConversationMessage {
     /// Get a unique identifier for this message (for keying in UI lists)
@@ -88,9 +97,8 @@ pub struct ConversationsStore {
     pub data: HashMap<String, Conversation>,
 }
 /// Global store to track DM conversations
-pub static CONVERSATIONS: GlobalSignal<Store<ConversationsStore>> = Signal::global(|| Store::new(
-    ConversationsStore::default(),
-));
+pub static CONVERSATIONS: GlobalSignal<Store<ConversationsStore>> =
+    Signal::global(|| Store::new(ConversationsStore::default()));
 /// Initialize DMs by fetching conversations from relays
 pub async fn init_dms() -> Result<(), String> {
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
@@ -99,15 +107,18 @@ pub async fn init_dms() -> Result<(), String> {
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-    let pubkey = PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     log::info!("Loading DMs for {}", pubkey_str);
     let dm_relays = relay::specialty::ensure_dm_relays_connected(&client).await;
     if dm_relays.is_empty() {
         CONVERSATIONS.read().data().write().clear();
         return Err("No DM relays could be connected".to_string());
     }
-    log::info!("Using {} connected DM relays: {:?}", dm_relays.len(), dm_relays);
+    log::info!(
+        "Using {} connected DM relays: {:?}",
+        dm_relays.len(),
+        dm_relays
+    );
     let received_nip04 = Filter::new()
         .kind(Kind::EncryptedDirectMessage)
         .pubkey(pubkey)
@@ -118,11 +129,24 @@ pub async fn init_dms() -> Result<(), String> {
         .limit(200);
     let nip17_all = Filter::new().kind(Kind::GiftWrap).pubkey(pubkey).limit(300);
     let (received_nip04_result, sent_nip04_result, nip17_all_result) = tokio::join!(
-        relay::connection::fetch_events_from_relays(& client, received_nip04, dm_relays
-        .clone(), Duration::from_secs(10)), relay::connection::fetch_events_from_relays(&
-        client, sent_nip04, dm_relays.clone(), Duration::from_secs(10)),
-        relay::connection::fetch_events_from_relays(& client, nip17_all, dm_relays
-        .clone(), Duration::from_secs(10))
+        relay::connection::fetch_events_from_relays(
+            &client,
+            received_nip04,
+            dm_relays.clone(),
+            Duration::from_secs(10)
+        ),
+        relay::connection::fetch_events_from_relays(
+            &client,
+            sent_nip04,
+            dm_relays.clone(),
+            Duration::from_secs(10)
+        ),
+        relay::connection::fetch_events_from_relays(
+            &client,
+            nip17_all,
+            dm_relays.clone(),
+            Duration::from_secs(10)
+        )
     );
     let mut all_messages = Vec::new();
     if let Ok(events) = received_nip04_result {
@@ -139,7 +163,8 @@ pub async fn init_dms() -> Result<(), String> {
     }
     if let Ok(events) = nip17_all_result {
         log::info!(
-            "Fetched {} NIP-17 DMs (gift wraps - both received and sent)", events.len()
+            "Fetched {} NIP-17 DMs (gift wraps - both received and sent)",
+            events.len()
         );
         all_messages.extend(events);
     } else if let Err(e) = nip17_all_result {
@@ -206,9 +231,7 @@ pub async fn init_dms() -> Result<(), String> {
             if other_pubkey.is_empty() {
                 continue;
             }
-            let conversation_msg = ConversationMessage::Nip04 {
-                event: msg,
-            };
+            let conversation_msg = ConversationMessage::Nip04 { event: msg };
             conversations
                 .entry(other_pubkey.clone())
                 .or_insert_with(|| Conversation {
@@ -236,10 +259,7 @@ pub async fn init_dms() -> Result<(), String> {
 ///
 /// The SDK's gossip feature automatically routes gift wraps to the correct
 /// NIP-17 relays based on the p-tag, eliminating the need for manual relay fetching.
-pub async fn send_dm(
-    recipient_pubkey: String,
-    content: String,
-) -> Result<PublishResult, String> {
+pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<PublishResult, String> {
     use nostr_sdk::EventBuilder;
     let client = nostr_client::NOSTR_CLIENT
         .read()
@@ -259,9 +279,16 @@ pub async fn send_dm(
         .get_public_key()
         .await
         .map_err(|e| format!("Failed to get sender pubkey: {}", e))?;
-    log::info!("Sending DM from {} to {}", sender_pk.to_hex(), recipient_pubkey);
+    log::info!(
+        "Sending DM from {} to {}",
+        sender_pk.to_hex(),
+        recipient_pubkey
+    );
     nostr_client::ensure_relays_ready(&client).await;
-    let filter = Filter::new().author(recipient_pk).kind(Kind::InboxRelays).limit(1);
+    let filter = Filter::new()
+        .author(recipient_pk)
+        .kind(Kind::InboxRelays)
+        .limit(1);
     let cached_events = client
         .database()
         .query(filter.clone())
@@ -293,14 +320,8 @@ pub async fn send_dm(
                 .to_string(),
         );
     }
-    let rumor = EventBuilder::private_msg_rumor(recipient_pk, content.clone())
-        .build(sender_pk);
-    let receiver_gift_wrap = EventBuilder::gift_wrap(
-            &signer,
-            &recipient_pk,
-            rumor.clone(),
-            [],
-        )
+    let rumor = EventBuilder::private_msg_rumor(recipient_pk, content.clone()).build(sender_pk);
+    let receiver_gift_wrap = EventBuilder::gift_wrap(&signer, &recipient_pk, rumor.clone(), [])
         .await
         .map_err(|e| format!("Failed to create receiver gift wrap: {}", e))?;
     let sender_gift_wrap = EventBuilder::gift_wrap(&signer, &sender_pk, rumor, [])
@@ -323,8 +344,10 @@ pub async fn send_dm(
     }
     let receiver_result = PublishResult::from_output(receiver_output);
     log::info!(
-        "Sent gift wrap to receiver: {} ({} success, {} failed)", receiver_result
-        .event_id, receiver_result.success_count(), receiver_result.failed_relays.len()
+        "Sent gift wrap to receiver: {} ({} success, {} failed)",
+        receiver_result.event_id,
+        receiver_result.success_count(),
+        receiver_result.failed_relays.len()
     );
     log::info!("Sending sender gift wrap via SDK gossip routing");
     let sender_output = client
@@ -333,8 +356,10 @@ pub async fn send_dm(
         .map_err(|e| format!("Failed to send sender copy: {}", e))?;
     let sender_result = PublishResult::from_output(sender_output);
     log::info!(
-        "Sent gift wrap to sender: {} ({} success, {} failed)", sender_result.event_id,
-        sender_result.success_count(), sender_result.failed_relays.len()
+        "Sent gift wrap to sender: {} ({} success, {} failed)",
+        sender_result.event_id,
+        sender_result.success_count(),
+        sender_result.failed_relays.len()
     );
     let mut successful_relays: Vec<String> = receiver_result
         .successful_relays
@@ -361,25 +386,27 @@ pub async fn send_dm(
         for (relay, error) in &combined_result.failed_relays {
             log::error!("Failed to send to {}: {}", relay, error);
         }
-        return Err(
-            format!(
-                "Failed to deliver DM to any relay. {} relays failed.",
-                combined_result.failed_relays.len(),
-            ),
-        );
+        return Err(format!(
+            "Failed to deliver DM to any relay. {} relays failed.",
+            combined_result.failed_relays.len(),
+        ));
     }
     if combined_result.success_count() < 2 {
         log::warn!(
-            "DM only delivered to {} relay(s) - low redundancy", combined_result
-            .success_count()
+            "DM only delivered to {} relay(s) - low redundancy",
+            combined_result.success_count()
         );
     }
     log::info!(
-        "DM sent: {} relays succeeded, {} failed", combined_result.success_count(),
+        "DM sent: {} relays succeeded, {} failed",
+        combined_result.success_count(),
         combined_result.failed_relays.len()
     );
     if let Err(e) = init_dms().await {
-        log::error!("Failed to refresh DM conversations after sending message: {}", e);
+        log::error!(
+            "Failed to refresh DM conversations after sending message: {}",
+            e
+        );
     }
     Ok(combined_result)
 }
@@ -394,7 +421,10 @@ pub async fn decrypt_dm(msg: &ConversationMessage) -> Result<String, NostrBlueEr
         return Err(NostrBlueError::Other("Invalid message type".to_string()));
     };
     if event.kind != Kind::EncryptedDirectMessage {
-        return Err(NostrBlueError::Other(format!("Unsupported message kind: {:?}", event.kind)));
+        return Err(NostrBlueError::Other(format!(
+            "Unsupported message kind: {:?}",
+            event.kind
+        )));
     }
     // Unencrypted NIP-04 content (no ?iv= parameter)
     if !event.content.contains("?iv=") {
@@ -402,13 +432,17 @@ pub async fn decrypt_dm(msg: &ConversationMessage) -> Result<String, NostrBlueEr
     }
     // Check decrypt cache first
     {
-        let mut cache = get_decrypt_cache().lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache = get_decrypt_cache()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if let Some(cached) = cache.get(&event.id) {
             match cached {
                 DecryptResult::Success(content) => return Ok(content.clone()),
                 DecryptResult::RetryableFailure(failed_at) => {
                     if failed_at.elapsed().as_secs() < RETRY_COOLDOWN_SECS {
-                        return Err(NostrBlueError::Other("Decryption failed, retrying soon".to_string()));
+                        return Err(NostrBlueError::Other(
+                            "Decryption failed, retrying soon".to_string(),
+                        ));
                     }
                     // Cooldown expired, fall through to retry
                 }
@@ -422,7 +456,9 @@ pub async fn decrypt_dm(msg: &ConversationMessage) -> Result<String, NostrBlueEr
             .iter()
             .find(|tag| tag.kind() == nostr_sdk::TagKind::p())
             .and_then(|tag| tag.content())
-            .ok_or(NostrBlueError::Other("No recipient found in sent message".to_string()))?
+            .ok_or(NostrBlueError::Other(
+                "No recipient found in sent message".to_string(),
+            ))?
             .to_string()
     } else {
         event.pubkey.to_string()
@@ -443,15 +479,22 @@ pub async fn decrypt_dm(msg: &ConversationMessage) -> Result<String, NostrBlueEr
     match signer.nip04_decrypt(&other_pk, &event.content).await {
         Ok(decrypted) => {
             log::debug!("Successfully decrypted NIP-04 message");
-            let mut cache = get_decrypt_cache().lock().unwrap_or_else(|e| e.into_inner());
+            let mut cache = get_decrypt_cache()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             cache.put(event.id, DecryptResult::Success(decrypted.clone()));
             Ok(decrypted)
         }
         Err(e) => {
             log::error!("Failed to decrypt NIP-04 message: {}", e);
-            let mut cache = get_decrypt_cache().lock().unwrap_or_else(|e| e.into_inner());
+            let mut cache = get_decrypt_cache()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             cache.put(event.id, DecryptResult::RetryableFailure(Instant::now()));
-            Err(NostrBlueError::Other(format!("Failed to decrypt NIP-04 message: {}", e)))
+            Err(NostrBlueError::Other(format!(
+                "Failed to decrypt NIP-04 message: {}",
+                e
+            )))
         }
     }
 }
@@ -468,11 +511,18 @@ pub fn get_conversations_sorted() -> Vec<Conversation> {
         .values()
         .cloned()
         .collect();
-    convos
-        .sort_by(|a, b| {
-            let last_a = a.messages.last().map(|m| m.created_at()).unwrap_or_default();
-            let last_b = b.messages.last().map(|m| m.created_at()).unwrap_or_default();
-            last_b.cmp(&last_a)
-        });
+    convos.sort_by(|a, b| {
+        let last_a = a
+            .messages
+            .last()
+            .map(|m| m.created_at())
+            .unwrap_or_default();
+        let last_b = b
+            .messages
+            .last()
+            .map(|m| m.created_at())
+            .unwrap_or_default();
+        last_b.cmp(&last_a)
+    });
     convos
 }

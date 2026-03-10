@@ -3,10 +3,10 @@
 //! Caches blind auth tokens per mint to avoid re-authentication.
 //! Implements TTL-based expiry and automatic refresh.
 #![allow(dead_code)]
+use super::utils::now_secs;
+use cdk_common::BlindAuthToken;
 use dioxus::prelude::*;
 use std::collections::HashMap;
-use cdk_common::BlindAuthToken;
-use super::utils::now_secs;
 /// Cached auth token with metadata
 #[derive(Debug, Clone)]
 pub struct CachedAuthToken {
@@ -22,7 +22,11 @@ pub struct CachedAuthToken {
 impl CachedAuthToken {
     /// Check if token is expired
     pub fn is_expired(&self) -> bool {
-        if let Some(exp) = self.expires_at { now_secs() >= exp } else { false }
+        if let Some(exp) = self.expires_at {
+            now_secs() >= exp
+        } else {
+            false
+        }
     }
     /// Check if token is still valid
     pub fn is_valid(&self) -> bool {
@@ -46,19 +50,17 @@ impl BlindAuthCache {
         }
     }
     /// Add a token for a mint
-    pub fn add_token(
-        &mut self,
-        mint_url: &str,
-        token: BlindAuthToken,
-        expires_at: Option<u64>,
-    ) {
+    pub fn add_token(&mut self, mint_url: &str, token: BlindAuthToken, expires_at: Option<u64>) {
         let cached = CachedAuthToken {
             token,
             cached_at: now_secs(),
             expires_at,
             use_count: 0,
         };
-        self.tokens.entry(mint_url.to_string()).or_default().push(cached);
+        self.tokens
+            .entry(mint_url.to_string())
+            .or_default()
+            .push(cached);
     }
     /// Add multiple tokens for a mint
     pub fn add_tokens(
@@ -126,15 +128,9 @@ pub const DEFAULT_TOKEN_TTL: u64 = 3600;
 /// Minimum tokens to request when replenishing
 pub const MIN_TOKEN_REQUEST: u32 = 5;
 /// Global blind auth token cache
-pub static BLIND_AUTH_CACHE: GlobalSignal<BlindAuthCache> = GlobalSignal::new(
-    BlindAuthCache::new,
-);
+pub static BLIND_AUTH_CACHE: GlobalSignal<BlindAuthCache> = GlobalSignal::new(BlindAuthCache::new);
 /// Add tokens to cache for a mint
-pub fn cache_tokens(
-    mint_url: &str,
-    tokens: Vec<BlindAuthToken>,
-    expires_at: Option<u64>,
-) {
+pub fn cache_tokens(mint_url: &str, tokens: Vec<BlindAuthToken>, expires_at: Option<u64>) {
     let token_count = tokens.len();
     let mut cache = BLIND_AUTH_CACHE.write();
     cache.add_tokens(mint_url, tokens, expires_at);
@@ -223,8 +219,7 @@ pub fn get_auth_cache_stats() -> AuthCacheStats {
     let cache = BLIND_AUTH_CACHE.read();
     let mut tokens_per_mint = HashMap::new();
     for (mint, tokens) in cache.tokens.iter() {
-        tokens_per_mint
-            .insert(mint.clone(), tokens.iter().filter(|t| t.is_valid()).count());
+        tokens_per_mint.insert(mint.clone(), tokens.iter().filter(|t| t.is_valid()).count());
     }
     AuthCacheStats {
         total_tokens: tokens_per_mint.values().sum(),

@@ -37,20 +37,17 @@ pub fn parse_checked_at_event(event: &Event) -> Option<i64> {
     if event.kind != Kind::from(APP_DATA_KIND) {
         return None;
     }
-    let has_correct_d_tag = event
-        .tags
-        .iter()
-        .any(|tag| {
-            if let Some(identifier) = tag.as_standardized() {
-                matches!(
-                    identifier,
-                    nostr_sdk::TagStandard::Identifier(d)
-                    if d == NOTIFICATION_CHECKED_AT_D_TAG
-                )
-            } else {
-                false
-            }
-        });
+    let has_correct_d_tag = event.tags.iter().any(|tag| {
+        if let Some(identifier) = tag.as_standardized() {
+            matches!(
+                identifier,
+                nostr_sdk::TagStandard::Identifier(d)
+                if d == NOTIFICATION_CHECKED_AT_D_TAG
+            )
+        } else {
+            false
+        }
+    });
     if !has_correct_d_tag {
         return None;
     }
@@ -71,21 +68,21 @@ mod tests {
         let event = builder.sign_with_keys(&keys).unwrap();
         assert_eq!(event.kind, Kind::from(APP_DATA_KIND));
         assert!(event.content.contains("1234567890"));
-        let has_d_tag = event
-            .tags
-            .iter()
-            .any(|tag| {
-                if let Some(identifier) = tag.as_standardized() {
-                    matches!(
-                        identifier,
-                        nostr_sdk::TagStandard::Identifier(d)
-                        if d == NOTIFICATION_CHECKED_AT_D_TAG
-                    )
-                } else {
-                    false
-                }
-            });
-        assert!(has_d_tag, "Event should have d-tag for notifications_checked_at");
+        let has_d_tag = event.tags.iter().any(|tag| {
+            if let Some(identifier) = tag.as_standardized() {
+                matches!(
+                    identifier,
+                    nostr_sdk::TagStandard::Identifier(d)
+                    if d == NOTIFICATION_CHECKED_AT_D_TAG
+                )
+            } else {
+                false
+            }
+        });
+        assert!(
+            has_d_tag,
+            "Event should have d-tag for notifications_checked_at"
+        );
         assert_eq!(event.created_at.as_secs(), timestamp as u64);
     }
     #[test]

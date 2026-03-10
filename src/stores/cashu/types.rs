@@ -183,14 +183,11 @@ impl SendOptions {
         use cdk::nuts::PublicKey;
         use cdk::nuts::SpendingConditions;
         use cdk::wallet::SendOptions as CdkSendOptions;
-        let conditions = self
-            .p2pk_pubkey
-            .as_ref()
-            .and_then(|pk| {
-                PublicKey::from_hex(pk)
-                    .ok()
-                    .map(|key| SpendingConditions::new_p2pk(key, None))
-            });
+        let conditions = self.p2pk_pubkey.as_ref().and_then(|pk| {
+            PublicKey::from_hex(pk)
+                .ok()
+                .map(|key| SpendingConditions::new_p2pk(key, None))
+        });
         CdkSendOptions {
             conditions,
             include_fee: self.include_fee,
@@ -470,24 +467,42 @@ impl MeltQuoteInfo {
 #[derive(Clone, Debug, PartialEq)]
 pub enum MeltProgress {
     CreatingQuote,
-    QuoteCreated { quote_id: String, amount: u64, fee_reserve: u64 },
+    QuoteCreated {
+        quote_id: String,
+        amount: u64,
+        fee_reserve: u64,
+    },
     PreparingPayment,
     PayingInvoice,
     WaitingForConfirmation,
-    Completed { total_paid: u64, fee_paid: u64, preimage: Option<String> },
-    Failed { error: String },
+    Completed {
+        total_paid: u64,
+        fee_paid: u64,
+        preimage: Option<String>,
+    },
+    Failed {
+        error: String,
+    },
 }
 /// Transfer progress tracking
 #[derive(Clone, Debug, PartialEq)]
 pub enum TransferProgress {
     CreatingMintQuote,
     CreatingMeltQuote,
-    QuotesReady { amount: u64, fee_estimate: u64 },
+    QuotesReady {
+        amount: u64,
+        fee_estimate: u64,
+    },
     Melting,
     WaitingForPayment,
     Minting,
-    Completed { amount_received: u64, fees_paid: u64 },
-    Failed { error: String },
+    Completed {
+        amount_received: u64,
+        fees_paid: u64,
+    },
+    Failed {
+        error: String,
+    },
 }
 /// Transfer result
 #[derive(Clone, Debug)]
@@ -675,21 +690,18 @@ impl WalletTokensStore {
     /// Get balance breakdown (available, pending) in single pass
     /// This is the primary balance computation - other methods delegate to this
     pub fn balance_breakdown(&self) -> (u64, u64) {
-        self.data
-            .iter()
-            .flat_map(|token| &token.proofs)
-            .fold(
-                (0u64, 0u64),
-                |(avail, pend), proof| {
-                    if proof.state.is_spendable() {
-                        (avail + proof.amount, pend)
-                    } else if proof.state.is_pending() {
-                        (avail, pend + proof.amount)
-                    } else {
-                        (avail, pend)
-                    }
-                },
-            )
+        self.data.iter().flat_map(|token| &token.proofs).fold(
+            (0u64, 0u64),
+            |(avail, pend), proof| {
+                if proof.state.is_spendable() {
+                    (avail + proof.amount, pend)
+                } else if proof.state.is_pending() {
+                    (avail, pend + proof.amount)
+                } else {
+                    (avail, pend)
+                }
+            },
+        )
     }
 }
 /// Store for wallet history with fine-grained reactivity

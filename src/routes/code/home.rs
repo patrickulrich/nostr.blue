@@ -1050,13 +1050,17 @@ fn DeveloperCard(rank: usize, developer: TopDeveloper) -> Element {
         let name = profile
             .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
             .unwrap_or_else(|| truncate_pubkey(&pubkey));
-        let avatar = profile
-            .and_then(|p| p.picture.clone())
-            .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", pubkey));
+        let avatar = profile.and_then(|p| p.picture.clone()).unwrap_or_else(|| {
+            format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", pubkey)
+        });
         (name, avatar)
     };
 
-    let suffix = if developer.contribution_count == 1 { "" } else { "s" };
+    let suffix = if developer.contribution_count == 1 {
+        ""
+    } else {
+        "s"
+    };
 
     rsx! {
         Link {

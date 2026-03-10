@@ -97,7 +97,9 @@ pub fn CodePullNew(naddr: String) -> Element {
     let handle_submit = {
         let naddr = naddr.clone();
         move |_| {
-            if *is_publishing.peek() { return; }
+            if *is_publishing.peek() {
+                return;
+            }
             let content_val = content.read().clone();
             let commit_val = commit.read().trim().to_string();
             let parent_val = parent_commit.read().trim().to_string();
@@ -111,17 +113,27 @@ pub fn CodePullNew(naddr: String) -> Element {
                 return;
             }
             if !branch_val.is_empty() && !is_valid_git_refname(&branch_val) {
-                error_message.set(Some(format!("Invalid branch name '{}': contains invalid characters", branch_val)));
+                error_message.set(Some(format!(
+                    "Invalid branch name '{}': contains invalid characters",
+                    branch_val
+                )));
                 return;
             }
             let closes_list: Vec<String> = if closes_val.is_empty() {
                 vec![]
             } else {
-                closes_val.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+                closes_val
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
             };
             for id in &closes_list {
                 if nostr_sdk::EventId::from_hex(id).is_err() {
-                    error_message.set(Some(format!("Invalid event ID '{}': must be exactly 64 hex characters", id)));
+                    error_message.set(Some(format!(
+                        "Invalid event ID '{}': must be exactly 64 hex characters",
+                        id
+                    )));
                     return;
                 }
             }
@@ -131,14 +143,20 @@ pub fn CodePullNew(naddr: String) -> Element {
                 let label_list: Vec<&str> = if labels_val.is_empty() {
                     vec![]
                 } else {
-                    labels_val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
+                    labels_val
+                        .split(',')
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .collect()
                 };
                 let (commit_ref, parent_ref) = if is_cover {
                     (None, None)
                 } else {
                     let cr = if commit_val.is_empty() {
                         None
-                    } else if (commit_val.len() != 40 && commit_val.len() != 64) || !commit_val.chars().all(|c| c.is_ascii_hexdigit()) {
+                    } else if (commit_val.len() != 40 && commit_val.len() != 64)
+                        || !commit_val.chars().all(|c| c.is_ascii_hexdigit())
+                    {
                         error_message.set(Some(format!("Invalid commit hash '{}': must be exactly 40 (SHA-1) or 64 (SHA-256) hex characters", commit_val)));
                         is_publishing.set(false);
                         return;
@@ -147,7 +165,9 @@ pub fn CodePullNew(naddr: String) -> Element {
                     };
                     let pr = if parent_val.is_empty() {
                         None
-                    } else if (parent_val.len() != 40 && parent_val.len() != 64) || !parent_val.chars().all(|c| c.is_ascii_hexdigit()) {
+                    } else if (parent_val.len() != 40 && parent_val.len() != 64)
+                        || !parent_val.chars().all(|c| c.is_ascii_hexdigit())
+                    {
                         error_message.set(Some(format!("Invalid parent commit hash '{}': must be exactly 40 (SHA-1) or 64 (SHA-256) hex characters", parent_val)));
                         is_publishing.set(false);
                         return;
@@ -163,21 +183,19 @@ pub fn CodePullNew(naddr: String) -> Element {
                 };
                 let closes_refs: Vec<&str> = closes_list.iter().map(|s| s.as_str()).collect();
                 match publish_patch_by_naddr(
-                        &naddr,
-                        &content_val,
-                        commit_ref,
-                        parent_ref,
-                        is_cover,
-                        &label_list,
-                        &closes_refs,
-                        branch_ref,
-                    )
-                    .await
+                    &naddr,
+                    &content_val,
+                    commit_ref,
+                    parent_ref,
+                    is_cover,
+                    &label_list,
+                    &closes_refs,
+                    branch_ref,
+                )
+                .await
                 {
                     Ok(event_id) => {
-                        nav.push(Route::CodePullDetail {
-                            note_id: event_id,
-                        });
+                        nav.push(Route::CodePullDetail { note_id: event_id });
                     }
                     Err(e) => {
                         error_message.set(Some(e));
