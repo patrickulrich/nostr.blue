@@ -90,7 +90,7 @@ reviews:
             - JNI security when communicating with Android signer apps (NIP-55)
           - **Performance**: Bottlenecks, inefficient algorithms, or unnecessary allocations, especially:
             - WASM binary size optimizations (avoid bloat from unused dependencies)
-            - Unnecessary clones or allocations (use references where possible)
+            - Unnecessary clones or allocations (use references where possible in non-component/business-logic code; Dioxus components in this repo intentionally prefer owned props and cheap String clones)
             - Database query efficiency for both IndexedDB (WASM) and nostr-ndb (native)
             - CDK wallet: atomic IndexedDB transactions (WASM) vs SQLite transactions (native)
             - Keyset counter persistence: IndexedDB vs SQLite mechanisms

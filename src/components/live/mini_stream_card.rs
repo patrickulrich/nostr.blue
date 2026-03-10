@@ -61,7 +61,24 @@ pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
     let naddr = coord
         .to_bech32()
         .unwrap_or_else(|_| format!("30311:{}:{}", event.pubkey, stream_meta.d_tag));
-    let mut author_metadata = use_signal(move || profiles::get_profile(&author_pubkey_for_fetch));
+    let author_metadata = use_memo(move || {
+        let cache = profiles::PROFILE_CACHE.read();
+        cache.peek(&author_pubkey_for_fetch).map(|profile| {
+            let mut metadata = nostr_sdk::Metadata::new();
+            if let Some(name) = &profile.name {
+                metadata = metadata.name(name);
+            }
+            if let Some(display_name) = &profile.display_name {
+                metadata = metadata.display_name(display_name);
+            }
+            if let Some(picture) = &profile.picture {
+                if let Ok(url) = nostr_sdk::Url::parse(picture) {
+                    metadata = metadata.picture(url);
+                }
+            }
+            metadata
+        })
+    });
     use_effect(use_reactive(
         (&author_pubkey, &*CLIENT_INITIALIZED.read()),
         move |(pk, client_initialized)| {
@@ -69,9 +86,7 @@ pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
                 return;
             }
             spawn(async move {
-                if profiles::fetch_profile(pk.clone()).await.is_ok() {
-                    author_metadata.set(profiles::get_profile(&pk));
-                }
+                let _ = profiles::fetch_profile(pk.clone()).await;
             });
         },
     ));

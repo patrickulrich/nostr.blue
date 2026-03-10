@@ -75,14 +75,15 @@ pub fn CommunityPostComposer(
                 }
                 #[cfg(not(feature = "web"))]
                 {
-                    // TODO: Implement crate::platform::dialog::confirm_discard for native
-                    // For now, require manual content deletion to prevent accidental data loss
-                    // Show user-visible feedback
-                    error.set(Some(
-                        "Discard not supported on this platform — please delete content manually"
-                            .to_string(),
-                    ));
-                    false
+                    if !has_signer {
+                        true
+                    } else {
+                        error.set(Some(
+                            "Discard not supported on this platform — please delete content manually"
+                                .to_string(),
+                        ));
+                        false
+                    }
                 }
             };
             if confirmed {

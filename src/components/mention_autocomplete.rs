@@ -275,7 +275,7 @@ fn detect_mention(
                 match search_profiles(&query_snapshot, 10, query_relays).await {
                     Ok(results) => {
                         if query_signal.read().as_str() == query_snapshot.as_str() {
-                            let merged: Vec<_> = results
+                            let mut merged: Vec<_> = results
                                 .into_iter()
                                 .map(|mut r| {
                                     // Check cached results for thread participant flag
@@ -296,6 +296,7 @@ fn detect_mention(
                                     r
                                 })
                                 .collect();
+                            merged.sort_by(|a, b| b.relevance.cmp(&a.relevance));
                             results_signal.set(merged);
                             searching_signal.set(false);
                         } else {

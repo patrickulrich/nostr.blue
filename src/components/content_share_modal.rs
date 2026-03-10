@@ -106,21 +106,24 @@ pub fn ContentShareModal(
     let mut cursor_position = use_signal(|| 0usize);
     let textarea_id = use_signal(|| format!("content-share-textarea-{}", modal_id()));
     #[allow(unused_variables)]
-    fn get_cursor_position(textarea_id: &str, current_text: &str) -> usize {
+    fn get_cursor_position(textarea_id: &str, current_text: &str) -> Option<usize> {
         #[cfg(feature = "web")]
         {
             if let Some(window) = web_sys::window() {
                 if let Some(document) = window.document() {
                     if let Some(element) = document.get_element_by_id(textarea_id) {
                         if let Some(textarea) = element.dyn_ref::<web_sys::HtmlTextAreaElement>() {
-                            return textarea.selection_start().unwrap_or(Some(0)).unwrap_or(0)
-                                as usize;
+                            return Some(
+                                textarea.selection_start().unwrap_or(Some(0)).unwrap_or(0)
+                                    as usize,
+                            );
                         }
                     }
                 }
             }
         }
-        current_text.encode_utf16().count()
+        let _ = current_text;
+        None
     }
     fn utf16_to_utf8_index(text: &str, utf16_index: usize) -> usize {
         let mut utf8_index = 0;
@@ -450,21 +453,24 @@ pub fn ContentShareModal(
                                 oninput: move |e| {
                                     nostr_text.set(e.value().clone());
                                     nostr_error.set(None);
-                                    let pos = get_cursor_position(&textarea_id.read(), &e.value());
-                                    let utf8_pos = utf16_to_utf8_index(&e.value(), pos);
-                                    cursor_position.set(utf8_pos);
+                                    if let Some(pos) = get_cursor_position(&textarea_id.read(), &e.value()) {
+                                        let utf8_pos = utf16_to_utf8_index(&e.value(), pos);
+                                        cursor_position.set(utf8_pos);
+                                    }
                                 },
                                 onclick: move |_| {
                                     let text = nostr_text.read();
-                                    let pos = get_cursor_position(&textarea_id.read(), &text);
-                                    let utf8_pos = utf16_to_utf8_index(&text, pos);
-                                    cursor_position.set(utf8_pos);
+                                    if let Some(pos) = get_cursor_position(&textarea_id.read(), &text) {
+                                        let utf8_pos = utf16_to_utf8_index(&text, pos);
+                                        cursor_position.set(utf8_pos);
+                                    }
                                 },
                                 onkeyup: move |_| {
                                     let text = nostr_text.read();
-                                    let pos = get_cursor_position(&textarea_id.read(), &text);
-                                    let utf8_pos = utf16_to_utf8_index(&text, pos);
-                                    cursor_position.set(utf8_pos);
+                                    if let Some(pos) = get_cursor_position(&textarea_id.read(), &text) {
+                                        let utf8_pos = utf16_to_utf8_index(&text, pos);
+                                        cursor_position.set(utf8_pos);
+                                    }
                                 },
                             }
                             if let Some(error) = nostr_error.read().as_ref() {
@@ -521,30 +527,32 @@ pub fn ContentShareModal(
                                 }
                             }
                             div { class: "flex items-center gap-2",
-                                button {
-                                    class: if *show_image_uploader.read() { "p-2 rounded-full bg-primary text-primary-foreground transition" } else { "p-2 rounded-full hover:bg-accent transition" },
-                                    title: "Add media",
-                                    onclick: move |_| {
-                                        let current = *show_image_uploader.read();
-                                        show_image_uploader.set(!current);
-                                    },
-                                    disabled: *is_publishing.read(),
-                                    CameraIcon { class: "w-5 h-5" }
-                                }
-                                EmojiPicker {
-                                    on_emoji_selected: handle_emoji_selected,
-                                    icon_only: true,
-                                }
-                                GifPicker {
-                                    on_gif_selected: handle_gif_selected,
-                                    icon_only: true,
-                                }
-                                button {
-                                    class: "p-2 rounded-full hover:bg-accent transition",
-                                    title: "Create poll",
-                                    onclick: move |_| show_poll_modal.set(true),
-                                    disabled: *is_publishing.read(),
-                                    BarChartIcon { class: "w-5 h-5" }
+                                if cfg!(feature = "web") {
+                                    button {
+                                        class: if *show_image_uploader.read() { "p-2 rounded-full bg-primary text-primary-foreground transition" } else { "p-2 rounded-full hover:bg-accent transition" },
+                                        title: "Add media",
+                                        onclick: move |_| {
+                                            let current = *show_image_uploader.read();
+                                            show_image_uploader.set(!current);
+                                        },
+                                        disabled: *is_publishing.read(),
+                                        CameraIcon { class: "w-5 h-5" }
+                                    }
+                                    EmojiPicker {
+                                        on_emoji_selected: handle_emoji_selected,
+                                        icon_only: true,
+                                    }
+                                    GifPicker {
+                                        on_gif_selected: handle_gif_selected,
+                                        icon_only: true,
+                                    }
+                                    button {
+                                        class: "p-2 rounded-full hover:bg-accent transition",
+                                        title: "Create poll",
+                                        onclick: move |_| show_poll_modal.set(true),
+                                        disabled: *is_publishing.read(),
+                                        BarChartIcon { class: "w-5 h-5" }
+                                    }
                                 }
                             }
                             button {

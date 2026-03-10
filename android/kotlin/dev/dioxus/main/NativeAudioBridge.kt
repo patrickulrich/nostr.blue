@@ -349,6 +349,7 @@ object NativeAudioBridge {
                         prepareCurrent(true)
                     } else {
                         playWhenReady = false
+                        releasePlayer()
                         updatePlaybackState(false, PlaybackState.STATE_STOPPED)
                         stopForegroundPlayback()
                         // Clear service state before updating notification to prevent re-triggering startForeground()
@@ -490,40 +491,34 @@ object NativeAudioBridge {
         if (service == null || item == null) {
             return
         }
-        val builder = Notification.Builder(context, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle(item.title)
             .setContentText(item.artist)
             .setStyle(
-                Notification.MediaStyle()
+                androidx.media.app.NotificationCompat.MediaStyle()
                     .setMediaSession(mediaSession?.sessionToken)
                     .setShowActionsInCompactView(0, 1, 2)
             )
             .setOnlyAlertOnce(true)
             .setOngoing(player?.isPlaying == true || (isPreparing && playWhenReady))
             .addAction(
-                Notification.Action.Builder(
-                    android.R.drawable.ic_media_previous,
-                    "Previous",
-                    serviceIntent(context, ACTION_PREVIOUS)
-                ).build()
+                android.R.drawable.ic_media_previous,
+                "Previous",
+                serviceIntent(context, ACTION_PREVIOUS)
             )
             .addAction(
-                Notification.Action.Builder(
-                    if (player?.isPlaying == true || (isPreparing && playWhenReady)) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
-                    if (player?.isPlaying == true || (isPreparing && playWhenReady)) "Pause" else "Play",
-                    serviceIntent(
-                        context,
-                        if (player?.isPlaying == true || (isPreparing && playWhenReady)) ACTION_PAUSE else ACTION_PLAY
-                    )
-                ).build()
+                if (player?.isPlaying == true || (isPreparing && playWhenReady)) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+                if (player?.isPlaying == true || (isPreparing && playWhenReady)) "Pause" else "Play",
+                serviceIntent(
+                    context,
+                    if (player?.isPlaying == true || (isPreparing && playWhenReady)) ACTION_PAUSE else ACTION_PLAY
+                )
             )
             .addAction(
-                Notification.Action.Builder(
-                    android.R.drawable.ic_media_next,
-                    "Next",
-                    serviceIntent(context, ACTION_NEXT)
-                ).build()
+                android.R.drawable.ic_media_next,
+                "Next",
+                serviceIntent(context, ACTION_NEXT)
             )
 
         service.startForeground(NOTIFICATION_ID, builder.build())

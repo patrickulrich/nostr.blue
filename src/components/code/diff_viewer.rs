@@ -744,6 +744,7 @@ fn parse_diff_content(content: &str) -> ParsedDiff {
     let mut in_header = false;
 
     let mut binary_hint: Option<String> = None;
+    let mut header_summary: Vec<String> = Vec::new();
 
     for line in &lines {
         if line.starts_with("diff --git") {
@@ -752,6 +753,7 @@ fn parse_diff_content(content: &str) -> ParsedDiff {
                 if current_lines.is_empty() {
                     let info_text = binary_hint
                         .take()
+                        .or_else(|| (!header_summary.is_empty()).then(|| header_summary.join(" • ")))
                         .unwrap_or_else(|| "(Binary file or file metadata changed)".to_string());
                     current_lines.push(DiffLine {
                         kind: LineKind::Info,
@@ -771,22 +773,27 @@ fn parse_diff_content(content: &str) -> ParsedDiff {
                 });
             }
             binary_hint = None;
+            header_summary.clear();
             current_file = extract_file_path(line).map(|s| s.to_string());
             in_header = true;
             continue;
         }
 
         if in_header
-            && (line.starts_with("--- ")
-                || line.starts_with("+++ ")
-                || line.starts_with("index ")
-                || line.starts_with("old mode")
+            && (line.starts_with("--- ") || line.starts_with("+++ ") || line.starts_with("index "))
+        {
+            continue;
+        }
+
+        if in_header
+            && (line.starts_with("old mode")
                 || line.starts_with("new mode")
                 || line.starts_with("new file")
                 || line.starts_with("deleted file")
                 || line.starts_with("similarity")
                 || line.starts_with("rename"))
         {
+            header_summary.push(line.to_string());
             continue;
         }
 
@@ -868,6 +875,7 @@ fn parse_diff_content(content: &str) -> ParsedDiff {
         if current_lines.is_empty() {
             let info_text = binary_hint
                 .take()
+                .or_else(|| (!header_summary.is_empty()).then(|| header_summary.join(" • ")))
                 .unwrap_or_else(|| "(Binary file or file metadata changed)".to_string());
             current_lines.push(DiffLine {
                 kind: LineKind::Info,

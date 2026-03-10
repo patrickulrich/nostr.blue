@@ -98,6 +98,7 @@ pub fn PersistentMusicPlayer() -> Element {
         move |(current_track, is_playing)| {
             // Rotate token FIRST to invalidate any pending bind tasks
             native_source_bound.set(false);
+            let previous_bind_token = *native_bind_token.peek();
             let bind_token = native_bind_token.with_mut(|token| {
                 *token = token.wrapping_add(1);
                 *token
@@ -107,7 +108,7 @@ pub fn PersistentMusicPlayer() -> Element {
             let Some(track) = current_track.as_ref() else {
                 // Clean up existing playback before returning
                 // Capture bind token to fence the cleanup
-                let bind_token = *native_bind_token.peek();
+                let bind_token = previous_bind_token;
                 spawn(async move {
                     let audio_id_json = serde_json::to_string(&"global-music-player-audio")
                         .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());

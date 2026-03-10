@@ -1,6 +1,6 @@
 //! Clone Help Modal Component
 //!
-//! Shows tabbed clone instructions for SSH, HTTPS, and Nostr protocols.
+//! Shows tabbed clone instructions for SSH, HTTP(S), and Nostr protocols.
 use crate::utils::clipboard::copy_to_clipboard;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
@@ -106,7 +106,7 @@ pub fn CloneHelpModal(
                             }
                         }
                     },
-                    TabButton { label: "HTTPS", tab_id: "https", active_tab: active_tab }
+                    TabButton { label: "HTTP(S)", tab_id: "https", active_tab: active_tab }
                     TabButton { label: "SSH", tab_id: "ssh", active_tab: active_tab }
                     if !git_urls.is_empty() {
                         TabButton { label: "Git", tab_id: "git", active_tab: active_tab }
@@ -148,7 +148,7 @@ pub fn CloneHelpModal(
                         },
                         _ => rsx! {
                             if https_urls.is_empty() {
-                                p { class: "text-sm text-muted-foreground py-4 text-center", "No HTTPS clone URLs available." }
+                                p { class: "text-sm text-muted-foreground py-4 text-center", "No HTTP(S) clone URLs available." }
                             } else {
                                 for url in https_urls.iter() {
                                     CloneUrlRow { key: "{url}", url: url.to_string() }

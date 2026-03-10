@@ -22,6 +22,80 @@ use nostr_sdk::{Event as NostrEvent, Filter, Kind, PublicKey, Timestamp, ToBech3
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::Duration;
+
+trait ProfileMetadataView {
+    fn name(&self) -> Option<&str>;
+    fn display_name(&self) -> Option<&str>;
+    fn about(&self) -> Option<&str>;
+    fn picture(&self) -> Option<&str>;
+    fn banner(&self) -> Option<&str>;
+    fn website(&self) -> Option<&str>;
+    fn nip05(&self) -> Option<&str>;
+    fn lud16(&self) -> Option<&str>;
+    fn lud06(&self) -> Option<&str>;
+}
+
+impl ProfileMetadataView for crate::stores::profiles::Profile {
+    fn name(&self) -> Option<&str> { self.name.as_deref() }
+    fn display_name(&self) -> Option<&str> { self.display_name.as_deref() }
+    fn about(&self) -> Option<&str> { self.about.as_deref() }
+    fn picture(&self) -> Option<&str> { self.picture.as_deref() }
+    fn banner(&self) -> Option<&str> { self.banner.as_deref() }
+    fn website(&self) -> Option<&str> { self.website.as_deref() }
+    fn nip05(&self) -> Option<&str> { self.nip05.as_deref() }
+    fn lud16(&self) -> Option<&str> { self.lud16.as_deref() }
+    fn lud06(&self) -> Option<&str> { self.lud06.as_deref() }
+}
+
+impl ProfileMetadataView for nostr_sdk::Metadata {
+    fn name(&self) -> Option<&str> { self.name.as_deref() }
+    fn display_name(&self) -> Option<&str> { self.display_name.as_deref() }
+    fn about(&self) -> Option<&str> { self.about.as_deref() }
+    fn picture(&self) -> Option<&str> { self.picture.as_deref() }
+    fn banner(&self) -> Option<&str> { self.banner.as_deref() }
+    fn website(&self) -> Option<&str> { self.website.as_deref() }
+    fn nip05(&self) -> Option<&str> { self.nip05.as_deref() }
+    fn lud16(&self) -> Option<&str> { self.lud16.as_deref() }
+    fn lud06(&self) -> Option<&str> { self.lud06.as_deref() }
+}
+
+fn metadata_from_profile_like<T: ProfileMetadataView>(profile: &T) -> nostr_sdk::Metadata {
+    let mut metadata = nostr_sdk::Metadata::new();
+    if let Some(name) = profile.name() {
+        metadata = metadata.name(name);
+    }
+    if let Some(display_name) = profile.display_name() {
+        metadata = metadata.display_name(display_name);
+    }
+    if let Some(about) = profile.about() {
+        metadata = metadata.about(about);
+    }
+    if let Some(picture) = profile.picture() {
+        if let Ok(url) = nostr_sdk::Url::parse(picture) {
+            metadata = metadata.picture(url);
+        }
+    }
+    if let Some(banner) = profile.banner() {
+        if let Ok(url) = nostr_sdk::Url::parse(banner) {
+            metadata = metadata.banner(url);
+        }
+    }
+    if let Some(website) = profile.website() {
+        if let Ok(url) = nostr_sdk::Url::parse(website) {
+            metadata = metadata.website(url);
+        }
+    }
+    if let Some(nip05) = profile.nip05() {
+        metadata = metadata.nip05(nip05);
+    }
+    if let Some(lud16) = profile.lud16() {
+        metadata = metadata.lud16(lud16);
+    }
+    if let Some(lud06) = profile.lud06() {
+        metadata = metadata.lud06(lud06);
+    }
+    metadata
+}
 #[component]
 pub fn NoteCard(
     event: NostrEvent,
@@ -68,6 +142,8 @@ pub fn NoteCard(
     );
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
     let mut reposter_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+    let mut author_metadata_gen = use_signal(|| 0u32);
+    let mut reposter_metadata_gen = use_signal(|| 0u32);
     use_effect(use_reactive(&precomputed_counts, move |counts_opt| {
         if let Some(counts) = counts_opt {
             reply_count.set(counts.replies);
@@ -82,16 +158,22 @@ pub fn NoteCard(
     use_effect(use_reactive(
         &(event_id_counts, has_precomputed),
         move |(event_id_for_counts, has_precomputed)| {
+            let current_gen = count_request_gen.peek().wrapping_add(1);
+            count_request_gen.set(current_gen);
             if has_precomputed {
                 return;
             }
+            reply_count.set(0);
+            repost_count.set(0);
+            zap_amount_sats.set(0);
+            is_reposted.set(false);
+            user_repost_id.set(None);
+            is_zapped.set(false);
             // Read SIGNER_INFO synchronously so the effect tracks viewer changes
             let current_user_pubkey = SIGNER_INFO
                 .read()
                 .as_ref()
                 .map(|info| info.public_key.clone());
-            let current_gen = count_request_gen.peek().wrapping_add(1);
-            count_request_gen.set(current_gen);
             spawn(async move {
                 let client = match get_client() {
                     Some(c) => c,
@@ -216,81 +298,23 @@ pub fn NoteCard(
         },
     ));
     use_effect(use_reactive(&author_pubkey_for_fetch, move |pubkey_str| {
+        let current_gen = author_metadata_gen.peek().wrapping_add(1);
+        author_metadata_gen.set(current_gen);
         author_metadata.set(None);
         spawn(async move {
             if let Some(cached_profile) = crate::stores::profiles::get_cached_profile(&pubkey_str) {
-                let mut metadata = nostr_sdk::Metadata::new();
-                if let Some(name) = &cached_profile.name {
-                    metadata = metadata.name(name);
-                }
-                if let Some(display_name) = &cached_profile.display_name {
-                    metadata = metadata.display_name(display_name);
-                }
-                if let Some(about) = &cached_profile.about {
-                    metadata = metadata.about(about);
-                }
-                if let Some(picture) = &cached_profile.picture {
-                    if let Ok(url) = nostr_sdk::Url::parse(picture) {
-                        metadata = metadata.picture(url);
-                    }
-                }
-                if let Some(banner) = &cached_profile.banner {
-                    if let Ok(url) = nostr_sdk::Url::parse(banner) {
-                        metadata = metadata.banner(url);
-                    }
-                }
-                if let Some(website) = &cached_profile.website {
-                    if let Ok(url) = nostr_sdk::Url::parse(website) {
-                        metadata = metadata.website(url);
-                    }
-                }
-                if let Some(nip05) = &cached_profile.nip05 {
-                    metadata = metadata.nip05(nip05);
-                }
-                if let Some(lud16) = &cached_profile.lud16 {
-                    metadata = metadata.lud16(lud16);
-                }
-                if let Some(lud06) = &cached_profile.lud06 {
-                    metadata = metadata.lud06(lud06);
+                let metadata = metadata_from_profile_like(&cached_profile);
+                if *author_metadata_gen.peek() != current_gen {
+                    return;
                 }
                 author_metadata.set(Some(metadata));
                 return;
             }
             match crate::stores::profiles::fetch_profile(pubkey_str.clone()).await {
                 Ok(profile) => {
-                    let mut metadata = nostr_sdk::Metadata::new();
-                    if let Some(name) = &profile.name {
-                        metadata = metadata.name(name);
-                    }
-                    if let Some(display_name) = &profile.display_name {
-                        metadata = metadata.display_name(display_name);
-                    }
-                    if let Some(about) = &profile.about {
-                        metadata = metadata.about(about);
-                    }
-                    if let Some(picture) = &profile.picture {
-                        if let Ok(url) = nostr_sdk::Url::parse(picture) {
-                            metadata = metadata.picture(url);
-                        }
-                    }
-                    if let Some(banner) = &profile.banner {
-                        if let Ok(url) = nostr_sdk::Url::parse(banner) {
-                            metadata = metadata.banner(url);
-                        }
-                    }
-                    if let Some(website) = &profile.website {
-                        if let Ok(url) = nostr_sdk::Url::parse(website) {
-                            metadata = metadata.website(url);
-                        }
-                    }
-                    if let Some(nip05) = &profile.nip05 {
-                        metadata = metadata.nip05(nip05);
-                    }
-                    if let Some(lud16) = &profile.lud16 {
-                        metadata = metadata.lud16(lud16);
-                    }
-                    if let Some(lud06) = &profile.lud06 {
-                        metadata = metadata.lud06(lud06);
+                    let metadata = metadata_from_profile_like(&profile);
+                    if *author_metadata_gen.peek() != current_gen {
+                        return;
                     }
                     author_metadata.set(Some(metadata));
                 }
@@ -301,6 +325,8 @@ pub fn NoteCard(
         });
     }));
     use_effect(use_reactive(&repost_info, move |info_opt| {
+        let current_gen = reposter_metadata_gen.peek().wrapping_add(1);
+        reposter_metadata_gen.set(current_gen);
         reposter_metadata.set(None);
         if let Some((reposter_pubkey, _timestamp)) = info_opt {
             let reposter_pubkey_str = reposter_pubkey.to_string();
@@ -308,34 +334,18 @@ pub fn NoteCard(
                 if let Some(cached_profile) =
                     crate::stores::profiles::get_cached_profile(&reposter_pubkey_str)
                 {
-                    let mut metadata = nostr_sdk::Metadata::new();
-                    if let Some(name) = &cached_profile.name {
-                        metadata = metadata.name(name);
-                    }
-                    if let Some(display_name) = &cached_profile.display_name {
-                        metadata = metadata.display_name(display_name);
-                    }
-                    if let Some(picture) = &cached_profile.picture {
-                        if let Ok(url) = nostr_sdk::Url::parse(picture) {
-                            metadata = metadata.picture(url);
-                        }
+                    let metadata = metadata_from_profile_like(&cached_profile);
+                    if *reposter_metadata_gen.peek() != current_gen {
+                        return;
                     }
                     reposter_metadata.set(Some(metadata));
                     return;
                 }
                 match crate::stores::profiles::fetch_profile(reposter_pubkey_str.clone()).await {
                     Ok(profile) => {
-                        let mut metadata = nostr_sdk::Metadata::new();
-                        if let Some(name) = &profile.name {
-                            metadata = metadata.name(name);
-                        }
-                        if let Some(display_name) = &profile.display_name {
-                            metadata = metadata.display_name(display_name);
-                        }
-                        if let Some(picture) = &profile.picture {
-                            if let Ok(url) = nostr_sdk::Url::parse(picture) {
-                                metadata = metadata.picture(url);
-                            }
+                        let metadata = metadata_from_profile_like(&profile);
+                        if *reposter_metadata_gen.peek() != current_gen {
+                            return;
                         }
                         reposter_metadata.set(Some(metadata));
                     }

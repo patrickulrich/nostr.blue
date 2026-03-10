@@ -3,7 +3,7 @@
 use super::card::CitationCardCompact;
 use crate::components::icons::{SearchIcon, XIcon};
 use crate::stores::auth_store;
-use crate::stores::citation_store::{fetch_citations_by_author, CachedCitation, USER_CITATIONS};
+use crate::stores::citation_store::{load_citations_by_author, CachedCitation, USER_CITATIONS};
 use crate::utils::nkbip03::CitationStyle;
 use dioxus::prelude::*;
 use dioxus_core::Task;
@@ -42,6 +42,7 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
     let mut selected_style = use_signal(|| CitationStyle::End);
     let mut loading = use_signal(|| false);
     let mut load_version = use_signal(|| 0u64);
+    let mut citations = use_signal(Vec::<CachedCitation>::new);
     let user_pubkey = auth_store::get_pubkey();
     use_effect(use_reactive(
         (&*props.show.read(), &user_pubkey),
@@ -55,14 +56,25 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
                     loading.set(true);
                     let pk_clone = pk.clone();
                     spawn(async move {
-                        if let Err(e) = fetch_citations_by_author(&pk_clone, 100).await {
-                            crate::utils::log_fetch_error("citations", e);
-                        }
-                        if *load_version.peek() == version && *props.show.peek() {
-                            loading.set(false);
+                        match load_citations_by_author(&pk_clone, 100).await {
+                            Ok(group) => {
+                                if *load_version.peek() == version && *props.show.peek() {
+                                    let all = group.all();
+                                    citations.set(all);
+                                    *USER_CITATIONS.write() = group;
+                                    loading.set(false);
+                                }
+                            }
+                            Err(e) => {
+                                crate::utils::log_fetch_error("citations", e);
+                                if *load_version.peek() == version && *props.show.peek() {
+                                    loading.set(false);
+                                }
+                            }
                         }
                     });
                 } else {
+                    citations.set(Vec::new());
                     loading.set(false);
                 }
                 selected_citation.set(None);
@@ -81,6 +93,7 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
                 }
                 loading.set(false);
                 is_searching.set(false);
+                citations.set(Vec::new());
                 selected_citation.set(None);
                 selected_style.set(CitationStyle::End);
                 search_query.set(String::new());
@@ -104,7 +117,7 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
         let new_task = spawn(async move {
             crate::platform::timer::sleep_ms(150).await;
             if search_query.peek().as_str() == query_snapshot.as_str() {
-                let all_citations = USER_CITATIONS.read().all();
+                let all_citations = citations.read().clone();
                 let filtered: Vec<CachedCitation> = all_citations
                     .into_iter()
                     .filter(|c| {
@@ -125,7 +138,7 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
         if *active_tab.read() == PickerTab::Search && !search_query.read().is_empty() {
             search_results.read().clone()
         } else {
-            USER_CITATIONS.read().all()
+            citations.read().clone()
         }
     });
     let markup_preview = use_memo(move || {

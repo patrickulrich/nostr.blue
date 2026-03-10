@@ -139,7 +139,7 @@ pub static PROFILE_CACHE: GlobalSignal<LruCache<String, Profile>> =
 const CACHE_TTL_SECONDS: i64 = 24 * 60 * 60;
 /// Get a profile from cache only (synchronous)
 pub fn get_profile(pubkey: &str) -> Option<nostr_sdk::Metadata> {
-    PROFILE_CACHE.read().peek(pubkey).map(|profile| {
+    PROFILE_CACHE.peek().peek(pubkey).map(|profile| {
         let mut metadata = nostr_sdk::Metadata::new();
         if let Some(name) = &profile.name {
             metadata = metadata.name(name);

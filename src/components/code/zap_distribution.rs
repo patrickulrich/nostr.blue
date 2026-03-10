@@ -77,17 +77,15 @@ pub fn ZapDistribution(
                 .collect::<Vec<String>>()
         }
     });
-    use_effect({
-        let deduped_splits = deduped_splits.clone();
-        move || {
-            selected_pubkeys.set(
-                deduped_splits
-                    .iter()
-                    .map(|(pk, _)| pk.clone())
-                    .collect::<Vec<String>>(),
-            );
-        }
-    });
+    let deduped_splits_for_effect = deduped_splits.clone();
+    use_effect(use_reactive(&zap_splits, move |_| {
+        selected_pubkeys.set(
+            deduped_splits_for_effect
+                .iter()
+                .map(|(pk, _)| pk.clone())
+                .collect::<Vec<String>>(),
+        );
+    }));
 
     // Pure allocation: largest-remainder method to avoid rounding loss
     let compute_allocations = {

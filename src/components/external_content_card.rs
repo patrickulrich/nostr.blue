@@ -116,7 +116,7 @@ pub fn ExternalContentList(
         div { class: "flex flex-col gap-2 mt-2",
             for (content , hint) in podcasts.iter() {
                 ExternalContentCard {
-                    key: "{nip73::get_raw_identifier(content)}",
+                    key: "{nip73::get_raw_identifier(content)}:{hint.clone().unwrap_or_default()}",
                     content: content.clone(),
                     compact: false,
                     podcast_guid: hint.clone(),

@@ -70,7 +70,7 @@ impl std::fmt::Display for LnUrlError {
 }
 /// Validate that a URL is safe for LNURL requests
 /// Validates scheme and blocks private/local IP addresses to prevent SSRF attacks
-fn validate_url(url: &str) -> Result<(), LnUrlError> {
+pub(crate) fn validate_url(url: &str) -> Result<(), LnUrlError> {
     if !crate::utils::validation::is_valid_http_url(url) {
         return Err(LnUrlError::InvalidUrl(format!(
             "URL must be a valid HTTP/HTTPS URL: {}",

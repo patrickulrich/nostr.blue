@@ -257,9 +257,8 @@ pub fn CashuTokenCard(token: String) -> Element {
                         },
                     }
                     button {
-                        class: if cfg!(feature = "web") { "px-4 py-2 bg-amber-100 dark:bg-amber-800/50 text-amber-800 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-700/50 rounded-full text-sm font-medium transition" } else { "px-4 py-2 bg-amber-100 dark:bg-amber-800/50 text-amber-800 dark:text-amber-200/50 rounded-full text-sm font-medium transition cursor-not-allowed opacity-50" },
+                        class: "px-4 py-2 bg-amber-100 dark:bg-amber-800/50 text-amber-800 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-700/50 rounded-full text-sm font-medium transition",
                         onclick: handle_wallet,
-                        disabled: !cfg!(feature = "web"),
                         title: if cfg!(feature = "web") { "" } else { "Not supported on this platform" },
                         "Wallet"
                     }

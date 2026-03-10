@@ -71,8 +71,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
                         client.unsubscribe(&sub_id).await;
                     }
                 }
-                let parts: Vec<&str> = tag.split(':').collect();
-                if parts.len() == 3 && PublicKey::parse(parts[1]).is_ok() {
+                if PublicKey::parse(&author).is_ok() {
                     let filter = Filter::new()
                         .kind(Kind::from(1311))
                         .custom_tag(

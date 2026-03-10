@@ -216,7 +216,7 @@ pub fn citations_referencing_filter(event_id: &str, limit: usize) -> Filter {
         .limit(limit)
 }
 /// Fetch all citations by author
-pub async fn fetch_citations_by_author(
+pub async fn load_citations_by_author(
     pubkey_hex: &str,
     limit: usize,
 ) -> StdResult<CitationGroup, String> {
@@ -239,9 +239,17 @@ pub async fn fetch_citations_by_author(
     *LOADING_CITATIONS.write() = false;
     cache_citations(&all_citations);
     let group = group_citations(all_citations);
+    log::info!("Fetched {} total citations", group.total_count());
+    Ok(group)
+}
+
+pub async fn fetch_citations_by_author(
+    pubkey_hex: &str,
+    limit: usize,
+) -> StdResult<CitationGroup, String> {
+    let group = load_citations_by_author(pubkey_hex, limit).await?;
     *USER_CITATIONS.write() = group.clone();
     *CITATION_STORE_INITIALIZED.write() = true;
-    log::info!("Fetched {} total citations", group.total_count());
     Ok(group)
 }
 /// Fetch citations of a specific type

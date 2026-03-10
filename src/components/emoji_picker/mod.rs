@@ -411,8 +411,17 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                     }
                                 }
                                 EmojiCategory::Standard(idx) => rsx! {
+                                    {
+                                        let mut seen = HashSet::new();
+                                        let unique_emojis: Vec<&str> = EMOJI_CATEGORIES[idx]
+                                            .1
+                                            .iter()
+                                            .copied()
+                                            .filter(|emoji| seen.insert(*emoji))
+                                            .collect();
+                                        rsx! {
                                     div { class: "grid grid-cols-5 sm:grid-cols-6 md:grid-cols-7 gap-2",
-                                        for (emoji_idx , emoji) in EMOJI_CATEGORIES[idx].1.iter().enumerate() {
+                                        for (emoji_idx , emoji) in unique_emojis.iter().enumerate() {
                                             {
                                                 let emoji_str = emoji.to_string();
                                                 let emoji_for_click = emoji_str.clone();
@@ -429,6 +438,8 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                     }
                                                 }
                                             }
+                                        }
+                                    }
                                         }
                                     }
                                 },

@@ -472,6 +472,8 @@ async fn generate_wavlake_lnurl_invoice(
     log::info!("Received LNURL: {}", lnurl_response.lnurl);
     let lnurl_pay_url = decode_lnurl(&lnurl_response.lnurl)
         .map_err(|e| format!("Failed to decode LNURL: {}", e))?;
+    lnurl::validate_url(&lnurl_pay_url)
+        .map_err(|e| format!("Unsafe LNURL pay URL: {}", e))?;
     log::info!("Decoded LNURL to: {}", lnurl_pay_url);
     log::info!("Fetching LNURL-pay parameters from: {}", lnurl_pay_url);
     let response = crate::platform::http::http_client()
@@ -486,6 +488,8 @@ async fn generate_wavlake_lnurl_invoice(
         .json()
         .await
         .map_err(|e| format!("Failed to parse LNURL-pay params: {}", e))?;
+    lnurl::validate_url(&params.callback)
+        .map_err(|e| format!("Unsafe LNURL callback URL: {}", e))?;
     log::info!(
         "LNURL-pay params received. Callback: {}, min: {}, max: {}",
         params.callback,
@@ -674,6 +678,9 @@ async fn generate_v4v_invoice(
         value_block.recipients.first()
     });
     let recipient = primary_recipient.ok_or_else(|| "No valid recipient found".to_string())?;
+    if value_block.recipients.len() > 1 || recipient.split != total_split {
+        return Err("Multi-recipient V4V splits are not yet supported".to_string());
+    }
     let is_lnaddress = recipient.recipient_type == "lnaddress" || recipient.address.contains('@');
     if !is_lnaddress {
         return Err(format!(
@@ -706,6 +713,8 @@ async fn generate_v4v_invoice(
     let (pay_info, amount_msats) = lnurl::prepare_zap(Some(lnaddress), None, recipient_share)
         .await
         .map_err(|e| format!("Failed to resolve Lightning Address '{}': {}", lnaddress, e))?;
+    lnurl::validate_url(&pay_info.callback)
+        .map_err(|e| format!("Unsafe LNURL callback URL: {}", e))?;
     log::info!(
         "Lightning Address resolved. Callback: {}",
         pay_info.callback

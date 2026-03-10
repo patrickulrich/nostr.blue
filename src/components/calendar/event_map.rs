@@ -344,6 +344,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
                 // If a geocode lookup is already running and key changed, invalidate it
                 if *loading_geo.peek() && key != *processed_event_ids.peek() {
                     geocode_gen.with_mut(|g| *g = g.wrapping_add(1));
+                    processed_event_ids.set(key);
                     geocoded_events.set(Vec::new());
                     return;
                 }

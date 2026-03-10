@@ -200,16 +200,8 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                 aria_labelledby: "{title_id}",
                 tabindex: "-1",
                 onclick: move |e| e.stop_propagation(),
-                onmounted: move |evt| {
-                    #[cfg(feature = "web")]
-                    {
-                        let element = evt.data();
-                        if let Some(html_element) = element.downcast::<web_sys::HtmlElement>() {
-                            let _ = html_element.focus();
-                        }
-                    }
-                    #[cfg(not(feature = "web"))]
-                    let _ = evt;
+                onmounted: move |evt| async move {
+                    let _ = evt.data().set_focus(true).await;
                 },
                 div { class: "flex justify-between items-center mb-4",
                     h2 { class: "text-xl font-bold", id: "{title_id}", "Add to List" }

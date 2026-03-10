@@ -23,7 +23,11 @@ pub fn QrShareModal(naddr: String, repo_name: String, on_close: EventHandler<()>
         }
         #[cfg(not(feature = "web"))]
         {
-            "https://nostr.blue".to_string()
+            if cfg!(debug_assertions) {
+                "http://localhost:8080".to_string()
+            } else {
+                "https://nostr.blue".to_string()
+            }
         }
     };
     let web_url = format!("{}/code/repo/{}", base, naddr);

@@ -173,6 +173,13 @@ pub fn PinBoardCardMosaic(
             let current_gen = reaction_request_gen.peek().wrapping_add(1);
             reaction_request_gen.set(current_gen);
             reaction_loading.set(false);
+            reaction_error.set(None);
+            if !has_signer {
+                reaction_bootstrapped.set(false);
+                reaction_count.set(0);
+                has_reacted.set(false);
+                return;
+            }
             reaction_bootstrapped.set(false);
             spawn(async move {
                 if let Ok((count, reacted)) = fetch_pinboard_reaction_state(&a_tag).await {

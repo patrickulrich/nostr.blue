@@ -44,8 +44,8 @@ pub fn get_citation_style(citation_type: &CitationType) -> CitationStyle {
         CitationType::Prompt => CitationStyle {
             emoji: "🤖",
             label: "AI",
-            bg_class: "bg-emerald-500/20",
-            text_class: "text-emerald-600 dark:text-emerald-400",
+            bg_class: "bg-purple-500/20",
+            text_class: "text-purple-600 dark:text-purple-400",
         },
     }
 }

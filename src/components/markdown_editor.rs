@@ -70,7 +70,9 @@ pub fn MarkdownEditor(mut props: MarkdownEditorProps) -> Element {
             #[cfg(not(feature = "web"))]
             {
                 let current_content = content.read().clone();
-                let (new_content, _) = apply_markdown_format(&current_content, 0, 0, format);
+                let cursor = current_content.len();
+                let (new_content, _) =
+                    apply_markdown_format(&current_content, cursor, cursor, format);
                 content.set(new_content);
             }
         }
