@@ -126,6 +126,40 @@ fn call_static_string_method(
     Ok(result_str.to_string_lossy().into_owned())
 }
 
+fn call_static_void_method(
+    env: &mut jni::JNIEnv,
+    class: &jni::objects::JClass,
+    method_name: &str,
+) -> Result<(), String> {
+    use jni::objects::JValue;
+
+    let context =
+        unsafe { jni::objects::JObject::from_raw(ndk_context::android_context().context().cast()) };
+
+    env.call_static_method(
+        class,
+        method_name,
+        "(Landroid/content/Context;)V",
+        &[JValue::Object(&context)],
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+pub fn finish_app() -> Result<(), String> {
+    let vm = get_jvm().ok_or("Failed to get JavaVM")?;
+    let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
+
+    let ctx = ndk_context::android_context();
+    let context = unsafe { jni::objects::JObject::from_raw(ctx.context().cast()) };
+
+    let class = find_app_class(&mut env, &context, "dev.dioxus.main.MainActivity")
+        .ok_or("Failed to find MainActivity class")?;
+
+    call_static_void_method(&mut env, &class, "finishApp")
+}
+
 pub async fn pick_file() -> Result<(Vec<u8>, String), String> {
     pick_from_android("pickFile", "pollFileResult").await
 }

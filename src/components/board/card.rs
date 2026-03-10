@@ -159,24 +159,34 @@ pub fn PinBoardCardMosaic(
     let mut reaction_count = use_signal(|| 0usize);
     let mut reaction_loading = use_signal(|| false);
     let mut reaction_request_gen = use_signal(|| 0u32);
+    let mut reaction_bootstrapped = use_signal(|| false);
     let a_tag_for_reactions = board.a_tag.clone();
-    use_effect(use_reactive((&a_tag_for_reactions, &crate::stores::auth_store::AUTH_STATE.read().pubkey), move |(a_tag, _pubkey)| {
-        let a_tag = a_tag.clone();
-        let has_signer = *HAS_SIGNER.read();
-        let current_gen = reaction_request_gen.peek().wrapping_add(1);
-        reaction_request_gen.set(current_gen);
-        spawn(async move {
-            if let Ok((count, reacted)) = fetch_pinboard_reaction_state(&a_tag).await {
-                if *reaction_request_gen.peek() != current_gen {
-                    return;
+    use_effect(use_reactive(
+        (
+            &a_tag_for_reactions,
+            &crate::stores::auth_store::AUTH_STATE.read().pubkey,
+        ),
+        move |(a_tag, _pubkey)| {
+            let a_tag = a_tag.clone();
+            let has_signer = *HAS_SIGNER.read();
+            let current_gen = reaction_request_gen.peek().wrapping_add(1);
+            reaction_request_gen.set(current_gen);
+            reaction_bootstrapped.set(false);
+            spawn(async move {
+                if let Ok((count, reacted)) = fetch_pinboard_reaction_state(&a_tag).await {
+                    if *reaction_request_gen.peek() != current_gen {
+                        return;
+                    }
+                    reaction_count.set(count);
+                    has_reacted.set(if has_signer { reacted } else { false });
+                    reaction_bootstrapped.set(true);
+                } else if *reaction_request_gen.peek() == current_gen {
+                    has_reacted.set(false);
+                    reaction_bootstrapped.set(true);
                 }
-                reaction_count.set(count);
-                has_reacted.set(if has_signer { reacted } else { false });
-            } else if *reaction_request_gen.peek() == current_gen {
-                has_reacted.set(false);
-            }
-        });
-    }));
+            });
+        },
+    ));
     let display_name = author_metadata
         .read()
         .as_ref()
@@ -237,7 +247,7 @@ pub fn PinBoardCardMosaic(
                 button {
                     class: "rounded-full p-2 bg-white/90 hover:bg-white shadow-md backdrop-blur-sm
                             {heart_button_class} transition-colors disabled:opacity-50",
-                    disabled: *reaction_loading.read(),
+                    disabled: *reaction_loading.read() || !*reaction_bootstrapped.read(),
                     onclick: move |e| {
                         e.stop_propagation();
                         if !*HAS_SIGNER.read() {
@@ -259,7 +269,25 @@ pub fn PinBoardCardMosaic(
                         reaction_loading.set(true);
                         spawn(async move {
                             match toggle_pinboard_reaction(&board, "+").await {
-                                Ok(_added) => {}
+                                Ok(added) => {
+                                    if added == currently_reacted {
+                                        match fetch_pinboard_reaction_state(&board.a_tag).await {
+                                            Ok((count, reacted)) => {
+                                                has_reacted.set(reacted);
+                                                reaction_count.set(count);
+                                            }
+                                            Err(e) => {
+                                                log::warn!(
+                                                    "Failed to reconcile reaction state after toggle: {}",
+                                                    e
+                                                );
+                                                has_reacted.set(added);
+                                            }
+                                        }
+                                    } else {
+                                        has_reacted.set(added);
+                                    }
+                                }
                                 Err(e) => {
                                     log::error!("Failed to toggle reaction: {}", e);
                                     has_reacted.set(currently_reacted);

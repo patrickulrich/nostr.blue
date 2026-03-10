@@ -13,7 +13,7 @@ use crate::services::profile_search::{
 };
 
 #[component]
-pub fn MobileSearchSlideout(show: Signal<bool>, on_close: EventHandler<()>) -> Element {
+pub fn MobileSearchSlideout(show: bool, on_close: EventHandler<()>) -> Element {
     let mut query = use_signal(String::new);
     let mut show_dropdown = use_signal(|| false);
     let mut search_results = use_signal(Vec::<ProfileSearchResult>::new);
@@ -32,8 +32,8 @@ pub fn MobileSearchSlideout(show: Signal<bool>, on_close: EventHandler<()>) -> E
     });
 
     // Reset state when closing
-    use_effect(move || {
-        if !*show.read() {
+    use_effect(use_reactive(&show, move |is_open| {
+        if !is_open {
             query.set(String::new());
             show_dropdown.set(false);
             search_results.set(Vec::new());
@@ -43,7 +43,7 @@ pub fn MobileSearchSlideout(show: Signal<bool>, on_close: EventHandler<()>) -> E
                 task.cancel();
             }
         }
-    });
+    }));
 
     let handle_input = move |evt: DioxusEvent<FormData>| {
         let new_value = evt.value().clone();
@@ -151,7 +151,7 @@ pub fn MobileSearchSlideout(show: Signal<bool>, on_close: EventHandler<()>) -> E
         }
     };
 
-    if !*show.read() {
+    if !show {
         return rsx! {};
     }
 

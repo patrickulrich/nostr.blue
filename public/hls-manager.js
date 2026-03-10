@@ -114,26 +114,23 @@ window.hlsManager = window.hlsManager || {
         const attachId = Symbol();
         this.activeAttachMap.set(elementId, attachId);
 
-        // Store resolve function with attachId for later use
-        this.pendingResolves.set(elementId, { attachId, resolve: resolvePromise });
-
-        // Start async work outside of Promise executor to avoid swallowing sync exceptions
-        this._doAttach(elementId, streamUrl, attachId).catch((e) => {
-            console.error('[HLS Manager] Attach failed:', e);
-            // Ensure promise is settled even on unexpected errors
-            if (this.activeAttachMap.get(elementId) === attachId) {
-                this.settlePendingAttach(elementId, {
-                    type: 'error',
-                    url: streamUrl,
-                    error: e.message || 'Unknown error'
-                }, attachId);
-            }
-        });
-
         // Return a Promise that will be settled via settlePendingAttach
         return new Promise((resolve) => {
             // Store the resolve with attachId (it will be called by settlePendingAttach)
             this.pendingResolves.set(elementId, { attachId, resolve });
+
+            // Start async work only after the real resolver is registered
+            this._doAttach(elementId, streamUrl, attachId).catch((e) => {
+                console.error('[HLS Manager] Attach failed:', e);
+                // Ensure promise is settled even on unexpected errors
+                if (this.activeAttachMap.get(elementId) === attachId) {
+                    this.settlePendingAttach(elementId, {
+                        type: 'error',
+                        url: streamUrl,
+                        error: e.message || 'Unknown error'
+                    }, attachId);
+                }
+            });
         });
     },
 
@@ -142,192 +139,200 @@ window.hlsManager = window.hlsManager || {
      * Separated from Promise executor to properly handle exceptions
      */
     async _doAttach(elementId, streamUrl, attachId) {
-        const resolve = this.pendingResolves.get(elementId);
+        const element = document.getElementById(elementId);
+        if (!element || !(element instanceof HTMLMediaElement)) {
+            this.activeAttachMap.delete(elementId);
+            this.settlePendingAttach(elementId, {
+                type: 'error',
+                url: streamUrl,
+                error: 'Media element not found'
+            }, attachId);
+            return;
+        }
 
-            // Use hls.js for browsers without native HLS support
-            try {
-                await this.loadHls();
-            } catch (e) {
-                if (this.activeAttachMap.get(elementId) !== attachId) {
-                    this.settlePendingAttach(elementId, { type: 'cancelled', url: streamUrl }, attachId);
-                    return;
-                }
-                // Remove only our own token to avoid clobbering a newer attach
-                this.activeAttachMap.delete(elementId);
-                console.error('[HLS Manager] Failed to load HLS:', e);
-                this.settlePendingAttach(elementId, {
-                    type: 'error',
-                    url: streamUrl,
-                    error: 'Failed to load hls.js'
-                }, attachId);
-                return;
-            }
-
-            // Check if this attach is still valid after await
+        // Use hls.js for browsers without native HLS support
+        try {
+            await this.loadHls();
+        } catch (e) {
             if (this.activeAttachMap.get(elementId) !== attachId) {
                 this.settlePendingAttach(elementId, { type: 'cancelled', url: streamUrl }, attachId);
                 return;
             }
+            // Remove only our own token to avoid clobbering a newer attach
+            this.activeAttachMap.delete(elementId);
+            console.error('[HLS Manager] Failed to load HLS:', e);
+            this.settlePendingAttach(elementId, {
+                type: 'error',
+                url: streamUrl,
+                error: 'Failed to load hls.js'
+            }, attachId);
+            return;
+        }
 
-            if (!Hls.isSupported()) {
-                this.activeAttachMap.delete(elementId);
-                this.settlePendingAttach(elementId, {
-                    type: 'error',
-                    url: streamUrl,
-                    error: 'HLS not supported in this browser'
-                }, attachId);
+        // Check if this attach is still valid after await
+        if (this.activeAttachMap.get(elementId) !== attachId) {
+            this.settlePendingAttach(elementId, { type: 'cancelled', url: streamUrl }, attachId);
+            return;
+        }
+
+        if (!Hls.isSupported()) {
+            this.activeAttachMap.delete(elementId);
+            this.settlePendingAttach(elementId, {
+                type: 'error',
+                url: streamUrl,
+                error: 'HLS not supported in this browser'
+            }, attachId);
+            return;
+        }
+
+        // Cleanup any previous instance before creating new one (use internal cleanup to not settle promise)
+        this.cleanupInstance(elementId);
+
+        // Re-register attach token after cleanup to maintain valid attach state
+        this.activeAttachMap.set(elementId, attachId);
+
+        const hls = new Hls({
+            enableWorker: true,
+            lowLatencyMode: true,
+            backBufferLength: 30,
+            maxBufferLength: 60,
+            maxMaxBufferLength: 120,
+            // Radio stream optimizations
+            liveSyncDurationCount: 3,
+            liveMaxLatencyDurationCount: 10,
+        });
+
+        // Track instance immediately to prevent orphaned workers on timeout
+        this.instances.set(elementId, hls);
+
+        // Check if this attach is still valid before setting up
+        if (this.activeAttachMap.get(elementId) !== attachId) {
+            hls.destroy();
+            this.instances.delete(elementId);
+            this.settlePendingAttach(elementId, { type: 'cancelled', url: streamUrl }, attachId);
+            return;
+        }
+
+        // Capture the current attachId for timeout validation
+        const capturedAttachId = attachId;
+        const timeout = setTimeout(() => {
+            // Verify this timeout belongs to the current attach
+            if (this.activeAttachMap.get(elementId) !== capturedAttachId) {
                 return;
             }
+            this.pendingTimeouts.delete(elementId);
+            this.instances.delete(elementId);
+            this.activeAttachMap.delete(elementId);
+            hls.destroy();
+            this.settlePendingAttach(elementId, {
+                type: 'error',
+                url: streamUrl,
+                error: 'HLS stream timeout - stream may be offline'
+            }, capturedAttachId);
+        }, 15000);
+        this.pendingTimeouts.set(elementId, timeout);
 
-            // Cleanup any previous instance before creating new one (use internal cleanup to not settle promise)
-            this.cleanupInstance(elementId);
+        hls.attachMedia(element);
 
-            // Re-register attach token after cleanup to maintain valid attach state
-            this.activeAttachMap.set(elementId, attachId);
-
-            const hls = new Hls({
-                enableWorker: true,
-                lowLatencyMode: true,
-                backBufferLength: 30,
-                maxBufferLength: 60,
-                maxMaxBufferLength: 120,
-                // Radio stream optimizations
-                liveSyncDurationCount: 3,
-                liveMaxLatencyDurationCount: 10,
-            });
-
-            // Track instance immediately to prevent orphaned workers on timeout
-            this.instances.set(elementId, hls);
-
-            // Check if this attach is still valid before setting up
+        hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+            // Check if this attach is still valid
             if (this.activeAttachMap.get(elementId) !== attachId) {
+                clearTimeout(timeout);
                 hls.destroy();
-                this.instances.delete(elementId);
-                this.settlePendingAttach(elementId, { type: 'cancelled', url: streamUrl }, attachId);
                 return;
             }
+            console.log('[HLS Manager] Media attached, loading source:', streamUrl);
+            hls.loadSource(streamUrl);
+        });
 
-            // Capture the current attachId for timeout validation
-            const capturedAttachId = attachId;
-            const timeout = setTimeout(() => {
-                // Verify this timeout belongs to the current attach
-                if (this.activeAttachMap.get(elementId) !== capturedAttachId) {
-                    return;
-                }
-                this.pendingTimeouts.delete(elementId);
-                this.instances.delete(elementId);
-                this.activeAttachMap.delete(elementId);
+        hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
+            // Check if this attach is still valid
+            if (this.activeAttachMap.get(elementId) !== attachId) {
+                clearTimeout(timeout);
                 hls.destroy();
-                this.settlePendingAttach(elementId, {
-                    type: 'error',
-                    url: streamUrl,
-                    error: 'HLS stream timeout - stream may be offline'
-                }, capturedAttachId);
-            }, 15000);
-            this.pendingTimeouts.set(elementId, timeout);
+                return;
+            }
+            clearTimeout(timeout);
+            this.pendingTimeouts.delete(elementId);
+            console.log('[HLS Manager] Manifest parsed, levels:', data.levels.length);
+            // Instance already tracked above; no need to set again
+            this.settlePendingAttach(elementId, {
+                type: 'success',
+                backend: 'hls.js',
+                levels: data.levels.length,
+                url: streamUrl
+            }, attachId);
+        });
 
-            hls.attachMedia(element);
-
-            hls.on(Hls.Events.MEDIA_ATTACHED, () => {
-                // Check if this attach is still valid
-                if (this.activeAttachMap.get(elementId) !== attachId) {
-                    clearTimeout(timeout);
-                    hls.destroy();
-                    return;
-                }
-                console.log('[HLS Manager] Media attached, loading source:', streamUrl);
-                hls.loadSource(streamUrl);
-            });
-
-            hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
-                // Check if this attach is still valid
-                if (this.activeAttachMap.get(elementId) !== attachId) {
-                    clearTimeout(timeout);
-                    hls.destroy();
-                    return;
-                }
+        hls.on(Hls.Events.ERROR, (event, data) => {
+            // Validate this error belongs to the current attach
+            if (this.activeAttachMap.get(elementId) !== attachId) {
+                return;
+            }
+            if (data.fatal) {
                 clearTimeout(timeout);
                 this.pendingTimeouts.delete(elementId);
-                console.log('[HLS Manager] Manifest parsed, levels:', data.levels.length);
-                // Instance already tracked above; no need to set again
+                console.error('[HLS Manager] Fatal error:', data.type, data.details);
+                hls.destroy();
+                this.instances.delete(elementId);
+                this.activeAttachMap.delete(elementId);
+                if (this.nowPlayingElementId === elementId) {
+                    this.nowPlaying = null;
+                    this.nowPlayingElementId = null;
+                }
+
+                // Dispatch error event for Rust to catch
+                window.dispatchEvent(new CustomEvent('hls-stream-error', {
+                    detail: {
+                        elementId: elementId,
+                        error: data.details,
+                        type: data.type
+                    }
+                }));
+
                 this.settlePendingAttach(elementId, {
-                    type: 'success',
-                    backend: 'hls.js',
-                    levels: data.levels.length,
-                    url: streamUrl
+                    type: 'error',
+                    url: streamUrl,
+                    error: 'HLS error: ' + data.details
                 }, attachId);
-            });
+            } else {
+                // Non-fatal error - hls.js will try to recover
+                console.warn('[HLS Manager] Non-fatal error:', data.details);
+            }
+        });
 
-            hls.on(Hls.Events.ERROR, (event, data) => {
-                // Validate this error belongs to the current attach
-                if (this.activeAttachMap.get(elementId) !== attachId) {
-                    return;
-                }
-                if (data.fatal) {
-                    clearTimeout(timeout);
-                    this.pendingTimeouts.delete(elementId);
-                    console.error('[HLS Manager] Fatal error:', data.type, data.details);
-                    hls.destroy();
-                    this.instances.delete(elementId);
-                    this.activeAttachMap.delete(elementId);
-                    if (this.nowPlayingElementId === elementId) {
-                        this.nowPlaying = null;
-                        this.nowPlayingElementId = null;
+        // Listen for ID3 timed metadata (now-playing info in some HLS streams)
+        hls.on(Hls.Events.FRAG_PARSING_METADATA, (event, data) => {
+            // Guard against stale metadata from older Hls instances
+            if (this.activeAttachMap.get(elementId) !== attachId) {
+                return;
+            }
+            const samples = data.samples || [];
+            samples.forEach(sample => {
+                try {
+                    const frames = this.parseId3(sample.data);
+                    if (frames && (frames.TIT2 || frames.TPE1)) {
+                        // Store in hlsManager for polling from Rust
+                        this.nowPlayingElementId = elementId;
+                        this.nowPlaying = {
+                            title: frames.TIT2 || null,
+                            artist: frames.TPE1 || null
+                        };
+                        console.log('[HLS Manager] Now playing:', this.nowPlaying);
+
+                        // Also dispatch event for any JS listeners
+                        window.dispatchEvent(new CustomEvent('hls-metadata', {
+                            detail: {
+                                elementId: elementId,
+                                title: frames.TIT2,
+                                artist: frames.TPE1
+                            }
+                        }));
                     }
-
-                    // Dispatch error event for Rust to catch
-                    window.dispatchEvent(new CustomEvent('hls-stream-error', {
-                        detail: {
-                            elementId: elementId,
-                            error: data.details,
-                            type: data.type
-                        }
-                    }));
-
-                    this.settlePendingAttach(elementId, {
-                        type: 'error',
-                        url: streamUrl,
-                        error: 'HLS error: ' + data.details
-                    }, attachId);
-                } else {
-                    // Non-fatal error - hls.js will try to recover
-                    console.warn('[HLS Manager] Non-fatal error:', data.details);
+                } catch (e) {
+                    // ID3 parsing errors are non-fatal
+                    console.debug('[HLS Manager] ID3 parsing error:', e);
                 }
-            });
-
-            // Listen for ID3 timed metadata (now-playing info in some HLS streams)
-            hls.on(Hls.Events.FRAG_PARSING_METADATA, (event, data) => {
-                // Guard against stale metadata from older Hls instances
-                if (this.activeAttachMap.get(elementId) !== attachId) {
-                    return;
-                }
-                const samples = data.samples || [];
-                samples.forEach(sample => {
-                    try {
-                        const frames = this.parseId3(sample.data);
-                        if (frames && (frames.TIT2 || frames.TPE1)) {
-                            // Store in hlsManager for polling from Rust
-                            this.nowPlayingElementId = elementId;
-                            this.nowPlaying = {
-                                title: frames.TIT2 || null,
-                                artist: frames.TPE1 || null
-                            };
-                            console.log('[HLS Manager] Now playing:', this.nowPlaying);
-
-                            // Also dispatch event for any JS listeners
-                            window.dispatchEvent(new CustomEvent('hls-metadata', {
-                                detail: {
-                                    elementId: elementId,
-                                    title: frames.TIT2,
-                                    artist: frames.TPE1
-                                }
-                            }));
-                        }
-                    } catch (e) {
-                        // ID3 parsing errors are non-fatal
-                        console.debug('[HLS Manager] ID3 parsing error:', e);
-                    }
-                });
             });
         });
     },

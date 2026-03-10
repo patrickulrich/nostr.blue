@@ -1,3 +1,4 @@
+pub mod back_navigation;
 pub mod emoji_store;
 pub mod notifications;
 pub mod settings_store;

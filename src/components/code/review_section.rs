@@ -96,10 +96,35 @@ fn should_replace_review(existing: &PersistedReview, candidate: &PersistedReview
         }
         // For persisted reviews, use event_id as tie-breaker (NIP-01 style: lower ID wins)
         if !existing.event_id.is_empty() && !candidate.event_id.is_empty() {
-            return candidate.event_id > existing.event_id;
+            return candidate.event_id < existing.event_id;
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::nip34::ReviewState;
+
+    fn review(event_id: &str, created_at: u64) -> PersistedReview {
+        PersistedReview {
+            pr_event_id: "pr".to_string(),
+            content: "content".to_string(),
+            state: ReviewState::Approved,
+            event_id: event_id.to_string(),
+            pubkey: "pubkey".to_string(),
+            created_at,
+        }
+    }
+
+    #[test]
+    fn lower_event_id_wins_for_equal_persisted_reviews() {
+        let existing = review("ff", 100);
+        let candidate = review("0a", 100);
+        assert!(should_replace_review(&existing, &candidate));
+        assert!(!should_replace_review(&candidate, &existing));
+    }
 }
 
 /// PR Review Section component
@@ -139,52 +164,56 @@ pub fn PRReviewSection(
     }));
 
     // Fetch persisted reviews when the PR changes or the client becomes ready.
-    use_effect(use_reactive((&pr_id, &*CLIENT_INITIALIZED.read()), move |(id, is_ready)| {
-        if !is_ready {
-            return;
-        }
-        let current_gen = *gen.peek();
-        spawn(async move {
-            match fetch_pr_reviews(&id).await {
-                Ok(persisted) => {
-                    if *gen.peek() != current_gen {
-                        return;
-                    }
-                    let mut by_pubkey = std::collections::HashMap::<String, PersistedReview>::new();
-                    for r in reviews.read().iter().cloned() {
-                        by_pubkey
-                            .entry(r.pubkey.clone())
-                            .and_modify(|existing| {
-                                if should_replace_review(existing, &r) {
-                                    *existing = r.clone();
-                                }
-                            })
-                            .or_insert(r);
-                    }
-                    for r in persisted {
-                        by_pubkey
-                            .entry(r.pubkey.clone())
-                            .and_modify(|existing| {
-                                if should_replace_review(existing, &r) {
-                                    *existing = r.clone();
-                                }
-                            })
-                            .or_insert(r);
-                    }
-                    let mut sorted: Vec<_> = by_pubkey.into_values().collect();
-                    sorted.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-                    reviews.set(sorted);
-                }
-                Err(e) => {
-                    if *gen.peek() != current_gen {
-                        return;
-                    }
-                    log::warn!("Failed to fetch PR reviews for {}: {}", id, e);
-                    fetch_error.set(Some(format!("Failed to load reviews: {}", e)));
-                }
+    use_effect(use_reactive(
+        (&pr_id, &*CLIENT_INITIALIZED.read()),
+        move |(id, is_ready)| {
+            if !is_ready {
+                return;
             }
-        });
-    }));
+            let current_gen = *gen.peek();
+            spawn(async move {
+                match fetch_pr_reviews(&id).await {
+                    Ok(persisted) => {
+                        if *gen.peek() != current_gen {
+                            return;
+                        }
+                        let mut by_pubkey =
+                            std::collections::HashMap::<String, PersistedReview>::new();
+                        for r in reviews.read().iter().cloned() {
+                            by_pubkey
+                                .entry(r.pubkey.clone())
+                                .and_modify(|existing| {
+                                    if should_replace_review(existing, &r) {
+                                        *existing = r.clone();
+                                    }
+                                })
+                                .or_insert(r);
+                        }
+                        for r in persisted {
+                            by_pubkey
+                                .entry(r.pubkey.clone())
+                                .and_modify(|existing| {
+                                    if should_replace_review(existing, &r) {
+                                        *existing = r.clone();
+                                    }
+                                })
+                                .or_insert(r);
+                        }
+                        let mut sorted: Vec<_> = by_pubkey.into_values().collect();
+                        sorted.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                        reviews.set(sorted);
+                    }
+                    Err(e) => {
+                        if *gen.peek() != current_gen {
+                            return;
+                        }
+                        log::warn!("Failed to fetch PR reviews for {}: {}", id, e);
+                        fetch_error.set(Some(format!("Failed to load reviews: {}", e)));
+                    }
+                }
+            });
+        },
+    ));
 
     let review_list = reviews.read();
     let maintainer_set: HashSet<&String> = HashSet::from_iter(maintainers.iter());

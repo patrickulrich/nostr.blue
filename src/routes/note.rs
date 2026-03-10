@@ -7,6 +7,7 @@ use std::time::Duration;
 use crate::components::{ClientInitializing, NoteCard, ThreadedComment, VoiceMessageCard};
 use crate::hooks::use_mute_block_cache;
 use crate::routes::Route;
+use crate::stores::back_navigation;
 use crate::stores::nostr_client;
 use crate::utils::{build_thread_tree, event::is_voice_message};
 
@@ -108,6 +109,11 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
     use_effect(use_reactive!(|note_id| {
         let note_id_str = note_id.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        back_navigation::set_active_note_back_context(
+            note_id_str.clone(),
+            Vec::new(),
+            initial_is_voice,
+        );
         if !client_initialized {
             log::info!("Waiting for client initialization before loading note...");
             return;
@@ -136,6 +142,11 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
             let parent_ids = match &note_result {
                 Ok(event) => {
                     note_data.set(Some(event.clone()));
+                    back_navigation::set_active_note_back_context(
+                        note_id_str.clone(),
+                        Vec::new(),
+                        is_voice_message(event),
+                    );
                     loading.set(false);
                     extract_parent_ids(event)
                 }
@@ -153,6 +164,11 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
 
             if let Ok(mut parents) = parents_result {
                 parents.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                back_navigation::set_active_note_back_context(
+                    note_id_str.clone(),
+                    parents.iter().map(|event| event.id.to_hex()).collect(),
+                    note_data.read().as_ref().is_some_and(is_voice_message),
+                );
                 parent_events.set(parents);
             }
             if let Ok(mut reply_vec) = replies_result {
@@ -227,6 +243,7 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
 
     // Cleanup subscription on unmount
     use_drop(move || {
+        back_navigation::clear_active_note_back_context(&note_id);
         if let Some(sub_id) = reply_sub_id.peek().clone() {
             spawn(async move {
                 if let Some(client) = nostr_client::get_client() {

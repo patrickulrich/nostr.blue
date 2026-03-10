@@ -117,6 +117,8 @@ pub fn PersistentMusicPlayer() -> Element {
                                 audio.pause();
                                 audio.src = "";
                                 audio.currentTime = 0;
+                                delete audio.dataset.currentUrl;
+                                delete audio.dataset.pendingUrl;
                             }}
                             if (window.hlsManager) {{
                                 window.hlsManager.detach({audio_id});
@@ -148,14 +150,14 @@ pub fn PersistentMusicPlayer() -> Element {
                         return;
                     }
                 }
-                        let audio_id_json = serde_json::to_string(&audio_id)
-                            .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
-                        let media_url_json = serde_json::to_string(&media_url)
-                            .unwrap_or_else(|_| "\"\"".to_string());
-                        let is_playing_literal = if is_playing { "true" } else { "false" };
-                        let script = if is_hls {
-                            format!(
-                                r#"
+                let audio_id_json = serde_json::to_string(&audio_id)
+                    .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
+                let media_url_json =
+                    serde_json::to_string(&media_url).unwrap_or_else(|_| "\"\"".to_string());
+                let is_playing_literal = if is_playing { "true" } else { "false" };
+                let script = if is_hls {
+                    format!(
+                        r#"
                             return (async function() {{
                                 try {{
                                     let audio = document.getElementById({audio_id});
@@ -196,13 +198,13 @@ pub fn PersistentMusicPlayer() -> Element {
                                 }}
                             }})();
                             "#,
-                                audio_id = audio_id_json,
-                                media_url = media_url_json,
-                                is_playing = is_playing_literal,
-                            )
-                        } else {
-                            format!(
-                                r#"
+                        audio_id = audio_id_json,
+                        media_url = media_url_json,
+                        is_playing = is_playing_literal,
+                    )
+                } else {
+                    format!(
+                        r#"
                             return (function() {{
                                 let audio = document.getElementById({audio_id});
                                 if (!audio) return "missing";
@@ -250,55 +252,52 @@ pub fn PersistentMusicPlayer() -> Element {
                                 return "bound:" + audio.dataset.currentUrl;
                             }})();
                             "#,
-                                audio_id = audio_id_json,
-                                media_url = media_url_json,
-                                is_playing = is_playing_literal,
-                            )
-                        };
-                        match document::eval(&script).await {
-                            Ok(val) => {
-                                let result = parse_audio_bind_result(val);
-                                if *native_bind_token.read() == bind_token {
-                                    if result == format!("bound:{}", media_url) {
-                                        native_source_bound.set(true);
-                                        music_player::set_playback_error(None);
-                                    } else {
-                                        native_source_bound.set(false);
-                                        if result == "cancelled" {
-                                            log::warn!(
-                                                "[Audio] Stream attach cancelled for {}",
-                                                media_url
-                                            );
-                                        } else {
-                                            // Try next stream before showing error
-                                            if !music_player::try_next_stream() {
-                                                let error_msg = result
-                                                    .strip_prefix("error:")
-                                                    .unwrap_or("Failed to attach stream")
-                                                    .to_string();
-                                                log::error!("[Audio] {}", error_msg);
-                                                music_player::set_playback_error(Some(error_msg));
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                if *native_bind_token.read() == bind_token {
-                                    native_source_bound.set(false);
+                        audio_id = audio_id_json,
+                        media_url = media_url_json,
+                        is_playing = is_playing_literal,
+                    )
+                };
+                match document::eval(&script).await {
+                    Ok(val) => {
+                        let result = parse_audio_bind_result(val);
+                        if *native_bind_token.read() == bind_token {
+                            if result == format!("bound:{}", media_url) {
+                                native_source_bound.set(true);
+                                music_player::set_playback_error(None);
+                            } else {
+                                native_source_bound.set(false);
+                                if result == "cancelled" {
+                                    log::warn!("[Audio] Stream attach cancelled for {}", media_url);
+                                } else {
                                     // Try next stream before showing error
                                     if !music_player::try_next_stream() {
-                                        let error_msg =
-                                            format!("Failed to apply audio source script: {:?}", e);
-                                        log::warn!("{}", error_msg);
+                                        let error_msg = result
+                                            .strip_prefix("error:")
+                                            .unwrap_or("Failed to attach stream")
+                                            .to_string();
+                                        log::error!("[Audio] {}", error_msg);
                                         music_player::set_playback_error(Some(error_msg));
                                     }
                                 }
                             }
                         }
-                    });
-                },
-            ));
+                    }
+                    Err(e) => {
+                        if *native_bind_token.read() == bind_token {
+                            native_source_bound.set(false);
+                            // Try next stream before showing error
+                            if !music_player::try_next_stream() {
+                                let error_msg =
+                                    format!("Failed to apply audio source script: {:?}", e);
+                                log::warn!("{}", error_msg);
+                                music_player::set_playback_error(Some(error_msg));
+                            }
+                        }
+                    }
+                }
+            });
+        },
+    ));
     #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
     {
         let audio_id_for_volume = audio_id.to_string();

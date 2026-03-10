@@ -362,6 +362,7 @@ object NativeAudioBridge {
                     isPreparing = false
                     playWhenReady = false
                     lastError.set("Playback failed")
+                    releasePlayer()
                     updatePlaybackState(false, PlaybackState.STATE_ERROR)
                     updateNotification()
                 }
@@ -391,7 +392,8 @@ object NativeAudioBridge {
             player.setDataSource(item.mediaUrl)
         } catch (e: Exception) {
             Log.e(AUDIO_TAG, "Failed to load media source for item=${item.id}", e)
-            lastError.set("Failed to load: ${e.message}")
+            releasePlayer()
+            lastError.set("Failed to load media source")
             isPreparing = false
             updatePlaybackState(false, PlaybackState.STATE_ERROR)
             updateNotification()

@@ -67,6 +67,10 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
                 }
                 selected_citation.set(None);
                 selected_style.set(CitationStyle::End);
+                if let Some(task) = search_task.take() {
+                    task.cancel();
+                }
+                is_searching.set(false);
                 search_query.set(String::new());
                 search_results.set(Vec::new());
             } else {

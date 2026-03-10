@@ -475,27 +475,291 @@ pub enum Route {
     #[route("/about")]
     About {},
 }
+
+#[cfg_attr(not(feature = "mobile"), allow(dead_code))]
+fn note_back_target(current_route: &Route) -> Option<Route> {
+    let Route::Note {
+        note_id,
+        from_voice,
+    } = current_route
+    else {
+        return None;
+    };
+
+    let note_context = crate::stores::back_navigation::ACTIVE_NOTE_BACK_CONTEXT.read();
+    if note_context.note_id.as_deref() == Some(note_id.as_str()) {
+        if let Some(parent_note_id) = note_context.parent_note_ids.last() {
+            return Some(Route::Note {
+                note_id: parent_note_id.clone(),
+                from_voice: None,
+            });
+        }
+
+        if note_context.is_voice_note {
+            return Some(Route::VoiceMessages {});
+        }
+    }
+
+    if from_voice.as_deref() == Some("true") {
+        Some(Route::VoiceMessages {})
+    } else {
+        Some(Route::Home {
+            list: String::new(),
+        })
+    }
+}
+
+#[cfg_attr(not(feature = "mobile"), allow(dead_code))]
+fn fallback_route_for(current_route: &Route) -> Option<Route> {
+    match current_route {
+        Route::Home { .. }
+        | Route::Explore {}
+        | Route::Trending {}
+        | Route::Articles {}
+        | Route::Videos {}
+        | Route::VideosLive {}
+        | Route::MusicHome {}
+        | Route::MusicRadio {}
+        | Route::MusicLeaderboard {}
+        | Route::PodcastHome {}
+        | Route::RadioHome {}
+        | Route::NipsHome {}
+        | Route::BadgesHome {}
+        | Route::PacksHome {}
+        | Route::CitationsHome {}
+        | Route::CodeHome {}
+        | Route::P2PHome {}
+        | Route::Chats {}
+        | Route::Communities {}
+        | Route::TopicsHome {}
+        | Route::RecipesHome {}
+        | Route::PinBoardsHome {}
+        | Route::WikiHome {}
+        | Route::PublicationsHome {}
+        | Route::Events {}
+        | Route::Calendar {}
+        | Route::ShopHome {}
+        | Route::Notifications {}
+        | Route::Bookmarks {}
+        | Route::DMs {}
+        | Route::Photos {}
+        | Route::VoiceMessages {}
+        | Route::Polls {}
+        | Route::CashuWallet {}
+        | Route::Lists {}
+        | Route::DVM {}
+        | Route::BlossomPage {}
+        | Route::BibleHome {}
+        | Route::Highlights {}
+        | Route::Settings {}
+        | Route::WebBookmarks {} => None,
+        Route::Search { .. }
+        | Route::Hashtag { .. }
+        | Route::Profile { .. }
+        | Route::Terms {}
+        | Route::Privacy {}
+        | Route::Cookies {}
+        | Route::About {}
+        | Route::Nip19Handler { .. } => Some(Route::Home {
+            list: String::new(),
+        }),
+        Route::ArticleDetail { .. } | Route::ArticleNew {} => Some(Route::Articles {}),
+        Route::VideoDetail { .. } | Route::VideoNewLandscape {} | Route::VideoNewPortrait {} => {
+            Some(Route::Videos {})
+        }
+        Route::VideosLiveTag { .. } | Route::LiveStreamDetail { .. } | Route::LiveStreamNew {} => {
+            Some(Route::VideosLive {})
+        }
+        Route::MusicSearch { .. }
+        | Route::MusicArtist { .. }
+        | Route::MusicAlbum { .. }
+        | Route::MusicTrackNew {}
+        | Route::MusicTrackDetail { .. }
+        | Route::MusicPlaylistNew {}
+        | Route::MusicPlaylistDetail { .. }
+        | Route::MusicRssAlbum { .. } => Some(Route::MusicHome {}),
+        Route::PodcastTrending {}
+        | Route::PodcastNostrDetail { .. }
+        | Route::PodcastRssFeedDetail { .. }
+        | Route::PodcastNostrEpisodeDetail { .. }
+        | Route::PodcastRssEpisodeDetail { .. } => Some(Route::PodcastHome {}),
+        Route::RadioStationNew {} | Route::RadioStation { .. } => Some(Route::RadioHome {}),
+        Route::NipNew {} | Route::NipDetail { .. } => Some(Route::NipsHome {}),
+        Route::BadgeNew {} | Route::BadgeDetail { .. } => Some(Route::BadgesHome {}),
+        Route::PackNew {} | Route::PackDetail { .. } => Some(Route::PacksHome {}),
+        Route::CitationDetail { .. } => Some(Route::CitationsHome {}),
+        Route::CodeNew {}
+        | Route::CodeStars {}
+        | Route::CodeBounties {}
+        | Route::CodeSettings {}
+        | Route::CodeGlobalIssues {}
+        | Route::CodeGlobalPulls {}
+        | Route::CodeNotifications {}
+        | Route::CodeExplore {}
+        | Route::CodeRepositories {}
+        | Route::CodeSnippets {}
+        | Route::CodeSnippetDetail { .. }
+        | Route::CodeSnippetNew {}
+        | Route::CodeImport {}
+        | Route::CodeSearch { .. }
+        | Route::CodeRepo { .. }
+        | Route::CodeRepoCommits { .. }
+        | Route::CodeRepoCommit { .. }
+        | Route::CodeRepoIssues { .. }
+        | Route::CodeIssueNew { .. }
+        | Route::CodeRepoPulls { .. }
+        | Route::CodePullNew { .. }
+        | Route::CodeRepoSettings { .. }
+        | Route::CodeRepoInsights { .. }
+        | Route::CodeRepoProjects { .. }
+        | Route::CodeRepoBlame { .. }
+        | Route::CodeRepoCompare { .. }
+        | Route::CodeRepoUpload { .. }
+        | Route::CodeRepoNewFile { .. }
+        | Route::CodeRepoEditFile { .. }
+        | Route::CodeRepoArchitecture { .. }
+        | Route::CodeRepoReleases { .. }
+        | Route::CodeRepoDiscussions { .. }
+        | Route::CodeDiscussionNew { .. }
+        | Route::CodeRepoTree { .. }
+        | Route::CodeRepoBlob { .. }
+        | Route::CodeIssueDetail { .. }
+        | Route::CodePullDetail { .. }
+        | Route::CodeDiscussionDetail { .. }
+        | Route::CodeUserProfile { .. } => Some(Route::CodeHome {}),
+        Route::P2POrderDetail { .. } => Some(Route::P2PHome {}),
+        Route::ChatNew {} | Route::ChatDetail { .. } => Some(Route::Chats {}),
+        Route::CommunityNew {} | Route::CommunityPage { .. } => Some(Route::Communities {}),
+        Route::TopicsPopular {}
+        | Route::TopicsBrowse {}
+        | Route::TopicNewPost {}
+        | Route::TopicFeed { .. }
+        | Route::TopicPostDetail { .. } => Some(Route::TopicsHome {}),
+        Route::RecipesAll {}
+        | Route::RecipeNew {}
+        | Route::RecipeFork { .. }
+        | Route::RecipesByTag { .. }
+        | Route::RecipeChef { .. }
+        | Route::RecipeDetail { .. } => Some(Route::RecipesHome {}),
+        Route::PinBoardNew {}
+        | Route::PinNew {}
+        | Route::UserPins {}
+        | Route::PinBoardDetail { .. }
+        | Route::PinBoardEdit { .. } => Some(Route::PinBoardsHome {}),
+        Route::WikiNew {} | Route::WikiDetail { .. } | Route::WikiAuthor { .. } => {
+            Some(Route::WikiHome {})
+        }
+        Route::PublicationNew {}
+        | Route::PublicationSearch { .. }
+        | Route::PublicationDetail { .. } => Some(Route::PublicationsHome {}),
+        Route::CalendarEventDetail { .. } | Route::CalendarEventNew {} => Some(Route::Calendar {}),
+        Route::ShopProductDetail { .. }
+        | Route::ShopProductNew {}
+        | Route::ShopProductEdit { .. }
+        | Route::ShopCart {}
+        | Route::ShopCheckout {}
+        | Route::ShopOrders {}
+        | Route::ShopMerchant {}
+        | Route::ShopMerchantOrders {}
+        | Route::ShopCollection { .. }
+        | Route::ShopCollectionNew {}
+        | Route::ShopSearch { .. } => Some(Route::ShopHome {}),
+        Route::PhotoDetail { .. } | Route::PhotoNew {} => Some(Route::Photos {}),
+        Route::VoiceMessageNew {} | Route::VoiceMessageDetail { .. } => {
+            Some(Route::VoiceMessages {})
+        }
+        Route::PollNew {} | Route::PollView { .. } => Some(Route::Polls {}),
+        Route::NoteNew { .. } => Some(Route::Home {
+            list: String::new(),
+        }),
+        Route::Note { .. } => note_back_target(current_route),
+        Route::ListDetail { .. } => Some(Route::Lists {}),
+        Route::BibleChapter { .. } | Route::BibleSearch {} => Some(Route::BibleHome {}),
+        Route::SettingsBlocklist {} | Route::SettingsMuted {} | Route::SettingsRelays {} => {
+            Some(Route::Settings {})
+        }
+    }
+}
+
+#[cfg_attr(not(feature = "mobile"), allow(dead_code))]
+fn handle_android_back(navigator: dioxus::router::Navigator, current_route: &Route) {
+    if crate::stores::back_navigation::close_topmost_mobile_overlay() {
+        return;
+    }
+
+    if navigator.can_go_back() {
+        navigator.go_back();
+        return;
+    }
+
+    if let Some(target) = fallback_route_for(current_route) {
+        navigator.replace(target);
+    }
+
+    #[cfg(feature = "mobile")]
+    if let Err(error) = crate::platform::mobile::finish_app() {
+        log::error!("Failed to finish Android activity: {}", error);
+    }
+}
+
+#[cfg(target_os = "android")]
+#[no_mangle]
+pub extern "system" fn Java_dev_dioxus_main_MainActivity_handleAndroidBackPressed(
+    _env: jni::JNIEnv,
+    _class: jni::objects::JClass,
+) {
+    crate::stores::back_navigation::request_android_back_from_platform();
+}
+
 #[component]
 fn Layout() -> Element {
-    use crate::stores::{auth_store, music_player::MUSIC_PLAYER, notifications as notif_store};
+    use crate::stores::{
+        auth_store, back_navigation, music_player::MUSIC_PLAYER, notifications as notif_store,
+    };
     let auth = auth_store::AUTH_STATE.read();
     let notif_count = use_memo(notif_store::get_unread_count);
-    let mut sidebar_open = use_signal(|| false);
-    let mut sidebar_page = use_signal(|| 0usize);
+    let mut sidebar_open = back_navigation::MOBILE_SIDEBAR_OPEN.signal();
+    let mut sidebar_page = back_navigation::MOBILE_SIDEBAR_PAGE.signal();
     // Clamp sidebar_page when total_pages decreases (e.g. auth state change)
     use_effect(move || {
         let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
         let total_pages = crate::stores::sidebar_store::get_total_pages(is_authenticated);
         let max_page = total_pages.saturating_sub(1);
-        if *sidebar_page.peek() > max_page {
-            sidebar_page.set(max_page);
+        if *sidebar_page.read() > max_page {
+            *sidebar_page.write() = max_page;
         }
     });
-    let mut radial_menu_open = use_signal(|| false);
-    let mut sidebar_customizer_open = use_signal(|| false);
-    let mut mobile_search_open = use_signal(|| false);
+    let mut radial_menu_open = back_navigation::RADIAL_MENU_OPEN.signal();
+    let mut sidebar_customizer_open = back_navigation::SIDEBAR_CUSTOMIZER_OPEN.signal();
+    let mut mobile_search_open = back_navigation::MOBILE_SEARCH_OPEN.signal();
+    #[allow(unused_mut, unused_variables)]
+    let mut android_back_nonce = use_signal(|| 0u64);
     let current_route = use_route::<Route>();
     let navigator = navigator();
+    #[cfg(feature = "mobile")]
+    use_effect(move || {
+        spawn(async move {
+            let mut last_seen = 0;
+            loop {
+                let latest = back_navigation::platform_android_back_request_count();
+                if latest > last_seen {
+                    last_seen = latest;
+                    android_back_nonce.set(latest);
+                }
+                crate::platform::timer::sleep_ms(50).await;
+            }
+        });
+    });
+    #[cfg(feature = "mobile")]
+    let route_for_android_back = current_route.clone();
+    #[cfg(feature = "mobile")]
+    use_effect(use_reactive(&*android_back_nonce.read(), move |nonce| {
+        if nonce == 0 {
+            return;
+        }
+
+        handle_android_back(navigator, &route_for_android_back);
+    }));
     let is_dms_page = matches!(current_route, Route::DMs {});
     let is_videos_page = matches!(
         current_route,
@@ -716,7 +980,7 @@ fn Layout() -> Element {
             class: "min-h-screen bg-background transition-colors",
             onclick: move |_| {
                 if *sidebar_page.read() != 0 {
-                    sidebar_page.set(0);
+                    *sidebar_page.write() = 0;
                 }
             },
             div { class: "flex justify-center max-w-[1600px] mx-auto",
@@ -753,7 +1017,7 @@ fn Layout() -> Element {
                                         onclick: move |e| {
                                             e.stop_propagation();
                                             let prev = sidebar_page.read().saturating_sub(1);
-                                            sidebar_page.set(prev);
+                                            *sidebar_page.write() = prev;
                                         },
                                         "← Back"
                                     }
@@ -768,7 +1032,7 @@ fn Layout() -> Element {
                                                         key: "{item:?}",
                                                         class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-accent transition text-xl w-full cursor-pointer {home_font_weight}",
                                                         onclick: move |_| {
-                                                            sidebar_page.set(0);
+                                                            *sidebar_page.write() = 0;
                                                             if is_home_page {
                                                                 #[cfg(feature = "web")]
                                                                 if let Some(window) = web_sys::window() {
@@ -787,7 +1051,7 @@ fn Layout() -> Element {
                                                         rsx! {
                                                             div {
                                                                 key: "{item:?}",
-                                                                onclick: move |_| sidebar_page.set(0),
+                                                                onclick: move |_| *sidebar_page.write() = 0,
                                                                 NavLink {
                                                                     to: Route::Profile {
                                                                         pubkey: pubkey.clone(),
@@ -804,7 +1068,7 @@ fn Layout() -> Element {
                                                 SidebarItem::Notifications => rsx! {
                                                     div {
                                                         key: "{item:?}",
-                                                        onclick: move |_| sidebar_page.set(0),
+                                                        onclick: move |_| *sidebar_page.write() = 0,
                                                         NavLink {
                                                             to: Route::Notifications {},
                                                             icon: render_sidebar_icon(&SidebarItem::Notifications, "w-7 h-7"),
@@ -818,7 +1082,7 @@ fn Layout() -> Element {
                                                         rsx! {
                                                             div {
                                                                 key: "{item:?}",
-                                                                onclick: move |_| sidebar_page.set(0),
+                                                                onclick: move |_| *sidebar_page.write() = 0,
                                                                 NavLink {
                                                                     to: route,
                                                                     icon: render_sidebar_icon(&item, "w-7 h-7"),
@@ -839,7 +1103,7 @@ fn Layout() -> Element {
                                             onclick: move |e| {
                                                 e.stop_propagation();
                                                 let next = *sidebar_page.read() + 1;
-                                                sidebar_page.set(next);
+                                                *sidebar_page.write() = next;
                                             },
                                             crate::components::icons::MoreHorizontalIcon { class: "w-7 h-7" }
                                             span { "More" }
@@ -851,8 +1115,8 @@ fn Layout() -> Element {
                                             class: "flex items-center gap-4 px-4 py-2 rounded-full hover:bg-accent transition text-xl w-full text-left",
                                             onclick: move |e| {
                                                 e.stop_propagation();
-                                                sidebar_page.set(0);
-                                                sidebar_customizer_open.set(true);
+                                                *sidebar_page.write() = 0;
+                                                *sidebar_customizer_open.write() = true;
                                             },
                                             crate::components::icons::SettingsIcon { class: "w-7 h-7" }
                                             span { "Edit Sidebar" }
@@ -867,40 +1131,40 @@ fn Layout() -> Element {
                                     class: "w-full py-6 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-full transition text-lg flex items-center justify-center gap-2 relative z-50",
                                     onclick: move |_| {
                                         let is_open = *radial_menu_open.read();
-                                        radial_menu_open.set(!is_open);
+                                        *radial_menu_open.write() = !is_open;
                                     },
                                     crate::components::icons::PenSquareIcon { class: "w-6 h-6" }
                                     span { "Post" }
                                 }
                                 crate::components::RadialMenu {
                                     is_open: *radial_menu_open.read(),
-                                    on_close: move |_| radial_menu_open.set(false),
+                                    on_close: move |_| *radial_menu_open.write() = false,
                                     on_note_click: move |_| {
-                                        radial_menu_open.set(false);
+                                        *radial_menu_open.write() = false;
                                         navigator.push(Route::NoteNew { quote: None });
                                     },
                                     on_article_click: move |_| {
-                                        radial_menu_open.set(false);
+                                        *radial_menu_open.write() = false;
                                         navigator.push(Route::ArticleNew {});
                                     },
                                     on_photo_click: move |_| {
-                                        radial_menu_open.set(false);
+                                        *radial_menu_open.write() = false;
                                         navigator.push(Route::PhotoNew {});
                                     },
                                     on_video_landscape_click: move |_| {
-                                        radial_menu_open.set(false);
+                                        *radial_menu_open.write() = false;
                                         navigator.push(Route::VideoNewLandscape {});
                                     },
                                     on_video_portrait_click: move |_| {
-                                        radial_menu_open.set(false);
+                                        *radial_menu_open.write() = false;
                                         navigator.push(Route::VideoNewPortrait {});
                                     },
                                     on_voice_click: move |_| {
-                                        radial_menu_open.set(false);
+                                        *radial_menu_open.write() = false;
                                         navigator.push(Route::VoiceMessageNew {});
                                     },
                                     on_poll_click: move |_| {
-                                        radial_menu_open.set(false);
+                                        *radial_menu_open.write() = false;
                                         navigator.push(Route::PollNew {});
                                     },
                                 }
@@ -912,8 +1176,8 @@ fn Layout() -> Element {
                     div {
                         class: "fixed inset-0 bg-black/50 z-40 lg:hidden",
                         onclick: move |_| {
-                            sidebar_open.set(false);
-                            sidebar_page.set(0);
+                            *sidebar_open.write() = false;
+                            *sidebar_page.write() = 0;
                         },
                         aside {
                             class: "w-64 bg-background h-full overflow-y-auto",
@@ -929,16 +1193,16 @@ fn Layout() -> Element {
                                             button {
                                                 class: "mb-4 p-2 rounded-lg hover:bg-accent",
                                                 onclick: move |_| {
-                                                    sidebar_open.set(false);
-                                                    sidebar_page.set(0);
+                                                    *sidebar_open.write() = false;
+                                                    *sidebar_page.write() = 0;
                                                 },
                                                 "✕ Close"
                                             }
                                             div {
                                                 class: "flex items-center gap-2 hover:opacity-80 transition mb-8 cursor-pointer",
                                                 onclick: move |_| {
-                                                    sidebar_open.set(false);
-                                                    sidebar_page.set(0);
+                                                    *sidebar_open.write() = false;
+                                                    *sidebar_page.write() = 0;
                                                     if is_home_page {
                                                         #[cfg(feature = "web")]
                                                         if let Some(window) = web_sys::window() {
@@ -961,7 +1225,7 @@ fn Layout() -> Element {
                                                 onclick: move |e| {
                                                     e.stop_propagation();
                                                     let prev = sidebar_page.read().saturating_sub(1);
-                                                    sidebar_page.set(prev);
+                                                    *sidebar_page.write() = prev;
                                                 },
                                                 "← Back"
                                             }
@@ -976,8 +1240,8 @@ fn Layout() -> Element {
                                                                 key: "{item:?}-mobile",
                                                                 class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-accent transition text-xl w-full cursor-pointer {home_font_weight}",
                                                                 onclick: move |_| {
-                                                                    sidebar_open.set(false);
-                                                                    sidebar_page.set(0);
+                                                                    *sidebar_open.write() = false;
+                                                                    *sidebar_page.write() = 0;
                                                                     if is_home_page {
                                                                         #[cfg(feature = "web")]
                                                                         if let Some(window) = web_sys::window() {
@@ -997,8 +1261,8 @@ fn Layout() -> Element {
                                                                     div {
                                                                         key: "{item:?}-mobile",
                                                                         onclick: move |_| {
-                                                                            sidebar_open.set(false);
-                                                                            sidebar_page.set(0);
+                                                                            *sidebar_open.write() = false;
+                                                                            *sidebar_page.write() = 0;
                                                                         },
                                                                         NavLink {
                                                                             to: Route::Profile {
@@ -1017,8 +1281,8 @@ fn Layout() -> Element {
                                                             div {
                                                                 key: "{item:?}-mobile",
                                                                 onclick: move |_| {
-                                                                    sidebar_open.set(false);
-                                                                    sidebar_page.set(0);
+                                                                    *sidebar_open.write() = false;
+                                                                    *sidebar_page.write() = 0;
                                                                 },
                                                                 NavLink {
                                                                     to: Route::Notifications {},
@@ -1034,8 +1298,8 @@ fn Layout() -> Element {
                                                                     div {
                                                                         key: "{item:?}-mobile",
                                                                         onclick: move |_| {
-                                                                            sidebar_open.set(false);
-                                                                            sidebar_page.set(0);
+                                                                            *sidebar_open.write() = false;
+                                                                            *sidebar_page.write() = 0;
                                                                         },
                                                                         NavLink {
                                                                             to: route,
@@ -1057,7 +1321,7 @@ fn Layout() -> Element {
                                                     onclick: move |e| {
                                                         e.stop_propagation();
                                                         let next = *sidebar_page.read() + 1;
-                                                        sidebar_page.set(next);
+                                                        *sidebar_page.write() = next;
                                                     },
                                                     crate::components::icons::MoreHorizontalIcon { class: "w-7 h-7".to_string() }
                                                     span { "More" }
@@ -1071,9 +1335,9 @@ fn Layout() -> Element {
                                                 button {
                                                     class: "flex items-center gap-4 px-4 py-3 rounded-full hover:bg-accent transition text-xl w-full text-left",
                                                     onclick: move |_| {
-                                                        sidebar_page.set(0);
-                                                        sidebar_open.set(false);
-                                                        sidebar_customizer_open.set(true);
+                                                        *sidebar_page.write() = 0;
+                                                        *sidebar_open.write() = false;
+                                                        *sidebar_customizer_open.write() = true;
                                                     },
                                                     crate::components::icons::SettingsIcon { class: "w-7 h-7" }
                                                     span { "Edit Sidebar" }
@@ -1089,8 +1353,8 @@ fn Layout() -> Element {
                 // Mobile search slideout
                 if *mobile_search_open.read() {
                     crate::components::MobileSearchSlideout {
-                        show: mobile_search_open,
-                        on_close: move |_| mobile_search_open.set(false),
+                        show: *mobile_search_open.read(),
+                        on_close: move |_| *mobile_search_open.write() = false,
                     }
                 }
                 main {
@@ -1106,13 +1370,13 @@ fn Layout() -> Element {
                         div { class: "flex items-center justify-between",
                             button {
                                 class: "p-2 hover:bg-accent rounded-lg",
-                                onclick: move |_| sidebar_open.set(true),
+                                onclick: move |_| *sidebar_open.write() = true,
                                 "☰ Menu"
                             }
                             div { class: "text-lg font-bold", "nostr.blue" }
                             button {
                                 class: "p-2 hover:bg-accent rounded-lg",
-                                onclick: move |_| mobile_search_open.set(true),
+                                onclick: move |_| *mobile_search_open.write() = true,
                                 crate::components::icons::SearchIcon { class: "w-5 h-5".to_string() }
                             }
                         }
@@ -1160,8 +1424,44 @@ fn Layout() -> Element {
             crate::components::MusicZapDialog {}
             crate::components::PwaUpdateBanner {}
             if *sidebar_customizer_open.read() {
-                crate::components::SidebarCustomizerModal { on_close: move |_| sidebar_customizer_open.set(false) }
+                crate::components::SidebarCustomizerModal { on_close: move |_| *sidebar_customizer_open.write() = false }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{fallback_route_for, Route};
+
+    #[test]
+    fn top_level_routes_do_not_fallback() {
+        assert_eq!(
+            fallback_route_for(&Route::Home {
+                list: String::new()
+            }),
+            None
+        );
+        assert_eq!(fallback_route_for(&Route::CodeHome {}), None);
+    }
+
+    #[test]
+    fn detail_routes_fallback_to_section_roots() {
+        assert_eq!(
+            fallback_route_for(&Route::ArticleDetail {
+                naddr: "article".to_string(),
+            }),
+            Some(Route::Articles {})
+        );
+        assert_eq!(
+            fallback_route_for(&Route::SettingsRelays {}),
+            Some(Route::Settings {})
+        );
+        assert_eq!(
+            fallback_route_for(&Route::ShopProductDetail {
+                naddr: "product".to_string(),
+            }),
+            Some(Route::ShopHome {})
+        );
     }
 }

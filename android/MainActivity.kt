@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -27,6 +28,12 @@ typealias BuildConfig = com.nostr.blue.BuildConfig
  * Protocol reference: https://github.com/nostr-protocol/nips/blob/master/55.md
  */
 class MainActivity : WryActivity() {
+
+    private val backPressedCallback = object : OnBackPressedCallback(true) {
+        override fun handleOnBackPressed() {
+            handleAndroidBackPressed()
+        }
+    }
 
     // Property initializer — registered before STARTED state, safe for AndroidX lifecycle
     private val signerLauncher: ActivityResultLauncher<Intent> = registerForActivityResult(
@@ -130,6 +137,7 @@ class MainActivity : WryActivity() {
         if (savedInstanceState == null) {
             cleanupTempShareFiles(cacheDir, TEMP_FILE_PRESERVE_MILLIS)
         }
+        onBackPressedDispatcher.addCallback(this, backPressedCallback)
         synchronized(lock) {
             instance = this
         }
@@ -147,6 +155,9 @@ class MainActivity : WryActivity() {
     }
 
     companion object {
+        @JvmStatic
+        external fun handleAndroidBackPressed()
+
         private const val TAG = "NIP55"
         private val lock = Any()
 
@@ -188,6 +199,19 @@ class MainActivity : WryActivity() {
         private const val NIP55_PERMISSIONS = """[{"type":"sign_event","kind":0},{"type":"sign_event","kind":1},{"type":"sign_event","kind":3},{"type":"sign_event","kind":5},{"type":"sign_event","kind":6},{"type":"sign_event","kind":7},{"type":"sign_event","kind":14},{"type":"sign_event","kind":1063},{"type":"sign_event","kind":1088},{"type":"sign_event","kind":1311},{"type":"sign_event","kind":1617},{"type":"sign_event","kind":1621},{"type":"sign_event","kind":1622},{"type":"sign_event","kind":6969},{"type":"sign_event","kind":7001},{"type":"sign_event","kind":9734},{"type":"sign_event","kind":10000},{"type":"sign_event","kind":10002},{"type":"sign_event","kind":30000},{"type":"sign_event","kind":30001},{"type":"sign_event","kind":30023},{"type":"sign_event","kind":30078},{"type":"sign_event","kind":30311},{"type":"sign_event","kind":31237},{"type":"nip04_encrypt"},{"type":"nip04_decrypt"},{"type":"nip44_encrypt"},{"type":"nip44_decrypt"}]"""
 
         private fun maxUploadError(): String = "File too large (max 10MB)"
+
+        @JvmStatic
+        fun finishApp(context: Context) {
+            val activity = instance
+            if (activity == null) {
+                Log.w(TAG, "finishApp called with no active MainActivity")
+                return
+            }
+
+            activity.runOnUiThread {
+                activity.finish()
+            }
+        }
 
         private fun querySignerPackages(context: Context): Set<String> {
             val intent = Intent().apply {
