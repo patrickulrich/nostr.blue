@@ -95,6 +95,10 @@ pub fn MobileSearchSlideout(show: bool, on_close: EventHandler<()>) -> Element {
             });
             relay_search_task.set(Some(new_task));
         } else {
+            // Cancel any pending relay search before clearing loading state
+            if let Some(task) = relay_search_task.take() {
+                task.cancel();
+            }
             is_searching.set(false);
         }
     };

@@ -171,6 +171,7 @@ pub fn PinBoardCardMosaic(
             let has_signer = *HAS_SIGNER.read();
             let current_gen = reaction_request_gen.peek().wrapping_add(1);
             reaction_request_gen.set(current_gen);
+            reaction_loading.set(false);
             reaction_bootstrapped.set(false);
             spawn(async move {
                 if let Ok((count, reacted)) = fetch_pinboard_reaction_state(&a_tag).await {
@@ -250,7 +251,7 @@ pub fn PinBoardCardMosaic(
                     disabled: *reaction_loading.read() || !*reaction_bootstrapped.read() || !*HAS_SIGNER.read(),
                     onclick: move |e| {
                         e.stop_propagation();
-                        if !*HAS_SIGNER.read() {
+                        if *reaction_loading.read() || !*reaction_bootstrapped.read() || !*HAS_SIGNER.read() {
                             return;
                         }
                         // Invalidate any in-flight bootstrap fetch before optimistic update
@@ -287,6 +288,7 @@ pub fn PinBoardCardMosaic(
                                                     "Failed to reconcile reaction state after toggle: {}",
                                                     e
                                                 );
+                                                reaction_count.set(current_count);
                                                 has_reacted.set(added);
                                             }
                                         }

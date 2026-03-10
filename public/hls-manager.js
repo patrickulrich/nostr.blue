@@ -119,8 +119,8 @@ window.hlsManager = window.hlsManager || {
             // Check if there's an existing pending resolve for this elementId
             const existing = this.pendingResolves.get(elementId);
             if (existing && existing.attachId !== attachId) {
-                // Cancel the old pending promise by rejecting it
-                existing.reject({ type: 'cancelled', url: streamUrl });
+                // Cancel the old pending promise by resolving it as cancelled
+                existing.resolve({ type: 'cancelled', url: streamUrl });
                 this.pendingResolves.delete(elementId);
             }
 

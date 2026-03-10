@@ -244,6 +244,10 @@ pub fn PRReviewSection(
             if *submitting.peek() {
                 return;
             }
+            if !*HAS_SIGNER.read() {
+                publish_error.set(Some("No signer attached".to_string()));
+                return;
+            }
             submitting.set(true);
             let state = *selected_state.read();
             let body = review_body.read().clone();
