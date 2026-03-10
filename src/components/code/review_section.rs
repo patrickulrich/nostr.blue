@@ -118,11 +118,54 @@ mod tests {
         }
     }
 
+    fn review_with_content(event_id: &str, created_at: u64, content: &str, state: ReviewState) -> PersistedReview {
+        PersistedReview {
+            pr_event_id: "pr".to_string(),
+            content: content.to_string(),
+            state,
+            event_id: event_id.to_string(),
+            pubkey: "pubkey".to_string(),
+            created_at,
+        }
+    }
+
     #[test]
     fn lower_event_id_wins_for_equal_persisted_reviews() {
         let existing = review("ff", 100);
         let candidate = review("0a", 100);
         assert!(should_replace_review(&existing, &candidate));
+        assert!(!should_replace_review(&candidate, &existing));
+    }
+
+    #[test]
+    fn optimistic_same_fields_replaces() {
+        // Existing optimistic review (no event_id)
+        let existing = review_with_content("", 100, "Great PR!", ReviewState::Approved);
+        // Candidate persisted review with identical semantic fields
+        let candidate = review_with_content("abc123", 100, "Great PR!", ReviewState::Approved);
+        // Should replace because semantic fields match
+        assert!(should_replace_review(&existing, &candidate));
+    }
+
+    #[test]
+    fn optimistic_different_content_no_replace() {
+        // Existing optimistic review with one content
+        let existing = review_with_content("", 100, "Great PR!", ReviewState::Approved);
+        // Candidate persisted review with different content
+        let candidate = review_with_content("abc123", 100, "Needs work", ReviewState::Approved);
+        // Should NOT replace because content differs
+        assert!(!should_replace_review(&existing, &candidate));
+    }
+
+    #[test]
+    fn newer_timestamp_wins() {
+        // Existing review with older timestamp
+        let existing = review("abc", 100);
+        // Candidate review with newer timestamp
+        let candidate = review("def", 200);
+        // Should replace because candidate is newer
+        assert!(should_replace_review(&existing, &candidate));
+        // Should NOT replace in reverse direction
         assert!(!should_replace_review(&candidate, &existing));
     }
 }

@@ -160,6 +160,7 @@ pub fn PinBoardCardMosaic(
     let mut reaction_loading = use_signal(|| false);
     let mut reaction_request_gen = use_signal(|| 0u32);
     let mut reaction_bootstrapped = use_signal(|| false);
+    let mut reaction_error = use_signal(|| None::<String>);
     let a_tag_for_reactions = board.a_tag.clone();
     use_effect(use_reactive(
         (
@@ -181,10 +182,12 @@ pub fn PinBoardCardMosaic(
                     reaction_count.set(count);
                     has_reacted.set(if has_signer { reacted } else { false });
                     reaction_bootstrapped.set(true);
+                    reaction_error.set(None);
                 } else if *reaction_request_gen.peek() == current_gen {
                     has_reacted.set(false);
                     reaction_bootstrapped.set(false);
                     reaction_count.set(0);
+                    reaction_error.set(Some("Failed to load reactions. Click to retry.".to_string()));
                 }
             });
         },
@@ -249,10 +252,38 @@ pub fn PinBoardCardMosaic(
                 button {
                     class: "rounded-full p-2 bg-white/90 hover:bg-white shadow-md backdrop-blur-sm
                             {heart_button_class} transition-colors disabled:opacity-50",
-                    disabled: *reaction_loading.read() || !*reaction_bootstrapped.read() || !*HAS_SIGNER.read(),
+                    disabled: *reaction_loading.read() || !*HAS_SIGNER.read(),
                     onclick: move |e| {
                         e.stop_propagation();
-                        if *reaction_loading.read() || !*reaction_bootstrapped.read() || !*HAS_SIGNER.read() {
+                        if *reaction_loading.read() || !*HAS_SIGNER.read() {
+                            return;
+                        }
+                        // If not bootstrapped, retry the bootstrap fetch first
+                        if !*reaction_bootstrapped.read() {
+                            let next_gen = reaction_request_gen.peek().wrapping_add(1);
+                            reaction_request_gen.set(next_gen);
+                            let current_gen = next_gen;
+                            let a_tag = board_for_react.a_tag.clone();
+                            let has_signer = *HAS_SIGNER.read();
+                            reaction_error.set(None);
+                            spawn(async move {
+                                match fetch_pinboard_reaction_state(&a_tag).await {
+                                    Ok((count, reacted)) => {
+                                        if *reaction_request_gen.peek() != current_gen {
+                                            return;
+                                        }
+                                        reaction_count.set(count);
+                                        has_reacted.set(if has_signer { reacted } else { false });
+                                        reaction_bootstrapped.set(true);
+                                        reaction_error.set(None);
+                                    }
+                                    Err(e) => {
+                                        if *reaction_request_gen.peek() == current_gen {
+                                            reaction_error.set(Some(format!("Failed to load reactions: {}. Click heart to retry.", e)));
+                                        }
+                                    }
+                                }
+                            });
                             return;
                         }
                         // Invalidate any in-flight bootstrap fetch before optimistic update
@@ -311,7 +342,13 @@ pub fn PinBoardCardMosaic(
                             }
                         });
                     },
-                    title: if *has_reacted.read() { "Unlike" } else { "Like" },
+                    title: if let Some(ref err) = *reaction_error.read() {
+                        "{err}"
+                    } else if *has_reacted.read() {
+                        "Unlike"
+                    } else {
+                        "Like"
+                    },
                     svg {
                         class: "w-5 h-5 {heart_fill_class}",
                         fill: if *has_reacted.read() { "currentColor" } else { "none" },
