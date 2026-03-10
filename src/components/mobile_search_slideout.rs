@@ -69,7 +69,7 @@ pub fn MobileSearchSlideout(show: bool, on_close: EventHandler<()>) -> Element {
         if new_value.len() >= 2 && cached_results.len() < 5 {
             is_searching.set(true);
 
-            if let Some(task) = relay_search_task.read().as_ref() {
+            if let Some(task) = relay_search_task.take() {
                 task.cancel();
             }
 

@@ -320,8 +320,14 @@ pub fn PRReviewSection(
                                 && r.event_id.is_empty())
                         });
                         if let Some(prior) = prior_review {
-                            current.push(prior);
-                            current.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                            // Only restore if no newer persisted review exists for this pubkey
+                            let has_newer = current.iter().any(|r| {
+                                r.pubkey == prior.pubkey && r.created_at >= prior.created_at
+                            });
+                            if !has_newer {
+                                current.push(prior);
+                                current.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                            }
                         }
                         drop(current);
                         // Restore form so user can retry

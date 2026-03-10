@@ -183,7 +183,8 @@ pub fn PinBoardCardMosaic(
                     reaction_bootstrapped.set(true);
                 } else if *reaction_request_gen.peek() == current_gen {
                     has_reacted.set(false);
-                    reaction_bootstrapped.set(true);
+                    reaction_bootstrapped.set(false);
+                    reaction_count.set(0);
                 }
             });
         },

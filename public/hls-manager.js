@@ -26,20 +26,46 @@ window.hlsManager = window.hlsManager || {
             return this.hlsLoading;
         }
 
-        this.hlsLoading = new Promise((resolve, reject) => {
+        this.hlsLoading = new Promise((resolve) => {
             const script = document.createElement('script');
             script.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.6.13/dist/hls.min.js';
             script.crossOrigin = 'anonymous';
             script.integrity = 'sha384-z+tuLqMWl1/cPv7O+39RO0EURSNvorimpcCaMgeNwU+qFBx+AlUIl7jaAwg0cYil';
+            
+            let timeoutId = null;
+            
+            const cleanup = () => {
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                    timeoutId = null;
+                }
+                script.onload = null;
+                script.onerror = null;
+            };
+            
             script.onload = () => {
+                cleanup();
                 console.log('[HLS Manager] hls.js loaded');
                 this.hlsLoaded = true;
-                resolve();
+                resolve({ type: 'success' });
             };
+            
             script.onerror = () => {
+                cleanup();
                 this.hlsLoading = null;
-                reject(new Error('Failed to load hls.js'));
+                this.hlsLoaded = false;
+                resolve({ type: 'error', error: 'Failed to load hls.js' });
             };
+            
+            // Add timeout to prevent hanging on CDN stall
+            timeoutId = setTimeout(() => {
+                cleanup();
+                script.remove();
+                this.hlsLoading = null;
+                this.hlsLoaded = false;
+                resolve({ type: 'error', error: 'Timeout loading hls.js from CDN' });
+            }, 10000);
+            
             document.head.appendChild(script);
         });
 
@@ -87,7 +113,11 @@ window.hlsManager = window.hlsManager || {
     async attachToMedia(elementId, streamUrl) {
         const element = document.getElementById(elementId);
         if (!element || !(element instanceof HTMLMediaElement)) {
-            throw new Error('Media element not found or not a HTMLMediaElement: ' + elementId);
+            return {
+                type: 'error',
+                url: streamUrl,
+                error: 'Media element not found or not a HTMLMediaElement: ' + elementId
+            };
         }
 
         const isHls = this.isHlsUrl(streamUrl);
