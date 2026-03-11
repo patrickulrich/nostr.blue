@@ -571,6 +571,7 @@ pub fn set_textarea_cursor(textarea_id: &str, position: usize, content: &str) {
     }
 }
 #[cfg(not(feature = "web"))]
+#[allow(dead_code)]
 pub fn set_textarea_cursor(_textarea_id: &str, _position: usize, _content: &str) {}
 /// Get cursor position from a textarea element (WASM only)
 #[cfg(feature = "web")]

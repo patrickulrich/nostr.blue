@@ -3,9 +3,10 @@
 //! A full-featured markdown editor with preview modes, formatting toolbar,
 //! and keyboard shortcut support.
 use super::markdown_toolbar::{
-    apply_markdown_format, get_textarea_cursor, set_textarea_cursor, MarkdownFormat,
-    MarkdownToolbar,
+    apply_markdown_format, get_textarea_cursor, MarkdownFormat, MarkdownToolbar,
 };
+#[cfg(feature = "web")]
+use super::markdown_toolbar::set_textarea_cursor;
 use crate::utils::markdown::render_markdown;
 use dioxus::prelude::*;
 use std::rc::Rc;
@@ -246,10 +247,10 @@ pub fn insert_at_cursor(content: &mut Signal<String>, textarea_id: &str, text_to
     let before = &current_content[..cursor_start];
     let after = &current_content[cursor_start..];
     let new_content = format!("{}{}{}", before, text_to_insert, after);
-    let new_cursor = cursor_start + text_to_insert.len();
     content.set(new_content.clone());
     #[cfg(feature = "web")]
     {
+        let new_cursor = cursor_start + text_to_insert.len();
         let id = textarea_id.to_string();
         spawn(async move {
             crate::platform::timer::sleep_ms(10).await;
