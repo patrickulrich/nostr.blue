@@ -100,6 +100,17 @@ pub fn TrackCard(props: TrackCardProps) -> Element {
                 button {
                     class: "absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition rounded",
                     tabindex: "-1",
+                    onkeydown: move |evt| {
+                        match evt.key() {
+                            Key::Enter => {
+                                evt.stop_propagation();
+                            }
+                            Key::Character(ref c) if c == " " => {
+                                evt.stop_propagation();
+                            }
+                            _ => {}
+                        }
+                    },
                     dangerous_inner_html: if *is_playing.read() { icons::PAUSE } else { icons::PLAY },
                 }
             }
@@ -111,7 +122,9 @@ pub fn TrackCard(props: TrackCardProps) -> Element {
                         "{track.title}"
                     }
                 }
-                div { class: "text-xs text-muted-foreground truncate",
+                div {
+                    class: "text-xs text-muted-foreground truncate",
+                    onkeydown: move |e: Event<KeyboardData>| e.stop_propagation(),
                     Link {
                         to: Route::MusicArtist {
                             artist_id: track.artist_id.clone(),
@@ -122,7 +135,9 @@ pub fn TrackCard(props: TrackCardProps) -> Element {
                     }
                 }
                 if props.show_album {
-                    div { class: "text-xs text-muted-foreground truncate",
+                    div {
+                        class: "text-xs text-muted-foreground truncate",
+                        onkeydown: move |e: Event<KeyboardData>| e.stop_propagation(),
                         Link {
                             to: Route::MusicAlbum {
                                 album_id: track.album_id.clone(),
@@ -139,6 +154,7 @@ pub fn TrackCard(props: TrackCardProps) -> Element {
                 button {
                     class: "p-2 hover:bg-muted rounded-full transition",
                     title: "Vote for this track",
+                    onkeydown: move |e: Event<KeyboardData>| e.stop_propagation(),
                     onclick: {
                         let vote_track: MusicTrack = track.clone().into();
                         move |e: Event<MouseData>| {
@@ -156,6 +172,7 @@ pub fn TrackCard(props: TrackCardProps) -> Element {
                 button {
                     class: "p-2 hover:bg-muted rounded-full transition",
                     title: "Zap this artist",
+                    onkeydown: move |e: Event<KeyboardData>| e.stop_propagation(),
                     onclick: {
                         let zap_track: MusicTrack = track.clone().into();
                         move |e: Event<MouseData>| {

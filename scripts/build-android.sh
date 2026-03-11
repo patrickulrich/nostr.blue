@@ -251,7 +251,13 @@ if [ -d "$OPENSSL_SEARCH" ]; then
         while IFS= read -r line; do
             sorted+=("$line")
         done < <(for m in "${matches[@]}"; do
-            mtime=$(stat -c %Y "$m" 2>/dev/null || echo 0)
+            if mtime=$(stat -c %Y "$m" 2>/dev/null); then
+                :
+            elif mtime=$(stat -f %m "$m" 2>/dev/null); then
+                :
+            else
+                mtime=0
+            fi
             echo "$mtime $m"
         done | sort -rn | cut -d' ' -f2-)
         OPENSSL_PREBUILT="${sorted[0]}"

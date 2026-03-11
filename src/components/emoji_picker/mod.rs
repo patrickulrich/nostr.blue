@@ -11,6 +11,21 @@ use crate::stores::emoji_store::{
 use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 use std::collections::HashSet;
+use std::sync::LazyLock;
+
+static UNIQUE_EMOJI_CATEGORIES: LazyLock<Vec<Vec<&'static str>>> = LazyLock::new(|| {
+    EMOJI_CATEGORIES
+        .iter()
+        .map(|(_, emojis)| {
+            let mut seen = HashSet::new();
+            emojis
+                .iter()
+                .copied()
+                .filter(|emoji| seen.insert(*emoji))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+});
 #[derive(Props, Clone, PartialEq)]
 pub struct EmojiPickerProps {
     pub on_emoji_selected: EventHandler<String>,
@@ -420,13 +435,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                 }
                                 EmojiCategory::Standard(idx) => rsx! {
                                     {
-                                        let mut seen = HashSet::new();
-                                        let unique_emojis: Vec<&str> = EMOJI_CATEGORIES[idx]
-                                            .1
-                                            .iter()
-                                            .copied()
-                                            .filter(|emoji| seen.insert(*emoji))
-                                            .collect();
+                                        let unique_emojis = &UNIQUE_EMOJI_CATEGORIES[idx];
                                         rsx! {
                                     div { class: "grid grid-cols-5 sm:grid-cols-6 md:grid-cols-7 gap-2",
                                         for (emoji_idx , emoji) in unique_emojis.iter().enumerate() {

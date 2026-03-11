@@ -140,130 +140,136 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
                     div {
                         class: "flex flex-wrap gap-2 p-3 bg-muted rounded-lg min-h-[60px] transition-colors",
                         for (index , item) in local_items.read().iter().cloned().enumerate() {
-                            Fragment { key: "{item:?}",
-                                if index > 0 && index % slot_count == 0 {
-                                    div { class: "w-full flex items-center gap-2 my-1",
-                                        div { class: "flex-1 border-t border-dashed border-border" }
-                                        span { class: "text-xs text-muted-foreground px-2",
-                                            "Page {index / slot_count + 1}"
-                                        }
-                                        div { class: "flex-1 border-t border-dashed border-border" }
-                                    }
-                                }
+                            if index > 0 && index % slot_count == 0 {
                                 div {
-                                    id: "sidebar-item-{index}",
-                                    class: "relative",
-                                    draggable: "true",
-                                    ondragstart: move |e| {
-                                        dragging_from_index.set(Some(index));
-                                        let _ = e.data_transfer().set_data("text/plain", &format!("{}", index));
-                                    },
-                                    ondragend: move |_| {
-                                        dragging_from_index.set(None);
-                                        drag_over_index.set(None);
-                                    },
-                                    ondragover: move |e| {
-                                        e.prevent_default();
-                                        drag_over_index.set(Some(index));
-                                    },
-                                    ondragleave: move |_| {
-                                        if drag_over_index() == Some(index) {
+                                    key: "sidebar-page-break-{index / slot_count}",
+                                    class: "w-full flex items-center gap-2 my-1",
+                                    div { class: "flex-1 border-t border-dashed border-border" }
+                                    span { class: "text-xs text-muted-foreground px-2",
+                                        "Page {index / slot_count + 1}"
+                                    }
+                                    div { class: "flex-1 border-t border-dashed border-border" }
+                                }
+                            }
+                            {
+                                let item_key = format!("sidebar-item-{item:?}");
+                                rsx! {
+                                    div {
+                                        key: "{item_key}",
+                                        id: "sidebar-item-{index}",
+                                        class: "relative",
+                                        draggable: "true",
+                                        ondragstart: move |e| {
+                                            dragging_from_index.set(Some(index));
+                                            let _ = e.data_transfer().set_data("text/plain", &format!("{}", index));
+                                        },
+                                        ondragend: move |_| {
+                                            dragging_from_index.set(None);
                                             drag_over_index.set(None);
-                                        }
-                                    },
-                                    ondrop: move |e| {
-                                        e.prevent_default();
-                                        e.stop_propagation();
-                                        if let Some(from_idx) = *dragging_from_index.read() {
-                                            reorder_items(from_idx, index);
-                                        }
-                                        drag_over_index.set(None);
-                                        dragging_from_index.set(None);
-                                    },
-                                    ontouchstart: move |_| {
-                                        touch_dragging_index.set(Some(index));
-                                        touch_over_index.set(Some(index));
-                                        is_touch_dragging.set(true);
-                                    },
-                                    ontouchmove: move |e| {
-                                        if !*is_touch_dragging.read() {
-                                            return;
-                                        }
-                                        e.prevent_default();
-                                        #[cfg(feature = "web")]
-                                        if let Some(touch) = e.touches().first() {
-                                            let coords = touch.client_coordinates();
-                                            let x = coords.x;
-                                            let y = coords.y;
-                                            if let Some(window) = web_sys::window() {
-                                                if let Some(document) = window.document() {
-                                                    if let Some(element) = document
-                                                        .element_from_point(x as f32, y as f32)
-                                                    {
-                                                        let mut current = Some(element);
-                                                        while let Some(el) = current {
-                                                            if let Some(id) = el.get_attribute("id") {
-                                                                if id.starts_with("sidebar-item-") {
-                                                                    if let Ok(target_idx) = id
-                                                                        .replace("sidebar-item-", "")
-                                                                        .parse::<usize>()
-                                                                    {
-                                                                        touch_over_index.set(Some(target_idx));
+                                        },
+                                        ondragover: move |e| {
+                                            e.prevent_default();
+                                            drag_over_index.set(Some(index));
+                                        },
+                                        ondragleave: move |_| {
+                                            if drag_over_index() == Some(index) {
+                                                drag_over_index.set(None);
+                                            }
+                                        },
+                                        ondrop: move |e| {
+                                            e.prevent_default();
+                                            e.stop_propagation();
+                                            if let Some(from_idx) = *dragging_from_index.read() {
+                                                reorder_items(from_idx, index);
+                                            }
+                                            drag_over_index.set(None);
+                                            dragging_from_index.set(None);
+                                        },
+                                        ontouchstart: move |_| {
+                                            touch_dragging_index.set(Some(index));
+                                            touch_over_index.set(Some(index));
+                                            is_touch_dragging.set(true);
+                                        },
+                                        ontouchmove: move |e| {
+                                            if !*is_touch_dragging.read() {
+                                                return;
+                                            }
+                                            e.prevent_default();
+                                            #[cfg(feature = "web")]
+                                            if let Some(touch) = e.touches().first() {
+                                                let coords = touch.client_coordinates();
+                                                let x = coords.x;
+                                                let y = coords.y;
+                                                if let Some(window) = web_sys::window() {
+                                                    if let Some(document) = window.document() {
+                                                        if let Some(element) = document
+                                                            .element_from_point(x as f32, y as f32)
+                                                        {
+                                                            let mut current = Some(element);
+                                                            while let Some(el) = current {
+                                                                if let Some(id) = el.get_attribute("id") {
+                                                                    if id.starts_with("sidebar-item-") {
+                                                                        if let Ok(target_idx) = id
+                                                                            .replace("sidebar-item-", "")
+                                                                            .parse::<usize>()
+                                                                        {
+                                                                            touch_over_index.set(Some(target_idx));
+                                                                        }
+                                                                        break;
                                                                     }
-                                                                    break;
                                                                 }
+                                                                current = el.parent_element();
                                                             }
-                                                            current = el.parent_element();
                                                         }
                                                     }
                                                 }
                                             }
-                                        }
-                                    },
-                                    ontouchend: move |_| {
-                                        if !*is_touch_dragging.read() {
-                                            return;
-                                        }
-                                        if let (Some(from_idx), Some(to_idx)) = (
-                                            *touch_dragging_index.read(),
-                                            *touch_over_index.read(),
-                                        ) {
-                                            if from_idx != to_idx {
-                                                reorder_items(from_idx, to_idx);
+                                        },
+                                        ontouchend: move |_| {
+                                            if !*is_touch_dragging.read() {
+                                                return;
                                             }
-                                        }
-                                        touch_dragging_index.set(None);
-                                        touch_over_index.set(None);
-                                        is_touch_dragging.set(false);
-                                    },
-                                    ontouchcancel: move |_| {
-                                        touch_dragging_index.set(None);
-                                        touch_over_index.set(None);
-                                        is_touch_dragging.set(false);
-                                    },
-                                    div {
-                                        class: format!(
-                                            "px-3 py-2 bg-card rounded-lg cursor-move \
-                                             transition-all flex items-center gap-2 {} {}",
-                                            if dragging_from_index() == Some(index) || touch_dragging_index() == Some(index)
-                                            {
-                                                "opacity-50 scale-95"
-                                            } else {
-                                                "opacity-100"
-                                            },
-                                            if (drag_over_index() == Some(index)
-                                                && dragging_from_index() != Some(index))
-                                                || (touch_over_index() == Some(index)
-                                                    && touch_dragging_index() != Some(index) && *is_touch_dragging.read())
-                                            {
-                                                "ring-2 ring-primary ring-offset-2"
-                                            } else {
-                                                ""
-                                            },
-                                        ),
-                                        {render_sidebar_icon(&item, "w-5 h-5")}
-                                        span { class: "text-sm text-foreground",
-                                            "{item.label()}"
+                                            if let (Some(from_idx), Some(to_idx)) = (
+                                                *touch_dragging_index.read(),
+                                                *touch_over_index.read(),
+                                            ) {
+                                                if from_idx != to_idx {
+                                                    reorder_items(from_idx, to_idx);
+                                                }
+                                            }
+                                            touch_dragging_index.set(None);
+                                            touch_over_index.set(None);
+                                            is_touch_dragging.set(false);
+                                        },
+                                        ontouchcancel: move |_| {
+                                            touch_dragging_index.set(None);
+                                            touch_over_index.set(None);
+                                            is_touch_dragging.set(false);
+                                        },
+                                        div {
+                                            class: format!(
+                                                "px-3 py-2 bg-card rounded-lg cursor-move \
+                                                 transition-all flex items-center gap-2 {} {}",
+                                                if dragging_from_index() == Some(index) || touch_dragging_index() == Some(index)
+                                                {
+                                                    "opacity-50 scale-95"
+                                                } else {
+                                                    "opacity-100"
+                                                },
+                                                if (drag_over_index() == Some(index)
+                                                    && dragging_from_index() != Some(index))
+                                                    || (touch_over_index() == Some(index)
+                                                        && touch_dragging_index() != Some(index) && *is_touch_dragging.read())
+                                                {
+                                                    "ring-2 ring-primary ring-offset-2"
+                                                } else {
+                                                    ""
+                                                },
+                                            ),
+                                            {render_sidebar_icon(&item, "w-5 h-5")}
+                                            span { class: "text-sm text-foreground",
+                                                "{item.label()}"
+                                            }
                                         }
                                     }
                                 }

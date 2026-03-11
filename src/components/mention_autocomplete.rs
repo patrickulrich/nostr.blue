@@ -301,7 +301,8 @@ fn detect_mention(
                                     r
                                 })
                                 .collect();
-                            let mut present = merged.iter().map(|r| r.pubkey).collect::<HashSet<_>>();
+                            let mut present =
+                                merged.iter().map(|r| r.pubkey).collect::<HashSet<_>>();
                             for cached in cached_results.iter() {
                                 if !thread_pubkeys_for_relay.contains(&cached.pubkey)
                                     || present.contains(&cached.pubkey)
@@ -466,9 +467,11 @@ fn get_cursor_position(textarea_id: &str) -> Option<usize> {
             if let Some(document) = window.document() {
                 if let Some(element) = document.get_element_by_id(textarea_id) {
                     if let Ok(textarea) = element.dyn_into::<web_sys::HtmlTextAreaElement>() {
-                        return Some(
-                            textarea.selection_start().unwrap_or(None).unwrap_or(0) as usize,
-                        );
+                        return textarea
+                            .selection_start()
+                            .ok()
+                            .flatten()
+                            .map(|pos| pos as usize);
                     }
                 }
             }

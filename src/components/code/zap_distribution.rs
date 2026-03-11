@@ -216,7 +216,7 @@ pub fn ZapDistribution(
             .collect();
         if sendable.is_empty() {
             toast.warning(
-                "No recipients with Lightning addresses found".to_string(),
+                "No recipients eligible for sending".to_string(),
                 ToastOptions::new(),
             );
             return;

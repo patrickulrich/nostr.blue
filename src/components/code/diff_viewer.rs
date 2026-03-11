@@ -753,7 +753,9 @@ fn parse_diff_content(content: &str) -> ParsedDiff {
                 if current_lines.is_empty() {
                     let info_text = binary_hint
                         .take()
-                        .or_else(|| (!header_summary.is_empty()).then(|| header_summary.join(" • ")))
+                        .or_else(|| {
+                            (!header_summary.is_empty()).then(|| header_summary.join(" • "))
+                        })
                         .unwrap_or_else(|| "(Binary file or file metadata changed)".to_string());
                     current_lines.push(DiffLine {
                         kind: LineKind::Info,

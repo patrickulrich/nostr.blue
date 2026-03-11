@@ -31,7 +31,9 @@ fn compute_depth_data(orders: &[P2POrder]) -> DepthData {
         .iter()
         .filter(|o| {
             o.status == OrderStatus::Pending
-                && o.premium.map(|premium| premium.is_finite()).unwrap_or(false)
+                && o.premium
+                    .map(|premium| premium.is_finite())
+                    .unwrap_or(false)
         })
         .collect();
     if pending_orders.is_empty() {
@@ -65,7 +67,10 @@ fn compute_depth_data(orders: &[P2POrder]) -> DepthData {
             continue;
         }
         cumulative = cumulative.saturating_add(order.amount_sats);
-        data.sells.push((order.premium.expect("finite premium filtered above"), cumulative));
+        data.sells.push((
+            order.premium.expect("finite premium filtered above"),
+            cumulative,
+        ));
     }
     data.max_cumulative = data.max_cumulative.max(cumulative);
     cumulative = 0;
@@ -74,7 +79,10 @@ fn compute_depth_data(orders: &[P2POrder]) -> DepthData {
             continue;
         }
         cumulative = cumulative.saturating_add(order.amount_sats);
-        data.buys.push((order.premium.expect("finite premium filtered above"), cumulative));
+        data.buys.push((
+            order.premium.expect("finite premium filtered above"),
+            cumulative,
+        ));
     }
     data.max_cumulative = data.max_cumulative.max(cumulative);
     if data.max_cumulative == 0 {

@@ -64,8 +64,11 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
         });
         person_metadata.set(profiles::get_profile(&pk));
         spawn(async move {
-            let _ = profiles::fetch_profile(pk.clone()).await;
-            let _still_current = *profile_fetch_version.peek() == version;
+            if profiles::fetch_profile(pk.clone()).await.is_ok()
+                && *profile_fetch_version.peek() == version
+            {
+                person_metadata.set(profiles::get_profile(&pk));
+            }
         });
     }));
     let person_pubkey_for_display = props.person_pubkey.clone();

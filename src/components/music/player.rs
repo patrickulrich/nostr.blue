@@ -315,7 +315,7 @@ pub fn PersistentMusicPlayer() -> Element {
             });
         },
     ));
-    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
+    #[cfg(not(feature = "mobile"))]
     {
         let audio_id_for_volume = audio_id.to_string();
         let volume_memo = use_memo(move || {
@@ -485,31 +485,27 @@ pub fn PersistentMusicPlayer() -> Element {
             }
         }
     });
+    #[cfg(not(feature = "mobile"))]
     let _now_playing_poller = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
         loop {
             crate::platform::timer::sleep_ms(2000).await;
-            #[cfg(not(feature = "mobile"))]
             if !is_live() {
                 continue;
             }
-            #[cfg(not(feature = "mobile"))]
-            {
-                // Bare return (no IIFE) — Dioxus wraps eval in AsyncFunction on mobile
-                let result = document::eval(
-                    r#"
-                    if (window.hlsManager && window.hlsManager.nowPlaying) {
-                        return JSON.stringify(window.hlsManager.nowPlaying);
-                    }
-                    return null;
-                    "#,
-                )
-                .await;
-                if let Ok(json_val) = result {
-                    if let Some(json_str) = json_val.as_str() {
-                        if let Ok(now_playing) = serde_json::from_str::<NowPlaying>(json_str) {
-                            if now_playing.has_data() {
-                                music_player::set_now_playing(Some(now_playing));
-                            }
+            let result = document::eval(
+                r#"
+                if (window.hlsManager && window.hlsManager.nowPlaying) {
+                    return JSON.stringify(window.hlsManager.nowPlaying);
+                }
+                return null;
+                "#,
+            )
+            .await;
+            if let Ok(json_val) = result {
+                if let Some(json_str) = json_val.as_str() {
+                    if let Ok(now_playing) = serde_json::from_str::<NowPlaying>(json_str) {
+                        if now_playing.has_data() {
+                            music_player::set_now_playing(Some(now_playing));
                         }
                     }
                 }

@@ -35,8 +35,8 @@ pub fn PodcastEpisodeList(props: PodcastEpisodeListProps) -> Element {
     } else {
         props.episodes.clone()
     };
-    let playlist: Option<Rc<Vec<MusicTrack>>> =
-        if props.enable_playlist && !all_episodes.is_empty() {
+    let playlist: Option<Rc<Vec<MusicTrack>>> = if props.enable_playlist && !all_episodes.is_empty()
+    {
         Some(Rc::new(
             all_episodes.iter().map(|ep| ep.to_music_track()).collect(),
         ))

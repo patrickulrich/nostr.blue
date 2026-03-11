@@ -114,8 +114,7 @@ pub fn ContentShareModal(
                     if let Some(element) = document.get_element_by_id(textarea_id) {
                         if let Some(textarea) = element.dyn_ref::<web_sys::HtmlTextAreaElement>() {
                             return Some(
-                                textarea.selection_start().unwrap_or(Some(0)).unwrap_or(0)
-                                    as usize,
+                                textarea.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize,
                             );
                         }
                     }

@@ -172,29 +172,37 @@ pub fn PinBoardCardMosaic(
             let has_signer = *HAS_SIGNER.read();
             let current_gen = reaction_request_gen.peek().wrapping_add(1);
             reaction_request_gen.set(current_gen);
-            reaction_loading.set(false);
+            reaction_loading.set(true);
             reaction_error.set(None);
             if !has_signer {
                 reaction_bootstrapped.set(false);
                 reaction_count.set(0);
                 has_reacted.set(false);
+                reaction_loading.set(false);
                 return;
             }
             reaction_bootstrapped.set(false);
             spawn(async move {
                 if let Ok((count, reacted)) = fetch_pinboard_reaction_state(&a_tag).await {
                     if *reaction_request_gen.peek() != current_gen {
+                        reaction_loading.set(false);
                         return;
                     }
                     reaction_count.set(count);
                     has_reacted.set(if has_signer { reacted } else { false });
                     reaction_bootstrapped.set(true);
                     reaction_error.set(None);
+                    reaction_loading.set(false);
                 } else if *reaction_request_gen.peek() == current_gen {
                     has_reacted.set(false);
                     reaction_bootstrapped.set(false);
                     reaction_count.set(0);
-                    reaction_error.set(Some("Failed to load reactions. Click to retry.".to_string()));
+                    reaction_error.set(Some(
+                        "Failed to load reactions. Click to retry.".to_string(),
+                    ));
+                    reaction_loading.set(false);
+                } else {
+                    reaction_loading.set(false);
                 }
             });
         },
@@ -272,22 +280,26 @@ pub fn PinBoardCardMosaic(
                             let current_gen = next_gen;
                             let a_tag = board_for_react.a_tag.clone();
                             let has_signer = *HAS_SIGNER.read();
+                            reaction_loading.set(true);
                             reaction_error.set(None);
                             spawn(async move {
                                 match fetch_pinboard_reaction_state(&a_tag).await {
                                     Ok((count, reacted)) => {
                                         if *reaction_request_gen.peek() != current_gen {
+                                            reaction_loading.set(false);
                                             return;
                                         }
                                         reaction_count.set(count);
                                         has_reacted.set(if has_signer { reacted } else { false });
                                         reaction_bootstrapped.set(true);
                                         reaction_error.set(None);
+                                        reaction_loading.set(false);
                                     }
-                                    Err(e) => {
+                                    Err(_e) => {
                                         if *reaction_request_gen.peek() == current_gen {
-                                            reaction_error.set(Some(format!("Failed to load reactions: {}. Click heart to retry.", e)));
+                                            reaction_error.set(Some("Failed to load reactions. Click heart to retry.".to_string()));
                                         }
+                                        reaction_loading.set(false);
                                     }
                                 }
                             });
@@ -299,6 +311,7 @@ pub fn PinBoardCardMosaic(
                         let board = board_for_react.clone();
                         let currently_reacted = *has_reacted.peek();
                         let current_count = *reaction_count.peek();
+                        reaction_error.set(None);
                         has_reacted.set(!currently_reacted);
                         if currently_reacted {
                             reaction_count.set(current_count.saturating_sub(1));
@@ -311,42 +324,52 @@ pub fn PinBoardCardMosaic(
                             match toggle_pinboard_reaction(&board, "+").await {
                                 Ok(added) => {
                                     if *reaction_request_gen.peek() != current_gen {
+                                        reaction_loading.set(false);
                                         return;
                                     }
                                     if added == currently_reacted {
                                         match fetch_pinboard_reaction_state(&board.a_tag).await {
                                             Ok((count, reacted)) => {
                                                 if *reaction_request_gen.peek() != current_gen {
+                                                    reaction_loading.set(false);
                                                     return;
                                                 }
                                                 has_reacted.set(reacted);
                                                 reaction_count.set(count);
+                                                reaction_error.set(None);
                                             }
                                             Err(e) => {
                                                 log::warn!(
                                                     "Failed to reconcile reaction state after toggle: {}",
                                                     e
                                                 );
+                                                reaction_error.set(Some(
+                                                    "Failed to update reaction - tap to retry."
+                                                        .to_string(),
+                                                ));
                                                 reaction_count.set(current_count);
                                                 has_reacted.set(currently_reacted);
                                             }
                                         }
                                     } else {
                                         has_reacted.set(added);
+                                        reaction_error.set(None);
                                     }
                                 }
                                 Err(e) => {
                                     if *reaction_request_gen.peek() != current_gen {
+                                        reaction_loading.set(false);
                                         return;
                                     }
                                     log::error!("Failed to toggle reaction: {}", e);
+                                    reaction_error.set(Some(
+                                        "Failed to update reaction - tap to retry.".to_string(),
+                                    ));
                                     has_reacted.set(currently_reacted);
                                     reaction_count.set(current_count);
                                 }
                             }
-                            if *reaction_request_gen.peek() == current_gen {
-                                reaction_loading.set(false);
-                            }
+                            reaction_loading.set(false);
                         });
                     },
                     title: if let Some(ref err) = *reaction_error.read() {

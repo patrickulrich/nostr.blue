@@ -345,7 +345,6 @@ pub fn EventMap(props: EventMapProps) -> Element {
                 let invalidated_running_lookup =
                     *loading_geo.peek() && key != *processed_event_ids.peek();
                 if invalidated_running_lookup {
-                    geocode_gen.with_mut(|g| *g = g.wrapping_add(1));
                     geocoded_events.set(Vec::new());
                 }
                 if *loading_geo.peek() && !invalidated_running_lookup {

@@ -3,6 +3,7 @@ use crate::routes::Route;
 use crate::stores::nostr_client::CLIENT_INITIALIZED;
 use crate::stores::profiles;
 use crate::utils::nip53::{extract_live_event_host, parse_nip53_live_event};
+use crate::utils::time::format_time_ago;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::{Coordinate, ToBech32};
@@ -93,17 +94,6 @@ pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
         .as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
-    let format_time_ago = |timestamp: u64| -> String {
-        let now = crate::platform::timestamp::now_secs();
-        let diff = now.saturating_sub(timestamp);
-        match diff {
-            0..=59 => "just now".to_string(),
-            60..=3599 => format!("{}m ago", diff / 60),
-            3600..=86399 => format!("{}h ago", diff / 3600),
-            86400..=604799 => format!("{}d ago", diff / 86400),
-            _ => format!("{}w ago", diff / 604800),
-        }
-    };
     rsx! {
         div { class: "group cursor-pointer",
             Link {

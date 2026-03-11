@@ -211,6 +211,21 @@ pub fn get_mempool_endpoint() -> String {
         settings.mempool_endpoint.clone()
     }
 }
+
+/// Get the canonical external origin for links shared outside the app.
+pub fn get_canonical_external_origin() -> String {
+    #[cfg(feature = "web")]
+    {
+        web_sys::window()
+            .and_then(|w| w.location().origin().ok())
+            .filter(|origin| !origin.is_empty())
+            .unwrap_or_else(|| "https://nostr.blue".to_string())
+    }
+    #[cfg(not(feature = "web"))]
+    {
+        "https://nostr.blue".to_string()
+    }
+}
 /// Update mempool endpoint and save to Nostr
 pub async fn update_mempool_endpoint(endpoint: String) {
     let mut settings = SETTINGS.read().clone();

@@ -1,23 +1,15 @@
 //! QR Share Modal Component
 //!
 //! Displays a QR code for sharing repository via Nostr or web URL.
-use crate::utils::clipboard::copy_to_clipboard;
+use crate::platform::clipboard::copy_to_clipboard;
+use crate::stores::settings_store;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use qrcode::render::svg;
 use qrcode::QrCode;
 
 fn canonical_external_origin() -> String {
-    #[cfg(feature = "web")]
-    {
-        web_sys::window()
-            .and_then(|w| w.location().origin().ok())
-            .unwrap_or_else(|| "https://nostr.blue".to_string())
-    }
-    #[cfg(not(feature = "web"))]
-    {
-        "https://nostr.blue".to_string()
-    }
+    settings_store::get_canonical_external_origin()
 }
 
 /// QR Share modal with Nostr and web URL tabs

@@ -46,34 +46,37 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
     let event_id_pin_check = event_id.clone();
     let event_id_pin_board = event_id.clone();
     let mut follow_state_gen = use_signal(|| 0u32);
-    use_effect(use_reactive((&author_pubkey_follow_check, &*HAS_SIGNER.read()), move |(pubkey, signer)| {
-        let gen = follow_state_gen.with_mut(|g| {
-            *g = g.wrapping_add(1);
-            *g
-        });
-        if !signer {
-            is_following.set(false);
-            is_loading_follow_state.set(false);
-            return;
-        }
-        is_loading_follow_state.set(true);
-        spawn(async move {
-            match nostr_client::is_following(pubkey).await {
-                Ok(following) => {
-                    if *follow_state_gen.peek() == gen {
-                        is_following.set(following);
-                        is_loading_follow_state.set(false);
-                    }
-                }
-                Err(e) => {
-                    log::warn!("Failed to check follow status: {}", e);
-                    if *follow_state_gen.peek() == gen {
-                        is_loading_follow_state.set(false);
-                    }
-                }
+    use_effect(use_reactive(
+        (&author_pubkey_follow_check, &*HAS_SIGNER.read()),
+        move |(pubkey, signer)| {
+            let gen = follow_state_gen.with_mut(|g| {
+                *g = g.wrapping_add(1);
+                *g
+            });
+            if !signer {
+                is_following.set(false);
+                is_loading_follow_state.set(false);
+                return;
             }
-        });
-    }));
+            is_loading_follow_state.set(true);
+            spawn(async move {
+                match nostr_client::is_following(pubkey).await {
+                    Ok(following) => {
+                        if *follow_state_gen.peek() == gen {
+                            is_following.set(following);
+                            is_loading_follow_state.set(false);
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to check follow status: {}", e);
+                        if *follow_state_gen.peek() == gen {
+                            is_loading_follow_state.set(false);
+                        }
+                    }
+                }
+            });
+        },
+    ));
     use_effect(use_reactive(&event_id_pin_check, move |eid| {
         let pinned = pinned_notes::is_pinned(&eid);
         is_pinned.set(pinned);

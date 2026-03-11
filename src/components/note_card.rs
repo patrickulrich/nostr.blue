@@ -36,27 +36,63 @@ trait ProfileMetadataView {
 }
 
 impl ProfileMetadataView for crate::stores::profiles::Profile {
-    fn name(&self) -> Option<&str> { self.name.as_deref() }
-    fn display_name(&self) -> Option<&str> { self.display_name.as_deref() }
-    fn about(&self) -> Option<&str> { self.about.as_deref() }
-    fn picture(&self) -> Option<&str> { self.picture.as_deref() }
-    fn banner(&self) -> Option<&str> { self.banner.as_deref() }
-    fn website(&self) -> Option<&str> { self.website.as_deref() }
-    fn nip05(&self) -> Option<&str> { self.nip05.as_deref() }
-    fn lud16(&self) -> Option<&str> { self.lud16.as_deref() }
-    fn lud06(&self) -> Option<&str> { self.lud06.as_deref() }
+    fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+    fn display_name(&self) -> Option<&str> {
+        self.display_name.as_deref()
+    }
+    fn about(&self) -> Option<&str> {
+        self.about.as_deref()
+    }
+    fn picture(&self) -> Option<&str> {
+        self.picture.as_deref()
+    }
+    fn banner(&self) -> Option<&str> {
+        self.banner.as_deref()
+    }
+    fn website(&self) -> Option<&str> {
+        self.website.as_deref()
+    }
+    fn nip05(&self) -> Option<&str> {
+        self.nip05.as_deref()
+    }
+    fn lud16(&self) -> Option<&str> {
+        self.lud16.as_deref()
+    }
+    fn lud06(&self) -> Option<&str> {
+        self.lud06.as_deref()
+    }
 }
 
 impl ProfileMetadataView for nostr_sdk::Metadata {
-    fn name(&self) -> Option<&str> { self.name.as_deref() }
-    fn display_name(&self) -> Option<&str> { self.display_name.as_deref() }
-    fn about(&self) -> Option<&str> { self.about.as_deref() }
-    fn picture(&self) -> Option<&str> { self.picture.as_deref() }
-    fn banner(&self) -> Option<&str> { self.banner.as_deref() }
-    fn website(&self) -> Option<&str> { self.website.as_deref() }
-    fn nip05(&self) -> Option<&str> { self.nip05.as_deref() }
-    fn lud16(&self) -> Option<&str> { self.lud16.as_deref() }
-    fn lud06(&self) -> Option<&str> { self.lud06.as_deref() }
+    fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+    fn display_name(&self) -> Option<&str> {
+        self.display_name.as_deref()
+    }
+    fn about(&self) -> Option<&str> {
+        self.about.as_deref()
+    }
+    fn picture(&self) -> Option<&str> {
+        self.picture.as_deref()
+    }
+    fn banner(&self) -> Option<&str> {
+        self.banner.as_deref()
+    }
+    fn website(&self) -> Option<&str> {
+        self.website.as_deref()
+    }
+    fn nip05(&self) -> Option<&str> {
+        self.nip05.as_deref()
+    }
+    fn lud16(&self) -> Option<&str> {
+        self.lud16.as_deref()
+    }
+    fn lud06(&self) -> Option<&str> {
+        self.lud06.as_deref()
+    }
 }
 
 fn metadata_from_profile_like<T: ProfileMetadataView>(profile: &T) -> nostr_sdk::Metadata {

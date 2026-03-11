@@ -3,11 +3,7 @@ use dioxus::prelude::*;
 use wasm_bindgen::prelude::*;
 
 #[cfg(feature = "native")]
-fn build_native_setup_script(
-    video_id: &str,
-    stream_url: &str,
-    autoplay: bool,
-) -> String {
+fn build_native_setup_script(video_id: &str, stream_url: &str, autoplay: bool) -> String {
     let video_id_json = serde_json::to_string(video_id).unwrap_or_default();
     let stream_url_json = serde_json::to_string(stream_url).unwrap_or_default();
     let autoplay_str = if autoplay { "true" } else { "false" };
@@ -507,8 +503,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                     return;
                 }
 
-                let setup_script =
-                    build_native_setup_script(&video_id, &stream_url, autoplay);
+                let setup_script = build_native_setup_script(&video_id, &stream_url, autoplay);
 
                 match document::eval(&setup_script).await {
                     Ok(val) => {

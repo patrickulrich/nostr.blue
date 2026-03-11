@@ -271,7 +271,10 @@ where
             let polling_generation_for_task = polling_generation;
 
             let task = spawn(async move {
-                log::info!("[InfiniteScroll] Starting mobile polling for sentinel {}", id);
+                log::info!(
+                    "[InfiniteScroll] Starting mobile polling for sentinel {}",
+                    id
+                );
 
                 loop {
                     if *polling_generation_for_task.peek() != generation {

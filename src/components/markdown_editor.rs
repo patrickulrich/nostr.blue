@@ -2,11 +2,11 @@
 //!
 //! A full-featured markdown editor with preview modes, formatting toolbar,
 //! and keyboard shortcut support.
-use super::markdown_toolbar::{
-    apply_markdown_format, get_textarea_cursor, MarkdownFormat, MarkdownToolbar,
-};
+#[cfg(feature = "web")]
+use super::markdown_toolbar::apply_markdown_format;
 #[cfg(feature = "web")]
 use super::markdown_toolbar::set_textarea_cursor;
+use super::markdown_toolbar::{get_textarea_cursor, MarkdownFormat, MarkdownToolbar};
 use crate::utils::markdown::render_markdown;
 use dioxus::prelude::*;
 use std::rc::Rc;
@@ -58,7 +58,11 @@ pub fn MarkdownEditor(mut props: MarkdownEditorProps) -> Element {
             {
                 let current_content = content.read().clone();
                 let id_str = (*textarea_id.read()).clone();
-                let (cursor_start, cursor_end) = get_textarea_cursor(&id_str, &current_content);
+                let Some((cursor_start, cursor_end)) =
+                    get_textarea_cursor(&id_str, &current_content)
+                else {
+                    return;
+                };
                 let (new_content, new_cursor) =
                     apply_markdown_format(&current_content, cursor_start, cursor_end, format);
                 content.set(new_content.clone());
@@ -70,35 +74,40 @@ pub fn MarkdownEditor(mut props: MarkdownEditorProps) -> Element {
             }
             #[cfg(not(feature = "web"))]
             {
-                let current_content = content.read().clone();
-                let cursor = current_content.len();
-                let (new_content, _) =
-                    apply_markdown_format(&current_content, cursor, cursor, format);
-                content.set(new_content);
+                let _ = (&mut content, format);
             }
         }
     };
     let handle_keydown = {
+        #[cfg(feature = "web")]
         let mut handle_format = handle_format;
         move |evt: Event<KeyboardData>| {
-            let key = evt.key();
             let modifiers = evt.modifiers();
             let ctrl_or_cmd = modifiers.ctrl() || modifiers.meta();
-            if !ctrl_or_cmd {
-                return;
-            }
-            let format = match key {
-                Key::Character(ref c) if c.to_lowercase() == "b" => Some(MarkdownFormat::Bold),
-                Key::Character(ref c) if c.to_lowercase() == "i" => Some(MarkdownFormat::Italic),
-                Key::Character(ref c) if c.to_lowercase() == "k" => Some(MarkdownFormat::Link),
-                Key::Character(ref c) if c.to_lowercase() == "`" => {
-                    Some(MarkdownFormat::InlineCode)
+            if ctrl_or_cmd {
+                #[cfg(feature = "web")]
+                {
+                    let key = evt.key();
+                    let format = match key {
+                        Key::Character(ref c) if c.to_lowercase() == "b" => {
+                            Some(MarkdownFormat::Bold)
+                        }
+                        Key::Character(ref c) if c.to_lowercase() == "i" => {
+                            Some(MarkdownFormat::Italic)
+                        }
+                        Key::Character(ref c) if c.to_lowercase() == "k" => {
+                            Some(MarkdownFormat::Link)
+                        }
+                        Key::Character(ref c) if c.to_lowercase() == "`" => {
+                            Some(MarkdownFormat::InlineCode)
+                        }
+                        _ => None,
+                    };
+                    if let Some(f) = format {
+                        evt.prevent_default();
+                        handle_format(f);
+                    }
                 }
-                _ => None,
-            };
-            if let Some(f) = format {
-                evt.prevent_default();
-                handle_format(f);
             }
         }
     };
@@ -120,7 +129,7 @@ pub fn MarkdownEditor(mut props: MarkdownEditorProps) -> Element {
                     on_format: handle_format,
                     on_image_upload_request: props.on_image_upload_request,
                     on_mention_request: props.on_mention_request,
-                    disabled: *mode.read() == EditorMode::Preview,
+                    disabled: *mode.read() == EditorMode::Preview || !cfg!(feature = "web"),
                 }
             }
             div { class: "flex border-b border-border bg-muted/20",
@@ -243,18 +252,24 @@ pub fn MarkdownEditor(mut props: MarkdownEditorProps) -> Element {
 /// This is useful for inserting content from external sources (e.g., image upload, mention dialog)
 pub fn insert_at_cursor(content: &mut Signal<String>, textarea_id: &str, text_to_insert: &str) {
     let current_content = content.read().clone();
-    let (cursor_start, _cursor_end) = get_textarea_cursor(textarea_id, &current_content);
+    let cursor_start = get_textarea_cursor(textarea_id, &current_content)
+        .map(|(start, _)| start)
+        .unwrap_or_else(|| current_content.len());
     let before = &current_content[..cursor_start];
     let after = &current_content[cursor_start..];
-    let new_content = format!("{}{}{}", before, text_to_insert, after);
-    content.set(new_content.clone());
     #[cfg(feature = "web")]
     {
+        let new_content = format!("{}{}{}", before, text_to_insert, after);
+        content.set(new_content.clone());
         let new_cursor = cursor_start + text_to_insert.len();
         let id = textarea_id.to_string();
         spawn(async move {
             crate::platform::timer::sleep_ms(10).await;
             set_textarea_cursor(&id, new_cursor, &new_content);
         });
+    }
+    #[cfg(not(feature = "web"))]
+    {
+        content.set(format!("{}{}{}", before, text_to_insert, after));
     }
 }

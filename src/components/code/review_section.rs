@@ -118,7 +118,12 @@ mod tests {
         }
     }
 
-    fn review_with_content(event_id: &str, created_at: u64, content: &str, state: ReviewState) -> PersistedReview {
+    fn review_with_content(
+        event_id: &str,
+        created_at: u64,
+        content: &str,
+        state: ReviewState,
+    ) -> PersistedReview {
         PersistedReview {
             pr_event_id: "pr".to_string(),
             content: content.to_string(),

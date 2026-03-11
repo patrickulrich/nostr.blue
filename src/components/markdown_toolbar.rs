@@ -36,6 +36,7 @@ pub enum MarkdownFormat {
     /// Horizontal rule: ---
     HorizontalRule,
 }
+#[cfg_attr(not(any(feature = "web", test)), allow(dead_code))]
 impl MarkdownFormat {
     /// Get the markdown prefix to insert
     pub fn prefix(&self) -> &'static str {
@@ -507,6 +508,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
 ///
 /// # Returns
 /// Tuple of (new content, new cursor position)
+#[cfg_attr(not(any(feature = "web", test)), allow(dead_code))]
 pub fn apply_markdown_format(
     content: &str,
     cursor_start: usize,
@@ -573,9 +575,9 @@ pub fn set_textarea_cursor(textarea_id: &str, position: usize, content: &str) {
 #[cfg(not(feature = "web"))]
 #[allow(dead_code)]
 pub fn set_textarea_cursor(_textarea_id: &str, _position: usize, _content: &str) {}
-/// Get cursor position from a textarea element (WASM only)
+/// Get the current UTF-8 cursor/selection range for a textarea when the platform exposes it.
 #[cfg(feature = "web")]
-pub fn get_textarea_cursor(textarea_id: &str, content: &str) -> (usize, usize) {
+pub fn get_textarea_cursor(textarea_id: &str, content: &str) -> Option<(usize, usize)> {
     use wasm_bindgen::JsCast;
     if let Some(window) = web_sys::window() {
         if let Some(document) = window.document() {
@@ -585,17 +587,16 @@ pub fn get_textarea_cursor(textarea_id: &str, content: &str) -> (usize, usize) {
                     let end = textarea.selection_end().ok().flatten().unwrap_or(0) as usize;
                     let start_utf8 = utf16_to_utf8_index(content, start);
                     let end_utf8 = utf16_to_utf8_index(content, end);
-                    return (start_utf8, end_utf8);
+                    return Some((start_utf8, end_utf8));
                 }
             }
         }
     }
-    (0, 0)
+    None
 }
 #[cfg(not(feature = "web"))]
-pub fn get_textarea_cursor(_textarea_id: &str, content: &str) -> (usize, usize) {
-    let end = content.len();
-    (end, end)
+pub fn get_textarea_cursor(_textarea_id: &str, _content: &str) -> Option<(usize, usize)> {
+    None
 }
 /// Convert UTF-16 code unit index (from DOM) to UTF-8 byte index (for Rust string slicing)
 #[cfg(feature = "web")]

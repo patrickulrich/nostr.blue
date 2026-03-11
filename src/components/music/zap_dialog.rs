@@ -19,6 +19,38 @@ fn default_relay_urls() -> Vec<RelayUrl> {
         .filter_map(|s| RelayUrl::parse(s).ok())
         .collect()
 }
+
+fn redact_url(url: &str) -> String {
+    match reqwest::Url::parse(url) {
+        Ok(mut parsed) => {
+            let redacted_pairs = parsed
+                .query_pairs()
+                .map(|(key, value)| {
+                    let needs_redaction = matches!(
+                        key.as_ref(),
+                        "comment" | "token" | "pr" | "invoice" | "auth" | "authorization"
+                    );
+                    let redacted_value = if needs_redaction {
+                        "[redacted]".to_string()
+                    } else {
+                        value.into_owned()
+                    };
+                    (key.into_owned(), redacted_value)
+                })
+                .collect::<Vec<_>>();
+            parsed
+                .query_pairs_mut()
+                .clear()
+                .extend_pairs(redacted_pairs);
+            parsed.to_string()
+        }
+        Err(_) => "[invalid-url]".to_string(),
+    }
+}
+
+fn redact_body(body: &str) -> String {
+    format!("{} bytes", body.len())
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LnurlPayParams {
     callback: String,
@@ -472,13 +504,15 @@ async fn generate_wavlake_lnurl_invoice(
         .get_lnurl(track_id, Some("nostrmusic"))
         .await
         .map_err(|e| format!("Failed to get LNURL: {}", e))?;
-    log::info!("Received LNURL: {}", lnurl_response.lnurl);
+    log::info!("Received LNURL response for track {}", track_id);
     let lnurl_pay_url = decode_lnurl(&lnurl_response.lnurl)
         .map_err(|e| format!("Failed to decode LNURL: {}", e))?;
-    lnurl::validate_url(&lnurl_pay_url)
-        .map_err(|e| format!("Unsafe LNURL pay URL: {}", e))?;
-    log::info!("Decoded LNURL to: {}", lnurl_pay_url);
-    log::info!("Fetching LNURL-pay parameters from: {}", lnurl_pay_url);
+    lnurl::validate_url(&lnurl_pay_url).map_err(|e| format!("Unsafe LNURL pay URL: {}", e))?;
+    log::info!("Decoded LNURL pay URL: {}", redact_url(&lnurl_pay_url));
+    log::info!(
+        "Fetching LNURL-pay parameters from: {}",
+        redact_url(&lnurl_pay_url)
+    );
     let response = crate::platform::http::http_client()
         .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&lnurl_pay_url)
@@ -495,7 +529,7 @@ async fn generate_wavlake_lnurl_invoice(
         .map_err(|e| format!("Unsafe LNURL callback URL: {}", e))?;
     log::info!(
         "LNURL-pay params received. Callback: {}, min: {}, max: {}",
-        params.callback,
+        redact_url(&params.callback),
         params.min_sendable,
         params.max_sendable
     );
@@ -523,7 +557,10 @@ async fn generate_wavlake_lnurl_invoice(
             }
         }
     }
-    log::info!("Requesting invoice from callback: {}", callback_url);
+    log::info!(
+        "Requesting invoice from callback: {}",
+        redact_url(&callback_url)
+    );
     let response = crate::platform::http::http_client()
         .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&callback_url)
@@ -536,11 +573,15 @@ async fn generate_wavlake_lnurl_invoice(
         .text()
         .await
         .map_err(|e| format!("Failed to read response body: {}", e))?;
-    log::info!("Invoice callback response: {}", response_text);
+    log::info!(
+        "Invoice callback response received ({})",
+        redact_body(&response_text)
+    );
     let invoice_response: InvoiceResponse = serde_json::from_str(&response_text).map_err(|e| {
         format!(
-            "Failed to parse invoice response: {}. Response body: {}",
-            e, response_text,
+            "Failed to parse invoice response: {}. Response size: {}",
+            e,
+            redact_body(&response_text)
         )
     })?;
     if let Some(error) = &invoice_response.error {
@@ -555,9 +596,12 @@ async fn generate_wavlake_lnurl_invoice(
             return Err(format!("Invoice generation failed: {}", reason));
         }
     }
-    let pr = invoice_response
-        .pr
-        .ok_or_else(|| format!("No invoice in response. Response body: {}", response_text))?;
+    let pr = invoice_response.pr.ok_or_else(|| {
+        format!(
+            "No invoice in response. Response size: {}",
+            redact_body(&response_text)
+        )
+    })?;
     let qr_code_url =
         generate_qr_code(&pr).map_err(|e| format!("Failed to generate QR code: {}", e))?;
     Ok((pr, qr_code_url))
@@ -601,7 +645,7 @@ async fn generate_nostr_zap_invoice(
         .map_err(|e| format!("Failed to prepare zap: {}", e))?;
     log::info!(
         "LNURL pay info received for nostr zap. Callback: {}",
-        pay_info.callback
+        redact_url(&pay_info.callback)
     );
     let recipient_pubkey =
         PublicKey::parse(artist_pubkey).map_err(|e| format!("Invalid artist pubkey: {}", e))?;
@@ -672,6 +716,9 @@ async fn generate_v4v_invoice(
     if total_split == 0 {
         return Err("Invalid split configuration - total is zero".to_string());
     }
+    if amount_sats == 0 {
+        return Err("Zero-sat V4V amounts are not supported".to_string());
+    }
     let lnaddress_recipient = value_block
         .recipients
         .iter()
@@ -687,7 +734,7 @@ async fn generate_v4v_invoice(
     let is_lnaddress = recipient.recipient_type == "lnaddress" || recipient.address.contains('@');
     if !is_lnaddress {
         return Err(format!(
-            "Direct keysend payments to node {} not yet supported in browser. \
+            "Direct keysend payments to node {} are not supported on this platform. \
             The podcast creator can add a Lightning Address for web payments.",
             recipient.address,
         ));
@@ -697,8 +744,7 @@ async fn generate_v4v_invoice(
         .checked_mul(recipient.split as u64)
         .and_then(|v| v.checked_add(total_split as u64 / 2))
         .map(|v| v / total_split as u64)
-        .ok_or("Arithmetic overflow calculating recipient share")?
-        .max(1);
+        .ok_or("Arithmetic overflow calculating recipient share")?;
     let recipient_name = recipient.name.as_deref().unwrap_or("Podcast Creator");
     let split_percentage = (recipient.split as f64 * 100.0) / total_split as f64;
     log::info!(
@@ -720,7 +766,7 @@ async fn generate_v4v_invoice(
         .map_err(|e| format!("Unsafe LNURL callback URL: {}", e))?;
     log::info!(
         "Lightning Address resolved. Callback: {}",
-        pay_info.callback
+        redact_url(&pay_info.callback)
     );
     let mut callback_url = pay_info.callback.clone();
     let separator = if callback_url.contains('?') { "&" } else { "?" };
@@ -737,7 +783,7 @@ async fn generate_v4v_invoice(
             }
         }
     }
-    log::info!("Requesting invoice from: {}", callback_url);
+    log::info!("Requesting invoice from: {}", redact_url(&callback_url));
     let client = crate::platform::http::http_client()
         .map_err(|e| format!("HTTP client init failed: {}", e))?;
     let response = client
