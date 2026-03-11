@@ -223,24 +223,26 @@ pub fn MarkdownEditor(mut props: MarkdownEditorProps) -> Element {
             }
             div { class: "px-4 py-2 text-xs text-muted-foreground bg-muted/30 border-t border-border flex items-center justify-between",
                 span { "Markdown supported" }
-                div { class: "flex items-center gap-3",
-                    span { class: "hidden sm:inline-flex items-center gap-1",
-                        kbd { class: "px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono",
-                            "Ctrl+B"
+                if cfg!(feature = "web") {
+                    div { class: "flex items-center gap-3",
+                        span { class: "hidden sm:inline-flex items-center gap-1",
+                            kbd { class: "px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono",
+                                "Ctrl+B"
+                            }
+                            span { "Bold" }
                         }
-                        span { "Bold" }
-                    }
-                    span { class: "hidden sm:inline-flex items-center gap-1",
-                        kbd { class: "px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono",
-                            "Ctrl+I"
+                        span { class: "hidden sm:inline-flex items-center gap-1",
+                            kbd { class: "px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono",
+                                "Ctrl+I"
+                            }
+                            span { "Italic" }
                         }
-                        span { "Italic" }
-                    }
-                    span { class: "hidden md:inline-flex items-center gap-1",
-                        kbd { class: "px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono",
-                            "Ctrl+K"
+                        span { class: "hidden md:inline-flex items-center gap-1",
+                            kbd { class: "px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono",
+                                "Ctrl+K"
+                            }
+                            span { "Link" }
                         }
-                        span { "Link" }
                     }
                 }
             }

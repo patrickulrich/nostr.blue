@@ -437,9 +437,9 @@ pub fn PersistentMusicPlayer() -> Element {
             }
         });
     }
-    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
+    #[cfg(not(feature = "mobile"))]
     let playback_speed = use_memo(move || MUSIC_PLAYER.read().playback_speed);
-    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
+    #[cfg(not(feature = "mobile"))]
     use_effect(move || {
         let speed = playback_speed();
         {

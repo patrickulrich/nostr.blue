@@ -46,7 +46,7 @@ fn build_native_setup_script(video_id: &str, stream_url: &str, autoplay: bool) -
                                     if (e.name === 'NotAllowedError') {{
                                         return "blocked";
                                     }}
-                                    console.log('Autoplay failed:', e);
+                                    return "error:" + (e.message || "Autoplay failed");
                                 }}
                             }}
 
@@ -80,19 +80,36 @@ fn parse_native_setup_result(val: serde_json::Value) -> String {
 
 #[cfg(feature = "native")]
 async fn ensure_hls_manager() -> Result<(), String> {
-    let check = document::eval("return typeof window.hlsManager !== 'undefined'")
-        .await
-        .map_err(|e| format!("Failed to check HLS manager: {:?}", e))?;
-    let hls_loaded = check.as_bool().unwrap_or(false);
-    if hls_loaded {
-        return Ok(());
-    }
-    log::info!("[Live] Injecting HLS manager into WebView");
     let hls_js = include_str!("../../../public/hls-manager.js");
-    document::eval(hls_js)
+    let inject_script = format!(
+        r#"
+        if (window.hlsManager) {{
+            return true;
+        }}
+        if (!window.hlsManagerInit) {{
+            window.hlsManagerInit = (async () => {{
+                try {{
+                    {}
+                    return true;
+                }} finally {{
+                    window.hlsManagerInit = null;
+                }}
+            }})();
+        }}
+        await window.hlsManagerInit;
+        return typeof window.hlsManager !== 'undefined';
+        "#,
+        hls_js
+    );
+    log::info!("[Live] Ensuring HLS manager is available in WebView");
+    let ready = document::eval(&inject_script)
         .await
         .map_err(|e| format!("Failed to inject HLS manager: {:?}", e))?;
-    Ok(())
+    if ready.as_bool().unwrap_or(false) {
+        Ok(())
+    } else {
+        Err("HLS manager unavailable after initialization".to_string())
+    }
 }
 /// Cleanup guard that destroys player on drop
 ///
@@ -444,6 +461,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
             *g
         });
         error.set(None);
+        playback_blocked.set(false);
         loading.set(true);
         cleanup_guard.set(None);
         let _video_id = video_id.clone();

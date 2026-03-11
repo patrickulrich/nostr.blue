@@ -38,16 +38,11 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
     let artist_is_empty = track.artist.is_empty();
     let mut artist_name = use_signal(|| track.artist.clone());
     let mut artist_lookup_gen = use_signal(|| 0u32);
-    use_effect({
-        let track_artist = track.artist.clone();
-        move || {
-            artist_name.set(track_artist.clone());
-        }
-    });
     use_effect(use_reactive(
-        (&track.id, &artist_pubkey, &artist_is_empty),
-        move |(track_id, pubkey_opt, is_empty)| {
+        (&track.id, &track.artist, &artist_pubkey, &artist_is_empty),
+        move |(track_id, track_artist, pubkey_opt, is_empty)| {
             let _ = track_id;
+            artist_name.set(track_artist.clone());
             let gen = artist_lookup_gen.with_mut(|g| {
                 *g = g.wrapping_add(1);
                 *g

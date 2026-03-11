@@ -96,6 +96,8 @@ pub fn ContentShareModal(
     let modal_id = use_signal(|| CONTENT_SHARE_MODAL_ID_COUNTER.fetch_add(1, Ordering::Relaxed));
     let mut share_mode = use_signal(|| ShareMode::Main);
     let mut copied = use_signal(|| false);
+    let mut copy_error = use_signal(|| Option::<String>::None);
+    let mut copy_disabled = use_signal(|| false);
     let mut nostr_text = use_signal(String::new);
     let mut dm_recipient = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
@@ -209,6 +211,8 @@ pub fn ContentShareModal(
             spawn(async move {
                 match copy_to_clipboard(&text_to_copy).await {
                     Ok(_) => {
+                        copy_error.set(None);
+                        copy_disabled.set(false);
                         copied.set(true);
                         log::info!("Content copied to clipboard");
                         spawn(async move {
@@ -217,6 +221,9 @@ pub fn ContentShareModal(
                         });
                     }
                     Err(e) => {
+                        copy_error.set(Some(format!("Clipboard unavailable: {}", e)));
+                        copy_disabled.set(true);
+                        copied.set(false);
                         log::error!("Failed to copy to clipboard: {:?}", e);
                     }
                 }
@@ -254,7 +261,9 @@ pub fn ContentShareModal(
                     nostr_text.set(String::new());
                     share_mode.set(ShareMode::Main);
                     is_publishing.set(false);
-                    on_close.call(());
+                    if !*is_publishing.peek() {
+                        on_close.call(());
+                    }
                 }
                 Err(e) => {
                     log::error!("Failed to share to Nostr: {}", e);
@@ -303,7 +312,9 @@ pub fn ContentShareModal(
                         dm_recipient.set(String::new());
                         share_mode.set(ShareMode::Main);
                         is_publishing.set(false);
-                        on_close.call(());
+                        if !*is_publishing.peek() {
+                            on_close.call(());
+                        }
                     }
                     Err(e) => {
                         log::error!("Failed to send DM: {}", e);
@@ -317,7 +328,11 @@ pub fn ContentShareModal(
     rsx! {
         div {
             class: "fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4",
-            onclick: move |_| on_close.call(()),
+            onclick: move |_| {
+                if !*is_publishing.read() {
+                    on_close.call(());
+                }
+            },
             div {
                 class: "bg-card border border-border rounded-lg shadow-xl max-w-md w-full max-h-[80vh] overflow-y-auto",
                 onclick: move |e| e.stop_propagation(),
@@ -340,8 +355,17 @@ pub fn ContentShareModal(
                         }
                     }
                     button {
-                        class: "text-muted-foreground hover:text-foreground transition",
-                        onclick: move |_| on_close.call(()),
+                        class: if *is_publishing.read() {
+                            "text-muted-foreground transition opacity-50 cursor-not-allowed"
+                        } else {
+                            "text-muted-foreground hover:text-foreground transition"
+                        },
+                        disabled: *is_publishing.read(),
+                        onclick: move |_| {
+                            if !*is_publishing.read() {
+                                on_close.call(());
+                            }
+                        },
                         "✕"
                     }
                 }
@@ -377,10 +401,20 @@ pub fn ContentShareModal(
                             }
                         }
                         div { class: "space-y-2",
+                            if let Some(error) = copy_error.read().as_ref() {
+                                div { class: "rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive",
+                                    "{error}"
+                                }
+                            }
                             p { class: "text-sm font-medium mb-3", "Choose how to share" }
                             button {
-                                class: "w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent transition",
+                                class: if *copy_disabled.read() {
+                                    "w-full flex items-start gap-3 p-3 rounded-lg border border-border opacity-50 cursor-not-allowed"
+                                } else {
+                                    "w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent transition"
+                                },
                                 onclick: handle_copy_link,
+                                disabled: *copy_disabled.read(),
                                 if *copied.read() {
                                     CheckIcon { class: "w-5 h-5 text-green-500 shrink-0 mt-0.5" }
                                 } else {
@@ -390,6 +424,8 @@ pub fn ContentShareModal(
                                     p { class: "font-medium",
                                         if *copied.read() {
                                             "Copied!"
+                                        } else if *copy_disabled.read() {
+                                            "Clipboard unavailable"
                                         } else {
                                             "Copy to clipboard"
                                         }
@@ -530,6 +566,7 @@ pub fn ContentShareModal(
                                     button {
                                         class: if *show_image_uploader.read() { "p-2 rounded-full bg-primary text-primary-foreground transition" } else { "p-2 rounded-full hover:bg-accent transition" },
                                         title: "Add media",
+                                        aria_label: "Add media",
                                         onclick: move |_| {
                                             let current = *show_image_uploader.read();
                                             show_image_uploader.set(!current);
@@ -548,6 +585,7 @@ pub fn ContentShareModal(
                                     button {
                                         class: "p-2 rounded-full hover:bg-accent transition",
                                         title: "Create poll",
+                                        aria_label: "Create poll",
                                         onclick: move |_| show_poll_modal.set(true),
                                         disabled: *is_publishing.read(),
                                         BarChartIcon { class: "w-5 h-5" }

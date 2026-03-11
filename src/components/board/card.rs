@@ -183,26 +183,28 @@ pub fn PinBoardCardMosaic(
             }
             reaction_bootstrapped.set(false);
             spawn(async move {
-                if let Ok((count, reacted)) = fetch_pinboard_reaction_state(&a_tag).await {
-                    if *reaction_request_gen.peek() != current_gen {
+                match fetch_pinboard_reaction_state(&a_tag).await {
+                    Ok((count, reacted)) => {
+                        if *reaction_request_gen.peek() != current_gen {
+                            return;
+                        }
+                        reaction_count.set(count);
+                        has_reacted.set(if has_signer { reacted } else { false });
+                        reaction_bootstrapped.set(true);
+                        reaction_error.set(None);
                         reaction_loading.set(false);
-                        return;
                     }
-                    reaction_count.set(count);
-                    has_reacted.set(if has_signer { reacted } else { false });
-                    reaction_bootstrapped.set(true);
-                    reaction_error.set(None);
-                    reaction_loading.set(false);
-                } else if *reaction_request_gen.peek() == current_gen {
-                    has_reacted.set(false);
-                    reaction_bootstrapped.set(false);
-                    reaction_count.set(0);
-                    reaction_error.set(Some(
-                        "Failed to load reactions. Click to retry.".to_string(),
-                    ));
-                    reaction_loading.set(false);
-                } else {
-                    reaction_loading.set(false);
+                    Err(_) => {
+                        if *reaction_request_gen.peek() != current_gen {
+                            return;
+                        }
+                        has_reacted.set(false);
+                        reaction_bootstrapped.set(false);
+                        reaction_count.set(0);
+                        reaction_error
+                            .set(Some("Failed to load reactions. Tap to retry.".to_string()));
+                        reaction_loading.set(false);
+                    }
                 }
             });
         },
@@ -286,7 +288,6 @@ pub fn PinBoardCardMosaic(
                                 match fetch_pinboard_reaction_state(&a_tag).await {
                                     Ok((count, reacted)) => {
                                         if *reaction_request_gen.peek() != current_gen {
-                                            reaction_loading.set(false);
                                             return;
                                         }
                                         reaction_count.set(count);
@@ -296,9 +297,13 @@ pub fn PinBoardCardMosaic(
                                         reaction_loading.set(false);
                                     }
                                     Err(_e) => {
-                                        if *reaction_request_gen.peek() == current_gen {
-                                            reaction_error.set(Some("Failed to load reactions. Click heart to retry.".to_string()));
+                                        if *reaction_request_gen.peek() != current_gen {
+                                            return;
                                         }
+                                        reaction_error.set(Some(
+                                            "Failed to load reactions. Tap heart to retry."
+                                                .to_string(),
+                                        ));
                                         reaction_loading.set(false);
                                     }
                                 }
@@ -324,14 +329,12 @@ pub fn PinBoardCardMosaic(
                             match toggle_pinboard_reaction(&board, "+").await {
                                 Ok(added) => {
                                     if *reaction_request_gen.peek() != current_gen {
-                                        reaction_loading.set(false);
                                         return;
                                     }
                                     if added == currently_reacted {
                                         match fetch_pinboard_reaction_state(&board.a_tag).await {
                                             Ok((count, reacted)) => {
                                                 if *reaction_request_gen.peek() != current_gen {
-                                                    reaction_loading.set(false);
                                                     return;
                                                 }
                                                 has_reacted.set(reacted);
@@ -358,7 +361,6 @@ pub fn PinBoardCardMosaic(
                                 }
                                 Err(e) => {
                                     if *reaction_request_gen.peek() != current_gen {
-                                        reaction_loading.set(false);
                                         return;
                                     }
                                     log::error!("Failed to toggle reaction: {}", e);
@@ -369,7 +371,9 @@ pub fn PinBoardCardMosaic(
                                     reaction_count.set(current_count);
                                 }
                             }
-                            reaction_loading.set(false);
+                            if *reaction_request_gen.peek() == current_gen {
+                                reaction_loading.set(false);
+                            }
                         });
                     },
                     title: if let Some(ref err) = *reaction_error.read() {
@@ -407,6 +411,12 @@ pub fn PinBoardCardMosaic(
                         fill: "currentColor",
                         view_box: "0 0 24 24",
                         path { d: "M13 10V3L4 14h7v7l9-11h-7z" }
+                    }
+                }
+                if let Some(error) = reaction_error.read().as_ref() {
+                    div {
+                        class: "mt-2 max-w-[12rem] rounded-md bg-black/75 px-2 py-1 text-[11px] font-medium text-white shadow-md",
+                        "{error}"
                     }
                 }
             }

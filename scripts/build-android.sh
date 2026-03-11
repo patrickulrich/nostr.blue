@@ -181,7 +181,7 @@ version_name = sys.argv[3]
 version_code = sys.argv[4]
 content = path.read_text()
 replacements = [
-    (r'namespace="[^"]*"', f'namespace="{app_id}"'),
+    (r'namespace\s*=\s*"[^"]*"', f'namespace="{app_id}"'),
     (r'applicationId = "[^"]*"', f'applicationId = "{app_id}"'),
     (r'versionName = "[^"]*"', f'versionName = "{version_name}"'),
     (r'versionCode = \d+', f'versionCode = {version_code}'),
@@ -226,7 +226,7 @@ if count != 1:
 path.write_text(content)
 PY
 verify_gradle_value "applicationId" "$APP_ID" '^[[:space:]]*applicationId = "\([^\"]*\)"$'
-verify_gradle_value "namespace" "$APP_ID" '^[[:space:]]*namespace="\([^\"]*\)"$'
+verify_gradle_value "namespace" "$APP_ID" '^[[:space:]]*namespace[[:space:]]*=[[:space:]]*"\([^\"]*\)"$'
 verify_gradle_value "versionName" "$CARGO_VERSION" '^[[:space:]]*versionName = "\([^\"]*\)"$'
 verify_gradle_value "versionCode" "$ANDROID_VERSION_CODE" '^[[:space:]]*versionCode = \([0-9][0-9]*\)$'
 echo "Normalized Gradle metadata for $APP_ID"

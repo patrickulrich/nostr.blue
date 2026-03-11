@@ -583,8 +583,8 @@ pub fn get_textarea_cursor(textarea_id: &str, content: &str) -> Option<(usize, u
         if let Some(document) = window.document() {
             if let Some(element) = document.get_element_by_id(textarea_id) {
                 if let Ok(textarea) = element.dyn_into::<web_sys::HtmlTextAreaElement>() {
-                    let start = textarea.selection_start().ok().flatten().unwrap_or(0) as usize;
-                    let end = textarea.selection_end().ok().flatten().unwrap_or(0) as usize;
+                    let start = textarea.selection_start().ok().flatten()? as usize;
+                    let end = textarea.selection_end().ok().flatten()? as usize;
                     let start_utf8 = utf16_to_utf8_index(content, start);
                     let end_utf8 = utf16_to_utf8_index(content, end);
                     return Some((start_utf8, end_utf8));

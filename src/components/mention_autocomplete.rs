@@ -80,7 +80,7 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
     let handle_input = move |evt: DioxusEvent<FormData>| {
         let new_value = evt.value().clone();
         props.on_input.call(new_value.clone());
-        let Some(cursor_pos) = get_cursor_position(&textarea_id.read()) else {
+        let Some(cursor_pos) = get_cursor_position(&textarea_id.read(), &new_value) else {
             autocomplete.show.set(false);
             return;
         };
@@ -175,9 +175,9 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
         }
     };
     let sync_cursor_position = move || {
-        if let Some(cursor_pos) = get_cursor_position(&textarea_id.read()) {
+        let text = props.content.read().clone();
+        if let Some(cursor_pos) = get_cursor_position(&textarea_id.read(), &text) {
             if let Some(mut signal) = props.cursor_position {
-                let text = props.content.read();
                 let cursor_utf8 = utf16_to_utf8_index(&text, cursor_pos);
                 signal.set(cursor_utf8);
             }
@@ -460,7 +460,7 @@ fn utf8_to_utf16_index(text: &str, utf8_index: usize) -> usize {
 }
 /// Get cursor position from textarea
 #[allow(unused_variables)]
-fn get_cursor_position(textarea_id: &str) -> Option<usize> {
+fn get_cursor_position(textarea_id: &str, current_text: &str) -> Option<usize> {
     #[cfg(feature = "web")]
     {
         if let Some(window) = web_sys::window() {
@@ -477,7 +477,7 @@ fn get_cursor_position(textarea_id: &str) -> Option<usize> {
             }
         }
     }
-    None
+    Some(current_text.len())
 }
 /// Update dropdown position based on cursor
 #[allow(unused_variables)]
@@ -488,7 +488,7 @@ fn update_dropdown_position(
     show_below: &mut Signal<bool>,
     is_mobile: &mut Signal<bool>,
 ) {
-    let has_cursor_position = get_cursor_position(textarea_id).is_some();
+    let has_cursor_position = get_cursor_position(textarea_id, "").is_some();
     #[cfg(feature = "web")]
     {
         if !has_cursor_position {

@@ -58,9 +58,29 @@ class MainActivity : WryActivity() {
                             Log.e(TAG, "Signer approval missing package for pubkey=$maskedPubkey")
                         }
                         else -> {
-                            pendingPubkey = pubkey
-                            pendingPackage = pkg
-                            intentError = null
+                            try {
+                                val validationError = validateSignerPackage(this@MainActivity, pkg)
+                                if (validationError != null) {
+                                    intentError = validationError
+                                    Log.e(
+                                        TAG,
+                                        "Signer approval package validation failed for package=$pkg: $validationError"
+                                    )
+                                } else {
+                                    pendingPubkey = pubkey
+                                    pendingPackage = pkg
+                                    intentError = null
+                                }
+                            } catch (e: Exception) {
+                                val validationError =
+                                    e.message ?: "Signer approval package validation failed"
+                                intentError = validationError
+                                Log.e(
+                                    TAG,
+                                    "Signer approval package validation threw for package=$pkg: $validationError",
+                                    e
+                                )
+                            }
                         }
                     }
                 } else {
@@ -332,10 +352,10 @@ class MainActivity : WryActivity() {
          * 1. Must match Java package identifier pattern
          * 2. Must be an installed package on the device
          */
-        private fun validateSignerPackage(context: Context, signerPackage: String): Boolean {
+        private fun validateSignerPackage(context: Context, signerPackage: String): String? {
             if (!PACKAGE_NAME_REGEX.matches(signerPackage)) {
                 Log.w(TAG, "Invalid package name format: $signerPackage")
-                return false
+                return "Invalid signer package name format"
             }
             return try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -355,13 +375,13 @@ class MainActivity : WryActivity() {
                             pendingPackage = null
                         }
                     }
-                    false
+                    "Selected signer package cannot handle nostrsigner requests"
                 } else {
-                    true
+                    null
                 }
             } catch (e: PackageManager.NameNotFoundException) {
                 Log.w(TAG, "Package not found: $signerPackage")
-                false
+                "Selected signer package is not installed"
             }
         }
 
@@ -418,7 +438,7 @@ class MainActivity : WryActivity() {
          */
         @JvmStatic
         fun getPublicKeyViaContentResolver(context: Context, signerPackage: String): String? {
-            if (!validateSignerPackage(context, signerPackage)) {
+            if (validateSignerPackage(context, signerPackage) != null) {
                 return null
             }
             return try {
@@ -468,7 +488,7 @@ class MainActivity : WryActivity() {
             eventJson: String,
             currentUser: String
         ): String? {
-            if (!validateSignerPackage(context, signerPackage)) {
+            if (validateSignerPackage(context, signerPackage) != null) {
                 return null
             }
             return try {
@@ -740,7 +760,7 @@ class MainActivity : WryActivity() {
             pubkey: String,
             currentUser: String
         ): String? {
-            if (!validateSignerPackage(context, signerPackage)) {
+            if (validateSignerPackage(context, signerPackage) != null) {
                 return null
             }
             return try {

@@ -35,16 +35,33 @@ export async function loadLeaflet() {
     }
 
     window.leafletLoadingPromise = new Promise((resolve, reject) => {
+        let cssLoaded = false;
+        let jsLoaded = false;
+        let settled = false;
+        const maybeResolve = () => {
+            if (!settled && cssLoaded && jsLoaded) {
+                settled = true;
+                resolve();
+            }
+        };
+        const fail = (message) => {
+            if (!settled) {
+                settled = true;
+                window.leafletLoadingPromise = null;
+                reject(new Error(message));
+            }
+        };
         // Load CSS
         const link = document.createElement('link');
         link.rel = 'stylesheet';
         link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
         link.integrity = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=';
         link.crossOrigin = '';
-        link.onerror = () => {
-            window.leafletLoadingPromise = null;
-            reject(new Error('Failed to load Leaflet CSS'));
+        link.onload = () => {
+            cssLoaded = true;
+            maybeResolve();
         };
+        link.onerror = () => fail('Failed to load Leaflet CSS');
         document.head.appendChild(link);
 
         // Load JS
@@ -54,12 +71,10 @@ export async function loadLeaflet() {
         script.crossOrigin = '';
         script.onload = () => {
             console.log('Leaflet loaded successfully');
-            resolve();
+            jsLoaded = true;
+            maybeResolve();
         };
-        script.onerror = () => {
-            window.leafletLoadingPromise = null;
-            reject(new Error('Failed to load Leaflet JS'));
-        };
+        script.onerror = () => fail('Failed to load Leaflet JS');
         document.head.appendChild(script);
     });
 
@@ -350,6 +365,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
                 if *loading_geo.peek() && !invalidated_running_lookup {
                     return;
                 }
+                processed_event_ids.set(key.clone());
                 geocode_gen.with_mut(|g| *g = g.wrapping_add(1));
                 let this_gen = *geocode_gen.peek();
                 loading_geo.set(true);
@@ -360,13 +376,23 @@ pub fn EventMap(props: EventMapProps) -> Element {
                     const BATCH_SIZE: usize = 5;
                     const BATCH_DELAY_MS: u32 = 200;
                     for (idx, event) in events_to_process.iter().enumerate() {
+                        if *geocode_gen.read() != this_gen {
+                            log::debug!("Geocoding generation superseded before processing batch");
+                            return;
+                        }
                         if *geocode_cancelled.read() {
                             log::debug!("Geocoding cancelled, stopping processing");
-                            loading_geo.set(false);
+                            if *geocode_gen.read() == this_gen {
+                                loading_geo.set(false);
+                            }
                             return;
                         }
                         if idx > 0 && idx % BATCH_SIZE == 0 {
                             crate::platform::timer::sleep_ms(BATCH_DELAY_MS).await;
+                            if *geocode_gen.read() != this_gen {
+                                log::debug!("Geocoding generation superseded after batch delay");
+                                return;
+                            }
                         }
                         if let Some(geohash) = event.geohash() {
                             if let Some((lat, lon)) = geohash_to_coords(geohash) {
@@ -411,13 +437,14 @@ pub fn EventMap(props: EventMapProps) -> Element {
                     }
                     if *geocode_cancelled.read() {
                         log::debug!("Geocoding cancelled, not updating signals");
-                        loading_geo.set(false);
+                        if *geocode_gen.read() == this_gen {
+                            loading_geo.set(false);
+                        }
                         return;
                     }
                     // Verify generation before updating state
                     if *geocode_gen.read() != this_gen {
                         log::debug!("Geocoding generation stale, discarding results");
-                        loading_geo.set(false);
                         return;
                     }
                     geocoded_events.set(results);

@@ -697,8 +697,10 @@ fn handle_android_back(navigator: dioxus::router::Navigator, current_route: &Rou
     }
 
     #[cfg(feature = "mobile")]
-    if let Err(error) = crate::platform::mobile::finish_app() {
-        log::error!("Failed to finish Android activity: {}", error);
+    {
+        if let Err(error) = crate::platform::mobile::finish_app() {
+            log::error!("Failed to finish Android activity: {}", error);
+        }
     }
 }
 
@@ -734,21 +736,21 @@ fn Layout() -> Element {
     let mut mobile_search_open = back_navigation::MOBILE_SEARCH_OPEN.signal();
     #[allow(unused_mut, unused_variables)]
     let mut android_back_nonce = use_signal(|| 0u64);
+    #[allow(unused_mut, unused_variables)]
+    let mut last_handled_android_back_nonce = use_signal(|| 0u64);
     let current_route = use_route::<Route>();
     let navigator = navigator();
     #[cfg(feature = "mobile")]
-    use_effect(move || {
-        spawn(async move {
-            let mut last_seen = 0;
-            loop {
-                let latest = back_navigation::platform_android_back_request_count();
-                if latest > last_seen {
-                    last_seen = latest;
-                    android_back_nonce.set(latest);
-                }
-                crate::platform::timer::sleep_ms(50).await;
+    let _android_back_poller = use_future(move || async move {
+        let mut last_seen = 0;
+        loop {
+            let latest = back_navigation::platform_android_back_request_count();
+            if latest > last_seen {
+                last_seen = latest;
+                android_back_nonce.set(latest);
             }
-        });
+            crate::platform::timer::sleep_ms(50).await;
+        }
     });
     #[cfg(feature = "mobile")]
     let route_for_android_back = current_route.clone();
@@ -758,6 +760,11 @@ fn Layout() -> Element {
             return;
         }
 
+        if *last_handled_android_back_nonce.read() == nonce {
+            return;
+        }
+
+        last_handled_android_back_nonce.set(nonce);
         handle_android_back(navigator, &route_for_android_back);
     }));
     let is_dms_page = matches!(current_route, Route::DMs {});

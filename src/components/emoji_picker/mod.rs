@@ -433,30 +433,28 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                         }
                                     }
                                 }
-                                EmojiCategory::Standard(idx) => rsx! {
-                                    {
-                                        let unique_emojis = &UNIQUE_EMOJI_CATEGORIES[idx];
-                                        rsx! {
-                                    div { class: "grid grid-cols-5 sm:grid-cols-6 md:grid-cols-7 gap-2",
-                                        for (emoji_idx , emoji) in unique_emojis.iter().enumerate() {
-                                            {
-                                                let emoji_str = emoji.to_string();
-                                                let emoji_for_click = emoji_str.clone();
-                                                rsx! {
-                                                    button {
-                                                        key: "std-{idx}-{emoji_idx}",
-                                                        class: "text-2xl hover:bg-accent rounded p-2 transition",
-                                                        onclick: move |_| {
-                                                            save_recent_emoji(emoji_for_click.clone());
-                                                            props.on_emoji_selected.call(emoji_for_click.clone());
-                                                            show_picker.set(false);
-                                                        },
-                                                        "{emoji_str}"
+                                EmojiCategory::Standard(idx) => {
+                                    let unique_emojis = &UNIQUE_EMOJI_CATEGORIES[idx];
+                                    rsx! {
+                                        div { class: "grid grid-cols-5 sm:grid-cols-6 md:grid-cols-7 gap-2",
+                                            for (emoji_idx , emoji) in unique_emojis.iter().enumerate() {
+                                                {
+                                                    let emoji_str = emoji.to_string();
+                                                    let emoji_for_click = emoji_str.clone();
+                                                    rsx! {
+                                                        button {
+                                                            key: "std-{idx}-{emoji_idx}",
+                                                            class: "text-2xl hover:bg-accent rounded p-2 transition",
+                                                            onclick: move |_| {
+                                                                save_recent_emoji(emoji_for_click.clone());
+                                                                props.on_emoji_selected.call(emoji_for_click.clone());
+                                                                show_picker.set(false);
+                                                            },
+                                                            "{emoji_str}"
+                                                        }
                                                     }
                                                 }
                                             }
-                                        }
-                                    }
                                         }
                                     }
                                 },

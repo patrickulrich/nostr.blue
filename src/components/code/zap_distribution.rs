@@ -11,6 +11,7 @@ use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use futures::future::{select, Either};
+use std::collections::HashSet;
 
 /// A single recipient in the zap distribution
 #[derive(Clone, Debug)]
@@ -51,6 +52,7 @@ pub fn ZapDistribution(
     let mut recipients = use_signal(Vec::<ZapRecipient>::new);
     let mut send_progress = use_signal(|| 0usize);
     let mut send_total = use_signal(|| 0usize);
+    let mut timed_out_pubkeys = use_signal(HashSet::<String>::new);
 
     // Deduplicate zap_splits by pubkey, summing weights for duplicates
     let deduped_splits: Vec<(String, u64)> = {
@@ -87,9 +89,12 @@ pub fn ZapDistribution(
         }
     });
     let deduped_splits_for_effect = deduped_splits.clone();
-    use_effect(use_reactive(&zap_splits, move |_| {
+    use_effect(move || {
+        let _ = &zap_splits;
+        let suppressed_pubkeys = timed_out_pubkeys.read().clone();
         let new_defaults = deduped_splits_for_effect
             .iter()
+            .filter(|(pk, _)| !suppressed_pubkeys.contains(pk))
             .map(|(pk, _)| pk.clone())
             .collect::<Vec<String>>();
         let previous_defaults = last_auto_synced_defaults.peek().clone();
@@ -121,7 +126,7 @@ pub fn ZapDistribution(
         };
         last_auto_synced_defaults.set(new_defaults);
         selected_pubkeys.set(merged);
-    }));
+    });
 
     // Pure allocation: largest-remainder method to avoid rounding loss
     let compute_allocations = {
@@ -167,7 +172,12 @@ pub fn ZapDistribution(
             return;
         }
         let amount = *total_amount.read();
-        let pubkeys = selected_pubkeys.read().clone();
+        let pubkeys = selected_pubkeys
+            .read()
+            .iter()
+            .filter(|pk| !timed_out_pubkeys.read().contains(*pk))
+            .cloned()
+            .collect::<Vec<_>>();
         let allocations = compute_allocations(&pubkeys, amount);
         let current = recipients.peek().clone();
         recipients.set(
@@ -198,13 +208,14 @@ pub fn ZapDistribution(
             return;
         }
         // Resolve lud16 from profile cache at send time
-        let recips = recipients.read().clone();
-        let sendable: Vec<(ZapRecipient, String)> = recips
-            .into_iter()
-            .filter(|r| {
-                r.amount > 0
+            let recips = recipients.read().clone();
+            let sendable: Vec<(ZapRecipient, String)> = recips
+                .into_iter()
+                .filter(|r| {
+                    r.amount > 0
                     && r.status != PaymentStatus::Success
                     && !matches!(r.status, PaymentStatus::Timeout(_))
+                    && !timed_out_pubkeys.peek().contains(&r.pubkey)
             })
             .filter_map(|r| {
                 let lud16 = PROFILE_CACHE
@@ -286,6 +297,7 @@ pub fn ZapDistribution(
                                         "Payment timed out after 30s".to_string(),
                                     );
                                 }
+                                timed_out_pubkeys.write().insert(recip.pubkey.clone());
                             }
                         }
                     }
@@ -319,7 +331,12 @@ pub fn ZapDistribution(
         // Backdrop
         div {
             class: "fixed inset-0 z-50 bg-black/50 backdrop-blur-sm",
-            onclick: move |_| { if !*is_sending.peek() { on_close.call(()); } },
+            onclick: move |_| {
+                if !*is_sending.peek() {
+                    timed_out_pubkeys.set(HashSet::new());
+                    on_close.call(());
+                }
+            },
         }
         div {
             class: "fixed inset-x-4 top-[10%] z-50 max-w-lg mx-auto bg-background border border-border rounded-xl shadow-xl max-h-[80vh] overflow-y-auto",
@@ -336,7 +353,12 @@ pub fn ZapDistribution(
                     aria_label: "Close",
                     r#type: "button",
                     disabled: *is_sending.read(),
-                    onclick: move |_| { if !*is_sending.peek() { on_close.call(()); } },
+                    onclick: move |_| {
+                        if !*is_sending.peek() {
+                            timed_out_pubkeys.set(HashSet::new());
+                            on_close.call(());
+                        }
+                    },
                     svg {
                         class: "w-5 h-5",
                         xmlns: "http://www.w3.org/2000/svg",

@@ -23,6 +23,12 @@ fn default_relay_urls() -> Vec<RelayUrl> {
 fn redact_url(url: &str) -> String {
     match reqwest::Url::parse(url) {
         Ok(mut parsed) => {
+            if !parsed.username().is_empty() {
+                let _ = parsed.set_username("");
+            }
+            if parsed.password().is_some() {
+                let _ = parsed.set_password(None);
+            }
             let redacted_pairs = parsed
                 .query_pairs()
                 .map(|(key, value)| {

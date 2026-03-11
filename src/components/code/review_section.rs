@@ -86,6 +86,13 @@ fn should_replace_review(existing: &PersistedReview, candidate: &PersistedReview
     if candidate.created_at > existing.created_at {
         return true;
     }
+    if !existing.event_id.is_empty()
+        && !candidate.event_id.is_empty()
+        && existing.event_id == candidate.event_id
+        && candidate.created_at != existing.created_at
+    {
+        return true;
+    }
     if candidate.created_at == existing.created_at {
         // If existing is optimistic (no event_id), only replace if candidate is semantically the same
         if existing.event_id.is_empty() && !candidate.event_id.is_empty() {
@@ -172,6 +179,13 @@ mod tests {
         assert!(should_replace_review(&existing, &candidate));
         // Should NOT replace in reverse direction
         assert!(!should_replace_review(&candidate, &existing));
+    }
+
+    #[test]
+    fn same_event_id_with_different_timestamp_replaces() {
+        let existing = review("same-event", 100);
+        let candidate = review("same-event", 200);
+        assert!(should_replace_review(&existing, &candidate));
     }
 }
 
