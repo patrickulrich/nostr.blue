@@ -26,8 +26,8 @@ pub fn get_citation_style(citation_type: &CitationType) -> CitationStyle {
         CitationType::Internal => CitationStyle {
             emoji: "📌",
             label: "Nostr",
-            bg_class: "bg-purple-500/20",
-            text_class: "text-purple-600 dark:text-purple-400",
+            bg_class: "bg-indigo-500/20",
+            text_class: "text-indigo-600 dark:text-indigo-400",
         },
         CitationType::ExternalWeb => CitationStyle {
             emoji: "🌐",

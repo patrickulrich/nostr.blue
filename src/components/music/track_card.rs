@@ -11,6 +11,23 @@ use wasm_bindgen::JsCast;
 #[cfg(feature = "web")]
 const INTERACTIVE_ELEMENT_SELECTOR: &str =
     "a,button,input,textarea,select,[role='button'],[role='link']";
+
+fn is_event_from_interactive_element(_evt: &KeyboardEvent) -> bool {
+    #[cfg(feature = "web")]
+    {
+        if let Some(target) = _evt.data.as_web_event().target() {
+            if let Some(element) = target.dyn_ref::<web_sys::Element>() {
+                return element
+                    .closest(INTERACTIVE_ELEMENT_SELECTOR)
+                    .ok()
+                    .flatten()
+                    .is_some();
+            }
+        }
+    }
+
+    false
+}
 #[derive(Props, Clone, PartialEq)]
 pub struct TrackCardProps {
     pub track: WavlakeTrack,
@@ -58,20 +75,8 @@ pub fn TrackCard(props: TrackCardProps) -> Element {
             tabindex: "0",
             onclick: move |_| play_track_on_click(),
             onkeydown: move |evt| {
-                #[cfg(feature = "web")]
-                {
-                    if let Some(target) = evt.data.as_web_event().target() {
-                        if let Some(element) = target.dyn_ref::<web_sys::Element>() {
-                            if element
-                                .closest(INTERACTIVE_ELEMENT_SELECTOR)
-                                .ok()
-                                .flatten()
-                                .is_some()
-                            {
-                                return;
-                            }
-                        }
-                    }
+                if is_event_from_interactive_element(&evt) {
+                    return;
                 }
                 match evt.key() {
                     Key::Enter => {

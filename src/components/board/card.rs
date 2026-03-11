@@ -328,7 +328,7 @@ pub fn PinBoardCardMosaic(
                                                     e
                                                 );
                                                 reaction_count.set(current_count);
-                                                has_reacted.set(added);
+                                                has_reacted.set(currently_reacted);
                                             }
                                         }
                                     } else {

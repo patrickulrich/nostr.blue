@@ -177,6 +177,7 @@ pub fn PersistentMusicPlayer() -> Element {
 
                                     // Skip if already playing this URL
                                     if (audio.dataset.currentUrl === {media_url}) {{
+                                        audio.dataset.bindToken = "{bind_token}";
                                         if ({is_playing} && audio.paused) {{
                                             audio.play().catch(e => console.log('Play failed:', e));
                                         }} else if (!{is_playing} && !audio.paused) {{
@@ -257,6 +258,7 @@ pub fn PersistentMusicPlayer() -> Element {
                                     }}
                                 }} else {{
                                     // URL unchanged - just toggle play/pause
+                                    audio.dataset.bindToken = "{bind_token}";
                                     if ({is_playing} && audio.paused) {{
                                         audio.play().catch(e => console.log('Play failed:', e.name, e.message));
                                     }} else if (!{is_playing} && !audio.paused) {{
@@ -340,7 +342,7 @@ pub fn PersistentMusicPlayer() -> Element {
                     audio_id = audio_id_json,
                     volume = volume_value,
                 );
-                let _ = document::eval(&script);
+                let _ = document::eval(&script).await;
             });
         });
     }
@@ -376,7 +378,7 @@ pub fn PersistentMusicPlayer() -> Element {
                         audio_id = audio_id_json,
                         current_time = current_time,
                     );
-                    let _ = document::eval(&script);
+                    let _ = document::eval(&script).await;
                 }
                 crate::platform::timer::sleep_ms(500).await;
                 // Only clear is_seeking if no newer seek has started
@@ -454,7 +456,7 @@ pub fn PersistentMusicPlayer() -> Element {
                     audio_id = audio_id_json,
                     speed = speed,
                 );
-                let _ = document::eval(&script);
+                let _ = document::eval(&script).await;
             });
         }
     });

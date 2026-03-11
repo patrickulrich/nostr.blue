@@ -51,11 +51,6 @@ reviews:
     - "!**/.env*"
     - "!**/tailwind.config.js"
 
-    # C bindings (if any) and build scripts
-    - "!**/*.c"
-    - "!**/CMakeLists.txt"
-    - "!**/build.rs"
-
     # Generated files
     - "!**/public/tailwind.css"
 
@@ -81,7 +76,7 @@ reviews:
 
         Thoroughly review the code snippets and suggest improvements for these key areas:
           - **Logic**: Flaws in program logic, edge cases, and algorithmic correctness.
-          - **Platform-Specific Code**: Check for proper use of `#[cfg(feature = "web")]`, `#[cfg(feature = "native")]`, `#[cfg(feature = "mobile")]` to handle platform differences correctly.
+          - **Platform-Specific Code**: Check for proper use of `#[cfg(feature = "web")]`, `#[cfg(feature = "native")]`, `#[cfg(feature = "mobile")]`, and `#[cfg(feature = "desktop")]` to handle platform differences correctly. This repo's feature model treats `desktop` and `mobile` as entry features that both imply `native`, so reviewers should treat code guarded by `#[cfg(feature = "desktop")]` or `#[cfg(feature = "mobile")]` as also matching the shared `#[cfg(feature = "native")]` path and should not flag shared native modules that only use `#[cfg(feature = "native")]`. Mobile builds use the native implementation path unless code is truly mobile-specific.
           - **Security**: Vulnerabilities, especially:
             - Nostr event validation and signature verification
             - XSS risks in user-generated content rendering

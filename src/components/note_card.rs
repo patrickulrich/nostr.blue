@@ -666,6 +666,10 @@ pub fn NoteCard(
                                                     show_undo_repost_confirm.set(true);
                                                 } else {
                                                     let event_id_clone = event_id_repost.clone();
+                                                    let next_gen = count_request_gen
+                                                        .peek()
+                                                        .wrapping_add(1);
+                                                    count_request_gen.set(next_gen);
                                                     is_reposting.set(true);
                                                     spawn(async move {
                                                         match publish_repost(event_id_clone, None).await {
@@ -813,6 +817,8 @@ pub fn NoteCard(
                     show_reply_modal.set(false);
                 },
                 on_success: move |reply_event: NostrEvent| {
+                    let next_gen = count_request_gen.peek().wrapping_add(1);
+                    count_request_gen.set(next_gen);
                     // Increment reply count for immediate visual feedback
                     let current = *reply_count.read();
                     reply_count.set(current + 1);
@@ -847,6 +853,8 @@ pub fn NoteCard(
                 on_confirm: move |_| {
                     show_undo_repost_confirm.set(false);
                     if let Some(repost_id) = user_repost_id.read().clone() {
+                        let next_gen = count_request_gen.peek().wrapping_add(1);
+                        count_request_gen.set(next_gen);
                         is_reposting.set(true);
                         spawn(async move {
                             match delete_repost(repost_id).await {

@@ -253,6 +253,9 @@ pub fn MusicZapDialog() -> Element {
                                 } else {
                                     error_msg.set(None);
                                     log::info!("WebLN payment completed successfully");
+                                    music_player::hide_zap_dialog();
+                                    invoice.set(None);
+                                    qr_code_url.set(None);
                                 }
                             }
                             Err(e) => {

@@ -248,10 +248,12 @@ pub fn insert_at_cursor(content: &mut Signal<String>, textarea_id: &str, text_to
     let new_content = format!("{}{}{}", before, text_to_insert, after);
     let new_cursor = cursor_start + text_to_insert.len();
     content.set(new_content.clone());
-    let id = textarea_id.to_string();
-    spawn(async move {
-        #[cfg(feature = "web")]
-        crate::platform::timer::sleep_ms(10).await;
-        set_textarea_cursor(&id, new_cursor, &new_content);
-    });
+    #[cfg(feature = "web")]
+    {
+        let id = textarea_id.to_string();
+        spawn(async move {
+            crate::platform::timer::sleep_ms(10).await;
+            set_textarea_cursor(&id, new_cursor, &new_content);
+        });
+    }
 }

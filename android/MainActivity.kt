@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.OnBackPressedCallback
@@ -218,8 +219,17 @@ class MainActivity : WryActivity() {
                 action = Intent.ACTION_VIEW
                 data = Uri.parse("nostrsigner:")
             }
-            return context.packageManager
-                .queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+            val resolvedActivities = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.queryIntentActivities(
+                    intent,
+                    PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong())
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+            }
+
+            return resolvedActivities
                 .mapNotNull { it.activityInfo?.packageName }
                 .toSet()
         }
@@ -328,7 +338,15 @@ class MainActivity : WryActivity() {
                 return false
             }
             return try {
-                context.packageManager.getPackageInfo(signerPackage, 0)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    context.packageManager.getPackageInfo(
+                        signerPackage,
+                        PackageManager.PackageInfoFlags.of(0)
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.packageManager.getPackageInfo(signerPackage, 0)
+                }
                 val validSignerPackages = querySignerPackages(context)
                 if (signerPackage !in validSignerPackages) {
                     Log.w(TAG, "Package does not handle nostrsigner scheme: $signerPackage")

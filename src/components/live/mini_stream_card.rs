@@ -55,15 +55,14 @@ pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
         .host_pubkey
         .clone()
         .unwrap_or_else(|| event.pubkey.to_string());
-    let author_pubkey_for_fetch = author_pubkey.clone();
     let host_verified = stream_meta.host_verified;
     let coord = Coordinate::new(Kind::from(30311), event.pubkey).identifier(&stream_meta.d_tag);
     let naddr = coord
         .to_bech32()
         .unwrap_or_else(|_| format!("30311:{}:{}", event.pubkey, stream_meta.d_tag));
-    let author_metadata = use_memo(move || {
+    let author_metadata = {
         let cache = profiles::PROFILE_CACHE.read();
-        cache.peek(&author_pubkey_for_fetch).map(|profile| {
+        cache.peek(&author_pubkey).map(|profile| {
             let mut metadata = nostr_sdk::Metadata::new();
             if let Some(name) = &profile.name {
                 metadata = metadata.name(name);
@@ -78,7 +77,7 @@ pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
             }
             metadata
         })
-    });
+    };
     use_effect(use_reactive(
         (&author_pubkey, &*CLIENT_INITIALIZED.read()),
         move |(pk, client_initialized)| {
@@ -91,7 +90,6 @@ pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
         },
     ));
     let display_name = author_metadata
-        .read()
         .as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));

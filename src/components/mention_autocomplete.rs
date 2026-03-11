@@ -6,6 +6,7 @@ use dioxus::prelude::Event as DioxusEvent;
 use dioxus::prelude::*;
 use dioxus_core::Task;
 use nostr_sdk::prelude::*;
+use std::collections::HashSet;
 use std::rc::Rc;
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
@@ -78,12 +79,15 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
     });
     let handle_input = move |evt: DioxusEvent<FormData>| {
         let new_value = evt.value().clone();
-        let cursor_pos = get_cursor_position(&textarea_id.read());
+        props.on_input.call(new_value.clone());
+        let Some(cursor_pos) = get_cursor_position(&textarea_id.read()) else {
+            autocomplete.show.set(false);
+            return;
+        };
         if let Some(mut signal) = props.cursor_position {
             let cursor_utf8 = utf16_to_utf8_index(&new_value, cursor_pos);
             signal.set(cursor_utf8);
         }
-        props.on_input.call(new_value.clone());
         detect_mention(
             &new_value,
             cursor_pos,
@@ -171,11 +175,12 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
         }
     };
     let sync_cursor_position = move || {
-        let cursor_pos = get_cursor_position(&textarea_id.read());
-        if let Some(mut signal) = props.cursor_position {
-            let text = props.content.read();
-            let cursor_utf8 = utf16_to_utf8_index(&text, cursor_pos);
-            signal.set(cursor_utf8);
+        if let Some(cursor_pos) = get_cursor_position(&textarea_id.read()) {
+            if let Some(mut signal) = props.cursor_position {
+                let text = props.content.read();
+                let cursor_utf8 = utf16_to_utf8_index(&text, cursor_pos);
+                signal.set(cursor_utf8);
+            }
         }
     };
     let handle_keyup = move |_| {
@@ -296,7 +301,21 @@ fn detect_mention(
                                     r
                                 })
                                 .collect();
+                            let mut present = merged.iter().map(|r| r.pubkey).collect::<HashSet<_>>();
+                            for cached in cached_results.iter() {
+                                if !thread_pubkeys_for_relay.contains(&cached.pubkey)
+                                    || present.contains(&cached.pubkey)
+                                {
+                                    continue;
+                                }
+                                let mut extra = cached.clone();
+                                extra.is_thread_participant = true;
+                                extra.relevance += 2000;
+                                present.insert(extra.pubkey);
+                                merged.push(extra);
+                            }
                             merged.sort_by(|a, b| b.relevance.cmp(&a.relevance));
+                            merged.truncate(10);
                             results_signal.set(merged);
                             searching_signal.set(false);
                         } else {
@@ -399,6 +418,7 @@ fn insert_mention(
                         if let Ok(textarea) = element.dyn_into::<web_sys::HtmlTextAreaElement>() {
                             let new_cursor_utf16_pos =
                                 utf8_to_utf16_index(&new_content, new_cursor_byte_pos) as u32;
+                            crate::platform::timer::sleep_ms(10).await;
                             let _ = textarea
                                 .set_selection_range(new_cursor_utf16_pos, new_cursor_utf16_pos);
                             let _ = textarea.focus();
@@ -439,20 +459,22 @@ fn utf8_to_utf16_index(text: &str, utf8_index: usize) -> usize {
 }
 /// Get cursor position from textarea
 #[allow(unused_variables)]
-fn get_cursor_position(textarea_id: &str) -> usize {
+fn get_cursor_position(textarea_id: &str) -> Option<usize> {
     #[cfg(feature = "web")]
     {
         if let Some(window) = web_sys::window() {
             if let Some(document) = window.document() {
                 if let Some(element) = document.get_element_by_id(textarea_id) {
                     if let Ok(textarea) = element.dyn_into::<web_sys::HtmlTextAreaElement>() {
-                        return textarea.selection_start().unwrap_or(None).unwrap_or(0) as usize;
+                        return Some(
+                            textarea.selection_start().unwrap_or(None).unwrap_or(0) as usize,
+                        );
                     }
                 }
             }
         }
     }
-    0
+    None
 }
 /// Update dropdown position based on cursor
 #[allow(unused_variables)]
@@ -463,8 +485,12 @@ fn update_dropdown_position(
     show_below: &mut Signal<bool>,
     is_mobile: &mut Signal<bool>,
 ) {
+    let has_cursor_position = get_cursor_position(textarea_id).is_some();
     #[cfg(feature = "web")]
     {
+        if !has_cursor_position {
+            return;
+        }
         if let Some(window) = web_sys::window() {
             if let Some(document) = window.document() {
                 if let Some(element) = document.get_element_by_id(textarea_id) {

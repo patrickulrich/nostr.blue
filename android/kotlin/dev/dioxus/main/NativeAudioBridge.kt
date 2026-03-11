@@ -17,6 +17,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import org.json.JSONArray
@@ -57,6 +58,11 @@ object NativeAudioBridge {
     private val lastError = AtomicReference<String?>(null)
     private var appContext: Context? = null
     private var serviceRef: WeakReference<MediaPlaybackService>? = null
+
+    private data class ParsedQueueResult(
+        val items: List<NativeQueueItem>,
+        val adjustedStartIndex: Int
+    )
 
     @Synchronized
     fun attachService(service: MediaPlaybackService) {
@@ -118,13 +124,14 @@ object NativeAudioBridge {
     @Synchronized
     fun setQueue(context: Context, queueJson: String, startIndex: Int, playWhenReady: Boolean): String {
         return try {
-            val parsed = parseQueue(queueJson)
+            val parsed = parseQueue(queueJson, startIndex)
             queue.clear()
-            queue.addAll(parsed)
-            currentIndex = startIndex.coerceIn(0, (queue.size - 1).coerceAtLeast(0))
+            queue.addAll(parsed.items)
+            currentIndex = parsed.adjustedStartIndex.coerceIn(0, (queue.size - 1).coerceAtLeast(0))
             this.playWhenReady = playWhenReady
             lastError.set(null)
             if (queue.isEmpty()) {
+                resetSnapshotState()
                 releasePlayer()
                 updatePlaybackState(false, PlaybackState.STATE_STOPPED)
                 stopForegroundPlayback()
@@ -282,8 +289,7 @@ object NativeAudioBridge {
         return try {
             ensureInitialized(context)
             queue.clear()
-            currentIndex = 0
-            playWhenReady = false
+            resetSnapshotState()
             releasePlayer()
             updatePlaybackState(false, PlaybackState.STATE_STOPPED)
             stopForegroundPlayback()
@@ -413,6 +419,13 @@ object NativeAudioBridge {
         player = null
     }
 
+    private fun resetSnapshotState() {
+        currentIndex = 0
+        playWhenReady = false
+        lastDurationSeconds = 0.0
+        lastError.set(null)
+    }
+
     private fun updateMetadata(item: NativeQueueItem) {
         val metadata = MediaMetadata.Builder()
             .putString(MediaMetadata.METADATA_KEY_TITLE, item.title)
@@ -495,11 +508,6 @@ object NativeAudioBridge {
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle(item.title)
             .setContentText(item.artist)
-            .setStyle(
-                androidx.media.app.NotificationCompat.MediaStyle()
-                    .setMediaSession(mediaSession?.sessionToken)
-                    .setShowActionsInCompactView(0, 1, 2)
-            )
             .setOnlyAlertOnce(true)
             .setOngoing(player?.isPlaying == true || (isPreparing && playWhenReady))
             .addAction(
@@ -557,14 +565,18 @@ object NativeAudioBridge {
         }
     }
 
-    private fun parseQueue(queueJson: String): List<NativeQueueItem> {
+    private fun parseQueue(queueJson: String, startIndex: Int): ParsedQueueResult {
         val arr = JSONArray(queueJson)
-        return buildList(arr.length()) {
+        var adjustedStartIndex = startIndex
+        val items = buildList(arr.length()) {
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
                 val mediaUrl = obj.optString("media_url")
                 // Skip entries with blank or missing media_url
                 if (mediaUrl.isBlank()) {
+                    if (i < startIndex) {
+                        adjustedStartIndex -= 1
+                    }
                     continue
                 }
                 add(
@@ -582,5 +594,9 @@ object NativeAudioBridge {
                 )
             }
         }
+        return ParsedQueueResult(
+            items = items,
+            adjustedStartIndex = adjustedStartIndex.coerceAtLeast(0)
+        )
     }
 }

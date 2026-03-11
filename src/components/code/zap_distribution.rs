@@ -77,14 +77,50 @@ pub fn ZapDistribution(
                 .collect::<Vec<String>>()
         }
     });
-    let deduped_splits_for_effect = deduped_splits.clone();
-    use_effect(use_reactive(&zap_splits, move |_| {
-        selected_pubkeys.set(
-            deduped_splits_for_effect
+    let mut last_auto_synced_defaults = use_signal({
+        let deduped_splits = deduped_splits.clone();
+        move || {
+            deduped_splits
                 .iter()
                 .map(|(pk, _)| pk.clone())
-                .collect::<Vec<String>>(),
-        );
+                .collect::<Vec<String>>()
+        }
+    });
+    let deduped_splits_for_effect = deduped_splits.clone();
+    use_effect(use_reactive(&zap_splits, move |_| {
+        let new_defaults = deduped_splits_for_effect
+            .iter()
+            .map(|(pk, _)| pk.clone())
+            .collect::<Vec<String>>();
+        let previous_defaults = last_auto_synced_defaults.peek().clone();
+        let current_selection = selected_pubkeys.peek().clone();
+        let merged = if current_selection == previous_defaults {
+            new_defaults.clone()
+        } else {
+            let user_removed = previous_defaults
+                .iter()
+                .filter(|pk| !current_selection.contains(pk))
+                .cloned()
+                .collect::<Vec<_>>();
+            let user_added = current_selection
+                .iter()
+                .filter(|pk| !previous_defaults.contains(pk))
+                .cloned()
+                .collect::<Vec<_>>();
+            let mut merged = new_defaults
+                .iter()
+                .filter(|pk| !user_removed.contains(pk))
+                .cloned()
+                .collect::<Vec<_>>();
+            for pk in user_added {
+                if !merged.contains(&pk) {
+                    merged.push(pk);
+                }
+            }
+            merged
+        };
+        last_auto_synced_defaults.set(new_defaults);
+        selected_pubkeys.set(merged);
     }));
 
     // Pure allocation: largest-remainder method to avoid rounding loss

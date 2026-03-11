@@ -119,6 +119,14 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                 }
                             }
                         }
+                        #[cfg(not(feature = "web"))]
+                        {
+                            is_mobile.set(false);
+                            position_below.set(true);
+                            picker_top.set(16.0);
+                            picker_left.set(16.0);
+                            picker_bottom.set(0.0);
+                        }
                     }
                 },
                 if props.icon_only {

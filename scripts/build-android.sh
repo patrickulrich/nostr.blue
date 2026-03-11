@@ -39,6 +39,39 @@ verify_gradle_value() {
     fi
 }
 
+write_android_local_properties() {
+    local local_properties="$DX_ANDROID/local.properties"
+    mkdir -p "$DX_ANDROID"
+    {
+        printf 'sdk.dir=%s\n' "$(printf '%s' "$ANDROID_HOME" | sed 's/\\/\\\\/g')"
+        printf 'ndk.dir=%s\n' "$(printf '%s' "$ANDROID_NDK_HOME" | sed 's/\\/\\\\/g')"
+    } >"$local_properties"
+    echo "Wrote Android SDK config: $local_properties"
+}
+
+normalize_gradle_properties() {
+    local gradle_properties="$DX_ANDROID/gradle.properties"
+    [ -f "$gradle_properties" ] || return
+    python3 - "$gradle_properties" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+lines = path.read_text().splitlines()
+filtered = [
+    line for line in lines
+    if line.strip() != "android.defaults.buildfeatures.buildconfig=true"
+]
+
+for line in ["android.javaCompile.suppressSourceTargetDeprecationWarning=true"]:
+    if line not in filtered:
+        filtered.append(line)
+
+path.write_text("\n".join(filtered) + "\n")
+PY
+    echo "Normalized Gradle properties"
+}
+
 # Android SDK/NDK paths
 ANDROID_HOME="${ANDROID_HOME:-${HOME}/Android/Sdk}"
 if [ -z "$ANDROID_NDK_HOME" ]; then
@@ -117,12 +150,14 @@ mkdir -p "$PROJECT_ROOT/target/dx/nostrblue/release/android/app/app/src/main/res
 cp "$PROJECT_ROOT/android/res/xml/file_paths.xml" "$PROJECT_ROOT/target/dx/nostrblue/release/android/app/app/src/main/res/xml/" 2>/dev/null && echo "Pre-copied file_paths.xml" || echo "Directory not yet created (will be handled post-build)"
 mkdir -p "$PROJECT_ROOT/target/dx/nostrblue/release/android/app/app/src/main/kotlin/dev/dioxus/main"
 cp "$ANDROID_KOTLIN_SRC/dev/dioxus/main/"*.kt "$PROJECT_ROOT/target/dx/nostrblue/release/android/app/app/src/main/kotlin/dev/dioxus/main/" 2>/dev/null && echo "Pre-copied Android Kotlin sources" || echo "Kotlin source directory not yet created (will be handled post-build)"
+write_android_local_properties
 
 # 2. Build (generates Android project + compiles Rust + runs Gradle)
 echo ""
 echo "--- Step 2: dx build (ARM64) ---"
 cd "$PROJECT_ROOT"
 dx build --platform android --release --target aarch64-linux-android --no-default-features --features mobile
+write_android_local_properties
 
 # 2b. Clean non-Android files from generated project
 echo ""
@@ -134,6 +169,7 @@ echo ""
 echo "--- Step 2b.i: Normalize Android metadata ---"
 require_file "$GRADLE_APP" "Generated Android Gradle config not found"
 require_file "$GENERATED_MAIN_ACTIVITY" "Generated Android MainActivity not found"
+normalize_gradle_properties
 python3 - "$GRADLE_APP" "$APP_ID" "$CARGO_VERSION" "$ANDROID_VERSION_CODE" <<'PY'
 from pathlib import Path
 import re
@@ -154,6 +190,21 @@ for pattern, replacement in replacements:
     content, count = re.subn(pattern, replacement, content, count=1)
     if count != 1:
         raise SystemExit(f"failed to patch {pattern} in {path}")
+
+content = re.sub(
+    r'\n\s*kotlinOptions\s*\{\n\s*jvmTarget = "1\.8"\n\s*\}\n',
+    '\n    compileOptions {\n        sourceCompatibility = JavaVersion.VERSION_17\n        targetCompatibility = JavaVersion.VERSION_17\n    }\n',
+    content,
+    count=1,
+)
+
+plugins_block = 'plugins {\n    id("com.android.application")\n    id("org.jetbrains.kotlin.android")\n}\n'
+compiler_options_block = '\nkotlin {\n    compilerOptions {\n        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17\n    }\n}\n'
+if "compilerOptions" not in content:
+    if plugins_block not in content:
+        raise SystemExit(f"failed to find plugins block in {path}")
+    content = content.replace(plugins_block, plugins_block + compiler_options_block, 1)
+
 path.write_text(content)
 PY
 python3 - "$GENERATED_MAIN_ACTIVITY" "$APP_ID" <<'PY'
