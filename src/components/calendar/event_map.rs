@@ -264,8 +264,11 @@ pub fn EventMap(props: EventMapProps) -> Element {
         let mut hasher = DefaultHasher::new();
         for e in events.iter() {
             e.coordinate().hash(&mut hasher);
+            e.naddr().hash(&mut hasher);
             e.title().hash(&mut hasher);
             e.start_timestamp().hash(&mut hasher);
+            e.is_all_day().hash(&mut hasher);
+            e.is_livestream().hash(&mut hasher);
             e.location().hash(&mut hasher);
             if let Some(geohash) = e.geohash() {
                 geohash.hash(&mut hasher);
@@ -354,6 +357,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
                     geocode_gen.with_mut(|g| *g = g.wrapping_add(1));
                     processed_event_ids.set(key);
                     geocoded_events.set(Vec::new());
+                    loading_geo.set(false);
                     return;
                 }
                 // If a geocode lookup is already running and key changed, invalidate it

@@ -90,7 +90,6 @@ pub fn ZapDistribution(
     });
     let deduped_splits_for_effect = deduped_splits.clone();
     use_effect(move || {
-        let _ = &zap_splits;
         let suppressed_pubkeys = timed_out_pubkeys.read().clone();
         let new_defaults = deduped_splits_for_effect
             .iter()

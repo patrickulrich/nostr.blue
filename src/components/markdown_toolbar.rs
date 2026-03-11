@@ -4,6 +4,8 @@
 //! Uses dioxus-primitives Toolbar for accessibility (keyboard navigation, roving focus).
 use dioxus::prelude::*;
 use dioxus_primitives::toolbar::{Toolbar, ToolbarButton, ToolbarSeparator};
+#[cfg(feature = "web")]
+use crate::utils::text::utf16_to_utf8_index;
 /// Type of markdown formatting to apply
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MarkdownFormat {
@@ -597,20 +599,6 @@ pub fn get_textarea_cursor(textarea_id: &str, content: &str) -> Option<(usize, u
 #[cfg(not(feature = "web"))]
 pub fn get_textarea_cursor(_textarea_id: &str, _content: &str) -> Option<(usize, usize)> {
     None
-}
-/// Convert UTF-16 code unit index (from DOM) to UTF-8 byte index (for Rust string slicing)
-#[cfg(feature = "web")]
-fn utf16_to_utf8_index(text: &str, utf16_index: usize) -> usize {
-    let mut utf16_count = 0;
-    let mut utf8_byte_index = 0;
-    for ch in text.chars() {
-        if utf16_count >= utf16_index {
-            break;
-        }
-        utf16_count += ch.len_utf16();
-        utf8_byte_index += ch.len_utf8();
-    }
-    utf8_byte_index.min(text.len())
 }
 /// Convert UTF-8 byte index (from Rust string) to UTF-16 code unit index (for DOM)
 #[cfg(feature = "web")]

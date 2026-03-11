@@ -675,6 +675,7 @@ class MainActivity : WryActivity() {
                 pendingPubkey = null
                 pendingPackage = null
                 intentError = null
+                intentInFlight = false
             }
             Log.d(TAG, "Cleared pending Intent state")
         }

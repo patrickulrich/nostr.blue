@@ -636,6 +636,10 @@ pub fn PersistentMusicPlayer() -> Element {
         }
         #[cfg(feature = "web")]
         {
+            if !*native_source_bound.read() {
+                log::warn!("Audio playback error before web source binding completed");
+                return;
+            }
             log::warn!("Audio playback error, attempting fallback...");
             music_player::set_buffering(false);
             if !music_player::try_next_stream() {

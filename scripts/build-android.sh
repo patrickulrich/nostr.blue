@@ -77,7 +77,19 @@ ANDROID_HOME="${ANDROID_HOME:-${HOME}/Android/Sdk}"
 if [ -z "$ANDROID_NDK_HOME" ]; then
     if [ -d "$ANDROID_HOME/ndk" ]; then
         # Use find to robustly handle directories with special characters
-        NDK_VERSION=$(find "$ANDROID_HOME/ndk" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | sort -V | tail -n1)
+        NDK_VERSION=$(
+            find "$ANDROID_HOME/ndk" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null \
+                | (
+                    sort -V 2>/dev/null || python3 -c '
+import sys
+versions = [line.strip() for line in sys.stdin if line.strip()]
+def key(v):
+    return tuple(int(part) if part.isdigit() else part for part in v.replace("-", ".").split("."))
+if versions:
+    print(max(versions, key=key))
+'
+                ) | tail -n1
+        )
         if [ -n "$NDK_VERSION" ]; then
             ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION"
         else

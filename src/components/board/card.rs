@@ -189,7 +189,7 @@ pub fn PinBoardCardMosaic(
                             return;
                         }
                         reaction_count.set(count);
-                        has_reacted.set(if has_signer { reacted } else { false });
+                        has_reacted.set(reacted);
                         reaction_bootstrapped.set(true);
                         reaction_error.set(None);
                         reaction_loading.set(false);
@@ -281,7 +281,6 @@ pub fn PinBoardCardMosaic(
                             reaction_request_gen.set(next_gen);
                             let current_gen = next_gen;
                             let a_tag = board_for_react.a_tag.clone();
-                            let has_signer = *HAS_SIGNER.read();
                             reaction_loading.set(true);
                             reaction_error.set(None);
                             spawn(async move {
@@ -291,7 +290,7 @@ pub fn PinBoardCardMosaic(
                                             return;
                                         }
                                         reaction_count.set(count);
-                                        has_reacted.set(if has_signer { reacted } else { false });
+                                        has_reacted.set(reacted);
                                         reaction_bootstrapped.set(true);
                                         reaction_error.set(None);
                                         reaction_loading.set(false);

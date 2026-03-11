@@ -14,7 +14,9 @@ pub(crate) fn http_client() -> Result<&'static reqwest::Client, &'static reqwest
         let builder =
             reqwest::Client::builder().user_agent("Mozilla/5.0 (compatible; NostrBlueBot/1.0)");
         #[cfg(not(target_arch = "wasm32"))]
-        let builder = builder.timeout(std::time::Duration::from_secs(15));
+        let builder = builder
+            .timeout(std::time::Duration::from_secs(15))
+            .redirect(reqwest::redirect::Policy::none());
         builder.build()
     }) {
         Ok(client) => Ok(client),

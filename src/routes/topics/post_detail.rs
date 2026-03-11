@@ -1,6 +1,6 @@
 //! Topic Post Detail Page
 //! Full post + threaded replies
-use crate::components::{ThreadView, TopicPostCard, TopicPostComposer, TopicSidebar};
+use crate::components::{ThreadView, TopicPostCard, TopicPostComposer};
 use crate::stores::auth_store;
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::profiles::prefetch_profiles;
@@ -73,58 +73,44 @@ pub fn TopicPostDetail(topic: String, post_id: String) -> Element {
         }
     });
 
-    let topic_val = topic_sig.read().clone();
-
     rsx! {
         div {
-            class: "flex gap-6 max-w-6xl mx-auto px-4 py-4",
-            // Sidebar
-            div {
-                class: "hidden lg:block w-64 shrink-0",
-                TopicSidebar { current_topic: Some(topic_val.clone()) }
-            }
-            // Main
-            div {
-                class: "flex-1 min-w-0",
-                if *loading.read() {
-                    div {
-                        class: "flex justify-center py-12",
-                        span { class: "inline-block w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" }
+            class: "w-full max-w-6xl mx-auto px-4 py-4",
+            if *loading.read() {
+                div {
+                    class: "flex justify-center py-12",
+                    span { class: "inline-block w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" }
+                }
+            } else if let Some(main_post) = &*post.read() {
+                TopicPostCard {
+                    post: main_post.clone(),
+                    vote_counts: vote_counts.read().get(&main_post.id).cloned(),
+                    show_topic_badge: true,
+                }
+                if has_signer {
+                    div { class: "mt-4" }
+                    TopicPostComposer {
+                        reply_to: Some(main_post.clone()),
+                        on_success: move |_: String| {
+                            // TODO: refresh replies
+                        },
                     }
-                } else if let Some(main_post) = &*post.read() {
-                    // Main post
-                    TopicPostCard {
-                        post: main_post.clone(),
-                        vote_counts: vote_counts.read().get(&main_post.id).cloned(),
-                        show_topic_badge: true,
+                }
+                if !replies.read().is_empty() {
+                    div { class: "mt-4" }
+                    h3 {
+                        class: "text-lg font-semibold text-foreground mb-2",
+                        "Replies"
                     }
-                    // Reply composer
-                    if has_signer {
-                        div { class: "mt-4" }
-                        TopicPostComposer {
-                            reply_to: Some(main_post.clone()),
-                            on_success: move |_: String| {
-                                // TODO: refresh replies
-                            },
-                        }
+                    ThreadView {
+                        thread: replies.read().clone(),
+                        vote_counts: Rc::new(vote_counts.read().clone()),
                     }
-                    // Replies
-                    if !replies.read().is_empty() {
-                        div { class: "mt-4" }
-                        h3 {
-                            class: "text-lg font-semibold text-foreground mb-2",
-                            "Replies"
-                        }
-                        ThreadView {
-                            thread: replies.read().clone(),
-                            vote_counts: Rc::new(vote_counts.read().clone()),
-                        }
-                    }
-                } else {
-                    div {
-                        class: "text-center py-12 text-muted-foreground",
-                        "Post not found."
-                    }
+                }
+            } else {
+                div {
+                    class: "text-center py-12 text-muted-foreground",
+                    "Post not found."
                 }
             }
         }

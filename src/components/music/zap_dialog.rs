@@ -674,7 +674,13 @@ async fn generate_nostr_zap_invoice(
     } else {
         Some(comment.to_string())
     };
-    let event_coordinate = track_coordinate.and_then(|coord| Coordinate::parse(coord).ok());
+    let event_coordinate = match track_coordinate {
+        Some(coord) => Some(
+            Coordinate::parse(coord)
+                .map_err(|e| format!("Invalid track coordinate '{}': {}", coord, e))?,
+        ),
+        None => None,
+    };
     let builder = lnurl::create_zap_request_unsigned(
         recipient_pubkey,
         relays,
@@ -782,10 +788,16 @@ async fn generate_v4v_invoice(
             let max = max_comment as usize;
             let char_count = full_comment.chars().count();
             if char_count <= max {
-                callback_url.push_str(&format!("&comment={}", urlencoding::encode(&full_comment)));
+                let encoded = urlencoding::encode(&full_comment).to_string();
+                if !encoded.is_empty() {
+                    callback_url.push_str(&format!("&comment={encoded}"));
+                }
             } else {
                 let truncated: String = full_comment.chars().take(max).collect();
-                callback_url.push_str(&format!("&comment={}", urlencoding::encode(&truncated)));
+                let encoded = urlencoding::encode(&truncated).to_string();
+                if !encoded.is_empty() {
+                    callback_url.push_str(&format!("&comment={encoded}"));
+                }
             }
         }
     }

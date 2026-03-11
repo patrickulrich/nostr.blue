@@ -1390,7 +1390,20 @@ fn Layout() -> Element {
                     }
                     Outlet::<Route> {}
                 }
-                if !is_wide_page && !is_settings_page {
+                if is_topics_page && !is_settings_page {
+                    aside { class: "w-[350px] shrink-0 hidden xl:block",
+                        div { class: "flex flex-col gap-4 sticky top-0 pt-4 pb-4 h-screen overflow-hidden px-4 z-0",
+                            div { class: "flex-1 overflow-y-auto scrollbar-hide",
+                                crate::components::TopicSidebar {
+                                    current_topic: match &current_route {
+                                        Route::TopicFeed { topic } | Route::TopicPostDetail { topic, .. } => Some(topic.clone()),
+                                        _ => None,
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else if !is_wide_page && !is_settings_page {
                     aside { class: "w-[350px] shrink-0 hidden xl:block",
                         div { class: "flex flex-col gap-4 sticky top-0 pt-4 pb-4 h-screen overflow-hidden px-4 z-0",
                             div { class: "shrink-0", crate::components::SearchInput {} }

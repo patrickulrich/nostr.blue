@@ -1,6 +1,6 @@
 //! Topics Home Page
 //! Tabs: "Your Feed" (subscribed topics) / "Recent" (all topics)
-use crate::components::{TopicPostCard, TopicSidebar};
+use crate::components::TopicPostCard;
 use crate::hooks::use_infinite_scroll;
 use crate::stores::auth_store;
 use crate::stores::profiles::prefetch_profiles;
@@ -105,85 +105,72 @@ pub fn TopicsHome() -> Element {
 
     rsx! {
         div {
-            class: "flex gap-6 max-w-6xl mx-auto px-4 py-4",
-            // Sidebar (desktop)
-            div {
-                class: "hidden lg:block w-64 shrink-0",
-                TopicSidebar {}
-            }
-            // Main content
-            div {
-                class: "flex-1 min-w-0",
-                // Header
-                h1 { class: "text-2xl font-bold text-foreground mb-4", "Topics" }
-                // Tabs
-                {
-                    let tab_val = active_tab.read().clone();
-                    let feed_class = if tab_val == "feed" {
-                        "px-4 py-2 text-sm font-medium transition border-b-2 border-primary text-primary"
-                    } else {
-                        "px-4 py-2 text-sm font-medium transition text-muted-foreground hover:text-foreground"
-                    };
-                    let recent_class = if tab_val == "recent" {
-                        "px-4 py-2 text-sm font-medium transition border-b-2 border-primary text-primary"
-                    } else {
-                        "px-4 py-2 text-sm font-medium transition text-muted-foreground hover:text-foreground"
-                    };
-                    rsx! {
-                        div {
-                            class: "flex gap-1 mb-4 border-b border-border",
-                            button {
-                                class: "{feed_class}",
-                                onclick: move |_| active_tab.set("feed".to_string()),
-                                "Your Feed"
-                            }
-                            button {
-                                class: "{recent_class}",
-                                onclick: move |_| active_tab.set("recent".to_string()),
-                                "Recent"
-                            }
-                        }
-                    }
-                }
-                // Posts
-                if loading && posts.read().is_empty() {
-                    div {
-                        class: "flex justify-center py-12",
-                        span { class: "inline-block w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" }
-                    }
-                } else if posts.read().is_empty() {
-                    div {
-                        class: "text-center py-12 text-muted-foreground",
-                        if *active_tab.read() == "feed" {
-                            p { "No posts in your subscribed topics yet." }
-                            p { class: "text-sm mt-1", "Browse topics to subscribe and build your feed." }
-                        } else {
-                            p { "No topic posts found." }
-                        }
-                    }
+            class: "w-full max-w-6xl mx-auto px-4 py-4",
+            h1 { class: "text-2xl font-bold text-foreground mb-4", "Topics" }
+            {
+                let tab_val = active_tab.read().clone();
+                let feed_class = if tab_val == "feed" {
+                    "px-4 py-2 text-sm font-medium transition border-b-2 border-primary text-primary"
                 } else {
+                    "px-4 py-2 text-sm font-medium transition text-muted-foreground hover:text-foreground"
+                };
+                let recent_class = if tab_val == "recent" {
+                    "px-4 py-2 text-sm font-medium transition border-b-2 border-primary text-primary"
+                } else {
+                    "px-4 py-2 text-sm font-medium transition text-muted-foreground hover:text-foreground"
+                };
+                rsx! {
                     div {
-                        class: "flex flex-col gap-2",
-                        for post in posts.read().iter() {
-                            TopicPostCard {
-                                key: "{post.id}",
-                                post: post.clone(),
-                                vote_counts: vote_counts.read().get(&post.id).cloned(),
-                                show_topic_badge: true,
-                            }
+                        class: "flex gap-1 mb-4 border-b border-border",
+                        button {
+                            class: "{feed_class}",
+                            onclick: move |_| active_tab.set("feed".to_string()),
+                            "Your Feed"
+                        }
+                        button {
+                            class: "{recent_class}",
+                            onclick: move |_| active_tab.set("recent".to_string()),
+                            "Recent"
                         }
                     }
                 }
-                // Infinite scroll sentinel
-                if *has_more.read() {
-                    div {
-                        id: "{sentinel_id}",
-                        class: "p-8 flex justify-center",
-                        if *pagination_loading.read() {
-                            span { class: "flex items-center gap-2 text-muted-foreground",
-                                span { class: "inline-block w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" }
-                                "Loading more..."
-                            }
+            }
+            if loading && posts.read().is_empty() {
+                div {
+                    class: "flex justify-center py-12",
+                    span { class: "inline-block w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" }
+                }
+            } else if posts.read().is_empty() {
+                div {
+                    class: "text-center py-12 text-muted-foreground",
+                    if *active_tab.read() == "feed" {
+                        p { "No posts in your subscribed topics yet." }
+                        p { class: "text-sm mt-1", "Browse topics to subscribe and build your feed." }
+                    } else {
+                        p { "No topic posts found." }
+                    }
+                }
+            } else {
+                div {
+                    class: "flex flex-col gap-2",
+                    for post in posts.read().iter() {
+                        TopicPostCard {
+                            key: "{post.id}",
+                            post: post.clone(),
+                            vote_counts: vote_counts.read().get(&post.id).cloned(),
+                            show_topic_badge: true,
+                        }
+                    }
+                }
+            }
+            if *has_more.read() {
+                div {
+                    id: "{sentinel_id}",
+                    class: "p-8 flex justify-center",
+                    if *pagination_loading.read() {
+                        span { class: "flex items-center gap-2 text-muted-foreground",
+                            span { class: "inline-block w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" }
+                            "Loading more..."
                         }
                     }
                 }

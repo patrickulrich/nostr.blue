@@ -6,6 +6,7 @@ use crate::components::{EmojiPicker, GifPicker, MediaUploader, PollCreatorModal}
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::{dms, nostr_client};
 use crate::utils::clipboard::copy_to_clipboard;
+use crate::utils::text::utf16_to_utf8_index;
 use dioxus::prelude::*;
 use nostr_sdk::{EventBuilder, PublicKey};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -115,9 +116,11 @@ pub fn ContentShareModal(
                 if let Some(document) = window.document() {
                     if let Some(element) = document.get_element_by_id(textarea_id) {
                         if let Some(textarea) = element.dyn_ref::<web_sys::HtmlTextAreaElement>() {
-                            return Some(
-                                textarea.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize,
-                            );
+                            return textarea
+                                .selection_start()
+                                .ok()
+                                .flatten()
+                                .map(|n| n as usize);
                         }
                     }
                 }
@@ -125,18 +128,6 @@ pub fn ContentShareModal(
         }
         let _ = current_text;
         None
-    }
-    fn utf16_to_utf8_index(text: &str, utf16_index: usize) -> usize {
-        let mut utf8_index = 0;
-        let mut utf16_count = 0;
-        for c in text.chars() {
-            if utf16_count >= utf16_index {
-                break;
-            }
-            utf16_count += c.len_utf16();
-            utf8_index += c.len_utf8();
-        }
-        utf8_index.min(text.len())
     }
     let mut insert_with_spacing = {
         let mut nostr_text = nostr_text;
@@ -190,9 +181,15 @@ pub fn ContentShareModal(
         insert_with_spacing(url);
     };
     let handle_emoji_selected = move |emoji: String| {
+        if *is_publishing.read() {
+            return;
+        }
         insert_at_cursor(emoji);
     };
     let handle_gif_selected = move |gif_url: String| {
+        if *is_publishing.read() {
+            return;
+        }
         insert_with_spacing(gif_url);
     };
     let handle_poll_created = move |nevent_ref: String| {
@@ -361,6 +358,7 @@ pub fn ContentShareModal(
                             "text-muted-foreground hover:text-foreground transition"
                         },
                         disabled: *is_publishing.read(),
+                        aria_label: "Close share modal",
                         onclick: move |_| {
                             if !*is_publishing.read() {
                                 on_close.call(());
@@ -574,13 +572,15 @@ pub fn ContentShareModal(
                                         disabled: *is_publishing.read(),
                                         CameraIcon { class: "w-5 h-5" }
                                     }
-                                    EmojiPicker {
-                                        on_emoji_selected: handle_emoji_selected,
-                                        icon_only: true,
-                                    }
-                                    GifPicker {
-                                        on_gif_selected: handle_gif_selected,
-                                        icon_only: true,
+                                    if !*is_publishing.read() {
+                                        EmojiPicker {
+                                            on_emoji_selected: handle_emoji_selected,
+                                            icon_only: true,
+                                        }
+                                        GifPicker {
+                                            on_gif_selected: handle_gif_selected,
+                                            icon_only: true,
+                                        }
                                     }
                                     button {
                                         class: "p-2 rounded-full hover:bg-accent transition",

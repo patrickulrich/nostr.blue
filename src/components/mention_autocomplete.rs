@@ -1,6 +1,7 @@
 use crate::services::profile_search::{
     get_contact_pubkeys, search_cached_profiles, search_profiles, ProfileSearchResult,
 };
+use crate::utils::text::utf16_to_utf8_index;
 use crate::utils::is_valid_http_url;
 use dioxus::prelude::Event as DioxusEvent;
 use dioxus::prelude::*;
@@ -429,19 +430,6 @@ fn insert_mention(
             }
         }
     });
-}
-/// Convert UTF-16 code unit index (from DOM) to UTF-8 byte index (for Rust string slicing)
-fn utf16_to_utf8_index(text: &str, utf16_index: usize) -> usize {
-    let mut utf16_count = 0;
-    let mut utf8_byte_index = 0;
-    for ch in text.chars() {
-        if utf16_count >= utf16_index {
-            break;
-        }
-        utf16_count += ch.len_utf16();
-        utf8_byte_index += ch.len_utf8();
-    }
-    utf8_byte_index.min(text.len())
 }
 /// Convert UTF-8 byte index (from Rust string) to UTF-16 code unit index (for DOM)
 #[allow(dead_code)]

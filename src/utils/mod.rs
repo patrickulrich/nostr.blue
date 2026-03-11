@@ -54,6 +54,7 @@ pub mod profile_prefetch;
 pub mod repost;
 pub mod time;
 pub mod timed_serializer;
+pub mod text;
 pub mod url_metadata;
 pub mod validation;
 pub mod video_kinds;

@@ -79,6 +79,75 @@ fn parse_native_setup_result(val: serde_json::Value) -> String {
 }
 
 #[cfg(feature = "native")]
+#[derive(Clone, Copy)]
+struct NativeSetupState {
+    init_gen: Signal<u32>,
+    mounted: Signal<bool>,
+    error: Signal<Option<String>>,
+    loading: Signal<bool>,
+    playback_blocked: Signal<bool>,
+}
+
+#[cfg(feature = "native")]
+async fn run_native_setup(
+    video_id: &str,
+    stream_url: &str,
+    autoplay: bool,
+    gen: u32,
+    mut state: NativeSetupState,
+) {
+    if !*state.mounted.peek() || *state.init_gen.peek() != gen {
+        return;
+    }
+
+    if let Err(e) = ensure_hls_manager().await {
+        log::error!("[Live] {}", e);
+        if *state.init_gen.peek() == gen && *state.mounted.peek() {
+            state
+                .error
+                .set(Some(format!("Failed to load HLS support: {}", e)));
+            state.loading.set(false);
+        }
+        return;
+    }
+
+    if !*state.mounted.peek() || *state.init_gen.peek() != gen {
+        return;
+    }
+
+    let setup_script = build_native_setup_script(video_id, stream_url, autoplay);
+    match document::eval(&setup_script).await {
+        Ok(val) => {
+            if !*state.mounted.peek() || *state.init_gen.peek() != gen {
+                return;
+            }
+            let result = parse_native_setup_result(val);
+            if let Some(err_msg) = result.strip_prefix("error:") {
+                state.error.set(Some(err_msg.to_string()));
+                state.playback_blocked.set(false);
+            } else if result == "cancelled" {
+                state.error.set(Some("Stream setup was cancelled".to_string()));
+                state.playback_blocked.set(false);
+            } else if result == "blocked" {
+                state.error.set(None);
+                state.playback_blocked.set(true);
+            } else {
+                state.error.set(None);
+                state.playback_blocked.set(false);
+            }
+            state.loading.set(false);
+        }
+        Err(e) => {
+            if !*state.mounted.peek() || *state.init_gen.peek() != gen {
+                return;
+            }
+            state.error.set(Some(format!("Failed to setup stream: {:?}", e)));
+            state.loading.set(false);
+        }
+    }
+}
+
+#[cfg(feature = "native")]
 async fn ensure_hls_manager() -> Result<(), String> {
     let hls_js = include_str!("../../../public/hls-manager.js");
     let inject_script = format!(
@@ -362,56 +431,20 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                     let stream_url = _stream_url;
                     spawn(async move {
                         crate::platform::timer::sleep_ms(300).await;
-                        if !*mounted.peek() {
-                            return;
-                        }
-                        if *init_gen.peek() != gen {
-                            return;
-                        }
-
-                        if let Err(e) = ensure_hls_manager().await {
-                            log::error!("[Live] {}", e);
-                            if *init_gen.peek() == gen {
-                                error.set(Some(format!("Failed to load HLS support: {}", e)));
-                                loading.set(false);
-                            }
-                            return;
-                        }
-
-                        // Set up the video element via eval
-                        let setup_script =
-                            build_native_setup_script(&video_id, &stream_url, autoplay_prop);
-
-                        if *init_gen.peek() != gen {
-                            return;
-                        }
-                        match document::eval(&setup_script).await {
-                            Ok(val) => {
-                                if *init_gen.peek() == gen {
-                                    let result = parse_native_setup_result(val);
-                                    if let Some(err_msg) = result.strip_prefix("error:") {
-                                        error.set(Some(err_msg.to_string()));
-                                        playback_blocked.set(false);
-                                    } else if result == "cancelled" {
-                                        error.set(Some("Stream setup was cancelled".to_string()));
-                                        playback_blocked.set(false);
-                                    } else if result == "blocked" {
-                                        error.set(None);
-                                        playback_blocked.set(true);
-                                    } else {
-                                        error.set(None);
-                                        playback_blocked.set(false);
-                                    }
-                                    loading.set(false);
-                                }
-                            }
-                            Err(e) => {
-                                if *init_gen.peek() == gen {
-                                    error.set(Some(format!("Failed to setup stream: {:?}", e)));
-                                    loading.set(false);
-                                }
-                            }
-                        }
+                        run_native_setup(
+                            &video_id,
+                            &stream_url,
+                            autoplay_prop,
+                            gen,
+                            NativeSetupState {
+                                init_gen,
+                                mounted,
+                                error,
+                                loading,
+                                playback_blocked,
+                            },
+                        )
+                        .await;
                     });
                 }
             } else {
@@ -503,53 +536,20 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
             let init_gen = init_gen;
             spawn(async move {
                 crate::platform::timer::sleep_ms(100).await;
-
-                if *init_gen.peek() != gen {
-                    return;
-                }
-
-                if let Err(e) = ensure_hls_manager().await {
-                    log::error!("[Live] {}", e);
-                    if *init_gen.peek() == gen {
-                        error.set(Some(format!("Failed to load HLS support: {}", e)));
-                        loading.set(false);
-                    }
-                    return;
-                }
-
-                if *init_gen.peek() != gen {
-                    return;
-                }
-
-                let setup_script = build_native_setup_script(&video_id, &stream_url, autoplay);
-
-                match document::eval(&setup_script).await {
-                    Ok(val) => {
-                        if *init_gen.peek() == gen {
-                            let result = parse_native_setup_result(val);
-                            if let Some(err_msg) = result.strip_prefix("error:") {
-                                error.set(Some(err_msg.to_string()));
-                                playback_blocked.set(false);
-                            } else if result == "cancelled" {
-                                error.set(Some("Stream setup was cancelled".to_string()));
-                                playback_blocked.set(false);
-                            } else if result == "blocked" {
-                                error.set(None);
-                                playback_blocked.set(true);
-                            } else {
-                                error.set(None);
-                                playback_blocked.set(false);
-                            }
-                            loading.set(false);
-                        }
-                    }
-                    Err(e) => {
-                        if *init_gen.peek() == gen {
-                            error.set(Some(format!("Failed to setup stream: {:?}", e)));
-                            loading.set(false);
-                        }
-                    }
-                }
+                run_native_setup(
+                    &video_id,
+                    &stream_url,
+                    autoplay,
+                    gen,
+                    NativeSetupState {
+                        init_gen,
+                        mounted,
+                        error,
+                        loading,
+                        playback_blocked,
+                    },
+                )
+                .await;
             });
         }
     };
