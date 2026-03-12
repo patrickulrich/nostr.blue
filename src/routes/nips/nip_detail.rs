@@ -567,6 +567,7 @@ pub fn NipDetail(nip_id: String) -> Element {
                 if let Some(event) = custom_event.read().clone() {
                     ShareModal {
                         event,
+                        web_url: Some(format!("https://nostr.blue/nips/{}", nip_id_for_render)),
                         on_close: move |_| show_share_modal.set(false),
                     }
                 }

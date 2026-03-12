@@ -126,7 +126,6 @@ pub fn ContentShareModal(
                 }
             }
         }
-        let _ = current_text;
         None
     }
     let mut insert_with_spacing = {
@@ -258,9 +257,7 @@ pub fn ContentShareModal(
                     nostr_text.set(String::new());
                     share_mode.set(ShareMode::Main);
                     is_publishing.set(false);
-                    if !*is_publishing.peek() {
-                        on_close.call(());
-                    }
+                    on_close.call(());
                 }
                 Err(e) => {
                     log::error!("Failed to share to Nostr: {}", e);
@@ -309,9 +306,7 @@ pub fn ContentShareModal(
                         dm_recipient.set(String::new());
                         share_mode.set(ShareMode::Main);
                         is_publishing.set(false);
-                        if !*is_publishing.peek() {
-                            on_close.call(());
-                        }
+                        on_close.call(());
                     }
                     Err(e) => {
                         log::error!("Failed to send DM: {}", e);

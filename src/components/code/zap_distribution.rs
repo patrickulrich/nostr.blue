@@ -90,10 +90,8 @@ pub fn ZapDistribution(
     });
     let deduped_splits_for_effect = deduped_splits.clone();
     use_effect(move || {
-        let suppressed_pubkeys = timed_out_pubkeys.read().clone();
         let new_defaults = deduped_splits_for_effect
             .iter()
-            .filter(|(pk, _)| !suppressed_pubkeys.contains(pk))
             .map(|(pk, _)| pk.clone())
             .collect::<Vec<String>>();
         let previous_defaults = last_auto_synced_defaults.peek().clone();
@@ -171,12 +169,7 @@ pub fn ZapDistribution(
             return;
         }
         let amount = *total_amount.read();
-        let pubkeys = selected_pubkeys
-            .read()
-            .iter()
-            .filter(|pk| !timed_out_pubkeys.read().contains(*pk))
-            .cloned()
-            .collect::<Vec<_>>();
+        let pubkeys = selected_pubkeys.read().clone();
         let allocations = compute_allocations(&pubkeys, amount);
         let current = recipients.peek().clone();
         recipients.set(
@@ -207,14 +200,15 @@ pub fn ZapDistribution(
             return;
         }
         // Resolve lud16 from profile cache at send time
-            let recips = recipients.read().clone();
-            let sendable: Vec<(ZapRecipient, String)> = recips
-                .into_iter()
-                .filter(|r| {
-                    r.amount > 0
+        let recips = recipients.read().clone();
+        let timed_out = timed_out_pubkeys.peek().clone();
+        let sendable: Vec<(ZapRecipient, String)> = recips
+            .into_iter()
+            .filter(|r| {
+                r.amount > 0
                     && r.status != PaymentStatus::Success
                     && !matches!(r.status, PaymentStatus::Timeout(_))
-                    && !timed_out_pubkeys.peek().contains(&r.pubkey)
+                    && !timed_out.contains(&r.pubkey)
             })
             .filter_map(|r| {
                 let lud16 = PROFILE_CACHE

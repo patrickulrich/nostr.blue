@@ -160,10 +160,9 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
     rsx! {
         div { class: "min-h-screen",
             if let Some(r) = repo.read().as_ref() {
-                // TODO(#218): add "projects" tab to RepoTabNav; active_tab left empty until tab exists
                 RepoTabNav {
                     naddr: naddr.clone(),
-                    active_tab: "".to_string(),
+                    active_tab: "projects".to_string(),
                     issue_count: Some(r.issue_count),
                     pr_count: Some(r.pr_count),
                 }

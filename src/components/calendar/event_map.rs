@@ -249,6 +249,8 @@ pub fn EventMap(props: EventMapProps) -> Element {
     let mut geocoded_events = use_signal(Vec::<GeocodedEvent>::new);
     #[allow(unused_mut)]
     let mut loading_geo = use_signal(|| false);
+    #[allow(unused_mut)]
+    let mut geocode_error_message = use_signal(|| None::<String>);
     let mut processed_event_ids = use_signal(String::new);
     let mut geocode_cancelled = use_signal(|| false);
     let mut unmounted = use_signal(|| false);
@@ -357,6 +359,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
                     geocode_gen.with_mut(|g| *g = g.wrapping_add(1));
                     processed_event_ids.set(key);
                     geocoded_events.set(Vec::new());
+                    geocode_error_message.set(None);
                     loading_geo.set(false);
                     return;
                 }
@@ -373,10 +376,13 @@ pub fn EventMap(props: EventMapProps) -> Element {
                 geocode_gen.with_mut(|g| *g = g.wrapping_add(1));
                 let this_gen = *geocode_gen.peek();
                 loading_geo.set(true);
+                geocode_error_message.set(None);
                 let key_to_store = key.clone();
                 let events_to_process = events_for_geocode.clone();
                 spawn(async move {
                     let mut results = Vec::new();
+                    let mut geocode_error_count = 0usize;
+                    let mut last_geocode_error = None::<String>;
                     const BATCH_SIZE: usize = 5;
                     const BATCH_DELAY_MS: u32 = 200;
                     for (idx, event) in events_to_process.iter().enumerate() {
@@ -435,6 +441,9 @@ pub fn EventMap(props: EventMapProps) -> Element {
                                 }
                                 Err(e) => {
                                     log::warn!("Geocoding failed for '{}': {}", location_str, e);
+                                    geocode_error_count = geocode_error_count.saturating_add(1);
+                                    last_geocode_error =
+                                        Some(format!("{} ({})", location_str, e));
                                 }
                             }
                         }
@@ -452,6 +461,22 @@ pub fn EventMap(props: EventMapProps) -> Element {
                         return;
                     }
                     geocoded_events.set(results);
+                    geocode_error_message.set(if geocode_error_count == 0 {
+                        None
+                    } else if let Some(last_error) = last_geocode_error {
+                        Some(format!(
+                            "We couldn't geocode {} event location{} while building the map. Last error: {}",
+                            geocode_error_count,
+                            if geocode_error_count == 1 { "" } else { "s" },
+                            last_error
+                        ))
+                    } else {
+                        Some(format!(
+                            "We couldn't geocode {} event location{} while building the map.",
+                            geocode_error_count,
+                            if geocode_error_count == 1 { "" } else { "s" }
+                        ))
+                    });
                     processed_event_ids.set(key_to_store);
                     loading_geo.set(false);
                 });
@@ -543,30 +568,57 @@ pub fn EventMap(props: EventMapProps) -> Element {
                     }
                 }
             }
-            if *map_initialized.read() && !*loading_geo.read() && geocoded_events.read().is_empty()
+            if *map_initialized.read()
+                && !*loading_geo.read()
                 && events_count > 0
+                && (geocode_error_message.read().is_some() || geocoded_events.read().is_empty())
             {
                 div { class: "absolute inset-0 flex items-center justify-center bg-background/80",
                     div { class: "text-center p-4",
-                        svg {
-                            class: "w-12 h-12 mx-auto text-muted-foreground mb-2",
-                            xmlns: "http://www.w3.org/2000/svg",
-                            fill: "none",
-                            view_box: "0 0 24 24",
-                            stroke: "currentColor",
-                            stroke_width: "1.5",
-                            path {
-                                stroke_linecap: "round",
-                                stroke_linejoin: "round",
-                                d: "M15 10.5a3 3 0 11-6 0 3 3 0 016 0z",
+                        if let Some(message) = geocode_error_message.read().as_ref() {
+                            if geocoded_events.read().is_empty() {
+                                svg {
+                                    class: "w-12 h-12 mx-auto text-amber-500 mb-2",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    fill: "none",
+                                    view_box: "0 0 24 24",
+                                    stroke: "currentColor",
+                                    stroke_width: "1.5",
+                                    path {
+                                        stroke_linecap: "round",
+                                        stroke_linejoin: "round",
+                                        d: "M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z",
+                                    }
+                                }
+                                p { class: "text-sm font-medium text-foreground", "Map data is temporarily incomplete" }
+                                p { class: "mt-1 text-sm text-muted-foreground", "{message}" }
+                            } else {
+                                div { class: "rounded-md border border-amber-500/30 bg-background/95 px-3 py-2 shadow-sm",
+                                    p { class: "text-xs font-medium text-amber-600 dark:text-amber-400", "Some event locations could not be mapped" }
+                                    p { class: "mt-1 max-w-sm text-xs text-muted-foreground", "{message}" }
+                                }
                             }
-                            path {
-                                stroke_linecap: "round",
-                                stroke_linejoin: "round",
-                                d: "M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z",
+                        } else if geocoded_events.read().is_empty() {
+                            svg {
+                                class: "w-12 h-12 mx-auto text-muted-foreground mb-2",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                fill: "none",
+                                view_box: "0 0 24 24",
+                                stroke: "currentColor",
+                                stroke_width: "1.5",
+                                path {
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    d: "M15 10.5a3 3 0 11-6 0 3 3 0 016 0z",
+                                }
+                                path {
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    d: "M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z",
+                                }
                             }
+                            p { class: "text-muted-foreground", "No events with physical locations found" }
                         }
-                        p { class: "text-muted-foreground", "No events with physical locations found" }
                     }
                 }
             }
@@ -603,7 +655,7 @@ fn format_popup(event: &UnifiedEvent, location: &GeoLocation) -> String {
 /// Format time for popup
 #[cfg(feature = "web")]
 fn format_popup_time(event: &UnifiedEvent) -> String {
-    let ts = event.start_timestamp();
+    let ts = event.start_timestamp().clamp(0, 253_402_300_799);
     if ts == 0 {
         return "Date TBD".to_string();
     }

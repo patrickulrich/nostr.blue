@@ -25,6 +25,9 @@ enum ShareMode {
 pub fn ShareModal(
     /// The event being shared
     event: NostrEvent,
+    /// Optional canonical web URL override for route-specific pages
+    #[props(default)]
+    web_url: Option<String>,
     /// Handler to close the modal
     on_close: EventHandler<()>,
 ) -> Element {
@@ -157,7 +160,9 @@ pub fn ShareModal(
     use nostr_sdk::{Kind, ToBech32};
     let is_recipe = event.tags.hashtags().any(|tag| tag == "nostrcooking");
     let is_article = event.kind == Kind::LongFormTextNote && !is_recipe;
-    let content_url = if event.kind.is_addressable() {
+    let content_url = if let Some(url) = web_url.clone() {
+        url
+    } else if event.kind.is_addressable() {
         if let Some(coord) = event.coordinate() {
             match coord.to_bech32() {
                 Ok(naddr) => {

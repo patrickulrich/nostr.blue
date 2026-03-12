@@ -262,7 +262,7 @@ pub fn PinBoardCardMosaic(
             }
             div { class: "absolute inset-0 bg-gradient-to-t from-black/80 to-transparent
                         opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-[1] pointer-events-none" }
-            div { class: "absolute top-3 right-3 flex gap-2 z-[4]
+            div { class: "absolute top-3 right-3 flex flex-wrap gap-2 z-[4]
                         opacity-0 translate-x-2
                         group-hover:opacity-100 group-hover:translate-x-0
                         transition-all duration-200 delay-100",
@@ -414,7 +414,7 @@ pub fn PinBoardCardMosaic(
                 }
                 if let Some(error) = reaction_error.read().as_ref() {
                     div {
-                        class: "mt-2 max-w-[12rem] rounded-md bg-black/75 px-2 py-1 text-[11px] font-medium text-white shadow-md",
+                        class: "w-full max-w-[12rem] rounded-md bg-black/75 px-2 py-1 text-[11px] font-medium text-white shadow-md",
                         "{error}"
                     }
                 }

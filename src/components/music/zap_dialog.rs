@@ -558,8 +558,15 @@ async fn generate_wavlake_lnurl_invoice(
     callback_url.push_str(&format!("{}amount={}", separator, amount_millisats));
     if !comment.is_empty() {
         if let Some(max_comment) = params.comment_allowed {
-            if comment.len() <= max_comment as usize {
-                callback_url.push_str(&format!("&comment={}", urlencoding::encode(comment)));
+            let truncated_comment = comment
+                .chars()
+                .take(max_comment as usize)
+                .collect::<String>();
+            if !truncated_comment.is_empty() {
+                callback_url.push_str(&format!(
+                    "&comment={}",
+                    urlencoding::encode(&truncated_comment)
+                ));
             }
         }
     }
@@ -642,11 +649,12 @@ async fn generate_nostr_zap_invoice(
         amount_sats
     );
     let profile = profile.ok_or_else(|| "Artist profile not loaded yet".to_string())?;
-    let lud16 = profile
-        .lud16
-        .as_deref()
-        .ok_or_else(|| "This artist hasn't set up a Lightning address".to_string())?;
-    let (pay_info, amount_msats) = lnurl::prepare_zap(Some(lud16), None, amount_sats)
+    let lud16_opt = profile.lud16.as_deref();
+    let lud06_opt = profile.lud06.as_deref();
+    if lud16_opt.is_none() && lud06_opt.is_none() {
+        return Err("This artist hasn't set up a Lightning address".to_string());
+    }
+    let (pay_info, amount_msats) = lnurl::prepare_zap(lud16_opt, lud06_opt, amount_sats)
         .await
         .map_err(|e| format!("Failed to prepare zap: {}", e))?;
     log::info!(

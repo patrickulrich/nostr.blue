@@ -187,6 +187,13 @@ mod tests {
         let candidate = review("same-event", 200);
         assert!(should_replace_review(&existing, &candidate));
     }
+
+    #[test]
+    fn same_event_id_older_candidate_still_replaces() {
+        let existing = review("same-event", 200);
+        let candidate = review("same-event", 100);
+        assert!(should_replace_review(&existing, &candidate));
+    }
 }
 
 /// PR Review Section component

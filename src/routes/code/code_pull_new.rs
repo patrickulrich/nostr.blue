@@ -56,6 +56,68 @@ fn is_valid_git_refname(name: &str) -> bool {
     true
 }
 
+#[cfg(test)]
+mod tests {
+    use super::is_valid_git_refname;
+
+    #[test]
+    fn is_valid_git_refname_accepts_valid_names() {
+        let cases = [
+            "feature/foo",
+            "main",
+            "v1.0.0",
+            "bugfix/login-flow",
+            "release/2026.03",
+            "topic_123",
+        ];
+
+        for case in cases {
+            assert!(
+                is_valid_git_refname(case),
+                "expected '{case}' to be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn is_valid_git_refname_rejects_invalid_names() {
+        let cases = [
+            "",
+            "@",
+            "HEAD",
+            "has space",
+            "foo..bar",
+            "foo~bar",
+            "foo^bar",
+            "foo:bar",
+            "bad\u{0001}char",
+            "bad\u{007f}char",
+            "branch.lock",
+            "-branch",
+            ".hidden",
+            "/start",
+            "trailing/",
+            "trailing.",
+            "refs@{1}",
+            "double//slash",
+            "wild?card",
+            "glob*name",
+            r"back\slash",
+            "bracket[name",
+            "foo/.hidden",
+            "foo/bar.lock",
+            "topic.lock/x",
+        ];
+
+        for case in cases {
+            assert!(
+                !is_valid_git_refname(case),
+                "expected '{case}' to be rejected"
+            );
+        }
+    }
+}
+
 /// New pull request page component
 #[component]
 pub fn CodePullNew(naddr: String) -> Element {

@@ -126,10 +126,24 @@ pub struct MarkdownToolbarProps {
     /// Whether the toolbar is disabled
     #[props(default = false)]
     pub disabled: bool,
+    /// Whether selection/caret APIs are available for textarea formatting actions
+    #[props(default = textarea_selection_supported())]
+    pub selection_supported: bool,
     /// Additional CSS classes for the toolbar container
     #[props(default)]
     pub class: String,
 }
+
+#[cfg(feature = "web")]
+pub const fn textarea_selection_supported() -> bool {
+    true
+}
+
+#[cfg(not(feature = "web"))]
+pub const fn textarea_selection_supported() -> bool {
+    false
+}
+
 #[component]
 pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
     let mut disabled = use_signal(|| props.disabled);
@@ -137,6 +151,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
         disabled.set(props.disabled);
     });
     let on_format = props.on_format;
+    let selection_actions_disabled = props.disabled || !props.selection_supported;
     rsx! {
         Toolbar {
             aria_label: "Markdown formatting",
@@ -145,6 +160,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 0usize,
                 on_click: move |_| on_format.call(MarkdownFormat::Bold),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Bold (Ctrl+B)",
                 svg {
@@ -160,6 +176,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 1usize,
                 on_click: move |_| on_format.call(MarkdownFormat::Italic),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Italic (Ctrl+I)",
                 svg {
@@ -191,6 +208,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 2usize,
                 on_click: move |_| on_format.call(MarkdownFormat::Strikethrough),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Strikethrough",
                 svg {
@@ -208,6 +226,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 3usize,
                 on_click: move |_| on_format.call(MarkdownFormat::Heading1),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Heading 1",
                 span { class: "font-bold text-sm", "H1" }
@@ -215,6 +234,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 4usize,
                 on_click: move |_| on_format.call(MarkdownFormat::Heading2),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Heading 2",
                 span { class: "font-bold text-sm", "H2" }
@@ -222,6 +242,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 5usize,
                 on_click: move |_| on_format.call(MarkdownFormat::Heading3),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Heading 3",
                 span { class: "font-bold text-sm", "H3" }
@@ -230,6 +251,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 6usize,
                 on_click: move |_| on_format.call(MarkdownFormat::BulletList),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Bullet list",
                 svg {
@@ -279,6 +301,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 7usize,
                 on_click: move |_| on_format.call(MarkdownFormat::NumberedList),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Numbered list",
                 svg {
@@ -331,6 +354,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 8usize,
                 on_click: move |_| on_format.call(MarkdownFormat::Quote),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Quote",
                 svg {
@@ -344,6 +368,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 9usize,
                 on_click: move |_| on_format.call(MarkdownFormat::InlineCode),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Inline code",
                 svg {
@@ -359,6 +384,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 10usize,
                 on_click: move |_| on_format.call(MarkdownFormat::CodeBlock),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Code block",
                 svg {
@@ -388,6 +414,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 11usize,
                 on_click: move |_| on_format.call(MarkdownFormat::Link),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Insert link",
                 svg {
@@ -407,6 +434,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
                         ToolbarButton {
                             index: 12usize,
                             on_click: move |_| on_upload.call(()),
+                            disabled: props.disabled,
                             class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                             title: "Upload image",
                             svg {
@@ -433,6 +461,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
                 ToolbarButton {
                     index: 12usize,
                     on_click: move |_| on_format.call(MarkdownFormat::Image),
+                    disabled: selection_actions_disabled,
                     class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                     title: "Insert image",
                     svg {
@@ -462,6 +491,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
                         ToolbarButton {
                             index: 13usize,
                             on_click: move |_| on_mention.call(()),
+                            disabled: props.disabled,
                             class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                             title: "Insert Nostr mention",
                             svg {
@@ -481,6 +511,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 14usize,
                 on_click: move |_| on_format.call(MarkdownFormat::HorizontalRule),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Horizontal rule",
                 svg {
