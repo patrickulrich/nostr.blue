@@ -1,5 +1,6 @@
 use crate::components::{EmojiPicker, GifPicker, MediaUploader, MentionAutocomplete};
 use crate::stores::nostr_client::{get_client, HAS_SIGNER};
+use crate::utils::custom_emoji::{build_custom_emoji_tags, EmojiSelection};
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
@@ -105,8 +106,8 @@ pub fn CommentComposer(
         cursor_position.set(pos + text.len());
     };
 
-    let handle_emoji_selected = move |emoji: String| {
-        insert_at_cursor(emoji);
+    let handle_emoji_selected = move |selection: EmojiSelection| {
+        insert_at_cursor(selection.insertion_text());
     };
 
     let handle_gif_selected = move |gif_url: String| {
@@ -176,7 +177,8 @@ pub fn CommentComposer(
                     (&target_event, None)
                 };
 
-                let builder = EventBuilder::comment(content_for_publish, comment_to, root);
+                let builder = EventBuilder::comment(content_for_publish.clone(), comment_to, root)
+                    .tags(build_custom_emoji_tags(&content_for_publish));
 
                 // Sign the event first to get the full event
                 match client.sign_event_builder(builder).await {

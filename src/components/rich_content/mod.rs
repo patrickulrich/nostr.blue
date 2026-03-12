@@ -25,9 +25,11 @@ use nostr_blue_renderers::{
 
 use crate::components::CashuTokenCard;
 use crate::routes::Route;
+use crate::utils::custom_emoji::render_custom_emoji_text;
 use crate::utils::content_parser::{parse_content, ContentToken};
 use dioxus::prelude::*;
 use nostr_sdk::Tag;
+use std::collections::HashMap;
 #[component]
 pub fn RichContent(
     content: String,
@@ -35,6 +37,7 @@ pub fn RichContent(
     #[props(default = false)] collapsible: bool,
 ) -> Element {
     let tokens = parse_content(&content, &tags);
+    let emoji_map = custom_emoji_map(&tags);
     let mut is_expanded = use_signal(|| false);
     let is_long_content = if collapsible {
         let char_count = content.chars().count();
@@ -92,12 +95,12 @@ pub fn RichContent(
                             TokenGroup::Inline(items) => rsx! {
                                 span { key: "inline-{items[0].0}",
                                     for (_idx , token) in items.iter() {
-                                        {render_token(token)}
+                                        {render_token(token, &emoji_map)}
                                     }
                                 }
                             },
                             TokenGroup::Block(idx, token) => rsx! {
-                                div { key: "{token_key(token, *idx)}", {render_token(token)} }
+                                div { key: "{token_key(token, *idx)}", {render_token(token, &emoji_map)} }
                             },
                         }
                     }
@@ -122,20 +125,29 @@ pub fn RichContent(
                 for group in groups.iter() {
                     match group {
                         TokenGroup::Inline(items) => rsx! {
-                            span { key: "inline-{items[0].0}",
-                                for (_idx , token) in items.iter() {
-                                    {render_token(token)}
+                                span { key: "inline-{items[0].0}",
+                                    for (_idx , token) in items.iter() {
+                                        {render_token(token, &emoji_map)}
+                                    }
                                 }
-                            }
-                        },
-                        TokenGroup::Block(idx, token) => rsx! {
-                            div { key: "{token_key(token, *idx)}", {render_token(token)} }
-                        },
+                            },
+                            TokenGroup::Block(idx, token) => rsx! {
+                                div { key: "{token_key(token, *idx)}", {render_token(token, &emoji_map)} }
+                            },
+                        }
                     }
-                }
             }
         }
     }
+}
+fn custom_emoji_map(tags: &[Tag]) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for tag in tags {
+        if let Some(nostr_sdk::TagStandard::Emoji { shortcode, url }) = tag.as_standardized() {
+            map.insert(shortcode.to_string(), url.to_string());
+        }
+    }
+    map
 }
 /// Simple hash function for generating stable keys (avoids external dependencies)
 fn hash_str(s: &str) -> u64 {
@@ -310,12 +322,10 @@ fn token_key(token: &ContentToken, idx: usize) -> String {
         }
     }
 }
-fn render_token(token: &ContentToken) -> Element {
+fn render_token(token: &ContentToken, emoji_map: &HashMap<String, String>) -> Element {
     match token {
         ContentToken::Text(text) => {
-            rsx! {
-                span { "{text}" }
-            }
+            rsx! { span { {render_custom_emoji_text(text, emoji_map, "inline-block h-6 w-6 align-text-bottom mx-0.5 object-contain")} } }
         }
         ContentToken::Link(url) => {
             let is_safe = url.starts_with("http://")

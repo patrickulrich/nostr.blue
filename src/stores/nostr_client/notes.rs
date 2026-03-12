@@ -4,6 +4,7 @@
 use super::fetching::get_client;
 use super::signals::HAS_SIGNER;
 use super::types::PublishResult;
+use crate::utils::custom_emoji::build_custom_emoji_tags;
 use crate::utils::mention_extractor::{create_mention_tags, extract_mentioned_pubkeys};
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
@@ -90,6 +91,8 @@ pub async fn publish_note_tracked(
     mention_tags.extend(nostr_tags);
     let quote_tags = extract_quote_tags(&content);
     mention_tags.extend(quote_tags);
+    let custom_emoji_tags = build_custom_emoji_tags(&content);
+    mention_tags.extend(custom_emoji_tags);
     let mut seen_pubkeys = std::collections::HashSet::new();
     mention_tags.retain(|tag| {
         if tag.kind() == nostr::TagKind::p() {

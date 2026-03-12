@@ -8,9 +8,15 @@
 
 use std::fmt;
 use std::pin::Pin;
+use std::time::{Duration, Instant};
 
 use nostr::signer::{NostrSigner, SignerBackend, SignerError};
 use nostr::{Event, PublicKey, UnsignedEvent};
+use nostr::secp256k1::schnorr::Signature;
+
+const SIGN_EVENT_REJECTED: &str = "NIP-55 signer rejected sign_event or not pre-approved";
+const APPROVAL_POLL_INTERVAL: Duration = Duration::from_millis(500);
+const APPROVAL_TIMEOUT: Duration = Duration::from_secs(45);
 
 /// Result of polling for a pending Intent result from the signer app.
 #[derive(Debug, Clone)]
@@ -23,6 +29,47 @@ pub enum IntentPollResult {
     None,
     /// The Intent failed or was rejected by the user.
     Error(String),
+}
+
+#[derive(Debug, Clone)]
+pub enum OperationIntentPollResult {
+    Ready {
+        result: Option<String>,
+        event: Option<String>,
+        package: Option<String>,
+        rejected: bool,
+    },
+    InFlight,
+    None,
+    Error(String),
+}
+
+enum ForegroundOperation<'a> {
+    SignEvent {
+        unsigned: UnsignedEvent,
+        event_json: String,
+        current_user: &'a str,
+    },
+    Nip04Encrypt {
+        content: &'a str,
+        pubkey_hex: &'a str,
+        current_user: &'a str,
+    },
+    Nip04Decrypt {
+        content: &'a str,
+        pubkey_hex: &'a str,
+        current_user: &'a str,
+    },
+    Nip44Encrypt {
+        content: &'a str,
+        pubkey_hex: &'a str,
+        current_user: &'a str,
+    },
+    Nip44Decrypt {
+        content: &'a str,
+        pubkey_hex: &'a str,
+        current_user: &'a str,
+    },
 }
 
 /// NIP-55 Android signer that delegates cryptographic operations
@@ -126,6 +173,48 @@ impl Nip55Signer {
         }
     }
 
+    /// Launch the get_public_key intent for a specific signer package so an
+    /// already-connected signer can refresh permissions in place.
+    pub fn launch_get_public_key_for_package(signer_package: &str) -> Result<bool, String> {
+        let result = call_static_string_with_arg("launchGetPublicKeyForPackage", signer_package)
+            .unwrap_or_else(|| "error:JNI call failed".to_string());
+
+        match result.as_str() {
+            "launched" => {
+                log::info!(
+                    "NIP-55: package-scoped get_public_key Intent launched for {}",
+                    signer_package
+                );
+                Ok(true)
+            }
+            "already_in_flight" => {
+                log::info!("NIP-55: Intent already in flight for {}", signer_package);
+                Ok(false)
+            }
+            "no_instance" => {
+                log::error!("NIP-55: no Activity instance available");
+                Err("No Activity instance available".to_string())
+            }
+            other if other.starts_with("error:") => {
+                let msg = other.strip_prefix("error:").unwrap_or(other);
+                log::error!(
+                    "NIP-55: launchGetPublicKeyForPackage error for {}: {}",
+                    signer_package,
+                    msg
+                );
+                Err(msg.to_string())
+            }
+            other => {
+                log::error!(
+                    "NIP-55: unexpected launchGetPublicKeyForPackage result for {}: {}",
+                    signer_package,
+                    other
+                );
+                Err(format!("Unexpected result: {}", other))
+            }
+        }
+    }
+
     /// Poll for the result of a previously launched get_public_key Intent.
     pub fn poll_intent_result() -> IntentPollResult {
         // Check if Intent is still in flight
@@ -172,9 +261,216 @@ impl Nip55Signer {
         log::debug!("NIP-55: cleared pending Intent state");
     }
 
+    pub fn poll_operation_result() -> OperationIntentPollResult {
+        let in_flight = call_static_bool("isIntentInFlight").unwrap_or(false);
+        if in_flight {
+            return OperationIntentPollResult::InFlight;
+        }
+
+        if let Some(err) = call_static_string("pollIntentError") {
+            log::warn!("NIP-55: operation Intent error: {}", err);
+            return OperationIntentPollResult::Error(err);
+        }
+
+        let result = call_static_string("pollOperationResult");
+        let event = call_static_string("pollOperationEvent");
+        let package = call_static_string("pollOperationPackage");
+        let rejected = call_static_string("pollOperationRejected")
+            .and_then(|value| value.parse::<bool>().ok());
+
+        if result.is_some() || event.is_some() || package.is_some() || rejected.is_some() {
+            return OperationIntentPollResult::Ready {
+                result,
+                event,
+                package,
+                rejected: rejected.unwrap_or(false),
+            };
+        }
+
+        OperationIntentPollResult::None
+    }
+
     /// Get the signer package name.
     pub fn signer_package(&self) -> &str {
         &self.signer_package
+    }
+
+    fn validate_signed_event(
+        unsigned: &UnsignedEvent,
+        signed_json: &str,
+        current_user: &str,
+    ) -> Result<Event, SignerError> {
+        let event: Event = serde_json::from_str(signed_json).map_err(SignerError::backend)?;
+
+        if event.pubkey.to_hex() != current_user {
+            return Err(SignerError::from("signer pubkey mismatch"));
+        }
+
+        if event.kind != unsigned.kind {
+            return Err(SignerError::from("signed event payload mismatch: kind"));
+        }
+        if event.tags != unsigned.tags {
+            return Err(SignerError::from("signed event payload mismatch: tags"));
+        }
+        if event.content != unsigned.content {
+            return Err(SignerError::from("signed event payload mismatch: content"));
+        }
+        if event.created_at != unsigned.created_at {
+            return Err(SignerError::from(
+                "signed event payload mismatch: created_at",
+            ));
+        }
+
+        Ok(event)
+    }
+
+    fn validate_signature_result(
+        unsigned: UnsignedEvent,
+        signature_hex: &str,
+    ) -> Result<Event, SignerError> {
+        let sig = signature_hex
+            .parse::<Signature>()
+            .map_err(SignerError::backend)?;
+        unsigned.add_signature(sig).map_err(SignerError::backend)
+    }
+
+    fn launch_foreground_operation<'a>(
+        signer_package: &str,
+        operation: &ForegroundOperation<'a>,
+    ) -> Result<bool, String> {
+        let result = match operation {
+            ForegroundOperation::SignEvent {
+                event_json,
+                current_user,
+                ..
+            } => call_static_string_with_args(
+                "launchSignEventIntent",
+                &[signer_package, event_json, current_user],
+            ),
+            ForegroundOperation::Nip04Encrypt {
+                content,
+                pubkey_hex,
+                current_user,
+            } => call_static_string_with_args(
+                "launchNip04EncryptIntent",
+                &[signer_package, content, pubkey_hex, current_user],
+            ),
+            ForegroundOperation::Nip04Decrypt {
+                content,
+                pubkey_hex,
+                current_user,
+            } => call_static_string_with_args(
+                "launchNip04DecryptIntent",
+                &[signer_package, content, pubkey_hex, current_user],
+            ),
+            ForegroundOperation::Nip44Encrypt {
+                content,
+                pubkey_hex,
+                current_user,
+            } => call_static_string_with_args(
+                "launchNip44EncryptIntent",
+                &[signer_package, content, pubkey_hex, current_user],
+            ),
+            ForegroundOperation::Nip44Decrypt {
+                content,
+                pubkey_hex,
+                current_user,
+            } => call_static_string_with_args(
+                "launchNip44DecryptIntent",
+                &[signer_package, content, pubkey_hex, current_user],
+            ),
+        }
+        .unwrap_or_else(|| "error:JNI call failed".to_string());
+
+        match result.as_str() {
+            "launched" => Ok(true),
+            "already_in_flight" => Ok(false),
+            "no_instance" => Err("No Activity instance available".to_string()),
+            other if other.starts_with("error:") => {
+                Err(other.strip_prefix("error:").unwrap_or(other).to_string())
+            }
+            other => Err(format!("Unexpected result: {}", other)),
+        }
+    }
+
+    async fn wait_for_foreground_operation<'a>(
+        &self,
+        operation: ForegroundOperation<'a>,
+    ) -> Result<String, SignerError> {
+        let start = Instant::now();
+
+        loop {
+            match Self::poll_operation_result() {
+                OperationIntentPollResult::Ready {
+                    result,
+                    event,
+                    package,
+                    rejected,
+                } => {
+                    Self::clear_pending_result();
+
+                    if let Some(package) = package.as_deref() {
+                        if package != self.signer_package {
+                            return Err(SignerError::from(format!(
+                                "NIP-55 signer operation returned unexpected package {}",
+                                package
+                            )));
+                        }
+                    }
+
+                    if rejected {
+                        return Err(SignerError::from(
+                            "NIP-55 signer request was rejected by the user",
+                        ));
+                    }
+
+                    return match operation {
+                        ForegroundOperation::SignEvent {
+                            unsigned,
+                            current_user,
+                            ..
+                        } => {
+                            if let Some(event_json) = event {
+                                let event =
+                                    Self::validate_signed_event(&unsigned, &event_json, current_user)?;
+                                serde_json::to_string(&event).map_err(SignerError::backend)
+                            } else if let Some(signature) = result {
+                                let event = Self::validate_signature_result(unsigned, &signature)?;
+                                serde_json::to_string(&event).map_err(SignerError::backend)
+                            } else {
+                                Err(SignerError::from(
+                                    "NIP-55 signer returned no sign_event result",
+                                ))
+                            }
+                        }
+                        ForegroundOperation::Nip04Encrypt { .. }
+                        | ForegroundOperation::Nip04Decrypt { .. }
+                        | ForegroundOperation::Nip44Encrypt { .. }
+                        | ForegroundOperation::Nip44Decrypt { .. } => result.ok_or_else(|| {
+                            SignerError::from(
+                                "NIP-55 signer returned no payload for the requested operation",
+                            )
+                        }),
+                    };
+                }
+                OperationIntentPollResult::InFlight | OperationIntentPollResult::None => {
+                    if start.elapsed() >= APPROVAL_TIMEOUT {
+                        Self::clear_pending_result();
+                        return Err(SignerError::from(
+                            "NIP-55 signer operation approval timed out",
+                        ));
+                    }
+                    tokio::time::sleep(APPROVAL_POLL_INTERVAL).await;
+                }
+                OperationIntentPollResult::Error(err) => {
+                    Self::clear_pending_result();
+                    return Err(SignerError::from(format!(
+                        "NIP-55 signer operation failed: {}",
+                        err
+                    )));
+                }
+            }
+        }
     }
 }
 
@@ -200,38 +496,37 @@ impl NostrSigner for Nip55Signer {
 
         Box::pin(async move {
             let event_json = serde_json::to_string(&unsigned).map_err(SignerError::backend)?;
+            let kind = unsigned.kind.as_u16();
 
-            let signed_json = call_content_resolver(
+            if let Some(signed_json) = call_content_resolver(
                 "signEventViaContentResolver",
                 &[&event_json, &current_user],
                 &package,
-            )
-            .ok_or_else(|| {
-                SignerError::from("NIP-55 signer rejected sign_event or not pre-approved")
+            ) {
+                return Self::validate_signed_event(&unsigned, &signed_json, &current_user);
+            }
+
+            log::info!(
+                "NIP-55: sign_event for kind {} was not pre-approved; requesting exact foreground approval",
+                kind
+            );
+
+            let operation = ForegroundOperation::SignEvent {
+                unsigned: unsigned.clone(),
+                event_json,
+                current_user: &current_user,
+            };
+
+            Self::launch_foreground_operation(&package, &operation).map_err(|e| {
+                SignerError::from(format!(
+                    "{} (kind {}): {}",
+                    SIGN_EVENT_REJECTED, kind, e
+                ))
             })?;
 
-            let event: Event = serde_json::from_str(&signed_json).map_err(SignerError::backend)?;
+            let signed_json = self.wait_for_foreground_operation(operation).await?;
 
-            if event.pubkey.to_hex() != current_user {
-                return Err(SignerError::from("signer pubkey mismatch"));
-            }
-
-            if event.kind != unsigned.kind {
-                return Err(SignerError::from("signed event payload mismatch: kind"));
-            }
-            if event.tags != unsigned.tags {
-                return Err(SignerError::from("signed event payload mismatch: tags"));
-            }
-            if event.content != unsigned.content {
-                return Err(SignerError::from("signed event payload mismatch: content"));
-            }
-            if event.created_at != unsigned.created_at {
-                return Err(SignerError::from(
-                    "signed event payload mismatch: created_at",
-                ));
-            }
-
-            Ok(event)
+            Self::validate_signed_event(&unsigned, &signed_json, &current_user)
         })
     }
 
@@ -245,14 +540,28 @@ impl NostrSigner for Nip55Signer {
         let pubkey_hex = public_key.to_hex();
 
         Box::pin(async move {
-            call_content_resolver(
+            if let Some(ciphertext) = call_content_resolver(
                 "nip04EncryptViaContentResolver",
                 &[content, &pubkey_hex, &current_user],
                 &package,
-            )
-            .ok_or_else(|| {
-                SignerError::from("NIP-55 signer rejected nip04_encrypt or not pre-approved")
-            })
+            ) {
+                return Ok(ciphertext);
+            }
+
+            let operation = ForegroundOperation::Nip04Encrypt {
+                content,
+                pubkey_hex: &pubkey_hex,
+                current_user: &current_user,
+            };
+
+            Self::launch_foreground_operation(&package, &operation).map_err(|e| {
+                SignerError::from(format!(
+                    "NIP-55 signer rejected nip04_encrypt or not pre-approved: {}",
+                    e
+                ))
+            })?;
+
+            self.wait_for_foreground_operation(operation).await
         })
     }
 
@@ -266,14 +575,28 @@ impl NostrSigner for Nip55Signer {
         let pubkey_hex = public_key.to_hex();
 
         Box::pin(async move {
-            call_content_resolver(
+            if let Some(plaintext) = call_content_resolver(
                 "nip04DecryptViaContentResolver",
                 &[encrypted_content, &pubkey_hex, &current_user],
                 &package,
-            )
-            .ok_or_else(|| {
-                SignerError::from("NIP-55 signer rejected nip04_decrypt or not pre-approved")
-            })
+            ) {
+                return Ok(plaintext);
+            }
+
+            let operation = ForegroundOperation::Nip04Decrypt {
+                content: encrypted_content,
+                pubkey_hex: &pubkey_hex,
+                current_user: &current_user,
+            };
+
+            Self::launch_foreground_operation(&package, &operation).map_err(|e| {
+                SignerError::from(format!(
+                    "NIP-55 signer rejected nip04_decrypt or not pre-approved: {}",
+                    e
+                ))
+            })?;
+
+            self.wait_for_foreground_operation(operation).await
         })
     }
 
@@ -287,14 +610,28 @@ impl NostrSigner for Nip55Signer {
         let pubkey_hex = public_key.to_hex();
 
         Box::pin(async move {
-            call_content_resolver(
+            if let Some(ciphertext) = call_content_resolver(
                 "nip44EncryptViaContentResolver",
                 &[content, &pubkey_hex, &current_user],
                 &package,
-            )
-            .ok_or_else(|| {
-                SignerError::from("NIP-55 signer rejected nip44_encrypt or not pre-approved")
-            })
+            ) {
+                return Ok(ciphertext);
+            }
+
+            let operation = ForegroundOperation::Nip44Encrypt {
+                content,
+                pubkey_hex: &pubkey_hex,
+                current_user: &current_user,
+            };
+
+            Self::launch_foreground_operation(&package, &operation).map_err(|e| {
+                SignerError::from(format!(
+                    "NIP-55 signer rejected nip44_encrypt or not pre-approved: {}",
+                    e
+                ))
+            })?;
+
+            self.wait_for_foreground_operation(operation).await
         })
     }
 
@@ -308,14 +645,28 @@ impl NostrSigner for Nip55Signer {
         let pubkey_hex = public_key.to_hex();
 
         Box::pin(async move {
-            call_content_resolver(
+            if let Some(plaintext) = call_content_resolver(
                 "nip44DecryptViaContentResolver",
                 &[payload, &pubkey_hex, &current_user],
                 &package,
-            )
-            .ok_or_else(|| {
-                SignerError::from("NIP-55 signer rejected nip44_decrypt or not pre-approved")
-            })
+            ) {
+                return Ok(plaintext);
+            }
+
+            let operation = ForegroundOperation::Nip44Decrypt {
+                content: payload,
+                pubkey_hex: &pubkey_hex,
+                current_user: &current_user,
+            };
+
+            Self::launch_foreground_operation(&package, &operation).map_err(|e| {
+                SignerError::from(format!(
+                    "NIP-55 signer rejected nip44_decrypt or not pre-approved: {}",
+                    e
+                ))
+            })?;
+
+            self.wait_for_foreground_operation(operation).await
         })
     }
 }
@@ -458,6 +809,212 @@ fn call_static_string(method_name: &str) -> Option<String> {
         }
     };
     ret
+}
+
+/// Call a static method on MainActivity that takes Context and String and returns String.
+fn call_static_string_with_arg(method_name: &str, arg: &str) -> Option<String> {
+    use jni::objects::{JObject, JValue};
+
+    let ctx = ndk_context::android_context();
+    let vm = match unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) } {
+        Ok(v) => v,
+        Err(e) => {
+            log::error!(
+                "NIP-55 JNI: JavaVM::from_raw failed in {}: {}",
+                method_name,
+                e
+            );
+            return None;
+        }
+    };
+    let mut env = match vm.attach_current_thread() {
+        Ok(e) => e,
+        Err(e) => {
+            log::error!(
+                "NIP-55 JNI: attach_current_thread failed in {}: {}",
+                method_name,
+                e
+            );
+            return None;
+        }
+    };
+
+    let context = unsafe { JObject::from_raw(ctx.context().cast()) };
+    let class = find_app_class(&mut env, &context, "dev.dioxus.main.MainActivity")?;
+
+    let j_arg = match env.new_string(arg) {
+        Ok(s) => s,
+        Err(e) => {
+            log::error!(
+                "NIP-55 JNI: new_string('{}') failed in {}: {}",
+                arg,
+                method_name,
+                e
+            );
+            return None;
+        }
+    };
+
+    let result = match env.call_static_method(
+        class,
+        method_name,
+        "(Landroid/content/Context;Ljava/lang/String;)Ljava/lang/String;",
+        &[JValue::Object(&context), JValue::Object(&j_arg)],
+    ) {
+        Ok(v) => match v.l() {
+            Ok(l) => l,
+            Err(e) => {
+                log::error!("NIP-55 JNI: {}.l() failed: {}", method_name, e);
+                return None;
+            }
+        },
+        Err(e) => {
+            log::error!("NIP-55 JNI: {} call failed: {}", method_name, e);
+            return None;
+        }
+    };
+
+    if result.is_null() {
+        return None;
+    }
+
+    let ret = match env.get_string((&result).into()) {
+        Ok(jstr) => Some(jstr.to_string_lossy().into_owned()),
+        Err(e) => {
+            log::error!("NIP-55 JNI: get_string failed in {}: {}", method_name, e);
+            None
+        }
+    };
+    ret
+}
+
+/// Call a static method on MainActivity that takes Context and N strings and returns String.
+fn call_static_string_with_args(method_name: &str, args: &[&str]) -> Option<String> {
+    use jni::objects::{JObject, JValue};
+
+    let ctx = ndk_context::android_context();
+    let vm = match unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) } {
+        Ok(v) => v,
+        Err(e) => {
+            log::error!(
+                "NIP-55 JNI: JavaVM::from_raw failed in {}: {}",
+                method_name,
+                e
+            );
+            return None;
+        }
+    };
+    let mut env = match vm.attach_current_thread() {
+        Ok(e) => e,
+        Err(e) => {
+            log::error!(
+                "NIP-55 JNI: attach_current_thread failed in {}: {}",
+                method_name,
+                e
+            );
+            return None;
+        }
+    };
+
+    let context = unsafe { JObject::from_raw(ctx.context().cast()) };
+    let class = find_app_class(&mut env, &context, "dev.dioxus.main.MainActivity")?;
+
+    match args.len() {
+        3 => {
+            let j_arg0 = env.new_string(args[0]).ok()?;
+            let j_arg1 = env.new_string(args[1]).ok()?;
+            let j_arg2 = env.new_string(args[2]).ok()?;
+
+            let result = match env.call_static_method(
+                class,
+                method_name,
+                "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                &[
+                    JValue::Object(&context),
+                    JValue::Object(&j_arg0),
+                    JValue::Object(&j_arg1),
+                    JValue::Object(&j_arg2),
+                ],
+            ) {
+                Ok(v) => match v.l() {
+                    Ok(l) => l,
+                    Err(e) => {
+                        log::error!("NIP-55 JNI: {}.l() failed: {}", method_name, e);
+                        return None;
+                    }
+                },
+                Err(e) => {
+                    log::error!("NIP-55 JNI: {} call failed: {}", method_name, e);
+                    return None;
+                }
+            };
+
+            if result.is_null() {
+                return None;
+            }
+
+            let ret = match env.get_string((&result).into()) {
+                Ok(jstr) => Some(jstr.to_string_lossy().into_owned()),
+                Err(e) => {
+                    log::error!("NIP-55 JNI: get_string failed in {}: {}", method_name, e);
+                    None
+                }
+            };
+            ret
+        }
+        4 => {
+            let j_arg0 = env.new_string(args[0]).ok()?;
+            let j_arg1 = env.new_string(args[1]).ok()?;
+            let j_arg2 = env.new_string(args[2]).ok()?;
+            let j_arg3 = env.new_string(args[3]).ok()?;
+
+            let result = match env.call_static_method(
+                class,
+                method_name,
+                "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                &[
+                    JValue::Object(&context),
+                    JValue::Object(&j_arg0),
+                    JValue::Object(&j_arg1),
+                    JValue::Object(&j_arg2),
+                    JValue::Object(&j_arg3),
+                ],
+            ) {
+                Ok(v) => match v.l() {
+                    Ok(l) => l,
+                    Err(e) => {
+                        log::error!("NIP-55 JNI: {}.l() failed: {}", method_name, e);
+                        return None;
+                    }
+                },
+                Err(e) => {
+                    log::error!("NIP-55 JNI: {} call failed: {}", method_name, e);
+                    return None;
+                }
+            };
+
+            if result.is_null() {
+                return None;
+            }
+
+            let ret = match env.get_string((&result).into()) {
+                Ok(jstr) => Some(jstr.to_string_lossy().into_owned()),
+                Err(e) => {
+                    log::error!("NIP-55 JNI: get_string failed in {}: {}", method_name, e);
+                    None
+                }
+            };
+            ret
+        }
+        _ => {
+            log::error!(
+                "NIP-55 JNI: unexpected arg count {} for {}",
+                args.len(),
+                method_name
+            );
+            None
+        }
+    }
 }
 
 /// Call a ContentResolver method that takes (Context, String signerPackage) and returns String?.

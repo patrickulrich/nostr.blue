@@ -3,6 +3,7 @@ use crate::components::{EmojiPicker, RichContent};
 use crate::routes::Route;
 use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
 use crate::stores::profiles;
+use crate::utils::custom_emoji::EmojiSelection;
 use crate::utils::profile_prefetch;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
@@ -325,9 +326,9 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
                     div { class: "flex items-center gap-2",
                         EmojiPicker {
                             icon_only: true,
-                            on_emoji_selected: move |emoji: String| {
+                            on_emoji_selected: move |selection: EmojiSelection| {
                                 let current = message_input.read().clone();
-                                message_input.set(format!("{}{}", current, emoji));
+                                message_input.set(format!("{}{}", current, selection.insertion_text()));
                             },
                         }
                         input {

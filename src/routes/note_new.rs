@@ -1,5 +1,6 @@
 use crate::components::{EmojiPicker, GifPicker, MediaUploader, MentionAutocomplete};
 use crate::stores::{auth_store, nostr_client::publish_note};
+use crate::utils::custom_emoji::EmojiSelection;
 use dioxus::prelude::*;
 const MAX_LENGTH: usize = 5000;
 #[component]
@@ -62,9 +63,9 @@ pub fn NoteNew(quote: Option<String>) -> Element {
         content.set(current);
         show_image_uploader.set(false);
     };
-    let handle_emoji_selected = move |emoji: String| {
+    let handle_emoji_selected = move |selection: EmojiSelection| {
         let mut current = content.read().clone();
-        current.push_str(&emoji);
+        current.push_str(&selection.insertion_text());
         content.set(current);
     };
     let handle_gif_selected = move |gif_url: String| {

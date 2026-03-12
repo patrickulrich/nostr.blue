@@ -43,54 +43,77 @@ class MainActivity : WryActivity() {
         synchronized(lock) {
             try {
                 Log.d(TAG, "Signer activity result: resultCode=${result.resultCode}")
+                val requestType = activeSignerRequest
                 if (result.resultCode == Activity.RESULT_OK) {
-                    val pubkey = result.data?.getStringExtra("result")
-                    val pkg = result.data?.getStringExtra("package")
-                    val maskedPubkey = pubkey?.let { if (it.length > 8) "...${it.takeLast(4)}" else it }
-                    Log.d(TAG, "Signer approved: pubkey=$maskedPubkey, package=$pkg")
-                    when {
-                        pubkey.isNullOrBlank() -> {
-                            intentError = "Signer approval returned without a pubkey"
-                            Log.e(TAG, "Signer approval missing pubkey for package=$pkg")
-                        }
-                        pkg.isNullOrBlank() -> {
-                            intentError = "Signer approval returned without a package name"
-                            Log.e(TAG, "Signer approval missing package for pubkey=$maskedPubkey")
-                        }
-                        else -> {
-                            try {
-                                val validationError = validateSignerPackage(this@MainActivity, pkg)
-                                if (validationError != null) {
+                    if (requestType == REQUEST_LOGIN) {
+                        val pubkey = result.data?.getStringExtra("result")
+                        val pkg = result.data?.getStringExtra("package")
+                        val maskedPubkey =
+                            pubkey?.let { if (it.length > 8) "...${it.takeLast(4)}" else it }
+                        Log.d(TAG, "Signer approved: pubkey=$maskedPubkey, package=$pkg")
+                        when {
+                            pubkey.isNullOrBlank() -> {
+                                intentError = "Signer approval returned without a pubkey"
+                                Log.e(TAG, "Signer approval missing pubkey for package=$pkg")
+                            }
+                            pkg.isNullOrBlank() -> {
+                                intentError = "Signer approval returned without a package name"
+                                Log.e(TAG, "Signer approval missing package for pubkey=$maskedPubkey")
+                            }
+                            else -> {
+                                try {
+                                    val validationError = validateSignerPackage(this@MainActivity, pkg)
+                                    if (validationError != null) {
+                                        intentError = validationError
+                                        Log.e(
+                                            TAG,
+                                            "Signer approval package validation failed for package=$pkg: $validationError"
+                                        )
+                                    } else {
+                                        pendingPubkey = pubkey
+                                        pendingPackage = pkg
+                                        intentError = null
+                                    }
+                                } catch (e: Exception) {
+                                    val validationError =
+                                        e.message ?: "Signer approval package validation failed"
                                     intentError = validationError
                                     Log.e(
                                         TAG,
-                                        "Signer approval package validation failed for package=$pkg: $validationError"
+                                        "Signer approval package validation threw for package=$pkg: $validationError",
+                                        e
                                     )
-                                } else {
-                                    pendingPubkey = pubkey
-                                    pendingPackage = pkg
-                                    intentError = null
                                 }
-                            } catch (e: Exception) {
-                                val validationError =
-                                    e.message ?: "Signer approval package validation failed"
-                                intentError = validationError
-                                Log.e(
-                                    TAG,
-                                    "Signer approval package validation threw for package=$pkg: $validationError",
-                                    e
-                                )
                             }
                         }
+                    } else {
+                        pendingOperationResult = result.data?.getStringExtra("result")
+                        pendingOperationEvent = result.data?.getStringExtra("event")
+                        pendingOperationPackage = result.data?.getStringExtra("package")
+                        pendingOperationRejected = if (result.data?.extras?.containsKey("rejected") == true) {
+                            result.data?.getBooleanExtra("rejected", false)
+                        } else {
+                            null
+                        }
+                        intentError = null
+                        Log.d(
+                            TAG,
+                            "Signer operation completed: request=$requestType package=${pendingOperationPackage} hasEvent=${pendingOperationEvent != null} hasResult=${pendingOperationResult != null} rejected=$pendingOperationRejected"
+                        )
                     }
                 } else {
                     val errorMsg = "User rejected or cancelled (resultCode=${result.resultCode})"
                     Log.w(TAG, errorMsg)
                     pendingPubkey = null
                     pendingPackage = null
+                    pendingOperationResult = null
+                    pendingOperationEvent = null
+                    pendingOperationPackage = null
+                    pendingOperationRejected = null
                     intentError = errorMsg
                 }
             } finally {
+                activeSignerRequest = null
                 intentInFlight = false
             }
         }
@@ -195,10 +218,25 @@ class MainActivity : WryActivity() {
         private var pendingPackage: String? = null
 
         @Volatile
+        private var pendingOperationResult: String? = null
+
+        @Volatile
+        private var pendingOperationEvent: String? = null
+
+        @Volatile
+        private var pendingOperationPackage: String? = null
+
+        @Volatile
+        private var pendingOperationRejected: Boolean? = null
+
+        @Volatile
         private var intentError: String? = null
 
         @Volatile
         private var intentInFlight: Boolean = false
+
+        @Volatile
+        private var activeSignerRequest: String? = null
 
         // Storage for file picker results
         @Volatile
@@ -212,12 +250,49 @@ class MainActivity : WryActivity() {
         private const val MAX_UPLOAD_BYTES = 10 * 1024 * 1024 // 10MB
         private const val SHARE_TEMP_PREFIX = "share_"
         private const val TEMP_FILE_PRESERVE_MILLIS = 5 * 60 * 1000L
+        private const val REQUEST_LOGIN = "get_public_key"
+        private const val REQUEST_SIGN_EVENT = "sign_event"
+        private const val REQUEST_NIP04_ENCRYPT = "nip04_encrypt"
+        private const val REQUEST_NIP04_DECRYPT = "nip04_decrypt"
+        private const val REQUEST_NIP44_ENCRYPT = "nip44_encrypt"
+        private const val REQUEST_NIP44_DECRYPT = "nip44_decrypt"
 
-        // NIP-55 permissions: pre-authorize signing for common event kinds.
-        // Kinds not listed here prompt the user in the signer each time.
-        // Full list of app kinds: 0,1,3,5,6,7,14,1063,1088,1311,1617,1619,
-        // 1621,1622,6969,7001,9734,10000-10050,30000-30311,31237,38000+
-        private const val NIP55_PERMISSIONS = """[{"type":"sign_event","kind":0},{"type":"sign_event","kind":1},{"type":"sign_event","kind":3},{"type":"sign_event","kind":5},{"type":"sign_event","kind":6},{"type":"sign_event","kind":7},{"type":"sign_event","kind":14},{"type":"sign_event","kind":1063},{"type":"sign_event","kind":1088},{"type":"sign_event","kind":1311},{"type":"sign_event","kind":1617},{"type":"sign_event","kind":1619},{"type":"sign_event","kind":1621},{"type":"sign_event","kind":1622},{"type":"sign_event","kind":6969},{"type":"sign_event","kind":7001},{"type":"sign_event","kind":9734},{"type":"sign_event","kind":10000},{"type":"sign_event","kind":10002},{"type":"sign_event","kind":30000},{"type":"sign_event","kind":30001},{"type":"sign_event","kind":30023},{"type":"sign_event","kind":30078},{"type":"sign_event","kind":30311},{"type":"sign_event","kind":31237},{"type":"nip04_encrypt"},{"type":"nip04_decrypt"},{"type":"nip44_encrypt"},{"type":"nip44_decrypt"}]"""
+        // NIP-55 permissions requested up front for first-party publish flows.
+        // Anything still outside this set can be approved later through the
+        // same get_public_key intent flow when a sign_event call is rejected.
+        private val NIP55_EVENT_KINDS = intArrayOf(
+            0, 1, 3, 5, 6, 7, 8, 14, 16, 17, 20,
+            30, 31, 32, 33, 52, 818,
+            1063, 1068, 1111, 1311,
+            1617, 1618, 1619, 1620, 1621, 1622,
+            1984, 1985, 1987,
+            4550, 4551, 4552, 4553, 4554,
+            5300, 6969, 7001,
+            7374, 7375, 7376, 9321,
+            9734, 9802, 9805, 9806, 9807,
+            10000, 10002, 10013, 10019, 10030, 10050, 10063, 10073, 10312,
+            30000, 30001, 30004, 30008, 30009, 30023, 30030, 30040, 30041,
+            30042, 30044, 30045, 30054, 30067, 30078,
+            30311, 30312, 30313,
+            30402, 30405,
+            30817, 30818, 30819,
+            31234, 31237, 31555,
+            31922, 31923, 31924, 31925, 31926, 31927,
+            33169, 34139, 34550, 34551, 36787, 38383, 39067
+        )
+
+        private val NIP55_PERMISSIONS: String by lazy {
+            val signPermissions = NIP55_EVENT_KINDS.joinToString(",") {
+                """{"type":"sign_event","kind":$it}"""
+            }
+            val cryptoPermissions = listOf(
+                """{"type":"nip04_encrypt"}""",
+                """{"type":"nip04_decrypt"}""",
+                """{"type":"nip44_encrypt"}""",
+                """{"type":"nip44_decrypt"}"""
+            ).joinToString(",")
+            "[$signPermissions,$cryptoPermissions]"
+        }
 
         private fun maxUploadError(): String = "File too large (max 10MB)"
 
@@ -603,8 +678,13 @@ class MainActivity : WryActivity() {
                         return "already_in_flight"
                     }
                     intentInFlight = true
+                    activeSignerRequest = REQUEST_LOGIN
                     pendingPubkey = null
                     pendingPackage = null
+                    pendingOperationResult = null
+                    pendingOperationEvent = null
+                    pendingOperationPackage = null
+                    pendingOperationRejected = null
                     intentError = null
                 }
 
@@ -625,6 +705,182 @@ class MainActivity : WryActivity() {
                 "error:${e.message}"
             }
         }
+
+        /**
+         * Launch the get_public_key Intent for a specific signer package so an
+         * already connected signer can refresh or expand permissions in place.
+         */
+        @JvmStatic
+        fun launchGetPublicKeyForPackage(context: Context, signerPackage: String): String {
+            validateSignerPackage(context, signerPackage)?.let { return "error:$it" }
+
+            return try {
+                val activity = synchronized(lock) { instance }
+                if (activity == null) {
+                    Log.e(TAG, "launchGetPublicKeyForPackage: no Activity instance")
+                    return "no_instance"
+                }
+
+                synchronized(lock) {
+                    if (intentInFlight) {
+                        Log.w(TAG, "launchGetPublicKeyForPackage: Intent already in flight")
+                        return "already_in_flight"
+                    }
+                    intentInFlight = true
+                    activeSignerRequest = REQUEST_LOGIN
+                    pendingPubkey = null
+                    pendingPackage = null
+                    pendingOperationResult = null
+                    pendingOperationEvent = null
+                    pendingOperationPackage = null
+                    pendingOperationRejected = null
+                    intentError = null
+                }
+
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("nostrsigner:")).apply {
+                    `package` = signerPackage
+                    putExtra("type", "get_public_key")
+                    putExtra("permissions", NIP55_PERMISSIONS)
+                }
+
+                Log.d(TAG, "Launching package-scoped get_public_key Intent for $signerPackage")
+                activity.signerLauncher.launch(intent)
+                "launched"
+            } catch (e: Exception) {
+                Log.e(TAG, "launchGetPublicKeyForPackage failed for $signerPackage", e)
+                synchronized(lock) {
+                    intentInFlight = false
+                    intentError = e.message ?: "Unknown error"
+                }
+                "error:${e.message}"
+            }
+        }
+
+        private fun launchSignerOperationIntent(
+            context: Context,
+            signerPackage: String,
+            requestType: String,
+            uriPayload: String,
+            extras: Map<String, String>
+        ): String {
+            validateSignerPackage(context, signerPackage)?.let { return "error:$it" }
+
+            return try {
+                val activity = synchronized(lock) { instance }
+                if (activity == null) {
+                    Log.e(TAG, "launchSignerOperationIntent: no Activity instance")
+                    return "no_instance"
+                }
+
+                synchronized(lock) {
+                    if (intentInFlight) {
+                        Log.w(TAG, "launchSignerOperationIntent: Intent already in flight")
+                        return "already_in_flight"
+                    }
+                    intentInFlight = true
+                    activeSignerRequest = requestType
+                    pendingPubkey = null
+                    pendingPackage = null
+                    pendingOperationResult = null
+                    pendingOperationEvent = null
+                    pendingOperationPackage = null
+                    pendingOperationRejected = null
+                    intentError = null
+                }
+
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("nostrsigner:$uriPayload")).apply {
+                    `package` = signerPackage
+                    putExtra("type", requestType)
+                    extras.forEach { (key, value) -> putExtra(key, value) }
+                }
+
+                Log.d(TAG, "Launching signer operation request=$requestType for $signerPackage")
+                activity.signerLauncher.launch(intent)
+                "launched"
+            } catch (e: Exception) {
+                Log.e(TAG, "launchSignerOperationIntent failed for $requestType/$signerPackage", e)
+                synchronized(lock) {
+                    intentInFlight = false
+                    activeSignerRequest = null
+                    intentError = e.message ?: "Unknown error"
+                }
+                "error:${e.message}"
+            }
+        }
+
+        @JvmStatic
+        fun launchSignEventIntent(
+            context: Context,
+            signerPackage: String,
+            eventJson: String,
+            currentUser: String
+        ): String = launchSignerOperationIntent(
+            context,
+            signerPackage,
+            REQUEST_SIGN_EVENT,
+            eventJson,
+            mapOf("current_user" to currentUser)
+        )
+
+        @JvmStatic
+        fun launchNip04EncryptIntent(
+            context: Context,
+            signerPackage: String,
+            plaintext: String,
+            pubkey: String,
+            currentUser: String
+        ): String = launchSignerOperationIntent(
+            context,
+            signerPackage,
+            REQUEST_NIP04_ENCRYPT,
+            plaintext,
+            mapOf("pubKey" to pubkey, "current_user" to currentUser)
+        )
+
+        @JvmStatic
+        fun launchNip04DecryptIntent(
+            context: Context,
+            signerPackage: String,
+            ciphertext: String,
+            pubkey: String,
+            currentUser: String
+        ): String = launchSignerOperationIntent(
+            context,
+            signerPackage,
+            REQUEST_NIP04_DECRYPT,
+            ciphertext,
+            mapOf("pubKey" to pubkey, "current_user" to currentUser)
+        )
+
+        @JvmStatic
+        fun launchNip44EncryptIntent(
+            context: Context,
+            signerPackage: String,
+            plaintext: String,
+            pubkey: String,
+            currentUser: String
+        ): String = launchSignerOperationIntent(
+            context,
+            signerPackage,
+            REQUEST_NIP44_ENCRYPT,
+            plaintext,
+            mapOf("pubKey" to pubkey, "current_user" to currentUser)
+        )
+
+        @JvmStatic
+        fun launchNip44DecryptIntent(
+            context: Context,
+            signerPackage: String,
+            ciphertext: String,
+            pubkey: String,
+            currentUser: String
+        ): String = launchSignerOperationIntent(
+            context,
+            signerPackage,
+            REQUEST_NIP44_DECRYPT,
+            ciphertext,
+            mapOf("pubKey" to pubkey, "current_user" to currentUser)
+        )
 
         /**
          * Poll for the public key result from a previous Intent launch.
@@ -656,6 +912,26 @@ class MainActivity : WryActivity() {
             return synchronized(lock) { intentError }
         }
 
+        @JvmStatic
+        fun pollOperationResult(@Suppress("UNUSED_PARAMETER") context: Context): String? {
+            return synchronized(lock) { pendingOperationResult }
+        }
+
+        @JvmStatic
+        fun pollOperationEvent(@Suppress("UNUSED_PARAMETER") context: Context): String? {
+            return synchronized(lock) { pendingOperationEvent }
+        }
+
+        @JvmStatic
+        fun pollOperationPackage(@Suppress("UNUSED_PARAMETER") context: Context): String? {
+            return synchronized(lock) { pendingOperationPackage }
+        }
+
+        @JvmStatic
+        fun pollOperationRejected(@Suppress("UNUSED_PARAMETER") context: Context): String? {
+            return synchronized(lock) { pendingOperationRejected?.toString() }
+        }
+
         /**
          * Check if an Intent is currently in flight (user hasn't returned yet).
          *
@@ -674,8 +950,13 @@ class MainActivity : WryActivity() {
             synchronized(lock) {
                 pendingPubkey = null
                 pendingPackage = null
+                pendingOperationResult = null
+                pendingOperationEvent = null
+                pendingOperationPackage = null
+                pendingOperationRejected = null
                 intentError = null
                 intentInFlight = false
+                activeSignerRequest = null
             }
             Log.d(TAG, "Cleared pending Intent state")
         }

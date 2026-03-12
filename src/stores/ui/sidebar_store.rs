@@ -113,7 +113,11 @@ impl SidebarItem {
     pub fn is_hidden(&self) -> bool {
         matches!(
             self,
-            SidebarItem::Citations | SidebarItem::WebBookmarks | SidebarItem::Trending
+            SidebarItem::Citations
+                | SidebarItem::WebBookmarks
+                | SidebarItem::Trending
+                | SidebarItem::Nips
+                | SidebarItem::Dvm
         )
     }
     /// Human-readable display label
@@ -306,9 +310,7 @@ pub fn default_sidebar_items() -> Vec<SidebarItem> {
         SidebarItem::Bookmarks,
         SidebarItem::Wallet,
         SidebarItem::Calendar,
-        SidebarItem::Nips,
         SidebarItem::Badges,
-        SidebarItem::Dvm,
         SidebarItem::Publications,
         SidebarItem::Blossom,
         SidebarItem::Bible,

@@ -9,6 +9,7 @@ use crate::stores::social::channel_store::{
     get_cached_channel, get_channel_display_info, get_channel_relay_url, parse_channel_creation,
     parse_channel_metadata, send_channel_message, Channel,
 };
+use crate::utils::custom_emoji::EmojiSelection;
 use crate::utils::profile_prefetch;
 use crate::utils::truncate_pubkey;
 use crate::utils::validation::is_valid_http_url;
@@ -448,9 +449,9 @@ pub fn ChannelChat(channel_id: String) -> Element {
                     div { class: "flex items-center gap-2",
                         EmojiPicker {
                             icon_only: true,
-                            on_emoji_selected: move |emoji: String| {
+                            on_emoji_selected: move |selection: EmojiSelection| {
                                 let current = message_input.read().clone();
-                                message_input.set(format!("{}{}", current, emoji));
+                                message_input.set(format!("{}{}", current, selection.insertion_text()));
                             },
                         }
                         input {

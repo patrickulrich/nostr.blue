@@ -3,6 +3,7 @@ use crate::components::{
     EmojiPicker, GifPicker, MediaUploader, MentionAutocomplete, PollCreatorModal,
 };
 use crate::stores::{auth_store, nostr_client::publish_note_tracked};
+use crate::utils::custom_emoji::EmojiSelection;
 use dioxus::prelude::*;
 const MAX_LENGTH: usize = 5000;
 #[component]
@@ -123,8 +124,8 @@ pub fn NoteComposer() -> Element {
         insert_with_spacing(url.clone());
         log::info!("Image URL inserted: {}", url);
     };
-    let handle_emoji_selected = move |emoji: String| {
-        insert_at_cursor(emoji);
+    let handle_emoji_selected = move |selection: EmojiSelection| {
+        insert_at_cursor(selection.insertion_text());
     };
     let handle_gif_selected = move |gif_url: String| {
         insert_with_spacing(gif_url.clone());

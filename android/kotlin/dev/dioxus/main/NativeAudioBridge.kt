@@ -17,10 +17,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
-import androidx.media.app.NotificationCompat.MediaStyle
 import org.json.JSONArray
 import org.json.JSONObject
 import java.lang.ref.WeakReference
@@ -502,12 +500,16 @@ object NativeAudioBridge {
         if (service == null || item == null) {
             return
         }
-        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(context, CHANNEL_ID)
+        } else {
+            Notification.Builder(context)
+        }
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle(item.title)
             .setContentText(item.artist)
             .setStyle(
-                MediaStyle()
+                Notification.MediaStyle()
                     .setMediaSession(mediaSession?.sessionToken)
                     .setShowActionsInCompactView(0, 1, 2)
             )

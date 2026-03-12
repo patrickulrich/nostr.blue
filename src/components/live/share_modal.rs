@@ -5,6 +5,7 @@ use crate::components::icons::{
 use crate::components::{EmojiPicker, GifPicker, MediaUploader, PollCreatorModal};
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::{dms, nostr_client};
+use crate::utils::custom_emoji::{build_custom_emoji_tags, EmojiSelection};
 use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, EventBuilder, FromBech32, Kind, PublicKey};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -157,8 +158,8 @@ pub fn LiveStreamShareModal(
     let handle_image_uploaded = move |url: String| {
         insert_with_spacing(url);
     };
-    let handle_emoji_selected = move |emoji: String| {
-        insert_at_cursor(emoji);
+    let handle_emoji_selected = move |selection: EmojiSelection| {
+        insert_at_cursor(selection.insertion_text());
     };
     let handle_gif_selected = move |gif_url: String| {
         insert_with_spacing(gif_url);
@@ -225,7 +226,9 @@ pub fn LiveStreamShareModal(
                     return;
                 }
             };
-            let builder = EventBuilder::text_note(&text).tag(nostr_sdk::Tag::event(event_id));
+            let builder = EventBuilder::text_note(&text)
+                .tag(nostr_sdk::Tag::event(event_id))
+                .tags(build_custom_emoji_tags(&text));
             match client.send_event_builder(builder).await {
                 Ok(output) => {
                     log::info!("Shared to Nostr: {:?}", output.val);

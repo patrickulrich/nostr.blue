@@ -4,6 +4,7 @@ use crate::components::{
 };
 use crate::stores::nostr_client::{get_client, HAS_SIGNER};
 use crate::stores::relay;
+use crate::utils::custom_emoji::{build_custom_emoji_tags, EmojiSelection};
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
@@ -135,8 +136,8 @@ pub fn ReplyComposer(
         insert_at_cursor(text_with_space);
     };
 
-    let handle_emoji_selected = move |emoji: String| {
-        insert_at_cursor(emoji);
+    let handle_emoji_selected = move |selection: EmojiSelection| {
+        insert_at_cursor(selection.insertion_text());
     };
 
     let handle_gif_selected = move |gif_url: String| {
@@ -254,6 +255,7 @@ pub fn ReplyComposer(
                     }
                 }
             }
+            tags.extend(build_custom_emoji_tags(&content_for_publish));
 
             let builder = EventBuilder::text_note(&content_for_publish).tags(tags);
 

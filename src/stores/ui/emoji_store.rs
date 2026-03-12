@@ -1,7 +1,10 @@
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
-use nostr_sdk::{Filter, Kind, PublicKey, Timestamp};
+use nostr::nips::nip51::Emojis;
+use nostr_sdk::{EventBuilder, Filter, Kind, PublicKey, Timestamp, Url};
+use std::collections::HashSet;
+use std::time::Duration;
 /// Custom emoji from Nostr (NIP-30 format)
 #[derive(Clone, Debug, PartialEq)]
 pub struct CustomEmoji {
@@ -15,6 +18,27 @@ pub struct EmojiSet {
     pub name: Option<String>,
     pub emojis: Vec<CustomEmoji>,
     pub author: String,
+    pub picture: Option<String>,
+    pub about: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EmojiPackReference {
+    pub coordinate: String,
+    pub identifier: String,
+    pub author: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DiscoverableEmojiPack {
+    pub coordinate: String,
+    pub identifier: String,
+    pub name: String,
+    pub author: String,
+    pub picture: Option<String>,
+    pub about: Option<String>,
+    pub emojis: Vec<CustomEmoji>,
+    pub created_at: u64,
 }
 /// Global state for custom emojis from Nostr
 /// Store for custom emojis with fine-grained reactivity
@@ -27,11 +51,26 @@ pub struct CustomEmojisStore {
 pub struct EmojiSetsStore {
     pub data: Vec<EmojiSet>,
 }
+#[derive(Clone, Debug, Default, Store)]
+pub struct EmojiPackRefsStore {
+    pub data: Vec<EmojiPackReference>,
+}
+#[derive(Clone, Debug, Default, Store)]
+pub struct DiscoverableEmojiPacksStore {
+    pub data: Vec<DiscoverableEmojiPack>,
+}
 pub static CUSTOM_EMOJIS: GlobalSignal<Store<CustomEmojisStore>> =
     Signal::global(|| Store::new(CustomEmojisStore::default()));
 pub static EMOJI_SETS: GlobalSignal<Store<EmojiSetsStore>> =
     Signal::global(|| Store::new(EmojiSetsStore::default()));
+pub static EMOJI_PACK_REFS: GlobalSignal<Store<EmojiPackRefsStore>> =
+    Signal::global(|| Store::new(EmojiPackRefsStore::default()));
+pub static DISCOVERABLE_EMOJI_PACKS: GlobalSignal<Store<DiscoverableEmojiPacksStore>> =
+    Signal::global(|| Store::new(DiscoverableEmojiPacksStore::default()));
 pub static EMOJI_FETCH_TIME: GlobalSignal<Option<Timestamp>> = Signal::global(|| None);
+pub static DISCOVERABLE_EMOJI_PACKS_FETCH_TIME: GlobalSignal<Option<Timestamp>> =
+    Signal::global(|| None);
+pub static DISCOVERABLE_EMOJI_PACKS_LOADING: GlobalSignal<bool> = Signal::global(|| false);
 #[cfg(feature = "web")]
 const RECENT_EMOJIS_KEY: &str = "nostr_blue_recent_emojis";
 const MAX_RECENT: usize = 14;
@@ -70,6 +109,155 @@ pub fn save_recent_emoji(emoji: String) {
         }
     }
 }
+
+fn parse_discoverable_pack(event: &nostr_sdk::Event) -> Option<DiscoverableEmojiPack> {
+    if event.kind != Kind::EmojiSet {
+        return None;
+    }
+
+    let identifier = event.tags.identifier()?.to_string();
+    let author = event.pubkey.to_hex();
+    let coordinate = format!("30030:{}:{}", author, identifier);
+
+    let mut name = None;
+    let mut picture = None;
+    let mut about = None;
+    let mut emojis = Vec::new();
+
+    for tag in event.tags.iter() {
+        let slice = tag.as_slice();
+        if slice.len() >= 3 && slice[0] == "emoji" {
+            emojis.push(CustomEmoji {
+                shortcode: slice[1].to_string(),
+                image_url: slice[2].to_string(),
+            });
+        } else if slice.len() >= 2 {
+            match slice[0].as_str() {
+                "name" => name = Some(slice[1].to_string()),
+                "picture" => picture = Some(slice[1].to_string()),
+                "about" => about = Some(slice[1].to_string()),
+                _ => {}
+            }
+        }
+    }
+
+    if emojis.is_empty() {
+        return None;
+    }
+
+    Some(DiscoverableEmojiPack {
+        coordinate,
+        identifier: identifier.clone(),
+        name: name.unwrap_or(identifier),
+        author,
+        picture,
+        about,
+        emojis,
+        created_at: event.created_at.as_secs(),
+    })
+}
+
+fn parse_emoji_collection(
+    event: &nostr_sdk::Event,
+) -> (Vec<CustomEmoji>, Vec<EmojiPackReference>) {
+    let mut custom_emojis = Vec::new();
+    let mut emoji_pack_refs = Vec::new();
+
+    for tag in event.tags.iter() {
+        let tag_slice = tag.as_slice();
+        if tag_slice.len() >= 3 && tag_slice[0] == "emoji" {
+            custom_emojis.push(CustomEmoji {
+                shortcode: tag_slice[1].to_string(),
+                image_url: tag_slice[2].to_string(),
+            });
+        } else if tag_slice.len() >= 2 && tag_slice[0] == "a" {
+            let coordinate = tag_slice[1].to_string();
+            let parts: Vec<&str> = coordinate.splitn(3, ':').collect();
+            if parts.len() >= 3 && parts[0] == "30030" {
+                emoji_pack_refs.push(EmojiPackReference {
+                    coordinate: coordinate.clone(),
+                    identifier: parts[2].to_string(),
+                    author: parts[1].to_string(),
+                });
+            }
+        }
+    }
+
+    (custom_emojis, emoji_pack_refs)
+}
+
+fn parse_emoji_set(event: &nostr_sdk::Event) -> Option<EmojiSet> {
+    if event.kind != Kind::EmojiSet {
+        return None;
+    }
+
+    let identifier = event.tags.identifier()?.to_string();
+    let mut emojis = Vec::new();
+    let mut name = None;
+    let mut picture = None;
+    let mut about = None;
+
+    for tag in event.tags.iter() {
+        let tag_slice = tag.as_slice();
+        if tag_slice.len() >= 3 && tag_slice[0] == "emoji" {
+            emojis.push(CustomEmoji {
+                shortcode: tag_slice[1].to_string(),
+                image_url: tag_slice[2].to_string(),
+            });
+        } else if tag_slice.len() >= 2 {
+            match tag_slice[0].as_str() {
+                "name" => name = Some(tag_slice[1].to_string()),
+                "picture" => picture = Some(tag_slice[1].to_string()),
+                "about" => about = Some(tag_slice[1].to_string()),
+                _ => {}
+            }
+        }
+    }
+
+    if emojis.is_empty() {
+        return None;
+    }
+
+    Some(EmojiSet {
+        identifier,
+        name,
+        emojis,
+        author: event.pubkey.to_hex(),
+        picture,
+        about,
+    })
+}
+
+async fn load_latest_event(
+    client: &std::sync::Arc<nostr_sdk::Client>,
+    filter: Filter,
+    label: &str,
+) -> Option<nostr_sdk::Event> {
+    match crate::stores::nostr_client::fetch_events_aggregated(filter.clone(), Duration::from_secs(5))
+        .await
+    {
+        Ok(events) if !events.is_empty() => {
+            log::info!("Loaded {} {} event(s) from fetch path", events.len(), label);
+            return events.first().cloned();
+        }
+        Ok(_) => {}
+        Err(e) => {
+            log::warn!("Failed to fetch {} from relays: {}, falling back to DB", label, e);
+        }
+    }
+
+    match client.database().query(filter).await {
+        Ok(events) => {
+            log::info!("Loaded {} {} event(s) from database", events.len(), label);
+            events.first().cloned()
+        }
+        Err(e) => {
+            log::error!("Failed to query {} from database: {}", label, e);
+            None
+        }
+    }
+}
+
 /// Fetch user's custom emojis (kind 10030) and emoji sets (kind 30030)
 pub async fn fetch_custom_emojis(pubkey: String) {
     log::info!("Fetching custom emojis for pubkey: {}", pubkey);
@@ -91,109 +279,47 @@ pub async fn fetch_custom_emojis(pubkey: String) {
         .kind(Kind::from(10030))
         .author(public_key)
         .limit(1);
-    let fetch_result = crate::stores::nostr_client::fetch_events_aggregated(
-        emoji_list_filter.clone(),
-        std::time::Duration::from_secs(5),
-    )
-    .await;
-    if let Err(e) = fetch_result {
-        log::warn!(
-            "Failed to fetch emoji list from relays: {}, will try local DB",
-            e
-        );
-    }
-    let emoji_list_events = match client.database().query(emoji_list_filter).await {
-        Ok(events) => events,
-        Err(e) => {
-            log::error!("Failed to query emoji list from database: {}", e);
-            return;
-        }
-    };
-    log::info!("Found {} emoji list events", emoji_list_events.len());
     let mut custom_emojis = Vec::new();
-    let mut emoji_set_refs = Vec::new();
-    if let Some(emoji_list) = emoji_list_events.first() {
-        for tag in emoji_list.tags.iter() {
-            let tag_slice = tag.as_slice();
-            if tag_slice.len() >= 3 && tag_slice[0] == "emoji" {
-                let shortcode = tag_slice[1].to_string();
-                let image_url = tag_slice[2].to_string();
-                custom_emojis.push(CustomEmoji {
-                    shortcode,
-                    image_url,
-                });
-            } else if tag_slice.len() >= 2 && tag_slice[0] == "a" {
-                emoji_set_refs.push(tag_slice[1].to_string());
-            }
-        }
+    let mut parsed_pack_refs = Vec::new();
+
+    if let Some(emoji_list) = load_latest_event(&client, emoji_list_filter, "emoji list").await {
+        let (emojis, pack_refs) = parse_emoji_collection(&emoji_list);
+        custom_emojis = emojis;
+        parsed_pack_refs = pack_refs;
     }
+
     log::info!(
         "Found {} direct emojis and {} emoji set references",
         custom_emojis.len(),
-        emoji_set_refs.len()
+        parsed_pack_refs.len()
     );
+
     let mut emoji_sets = Vec::new();
-    for set_ref in emoji_set_refs {
-        let parts: Vec<&str> = set_ref.splitn(3, ':').collect();
-        if parts.len() >= 3 && parts[0] == "30030" {
-            let author = parts[1].to_string();
-            let identifier = parts[2].to_string();
-            let author_pk = match PublicKey::parse(&author) {
-                Ok(pk) => pk,
-                Err(e) => {
-                    log::warn!("Failed to parse author pubkey {}: {}", author, e);
-                    continue;
-                }
-            };
-            let set_filter = Filter::new()
-                .kind(Kind::from(30030))
-                .author(author_pk)
-                .identifier(identifier.clone())
-                .limit(1);
-            let fetch_result = crate::stores::nostr_client::fetch_events_aggregated(
-                set_filter.clone(),
-                std::time::Duration::from_secs(5),
-            )
-            .await;
-            if let Err(e) = fetch_result {
-                log::warn!(
-                    "Failed to fetch emoji set {} from relays: {}, will try local DB",
-                    identifier,
-                    e
-                );
+    for pack_ref in &parsed_pack_refs {
+        let author_pk = match PublicKey::parse(&pack_ref.author) {
+            Ok(pk) => pk,
+            Err(e) => {
+                log::warn!("Failed to parse author pubkey {}: {}", pack_ref.author, e);
+                continue;
             }
-            if let Ok(set_events) = client.database().query(set_filter).await {
-                if let Some(set_event) = set_events.first() {
-                    let mut set_emojis = Vec::new();
-                    let mut set_name = None;
-                    for tag in set_event.tags.iter() {
-                        let tag_slice = tag.as_slice();
-                        if tag_slice.len() >= 3 && tag_slice[0] == "emoji" {
-                            let shortcode = tag_slice[1].to_string();
-                            let image_url = tag_slice[2].to_string();
-                            set_emojis.push(CustomEmoji {
-                                shortcode,
-                                image_url,
-                            });
-                        } else if tag_slice.len() >= 2 && tag_slice[0] == "name" {
-                            set_name = Some(tag_slice[1].to_string());
-                        }
-                    }
-                    if !set_emojis.is_empty() {
-                        emoji_sets.push(EmojiSet {
-                            identifier: identifier.clone(),
-                            name: set_name,
-                            emojis: set_emojis,
-                            author: author.clone(),
-                        });
-                    }
-                }
+        };
+        let set_filter = Filter::new()
+            .kind(Kind::from(30030))
+            .author(author_pk)
+            .identifier(pack_ref.identifier.clone())
+            .limit(1);
+
+        if let Some(set_event) = load_latest_event(&client, set_filter, "emoji set").await {
+            if let Some(set) = parse_emoji_set(&set_event) {
+                emoji_sets.push(set);
             }
         }
     }
+
     log::info!("Loaded {} emoji sets with emojis", emoji_sets.len());
     *CUSTOM_EMOJIS.read().data().write() = custom_emojis;
     *EMOJI_SETS.read().data().write() = emoji_sets;
+    *EMOJI_PACK_REFS.read().data().write() = parsed_pack_refs;
     *EMOJI_FETCH_TIME.write() = Some(Timestamp::now());
 }
 /// Initialize emoji fetching for the authenticated user
@@ -213,6 +339,122 @@ pub fn should_refresh_emojis() -> bool {
         let now = Timestamp::now();
         let diff = now.as_secs() - last_fetch.as_secs();
         diff > 300
+    } else {
+        true
+    }
+}
+
+pub fn is_pack_installed(coordinate: &str) -> bool {
+    EMOJI_PACK_REFS
+        .read()
+        .data()
+        .read()
+        .iter()
+        .any(|pack| pack.coordinate == coordinate)
+}
+
+pub async fn publish_emoji_collection(
+    inline_emojis: Vec<CustomEmoji>,
+    pack_coordinates: Vec<String>,
+) -> std::result::Result<(), String> {
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+
+    let emojis = inline_emojis
+        .into_iter()
+        .filter_map(|emoji| match Url::parse(&emoji.image_url) {
+            Ok(url) => Some((emoji.shortcode, url)),
+            Err(e) => {
+                log::warn!("Skipping invalid emoji URL {}: {}", emoji.image_url, e);
+                None
+            }
+        })
+        .collect();
+
+    let coordinate = pack_coordinates
+        .into_iter()
+        .filter_map(|pack| match nostr::nips::nip01::Coordinate::parse(&pack) {
+            Ok(coord) => Some(coord),
+            Err(e) => {
+                log::warn!("Skipping invalid emoji pack coordinate {}: {}", pack, e);
+                None
+            }
+        })
+        .collect();
+
+    let builder = EventBuilder::emojis(Emojis { emojis, coordinate });
+    client
+        .send_event_builder(builder)
+        .await
+        .map_err(|e| format!("Failed to publish emoji collection: {}", e))?;
+
+    Ok(())
+}
+
+pub async fn toggle_emoji_pack(coordinate: String) -> std::result::Result<(), String> {
+    let auth_state = crate::stores::auth_store::AUTH_STATE.read();
+    let pubkey = auth_state
+        .pubkey
+        .clone()
+        .ok_or("No authenticated user found")?;
+
+    let inline_emojis = CUSTOM_EMOJIS.read().data().read().clone();
+    let current_refs = EMOJI_PACK_REFS.read().data().read().clone();
+    let mut next_refs: Vec<String> = current_refs
+        .iter()
+        .map(|pack| pack.coordinate.clone())
+        .collect();
+
+    if next_refs.iter().any(|pack| pack == &coordinate) {
+        next_refs.retain(|pack| pack != &coordinate);
+    } else {
+        next_refs.push(coordinate);
+        next_refs.sort();
+        next_refs.dedup();
+    }
+
+    publish_emoji_collection(inline_emojis, next_refs).await?;
+    fetch_custom_emojis(pubkey).await;
+
+    Ok(())
+}
+
+pub async fn fetch_discoverable_emoji_packs(limit: usize) -> std::result::Result<(), String> {
+    *DISCOVERABLE_EMOJI_PACKS_LOADING.write() = true;
+
+    let filter = Filter::new().kind(Kind::EmojiSet).limit(limit);
+    let events = match crate::stores::nostr_client::fetch_events_aggregated(
+        filter,
+        Duration::from_secs(10),
+    )
+    .await
+    {
+        Ok(events) => events,
+        Err(e) => {
+            *DISCOVERABLE_EMOJI_PACKS_LOADING.write() = false;
+            return Err(e);
+        }
+    };
+
+    let mut seen = HashSet::new();
+    let mut packs: Vec<DiscoverableEmojiPack> = events
+        .iter()
+        .filter_map(parse_discoverable_pack)
+        .filter(|pack| seen.insert(pack.coordinate.clone()))
+        .collect();
+
+    packs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+    *DISCOVERABLE_EMOJI_PACKS.read().data().write() = packs;
+    *DISCOVERABLE_EMOJI_PACKS_FETCH_TIME.write() = Some(Timestamp::now());
+    *DISCOVERABLE_EMOJI_PACKS_LOADING.write() = false;
+
+    Ok(())
+}
+
+pub fn should_refresh_discoverable_emoji_packs() -> bool {
+    if let Some(last_fetch) = *DISCOVERABLE_EMOJI_PACKS_FETCH_TIME.read() {
+        let now = Timestamp::now();
+        now.as_secs().saturating_sub(last_fetch.as_secs()) > 300
     } else {
         true
     }

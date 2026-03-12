@@ -6,6 +6,7 @@ use crate::components::{EmojiPicker, GifPicker, MediaUploader, PollCreatorModal}
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::{dms, nostr_client};
 use crate::utils::clipboard::copy_to_clipboard;
+use crate::utils::custom_emoji::{build_custom_emoji_tags, EmojiSelection};
 use dioxus::html::input_data::keyboard_types::Key;
 use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, EventBuilder, FromBech32, PublicKey};
@@ -125,8 +126,8 @@ pub fn ShareModal(
     let handle_image_uploaded = move |url: String| {
         insert_with_spacing(url);
     };
-    let handle_emoji_selected = move |emoji: String| {
-        insert_at_cursor(emoji);
+    let handle_emoji_selected = move |selection: EmojiSelection| {
+        insert_at_cursor(selection.insertion_text());
     };
     let handle_gif_selected = move |gif_url: String| {
         insert_with_spacing(gif_url);
@@ -247,7 +248,7 @@ pub fn ShareModal(
                     return;
                 }
             };
-            let builder = EventBuilder::text_note(&text);
+            let builder = EventBuilder::text_note(&text).tags(build_custom_emoji_tags(&text));
             match client.send_event_builder(builder).await {
                 Ok(output) => {
                     log::info!("Shared to Nostr: {:?}", output.val);
