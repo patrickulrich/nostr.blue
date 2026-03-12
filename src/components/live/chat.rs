@@ -8,6 +8,7 @@ use crate::utils::profile_prefetch;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
+use dioxus_core::Task;
 use nostr::TagKind;
 use nostr_sdk::{
     Event, EventBuilder, Filter, Kind, PublicKey, RelayPoolNotification, SubscriptionId, Tag,
@@ -46,6 +47,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
     let mut sending = use_signal(|| false);
     let mut expanded = use_signal(|| false);
     let mut chat_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
+    let mut realtime_task: Signal<Option<Task>> = use_signal(|| None);
     let mut request_gen = use_signal(|| 0u32);
     let has_signer = use_memo(move || *HAS_SIGNER.read());
     let chat_container_id = format!(
@@ -66,6 +68,9 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
             messages.set(Vec::new());
             loading.set(true);
             spawn(async move {
+                if let Some(old_task) = *realtime_task.peek() {
+                    old_task.cancel();
+                }
                 let previous_sub_id = chat_sub_id.read().clone();
                 chat_sub_id.set(None);
                 if let Some(sub_id) = previous_sub_id {
@@ -122,7 +127,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
                             chat_sub_id.set(Some(subscription_id.clone()));
                             log::debug!("Subscribed to live chat for {}", tag);
 
-                            spawn(async move {
+                            let task = spawn(async move {
                                 let mut notifications = client.notifications();
                                 while let Ok(notification) = notifications.recv().await {
                                     if *request_gen.peek() != current_gen {
@@ -157,6 +162,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
                                     }
                                 }
                             });
+                            realtime_task.set(Some(task));
                         }
                         Err(e) => {
                             log::error!("Failed to subscribe to live chat: {}", e);
@@ -167,34 +173,50 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
         },
     ));
     let mut is_first_load = use_signal(|| true);
+    let mut chat_scroll_gen = use_signal(|| 0u32);
     use_effect(use_reactive(
         (&stream_author_pubkey, &stream_d_tag),
         move |_| {
             is_first_load.set(true);
+            chat_scroll_gen.with_mut(|gen| *gen = gen.wrapping_add(1));
         },
     ));
     use_effect(move || {
         let msg_count = messages.read().len();
         let container_id = chat_id_for_auto_scroll.clone();
+        let scroll_gen = chat_scroll_gen.with_mut(|gen| {
+            *gen = gen.wrapping_add(1);
+            *gen
+        });
         spawn(async move {
             crate::platform::timer::sleep_ms(50).await;
             #[cfg(feature = "web")]
             {
+                let mut did_scroll = false;
                 if *is_first_load.peek() && msg_count > 0 {
                     scrollChatToBottom(&container_id);
-                    is_first_load.set(false);
+                    did_scroll = true;
                 } else if isScrolledNearBottom(&container_id, 100.0) {
                     scrollChatToBottom(&container_id);
+                    did_scroll = true;
+                }
+                if did_scroll && msg_count > 0 && *chat_scroll_gen.read() == scroll_gen {
+                    is_first_load.set(false);
                 }
             }
             #[cfg(not(feature = "web"))]
             {
                 let _ = (&container_id, msg_count);
-                is_first_load.set(false);
+                if msg_count > 0 && *chat_scroll_gen.read() == scroll_gen {
+                    is_first_load.set(false);
+                }
             }
         });
     });
     use_drop(move || {
+        if let Some(task) = *realtime_task.peek() {
+            task.cancel();
+        }
         if let Some(sub_id) = chat_sub_id.peek().clone() {
             spawn(async move {
                 if let Some(client) = get_client() {

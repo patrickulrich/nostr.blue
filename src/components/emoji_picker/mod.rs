@@ -56,7 +56,7 @@ fn installed_custom_search_items() -> Vec<(String, String, Option<String>)> {
     let mut items = Vec::new();
 
     for emoji in custom_list.iter() {
-        if seen.insert(emoji.shortcode.clone()) {
+        if seen.insert((emoji.shortcode.clone(), emoji.image_url.clone(), None)) {
             items.push((emoji.shortcode.clone(), emoji.image_url.clone(), None));
         }
     }
@@ -64,7 +64,11 @@ fn installed_custom_search_items() -> Vec<(String, String, Option<String>)> {
     for set in sets_list.iter() {
         let coordinate = format!("30030:{}:{}", set.author, set.identifier);
         for emoji in &set.emojis {
-            if seen.insert(emoji.shortcode.clone()) {
+            if seen.insert((
+                emoji.shortcode.clone(),
+                emoji.image_url.clone(),
+                Some(coordinate.clone()),
+            )) {
                 items.push((
                     emoji.shortcode.clone(),
                     emoji.image_url.clone(),

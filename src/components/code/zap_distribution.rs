@@ -254,11 +254,13 @@ pub fn ZapDistribution(
             .collect::<std::collections::HashMap<_, _>>();
         let sendable: Vec<(ZapRecipient, String)> = eligible_with_lud16
             .into_iter()
-            .map(|(mut recip, lud16)| {
-                if let Some(amount) = amount_map.get(&recip.pubkey).copied() {
-                    recip.amount = amount;
+            .filter_map(|(mut recip, lud16)| {
+                let amount = amount_map.get(&recip.pubkey).copied().unwrap_or(0);
+                if amount == 0 {
+                    return None;
                 }
-                (recip, lud16)
+                recip.amount = amount;
+                Some((recip, lud16))
             })
             .collect();
         {

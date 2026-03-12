@@ -25,10 +25,14 @@ pub fn EmojiPackManagerModal(props: EmojiPackManagerModalProps) -> Element {
     let is_authenticated = auth_store::is_authenticated();
 
     use_effect(move || {
-        if !(props.show)() || !should_refresh_discoverable_emoji_packs() {
+        if !(props.show)()
+            || discoverable_loading
+            || !should_refresh_discoverable_emoji_packs()
+        {
             return;
         }
 
+        error_message.set(None);
         spawn(async move {
             if let Err(e) = fetch_discoverable_emoji_packs(80).await {
                 log::error!("Failed to fetch discoverable emoji packs: {}", e);
@@ -38,6 +42,14 @@ pub fn EmojiPackManagerModal(props: EmojiPackManagerModalProps) -> Element {
     });
 
     let query = search_query.read().trim().to_lowercase();
+    let installed_catalog_empty = installed_sets.data().read().is_empty();
+    let discover_catalog_empty = discoverable_packs
+        .data()
+        .read()
+        .iter()
+        .filter(|pack| !is_pack_installed(&pack.coordinate))
+        .count()
+        == 0;
     let installed_filtered: Vec<_> = installed_sets
         .data()
         .read()
@@ -138,7 +150,11 @@ pub fn EmojiPackManagerModal(props: EmojiPackManagerModalProps) -> Element {
                             }
                             if installed_filtered.is_empty() {
                                 div { class: "rounded-xl border border-dashed border-border px-4 py-6 text-sm text-muted-foreground text-center",
-                                    "No installed emoji packs yet."
+                                    if query.is_empty() && installed_catalog_empty {
+                                        "No installed emoji packs yet."
+                                    } else {
+                                        "No emoji packs match your search."
+                                    }
                                 }
                             } else {
                                 div { class: "grid gap-3 md:grid-cols-2",
@@ -233,7 +249,11 @@ pub fn EmojiPackManagerModal(props: EmojiPackManagerModalProps) -> Element {
                                 }
                             } else if discoverable_filtered.is_empty() {
                                 div { class: "rounded-xl border border-dashed border-border px-4 py-6 text-sm text-muted-foreground text-center",
-                                    "No discoverable packs match your search."
+                                    if query.is_empty() && discover_catalog_empty {
+                                        "No discoverable emoji packs yet."
+                                    } else {
+                                        "No emoji packs match your search."
+                                    }
                                 }
                             } else {
                                 div { class: "grid gap-3 md:grid-cols-2",
