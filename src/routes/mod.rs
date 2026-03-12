@@ -136,8 +136,8 @@ pub enum Route {
     Home { list: String },
     #[route("/explore")]
     Explore {},
-    #[route("/trending")]
-    Trending {},
+    #[route("/trending?:source")]
+    Trending { source: Option<String> },
     #[route("/search?:q")]
     Search { q: String },
     #[route("/articles")]
@@ -518,7 +518,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
     match current_route {
         Route::Home { .. }
         | Route::Explore {}
-        | Route::Trending {}
+        | Route::Trending { .. }
         | Route::Articles {}
         | Route::Videos {}
         | Route::VideosLive {}
@@ -1410,9 +1410,9 @@ fn Layout() -> Element {
                     }
                 } else if !is_wide_page && !is_settings_page {
                     aside { class: "w-[350px] shrink-0 hidden xl:block",
-                        div { class: "flex flex-col gap-4 sticky top-0 pt-4 pb-4 h-screen overflow-hidden px-4 z-0",
+                        div { class: "sticky top-0 z-0 flex h-screen min-h-0 flex-col gap-4 overflow-hidden px-4 pt-4 pb-4",
                             div { class: "shrink-0", crate::components::SearchInput {} }
-                            div { class: "flex-1 overflow-hidden", crate::components::TrendingNotes {} }
+                            div { class: "min-h-0 flex-1 overflow-hidden", crate::components::RightDiscoverySidebar {} }
                             div { class: "text-xs text-muted-foreground flex flex-wrap gap-2 mt-auto shrink-0",
                                 Link {
                                     to: Route::Terms {},

@@ -85,7 +85,7 @@ pub fn TrendingNotes() -> Element {
             if !*loading.read() && !*error.read() && !trending_notes.read().is_empty() {
                 div { class: "border-t border-border shrink-0",
                     Link {
-                        to: Route::Trending {},
+                        to: Route::Trending { source: None },
                         class: "block w-full px-4 py-3 text-blue-500 hover:bg-accent/50 transition-colors text-left text-sm",
                         "Show more"
                     }

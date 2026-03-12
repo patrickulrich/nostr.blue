@@ -111,7 +111,10 @@ impl SidebarItem {
     /// Items temporarily hidden from sidebar and customizer.
     /// Routes remain accessible via direct navigation.
     pub fn is_hidden(&self) -> bool {
-        matches!(self, SidebarItem::Citations | SidebarItem::WebBookmarks)
+        matches!(
+            self,
+            SidebarItem::Citations | SidebarItem::WebBookmarks | SidebarItem::Trending
+        )
     }
     /// Human-readable display label
     pub fn label(&self) -> &'static str {
@@ -192,7 +195,7 @@ impl SidebarItem {
             SidebarItem::Calendar => Some(Route::Calendar {}),
             SidebarItem::Recipes => Some(Route::RecipesHome {}),
             SidebarItem::PinBoards => Some(Route::PinBoardsHome {}),
-            SidebarItem::Trending => Some(Route::Trending {}),
+            SidebarItem::Trending => Some(Route::Trending { source: None }),
             SidebarItem::Nips => Some(Route::NipsHome {}),
             SidebarItem::Badges => Some(Route::BadgesHome {}),
             SidebarItem::Citations => Some(Route::CitationsHome {}),
@@ -303,7 +306,6 @@ pub fn default_sidebar_items() -> Vec<SidebarItem> {
         SidebarItem::Bookmarks,
         SidebarItem::Wallet,
         SidebarItem::Calendar,
-        SidebarItem::Trending,
         SidebarItem::Nips,
         SidebarItem::Badges,
         SidebarItem::Dvm,
