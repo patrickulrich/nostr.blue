@@ -17,10 +17,7 @@ fn nav_class(active: bool, extra: &str) -> String {
 
 /// Sidebar for topic navigation
 #[component]
-pub fn TopicSidebar(
-    #[props(default)]
-    current_topic: Option<String>,
-) -> Element {
+pub fn TopicSidebar(#[props(default)] current_topic: Option<String>) -> Element {
     let subscribed = get_subscribed_topic_names();
     let loading = *LOADING_SUBSCRIPTIONS.read();
     let current_route = use_route::<Route>();
@@ -28,7 +25,10 @@ pub fn TopicSidebar(
     let home_class = nav_class(matches!(current_route, Route::TopicsHome {}), "");
     let popular_class = nav_class(matches!(current_route, Route::TopicsPopular {}), "");
     let browse_class = nav_class(matches!(current_route, Route::TopicsBrowse {}), "");
-    let new_post_class = nav_class(matches!(current_route, Route::TopicNewPost {}), "text-primary font-medium");
+    let new_post_class = nav_class(
+        matches!(current_route, Route::TopicNewPost {}),
+        "text-primary font-medium",
+    );
 
     rsx! {
         div {

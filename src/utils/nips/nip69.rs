@@ -9,7 +9,7 @@ use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 /// Get current Unix timestamp in seconds (WASM-compatible)
 fn now_secs() -> u64 {
-    (js_sys::Date::now() / 1000.0) as u64
+    crate::platform::timestamp::now_secs()
 }
 /// P2P order event kind (addressable)
 /// Note: Kind::PeerToPeerOrder is also available in nostr-sdk
@@ -266,7 +266,8 @@ impl P2POrder {
     }
     /// Get time remaining until expiration (in seconds)
     pub fn time_remaining(&self) -> Option<u64> {
-        self.expires_at.map(|expires| expires.saturating_sub(now_secs()))
+        self.expires_at
+            .map(|expires| expires.saturating_sub(now_secs()))
     }
     /// Calculate satoshis at current rate (for premium-based orders)
     pub fn calc_sats_at_rate(&self, exchange_rate: f64) -> u64 {
@@ -289,28 +290,28 @@ impl P2POrder {
 /// Parse a Kind 38383 event into a P2POrder
 pub fn parse_p2p_order(event: &Event) -> Result<P2POrder, String> {
     if event.kind.as_u16() != KIND_P2P_ORDER {
-        return Err(
-            format!("Expected kind {}, got {}", KIND_P2P_ORDER, event.kind.as_u16()),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_P2P_ORDER,
+            event.kind.as_u16()
+        ));
     }
     let pubkey = event.pubkey.to_hex();
-    let order_id = get_tag_value(event, "d")
-        .ok_or("Missing required 'd' tag (order ID)")?;
+    let order_id = get_tag_value(event, "d").ok_or("Missing required 'd' tag (order ID)")?;
     let coordinate = format!("{}:{}:{}", KIND_P2P_ORDER, pubkey, order_id);
     let naddr = build_naddr(&pubkey, &order_id).unwrap_or_default();
     let order_type = get_tag_value(event, "k")
         .and_then(|s| OrderType::from_str(&s))
         .ok_or("Missing or invalid 'k' tag (order type: buy/sell)")?;
-    let currency = get_tag_value(event, "f")
-        .ok_or("Missing required 'f' tag (currency)")?;
+    let currency = get_tag_value(event, "f").ok_or("Missing required 'f' tag (currency)")?;
     let status = get_tag_value(event, "s")
         .and_then(|s| OrderStatus::from_str(&s))
         .unwrap_or(OrderStatus::Pending);
     let amount_sats = get_tag_value(event, "amt")
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0);
-    let fiat_amount = parse_fiat_amount(event)
-        .ok_or("Missing or invalid 'fa' tag (fiat amount)")?;
+    let fiat_amount =
+        parse_fiat_amount(event).ok_or("Missing or invalid 'fa' tag (fiat amount)")?;
     let premium = get_tag_value(event, "premium").and_then(|s| s.parse::<f64>().ok());
     let payment_methods = get_tag_values(event, "pm");
     let network = get_tag_value(event, "network")
@@ -325,10 +326,8 @@ pub fn parse_p2p_order(event: &Event) -> Result<P2POrder, String> {
     let rating = get_tag_value(event, "rating").and_then(|s| Rating::from_json(&s));
     let geohash = get_tag_value(event, "g");
     let bond = get_tag_value(event, "bond").and_then(|s| s.parse::<f64>().ok());
-    let expires_at = get_tag_value(event, "expires_at")
-        .and_then(|s| s.parse::<u64>().ok());
-    let expiration = get_tag_value(event, "expiration")
-        .and_then(|s| s.parse::<u64>().ok());
+    let expires_at = get_tag_value(event, "expires_at").and_then(|s| s.parse::<u64>().ok());
+    let expiration = get_tag_value(event, "expiration").and_then(|s| s.parse::<u64>().ok());
     Ok(P2POrder {
         order_id,
         event_id: event.id.to_hex(),
@@ -393,8 +392,7 @@ fn parse_fiat_amount(event: &Event) -> Option<FiatAmount> {
 /// Build naddr from pubkey and order_id
 fn build_naddr(pubkey: &str, order_id: &str) -> Option<String> {
     let pk = PublicKey::from_hex(pubkey).ok()?;
-    let coordinate = Coordinate::new(Kind::Custom(KIND_P2P_ORDER), pk)
-        .identifier(order_id);
+    let coordinate = Coordinate::new(Kind::Custom(KIND_P2P_ORDER), pk).identifier(order_id);
     let nip19 = Nip19Coordinate::new(coordinate, vec![]);
     nip19.to_bech32().ok()
 }
@@ -410,8 +408,14 @@ mod tests {
     #[test]
     fn test_order_status_from_str() {
         assert_eq!(OrderStatus::from_str("pending"), Some(OrderStatus::Pending));
-        assert_eq!(OrderStatus::from_str("in-progress"), Some(OrderStatus::InProgress));
-        assert_eq!(OrderStatus::from_str("cancelled"), Some(OrderStatus::Canceled));
+        assert_eq!(
+            OrderStatus::from_str("in-progress"),
+            Some(OrderStatus::InProgress)
+        );
+        assert_eq!(
+            OrderStatus::from_str("cancelled"),
+            Some(OrderStatus::Canceled)
+        );
     }
     #[test]
     fn test_fiat_amount_display() {

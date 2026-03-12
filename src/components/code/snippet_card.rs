@@ -8,13 +8,17 @@ use dioxus::prelude::*;
 #[component]
 pub fn CodeSnippetCard(
     snippet: DisplaySnippet,
-    #[props(default = true)]
-    show_author: bool,
-    #[props(default = 10)]
-    max_lines: usize,
+    #[props(default = true)] show_author: bool,
+    #[props(default = 10)] max_lines: usize,
 ) -> Element {
-    let language = snippet.language.clone().unwrap_or_else(|| "text".to_string());
-    let display_name = snippet.name.clone().unwrap_or_else(|| "Untitled".to_string());
+    let language = snippet
+        .language
+        .clone()
+        .unwrap_or_else(|| "text".to_string());
+    let display_name = snippet
+        .name
+        .clone()
+        .unwrap_or_else(|| "Untitled".to_string());
     let description = snippet.description.clone().unwrap_or_default();
     let code_lines: Vec<&str> = snippet.code.lines().collect();
     let truncated = code_lines.len() > max_lines;
@@ -79,7 +83,10 @@ pub fn CodeSnippetCard(
 /// Inline/embed version for rendering in notes
 #[component]
 pub fn CodeSnippetEmbed(snippet: DisplaySnippet) -> Element {
-    let language = snippet.language.clone().unwrap_or_else(|| "text".to_string());
+    let language = snippet
+        .language
+        .clone()
+        .unwrap_or_else(|| "text".to_string());
     let display_name = snippet.name.clone();
     let code_lines: Vec<&str> = snippet.code.lines().collect();
     let truncated = code_lines.len() > 15;

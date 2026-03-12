@@ -1,9 +1,9 @@
-use dioxus::prelude::ReadableExt;
-use nostr_sdk::prelude::*;
-use std::time::Duration;
 use super::search_relays::get_connected_search_relays;
 use crate::stores::nostr_client::{ensure_relays_ready, NOSTR_CLIENT};
 use crate::utils::video_kinds::all_video_kinds;
+use dioxus::prelude::ReadableExt;
+use nostr_sdk::prelude::*;
+use std::time::Duration;
 /// Result type for content search
 #[derive(Clone, Debug)]
 pub struct ContentSearchResult {
@@ -36,12 +36,17 @@ pub async fn search_text_notes(
     };
     log::debug!("Searching for text notes matching: {}", query);
     ensure_relays_ready(&client).await;
-    let filter = Filter::new().kind(Kind::TextNote).search(query).limit(limit);
+    let filter = Filter::new()
+        .kind(Kind::TextNote)
+        .search(query)
+        .limit(limit);
     let search_urls = get_connected_search_relays(&client).await;
     let fetch_result = if search_urls.is_empty() {
         client.fetch_events(filter, Duration::from_secs(5)).await
     } else {
-        client.fetch_events_from(search_urls, filter, Duration::from_secs(5)).await
+        client
+            .fetch_events_from(search_urls, filter, Duration::from_secs(5))
+            .await
     };
     match fetch_result {
         Ok(events) => {
@@ -60,7 +65,9 @@ pub async fn search_text_notes(
                 .collect();
             results.sort_by(|a, b| b.relevance.cmp(&a.relevance));
             log::debug!(
-                "Text note search for '{}' returned {} results", query, results.len()
+                "Text note search for '{}' returned {} results",
+                query,
+                results.len()
             );
             Ok(results)
         }
@@ -86,12 +93,17 @@ pub async fn search_articles(
     };
     log::debug!("Searching for articles matching: {}", query);
     ensure_relays_ready(&client).await;
-    let filter = Filter::new().kind(Kind::from(30023)).search(query).limit(limit);
+    let filter = Filter::new()
+        .kind(Kind::from(30023))
+        .search(query)
+        .limit(limit);
     let search_urls = get_connected_search_relays(&client).await;
     let fetch_result = if search_urls.is_empty() {
         client.fetch_events(filter, Duration::from_secs(5)).await
     } else {
-        client.fetch_events_from(search_urls, filter, Duration::from_secs(5)).await
+        client
+            .fetch_events_from(search_urls, filter, Duration::from_secs(5))
+            .await
     };
     match fetch_result {
         Ok(events) => {
@@ -110,7 +122,9 @@ pub async fn search_articles(
                 .collect();
             results.sort_by(|a, b| b.relevance.cmp(&a.relevance));
             log::debug!(
-                "Article search for '{}' returned {} results", query, results.len()
+                "Article search for '{}' returned {} results",
+                query,
+                results.len()
             );
             Ok(results)
         }
@@ -136,12 +150,17 @@ pub async fn search_photos(
     };
     log::debug!("Searching for photos matching: {}", query);
     ensure_relays_ready(&client).await;
-    let filter = Filter::new().kind(Kind::Custom(20)).search(query).limit(limit);
+    let filter = Filter::new()
+        .kind(Kind::Custom(20))
+        .search(query)
+        .limit(limit);
     let search_urls = get_connected_search_relays(&client).await;
     let fetch_result = if search_urls.is_empty() {
         client.fetch_events(filter, Duration::from_secs(5)).await
     } else {
-        client.fetch_events_from(search_urls, filter, Duration::from_secs(5)).await
+        client
+            .fetch_events_from(search_urls, filter, Duration::from_secs(5))
+            .await
     };
     match fetch_result {
         Ok(events) => {
@@ -160,7 +179,9 @@ pub async fn search_photos(
                 .collect();
             results.sort_by(|a, b| b.relevance.cmp(&a.relevance));
             log::debug!(
-                "Photo search for '{}' returned {} results", query, results.len()
+                "Photo search for '{}' returned {} results",
+                query,
+                results.len()
             );
             Ok(results)
         }
@@ -194,7 +215,9 @@ pub async fn search_videos(
     let fetch_result = if search_urls.is_empty() {
         client.fetch_events(filter, Duration::from_secs(5)).await
     } else {
-        client.fetch_events_from(search_urls, filter, Duration::from_secs(5)).await
+        client
+            .fetch_events_from(search_urls, filter, Duration::from_secs(5))
+            .await
     };
     match fetch_result {
         Ok(events) => {
@@ -213,7 +236,9 @@ pub async fn search_videos(
                 .collect();
             results.sort_by(|a, b| b.relevance.cmp(&a.relevance));
             log::debug!(
-                "Video search for '{}' returned {} results", query, results.len()
+                "Video search for '{}' returned {} results",
+                query,
+                results.len()
             );
             Ok(results)
         }
@@ -233,7 +258,10 @@ pub async fn get_contact_pubkeys() -> Vec<PublicKey> {
             return Vec::new();
         }
     };
-    match client.get_contact_list_public_keys(Duration::from_secs(5)).await {
+    match client
+        .get_contact_list_public_keys(Duration::from_secs(5))
+        .await
+    {
         Ok(pubkeys) => {
             log::debug!("Found {} contacts", pubkeys.len());
             pubkeys

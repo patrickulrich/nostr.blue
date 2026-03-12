@@ -7,8 +7,7 @@ pub(super) fn NavLink(
     to: Route,
     icon: Element,
     label: &'static str,
-    #[props(default = None)]
-    badge: Option<usize>,
+    #[props(default = None)] badge: Option<usize>,
 ) -> Element {
     let current_route = use_route::<Route>();
     let is_active = match (&to, &current_route) {
@@ -20,9 +19,7 @@ pub(super) fn NavLink(
         (Route::DMs {}, Route::DMs {}) => true,
         (Route::Photos {}, Route::Photos {}) => true,
         (Route::Photos {}, Route::PhotoDetail { .. }) => true,
-        (Route::PhotoDetail { photo_id: p1 }, Route::PhotoDetail { photo_id: p2 }) => {
-            p1 == p2
-        }
+        (Route::PhotoDetail { photo_id: p1 }, Route::PhotoDetail { photo_id: p2 }) => p1 == p2,
         (Route::MusicHome {}, Route::MusicHome {})
         | (Route::MusicHome {}, Route::MusicRadio {})
         | (Route::MusicHome {}, Route::MusicLeaderboard {})
@@ -37,17 +34,14 @@ pub(super) fn NavLink(
         (Route::Bookmarks {}, Route::Bookmarks {}) => true,
         (Route::Videos {}, Route::Videos {}) => true,
         (Route::Videos {}, Route::VideoDetail { .. }) => true,
-        (Route::VideoDetail { video_id: v1 }, Route::VideoDetail { video_id: v2 }) => {
-            v1 == v2
-        }
+        (Route::VideoDetail { video_id: v1 }, Route::VideoDetail { video_id: v2 }) => v1 == v2,
         (Route::VideosLive {}, Route::VideosLive {})
         | (Route::VideosLive {}, Route::VideosLiveTag { .. })
         | (Route::VideosLive {}, Route::LiveStreamDetail { .. }) => true,
         (Route::VideosLiveTag { tag: t1 }, Route::VideosLiveTag { tag: t2 }) => t1 == t2,
-        (
-            Route::LiveStreamDetail { note_id: n1 },
-            Route::LiveStreamDetail { note_id: n2 },
-        ) => n1 == n2,
+        (Route::LiveStreamDetail { note_id: n1 }, Route::LiveStreamDetail { note_id: n2 }) => {
+            n1 == n2
+        }
         (Route::LiveStreamNew {}, Route::LiveStreamNew {}) => true,
         (Route::CashuWallet {}, Route::CashuWallet {}) => true,
         (Route::Settings {}, Route::Settings {}) => true,

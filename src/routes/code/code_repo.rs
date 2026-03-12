@@ -2,7 +2,10 @@
 //!
 //! View a single NIP-34 Git repository with README, issues, and PRs.
 //! Styled to match gittr's layout-client.tsx pattern.
-use crate::components::code::{CloneHelpModal, ContributorsList, ReadmeViewer, RelayDisplay, RepoActionBar, RepoHeader, RepoTabNav};
+use crate::components::code::{
+    CloneHelpModal, ContributorsList, ReadmeViewer, RelayDisplay, RepoActionBar, RepoHeader,
+    RepoTabNav,
+};
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::git_hosting::{fetch_readme, fetch_repository};
@@ -29,7 +32,9 @@ pub fn CodeRepo(naddr: String) -> Element {
         spawn(async move {
             loading.set(true);
             let result = fetch_repository(&naddr_val).await;
-            if *request_gen.peek() != gen { return; }
+            if *request_gen.peek() != gen {
+                return;
+            }
             repo_result.set(Some(result));
             loading.set(false);
         });

@@ -5,14 +5,12 @@
 //! - Relay Lists (30002): Relay URLs
 //! - Bookmark Lists (30003): Event cards
 //! - Curation Lists (30004): Event cards
-use dioxus::prelude::*;
-use nostr_sdk::{Event, EventId, PublicKey, ToBech32};
 use crate::hooks::{use_user_lists, UserList};
 use crate::stores::{nostr_client, profiles};
 use crate::utils::list_encryption::decrypt_private_tags;
-use crate::utils::list_kinds::{
-    NAMED_BOOKMARKS, NAMED_CURATIONS, NAMED_PEOPLE, NAMED_RELAYS,
-};
+use crate::utils::list_kinds::{NAMED_BOOKMARKS, NAMED_CURATIONS, NAMED_PEOPLE, NAMED_RELAYS};
+use dioxus::prelude::*;
+use nostr_sdk::{Event, EventId, PublicKey, ToBech32};
 /// A member entry extracted from a list
 #[derive(Clone, PartialEq)]
 struct ListMember {
@@ -128,12 +126,11 @@ fn PeopleListView(list: UserList) -> Element {
                     if tag.kind() == nostr_sdk::TagKind::p() {
                         if let Some(pk_str) = tag.content() {
                             let display_name = get_member_display_name(pk_str);
-                            all_members
-                                .push(ListMember {
-                                    pubkey: pk_str.to_string(),
-                                    display_name,
-                                    is_private: false,
-                                });
+                            all_members.push(ListMember {
+                                pubkey: pk_str.to_string(),
+                                display_name,
+                                is_private: false,
+                            });
                         }
                     }
                 }
@@ -144,12 +141,11 @@ fn PeopleListView(list: UserList) -> Element {
                                 if let Some(pk_str) = tag.content() {
                                     if !all_members.iter().any(|m| m.pubkey == pk_str) {
                                         let display_name = get_member_display_name(pk_str);
-                                        all_members
-                                            .push(ListMember {
-                                                pubkey: pk_str.to_string(),
-                                                display_name,
-                                                is_private: true,
-                                            });
+                                        all_members.push(ListMember {
+                                            pubkey: pk_str.to_string(),
+                                            display_name,
+                                            is_private: true,
+                                        });
                                     }
                                 }
                             }
@@ -251,12 +247,11 @@ fn RelayListView(list: UserList) -> Element {
                             Some("write") => (false, true),
                             _ => (true, true),
                         };
-                        entries
-                            .push(RelayEntry {
-                                url: url.to_string(),
-                                read,
-                                write,
-                            });
+                        entries.push(RelayEntry {
+                            url: url.to_string(),
+                            read,
+                            write,
+                        });
                     }
                 }
             }

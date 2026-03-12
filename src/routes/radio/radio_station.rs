@@ -14,31 +14,26 @@ pub fn RadioStation(naddr: String) -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut selected_stream_idx = use_signal(|| 0usize);
     let naddr_clone = naddr.clone();
-    use_effect(
-        use_reactive(
-            &naddr_clone,
-            move |naddr_val| {
-                let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-                if !client_initialized {
-                    return;
+    use_effect(use_reactive(&naddr_clone, move |naddr_val| {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            return;
+        }
+        spawn(async move {
+            is_loading.set(true);
+            error.set(None);
+            match fetch_station_by_naddr(&naddr_val).await {
+                Ok(fetched_station) => {
+                    station.set(Some(fetched_station));
                 }
-                spawn(async move {
-                    is_loading.set(true);
-                    error.set(None);
-                    match fetch_station_by_naddr(&naddr_val).await {
-                        Ok(fetched_station) => {
-                            station.set(Some(fetched_station));
-                        }
-                        Err(e) => {
-                            log::error!("Failed to fetch radio station: {}", e);
-                            error.set(Some(e));
-                        }
-                    }
-                    is_loading.set(false);
-                });
-            },
-        ),
-    );
+                Err(e) => {
+                    log::error!("Failed to fetch radio station: {}", e);
+                    error.set(Some(e));
+                }
+            }
+            is_loading.set(false);
+        });
+    }));
     let station_id = station
         .read()
         .as_ref()

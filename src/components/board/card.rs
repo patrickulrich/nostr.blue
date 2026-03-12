@@ -1,17 +1,16 @@
 //! Pinboard Card Component
 //! Displays a pinboard in a card format for listing pages
 //! Image-focused card with cover image gradient, title, and author
-use dioxus::prelude::*;
 use crate::components::icons::PinIcon;
 use crate::hooks::use_author_metadata;
 use crate::routes::Route;
 use crate::stores::auth_store;
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::pin_boards_store::{
-    fetch_pinboard_reaction_count, has_user_reacted_to_pinboard,
-    toggle_pinboard_reaction, Pinboard,
+    fetch_pinboard_reaction_state, toggle_pinboard_reaction, Pinboard,
 };
 use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
 /// Hashtag badge for displaying board tags
 #[component]
 pub fn HashtagBadge(tag: String) -> Element {
@@ -51,8 +50,13 @@ pub fn PinBoardCard(
         .unwrap_or('?')
         .to_uppercase()
         .to_string();
-    let pin_text = pin_count
-        .map(|c| { if c == 1 { "1 pin".to_string() } else { format!("{} pins", c) } });
+    let pin_text = pin_count.map(|c| {
+        if c == 1 {
+            "1 pin".to_string()
+        } else {
+            format!("{} pins", c)
+        }
+    });
     let is_owner = auth_store::get_pubkey()
         .map(|pk| pk == author_pubkey)
         .unwrap_or(false);
@@ -154,17 +158,57 @@ pub fn PinBoardCardMosaic(
     let mut has_reacted = use_signal(|| false);
     let mut reaction_count = use_signal(|| 0usize);
     let mut reaction_loading = use_signal(|| false);
+    let mut reaction_request_gen = use_signal(|| 0u32);
+    let mut reaction_bootstrapped = use_signal(|| false);
+    let mut reaction_error = use_signal(|| None::<String>);
     let a_tag_for_reactions = board.a_tag.clone();
-    use_effect(
-        use_reactive!(
-            | a_tag_for_reactions | { let a_tag = a_tag_for_reactions.clone();
-            spawn(async move { if let Ok(count) = fetch_pinboard_reaction_count(& a_tag).
-            await { reaction_count.set(count); }
-            if *HAS_SIGNER.read() { if let
-            Ok(reacted) = has_user_reacted_to_pinboard(& a_tag). await { has_reacted
-            .set(reacted); } } }); }
+    use_effect(use_reactive(
+        (
+            &a_tag_for_reactions,
+            &crate::stores::auth_store::AUTH_STATE.read().pubkey,
         ),
-    );
+        move |(a_tag, _pubkey)| {
+            let a_tag = a_tag.clone();
+            let has_signer = *HAS_SIGNER.read();
+            let current_gen = reaction_request_gen.peek().wrapping_add(1);
+            reaction_request_gen.set(current_gen);
+            reaction_loading.set(true);
+            reaction_error.set(None);
+            if !has_signer {
+                reaction_bootstrapped.set(false);
+                reaction_count.set(0);
+                has_reacted.set(false);
+                reaction_loading.set(false);
+                return;
+            }
+            reaction_bootstrapped.set(false);
+            spawn(async move {
+                match fetch_pinboard_reaction_state(&a_tag).await {
+                    Ok((count, reacted)) => {
+                        if *reaction_request_gen.peek() != current_gen {
+                            return;
+                        }
+                        reaction_count.set(count);
+                        has_reacted.set(reacted);
+                        reaction_bootstrapped.set(true);
+                        reaction_error.set(None);
+                        reaction_loading.set(false);
+                    }
+                    Err(_) => {
+                        if *reaction_request_gen.peek() != current_gen {
+                            return;
+                        }
+                        has_reacted.set(false);
+                        reaction_bootstrapped.set(false);
+                        reaction_count.set(0);
+                        reaction_error
+                            .set(Some("Failed to load reactions. Tap to retry.".to_string()));
+                        reaction_loading.set(false);
+                    }
+                }
+            });
+        },
+    ));
     let display_name = author_metadata
         .read()
         .as_ref()
@@ -218,23 +262,60 @@ pub fn PinBoardCardMosaic(
             }
             div { class: "absolute inset-0 bg-gradient-to-t from-black/80 to-transparent
                         opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-[1] pointer-events-none" }
-            div { class: "absolute top-3 right-3 flex gap-2 z-[4]
+            div { class: "absolute top-3 right-3 flex flex-wrap gap-2 z-[4]
                         opacity-0 translate-x-2
                         group-hover:opacity-100 group-hover:translate-x-0
                         transition-all duration-200 delay-100",
                 button {
                     class: "rounded-full p-2 bg-white/90 hover:bg-white shadow-md backdrop-blur-sm
                             {heart_button_class} transition-colors disabled:opacity-50",
-                    disabled: *reaction_loading.read(),
+                    disabled: *reaction_loading.read() || !*HAS_SIGNER.read(),
                     onclick: move |e| {
                         e.stop_propagation();
-                        if !*HAS_SIGNER.read() {
-                            log::warn!("Cannot react: no signer");
+                        if *reaction_loading.read() || !*HAS_SIGNER.read() {
                             return;
                         }
+                        // If not bootstrapped, retry the bootstrap fetch first
+                        if !*reaction_bootstrapped.read() {
+                            let next_gen = reaction_request_gen.peek().wrapping_add(1);
+                            reaction_request_gen.set(next_gen);
+                            let current_gen = next_gen;
+                            let a_tag = board_for_react.a_tag.clone();
+                            reaction_loading.set(true);
+                            reaction_error.set(None);
+                            spawn(async move {
+                                match fetch_pinboard_reaction_state(&a_tag).await {
+                                    Ok((count, reacted)) => {
+                                        if *reaction_request_gen.peek() != current_gen {
+                                            return;
+                                        }
+                                        reaction_count.set(count);
+                                        has_reacted.set(reacted);
+                                        reaction_bootstrapped.set(true);
+                                        reaction_error.set(None);
+                                        reaction_loading.set(false);
+                                    }
+                                    Err(_e) => {
+                                        if *reaction_request_gen.peek() != current_gen {
+                                            return;
+                                        }
+                                        reaction_error.set(Some(
+                                            "Failed to load reactions. Tap heart to retry."
+                                                .to_string(),
+                                        ));
+                                        reaction_loading.set(false);
+                                    }
+                                }
+                            });
+                            return;
+                        }
+                        // Invalidate any in-flight bootstrap fetch before optimistic update
+                        let next_gen = reaction_request_gen.peek().wrapping_add(1);
+                        reaction_request_gen.set(next_gen);
                         let board = board_for_react.clone();
                         let currently_reacted = *has_reacted.peek();
                         let current_count = *reaction_count.peek();
+                        reaction_error.set(None);
                         has_reacted.set(!currently_reacted);
                         if currently_reacted {
                             reaction_count.set(current_count.saturating_sub(1));
@@ -242,19 +323,65 @@ pub fn PinBoardCardMosaic(
                             reaction_count.set(current_count + 1);
                         }
                         reaction_loading.set(true);
+                        let current_gen = *reaction_request_gen.peek();
                         spawn(async move {
                             match toggle_pinboard_reaction(&board, "+").await {
-                                Ok(_added) => {}
+                                Ok(added) => {
+                                    if *reaction_request_gen.peek() != current_gen {
+                                        return;
+                                    }
+                                    if added == currently_reacted {
+                                        match fetch_pinboard_reaction_state(&board.a_tag).await {
+                                            Ok((count, reacted)) => {
+                                                if *reaction_request_gen.peek() != current_gen {
+                                                    return;
+                                                }
+                                                has_reacted.set(reacted);
+                                                reaction_count.set(count);
+                                                reaction_error.set(None);
+                                            }
+                                            Err(e) => {
+                                                log::warn!(
+                                                    "Failed to reconcile reaction state after toggle: {}",
+                                                    e
+                                                );
+                                                reaction_error.set(Some(
+                                                    "Failed to update reaction - tap to retry."
+                                                        .to_string(),
+                                                ));
+                                                reaction_count.set(current_count);
+                                                has_reacted.set(currently_reacted);
+                                            }
+                                        }
+                                    } else {
+                                        has_reacted.set(added);
+                                        reaction_error.set(None);
+                                    }
+                                }
                                 Err(e) => {
+                                    if *reaction_request_gen.peek() != current_gen {
+                                        return;
+                                    }
                                     log::error!("Failed to toggle reaction: {}", e);
+                                    reaction_error.set(Some(
+                                        "Failed to update reaction - tap to retry.".to_string(),
+                                    ));
                                     has_reacted.set(currently_reacted);
                                     reaction_count.set(current_count);
                                 }
                             }
-                            reaction_loading.set(false);
+                            if *reaction_request_gen.peek() == current_gen {
+                                reaction_loading.set(false);
+                            }
                         });
                     },
-                    title: if *has_reacted.read() { "Unlike" } else { "Like" },
+                    title: if let Some(ref err) = *reaction_error.read() {
+                        "{err}"
+                    } else if *has_reacted.read() {
+                        "Unlike"
+                    } else {
+                        "Like"
+                    },
                     svg {
                         class: "w-5 h-5 {heart_fill_class}",
                         fill: if *has_reacted.read() { "currentColor" } else { "none" },
@@ -283,6 +410,12 @@ pub fn PinBoardCardMosaic(
                         fill: "currentColor",
                         view_box: "0 0 24 24",
                         path { d: "M13 10V3L4 14h7v7l9-11h-7z" }
+                    }
+                }
+                if let Some(error) = reaction_error.read().as_ref() {
+                    div {
+                        class: "w-full max-w-[12rem] rounded-md bg-black/75 px-2 py-1 text-[11px] font-medium text-white shadow-md",
+                        "{error}"
                     }
                 }
             }
@@ -347,15 +480,12 @@ const SIZE_VARIANTS: [&str; 3] = ["small", "medium", "large"];
 #[component]
 pub fn PinBoardMosaicGrid(
     boards: Vec<Pinboard>,
-    #[props(default)]
-    on_board_click: Option<EventHandler<Pinboard>>,
+    #[props(default)] on_board_click: Option<EventHandler<Pinboard>>,
     /// Handler for zap button clicks - parent should open ZapModal
     #[props(default)]
     on_zap_request: Option<EventHandler<Pinboard>>,
-    #[props(default = false)]
-    loading: bool,
-    #[props(default = 8)]
-    skeleton_count: usize,
+    #[props(default = false)] loading: bool,
+    #[props(default = 8)] skeleton_count: usize,
     /// Callback when more items should be loaded
     #[props(default)]
     on_load_more: Option<EventHandler<()>>,
@@ -410,16 +540,17 @@ pub fn PinBoardMosaicGrid(
 }
 /// Compact pinboard card for smaller displays or sidebars
 #[component]
-pub fn PinBoardCardCompact(
-    board: Pinboard,
-    #[props(default)]
-    pin_count: Option<usize>,
-) -> Element {
+pub fn PinBoardCardCompact(board: Pinboard, #[props(default)] pin_count: Option<usize>) -> Element {
     let title = board.title.clone();
     let cover_image = board.image.clone();
     let naddr = board.naddr.clone();
-    let pin_text = pin_count
-        .map(|c| { if c == 1 { "1 pin".to_string() } else { format!("{} pins", c) } });
+    let pin_text = pin_count.map(|c| {
+        if c == 1 {
+            "1 pin".to_string()
+        } else {
+            format!("{} pins", c)
+        }
+    });
     rsx! {
         Link {
             to: Route::PinBoardDetail {
@@ -500,10 +631,8 @@ pub fn PinBoardCardCompactSkeleton() -> Element {
 #[component]
 pub fn PinBoardGrid(
     boards: Vec<Pinboard>,
-    #[props(default = false)]
-    loading: bool,
-    #[props(default = 4)]
-    skeleton_count: usize,
+    #[props(default = false)] loading: bool,
+    #[props(default = 4)] skeleton_count: usize,
 ) -> Element {
     rsx! {
         div { class: "grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4",

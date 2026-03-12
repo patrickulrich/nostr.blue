@@ -4,6 +4,7 @@ use crate::components::{
 };
 use crate::stores::nostr_client::{get_client, HAS_SIGNER};
 use crate::stores::relay;
+use crate::utils::custom_emoji::{build_custom_emoji_tags, EmojiSelection};
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
@@ -45,11 +46,7 @@ pub fn ReplyComposer(
     let content_len = content.read().len();
     let media_len = if !uploaded_media.read().is_empty() {
         let separator_len = if content_len > 0 { 2 } else { 0 };
-        let urls_with_newlines: usize = uploaded_media
-            .read()
-            .iter()
-            .map(|url| url.len() + 1)
-            .sum();
+        let urls_with_newlines: usize = uploaded_media.read().iter().map(|url| url.len() + 1).sum();
         separator_len + urls_with_newlines
     } else {
         0
@@ -60,8 +57,7 @@ pub fn ReplyComposer(
     let show_warning = remaining < 100 && !is_over_limit;
 
     let has_signer = *HAS_SIGNER.read();
-    let can_publish =
-        char_count > 0 && !is_over_limit && !*is_publishing.read() && has_signer;
+    let can_publish = char_count > 0 && !is_over_limit && !*is_publishing.read() && has_signer;
 
     let counter_color = if is_over_limit {
         "text-red-500"
@@ -140,8 +136,8 @@ pub fn ReplyComposer(
         insert_at_cursor(text_with_space);
     };
 
-    let handle_emoji_selected = move |emoji: String| {
-        insert_at_cursor(emoji);
+    let handle_emoji_selected = move |selection: EmojiSelection| {
+        insert_at_cursor(selection.insertion_text());
     };
 
     let handle_gif_selected = move |gif_url: String| {
@@ -259,6 +255,7 @@ pub fn ReplyComposer(
                     }
                 }
             }
+            tags.extend(build_custom_emoji_tags(&content_for_publish));
 
             let builder = EventBuilder::text_note(&content_for_publish).tags(tags);
 

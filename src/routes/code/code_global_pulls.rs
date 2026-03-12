@@ -4,7 +4,7 @@
 //! Shows PRs created by the user with status filtering and search.
 use crate::components::{icons, CodePullRow};
 use crate::routes::Route;
-use crate::services::git_hosting::{fetch_user_prs, fetch_prs_assigned_to};
+use crate::services::git_hosting::{fetch_prs_assigned_to, fetch_user_prs};
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip34::{IssueStatus, PullRequest};
 use dioxus::prelude::*;
@@ -40,55 +40,57 @@ pub fn CodeGlobalPulls() -> Element {
     let auth = auth_store::AUTH_STATE.read();
     let user_pubkey = auth.pubkey.clone().unwrap_or_default();
     let client_init = *nostr_client::CLIENT_INITIALIZED.read();
-    use_effect(
-        use_reactive(
-            (&user_pubkey, &client_init),
-            move |(pk_hex, client_initialized)| {
-                if !client_initialized || pk_hex.is_empty() {
+    use_effect(use_reactive(
+        (&user_pubkey, &client_init),
+        move |(pk_hex, client_initialized)| {
+            if !client_initialized || pk_hex.is_empty() {
+                return;
+            }
+            let gen = fetch_gen.peek().wrapping_add(1);
+            fetch_gen.set(gen);
+            created_prs.set(Vec::new());
+            assigned_prs.set(Vec::new());
+            loading.set(true);
+            fetch_error.set(None);
+            let captured_pk = pk_hex.clone();
+            spawn(async move {
+                if let Ok(pk) = PublicKey::from_hex(&captured_pk) {
+                    let (created_res, assigned_res) =
+                        futures::join!(fetch_user_prs(&pk, 100), fetch_prs_assigned_to(&pk, 100));
+                    if *fetch_gen.peek() != gen {
+                        return;
+                    }
+                    let mut errors = Vec::new();
+                    match created_res {
+                        Ok(fetched) => created_prs.set(fetched),
+                        Err(e) => {
+                            errors.push(format!("Created: {}", e));
+                            created_prs.set(Vec::new());
+                        }
+                    }
+                    match assigned_res {
+                        Ok(fetched) => assigned_prs.set(fetched),
+                        Err(e) => {
+                            errors.push(format!("Assigned: {}", e));
+                            assigned_prs.set(Vec::new());
+                        }
+                    }
+                    if !errors.is_empty() {
+                        fetch_error.set(Some(errors.join("; ")));
+                    }
+                } else {
+                    if *fetch_gen.peek() != gen {
+                        return;
+                    }
+                    fetch_error.set(Some("Invalid public key".to_string()));
+                }
+                if *fetch_gen.peek() != gen {
                     return;
                 }
-                let gen = fetch_gen.peek().wrapping_add(1);
-                fetch_gen.set(gen);
-                created_prs.set(Vec::new());
-                assigned_prs.set(Vec::new());
-                loading.set(true);
-                fetch_error.set(None);
-                let captured_pk = pk_hex.clone();
-                spawn(async move {
-                    if let Ok(pk) = PublicKey::from_hex(&captured_pk) {
-                        let (created_res, assigned_res) = futures::join!(
-                            fetch_user_prs(&pk, 100),
-                            fetch_prs_assigned_to(&pk, 100)
-                        );
-                        if *fetch_gen.peek() != gen { return; }
-                        let mut errors = Vec::new();
-                        match created_res {
-                            Ok(fetched) => created_prs.set(fetched),
-                            Err(e) => {
-                                errors.push(format!("Created: {}", e));
-                                created_prs.set(Vec::new());
-                            }
-                        }
-                        match assigned_res {
-                            Ok(fetched) => assigned_prs.set(fetched),
-                            Err(e) => {
-                                errors.push(format!("Assigned: {}", e));
-                                assigned_prs.set(Vec::new());
-                            }
-                        }
-                        if !errors.is_empty() {
-                            fetch_error.set(Some(errors.join("; ")));
-                        }
-                    } else {
-                        if *fetch_gen.peek() != gen { return; }
-                        fetch_error.set(Some("Invalid public key".to_string()));
-                    }
-                    if *fetch_gen.peek() != gen { return; }
-                    loading.set(false);
-                });
-            },
-        ),
-    );
+                loading.set(false);
+            });
+        },
+    ));
 
     if !auth.is_authenticated {
         return rsx! { NotAuthenticatedState {} };
@@ -102,10 +104,7 @@ pub fn CodeGlobalPulls() -> Element {
     });
     let all_labels = use_memo(move || {
         let prs = all_prs_for_tab.read();
-        let mut labels: Vec<String> = prs
-            .iter()
-            .flat_map(|p| p.labels.iter().cloned())
-            .collect();
+        let mut labels: Vec<String> = prs.iter().flat_map(|p| p.labels.iter().cloned()).collect();
         labels.sort();
         labels.dedup();
         labels
@@ -129,7 +128,8 @@ pub fn CodeGlobalPulls() -> Element {
             }
             let title = p.display_title().to_lowercase();
             let content = p.content.to_lowercase();
-            title.contains(&query) || content.contains(&query)
+            title.contains(&query)
+                || content.contains(&query)
                 || p.labels.iter().any(|l| l.to_lowercase().contains(&query))
         })
         .filter(|p| match current_label.as_deref() {

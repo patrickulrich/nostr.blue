@@ -1,8 +1,8 @@
-use dioxus::prelude::*;
-use nostr_sdk::Event as NostrEvent;
 use crate::components::{ClientInitializing, NoteCard};
 use crate::hooks::{use_infinite_scroll::use_infinite_scroll, use_mute_block_cache};
 use crate::stores::{auth_store, bookmarks, nostr_client};
+use dioxus::prelude::*;
+use nostr_sdk::Event as NostrEvent;
 #[component]
 pub fn Bookmarks() -> Element {
     let auth = auth_store::AUTH_STATE.read();
@@ -30,19 +30,15 @@ pub fn Bookmarks() -> Element {
             match bookmarks::init_bookmarks().await {
                 Ok(_) => {
                     let total_bookmarks = bookmarks::get_bookmarks_count();
-                    match bookmarks::fetch_bookmarked_events_paginated(
-                            0,
-                            Some(BATCH_SIZE),
-                        )
-                        .await
-                    {
+                    match bookmarks::fetch_bookmarked_events_paginated(0, Some(BATCH_SIZE)).await {
                         Ok(events) => {
                             let fetched_count = events.len();
                             bookmarked_events.set(events);
                             loaded_count.set(fetched_count);
                             has_more.set(fetched_count < total_bookmarks);
                             log::info!(
-                                "Loaded initial batch: {} / {} bookmarks", fetched_count,
+                                "Loaded initial batch: {} / {} bookmarks",
+                                fetched_count,
                                 total_bookmarks
                             );
                         }
@@ -67,21 +63,18 @@ pub fn Bookmarks() -> Element {
             let current_loaded = *loaded_count.read();
             let total_bookmarks = bookmarks::get_bookmarks_count();
             log::info!(
-                "Loading more bookmarks: skip={}, limit={}", current_loaded, BATCH_SIZE
+                "Loading more bookmarks: skip={}, limit={}",
+                current_loaded,
+                BATCH_SIZE
             );
-            match bookmarks::fetch_bookmarked_events_paginated(
-                    current_loaded,
-                    Some(BATCH_SIZE),
-                )
+            match bookmarks::fetch_bookmarked_events_paginated(current_loaded, Some(BATCH_SIZE))
                 .await
             {
                 Ok(new_events) => {
                     if !new_events.is_empty() {
                         let mut current_events = bookmarked_events.read().clone();
-                        let existing_ids: std::collections::HashSet<_> = current_events
-                            .iter()
-                            .map(|e| e.id.to_hex())
-                            .collect();
+                        let existing_ids: std::collections::HashSet<_> =
+                            current_events.iter().map(|e| e.id.to_hex()).collect();
                         let unique_new: Vec<_> = new_events
                             .iter()
                             .filter(|e| !existing_ids.contains(&e.id.to_hex()))
@@ -95,7 +88,9 @@ pub fn Bookmarks() -> Element {
                         has_more.set(new_loaded_count < total_bookmarks);
                         log::info!(
                             "Loaded more bookmarks: {} / {} total ({} unique added)",
-                            new_loaded_count, total_bookmarks, unique_count
+                            new_loaded_count,
+                            total_bookmarks,
+                            unique_count
                         );
                     } else {
                         has_more.set(false);

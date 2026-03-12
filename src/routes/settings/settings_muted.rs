@@ -27,10 +27,9 @@ pub fn SettingsMuted() -> Element {
             match nostr_client::unmute_post(event_id).await {
                 Ok(_) => {
                     log::info!("Post unmuted successfully");
-                    muted_posts
-                        .with_mut(|posts| {
-                            posts.retain(|p| p != &event_id_clone);
-                        });
+                    muted_posts.with_mut(|posts| {
+                        posts.retain(|p| p != &event_id_clone);
+                    });
                 }
                 Err(e) => {
                     log::error!("Failed to unmute post: {}", e);

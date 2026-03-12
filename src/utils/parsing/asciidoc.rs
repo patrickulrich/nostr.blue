@@ -15,16 +15,15 @@
 //! with wiki articles that use Markdown instead of AsciiDoc.
 //!
 //! Uses ammonia for HTML sanitization to prevent XSS.
-use regex::Regex;
-use std::collections::HashMap;
-use std::sync::LazyLock;
 use super::markdown::{render_markdown, sanitize_html};
 use crate::utils::nip54::render_wikilinks_to_html;
 use crate::utils::nkbip03::{
-    extract_citations, generate_endnotes_html_with_data,
-    generate_footnotes_html_with_data, has_citations, render_citations_with_data,
-    CitationReference, ResolvedCitation,
+    extract_citations, generate_endnotes_html_with_data, generate_footnotes_html_with_data,
+    has_citations, render_citations_with_data, CitationReference, ResolvedCitation,
 };
+use regex::Regex;
+use std::collections::HashMap;
+use std::sync::LazyLock;
 /// Detected content format
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ContentFormat {
@@ -45,12 +44,20 @@ pub fn detect_content_format(content: &str) -> ContentFormat {
     for line in content.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with('#')
-            && trimmed.chars().nth(1).map(|c| c == ' ' || c == '#').unwrap_or(false)
+            && trimmed
+                .chars()
+                .nth(1)
+                .map(|c| c == ' ' || c == '#')
+                .unwrap_or(false)
         {
             markdown_score += 3;
         }
         if trimmed.starts_with('=')
-            && trimmed.chars().nth(1).map(|c| c == ' ' || c == '=').unwrap_or(false)
+            && trimmed
+                .chars()
+                .nth(1)
+                .map(|c| c == ' ' || c == '=')
+                .unwrap_or(false)
         {
             asciidoc_score += 3;
         }
@@ -76,9 +83,7 @@ pub fn detect_content_format(content: &str) -> ContentFormat {
     if content.contains("```") {
         markdown_score += 2;
     }
-    if content.contains("NOTE:") || content.contains("TIP:")
-        || content.contains("WARNING:")
-    {
+    if content.contains("NOTE:") || content.contains("TIP:") || content.contains("WARNING:") {
         asciidoc_score += 1;
     }
     if asciidoc_score > markdown_score {
@@ -98,10 +103,7 @@ pub fn render_content_auto(content: &str) -> String {
 ///
 /// Detects whether content is Markdown or AsciiDoc and renders accordingly.
 /// When `enable_wikilinks` is true, wikilinks are processed.
-pub fn render_content_auto_with_options(
-    content: &str,
-    enable_wikilinks: bool,
-) -> String {
+pub fn render_content_auto_with_options(content: &str, enable_wikilinks: bool) -> String {
     let format = detect_content_format(content);
     match format {
         ContentFormat::Markdown => {
@@ -124,22 +126,18 @@ pub fn render_content_auto_with_options(
 static HEADING_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?m)^(={1,6})\s+(.+?)(?:\s+=+)?$").expect("Invalid heading regex")
 });
-static BOLD_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\*\*?([^*\n]+?)\*\*?").expect("Invalid bold regex")
-});
+static BOLD_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\*\*?([^*\n]+?)\*\*?").expect("Invalid bold regex"));
 static ITALIC_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?:^|[^a-zA-Z0-9])_([^_\n]+?)_(?:[^a-zA-Z0-9]|$)")
-        .expect("Invalid italic regex")
+    Regex::new(r"(?:^|[^a-zA-Z0-9])_([^_\n]+?)_(?:[^a-zA-Z0-9]|$)").expect("Invalid italic regex")
 });
-static MONO_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"`([^`\n]+?)`|\+([^+\n]+?)\+").expect("Invalid mono regex")
-});
+static MONO_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"`([^`\n]+?)`|\+([^+\n]+?)\+").expect("Invalid mono regex"));
 static LINK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?:link:)?(https?://[^\s\[]+)\[([^\]]*)\]").expect("Invalid link regex")
 });
-static IMAGE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"image::?([^\s\[]+)\[([^\]]*)\]").expect("Invalid image regex")
-});
+static IMAGE_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"image::?([^\s\[]+)\[([^\]]*)\]").expect("Invalid image regex"));
 static CODE_BLOCK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?s)\[source(?:,([^\]]*))?\]\s*\n----\n(.*?)\n----")
         .expect("Invalid code block regex")
@@ -147,28 +145,22 @@ static CODE_BLOCK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 static LITERAL_BLOCK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?s)\.\.\.\.\n(.*?)\n\.\.\.\.").expect("Invalid literal block regex")
 });
-static UNORDERED_LIST_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?m)^(\*+|-)\s+(.+)$").expect("Invalid unordered list regex")
-});
-static ORDERED_LIST_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?m)^(\.+|\d+\.)\s+(.+)$").expect("Invalid ordered list regex")
-});
-static BLOCKQUOTE_LINE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?m)^>\s*(.*)$").expect("Invalid blockquote regex")
-});
+static UNORDERED_LIST_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?m)^(\*+|-)\s+(.+)$").expect("Invalid unordered list regex"));
+static ORDERED_LIST_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?m)^(\.+|\d+\.)\s+(.+)$").expect("Invalid ordered list regex"));
+static BLOCKQUOTE_LINE_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?m)^>\s*(.*)$").expect("Invalid blockquote regex"));
 static ADMONITION_INLINE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?m)^(NOTE|TIP|WARNING|CAUTION|IMPORTANT):\s+(.+)$")
         .expect("Invalid admonition regex")
 });
-static HR_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?m)^(?:'{3,}|-{3,})$").expect("Invalid hr regex")
-});
-static LINE_BREAK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\s+\+\s*$").expect("Invalid line break regex")
-});
-static TABLE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?s)\|===\s*\n(.*?)\n\|===").expect("Invalid table regex")
-});
+static HR_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?m)^(?:'{3,}|-{3,})$").expect("Invalid hr regex"));
+static LINE_BREAK_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\s+\+\s*$").expect("Invalid line break regex"));
+static TABLE_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)\|===\s*\n(.*?)\n\|===").expect("Invalid table regex"));
 /// Render AsciiDoc content to sanitized HTML
 ///
 /// Processes common AsciiDoc patterns and returns safe HTML.
@@ -206,58 +198,45 @@ fn render_asciidoc_internal(content: &str) -> String {
 }
 fn render_headings(content: &str) -> String {
     HEADING_REGEX
-        .replace_all(
-            content,
-            |caps: &regex::Captures| {
-                let level = caps.get(1).map(|m| m.as_str().len()).unwrap_or(1);
-                let text = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-                let id = slugify_heading(text);
-                format!(r#"<h{} id="{}">{}</h{}>"#, level, id, text, level)
-            },
-        )
+        .replace_all(content, |caps: &regex::Captures| {
+            let level = caps.get(1).map(|m| m.as_str().len()).unwrap_or(1);
+            let text = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+            let id = slugify_heading(text);
+            format!(r#"<h{} id="{}">{}</h{}>"#, level, id, text, level)
+        })
         .to_string()
 }
 fn render_code_blocks(content: &str) -> String {
     CODE_BLOCK_REGEX
-        .replace_all(
-            content,
-            |caps: &regex::Captures| {
-                let lang = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                let code = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-                let escaped = html_escape(code);
-                if lang.is_empty() {
-                    format!(r#"<pre><code>{}</code></pre>"#, escaped)
-                } else {
-                    format!(
-                        r#"<pre><code class="language-{}">{}</code></pre>"#,
-                        lang,
-                        escaped,
-                    )
-                }
-            },
-        )
+        .replace_all(content, |caps: &regex::Captures| {
+            let lang = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let code = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+            let escaped = html_escape(code);
+            if lang.is_empty() {
+                format!(r#"<pre><code>{}</code></pre>"#, escaped)
+            } else {
+                format!(
+                    r#"<pre><code class="language-{}">{}</code></pre>"#,
+                    lang, escaped,
+                )
+            }
+        })
         .to_string()
 }
 fn render_literal_blocks(content: &str) -> String {
     LITERAL_BLOCK_REGEX
-        .replace_all(
-            content,
-            |caps: &regex::Captures| {
-                let text = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                format!(r#"<pre>{}</pre>"#, html_escape(text))
-            },
-        )
+        .replace_all(content, |caps: &regex::Captures| {
+            let text = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            format!(r#"<pre>{}</pre>"#, html_escape(text))
+        })
         .to_string()
 }
 fn render_tables(content: &str) -> String {
     TABLE_REGEX
-        .replace_all(
-            content,
-            |caps: &regex::Captures| {
-                let table_content = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                render_table_content(table_content)
-            },
-        )
+        .replace_all(content, |caps: &regex::Captures| {
+            let table_content = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            render_table_content(table_content)
+        })
         .to_string()
 }
 fn render_table_content(content: &str) -> String {
@@ -333,10 +312,10 @@ fn render_blockquotes(content: &str) -> String {
             quote_lines.push(text.to_string());
         } else {
             if in_blockquote {
-                result
-                    .push(
-                        format!("<blockquote>{}</blockquote>", quote_lines.join("<br>")),
-                    );
+                result.push(format!(
+                    "<blockquote>{}</blockquote>",
+                    quote_lines.join("<br>")
+                ));
                 quote_lines.clear();
                 in_blockquote = false;
             }
@@ -344,7 +323,10 @@ fn render_blockquotes(content: &str) -> String {
         }
     }
     if in_blockquote && !quote_lines.is_empty() {
-        result.push(format!("<blockquote>{}</blockquote>", quote_lines.join("<br>")));
+        result.push(format!(
+            "<blockquote>{}</blockquote>",
+            quote_lines.join("<br>")
+        ));
     }
     result.join("\n")
 }
@@ -414,13 +396,20 @@ fn render_paragraphs(content: &str) -> String {
     for line in lines {
         let trimmed = line.trim();
         let is_block_element = trimmed.starts_with('<')
-            && (trimmed.starts_with("<h") || trimmed.starts_with("<p")
-                || trimmed.starts_with("<ul") || trimmed.starts_with("<ol")
-                || trimmed.starts_with("<li") || trimmed.starts_with("</")
-                || trimmed.starts_with("<table") || trimmed.starts_with("<tr")
-                || trimmed.starts_with("<th") || trimmed.starts_with("<td")
-                || trimmed.starts_with("<pre") || trimmed.starts_with("<blockquote")
-                || trimmed.starts_with("<div") || trimmed.starts_with("<hr"));
+            && (trimmed.starts_with("<h")
+                || trimmed.starts_with("<p")
+                || trimmed.starts_with("<ul")
+                || trimmed.starts_with("<ol")
+                || trimmed.starts_with("<li")
+                || trimmed.starts_with("</")
+                || trimmed.starts_with("<table")
+                || trimmed.starts_with("<tr")
+                || trimmed.starts_with("<th")
+                || trimmed.starts_with("<td")
+                || trimmed.starts_with("<pre")
+                || trimmed.starts_with("<blockquote")
+                || trimmed.starts_with("<div")
+                || trimmed.starts_with("<hr"));
         if trimmed.is_empty() || is_block_element {
             if !paragraph.is_empty() {
                 result.push(format!("<p>{}</p>", paragraph.join(" ")));
@@ -440,70 +429,59 @@ fn render_paragraphs(content: &str) -> String {
 }
 fn render_images(content: &str) -> String {
     IMAGE_REGEX
-        .replace_all(
-            content,
-            |caps: &regex::Captures| {
-                let url = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                let alt = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-                format!(r#"<img src="{}" alt="{}">"#, url, html_escape(alt))
-            },
-        )
+        .replace_all(content, |caps: &regex::Captures| {
+            let url = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let alt = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+            format!(r#"<img src="{}" alt="{}">"#, url, html_escape(alt))
+        })
         .to_string()
 }
 fn render_links(content: &str) -> String {
     LINK_REGEX
-        .replace_all(
-            content,
-            |caps: &regex::Captures| {
-                let url = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                let text = caps.get(2).map(|m| m.as_str()).unwrap_or(url);
-                format!(r#"<a href="{}">{}</a>"#, url, html_escape(text))
-            },
-        )
+        .replace_all(content, |caps: &regex::Captures| {
+            let url = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let text = caps.get(2).map(|m| m.as_str()).unwrap_or(url);
+            format!(r#"<a href="{}">{}</a>"#, url, html_escape(text))
+        })
         .to_string()
 }
 fn render_bold(content: &str) -> String {
     BOLD_REGEX
-        .replace_all(
-            content,
-            |caps: &regex::Captures| {
-                let text = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                format!("<strong>{}</strong>", text)
-            },
-        )
+        .replace_all(content, |caps: &regex::Captures| {
+            let text = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            format!("<strong>{}</strong>", text)
+        })
         .to_string()
 }
 fn render_italic(content: &str) -> String {
     ITALIC_REGEX
-        .replace_all(
-            content,
-            |caps: &regex::Captures| {
-                let full = caps.get(0).map(|m| m.as_str()).unwrap_or("");
-                let text = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                let leading = if full.starts_with('_') { "" } else { &full[..1] };
-                let trailing = if full.ends_with('_') {
-                    ""
-                } else {
-                    &full[full.len() - 1..]
-                };
-                format!("{}<em>{}</em>{}", leading, text, trailing)
-            },
-        )
+        .replace_all(content, |caps: &regex::Captures| {
+            let full = caps.get(0).map(|m| m.as_str()).unwrap_or("");
+            let text = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let leading = if full.starts_with('_') {
+                ""
+            } else {
+                &full[..1]
+            };
+            let trailing = if full.ends_with('_') {
+                ""
+            } else {
+                &full[full.len() - 1..]
+            };
+            format!("{}<em>{}</em>{}", leading, text, trailing)
+        })
         .to_string()
 }
 fn render_mono(content: &str) -> String {
     MONO_REGEX
-        .replace_all(
-            content,
-            |caps: &regex::Captures| {
-                let text = caps
-                    .get(1)
-                    .or_else(|| caps.get(2))
-                    .map(|m| m.as_str())
-                    .unwrap_or("");
-                format!("<code>{}</code>", html_escape(text))
-            },
-        )
+        .replace_all(content, |caps: &regex::Captures| {
+            let text = caps
+                .get(1)
+                .or_else(|| caps.get(2))
+                .map(|m| m.as_str())
+                .unwrap_or("");
+            format!("<code>{}</code>", html_escape(text))
+        })
         .to_string()
 }
 fn render_line_breaks(content: &str) -> String {
@@ -553,8 +531,7 @@ pub fn markdown_to_plain_text(content: &str) -> String {
     text = bold_double_under.replace_all(&text, "$1").to_string();
     let italic_star = Regex::new(r"\*([^*\n]+)\*").unwrap();
     text = italic_star.replace_all(&text, "$1").to_string();
-    let italic_under = Regex::new(r"(?:^|[^a-zA-Z0-9])_([^_\n]+)_(?:[^a-zA-Z0-9]|$)")
-        .unwrap();
+    let italic_under = Regex::new(r"(?:^|[^a-zA-Z0-9])_([^_\n]+)_(?:[^a-zA-Z0-9]|$)").unwrap();
     text = italic_under.replace_all(&text, " $1 ").to_string();
     let link_regex = Regex::new(r"\[([^\]]+)\]\([^)]+\)").unwrap();
     text = link_regex.replace_all(&text, "$1").to_string();
@@ -562,15 +539,12 @@ pub fn markdown_to_plain_text(content: &str) -> String {
     text = image_regex.replace_all(&text, "$1").to_string();
     let wikilink_regex = Regex::new(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]").unwrap();
     text = wikilink_regex
-        .replace_all(
-            &text,
-            |caps: &regex::Captures| {
-                caps.get(2)
-                    .map(|m| m.as_str())
-                    .unwrap_or(caps.get(1).map(|m| m.as_str()).unwrap_or(""))
-                    .to_string()
-            },
-        )
+        .replace_all(&text, |caps: &regex::Captures| {
+            caps.get(2)
+                .map(|m| m.as_str())
+                .unwrap_or(caps.get(1).map(|m| m.as_str()).unwrap_or(""))
+                .to_string()
+        })
         .to_string();
     let blockquote_regex = Regex::new(r"(?m)^>\s*(.*)$").unwrap();
     text = blockquote_regex.replace_all(&text, "$1 ").to_string();
@@ -596,7 +570,9 @@ pub fn asciidoc_to_text(content: &str) -> String {
     text = UNORDERED_LIST_REGEX.replace_all(&text, "$2 ").to_string();
     text = ORDERED_LIST_REGEX.replace_all(&text, "$2 ").to_string();
     text = BLOCKQUOTE_LINE_REGEX.replace_all(&text, "$1 ").to_string();
-    text = ADMONITION_INLINE_REGEX.replace_all(&text, "$2 ").to_string();
+    text = ADMONITION_INLINE_REGEX
+        .replace_all(&text, "$2 ")
+        .to_string();
     text = HR_REGEX.replace_all(&text, " ").to_string();
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -649,7 +625,10 @@ pub fn content_has_citations(content: &str) -> bool {
 }
 /// Extract citation identifiers from content
 pub fn extract_citation_identifiers(content: &str) -> Vec<String> {
-    extract_citations(content).into_iter().map(|c| c.identifier).collect()
+    extract_citations(content)
+        .into_iter()
+        .map(|c| c.identifier)
+        .collect()
 }
 /// Render content with automatic format detection and citation support
 ///
@@ -665,10 +644,8 @@ pub fn render_content_with_citations(
     let format = detect_content_format(content);
     let has_citations_flag = has_citations(content);
     let citation_refs = extract_citations(content);
-    let citation_identifiers: Vec<String> = citation_refs
-        .iter()
-        .map(|c| c.identifier.clone())
-        .collect();
+    let citation_identifiers: Vec<String> =
+        citation_refs.iter().map(|c| c.identifier.clone()).collect();
     let content_with_citations = if has_citations_flag {
         render_citations_with_data(content, resolved_citations)
     } else {
@@ -795,7 +772,8 @@ mod tests {
     }
     #[test]
     fn test_asciidoc_to_text() {
-        let asciidoc = "= Title\n\nThis is *bold* and _italic_ text with a link:https://example.com[link].";
+        let asciidoc =
+            "= Title\n\nThis is *bold* and _italic_ text with a link:https://example.com[link].";
         let text = asciidoc_to_text(asciidoc);
         assert!(text.contains("Title"));
         assert!(text.contains("bold"));
@@ -807,6 +785,9 @@ mod tests {
     #[test]
     fn test_slugify_heading() {
         assert_eq!(slugify_heading("Hello World"), "hello-world");
-        assert_eq!(slugify_heading("Chapter 1: Introduction"), "chapter-1-introduction");
+        assert_eq!(
+            slugify_heading("Chapter 1: Introduction"),
+            "chapter-1-introduction"
+        );
     }
 }

@@ -2,19 +2,17 @@
 //! Routes for the Bible reading app
 mod chapter;
 mod search;
-pub use chapter::BibleChapter;
-pub use search::BibleSearch;
-use dioxus::prelude::*;
 use crate::stores::bible_store::{
     self, split_books_by_testament, Book, BIBLE_STORE_INITIALIZED, CURRENT_BOOKS,
     CURRENT_TRANSLATION, ENGLISH_TRANSLATIONS, LOADING_BOOKS, LOADING_TRANSLATIONS,
 };
+pub use chapter::BibleChapter;
+use dioxus::prelude::*;
+pub use search::BibleSearch;
 /// Bible Home Page - Book/Chapter picker
 #[component]
 pub fn BibleHome() -> Element {
-    let mut selected_translation = use_signal(|| {
-        bible_store::DEFAULT_TRANSLATION.to_string()
-    });
+    let mut selected_translation = use_signal(|| bible_store::DEFAULT_TRANSLATION.to_string());
     let mut show_all_translations = use_signal(|| false);
     let mut active_tab = use_signal(|| "ot");
     use_effect(move || {
@@ -31,7 +29,8 @@ pub fn BibleHome() -> Element {
         let store_initialized = *BIBLE_STORE_INITIALIZED.read();
         let current_translation = CURRENT_TRANSLATION.read().clone();
         let books_loaded = !CURRENT_BOOKS.read().is_empty();
-        if !store_initialized || translation == current_translation
+        if !store_initialized
+            || translation == current_translation
             || (translation == bible_store::DEFAULT_TRANSLATION && books_loaded)
         {
             return;

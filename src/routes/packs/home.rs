@@ -7,8 +7,8 @@ use dioxus::prelude::*;
 
 use crate::components::ClientInitializing;
 use crate::routes::Route;
-use crate::stores::{auth_store, nostr_client, packs_store, profiles};
 use crate::stores::packs_store::StarterPack;
+use crate::stores::{auth_store, nostr_client, packs_store, profiles};
 use crate::utils::time::format_relative_time;
 use crate::utils::truncate_pubkey;
 use crate::utils::validation::is_valid_http_url;
@@ -250,11 +250,7 @@ pub fn PacksHome() -> Element {
 
 /// Tab button component
 #[component]
-fn TabButton(
-    label: &'static str,
-    active: bool,
-    onclick: EventHandler<MouseEvent>,
-) -> Element {
+fn TabButton(label: &'static str, active: bool, onclick: EventHandler<MouseEvent>) -> Element {
     rsx! {
         button {
             class: if active {
@@ -352,7 +348,10 @@ fn PackCard(pack: StarterPack) -> Element {
 #[component]
 fn MemberAvatar(pubkey: String) -> Element {
     let profile = profiles::get_profile(&pubkey);
-    let picture = profile.as_ref().and_then(|p| p.picture.clone()).filter(|u| is_valid_http_url(u));
+    let picture = profile
+        .as_ref()
+        .and_then(|p| p.picture.clone())
+        .filter(|u| is_valid_http_url(u));
     let name = profile
         .as_ref()
         .and_then(|p| p.display_name.clone().or(p.name.clone()))

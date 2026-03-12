@@ -2,15 +2,15 @@
 //!
 //! Displays a user's code-specific profile at /code/profile/:pubkey
 //! showing their repositories, issues, pull requests, and code snippets.
-use crate::utils::clipboard::copy_to_clipboard;
-use crate::components::{CodeRepoCard, CodeSnippetCard};
 use crate::components::code::{CodeIssueCard, CodePullCard, ContributionGraph};
 use crate::components::icons::GlobeIcon;
+use crate::components::{CodeRepoCard, CodeSnippetCard};
 use crate::routes::Route;
 use crate::services::git_hosting::{
     fetch_user_issues, fetch_user_prs, fetch_user_repositories, fetch_user_snippets,
 };
 use crate::stores::{auth_store, nostr_client, profiles};
+use crate::utils::clipboard::copy_to_clipboard;
 use crate::utils::nip34::{DisplaySnippet, Issue, PullRequest, Repository};
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip19::ToBech32;
@@ -65,8 +65,7 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
     #[allow(unused_mut)]
     let mut npub_copied = use_signal(|| false);
 
-    let parsed_pubkey = PublicKey::parse(&pubkey)
-        .ok();
+    let parsed_pubkey = PublicKey::parse(&pubkey).ok();
 
     let auth = auth_store::AUTH_STATE.read();
     let is_own_profile = auth
@@ -91,7 +90,10 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
         // Clear PROFILE_CACHE entry for old pubkey on navigation
         let old_pk = prev_pubkey.peek().clone();
         if !old_pk.is_empty() && old_pk != pk {
-            let normalized = PublicKey::parse(&old_pk).ok().map(|p| p.to_hex()).unwrap_or(old_pk);
+            let normalized = PublicKey::parse(&old_pk)
+                .ok()
+                .map(|p| p.to_hex())
+                .unwrap_or(old_pk);
             profiles::PROFILE_CACHE.write().pop(&normalized);
         }
         prev_pubkey.set(pk.clone());
@@ -121,16 +123,21 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
                 if *nostr_client::CLIENT_INITIALIZED.read() {
                     break;
                 }
-                gloo_timers::future::TimeoutFuture::new(100).await;
-                if *request_id.peek() != current_id { return; }
+                crate::platform::timer::sleep_ms(100).await;
+                if *request_id.peek() != current_id {
+                    return;
+                }
             }
-            if *request_id.peek() != current_id { return; }
+            if *request_id.peek() != current_id {
+                return;
+            }
 
-            let parsed = match PublicKey::parse(&pk)
-            {
+            let parsed = match PublicKey::parse(&pk) {
                 Ok(pk) => pk,
                 Err(e) => {
-                    if *request_id.peek() != current_id { return; }
+                    if *request_id.peek() != current_id {
+                        return;
+                    }
                     error.set(Some(format!("Invalid public key: {}", e)));
                     loading.set(false);
                     return;
@@ -140,7 +147,9 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
             // Load profile metadata
             match profiles::fetch_profile(parsed.to_hex()).await {
                 Ok(profile) => {
-                    if *request_id.peek() != current_id { return; }
+                    if *request_id.peek() != current_id {
+                        return;
+                    }
                     profile_data.set(Some(profile));
                 }
                 Err(e) => {
@@ -154,7 +163,9 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
             // Check following status
             if auth_store::is_authenticated() {
                 if let Ok(following) = nostr_client::is_following(parsed.to_hex()).await {
-                    if *request_id.peek() != current_id { return; }
+                    if *request_id.peek() != current_id {
+                        return;
+                    }
                     is_following.set(following);
                 }
             }
@@ -195,7 +206,12 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
             td.insert(CodeProfileTab::Repositories, TabData { count: repo_count });
             td.insert(CodeProfileTab::Issues, TabData { count: issue_count });
             td.insert(CodeProfileTab::PullRequests, TabData { count: pr_count });
-            td.insert(CodeProfileTab::Snippets, TabData { count: snippet_count });
+            td.insert(
+                CodeProfileTab::Snippets,
+                TabData {
+                    count: snippet_count,
+                },
+            );
             tab_data.set(td);
 
             loading.set(false);
@@ -205,25 +221,31 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
     // Follow/unfollow handler
     let pubkey_for_follow = pubkey.clone();
     let on_follow_click = move |_| {
-        if *follow_loading.peek() { return; }
+        if *follow_loading.peek() {
+            return;
+        }
         let pk = pubkey_for_follow.clone();
         let captured = follow_request_id.peek().wrapping_add(1);
         follow_request_id.set(captured);
         follow_loading.set(true);
         follow_error.set(None);
         spawn(async move {
-            let hex = PublicKey::parse(&pk)
-                .map(|k| k.to_hex())
-                .unwrap_or(pk);
+            let hex = PublicKey::parse(&pk).map(|k| k.to_hex()).unwrap_or(pk);
 
             if is_following() {
                 match nostr_client::unfollow_user(hex).await {
                     Ok(()) => {
-                        if *follow_request_id.peek() != captured { follow_loading.set(false); return; }
+                        if *follow_request_id.peek() != captured {
+                            follow_loading.set(false);
+                            return;
+                        }
                         is_following.set(false);
                     }
                     Err(e) => {
-                        if *follow_request_id.peek() != captured { follow_loading.set(false); return; }
+                        if *follow_request_id.peek() != captured {
+                            follow_loading.set(false);
+                            return;
+                        }
                         log::error!("Failed to unfollow: {}", e);
                         follow_error.set(Some(format!("Failed to unfollow: {}", e)));
                     }
@@ -231,11 +253,17 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
             } else {
                 match nostr_client::follow_user(hex).await {
                     Ok(()) => {
-                        if *follow_request_id.peek() != captured { follow_loading.set(false); return; }
+                        if *follow_request_id.peek() != captured {
+                            follow_loading.set(false);
+                            return;
+                        }
                         is_following.set(true);
                     }
                     Err(e) => {
-                        if *follow_request_id.peek() != captured { follow_loading.set(false); return; }
+                        if *follow_request_id.peek() != captured {
+                            follow_loading.set(false);
+                            return;
+                        }
                         log::error!("Failed to follow: {}", e);
                         follow_error.set(Some(format!("Failed to follow: {}", e)));
                     }
@@ -254,7 +282,7 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
         spawn(async move {
             if copy_to_clipboard(&npub).await.is_ok() {
                 npub_copied.set(true);
-                gloo_timers::future::TimeoutFuture::new(2000).await;
+                crate::platform::timer::sleep_ms(2000).await;
                 npub_copied.set(false);
             }
         });
@@ -267,7 +295,11 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
         .map(|p| p.get_display_name())
         .unwrap_or_else(|| {
             if npub_display.len() > 16 {
-                format!("{}...{}", &npub_display[..8], &npub_display[npub_display.len()-4..])
+                format!(
+                    "{}...{}",
+                    &npub_display[..8],
+                    &npub_display[npub_display.len() - 4..]
+                )
             } else {
                 npub_display.clone()
             }
@@ -286,16 +318,32 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
     let banner = profile.as_ref().and_then(|p| p.banner.clone());
 
     let tab_counts = tab_data.read();
-    let repo_count = tab_counts.get(&CodeProfileTab::Repositories).map(|t| t.count).unwrap_or(0);
-    let issue_count = tab_counts.get(&CodeProfileTab::Issues).map(|t| t.count).unwrap_or(0);
-    let pr_count = tab_counts.get(&CodeProfileTab::PullRequests).map(|t| t.count).unwrap_or(0);
-    let snippet_count = tab_counts.get(&CodeProfileTab::Snippets).map(|t| t.count).unwrap_or(0);
+    let repo_count = tab_counts
+        .get(&CodeProfileTab::Repositories)
+        .map(|t| t.count)
+        .unwrap_or(0);
+    let issue_count = tab_counts
+        .get(&CodeProfileTab::Issues)
+        .map(|t| t.count)
+        .unwrap_or(0);
+    let pr_count = tab_counts
+        .get(&CodeProfileTab::PullRequests)
+        .map(|t| t.count)
+        .unwrap_or(0);
+    let snippet_count = tab_counts
+        .get(&CodeProfileTab::Snippets)
+        .map(|t| t.count)
+        .unwrap_or(0);
 
     let current_tab = *active_tab.read();
 
     // Truncated npub for display
     let npub_short = if npub_display.len() > 20 {
-        format!("{}...{}", &npub_display[..12], &npub_display[npub_display.len()-4..])
+        format!(
+            "{}...{}",
+            &npub_display[..12],
+            &npub_display[npub_display.len() - 4..]
+        )
     } else {
         npub_display.clone()
     };

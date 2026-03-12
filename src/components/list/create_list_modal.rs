@@ -7,11 +7,9 @@
 //! - Curation lists (kind 30004)
 //!
 //! People lists support NIP-44 encrypted private members.
-use dioxus::prelude::*;
 use crate::stores::nostr_client;
-use crate::utils::list_kinds::{
-    NAMED_BOOKMARKS, NAMED_CURATIONS, NAMED_PEOPLE, NAMED_RELAYS,
-};
+use crate::utils::list_kinds::{NAMED_BOOKMARKS, NAMED_CURATIONS, NAMED_PEOPLE, NAMED_RELAYS};
+use dioxus::prelude::*;
 use nostr_sdk::{EventBuilder, Kind, Tag};
 /// List type for creation
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -271,7 +269,10 @@ async fn create_list(
     is_private_default: bool,
 ) -> Result<(), String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
+    let signer = client
+        .signer()
+        .await
+        .map_err(|e| format!("No signer: {}", e))?;
     let name = name.trim();
     if name.is_empty() {
         return Err("List name cannot be empty".to_string());
@@ -294,12 +295,10 @@ async fn create_list(
     let desc = description.trim();
     if !desc.is_empty() {
         let bounded_desc: String = desc.chars().take(500).collect();
-        tags.push(
-            Tag::custom(
-                nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("description")),
-                vec![bounded_desc],
-            ),
-        );
+        tags.push(Tag::custom(
+            nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("description")),
+            vec![bounded_desc],
+        ));
     }
     let content = if list_type.supports_privacy() && is_private_default {
         let pubkey = signer
@@ -313,8 +312,7 @@ async fn create_list(
     } else {
         String::new()
     };
-    let builder = EventBuilder::new(Kind::from_u16(list_type.kind()), content)
-        .tags(tags);
+    let builder = EventBuilder::new(Kind::from_u16(list_type.kind()), content).tags(tags);
     client
         .send_event_builder(builder)
         .await

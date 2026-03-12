@@ -1,14 +1,11 @@
 //! Bible API client for fetching translations, books, and chapters.
 //!
-//! This module is WASM-only as it uses web_sys::AbortController and gloo_net.
-//! (Gated in services/mod.rs)
-use gloo_net::http::Request;
-use gloo_timers::callback::Timeout;
+//! Uses reqwest for cross-platform HTTP (works on web, desktop, and mobile).
+use crate::platform::http::http_client;
 use serde::{Deserialize, Serialize};
+
 /// HelloAO Bible API base URL
 const BIBLE_API_BASE: &str = "https://bible.helloao.org/api";
-/// API request timeout in milliseconds (10 seconds)
-const API_TIMEOUT_MS: u32 = 10_000;
 /// A Bible translation available in the API
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -93,10 +90,17 @@ pub struct ChapterData {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ChapterContent {
-    Heading { content: Vec<String> },
+    Heading {
+        content: Vec<String>,
+    },
     LineBreak,
-    Verse { number: u32, content: Vec<VerseContent> },
-    HebrewSubtitle { content: Vec<VerseContent> },
+    Verse {
+        number: u32,
+        content: Vec<VerseContent>,
+    },
+    HebrewSubtitle {
+        content: Vec<VerseContent>,
+    },
 }
 /// Verse content can be plain text, formatted text, or special elements.
 ///
@@ -176,39 +180,38 @@ pub struct FootnoteVerseReference {
     pub chapter: u32,
     pub verse: u32,
 }
-/// Helper to perform HTTP GET request with timeout and abort controller
+/// Helper to perform HTTP GET request with timeout
 /// Reduces code duplication across fetch_translations, fetch_books, fetch_chapter
-async fn fetch_with_timeout(
-    url: &str,
-    error_context: &str,
-) -> Result<gloo_net::http::Response, String> {
-    let controller = web_sys::AbortController::new()
-        .map_err(|_| "Failed to create AbortController".to_string())?;
-    let signal = controller.signal();
-    let controller_for_timeout = controller.clone();
-    let timeout = Timeout::new(
-        API_TIMEOUT_MS,
-        move || {
-            controller_for_timeout.abort();
-        },
-    );
-    let response = match Request::get(url).abort_signal(Some(&signal)).send().await {
-        Ok(resp) => {
-            timeout.cancel();
-            resp
-        }
-        Err(e) => {
-            timeout.cancel();
-            return Err(
-                if signal.aborted() {
-                    "Request timeout".to_string()
-                } else {
-                    format!("Failed to {}: {}", error_context, e)
-                },
-            );
+async fn fetch_with_timeout(url: &str, error_context: &str) -> Result<reqwest::Response, String> {
+    #[cfg(feature = "web")]
+    let response = {
+        use futures::FutureExt;
+        let request = http_client()
+            .map_err(|e| format!("HTTP client init failed: {}", e))?
+            .get(url)
+            .send()
+            .fuse();
+        let timeout = gloo_timers::future::TimeoutFuture::new(15_000).fuse();
+        futures::pin_mut!(request, timeout);
+        futures::select! {
+            resp = request => resp,
+            _ = timeout => return Err("Request timeout".to_string()),
         }
     };
-    if !response.ok() {
+    #[cfg(not(feature = "web"))]
+    let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(url)
+        .send()
+        .await;
+    let response = response.map_err(|e| {
+        if e.is_timeout() {
+            "Request timeout".to_string()
+        } else {
+            format!("Failed to {}: {}", error_context, e)
+        }
+    })?;
+    if !response.status().is_success() {
         return Err(format!("API error: {}", response.status()));
     }
     Ok(response)
@@ -291,12 +294,55 @@ pub fn format_verse_range_reference(
     } else {
         format!(
             "{} {}:{}-{} ({})",
-            book_name,
-            chapter,
-            start_verse,
-            end_verse,
-            translation,
+            book_name, chapter, start_verse, end_verse, translation,
         )
+    }
+}
+
+/// Get the display reference for an arbitrary verse selection.
+#[allow(dead_code)]
+pub fn format_selected_verses_reference(
+    book_name: &str,
+    chapter: u32,
+    verses: &[u32],
+    translation: &str,
+) -> String {
+    let mut verses = verses.to_vec();
+    verses.sort_unstable();
+    verses.dedup();
+    match verses.as_slice() {
+        [] => format!("{} {} ({})", book_name, chapter, translation),
+        [verse] => format_verse_reference(book_name, chapter, *verse, translation),
+        _ => {
+            let mut segments = Vec::new();
+            let mut start = verses[0];
+            let mut end = verses[0];
+            for verse in verses.iter().copied().skip(1) {
+                if verse == end + 1 {
+                    end = verse;
+                    continue;
+                }
+                if start == end {
+                    segments.push(start.to_string());
+                } else {
+                    segments.push(format!("{}-{}", start, end));
+                }
+                start = verse;
+                end = verse;
+            }
+            if start == end {
+                segments.push(start.to_string());
+            } else {
+                segments.push(format!("{}-{}", start, end));
+            }
+            format!(
+                "{} {}:{} ({})",
+                book_name,
+                chapter,
+                segments.join(","),
+                translation
+            )
+        }
     }
 }
 #[allow(dead_code)]
@@ -362,46 +408,73 @@ pub fn verse_to_plain_text(content: &[VerseContent]) -> String {
     content
         .iter()
         .filter_map(|c| c.as_text())
-        .fold(
-            String::new(),
-            |mut acc, t| {
-                if !acc.is_empty() {
-                    acc.push(' ');
-                }
-                acc.push_str(t);
-                acc
-            },
-        )
+        .fold(String::new(), |mut acc, t| {
+            if !acc.is_empty() {
+                acc.push(' ');
+            }
+            acc.push_str(t);
+            acc
+        })
 }
 /// Filter to get only English translations
 pub fn filter_english_translations(translations: &[Translation]) -> Vec<Translation> {
-    translations.iter().filter(|t| t.language == "eng").cloned().collect()
+    translations
+        .iter()
+        .filter(|t| t.language == "eng")
+        .cloned()
+        .collect()
 }
 /// Common English translations to prioritize
-pub const RECOMMENDED_TRANSLATIONS: &[&str] = &[
-    "BSB",
-    "KJV",
-    "ASV",
-    "WEB",
-    "NASB",
-    "ESV",
-    "NIV",
-];
+pub const RECOMMENDED_TRANSLATIONS: &[&str] = &["BSB", "KJV", "ASV", "WEB", "NASB", "ESV", "NIV"];
 /// Filter and sort translations, prioritizing recommended ones
-pub fn sort_translations_by_priority(
-    translations: Vec<Translation>,
-) -> Vec<Translation> {
+pub fn sort_translations_by_priority(translations: Vec<Translation>) -> Vec<Translation> {
     let mut result = translations;
+    result.sort_by(|a, b| {
+        let a_priority = RECOMMENDED_TRANSLATIONS.iter().position(|&x| x == a.id);
+        let b_priority = RECOMMENDED_TRANSLATIONS.iter().position(|&x| x == b.id);
+        match (a_priority, b_priority) {
+            (Some(ap), Some(bp)) => ap.cmp(&bp),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => a.english_name.cmp(&b.english_name),
+        }
+    });
     result
-        .sort_by(|a, b| {
-            let a_priority = RECOMMENDED_TRANSLATIONS.iter().position(|&x| x == a.id);
-            let b_priority = RECOMMENDED_TRANSLATIONS.iter().position(|&x| x == b.id);
-            match (a_priority, b_priority) {
-                (Some(ap), Some(bp)) => ap.cmp(&bp),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => a.english_name.cmp(&b.english_name),
-            }
-        });
-    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_selected_verses_reference;
+
+    #[test]
+    fn formats_single_selected_verse() {
+        assert_eq!(
+            format_selected_verses_reference("John", 3, &[16], "BSB"),
+            "John 3:16 (BSB)"
+        );
+    }
+
+    #[test]
+    fn formats_contiguous_selected_verses() {
+        assert_eq!(
+            format_selected_verses_reference("John", 3, &[16, 17, 18], "BSB"),
+            "John 3:16-18 (BSB)"
+        );
+    }
+
+    #[test]
+    fn formats_non_contiguous_selected_verses() {
+        assert_eq!(
+            format_selected_verses_reference("John", 3, &[16, 18, 19, 21], "BSB"),
+            "John 3:16,18-19,21 (BSB)"
+        );
+    }
+
+    #[test]
+    fn normalizes_unsorted_duplicate_selected_verses() {
+        assert_eq!(
+            format_selected_verses_reference("John", 3, &[19, 16, 18, 18, 17], "BSB"),
+            "John 3:16-19 (BSB)"
+        );
+    }
 }

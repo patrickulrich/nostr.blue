@@ -2,31 +2,27 @@
 //! Supports drag-to-reorder and adding both standard unicode and NIP-30 custom emojis
 use crate::components::icons::SettingsIcon;
 use crate::components::EmojiPicker;
-use crate::stores::emoji_store::{
-    CustomEmojisStoreStoreExt, EmojiSetsStoreStoreExt, CUSTOM_EMOJIS, EMOJI_SETS,
-};
+use crate::stores::emoji_store::{CustomEmojisStoreStoreExt, CUSTOM_EMOJIS};
 use crate::stores::reactions_store::{
     save_preferred_reactions, PreferredReaction, MAX_REACTIONS, PREFERRED_REACTIONS,
 };
+use crate::utils::custom_emoji::EmojiSelection;
 use dioxus::prelude::*;
 /// Check if a reaction already exists in the list (by emoji content or shortcode)
 fn is_duplicate_reaction(
     reactions: &[PreferredReaction],
     new_reaction: &PreferredReaction,
 ) -> bool {
-    reactions
-        .iter()
-        .any(|r| match (r, new_reaction) {
-            (
-                PreferredReaction::Standard { emoji: a },
-                PreferredReaction::Standard { emoji: b },
-            ) => a == b,
-            (
-                PreferredReaction::Custom { shortcode: a, .. },
-                PreferredReaction::Custom { shortcode: b, .. },
-            ) => a == b,
-            _ => false,
-        })
+    reactions.iter().any(|r| match (r, new_reaction) {
+        (PreferredReaction::Standard { emoji: a }, PreferredReaction::Standard { emoji: b }) => {
+            a == b
+        }
+        (
+            PreferredReaction::Custom { shortcode: a, .. },
+            PreferredReaction::Custom { shortcode: b, .. },
+        ) => a == b,
+        _ => false,
+    })
 }
 #[derive(Props, Clone, PartialEq)]
 pub struct ReactionDefaultsModalProps {
@@ -48,37 +44,26 @@ pub fn ReactionDefaultsModal(props: ReactionDefaultsModalProps) -> Element {
         if input.is_empty() || local_reactions.read().len() >= MAX_REACTIONS {
             return;
         }
-        let reaction = if input.starts_with(':') && input.ends_with(':')
-            && input.len() > 2
-        {
+        let reaction = if input.starts_with(':') && input.ends_with(':') && input.len() > 2 {
             let shortcode = input[1..input.len() - 1].to_string();
             let custom_emojis_store = CUSTOM_EMOJIS.read();
             let custom_emojis_data = custom_emojis_store.data();
             let custom_emojis_list = custom_emojis_data.read();
-            let found_emoji = custom_emojis_list
-                .iter()
-                .find(|e| e.shortcode == shortcode);
+            let found_emoji = custom_emojis_list.iter().find(|e| e.shortcode == shortcode);
             if let Some(emoji) = found_emoji {
                 PreferredReaction::Custom {
                     shortcode: shortcode.clone(),
                     url: emoji.image_url.clone(),
                 }
             } else {
-                error_msg
-                    .set(
-                        Some(
-                            format!(
-                                "Custom emoji :{}: not found in your emoji list",
-                                shortcode,
-                            ),
-                        ),
-                    );
+                error_msg.set(Some(format!(
+                    "Custom emoji :{}: not found in your emoji list",
+                    shortcode,
+                )));
                 return;
             }
         } else {
-            PreferredReaction::Standard {
-                emoji: input,
-            }
+            PreferredReaction::Standard { emoji: input }
         };
         if is_duplicate_reaction(&local_reactions.read(), &reaction) {
             error_msg.set(Some("This emoji is already in your list".to_string()));
@@ -88,69 +73,17 @@ pub fn ReactionDefaultsModal(props: ReactionDefaultsModalProps) -> Element {
         new_emoji_input.set(String::new());
         error_msg.set(None);
     };
-    let add_emoji_from_picker = move |emoji: String| {
+    let add_emoji_from_picker = move |emoji: EmojiSelection| {
         if local_reactions.read().len() >= MAX_REACTIONS {
             return;
         }
-        let trimmed = emoji.trim();
-        let reaction = if trimmed.starts_with("http://")
-            || trimmed.starts_with("https://")
-        {
-            let custom_emojis_store = CUSTOM_EMOJIS.read();
-            let custom_emojis_data = custom_emojis_store.data();
-            let custom_emojis_list = custom_emojis_data.read();
-            let found_in_custom = custom_emojis_list
-                .iter()
-                .find(|e| e.image_url == trimmed);
-            if let Some(found) = found_in_custom {
-                PreferredReaction::Custom {
-                    shortcode: found.shortcode.clone(),
-                    url: found.image_url.clone(),
-                }
-            } else {
-                drop(custom_emojis_list);
-                let _ = custom_emojis_data;
-                drop(custom_emojis_store);
-                let emoji_sets_store = EMOJI_SETS.read();
-                let emoji_sets_data = emoji_sets_store.data();
-                let emoji_sets_list = emoji_sets_data.read();
-                let mut found_in_set: Option<(String, String)> = None;
-                for set in emoji_sets_list.iter() {
-                    if let Some(emoji) = set
-                        .emojis
-                        .iter()
-                        .find(|e| e.image_url == trimmed)
-                    {
-                        found_in_set = Some((
-                            emoji.shortcode.clone(),
-                            emoji.image_url.clone(),
-                        ));
-                        break;
-                    }
-                }
-                if let Some((shortcode, url)) = found_in_set {
-                    PreferredReaction::Custom {
-                        shortcode,
-                        url,
-                    }
-                } else {
-                    log::warn!(
-                        "Custom emoji URL not found in user's emoji stores: {}", trimmed
-                    );
-                    error_msg
-                        .set(
-                            Some(
-                                "Custom emoji not found in your emoji list. Try adding it first."
-                                    .to_string(),
-                            ),
-                        );
-                    return;
-                }
+        let reaction = match emoji {
+            EmojiSelection::Custom { shortcode, url, .. } => {
+                PreferredReaction::Custom { shortcode, url }
             }
-        } else {
-            PreferredReaction::Standard {
-                emoji: trimmed.to_string(),
-            }
+            EmojiSelection::Native { emoji } => PreferredReaction::Standard {
+                emoji: emoji.trim().to_string(),
+            },
         };
         if !is_duplicate_reaction(&local_reactions.read(), &reaction) {
             local_reactions.write().push(reaction);
@@ -261,7 +194,7 @@ pub fn ReactionDefaultsModal(props: ReactionDefaultsModalProps) -> Element {
                                     return;
                                 }
                                 e.prevent_default();
-                                #[cfg(target_family = "wasm")]
+                                #[cfg(feature = "web")]
                                 if let Some(touch) = e.touches().first() {
                                     let coords = touch.client_coordinates();
                                     let x = coords.x;

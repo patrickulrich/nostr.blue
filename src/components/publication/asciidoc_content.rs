@@ -11,7 +11,7 @@ use crate::utils::nip54::extract_wikilinks;
 use crate::utils::nkbip03::ResolvedCitation;
 use crate::utils::nkbip08::render_book_wikilinks;
 use dioxus::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 /// Citation metadata exposed to parent components
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CitationMetadata {
@@ -47,45 +47,69 @@ pub fn AsciiDocContent(
     #[props(default = None)]
     on_citations_loaded: Option<EventHandler<CitationMetadata>>,
 ) -> Element {
-    let mut resolved_citations: Signal<HashMap<String, ResolvedCitation>> = use_signal(
-        HashMap::new,
-    );
+    let mut resolved_citations: Signal<HashMap<String, ResolvedCitation>> =
+        use_signal(HashMap::new);
     let mut citations_loading = use_signal(|| false);
     let mut citations_error = use_signal(|| false);
     let mut fetch_generation = use_signal(|| 0u64);
-    let mut last_notified_metadata: Signal<Option<CitationMetadata>> = use_signal(|| {
-        None
-    });
+    let mut last_notified_metadata: Signal<Option<CitationMetadata>> = use_signal(|| None);
     let content_for_effect = content.clone();
-    use_effect(
-        use_reactive!(
-            | (content_for_effect, enable_citations) | { let current_generation = *
-            fetch_generation.peek() + 1; fetch_generation.set(current_generation); if !
-            enable_citations || content_for_effect.is_empty() || !
-            content_has_citations(& content_for_effect) { citations_loading.set(false);
-            citations_error.set(false); resolved_citations.set(HashMap::new()); return; }
-            let identifiers = extract_citation_identifiers(& content_for_effect); if
-            identifiers.is_empty() { citations_loading.set(false); citations_error
-            .set(false); resolved_citations.set(HashMap::new()); return; }
-            citations_loading.set(true); citations_error.set(false); spawn(async move {
-            let result = fetch_citations_by_identifiers(& identifiers). await; if *
-            fetch_generation.peek() != current_generation { return; } match result {
-            Ok(cached) => { let resolved : HashMap < String, ResolvedCitation > = cached
-            .into_iter().map(| (id, cached_cit) | { let resolved =
-            ResolvedCitation::from_citation(id.clone(), & cached_cit.citation); (id,
-            resolved) }).collect(); resolved_citations.set(resolved); citations_error
-            .set(false); } Err(e) => { crate
-            ::utils::log_fetch_error("citations for article", e); resolved_citations
-            .set(HashMap::new()); citations_error.set(true); } } citations_loading
-            .set(false); }); }
-        ),
-    );
+    use_effect(use_reactive!(|(content_for_effect, enable_citations)| {
+        let current_generation = *fetch_generation.peek() + 1;
+        fetch_generation.set(current_generation);
+        if !enable_citations
+            || content_for_effect.is_empty()
+            || !content_has_citations(&content_for_effect)
+        {
+            citations_loading.set(false);
+            citations_error.set(false);
+            resolved_citations.set(HashMap::new());
+            return;
+        }
+        let identifiers = extract_citation_identifiers(&content_for_effect);
+        let unique_identifiers: Vec<String> = identifiers
+            .into_iter()
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        if unique_identifiers.is_empty() {
+            citations_loading.set(false);
+            citations_error.set(false);
+            resolved_citations.set(HashMap::new());
+            return;
+        }
+        citations_loading.set(true);
+        citations_error.set(false);
+        spawn(async move {
+            let result = fetch_citations_by_identifiers(&unique_identifiers).await;
+            if *fetch_generation.peek() != current_generation {
+                return;
+            }
+            match result {
+                Ok(cached) => {
+                    let resolved: HashMap<String, ResolvedCitation> = cached
+                        .into_iter()
+                        .map(|(id, cached_cit)| {
+                            let resolved =
+                                ResolvedCitation::from_citation(id.clone(), &cached_cit.citation);
+                            (id, resolved)
+                        })
+                        .collect();
+                    resolved_citations.set(resolved);
+                    citations_error.set(false);
+                }
+                Err(e) => {
+                    crate::utils::log_fetch_error("citations for article", e);
+                    resolved_citations.set(HashMap::new());
+                    citations_error.set(true);
+                }
+            }
+            citations_loading.set(false);
+        });
+    }));
     let (rendered, footnotes_html, endnotes_html, citation_metadata) = if enable_citations {
-        let result = render_content_with_citations(
-            &content,
-            &resolved_citations.read(),
-            enable_wikilinks,
-        );
+        let result =
+            render_content_with_citations(&content, &resolved_citations.read(), enable_wikilinks);
         let mut html = result.html;
         if enable_book_links {
             html = render_book_wikilinks(&html);
@@ -95,7 +119,12 @@ pub fn AsciiDocContent(
             has_citations: result.has_citations,
             identifiers: result.citation_identifiers,
         };
-        (html, result.footnotes_html, result.endnotes_html, Some(metadata))
+        (
+            html,
+            result.footnotes_html,
+            result.endnotes_html,
+            Some(metadata),
+        )
     } else {
         let mut html = render_content_auto_with_options(&content, enable_wikilinks);
         if enable_book_links {
@@ -104,16 +133,19 @@ pub fn AsciiDocContent(
         (html, String::new(), String::new(), None)
     };
     let citation_metadata_for_effect = citation_metadata.clone();
-    use_effect(
-        use_reactive!(
-            | citation_metadata_for_effect | { if let (Some(ref handler), Some(ref
-            metadata)) = (& on_citations_loaded, & citation_metadata_for_effect) { let
-            should_notify = last_notified_metadata.read().as_ref() != Some(metadata); if
-            should_notify { last_notified_metadata.set(Some(metadata.clone())); handler
-            .call(metadata.clone()); } } else if citation_metadata_for_effect.is_none() {
-            last_notified_metadata.set(None); } }
-        ),
-    );
+    use_effect(use_reactive!(|citation_metadata_for_effect| {
+        if let (Some(ref handler), Some(ref metadata)) =
+            (&on_citations_loaded, &citation_metadata_for_effect)
+        {
+            let should_notify = last_notified_metadata.peek().as_ref() != Some(metadata);
+            if should_notify {
+                last_notified_metadata.set(Some(metadata.clone()));
+                handler.call(metadata.clone());
+            }
+        } else if citation_metadata_for_effect.is_none() {
+            last_notified_metadata.set(None);
+        }
+    }));
     let sanitized_content = sanitize_html(&rendered);
     rsx! {
         div {

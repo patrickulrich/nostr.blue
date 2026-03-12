@@ -1,11 +1,43 @@
 //! Reaction button component with emoji picker
 //! Encapsulates the like button, reaction picker, and click-outside-to-close behavior
-use crate::components::icons::HeartIcon;
 use super::defaults_modal::ReactionDefaultsModal;
 use super::picker::InlineReactionPicker;
+use crate::components::icons::HeartIcon;
 use crate::hooks::{format_count, ReactionEmoji, ReactionState, UseReaction};
 use crate::stores::reactions_store::get_default_reaction;
 use dioxus::prelude::*;
+
+const PICKER_WIDTH_PX: f64 = 280.0;
+const PICKER_HEIGHT_PX: f64 = 50.0;
+const PICKER_GAP_PX: f64 = 8.0;
+const PICKER_EDGE_PADDING_PX: f64 = 8.0;
+#[cfg(not(feature = "web"))]
+const ESTIMATED_BUTTON_HEIGHT_PX: f64 = 36.0;
+
+fn compute_picker_position(
+    anchor_x: f64,
+    anchor_top: f64,
+    anchor_bottom: f64,
+    viewport_width: f64,
+    viewport_height: f64,
+) -> (f64, f64, bool) {
+    let max_left =
+        (viewport_width - PICKER_WIDTH_PX - PICKER_EDGE_PADDING_PX).max(PICKER_EDGE_PADDING_PX);
+    let left = (anchor_x - (PICKER_WIDTH_PX / 2.0)).clamp(PICKER_EDGE_PADDING_PX, max_left);
+    let top_candidate = anchor_top - PICKER_HEIGHT_PX - PICKER_GAP_PX;
+    let (top, position_below) = if top_candidate >= PICKER_EDGE_PADDING_PX {
+        (top_candidate, false)
+    } else {
+        let max_top = (viewport_height - PICKER_HEIGHT_PX - PICKER_EDGE_PADDING_PX)
+            .max(PICKER_EDGE_PADDING_PX);
+        (
+            (anchor_bottom + PICKER_GAP_PX).clamp(PICKER_EDGE_PADDING_PX, max_top),
+            true,
+        )
+    };
+    (top, left, position_below)
+}
+
 #[derive(Props, Clone, PartialEq)]
 pub struct ReactionButtonProps {
     /// The reaction hook instance from use_reaction()
@@ -28,14 +60,9 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
     let mut show_defaults_modal = use_signal(|| false);
     let mut custom_emoji_failed = use_signal(|| false);
     let user_reaction_for_effect = props.reaction.user_reaction;
-    use_effect(
-        use_reactive(
-            &*user_reaction_for_effect.read(),
-            move |_| {
-                custom_emoji_failed.set(false);
-            },
-        ),
-    );
+    use_effect(use_reactive(&*user_reaction_for_effect.read(), move |_| {
+        custom_emoji_failed.set(false);
+    }));
     let button_id = use_signal(|| format!("reaction-btn-{}", uuid::Uuid::new_v4()));
     #[allow(unused_mut, unused_variables)]
     let mut picker_top = use_signal(|| 0.0);
@@ -43,6 +70,7 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
     let mut picker_left = use_signal(|| 0.0);
     #[allow(unused_mut, unused_variables)]
     let mut position_below = use_signal(|| false);
+    let mut picker_session_id = use_signal(|| 0u32);
     let is_liked = *props.reaction.is_liked.read();
     let like_count = *props.reaction.like_count.read();
     let is_pending = matches!(*props.reaction.state.read(), ReactionState::Pending);
@@ -85,35 +113,110 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
                     e.stop_propagation();
                     if props.has_signer {
                         let current = *show_picker.peek();
+                        if current {
+                            picker_session_id.with_mut(|id| *id = id.wrapping_add(1));
+                            show_picker.set(false);
+                            return;
+                        }
                         if !current {
-                            #[cfg(target_family = "wasm")]
+                            let session_id = picker_session_id.with_mut(|id| {
+                                *id = id.wrapping_add(1);
+                                *id
+                            });
+                            #[cfg(feature = "web")]
                             {
                                 let btn_id = button_id.read().clone();
                                 if let Some(window) = web_sys::window() {
                                     if let Some(document) = window.document() {
                                         if let Some(element) = document.get_element_by_id(&btn_id) {
                                             let rect = element.get_bounding_client_rect();
+                                            let viewport_width = window
+                                                .inner_width()
+                                                .ok()
+                                                .and_then(|w| w.as_f64())
+                                                .unwrap_or(1024.0);
                                             let viewport_height = window
                                                 .inner_height()
                                                 .ok()
                                                 .and_then(|h| h.as_f64())
                                                 .unwrap_or(800.0);
-                                            let picker_height = 50.0;
-                                            let button_center_y = rect.top() + (rect.height() / 2.0);
-                                            if button_center_y < (viewport_height / 2.0) {
-                                                picker_top.set(rect.bottom() + 8.0);
-                                                position_below.set(true);
-                                            } else {
-                                                picker_top.set(rect.top() - picker_height - 8.0);
-                                                position_below.set(false);
+                                            let anchor_x = rect.left() + (rect.width() / 2.0);
+                                            let anchor_top = rect.top();
+                                            let anchor_bottom = rect.bottom();
+                                            let (top, left, is_below) = compute_picker_position(
+                                                anchor_x,
+                                                anchor_top,
+                                                anchor_bottom,
+                                                viewport_width,
+                                                viewport_height,
+                                            );
+                                            if *picker_session_id.read() != session_id
+                                                || *show_picker.read()
+                                            {
+                                                return;
                                             }
-                                            picker_left.set(rect.left());
+                                            picker_top.set(top);
+                                            picker_left.set(left);
+                                            position_below.set(is_below);
+                                            show_picker.set(true);
                                         }
                                     }
                                 }
                             }
+                            #[cfg(not(feature = "web"))]
+                            {
+                                let coords = e.client_coordinates();
+                                spawn(async move {
+                                    let result = document::eval(
+                                        "(() => { return [window.innerWidth || 1024, window.innerHeight || 800]; })()",
+                                    )
+                                    .await;
+                                    let (window_width, window_height) = match result {
+                                        Ok(val) => {
+                                            if let Some(arr) = val.as_array() {
+                                                let width = arr
+                                                    .first()
+                                                    .and_then(|v| v.as_f64())
+                                                    .unwrap_or(1024.0);
+                                                let height = arr
+                                                    .get(1)
+                                                    .and_then(|v| v.as_f64())
+                                                    .unwrap_or(800.0);
+                                                (width, height)
+                                            } else {
+                                                (1024.0, 800.0)
+                                            }
+                                        }
+                                        Err(_) => (1024.0, 800.0),
+                                    };
+                                    if *picker_session_id.read() != session_id
+                                        || *show_picker.read()
+                                    {
+                                        return;
+                                    }
+                                    let anchor_top =
+                                        coords.y - (ESTIMATED_BUTTON_HEIGHT_PX / 2.0);
+                                    let anchor_bottom =
+                                        coords.y + (ESTIMATED_BUTTON_HEIGHT_PX / 2.0);
+                                    let (top, left, is_below) = compute_picker_position(
+                                        coords.x,
+                                        anchor_top,
+                                        anchor_bottom,
+                                        window_width,
+                                        window_height,
+                                    );
+                                    if *picker_session_id.read() != session_id
+                                        || *show_picker.read()
+                                    {
+                                        return;
+                                    }
+                                    picker_top.set(top);
+                                    picker_left.set(left);
+                                    position_below.set(is_below);
+                                    show_picker.set(true);
+                                });
+                            }
                         }
-                        show_picker.set(!current);
                     }
                 },
                 match &user_reaction {
@@ -157,6 +260,7 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
                     class: "fixed inset-0 z-40",
                     onclick: move |e: MouseEvent| {
                         e.stop_propagation();
+                        picker_session_id.with_mut(|id| *id = id.wrapping_add(1));
                         show_picker.set(false);
                     },
                 }
@@ -166,9 +270,11 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
                     InlineReactionPicker {
                         on_reaction: move |emoji: ReactionEmoji| {
                             props.reaction.react_with.call(emoji);
+                            picker_session_id.with_mut(|id| *id = id.wrapping_add(1));
                             show_picker.set(false);
                         },
                         on_settings: move |_| {
+                            picker_session_id.with_mut(|id| *id = id.wrapping_add(1));
                             show_picker.set(false);
                             show_defaults_modal.set(true);
                         },

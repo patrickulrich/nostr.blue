@@ -1,8 +1,8 @@
 use crate::hooks::use_author_metadata;
 use crate::routes::Route;
 use crate::utils::article_meta::{
-    calculate_read_time, get_hashtags, get_identifier, get_image, get_published_at,
-    get_summary, get_title,
+    calculate_read_time, get_hashtags, get_identifier, get_image, get_published_at, get_summary,
+    get_title,
 };
 use crate::utils::{format_relative_time_or, is_valid_http_url, truncate_pubkey};
 use dioxus::prelude::*;

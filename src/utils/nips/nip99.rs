@@ -15,12 +15,7 @@ use serde::{Deserialize, Serialize};
 /// Get current Unix timestamp in seconds
 /// Uses js_sys for WASM environments, std::time for native builds
 pub fn now_secs() -> u64 {
-    #[cfg(target_arch = "wasm32")] { (js_sys::Date::now() / 1000.0) as u64 }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
-    }
+    crate::platform::timestamp::now_secs()
 }
 /// Extract product display name from NIP-99 coordinate (30402:pubkey:d-tag)
 ///
@@ -337,9 +332,7 @@ impl ProductPrice {
     }
     /// Display price with currency
     pub fn display(&self) -> String {
-        if self.currency.eq_ignore_ascii_case("sats")
-            || self.currency.eq_ignore_ascii_case("sat")
-        {
+        if self.currency.eq_ignore_ascii_case("sats") || self.currency.eq_ignore_ascii_case("sat") {
             format!("{:.0} sats", self.amount)
         } else {
             format!("{:.2} {}", self.amount, self.currency)
@@ -354,17 +347,14 @@ impl ProductPrice {
     /// Converts from fiat using exchange rate if available
     /// Returns None if conversion is not possible (no exchange rate)
     pub fn to_sats(&self) -> Option<u64> {
-        if self.currency.eq_ignore_ascii_case("sats")
-            || self.currency.eq_ignore_ascii_case("sat")
-        {
+        if self.currency.eq_ignore_ascii_case("sats") || self.currency.eq_ignore_ascii_case("sat") {
             return Some(self.amount as u64);
         }
         crate::services::btc_price::fiat_to_sats(self.amount, &self.currency)
     }
     /// Check if this price is in sats (no conversion needed)
     pub fn is_sats(&self) -> bool {
-        self.currency.eq_ignore_ascii_case("sats")
-            || self.currency.eq_ignore_ascii_case("sat")
+        self.currency.eq_ignore_ascii_case("sats") || self.currency.eq_ignore_ascii_case("sat")
     }
 }
 impl Default for ProductPrice {
@@ -675,9 +665,11 @@ pub struct ShopOrder {
 /// Parse a Kind 30402 event into a Product
 pub fn parse_product(event: &Event) -> Result<Product, String> {
     if event.kind.as_u16() != KIND_PRODUCT {
-        return Err(
-            format!("Expected kind {}, got {}", KIND_PRODUCT, event.kind.as_u16()),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_PRODUCT,
+            event.kind.as_u16()
+        ));
     }
     let pubkey = event.pubkey.to_hex();
     let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
@@ -711,8 +703,7 @@ pub fn parse_product(event: &Event) -> Result<Product, String> {
     let license_key = get_tag_value(event, "license");
     let content_hash = parse_hash_tag(event, "sha256");
     let file_size = get_tag_value(event, "size").and_then(|s| s.parse().ok());
-    let file_type = get_tag_value(event, "type")
-        .or_else(|| get_tag_value(event, "mime"));
+    let file_type = get_tag_value(event, "type").or_else(|| get_tag_value(event, "mime"));
     Ok(Product {
         d_tag,
         event_id: event.id.to_hex(),
@@ -749,9 +740,11 @@ pub fn parse_product(event: &Event) -> Result<Product, String> {
 /// Parse a Kind 30405 event into a ProductCollection
 pub fn parse_collection(event: &Event) -> Result<ProductCollection, String> {
     if event.kind.as_u16() != KIND_COLLECTION {
-        return Err(
-            format!("Expected kind {}, got {}", KIND_COLLECTION, event.kind.as_u16()),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_COLLECTION,
+            event.kind.as_u16()
+        ));
     }
     let pubkey = event.pubkey.to_hex();
     let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
@@ -782,15 +775,17 @@ pub fn parse_collection(event: &Event) -> Result<ProductCollection, String> {
 /// Parse a Kind 30406 event into a ShippingOption
 pub fn parse_shipping(event: &Event) -> Result<ShippingOption, String> {
     if event.kind.as_u16() != KIND_SHIPPING {
-        return Err(
-            format!("Expected kind {}, got {}", KIND_SHIPPING, event.kind.as_u16()),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_SHIPPING,
+            event.kind.as_u16()
+        ));
     }
     let pubkey = event.pubkey.to_hex();
     let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
     let title = get_tag_value(event, "title").ok_or("Missing required 'title' tag")?;
-    let (base_price, currency) = parse_shipping_price_tag(event)
-        .ok_or("Missing or invalid 'price' tag")?;
+    let (base_price, currency) =
+        parse_shipping_price_tag(event).ok_or("Missing or invalid 'price' tag")?;
     let countries = get_tag_values(event, "country");
     if countries.is_empty() {
         return Err("Missing required 'country' tag".to_string());
@@ -833,9 +828,11 @@ pub fn parse_shipping(event: &Event) -> Result<ShippingOption, String> {
 /// Parse a Kind 31555 event into a ProductReview
 pub fn parse_review(event: &Event) -> Result<ProductReview, String> {
     if event.kind.as_u16() != KIND_REVIEW {
-        return Err(
-            format!("Expected kind {}, got {}", KIND_REVIEW, event.kind.as_u16()),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_REVIEW,
+            event.kind.as_u16()
+        ));
     }
     let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
     let product_coordinate = if let Some(stripped) = d_tag.strip_prefix("a:") {
@@ -843,8 +840,7 @@ pub fn parse_review(event: &Event) -> Result<ProductReview, String> {
     } else {
         d_tag.clone()
     };
-    let thumb_rating = parse_rating_tag(event, "thumb")
-        .ok_or("Missing required 'thumb' rating")?;
+    let thumb_rating = parse_rating_tag(event, "thumb").ok_or("Missing required 'thumb' rating")?;
     let value_rating = parse_rating_tag(event, "value");
     let quality_rating = parse_rating_tag(event, "quality");
     let delivery_rating = parse_rating_tag(event, "delivery");
@@ -901,12 +897,10 @@ fn parse_price_tag(event: &Event) -> Option<ProductPrice> {
     let amount = slice.get(1)?.parse::<f64>().ok()?;
     let currency = slice.get(2)?;
     let frequency = slice.get(3).filter(|s| !s.is_empty());
-    Some(
-        match frequency {
-            Some(freq) => ProductPrice::with_frequency(amount, currency, freq),
-            None => ProductPrice::new(amount, currency),
-        },
-    )
+    Some(match frequency {
+        Some(freq) => ProductPrice::with_frequency(amount, currency, freq),
+        None => ProductPrice::new(amount, currency),
+    })
 }
 /// Parse shipping price tag: ["price", base_cost, currency]
 fn parse_shipping_price_tag(event: &Event) -> Option<(f64, String)> {
@@ -1083,13 +1077,25 @@ mod tests {
     #[test]
     fn test_product_type_from_str() {
         assert_eq!(ProductType::from_str("simple"), Some(ProductType::Simple));
-        assert_eq!(ProductType::from_str("variable"), Some(ProductType::Variable));
-        assert_eq!(ProductType::from_str("variation"), Some(ProductType::Variation));
+        assert_eq!(
+            ProductType::from_str("variable"),
+            Some(ProductType::Variable)
+        );
+        assert_eq!(
+            ProductType::from_str("variation"),
+            Some(ProductType::Variation)
+        );
     }
     #[test]
     fn test_product_format_from_str() {
-        assert_eq!(ProductFormat::from_str("digital"), Some(ProductFormat::Digital));
-        assert_eq!(ProductFormat::from_str("physical"), Some(ProductFormat::Physical));
+        assert_eq!(
+            ProductFormat::from_str("digital"),
+            Some(ProductFormat::Digital)
+        );
+        assert_eq!(
+            ProductFormat::from_str("physical"),
+            Some(ProductFormat::Physical)
+        );
     }
     #[test]
     fn test_product_price_display() {
@@ -1101,9 +1107,18 @@ mod tests {
     #[test]
     fn test_order_status_from_str() {
         assert_eq!(OrderStatus::from_str("pending"), Some(OrderStatus::Pending));
-        assert_eq!(OrderStatus::from_str("confirmed"), Some(OrderStatus::Confirmed));
-        assert_eq!(OrderStatus::from_str("cancelled"), Some(OrderStatus::Cancelled));
-        assert_eq!(OrderStatus::from_str("canceled"), Some(OrderStatus::Cancelled));
+        assert_eq!(
+            OrderStatus::from_str("confirmed"),
+            Some(OrderStatus::Confirmed)
+        );
+        assert_eq!(
+            OrderStatus::from_str("cancelled"),
+            Some(OrderStatus::Cancelled)
+        );
+        assert_eq!(
+            OrderStatus::from_str("canceled"),
+            Some(OrderStatus::Cancelled)
+        );
     }
     #[test]
     fn test_review_total_score() {
@@ -1129,7 +1144,13 @@ mod tests {
             ShippingService::from_str("standard"),
             Some(ShippingService::Standard),
         );
-        assert_eq!(ShippingService::from_str("express"), Some(ShippingService::Express));
-        assert_eq!(ShippingService::from_str("pickup"), Some(ShippingService::Pickup));
+        assert_eq!(
+            ShippingService::from_str("express"),
+            Some(ShippingService::Express)
+        );
+        assert_eq!(
+            ShippingService::from_str("pickup"),
+            Some(ShippingService::Pickup)
+        );
     }
 }

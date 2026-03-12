@@ -5,11 +5,11 @@
 //! - Viewing all members (public + decrypted private)
 //! - Showing which members are private (encrypted)
 //! - Removing members from the list
-use dioxus::prelude::*;
-use nostr_sdk::{PublicKey, ToBech32};
 use crate::hooks::UserList;
 use crate::stores::profiles;
 use crate::utils::list_encryption::{decrypt_private_tags, remove_person_from_list};
+use dioxus::prelude::*;
+use nostr_sdk::{PublicKey, ToBech32};
 /// A member in a people list
 #[derive(Clone, PartialEq)]
 struct ListMember {
@@ -48,12 +48,11 @@ pub fn PeopleListMembersModal(props: PeopleListMembersModalProps) -> Element {
                     if tag.kind() == nostr_sdk::TagKind::p() {
                         if let Some(pk_str) = tag.content() {
                             let display_name = get_member_display_name(pk_str);
-                            all_members
-                                .push(ListMember {
-                                    pubkey: pk_str.to_string(),
-                                    display_name,
-                                    is_private: false,
-                                });
+                            all_members.push(ListMember {
+                                pubkey: pk_str.to_string(),
+                                display_name,
+                                is_private: false,
+                            });
                         }
                     }
                 }
@@ -64,12 +63,11 @@ pub fn PeopleListMembersModal(props: PeopleListMembersModalProps) -> Element {
                                 if let Some(pk_str) = tag.content() {
                                     if !all_members.iter().any(|m| m.pubkey == pk_str) {
                                         let display_name = get_member_display_name(pk_str);
-                                        all_members
-                                            .push(ListMember {
-                                                pubkey: pk_str.to_string(),
-                                                display_name,
-                                                is_private: true,
-                                            });
+                                        all_members.push(ListMember {
+                                            pubkey: pk_str.to_string(),
+                                            display_name,
+                                            is_private: true,
+                                        });
                                     }
                                 }
                             }
@@ -185,11 +183,7 @@ pub fn PeopleListMembersModal(props: PeopleListMembersModalProps) -> Element {
 }
 /// Individual member row component
 #[component]
-fn MemberRow(
-    member: ListMember,
-    is_removing: bool,
-    on_remove: EventHandler<String>,
-) -> Element {
+fn MemberRow(member: ListMember, is_removing: bool, on_remove: EventHandler<String>) -> Element {
     let navigator = use_navigator();
     let pubkey = member.pubkey.clone();
     let pubkey_for_nav = member.pubkey.clone();

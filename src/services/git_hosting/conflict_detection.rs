@@ -86,9 +86,7 @@ fn parse_diff(diff: &str) -> Vec<DiffFile> {
                 current_hunk_lines.clear();
             }
             in_hunk = true;
-        } else if in_hunk
-            && (line.starts_with(' ') || line.starts_with('-'))
-        {
+        } else if in_hunk && (line.starts_with(' ') || line.starts_with('-')) {
             // Context line or removed line — these are what we expect in the base
             current_hunk_lines.push(line[1..].to_string());
             // Lines starting with '+' are additions — skip for base comparison
@@ -115,11 +113,7 @@ fn parse_diff(diff: &str) -> Vec<DiffFile> {
 
 /// Detect potential merge conflicts by comparing the PR's diff against
 /// the current state of the repository at the given base ref.
-pub async fn detect_conflicts(
-    repo: &Repository,
-    diff: &str,
-    base_ref: &str,
-) -> Vec<ConflictInfo> {
+pub async fn detect_conflicts(repo: &Repository, diff: &str, base_ref: &str) -> Vec<ConflictInfo> {
     let diff_files = parse_diff(diff);
     let mut conflicts = Vec::new();
 
@@ -130,18 +124,26 @@ pub async fn detect_conflicts(
 
         // Check new-file conflicts
         if file.is_new_file {
-            if git_service().read_file(repo, &file.path, Some(base_ref)).await.is_ok() {
+            if git_service()
+                .read_file(repo, &file.path, Some(base_ref))
+                .await
+                .is_ok()
+            {
                 conflicts.push(ConflictInfo {
                     file_path: file.path.clone(),
                     conflict_type: ConflictType::FileAlreadyExists,
-                    details: "Patch creates this file but it already exists on the target branch".to_string(),
+                    details: "Patch creates this file but it already exists on the target branch"
+                        .to_string(),
                 });
             }
             continue;
         }
 
         // Check if file still exists
-        let current_content = match git_service().read_file(repo, &file.path, Some(base_ref)).await {
+        let current_content = match git_service()
+            .read_file(repo, &file.path, Some(base_ref))
+            .await
+        {
             Ok(c) => c,
             Err(_) => {
                 if !file.is_deleted {

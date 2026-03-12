@@ -63,6 +63,7 @@ pub struct Profile {
     pub banner: Option<String>,
     pub nip05: Option<String>,
     pub lud16: Option<String>,
+    pub lud06: Option<String>,
     pub website: Option<String>,
     /// Whether this account is a bot (NIP-24)
     pub bot: Option<bool>,
@@ -97,7 +98,10 @@ impl Profile {
                 return picture.clone();
             }
         }
-        format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", self.pubkey)
+        format!(
+            "https://api.dicebear.com/7.x/identicon/svg?seed={}",
+            self.pubkey
+        )
     }
     /// Get initials for avatar placeholder (first char of pubkey)
     #[allow(dead_code)]
@@ -109,60 +113,66 @@ impl Profile {
                 let second = words[1].chars().next().unwrap_or('?');
                 return format!("{}{}", first, second).to_uppercase();
             } else if !words.is_empty() {
-                return words[0].chars().next().unwrap_or('?').to_uppercase().to_string();
+                return words[0]
+                    .chars()
+                    .next()
+                    .unwrap_or('?')
+                    .to_uppercase()
+                    .to_string();
             }
         }
-        self.pubkey.chars().next().unwrap_or('?').to_uppercase().to_string()
+        self.pubkey
+            .chars()
+            .next()
+            .unwrap_or('?')
+            .to_uppercase()
+            .to_string()
     }
 }
 /// Global signal to cache profiles (pubkey -> Profile)
 /// LRU cache with max capacity of 5000 profiles to prevent unbounded memory growth
 /// Increased from 1000 to better serve power users who follow many accounts
-pub static PROFILE_CACHE: GlobalSignal<LruCache<String, Profile>> = Signal::global(|| LruCache::new(
-    NonZeroUsize::new(5000).unwrap(),
-));
+pub static PROFILE_CACHE: GlobalSignal<LruCache<String, Profile>> =
+    Signal::global(|| LruCache::new(NonZeroUsize::new(5000).unwrap()));
 /// Cache TTL in seconds (24 hours)
 /// Increased from 5 minutes to reduce network requests for stable profile data
 const CACHE_TTL_SECONDS: i64 = 24 * 60 * 60;
 /// Get a profile from cache only (synchronous)
 pub fn get_profile(pubkey: &str) -> Option<nostr_sdk::Metadata> {
-    PROFILE_CACHE
-        .read()
-        .peek(pubkey)
-        .map(|profile| {
-            let mut metadata = nostr_sdk::Metadata::new();
-            if let Some(name) = &profile.name {
-                metadata = metadata.name(name);
+    PROFILE_CACHE.peek().peek(pubkey).map(|profile| {
+        let mut metadata = nostr_sdk::Metadata::new();
+        if let Some(name) = &profile.name {
+            metadata = metadata.name(name);
+        }
+        if let Some(display_name) = &profile.display_name {
+            metadata = metadata.display_name(display_name);
+        }
+        if let Some(about) = &profile.about {
+            metadata = metadata.about(about);
+        }
+        if let Some(picture) = &profile.picture {
+            if let Ok(url) = nostr_sdk::Url::parse(picture) {
+                metadata = metadata.picture(url);
             }
-            if let Some(display_name) = &profile.display_name {
-                metadata = metadata.display_name(display_name);
+        }
+        if let Some(banner) = &profile.banner {
+            if let Ok(url) = nostr_sdk::Url::parse(banner) {
+                metadata = metadata.banner(url);
             }
-            if let Some(about) = &profile.about {
-                metadata = metadata.about(about);
+        }
+        if let Some(website) = &profile.website {
+            if let Ok(url) = nostr_sdk::Url::parse(website) {
+                metadata = metadata.website(url);
             }
-            if let Some(picture) = &profile.picture {
-                if let Ok(url) = nostr_sdk::Url::parse(picture) {
-                    metadata = metadata.picture(url);
-                }
-            }
-            if let Some(banner) = &profile.banner {
-                if let Ok(url) = nostr_sdk::Url::parse(banner) {
-                    metadata = metadata.banner(url);
-                }
-            }
-            if let Some(website) = &profile.website {
-                if let Ok(url) = nostr_sdk::Url::parse(website) {
-                    metadata = metadata.website(url);
-                }
-            }
-            if let Some(nip05) = &profile.nip05 {
-                metadata = metadata.nip05(nip05);
-            }
-            if let Some(lud16) = &profile.lud16 {
-                metadata = metadata.lud16(lud16);
-            }
-            metadata
-        })
+        }
+        if let Some(nip05) = &profile.nip05 {
+            metadata = metadata.nip05(nip05);
+        }
+        if let Some(lud16) = &profile.lud16 {
+            metadata = metadata.lud16(lud16);
+        }
+        metadata
+    })
 }
 /// Fetch a profile from relays by pubkey
 /// Returns cached profile immediately if available (even if stale),
@@ -190,12 +200,17 @@ async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> {
     let public_key = PublicKey::from_bech32(pubkey)
         .or_else(|_| PublicKey::from_hex(pubkey))
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let filter = Filter::new().kind(Kind::Metadata).author(public_key).limit(1);
+    let filter = Filter::new()
+        .kind(Kind::Metadata)
+        .author(public_key)
+        .limit(1);
     match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 let profile = parse_profile_event(&event)?;
-                PROFILE_CACHE.write().put(pubkey.to_string(), profile.clone());
+                PROFILE_CACHE
+                    .write()
+                    .put(pubkey.to_string(), profile.clone());
                 Ok(profile)
             } else {
                 let profile = Profile {
@@ -207,13 +222,16 @@ async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> {
                     banner: None,
                     nip05: None,
                     lud16: None,
+                    lud06: None,
                     website: None,
                     bot: None,
                     birthday: None,
                     fetched_at: Utc::now(),
                     raw_metadata_json: None,
                 };
-                PROFILE_CACHE.write().put(pubkey.to_string(), profile.clone());
+                PROFILE_CACHE
+                    .write()
+                    .put(pubkey.to_string(), profile.clone());
                 Ok(profile)
             }
         }
@@ -228,6 +246,7 @@ async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> {
                 banner: None,
                 nip05: None,
                 lud16: None,
+                lud06: None,
                 website: None,
                 bot: None,
                 birthday: None,
@@ -243,37 +262,33 @@ fn parse_profile_event(event: &Event) -> Result<Profile, String> {
     let content = &event.content;
     let metadata: serde_json::Value = serde_json::from_str(content)
         .map_err(|e| format!("Failed to parse metadata JSON: {}", e))?;
-    let bot = metadata
-        .get("bot")
-        .and_then(|v| {
-            if let Some(b) = v.as_bool() {
-                Some(b)
-            } else if let Some(s) = v.as_str() {
-                match s.to_lowercase().as_str() {
-                    "true" | "1" | "yes" => Some(true),
-                    "false" | "0" | "no" => Some(false),
-                    _ => None,
-                }
+    let bot = metadata.get("bot").and_then(|v| {
+        if let Some(b) = v.as_bool() {
+            Some(b)
+        } else if let Some(s) = v.as_str() {
+            match s.to_lowercase().as_str() {
+                "true" | "1" | "yes" => Some(true),
+                "false" | "0" | "no" => Some(false),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    });
+    let birthday = metadata.get("birthday").and_then(|v| {
+        if v.is_object() {
+            let year = v.get("year").and_then(|y| y.as_u64()).map(|y| y as u16);
+            let month = v.get("month").and_then(|m| m.as_u64()).map(|m| m as u8);
+            let day = v.get("day").and_then(|d| d.as_u64()).map(|d| d as u8);
+            if year.is_some() || month.is_some() || day.is_some() {
+                Some(Birthday { year, month, day })
             } else {
                 None
             }
-        });
-    let birthday = metadata
-        .get("birthday")
-        .and_then(|v| {
-            if v.is_object() {
-                let year = v.get("year").and_then(|y| y.as_u64()).map(|y| y as u16);
-                let month = v.get("month").and_then(|m| m.as_u64()).map(|m| m as u8);
-                let day = v.get("day").and_then(|d| d.as_u64()).map(|d| d as u8);
-                if year.is_some() || month.is_some() || day.is_some() {
-                    Some(Birthday { year, month, day })
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        });
+        } else {
+            None
+        }
+    });
     Ok(Profile {
         pubkey: event.pubkey.to_string(),
         name: metadata
@@ -308,6 +323,11 @@ fn parse_profile_event(event: &Event) -> Result<Profile, String> {
             .map(String::from),
         lud16: metadata
             .get("lud16")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from),
+        lud06: metadata
+            .get("lud06")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .map(String::from),
@@ -353,20 +373,22 @@ pub async fn fetch_profiles_batch(
     let authors: Vec<PublicKey> = missing
         .iter()
         .filter_map(|pk| {
-            PublicKey::from_bech32(pk).or_else(|_| PublicKey::from_hex(pk)).ok()
+            PublicKey::from_bech32(pk)
+                .or_else(|_| PublicKey::from_hex(pk))
+                .ok()
         })
         .collect();
     if authors.is_empty() {
         return Ok(results);
     }
     let filter = Filter::new().kind(Kind::Metadata).authors(authors);
-    match nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10))
-        .await
-    {
+    match nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             for event in events {
                 if let Ok(profile) = parse_profile_event(&event) {
-                    PROFILE_CACHE.write().put(profile.pubkey.clone(), profile.clone());
+                    PROFILE_CACHE
+                        .write()
+                        .put(profile.pubkey.clone(), profile.clone());
                     results.insert(profile.pubkey.clone(), profile);
                 }
             }
@@ -421,19 +443,26 @@ pub async fn fetch_profiles_batch_native(
     }
     log::info!("Batch fetching {} profiles (optimized path)", missing.len());
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let filter = Filter::new().kind(Kind::Metadata).authors(missing.iter().copied());
+    let filter = Filter::new()
+        .kind(Kind::Metadata)
+        .authors(missing.iter().copied());
     match client.database().query(filter).await {
         Ok(database_events) => {
             for event in database_events {
                 if let Ok(profile) = parse_profile_event(&event) {
                     let pk = event.pubkey;
-                    PROFILE_CACHE.write().put(profile.pubkey.clone(), profile.clone());
+                    PROFILE_CACHE
+                        .write()
+                        .put(profile.pubkey.clone(), profile.clone());
                     results.insert(pk, profile);
                 }
             }
         }
         Err(e) => {
-            log::warn!("Database batch query failed: {}, will query relays for all", e);
+            log::warn!(
+                "Database batch query failed: {}, will query relays for all",
+                e
+            );
         }
     }
     let found_pubkeys: HashSet<PublicKey> = results.keys().copied().collect();
@@ -443,14 +472,13 @@ pub async fn fetch_profiles_batch_native(
         .collect();
     if !still_missing.is_empty() {
         log::info!(
-            "Querying relays for {} profiles not in database", still_missing.len()
+            "Querying relays for {} profiles not in database",
+            still_missing.len()
         );
         let filter = Filter::new()
             .kind(Kind::Metadata)
             .authors(still_missing.iter().copied());
-        match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-            .await
-        {
+        match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
             Ok(events) => {
                 for event in events {
                     if let Ok(profile) = parse_profile_event(&event) {

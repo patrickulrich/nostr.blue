@@ -16,12 +16,8 @@ pub type MuteBlockCache = Signal<Option<Rc<HashSet<String>>>>;
 /// Both are `MuteBlockCache` (Signal<Option<Rc<HashSet<String>>>>) for O(1) lookups
 #[allow(clippy::type_complexity)]
 pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache) {
-    let mut cached_muted_posts: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| {
-        None
-    });
-    let mut cached_blocked_users: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| {
-        None
-    });
+    let mut cached_muted_posts: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
+    let mut cached_blocked_users: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
     let mut last_fetch_error_at: Signal<Option<u64>> = use_signal(|| None);
     let mut last_pubkey: Signal<Option<String>> = use_signal(|| None);
     let mut last_invalidate_token: Signal<u32> = use_signal(|| 0);
@@ -51,10 +47,9 @@ pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache) {
             last_pubkey.set(current_pubkey.clone());
             return;
         }
-        if let (Some(ref last), Some(ref current)) = (
-            last_pubkey.peek().as_ref(),
-            current_pubkey.as_ref(),
-        ) {
+        if let (Some(ref last), Some(ref current)) =
+            (last_pubkey.peek().as_ref(), current_pubkey.as_ref())
+        {
             if last != current {
                 log::debug!("Account switch detected, clearing mute/block cache");
                 cached_muted_posts.set(None);
@@ -79,12 +74,9 @@ pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache) {
         spawn(async move {
             match crate::stores::nostr_client::get_mute_list_data().await {
                 Ok(data) => {
-                    let current = crate::stores::auth_store::AUTH_STATE
-                        .peek()
-                        .pubkey
-                        .clone();
-                    let current_invalidate = *crate::stores::nostr_client::MUTE_BLOCK_INVALIDATE
-                        .peek();
+                    let current = crate::stores::auth_store::AUTH_STATE.peek().pubkey.clone();
+                    let current_invalidate =
+                        *crate::stores::nostr_client::MUTE_BLOCK_INVALIDATE.peek();
                     if current == auth_pubkey_snapshot
                         && current_invalidate == invalidate_token_snapshot
                         && auth_pubkey_snapshot.is_some()
@@ -95,19 +87,16 @@ pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache) {
                     }
                 }
                 Err(e) => {
-                    let snapshot_short = auth_pubkey_snapshot
-                        .as_ref()
-                        .map(|s| &s[..8.min(s.len())]);
+                    let snapshot_short =
+                        auth_pubkey_snapshot.as_ref().map(|s| &s[..8.min(s.len())]);
                     log::error!(
-                        "Failed to fetch mute list: {} (snapshot={:?})", e,
+                        "Failed to fetch mute list: {} (snapshot={:?})",
+                        e,
                         snapshot_short
                     );
-                    let current = crate::stores::auth_store::AUTH_STATE
-                        .peek()
-                        .pubkey
-                        .clone();
-                    let current_invalidate = *crate::stores::nostr_client::MUTE_BLOCK_INVALIDATE
-                        .peek();
+                    let current = crate::stores::auth_store::AUTH_STATE.peek().pubkey.clone();
+                    let current_invalidate =
+                        *crate::stores::nostr_client::MUTE_BLOCK_INVALIDATE.peek();
                     if current == auth_pubkey_snapshot
                         && current_invalidate == invalidate_token_snapshot
                     {

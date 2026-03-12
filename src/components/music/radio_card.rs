@@ -50,22 +50,20 @@ pub fn RadioCard(props: RadioCardProps) -> Element {
     let thumbnail_url = station
         .thumbnail
         .clone()
-        .unwrap_or_else(|| {
-            "https://api.dicebear.com/7.x/shapes/svg?seed=radio".to_string()
-        });
+        .unwrap_or_else(|| "https://api.dicebear.com/7.x/shapes/svg?seed=radio".to_string());
     let primary_genre = station.genres.first().cloned();
-    let stream_info = station
-        .streams
-        .first()
-        .map(|s| {
-            let format = s.format.display_name();
-            if let Some(bitrate) = s.bitrate() {
-                format!("{} {}kbps", format, bitrate)
-            } else {
-                format.to_string()
-            }
-        });
-    let naddr = station.naddr.clone().unwrap_or_else(|| station.coordinate.clone());
+    let stream_info = station.streams.first().map(|s| {
+        let format = s.format.display_name();
+        if let Some(bitrate) = s.bitrate() {
+            format!("{} {}kbps", format, bitrate)
+        } else {
+            format.to_string()
+        }
+    });
+    let naddr = station
+        .naddr
+        .clone()
+        .unwrap_or_else(|| station.coordinate.clone());
     if props.compact {
         rsx! {
             div { class: "group relative bg-card rounded-lg overflow-hidden border border-border hover:border-primary/50 transition",

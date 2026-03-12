@@ -10,17 +10,17 @@
 #![allow(unused_imports)]
 mod fetch;
 mod publish;
-pub use fetch::*;
-pub use publish::*;
+use crate::stores::nostr_client;
+use crate::utils::nip73::ExternalContentId;
 use dioxus::prelude::*;
+pub use fetch::*;
 use lru::LruCache;
 use nostr::Event as NostrEvent;
 use nostr_sdk::prelude::*;
+pub use publish::*;
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroUsize;
 use std::time::Duration;
-use crate::stores::nostr_client;
-use crate::utils::nip73::ExternalContentId;
 /// Kind 30067 - Pinboard Set (board metadata only, addressable event)
 pub const KIND_PINBOARD: u16 = 30067;
 /// Kind 39067 - Pin (individual content reference, regular event)
@@ -121,53 +121,69 @@ pub struct Pinboard {
 impl Pinboard {
     /// Get display title (falls back to d_tag if no title)
     pub fn display_title(&self) -> &str {
-        if self.title.is_empty() { &self.d_tag } else { &self.title }
+        if self.title.is_empty() {
+            &self.d_tag
+        } else {
+            &self.title
+        }
     }
 }
 /// Pin reference - what content is being pinned
 #[derive(Clone, Debug, PartialEq)]
 pub enum PinReference {
     /// Reference to a Nostr event by ID (e tag)
-    Event { id: String, relay_hint: Option<String> },
+    Event {
+        id: String,
+        relay_hint: Option<String>,
+    },
     /// Reference to a parameterized replaceable event (a tag with non-30067 kind)
-    Coordinate { address: String, relay_hint: Option<String> },
+    Coordinate {
+        address: String,
+        relay_hint: Option<String>,
+    },
     /// Reference to external content via NIP-73 (i tag + k tag)
-    External { content: ExternalContentId, hint: Option<String> },
+    External {
+        content: ExternalContentId,
+        hint: Option<String>,
+    },
 }
 impl PinReference {
     /// Infer content type from the reference
     pub fn infer_content_type(&self) -> PinContentType {
         match self {
-            PinReference::External { content, .. } => {
-                match content {
-                    ExternalContentId::Url(url) => {
-                        let lower = url.as_str().to_lowercase();
-                        if is_image_url(&lower) {
-                            PinContentType::Image
-                        } else if is_video_url(&lower) {
-                            PinContentType::Video
-                        } else {
-                            PinContentType::Link
-                        }
+            PinReference::External { content, .. } => match content {
+                ExternalContentId::Url(url) => {
+                    let lower = url.as_str().to_lowercase();
+                    if is_image_url(&lower) {
+                        PinContentType::Image
+                    } else if is_video_url(&lower) {
+                        PinContentType::Video
+                    } else {
+                        PinContentType::Link
                     }
-                    ExternalContentId::Book(_) => PinContentType::Book,
-                    ExternalContentId::PodcastFeed(_)
-                    | ExternalContentId::PodcastEpisode(_)
-                    | ExternalContentId::PodcastPublisher(_) => PinContentType::Podcast,
-                    ExternalContentId::Movie(_) => PinContentType::Video,
-                    ExternalContentId::Paper(_) => PinContentType::Article,
-                    ExternalContentId::Geohash(_) => PinContentType::Location,
-                    ExternalContentId::Hashtag(_) => PinContentType::Text,
-                    ExternalContentId::BlockchainTransaction { .. }
-                    | ExternalContentId::BlockchainAddress { .. } => PinContentType::Link,
                 }
-            }
+                ExternalContentId::Book(_) => PinContentType::Book,
+                ExternalContentId::PodcastFeed(_)
+                | ExternalContentId::PodcastEpisode(_)
+                | ExternalContentId::PodcastPublisher(_) => PinContentType::Podcast,
+                ExternalContentId::Movie(_) => PinContentType::Video,
+                ExternalContentId::Paper(_) => PinContentType::Article,
+                ExternalContentId::Geohash(_) => PinContentType::Location,
+                ExternalContentId::Hashtag(_) => PinContentType::Text,
+                ExternalContentId::BlockchainTransaction { .. }
+                | ExternalContentId::BlockchainAddress { .. } => PinContentType::Link,
+            },
             PinReference::Event { .. } => PinContentType::Note,
             PinReference::Coordinate { address, .. } => {
                 let kind_opt = if address.starts_with("naddr1") {
-                    Coordinate::from_bech32(address).ok().map(|c| c.kind.as_u16() as u32)
+                    Coordinate::from_bech32(address)
+                        .ok()
+                        .map(|c| c.kind.as_u16() as u32)
                 } else {
-                    address.split(':').next().and_then(|s| s.parse::<u32>().ok())
+                    address
+                        .split(':')
+                        .next()
+                        .and_then(|s| s.parse::<u32>().ok())
                 };
                 if let Some(kind) = kind_opt {
                     return match kind {
@@ -299,19 +315,18 @@ pub type PinBoard = Pinboard;
 pub type PinBoardInput = PinboardInput;
 pub type PinBoardContentType = PinContentType;
 /// Pinboards cache (keyed by a_tag)
-pub static PINBOARDS_CACHE: GlobalSignal<LruCache<String, Pinboard>> = GlobalSignal::new(||
-LruCache::new(NonZeroUsize::new(PINBOARD_CACHE_SIZE).unwrap()));
+pub static PINBOARDS_CACHE: GlobalSignal<LruCache<String, Pinboard>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(PINBOARD_CACHE_SIZE).unwrap()));
 /// Pins cache (keyed by event_id)
-pub static PINS_CACHE: GlobalSignal<LruCache<String, Pin>> = GlobalSignal::new(|| LruCache::new(
-    NonZeroUsize::new(PIN_CACHE_SIZE).unwrap(),
-));
+pub static PINS_CACHE: GlobalSignal<LruCache<String, Pin>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(PIN_CACHE_SIZE).unwrap()));
 /// Loading state
 pub static LOADING_PINBOARDS: GlobalSignal<bool> = GlobalSignal::new(|| false);
 /// Store initialization state
 pub static PINBOARDS_INITIALIZED: GlobalSignal<bool> = GlobalSignal::new(|| false);
 /// Alias for old global signals
-pub static PIN_BOARDS_CACHE: GlobalSignal<LruCache<String, Pinboard>> = GlobalSignal::new(||
-LruCache::new(NonZeroUsize::new(PINBOARD_CACHE_SIZE).unwrap()));
+pub static PIN_BOARDS_CACHE: GlobalSignal<LruCache<String, Pinboard>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(PINBOARD_CACHE_SIZE).unwrap()));
 pub static LOADING_PIN_BOARDS: GlobalSignal<bool> = GlobalSignal::new(|| false);
 pub static PIN_BOARDS_INITIALIZED: GlobalSignal<bool> = GlobalSignal::new(|| false);
 /// Get a pinboard from cache by a_tag
@@ -321,7 +336,10 @@ pub fn get_cached_pinboard(a_tag: &str) -> Option<Pinboard> {
 /// Get a pinboard from cache by naddr
 pub fn get_cached_pinboard_by_naddr(naddr: &str) -> Option<Pinboard> {
     let cache = PINBOARDS_CACHE.read();
-    cache.iter().find(|(_, board)| board.naddr == naddr).map(|(_, board)| board.clone())
+    cache
+        .iter()
+        .find(|(_, board)| board.naddr == naddr)
+        .map(|(_, board)| board.clone())
 }
 /// Cache a pinboard
 pub fn cache_pinboard(board: Pinboard) {
@@ -388,15 +406,18 @@ pub fn get_cached_board(a_tag: &str) -> Option<Pinboard> {
 }
 /// Check if URL is an image
 fn is_image_url(url: &str) -> bool {
-    let extensions = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".ico"];
-    extensions.iter().any(|ext| url.ends_with(ext)) || url.contains("image")
-        || url.contains("/i/")
+    let extensions = [
+        ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".ico",
+    ];
+    extensions.iter().any(|ext| url.ends_with(ext)) || url.contains("image") || url.contains("/i/")
 }
 /// Check if URL is a video
 fn is_video_url(url: &str) -> bool {
     let extensions = [".mp4", ".webm", ".mov", ".avi", ".mkv", ".m4v"];
-    extensions.iter().any(|ext| url.ends_with(ext)) || url.contains("youtube.com")
-        || url.contains("youtu.be") || url.contains("vimeo.com")
+    extensions.iter().any(|ext| url.ends_with(ext))
+        || url.contains("youtube.com")
+        || url.contains("youtu.be")
+        || url.contains("vimeo.com")
 }
 /// Extract a tag value by tag name
 pub(crate) fn extract_tag_value(tags: &Tags, tag_name: &str) -> Option<String> {
@@ -434,9 +455,7 @@ pub fn parse_pinboard_event(
     let d_tag = event
         .tags
         .iter()
-        .find(|t| {
-            t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D))
-        })
+        .find(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)))
         .and_then(|t| t.content())
         .map(|s| s.to_string())?;
     let a_tag = format!("{}:{}:{}", KIND_PINBOARD, event.pubkey.to_hex(), d_tag);
@@ -521,30 +540,19 @@ pub fn parse_pin_event(event: &NostrEvent) -> Option<Pin> {
             }
             _ => {}
         }
-        if let Some(TagStandard::ExternalContent { content, hint, .. }) = tag
-            .as_standardized()
-        {
-            external_content = Some((
-                content.clone(),
-                hint.as_ref().map(|u| u.to_string()),
-            ));
+        if let Some(TagStandard::ExternalContent { content, hint, .. }) = tag.as_standardized() {
+            external_content = Some((content.clone(), hint.as_ref().map(|u| u.to_string())));
         }
     }
     let reference = if let Some((id, relay_hint)) = event_ref {
-        PinReference::Event {
-            id,
-            relay_hint,
-        }
+        PinReference::Event { id, relay_hint }
     } else if let Some((address, relay_hint)) = content_coordinate {
         PinReference::Coordinate {
             address,
             relay_hint,
         }
     } else if let Some((content, hint)) = external_content {
-        PinReference::External {
-            content,
-            hint,
-        }
+        PinReference::External { content, hint }
     } else {
         log::warn!("Pin event {} has no content reference", event.id.to_hex());
         return None;
@@ -571,7 +579,9 @@ pub(crate) fn extract_event_metadata(event: &NostrEvent, kind: u16) -> PinMetada
     let summary = extract_tag_value(tags, "summary");
     let content_type = match kind {
         30023 => {
-            if tags.hashtags().any(|tag| tag == crate::utils::recipe::RECIPE_TAG_PREFIX)
+            if tags
+                .hashtags()
+                .any(|tag| tag == crate::utils::recipe::RECIPE_TAG_PREFIX)
             {
                 Some(PinContentType::Recipe)
             } else {
@@ -604,11 +614,17 @@ pub fn pinboards_filter(limit: usize) -> Filter {
 }
 /// Build a filter for a specific pinboard by coordinate
 pub fn pinboard_by_coord_filter(pubkey: PublicKey, identifier: &str) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_PINBOARD)).author(pubkey).identifier(identifier)
+    Filter::new()
+        .kind(Kind::Custom(KIND_PINBOARD))
+        .author(pubkey)
+        .identifier(identifier)
 }
 /// Build a filter for pinboards by author
 pub fn pinboards_by_author_filter(pubkey: PublicKey, limit: usize) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_PINBOARD)).author(pubkey).limit(limit)
+    Filter::new()
+        .kind(Kind::Custom(KIND_PINBOARD))
+        .author(pubkey)
+        .limit(limit)
 }
 /// Build a filter for pinboards with pagination
 pub fn pinboards_paginated_filter(limit: usize, until: Option<u64>) -> Filter {
@@ -620,7 +636,10 @@ pub fn pinboards_paginated_filter(limit: usize, until: Option<u64>) -> Filter {
 }
 /// Build a filter for pinboards by hashtag
 pub fn pinboards_by_hashtag_filter(hashtag: &str, limit: usize) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_PINBOARD)).hashtag(hashtag).limit(limit)
+    Filter::new()
+        .kind(Kind::Custom(KIND_PINBOARD))
+        .hashtag(hashtag)
+        .limit(limit)
 }
 /// Build a filter for pins referencing a board (uppercase A per NIP spec)
 pub fn pins_for_board_filter(board_a_tag: &str, limit: usize) -> Filter {
@@ -631,7 +650,10 @@ pub fn pins_for_board_filter(board_a_tag: &str, limit: usize) -> Filter {
 }
 /// Build a filter for pins by author
 pub fn pins_by_author_filter(pubkey: PublicKey, limit: usize) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_PIN)).author(pubkey).limit(limit)
+    Filter::new()
+        .kind(Kind::Custom(KIND_PIN))
+        .author(pubkey)
+        .limit(limit)
 }
 /// Build a filter for pins by author referencing a specific board (uppercase A per NIP spec)
 pub fn pins_by_author_for_board_filter(

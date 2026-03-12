@@ -3,10 +3,10 @@
 //! Manages SSH public keys stored as Kind 52 events on Nostr.
 //! Used for git authentication operations.
 #![allow(dead_code)]
+use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
 use dioxus::signals::ReadableExt;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
-use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
 /// Default timeout for fetching events
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 /// SSH public key stored as Kind 52 event
@@ -83,8 +83,14 @@ pub async fn publish_ssh_key(title: &str, public_key: &str) -> Result<EventId, S
     let fingerprint = compute_ssh_fingerprint(public_key)
         .ok_or_else(|| "Invalid SSH public key format".to_string())?;
     let builder = EventBuilder::new(Kind::Custom(52), public_key)
-        .tag(Tag::custom(TagKind::custom("title"), vec![title.to_string()]))
-        .tag(Tag::custom(TagKind::custom("fingerprint"), vec![fingerprint]));
+        .tag(Tag::custom(
+            TagKind::custom("title"),
+            vec![title.to_string()],
+        ))
+        .tag(Tag::custom(
+            TagKind::custom("fingerprint"),
+            vec![fingerprint],
+        ));
     let output = client
         .send_event_builder(builder)
         .await
@@ -117,7 +123,9 @@ pub async fn delete_ssh_key(event_id: EventId) -> Result<(), String> {
         return Err("No signer attached. Cannot publish events.".into());
     }
     use nostr::nips::nip09::EventDeletionRequest;
-    let request = EventDeletionRequest::new().id(event_id).reason("SSH key deleted");
+    let request = EventDeletionRequest::new()
+        .id(event_id)
+        .reason("SSH key deleted");
     let builder = EventBuilder::delete(request);
     client
         .send_event_builder(builder)

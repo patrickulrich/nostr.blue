@@ -27,19 +27,17 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
     let mut comment = use_signal(String::new);
     let mut is_submitting = use_signal(|| false);
     let parent_submitting = props.submitting;
-    use_effect(
-        use_reactive!(
-            | parent_submitting | { if parent_submitting == Some(false) { is_submitting
-            .set(false); } }
-        ),
-    );
+    use_effect(use_reactive!(|parent_submitting| {
+        if parent_submitting == Some(false) {
+            is_submitting.set(false);
+        }
+    }));
     let effective_submitting = props.submitting.unwrap_or(*is_submitting.read());
     let do_cancel = {
         let on_cancel = props.on_cancel;
         let parent_submitting = props.submitting;
         move || {
-            let currently_submitting = parent_submitting
-                .unwrap_or(*is_submitting.read());
+            let currently_submitting = parent_submitting.unwrap_or(*is_submitting.read());
             if currently_submitting {
                 return;
             }
@@ -51,8 +49,7 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
         let on_confirm = props.on_confirm;
         let parent_submitting = props.submitting;
         move || {
-            let currently_submitting = parent_submitting
-                .unwrap_or(*is_submitting.read());
+            let currently_submitting = parent_submitting.unwrap_or(*is_submitting.read());
             if currently_submitting {
                 return;
             }
@@ -97,7 +94,7 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
                 aria_labelledby: "highlight-modal-title",
                 tabindex: "-1",
                 onmounted: move |_evt| {
-                    #[cfg(target_arch = "wasm32")]
+                    #[cfg(feature = "web")]
                     {
                         if let Some(html_element) = _evt.data().downcast::<web_sys::HtmlElement>() {
                             let _ = html_element.focus();
@@ -163,7 +160,7 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
                                 }
                             },
                         }
-                        p { class: "text-xs text-muted-foreground", "Press Ctrl+Enter to save" }
+                        p { class: "text-xs text-muted-foreground", "Press Ctrl/⌘+Enter to save" }
                     }
                 }
                 div { class: "flex justify-end gap-3 p-4 border-t border-border",

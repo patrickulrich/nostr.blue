@@ -2,8 +2,8 @@
 //!
 //! Fetches repository metadata from GitHub for import wizard.
 #![allow(dead_code)]
-use gloo_net::http::Request;
 use serde::Deserialize;
+
 /// GitHub repository metadata
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct GitHubRepo {
@@ -73,48 +73,52 @@ pub fn parse_github_url(url: &str) -> Option<(String, String)> {
 /// Fetch repository metadata from GitHub
 pub async fn fetch_github_repo(owner: &str, repo: &str) -> Result<GitHubRepo, String> {
     let url = format!("https://api.github.com/repos/{}/{}", owner, repo);
-    let response = Request::get(&url)
+    let response = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if response.status() == 404 {
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
         return Err("Repository not found".to_string());
     }
-    if !response.ok() {
-        return Err(
-            format!("GitHub API error: {} {}", response.status(), response.status_text()),
-        );
+    if !response.status().is_success() {
+        return Err(format!("GitHub API error: {}", response.status()));
     }
-    response.json().await.map_err(|e| format!("Failed to parse response: {}", e))
+    response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))
 }
 /// Fetch repository from URL
 pub async fn fetch_repo_from_url(github_url: &str) -> Result<GitHubRepo, String> {
-    let (owner, repo) = parse_github_url(github_url)
-        .ok_or_else(|| "Invalid GitHub URL".to_string())?;
+    let (owner, repo) =
+        parse_github_url(github_url).ok_or_else(|| "Invalid GitHub URL".to_string())?;
     fetch_github_repo(&owner, &repo).await
 }
 /// Fetch user's repositories
-pub async fn fetch_user_repos(
-    username: &str,
-    limit: usize,
-) -> Result<Vec<GitHubRepo>, String> {
+pub async fn fetch_user_repos(username: &str, limit: usize) -> Result<Vec<GitHubRepo>, String> {
     let url = format!(
         "https://api.github.com/users/{}/repos?sort=updated&per_page={}",
-        username,
-        limit,
+        username, limit,
     );
-    let response = Request::get(&url)
+    let response = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("GitHub API error: {}", response.status()));
     }
-    response.json().await.map_err(|e| format!("Failed to parse response: {}", e))
+    response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))
 }
 /// Search GitHub repositories
 pub async fn search_repos(query: &str, limit: usize) -> Result<Vec<GitHubRepo>, String> {
@@ -123,13 +127,15 @@ pub async fn search_repos(query: &str, limit: usize) -> Result<Vec<GitHubRepo>, 
         urlencoding::encode(query),
         limit,
     );
-    let response = Request::get(&url)
+    let response = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("GitHub API error: {}", response.status()));
     }
     #[derive(Deserialize)]
@@ -169,20 +175,23 @@ pub async fn fetch_commits(
 ) -> Result<Vec<GitHubCommit>, String> {
     let url = format!(
         "https://api.github.com/repos/{}/{}/commits?per_page={}",
-        owner,
-        repo,
-        limit,
+        owner, repo, limit,
     );
-    let response = Request::get(&url)
+    let response = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("GitHub API error: {}", response.status()));
     }
-    response.json().await.map_err(|e| format!("Failed to parse response: {}", e))
+    response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))
 }
 /// Fetch recent commits for a specific file path
 pub async fn fetch_file_commits(
@@ -200,27 +209,34 @@ pub async fn fetch_file_commits(
         urlencoding::encode(git_ref),
         limit,
     );
-    let response = Request::get(&url)
+    let response = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("GitHub API error: {}", response.status()));
     }
-    response.json().await.map_err(|e| format!("Failed to parse response: {}", e))
+    response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))
 }
 /// Fetch branches
 pub async fn fetch_branches(owner: &str, repo: &str) -> Result<Vec<String>, String> {
     let url = format!("https://api.github.com/repos/{}/{}/branches", owner, repo);
-    let response = Request::get(&url)
+    let response = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("GitHub API error: {}", response.status()));
     }
     #[derive(Deserialize)]
@@ -256,7 +272,10 @@ mod tests {
         );
         assert_eq!(parse_github_url("not-a-github-url"), None);
         // Spoofed domain variants must be rejected
-        assert_eq!(parse_github_url("https://github.com.evil.com/owner/repo"), None);
+        assert_eq!(
+            parse_github_url("https://github.com.evil.com/owner/repo"),
+            None
+        );
         assert_eq!(parse_github_url("https://fakegithub.com/owner/repo"), None);
     }
 }

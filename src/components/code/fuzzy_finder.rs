@@ -1,9 +1,9 @@
 //! Fuzzy Finder Component
 //!
 //! Modal file finder with fuzzy subsequence search for repository browsing.
+use super::file_tree::split_path;
 use crate::routes::Route;
 use dioxus::prelude::*;
-use super::file_tree::split_path;
 
 /// Modal fuzzy file finder for repository file navigation
 #[component]

@@ -9,11 +9,7 @@ pub struct RecipeTag {
     pub emoji: Option<&'static str>,
 }
 impl RecipeTag {
-    pub const fn new(
-        name: &'static str,
-        slug: &'static str,
-        emoji: Option<&'static str>,
-    ) -> Self {
+    pub const fn new(name: &'static str, slug: &'static str, emoji: Option<&'static str>) -> Self {
         Self { name, slug, emoji }
     }
 }
@@ -244,17 +240,8 @@ pub static CURATED_TAG_SECTIONS: &[TagSection] = &[
         emoji: "🥩",
         title: "Proteins",
         tags: &[
-            "Beef",
-            "Chicken",
-            "Fish",
-            "Lamb",
-            "Pork",
-            "Seafood",
-            "Steak",
-            "Turkey",
-            "Duck",
-            "Eggs",
-            "Tofu",
+            "Beef", "Chicken", "Fish", "Lamb", "Pork", "Seafood", "Steak", "Turkey", "Duck",
+            "Eggs", "Tofu",
         ],
     },
     TagSection {
@@ -326,7 +313,9 @@ pub static TAG_ALIASES: &[(&str, &str)] = &[
 /// Find a tag by name (case-insensitive)
 pub fn find_tag(name: &str) -> Option<&'static RecipeTag> {
     let name_lower = name.to_lowercase();
-    RECIPE_TAGS.iter().find(|t| t.name.to_lowercase() == name_lower)
+    RECIPE_TAGS
+        .iter()
+        .find(|t| t.name.to_lowercase() == name_lower)
 }
 /// Find a tag by slug
 pub fn find_tag_by_slug(slug: &str) -> Option<&'static RecipeTag> {
@@ -357,7 +346,11 @@ pub fn get_section_tags(section_title: &str) -> Option<Vec<&'static RecipeTag>> 
         .iter()
         .find(|s| s.title == section_title)
         .map(|section| {
-            section.tags.iter().filter_map(|name| find_tag(name)).collect()
+            section
+                .tags
+                .iter()
+                .filter_map(|name| find_tag(name))
+                .collect()
         })
 }
 #[cfg(test)]

@@ -1,7 +1,26 @@
+//! Format utilities
+//!
+//! Provides formatting functions for display strings.
+
+#[cfg(all(feature = "web", feature = "desktop"))]
+compile_error!("Cannot enable both 'web' and 'desktop' features");
+
+#[cfg(all(feature = "web", feature = "mobile"))]
+compile_error!("Cannot enable both 'web' and 'mobile' features");
+
+#[cfg(all(feature = "desktop", feature = "mobile"))]
+compile_error!("Cannot enable both 'desktop' and 'mobile' features");
+
+#[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile")))]
+compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature");
+
 /// Format server URL for user-friendly display
 /// Removes protocol prefixes and trailing slashes
 pub fn display_server_url(url: &str) -> String {
-    url.replace("https://", "").replace("http://", "").trim_end_matches('/').to_string()
+    url.replace("https://", "")
+        .replace("http://", "")
+        .trim_end_matches('/')
+        .to_string()
 }
 /// Format satoshi amount with thousands separator (e.g., 1,234,567)
 pub fn format_sats_with_separator(sats: u64) -> String {
@@ -96,7 +115,9 @@ pub fn truncate_with_word_break(text: &str, max_chars: usize) -> String {
 /// Shortens a URL for display by stripping protocol and truncating
 /// Uses UTF-8 safe character-based slicing to avoid panic on multi-byte chars
 pub fn shorten_url(url: &str, max_len: usize) -> String {
-    let url = url.trim_start_matches("https://").trim_start_matches("http://");
+    let url = url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
     if max_len <= 3 {
         return url.chars().take(max_len).collect();
     }
@@ -105,7 +126,12 @@ pub fn shorten_url(url: &str, max_len: usize) -> String {
     }
     let char_count = url.chars().count();
     if char_count > max_len {
-        format!("{}...", url.chars().take(max_len.saturating_sub(3)).collect::<String>())
+        format!(
+            "{}...",
+            url.chars()
+                .take(max_len.saturating_sub(3))
+                .collect::<String>()
+        )
     } else {
         url.to_string()
     }
@@ -113,7 +139,7 @@ pub fn shorten_url(url: &str, max_len: usize) -> String {
 /// Format a Unix timestamp as a relative time string (e.g., "5m ago", "2d ago")
 ///
 /// Returns `None` for invalid timestamps (0 or far in the future).
-/// Uses WASM-compatible `js_sys::Date::now()` for current time.
+/// Uses cross-platform `crate::platform::timestamp::now_secs()` for current time.
 ///
 /// # Examples
 /// ```
@@ -125,22 +151,20 @@ pub fn format_relative_time(timestamp: u64) -> Option<String> {
     if timestamp == 0 {
         return None;
     }
-    let now = (js_sys::Date::now() / 1000.0) as u64;
+    let now = crate::platform::timestamp::now_secs();
     if timestamp > now.saturating_add(86400) {
         return None;
     }
     let diff = now.saturating_sub(timestamp);
-    Some(
-        match diff {
-            0..=59 => "just now".to_string(),
-            60..=3599 => format!("{}m ago", diff / 60),
-            3600..=86399 => format!("{}h ago", diff / 3600),
-            86400..=604799 => format!("{}d ago", diff / 86400),
-            604800..=2591999 => format!("{}w ago", diff / 604800),
-            2592000..=31535999 => format!("{}mo ago", diff / 2592000),
-            _ => format!("{}y ago", diff / 31536000),
-        },
-    )
+    Some(match diff {
+        0..=59 => "just now".to_string(),
+        60..=3599 => format!("{}m ago", diff / 60),
+        3600..=86399 => format!("{}h ago", diff / 3600),
+        86400..=604799 => format!("{}d ago", diff / 86400),
+        604800..=2591999 => format!("{}w ago", diff / 604800),
+        2592000..=31535999 => format!("{}mo ago", diff / 2592000),
+        _ => format!("{}y ago", diff / 31536000),
+    })
 }
 /// Format a Unix timestamp as relative time, with a fallback for invalid timestamps
 ///
@@ -194,7 +218,7 @@ pub fn truncate_id(id: &str, len: usize) -> String {
 /// This function uses cryptographically secure random number generation
 /// suitable for order IDs, review IDs, and other security-sensitive identifiers.
 pub fn generate_unique_id() -> String {
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
         use js_sys::{Math, Uint8Array};
         use wasm_bindgen::JsCast;
@@ -218,7 +242,7 @@ pub fn generate_unique_id() -> String {
         let bytes: Vec<u8> = array.to_vec();
         bytes.iter().map(|b| format!("{:02x}", b)).collect()
     }
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(feature = "native")]
     {
         use rand::Rng;
         let bytes: [u8; 16] = rand::thread_rng().gen();

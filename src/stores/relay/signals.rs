@@ -74,9 +74,8 @@ pub struct RelayPoolStore {
     pub data: Vec<RelayInfo>,
 }
 /// Global signal for relay pool state
-pub static RELAY_POOL: GlobalSignal<Store<RelayPoolStore>> = Signal::global(|| Store::new(
-    RelayPoolStore::default(),
-));
+pub static RELAY_POOL: GlobalSignal<Store<RelayPoolStore>> =
+    Signal::global(|| Store::new(RelayPoolStore::default()));
 /// Whether at least one relay has connected (triggers NIP-78 retries)
 /// Once true, stays true for the session (relay may reconnect automatically)
 pub static RELAY_CONNECTED: GlobalSignal<bool> = Signal::global(|| false);

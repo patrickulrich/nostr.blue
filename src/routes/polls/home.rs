@@ -4,8 +4,8 @@ use crate::services::aggregation::{
     fetch_interaction_counts_batch, stream_interaction_counts, InteractionCounts,
     InteractionStreamHandle,
 };
-use crate::stores::{auth_store, nostr_client};
 use crate::stores::nostr_client::stream_events_immediate;
+use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
 use nostr_sdk::{Event, EventId, Filter, Kind, PublicKey, Timestamp};
 use std::collections::{HashMap, HashSet};
@@ -73,7 +73,10 @@ pub fn Polls() -> Element {
                     let pubkey_str = match auth_store::get_pubkey() {
                         Some(pk) => pk,
                         None => {
-                            error.set(Some("Not authenticated. Please sign in to view your following feed.".to_string()));
+                            error.set(Some(
+                                "Not authenticated. Please sign in to view your following feed."
+                                    .to_string(),
+                            ));
                             loading.set(false);
                             return;
                         }
@@ -94,31 +97,31 @@ pub fn Polls() -> Element {
                         loading.set(false);
                         return;
                     }
-                    Filter::new().kind(Kind::Poll).authors(authors).limit(PAGE_SIZE)
+                    Filter::new()
+                        .kind(Kind::Poll)
+                        .authors(authors)
+                        .limit(PAGE_SIZE)
                 }
-                FeedType::Global => {
-                    Filter::new().kind(Kind::Poll).limit(PAGE_SIZE)
-                }
+                FeedType::Global => Filter::new().kind(Kind::Poll).limit(PAGE_SIZE),
             };
             // Stream events for fast time-to-first-post
             let mut seen_ids = HashSet::new();
-            let result = stream_events_immediate(
-                filter,
-                Duration::from_secs(10),
-                |event| {
-                    if *request_id.peek() != current_id {
-                        return;
-                    }
-                    if seen_ids.insert(event.id) {
-                        events.with_mut(|current| {
-                            // Insert in sorted order (newest first)
-                            let pos = current.iter().position(|e| e.created_at < event.created_at)
-                                .unwrap_or(current.len());
-                            current.insert(pos, event);
-                        });
-                    }
-                },
-            ).await;
+            let result = stream_events_immediate(filter, Duration::from_secs(10), |event| {
+                if *request_id.peek() != current_id {
+                    return;
+                }
+                if seen_ids.insert(event.id) {
+                    events.with_mut(|current| {
+                        // Insert in sorted order (newest first)
+                        let pos = current
+                            .iter()
+                            .position(|e| e.created_at < event.created_at)
+                            .unwrap_or(current.len());
+                        current.insert(pos, event);
+                    });
+                }
+            })
+            .await;
             if *request_id.peek() != current_id {
                 loading.set(false);
                 return;
@@ -148,24 +151,33 @@ pub fn Polls() -> Element {
                         match fetch_interaction_counts_batch(
                             event_ids.clone(),
                             Duration::from_secs(5),
-                        ).await {
+                        )
+                        .await
+                        {
                             Ok(counts) => {
-                                if *request_id.peek() != current_id { loading.set(false); return; }
+                                if *request_id.peek() != current_id {
+                                    loading.set(false);
+                                    return;
+                                }
                                 interaction_counts.set(counts);
                             }
                             Err(e) => {
                                 log::warn!("Failed to fetch interaction counts: {e}");
                             }
                         }
-                        if *request_id.peek() != current_id { loading.set(false); return; }
-                        match stream_interaction_counts(
-                            event_ids,
-                            interaction_counts,
-                            Some(600),
-                        ).await {
+                        if *request_id.peek() != current_id {
+                            loading.set(false);
+                            return;
+                        }
+                        match stream_interaction_counts(event_ids, interaction_counts, Some(600))
+                            .await
+                        {
                             Ok(handle) => {
-                                if *request_id.peek() == current_id && *feed_type.read() == current_feed_type {
-                                    interaction_stream_handles.with_mut(|handles| handles.push(handle));
+                                if *request_id.peek() == current_id
+                                    && *feed_type.read() == current_feed_type
+                                {
+                                    interaction_stream_handles
+                                        .with_mut(|handles| handles.push(handle));
                                 } else {
                                     handle.unsubscribe().await;
                                 }
@@ -232,17 +244,21 @@ pub fn Polls() -> Element {
                     }
                     has_more.set(raw_count >= PAGE_SIZE);
                     let new_event_ids: Vec<EventId> = unique_new.iter().map(|e| e.id).collect();
-                    events
-                        .with_mut(|current| {
-                            current.extend(unique_new);
-                        });
+                    events.with_mut(|current| {
+                        current.extend(unique_new);
+                    });
                     // Fetch interaction counts for new page and extend streaming
                     if !new_event_ids.is_empty() {
                         if let Ok(counts) = fetch_interaction_counts_batch(
                             new_event_ids.clone(),
                             Duration::from_secs(5),
-                        ).await {
-                            if *request_id.peek() != rid { loading.set(false); return; }
+                        )
+                        .await
+                        {
+                            if *request_id.peek() != rid {
+                                loading.set(false);
+                                return;
+                            }
                             interaction_counts.with_mut(|existing| {
                                 existing.extend(counts);
                             });
@@ -253,7 +269,10 @@ pub fn Polls() -> Element {
                                 new_event_ids.len()
                             );
                         }
-                        if *request_id.peek() != rid { loading.set(false); return; }
+                        if *request_id.peek() != rid {
+                            loading.set(false);
+                            return;
+                        }
                         // Only stream interactions for newly added poll IDs (keep existing streams running)
                         let truly_new_ids: Vec<EventId> = new_event_ids
                             .into_iter()
@@ -267,16 +286,24 @@ pub fn Polls() -> Element {
                                 truly_new_ids,
                                 interaction_counts,
                                 Some(600),
-                            ).await {
+                            )
+                            .await
+                            {
                                 Ok(handle) => {
-                                    if *request_id.peek() == rid && *feed_type.read() == current_feed_type {
-                                        interaction_stream_handles.with_mut(|handles| handles.push(handle));
+                                    if *request_id.peek() == rid
+                                        && *feed_type.read() == current_feed_type
+                                    {
+                                        interaction_stream_handles
+                                            .with_mut(|handles| handles.push(handle));
                                     } else {
                                         handle.unsubscribe().await;
                                     }
                                 }
                                 Err(e) => {
-                                    log::error!("Failed to start interaction stream for new polls: {}", e);
+                                    log::error!(
+                                        "Failed to start interaction stream for new polls: {}",
+                                        e
+                                    );
                                 }
                             }
                         }
@@ -428,7 +455,10 @@ async fn load_following_polls(
     if authors.is_empty() {
         return Ok(Vec::new());
     }
-    let mut filter = Filter::new().kind(Kind::Poll).authors(authors).limit(PAGE_SIZE);
+    let mut filter = Filter::new()
+        .kind(Kind::Poll)
+        .authors(authors)
+        .limit(PAGE_SIZE);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }

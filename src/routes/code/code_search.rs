@@ -58,7 +58,9 @@ impl ParsedQuery {
                     "issue" | "issues" => query.entity_type = Some("issue".to_string()),
                     "pr" | "pull" | "prs" => query.entity_type = Some("pr".to_string()),
                     "repo" | "repository" | "repos" => query.entity_type = Some("repo".to_string()),
-                    "snippet" | "snippets" | "code" => query.entity_type = Some("snippet".to_string()),
+                    "snippet" | "snippets" | "code" => {
+                        query.entity_type = Some("snippet".to_string())
+                    }
                     _ => text_parts.push(token.to_string()),
                 }
             } else if let Some(value) = token.strip_prefix("author:") {
@@ -92,7 +94,10 @@ impl ParsedQuery {
             }
         }
         if !self.labels.is_empty()
-            && !self.labels.iter().all(|l| issue.labels.iter().any(|il| il.eq_ignore_ascii_case(l)))
+            && !self
+                .labels
+                .iter()
+                .all(|l| issue.labels.iter().any(|il| il.eq_ignore_ascii_case(l)))
         {
             return false;
         }
@@ -111,7 +116,10 @@ impl ParsedQuery {
             }
         }
         if !self.labels.is_empty()
-            && !self.labels.iter().all(|l| pr.labels.iter().any(|il| il.eq_ignore_ascii_case(l)))
+            && !self
+                .labels
+                .iter()
+                .all(|l| pr.labels.iter().any(|il| il.eq_ignore_ascii_case(l)))
         {
             return false;
         }
@@ -130,7 +138,10 @@ impl ParsedQuery {
             }
         }
         if !self.labels.is_empty()
-            && !self.labels.iter().all(|l| repo.topics.iter().any(|t| t.eq_ignore_ascii_case(l)))
+            && !self
+                .labels
+                .iter()
+                .all(|l| repo.topics.iter().any(|t| t.eq_ignore_ascii_case(l)))
         {
             return false;
         }
@@ -209,38 +220,74 @@ pub fn CodeSearch(q: String) -> Element {
             // Only fetch entity types that will be displayed (based on type: filter)
             let repos_fut = if parsed.show_repos() {
                 Some(search_repositories(search_text.as_deref(), 20))
-            } else { None };
+            } else {
+                None
+            };
             let snippets_fut = if parsed.show_snippets() {
                 Some(search_snippets(search_text.as_deref(), 20))
-            } else { None };
+            } else {
+                None
+            };
             let issues_fut = if parsed.show_issues() {
                 Some(search_issues(search_text.as_deref(), 20))
-            } else { None };
+            } else {
+                None
+            };
             let prs_fut = if parsed.show_prs() {
                 Some(search_prs(search_text.as_deref(), 20))
-            } else { None };
+            } else {
+                None
+            };
 
             // Use OptionFuture for conditional parallel execution
             let (repos_res, snippets_res, issues_res, prs_res) = futures::join!(
-                async { match repos_fut { Some(f) => Some(f.await), None => None } },
-                async { match snippets_fut { Some(f) => Some(f.await), None => None } },
-                async { match issues_fut { Some(f) => Some(f.await), None => None } },
-                async { match prs_fut { Some(f) => Some(f.await), None => None } }
+                async {
+                    match repos_fut {
+                        Some(f) => Some(f.await),
+                        None => None,
+                    }
+                },
+                async {
+                    match snippets_fut {
+                        Some(f) => Some(f.await),
+                        None => None,
+                    }
+                },
+                async {
+                    match issues_fut {
+                        Some(f) => Some(f.await),
+                        None => None,
+                    }
+                },
+                async {
+                    match prs_fut {
+                        Some(f) => Some(f.await),
+                        None => None,
+                    }
+                }
             );
-            if *request_gen.peek() != gen { return; }
+            if *request_gen.peek() != gen {
+                return;
+            }
             // Apply client-side filters and set results
-            repos.set(Some(repos_res
-                .unwrap_or(Ok(vec![]))
-                .map(|list| list.into_iter().filter(|r| parsed.matches_repo(r)).collect())));
-            snippets.set(Some(snippets_res
-                .unwrap_or(Ok(vec![]))
-                .map(|list| list.into_iter().filter(|s| parsed.matches_snippet(s)).collect())));
-            issues.set(Some(issues_res
-                .unwrap_or(Ok(vec![]))
-                .map(|list| list.into_iter().filter(|i| parsed.matches_issue(i)).collect())));
-            prs.set(Some(prs_res
-                .unwrap_or(Ok(vec![]))
-                .map(|list| list.into_iter().filter(|p| parsed.matches_pr(p)).collect())));
+            repos.set(Some(repos_res.unwrap_or(Ok(vec![])).map(|list| {
+                list.into_iter()
+                    .filter(|r| parsed.matches_repo(r))
+                    .collect()
+            })));
+            snippets.set(Some(snippets_res.unwrap_or(Ok(vec![])).map(|list| {
+                list.into_iter()
+                    .filter(|s| parsed.matches_snippet(s))
+                    .collect()
+            })));
+            issues.set(Some(issues_res.unwrap_or(Ok(vec![])).map(|list| {
+                list.into_iter()
+                    .filter(|i| parsed.matches_issue(i))
+                    .collect()
+            })));
+            prs.set(Some(prs_res.unwrap_or(Ok(vec![])).map(|list| {
+                list.into_iter().filter(|p| parsed.matches_pr(p)).collect()
+            })));
         });
     }));
     let handle_search = move |_| {

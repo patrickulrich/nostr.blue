@@ -4,20 +4,20 @@
 //! Supports drag-and-drop, multiple files, and any file type.
 use crate::components::icons;
 use crate::routes::Route;
-use crate::stores::{auth_store, blossom_store, nostr_client};
 use crate::services::git_hosting::fetch_repository;
+use crate::stores::{auth_store, blossom_store, nostr_client};
 use crate::utils::clipboard::copy_to_clipboard;
 use crate::utils::format::display_server_url;
 use crate::utils::nip34::Repository;
 use dioxus::html::HasFileData;
 use dioxus::prelude::*;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use js_sys::{ArrayBuffer, Uint8Array};
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen_futures::JsFuture;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use web_sys::{HtmlElement, HtmlInputElement};
 
 /// Maximum file size: 50 MB
@@ -73,7 +73,9 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
         let n = naddr.clone();
         spawn(async move {
             let result = fetch_repository(&n).await;
-            if *request_gen.peek() != gen { return; }
+            if *request_gen.peek() != gen {
+                return;
+            }
             repo_result.set(Some(result));
         });
     }));
@@ -156,7 +158,13 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
                 .await
                 {
                     Ok(url) => {
-                        log::info!("Uploaded file {}/{}: {} -> {}", i + 1, total, file.name, url);
+                        log::info!(
+                            "Uploaded file {}/{}: {} -> {}",
+                            i + 1,
+                            total,
+                            file.name,
+                            url
+                        );
                         results.push(UploadResult {
                             id: file.id,
                             name: file.name.clone(),
@@ -191,7 +199,7 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
                 if copy_to_clipboard(&url).await.is_ok() {
                     copied_index.set(Some(index));
                     // Reset copied state after 2 seconds
-                    gloo_timers::future::TimeoutFuture::new(2000).await;
+                    crate::platform::timer::sleep_ms(2000).await;
                     if *copied_index.read() == Some(index) {
                         copied_index.set(None);
                     }
@@ -334,8 +342,18 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
                             }
                         },
                         onclick: move |_| {
-                            // Programmatically click the hidden file input
-                            trigger_file_input(input_id);
+                            #[cfg(feature = "web")]
+                            {
+                                // Programmatically click the hidden file input
+                                trigger_file_input(input_id);
+                            }
+                            #[cfg(not(feature = "web"))]
+                            {
+                                error_message.set(Some(
+                                    "File browsing is currently available only on web builds."
+                                        .to_string(),
+                                ));
+                            }
                         },
                         div { class: "w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center",
                             svg {
@@ -627,7 +645,7 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
 }
 
 /// Read multiple files from a file input element
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 async fn read_files_from_input(input_id: &str) -> Result<Vec<SelectedFile>, String> {
     let window = web_sys::window().ok_or("No window")?;
     let document = window.document().ok_or("No document")?;
@@ -657,9 +675,8 @@ async fn read_files_from_input(input_id: &str) -> Result<Vec<SelectedFile>, Stri
         let array_buffer = JsFuture::from(promise)
             .await
             .map_err(|_| format!("Failed to read file: {}", name))?;
-        let array_buffer: ArrayBuffer = array_buffer
-            .dyn_into()
-            .map_err(|_| "Not an ArrayBuffer")?;
+        let array_buffer: ArrayBuffer =
+            array_buffer.dyn_into().map_err(|_| "Not an ArrayBuffer")?;
         let uint8_array = Uint8Array::new(&array_buffer);
         let bytes = uint8_array.to_vec();
 
@@ -681,13 +698,13 @@ async fn read_files_from_input(input_id: &str) -> Result<Vec<SelectedFile>, Stri
     Ok(files)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 async fn read_files_from_input(_input_id: &str) -> Result<Vec<SelectedFile>, String> {
-    Err("File reading is only supported in WASM".to_string())
+    Err("File reading requires the 'web' feature".to_string())
 }
 
 /// Programmatically click a file input element
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 fn trigger_file_input(input_id: &str) {
     if let Some(window) = web_sys::window() {
         if let Some(document) = window.document() {
@@ -700,11 +717,12 @@ fn trigger_file_input(input_id: &str) {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
+#[allow(dead_code)]
 fn trigger_file_input(_input_id: &str) {}
 
 /// Clear a file input element's value
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 fn clear_file_input(input_id: &str) {
     if let Some(window) = web_sys::window() {
         if let Some(document) = window.document() {
@@ -717,7 +735,7 @@ fn clear_file_input(input_id: &str) {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 fn clear_file_input(_input_id: &str) {}
 
 /// Format bytes as human-readable string

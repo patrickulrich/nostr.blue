@@ -1,7 +1,7 @@
 //! Code Pull Request Card Component
 //!
 //! Displays NIP-34 Git patches/PRs in cards.
-use super::status_badge::{status_color_class, BadgeSize, CodeStatusBadge};
+use super::status_badge::{status_color_class, BadgeSize, CodeStatusBadge, StatusDisplayContext};
 use crate::routes::Route;
 use crate::utils::format::truncate_commit;
 use crate::utils::nip34::PullRequest;
@@ -17,7 +17,11 @@ pub fn CodePullCard(pr: PullRequest) -> Element {
             },
             class: "block p-4 border border-border rounded-lg hover:bg-accent/50 transition",
             div { class: "flex items-start gap-3",
-                CodeStatusBadge { status: pr.status, size: BadgeSize::Small }
+                CodeStatusBadge {
+                    status: pr.status,
+                    size: BadgeSize::Small,
+                    context: StatusDisplayContext::PullRequest,
+                }
                 div { class: "flex-1 min-w-0",
                     h3 { class: "font-medium text-foreground line-clamp-2", "{title}" }
                     div { class: "mt-1 flex items-center gap-2 text-sm text-muted-foreground",

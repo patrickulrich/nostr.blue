@@ -1,6 +1,8 @@
 use crate::components::code::repo_card::CodeRepoCardCompact;
 use crate::components::live::stream_card::LiveStreamCard;
-use crate::components::{EventCardCompact, P2POrderCard, PhotoCard, PollCard, VideoCard, VoiceMessageCard};
+use crate::components::{
+    EventCardCompact, P2POrderCard, PhotoCard, PollCard, VideoCard, VoiceMessageCard,
+};
 use crate::routes::Route;
 use crate::stores::calendar_store::UnifiedEvent;
 use crate::stores::nostr_client;
@@ -22,20 +24,21 @@ use dioxus::prelude::*;
 use nostr_sdk::nips::nip19::Nip19;
 use nostr_sdk::{Event, EventId, Filter, FromBech32, Kind, Metadata};
 
-use crate::utils::validation::is_valid_http_url;
 use super::minicards::*;
+use crate::utils::validation::is_valid_http_url;
 
 #[component]
 pub(super) fn MentionRenderer(mention: String) -> Element {
     let lower = mention.to_lowercase();
     let identifier = lower.strip_prefix("nostr:").unwrap_or(&lower);
-    let pubkey_result: Option<nostr_sdk::PublicKey> = Nip19::from_bech32(identifier)
-        .ok()
-        .and_then(|nip19| match nip19 {
-            Nip19::Pubkey(pk) => Some(pk),
-            Nip19::Profile(profile) => Some(profile.public_key),
-            _ => None,
-        });
+    let pubkey_result: Option<nostr_sdk::PublicKey> =
+        Nip19::from_bech32(identifier)
+            .ok()
+            .and_then(|nip19| match nip19 {
+                Nip19::Pubkey(pk) => Some(pk),
+                Nip19::Profile(profile) => Some(profile.public_key),
+                _ => None,
+            });
     let cached_metadata = pubkey_result
         .as_ref()
         .and_then(|pk| profiles::get_profile(&pk.to_hex()));
@@ -145,19 +148,14 @@ pub(super) fn EventMentionRenderer(mention: String) -> Element {
             NaddrMentionRenderer { mention: mention.clone() }
         };
     }
-    let parsed_event: Option<(EventId, Vec<String>)> = nip19_result
-        .and_then(|nip19| match nip19 {
-            Nip19::Event(nevent) => {
-                let relays: Vec<String> = nevent
-                    .relays
-                    .iter()
-                    .map(|r| r.to_string())
-                    .collect();
-                Some((nevent.event_id, relays))
-            }
-            Nip19::EventId(id) => Some((id, Vec::new())),
-            _ => None,
-        });
+    let parsed_event: Option<(EventId, Vec<String>)> = nip19_result.and_then(|nip19| match nip19 {
+        Nip19::Event(nevent) => {
+            let relays: Vec<String> = nevent.relays.iter().map(|r| r.to_string()).collect();
+            Some((nevent.event_id, relays))
+        }
+        Nip19::EventId(id) => Some((id, Vec::new())),
+        _ => None,
+    });
     let (event_id_result, relay_hints) = if let Some((id, relays)) = parsed_event {
         (Some(id), relays)
     } else if let Some(id) = try_extract_event_id_from_nevent(identifier) {
@@ -200,14 +198,12 @@ pub(super) fn EventMentionRenderer(mention: String) -> Element {
                 };
                 let events = match fetch_result {
                     Some(events) if !events.is_empty() => events,
-                    _ => {
-                        nostr_client::fetch_events_aggregated(
-                                event_filter,
-                                std::time::Duration::from_secs(5),
-                            )
-                            .await
-                            .unwrap_or_default()
-                    }
+                    _ => nostr_client::fetch_events_aggregated(
+                        event_filter,
+                        std::time::Duration::from_secs(5),
+                    )
+                    .await
+                    .unwrap_or_default(),
                 };
                 if let Some(event) = events.into_iter().next() {
                     let author_pubkey = event.pubkey;
@@ -217,16 +213,15 @@ pub(super) fn EventMentionRenderer(mention: String) -> Element {
                         .kind(Kind::Metadata)
                         .limit(1);
                     if let Ok(metadata_events) = nostr_client::fetch_events_aggregated_outbox(
-                            metadata_filter,
-                            std::time::Duration::from_secs(5),
-                        )
-                        .await
+                        metadata_filter,
+                        std::time::Duration::from_secs(5),
+                    )
+                    .await
                     {
-                        if let Some(metadata_event) = metadata_events.into_iter().next()
-                        {
-                            if let Ok(meta) = serde_json::from_str::<
-                                Metadata,
-                            >(&metadata_event.content) {
+                        if let Some(metadata_event) = metadata_events.into_iter().next() {
+                            if let Ok(meta) =
+                                serde_json::from_str::<Metadata>(&metadata_event.content)
+                            {
                                 author_metadata.set(Some(meta));
                             }
                         }
@@ -369,10 +364,18 @@ pub(super) fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -
             .clone()
             .or_else(|| meta.name.clone())
             .unwrap_or_else(|| {
-                format!("{}...{}", &pubkey_str[..8], &pubkey_str[pubkey_str.len() - 4..])
+                format!(
+                    "{}...{}",
+                    &pubkey_str[..8],
+                    &pubkey_str[pubkey_str.len() - 4..]
+                )
             })
     } else {
-        format!("{}...{}", &pubkey_str[..8], &pubkey_str[pubkey_str.len() - 4..])
+        format!(
+            "{}...{}",
+            &pubkey_str[..8],
+            &pubkey_str[pubkey_str.len() - 4..]
+        )
     };
     rsx! {
         Link {
@@ -418,11 +421,7 @@ pub(super) fn NaddrMentionRenderer(mention: String) -> Element {
     let coord_data = nostr_sdk::nips::nip19::Nip19Coordinate::from_bech32(identifier)
         .ok()
         .map(|coord| {
-            let relay_hints: Vec<String> = coord
-                .relays
-                .iter()
-                .map(|r| r.to_string())
-                .collect();
+            let relay_hints: Vec<String> = coord.relays.iter().map(|r| r.to_string()).collect();
             (
                 coord.public_key.to_hex(),
                 coord.identifier.clone(),
@@ -442,12 +441,12 @@ pub(super) fn NaddrMentionRenderer(mention: String) -> Element {
             spawn(async move {
                 loading.set(true);
                 match crate::stores::nostr_client::fetch_event_by_coordinate_with_relays(
-                        kind,
-                        pubkey.clone(),
-                        ident,
-                        relay_hints,
-                    )
-                    .await
+                    kind,
+                    pubkey.clone(),
+                    ident,
+                    relay_hints,
+                )
+                .await
                 {
                     Ok(Some(event)) => {
                         let author_pubkey = event.pubkey;
@@ -457,18 +456,15 @@ pub(super) fn NaddrMentionRenderer(mention: String) -> Element {
                             .kind(Kind::Metadata)
                             .limit(1);
                         if let Ok(metadata_events) = nostr_client::fetch_events_aggregated_outbox(
-                                metadata_filter,
-                                std::time::Duration::from_secs(5),
-                            )
-                            .await
+                            metadata_filter,
+                            std::time::Duration::from_secs(5),
+                        )
+                        .await
                         {
-                            if let Some(metadata_event) = metadata_events
-                                .into_iter()
-                                .next()
-                            {
-                                if let Ok(meta) = serde_json::from_str::<
-                                    Metadata,
-                                >(&metadata_event.content) {
+                            if let Some(metadata_event) = metadata_events.into_iter().next() {
+                                if let Ok(meta) =
+                                    serde_json::from_str::<Metadata>(&metadata_event.content)
+                                {
                                     author_metadata.set(Some(meta));
                                 }
                             }
@@ -547,9 +543,7 @@ pub(super) fn NaddrMentionRenderer(mention: String) -> Element {
                 }
                 MEETING_SPACE => {
                     if let Ok(space) = parse_meeting_space(&event) {
-                        let unified = UnifiedEvent::Live(
-                            LiveActivityEvent::Space(space),
-                        );
+                        let unified = UnifiedEvent::Live(LiveActivityEvent::Space(space));
                         rsx! {
                             div { onclick: move |e: MouseEvent| e.stop_propagation(),
                                 EventCardCompact { event: unified }
@@ -563,9 +557,7 @@ pub(super) fn NaddrMentionRenderer(mention: String) -> Element {
                 }
                 MEETING_ROOM => {
                     if let Ok(room) = parse_meeting_room_event(&event) {
-                        let unified = UnifiedEvent::Live(
-                            LiveActivityEvent::Meeting(room),
-                        );
+                        let unified = UnifiedEvent::Live(LiveActivityEvent::Meeting(room));
                         rsx! {
                             div { onclick: move |e: MouseEvent| e.stop_propagation(),
                                 EventCardCompact { event: unified }
@@ -760,7 +752,8 @@ pub(super) fn NaddrMentionRenderer(mention: String) -> Element {
                 }
             }
         } else {
-            let fallback_class = "text-foreground hover:text-foreground/70 font-medium hover:underline";
+            let fallback_class =
+                "text-foreground hover:text-foreground/70 font-medium hover:underline";
             match kind {
                 30023 => rsx! { // ARTICLE
                     Link {
@@ -810,7 +803,8 @@ pub(super) fn NaddrMentionRenderer(mention: String) -> Element {
                         "🏅 Badge"
                     }
                 },
-                30818 => { // WIKI_ARTICLE
+                30818 => {
+                    // WIKI_ARTICLE
                     // WikiDetail uses identifier, not naddr
                     let identifier = naddr_for_link.clone();
                     rsx! {
@@ -821,7 +815,7 @@ pub(super) fn NaddrMentionRenderer(mention: String) -> Element {
                             "📖 Wiki Article"
                         }
                     }
-                },
+                }
                 30040 => rsx! { // PUBLICATION_INDEX
                     Link {
                         to: Route::PublicationDetail { naddr: naddr_for_link.clone() },

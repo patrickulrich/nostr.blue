@@ -2,11 +2,11 @@
 //!
 //! Functions for managing relay connections and fetching events from specific relays.
 //! All functions take `client: &Client` as parameter to avoid circular dependencies.
+use super::signals::{RELAY_CONNECTED, USER_RELAYS_APPLIED};
 use dioxus::signals::ReadableExt;
 use nostr_relay_pool::RelayStatus as PoolRelayStatus;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
-use super::signals::{RELAY_CONNECTED, USER_RELAYS_APPLIED};
 
 /// Process the result of client.try_connect(), updating RELAY_CONNECTED and logging.
 /// Returns true if at least one relay connected.
@@ -55,7 +55,10 @@ pub async fn try_connect_relays(client: &Client, timeout: Duration) -> bool {
         return true;
     }
 
-    log::info!("[Fast connect] Attempting relay connection with {:?} timeout...", timeout);
+    log::info!(
+        "[Fast connect] Attempting relay connection with {:?} timeout...",
+        timeout
+    );
 
     // Use SDK's try_connect which attempts connection with timeout
     // This is faster than spawning connect() and then polling
@@ -97,9 +100,7 @@ pub async fn ensure_relays_ready(client: &Client) {
 /// Only waits if HAS_SIGNER is true (NIP-46 timing issue).
 /// Returns true if relays were applied within timeout, false if timed out.
 pub async fn wait_for_user_relays(timeout: Duration, context: &str) -> bool {
-    if !*crate::stores::nostr_client::HAS_SIGNER.peek()
-        || *USER_RELAYS_APPLIED.peek()
-    {
+    if !*crate::stores::nostr_client::HAS_SIGNER.peek() || *USER_RELAYS_APPLIED.peek() {
         return true;
     }
     log::debug!("{context}: waiting for user relay lists...");
@@ -109,7 +110,10 @@ pub async fn wait_for_user_relays(timeout: Duration, context: &str) -> bool {
     }
     let applied = *USER_RELAYS_APPLIED.peek();
     if applied {
-        log::debug!("{context}: user relay lists applied after {}ms", start.elapsed().as_millis());
+        log::debug!(
+            "{context}: user relay lists applied after {}ms",
+            start.elapsed().as_millis()
+        );
     } else {
         log::warn!("{context}: proceeding without user relay lists after timeout");
     }
@@ -151,9 +155,8 @@ pub async fn reconnect(client: &Client) -> bool {
     client.connect().await;
     const TIMEOUT_MS: u64 = 3000;
     const POLL_INTERVAL_MS: u64 = 100;
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
-        use gloo_timers::future::TimeoutFuture;
         let start = instant::Instant::now();
         loop {
             let relays = client.relays().await;
@@ -162,8 +165,8 @@ pub async fn reconnect(client: &Client) -> bool {
                 .any(|r| r.status() == PoolRelayStatus::Connected);
             if connected {
                 log::info!(
-                    "Reconnected to relays successfully after {}ms", start.elapsed()
-                    .as_millis()
+                    "Reconnected to relays successfully after {}ms",
+                    start.elapsed().as_millis()
                 );
                 if !*RELAY_CONNECTED.peek() {
                     *RELAY_CONNECTED.write() = true;
@@ -173,10 +176,10 @@ pub async fn reconnect(client: &Client) -> bool {
             if start.elapsed().as_millis() > TIMEOUT_MS as u128 {
                 break;
             }
-            TimeoutFuture::new(POLL_INTERVAL_MS as u32).await;
+            crate::platform::timer::sleep_ms(POLL_INTERVAL_MS as u32).await;
         }
     }
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(feature = "web"))]
     {
         let start = std::time::Instant::now();
         let timeout = Duration::from_millis(TIMEOUT_MS);
@@ -187,7 +190,8 @@ pub async fn reconnect(client: &Client) -> bool {
                 .any(|r| r.status() == PoolRelayStatus::Connected);
             if connected {
                 log::info!(
-                    "Reconnected to relays successfully after {:?}", start.elapsed()
+                    "Reconnected to relays successfully after {:?}",
+                    start.elapsed()
                 );
                 if !*RELAY_CONNECTED.peek() {
                     *RELAY_CONNECTED.write() = true;
@@ -201,7 +205,9 @@ pub async fn reconnect(client: &Client) -> bool {
         }
     }
     let relays = client.relays().await;
-    let connected = relays.values().any(|r| r.status() == PoolRelayStatus::Connected);
+    let connected = relays
+        .values()
+        .any(|r| r.status() == PoolRelayStatus::Connected);
     if connected {
         log::info!("Reconnected to relays successfully");
         if !*RELAY_CONNECTED.peek() {
@@ -243,7 +249,11 @@ pub async fn fetch_events_from_relays(
     if urls.is_empty() {
         return Err("No valid relay URLs provided for targeted fetch".to_string());
     }
-    log::info!("Fetching events from {} specific relays: {:?}", urls.len(), urls);
+    log::info!(
+        "Fetching events from {} specific relays: {:?}",
+        urls.len(),
+        urls
+    );
     client
         .fetch_events_from(urls, filter, timeout)
         .await
@@ -286,10 +296,14 @@ pub async fn fetch_event_by_coordinate_with_relays(
             return Ok(Some(event));
         }
     }
-    log::info!("Fetching event kind {} from relay: {}:{}", kind, pubkey, identifier);
+    log::info!(
+        "Fetching event kind {} from relay: {}:{}",
+        kind,
+        pubkey,
+        identifier
+    );
     if !relay_hints.is_empty() {
-        let added = super::specialty::add_relays_from_strings(client, &relay_hints)
-            .await;
+        let added = super::specialty::add_relays_from_strings(client, &relay_hints).await;
         let fetch_result = client
             .fetch_events(filter.clone(), Duration::from_secs(5))
             .await;

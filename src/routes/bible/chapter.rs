@@ -1,18 +1,24 @@
 //! Bible Chapter Reading View
 //! Displays a chapter with verse selection and highlighting
-use std::collections::HashMap;
-use dioxus::prelude::*;
 use crate::components::content_share_modal::{ContentShareModal, ContentType};
 use crate::components::HighlightModal;
+use crate::services::bible_api::format_selected_verses_reference;
 use crate::services::bible_api::verse_to_plain_text;
 use crate::stores::auth_store;
 use crate::stores::bible_store::{self, ChapterContent, VerseContent};
+use dioxus::prelude::*;
+use dioxus_primitives::toast::{consume_toast, ToastOptions};
+use std::collections::HashMap;
 /// Build a HashMap mapping verse numbers to plain text for efficient lookup
 fn build_verse_text_map(content: &[ChapterContent]) -> HashMap<u32, String> {
     content
         .iter()
         .filter_map(|c| {
-            if let ChapterContent::Verse { number, content: verse_content } = c {
+            if let ChapterContent::Verse {
+                number,
+                content: verse_content,
+            } = c
+            {
                 Some((*number, verse_to_plain_text(verse_content)))
             } else {
                 None
@@ -55,6 +61,7 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
     let mut pending_highlight_text = use_signal(String::new);
     let mut pending_highlight_reference = use_signal(String::new);
     let is_authenticated = auth_store::is_authenticated();
+    let toast = consume_toast();
     let current_key = format!("{}/{}/{}", translation, book, chapter);
     let mut loaded_key = use_signal(String::new);
     let mut chapter_data: Signal<
@@ -105,14 +112,14 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
         selected_verses.set(Vec::new());
         show_toolbar.set(false);
     };
-    #[allow(unused_variables, unused_mut)]
     let copy_verses = {
         let translation = translation_for_copy;
-        let mut selected_verses = selected_verses;
-        let mut show_toolbar = show_toolbar;
+        let selected_verses_for_copy = selected_verses;
+        let mut selected_verses_for_clear = selected_verses;
+        let mut show_toolbar_for_clear = show_toolbar;
         move |_| {
             if let Some(Ok(ref data)) = *chapter_data.read() {
-                let verses = selected_verses.read().clone();
+                let verses = selected_verses_for_copy.read().clone();
                 if verses.is_empty() {
                     return;
                 }
@@ -124,58 +131,22 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                         text_parts.push(format!("{} {}", v, text));
                     }
                 }
-                #[cfg(target_arch = "wasm32")]
-                {
-                    let first = *verses.first().unwrap_or(&0);
-                    let last = *verses.last().unwrap_or(&0);
-                    let reference = if first == last {
-                        format!("{} {}:{} ({})", book_name, chapter, first, translation)
-                    } else {
-                        format!(
-                            "{} {}:{}-{} ({})",
-                            book_name,
-                            chapter,
-                            first,
-                            last,
-                            translation,
-                        )
-                    };
-                    let full_text = format!(
-                        "{}\n\u{2014} {}",
-                        text_parts.join(" "),
-                        reference,
-                    );
-                    wasm_bindgen_futures::spawn_local(async move {
-                        let window = match web_sys::window() {
-                            Some(w) => w,
-                            None => {
-                                log::error!("Clipboard: No window object available");
-                                return;
-                            }
-                        };
-                        let navigator = window.navigator();
-                        let clipboard_exists = js_sys::Reflect::has(
-                                &navigator,
-                                &"clipboard".into(),
-                            )
-                            .unwrap_or(false);
-                        if !clipboard_exists {
-                            log::warn!(
-                                "Clipboard API unavailable (requires HTTPS or localhost)"
-                            );
-                            return;
-                        }
-                        let clipboard = navigator.clipboard();
-                        let promise = clipboard.write_text(&full_text);
-                        if let Err(e) = wasm_bindgen_futures::JsFuture::from(promise)
-                            .await
-                        {
-                            log::error!("Clipboard write failed: {:?}", e);
-                        }
-                    });
-                }
-                selected_verses.set(Vec::new());
-                show_toolbar.set(false);
+                let reference =
+                    format_selected_verses_reference(book_name, chapter, &verses, &translation);
+                let full_text = format!("{}\n\u{2014} {}", text_parts.join(" "), reference,);
+                spawn(async move {
+                    if let Err(e) = crate::platform::clipboard::copy_to_clipboard(&full_text).await
+                    {
+                        log::error!("Clipboard write failed: {:?}", e);
+                        toast.error(
+                            "Failed to copy to clipboard".to_string(),
+                            ToastOptions::new(),
+                        );
+                        return;
+                    }
+                    selected_verses_for_clear.set(Vec::new());
+                    show_toolbar_for_clear.set(false);
+                });
             }
         }
     };
@@ -195,20 +166,8 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                         text_parts.push(text.clone());
                     }
                 }
-                let first = *verses.first().unwrap_or(&0);
-                let last = *verses.last().unwrap_or(&0);
-                let reference = if first == last {
-                    format!("{} {}:{} ({})", book_name, chapter, first, translation)
-                } else {
-                    format!(
-                        "{} {}:{}-{} ({})",
-                        book_name,
-                        chapter,
-                        first,
-                        last,
-                        translation,
-                    )
-                };
+                let reference =
+                    format_selected_verses_reference(&book_name, chapter, &verses, &translation);
                 let verse_text = text_parts.join(" ");
                 pending_highlight_text.set(verse_text);
                 pending_highlight_reference.set(reference);
@@ -476,8 +435,6 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                             return;
                                         }
                                         let book_name = &data.book.common_name;
-                                        let first = *verses.first().unwrap_or(&0);
-                                        let last = *verses.last().unwrap_or(&0);
                                         let verse_text_map = build_verse_text_map(&data.chapter.content);
                                         let mut text_parts = Vec::new();
                                         for v in verses.iter() {
@@ -486,11 +443,12 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                             }
                                         }
                                         let verse_text = text_parts.join(" ");
-                                        let reference = if first == last {
-                                            format!("{} {}:{} ({})", book_name, chapter, first, translation)
-                                        } else {
-                                            format!("{} {}:{}-{} ({})", book_name, chapter, first, last, translation)
-                                        };
+                                        let reference = format_selected_verses_reference(
+                                            book_name,
+                                            chapter,
+                                            &verses,
+                                            &translation,
+                                        );
                                         let url = format!(
                                             "https://nostr.blue/bible/{}/{}/{}",
                                             urlencoding::encode(&translation),
@@ -584,7 +542,7 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                             log::info!("Highlight created");
                                             highlight_feedback.set(Some((true, "Highlight saved".to_string())));
                                             spawn(async move {
-                                                gloo_timers::future::TimeoutFuture::new(2000).await;
+                                                crate::platform::timer::sleep_ms(2000).await;
                                                 highlight_feedback.set(None);
                                             });
                                         }
@@ -592,7 +550,7 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                             log::error!("Failed to create highlight: {}", e);
                                             highlight_feedback.set(Some((false, format!("Failed: {}", e))));
                                             spawn(async move {
-                                                gloo_timers::future::TimeoutFuture::new(4000).await;
+                                                crate::platform::timer::sleep_ms(4000).await;
                                                 highlight_feedback.set(None);
                                             });
                                         }

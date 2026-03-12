@@ -1,9 +1,7 @@
 //! Shop Orders - Buyer's order history
 use crate::components::shop::{OrderStatusBadge, ReviewForm};
 use crate::routes::Route;
-use crate::stores::shop_store::{
-    ensure_orders_loaded, fetch_my_orders, listen_for_order_updates,
-};
+use crate::stores::shop_store::{ensure_orders_loaded, fetch_my_orders, listen_for_order_updates};
 use crate::utils::nip99::{
     extract_product_name_from_coordinate, OrderStatus, ShippingStatus, ShopOrder,
 };

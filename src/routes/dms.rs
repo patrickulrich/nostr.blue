@@ -6,6 +6,7 @@ use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use dioxus_core::Task;
 use std::collections::HashMap;
+#[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
 /// Guard struct that cancels polling task on drop
 #[derive(Clone)]
@@ -19,16 +20,16 @@ impl Drop for PollTaskGuard {
         }
     }
 }
-#[wasm_bindgen(
-    inline_js = r#"
-export function scrollDMsToBottom(elementId) {
+#[cfg(feature = "web")]
+#[wasm_bindgen(inline_js = r#"
+export function scroll_dms_to_bottom(elementId) {
     const element = document.getElementById(elementId);
     if (element) {
         element.scrollTop = element.scrollHeight;
     }
 }
 
-export function isDMsScrolledNearBottom(elementId, threshold) {
+export function is_dms_scrolled_near_bottom(elementId, threshold) {
     const element = document.getElementById(elementId);
     if (!element) return true;
     const scrollTop = element.scrollTop;
@@ -37,15 +38,22 @@ export function isDMsScrolledNearBottom(elementId, threshold) {
     return scrollHeight - scrollTop - clientHeight < threshold;
 }
 
-export function isPageVisible() {
+export function is_page_visible() {
     return !document.hidden;
 }
-"#
-)]
+"#)]
 extern "C" {
-    fn scrollDMsToBottom(element_id: &str);
-    fn isDMsScrolledNearBottom(element_id: &str, threshold: f64) -> bool;
-    fn isPageVisible() -> bool;
+    #[wasm_bindgen(js_name = "scroll_dms_to_bottom")]
+    fn scroll_dms_to_bottom(element_id: &str);
+    #[wasm_bindgen(js_name = "is_dms_scrolled_near_bottom")]
+    fn is_dms_scrolled_near_bottom(element_id: &str, threshold: f64) -> bool;
+    #[wasm_bindgen(js_name = "is_page_visible")]
+    fn is_page_visible() -> bool;
+}
+
+#[cfg(not(feature = "web"))]
+fn is_page_visible() -> bool {
+    true
 }
 /// Run the decrypt previews pass if not already running.
 async fn run_decrypt_if_idle(
@@ -85,7 +93,9 @@ async fn decrypt_previews_sequentially(
                     previews.write().insert(pubkey, preview);
                 }
                 Err(_) => {
-                    previews.write().insert(pubkey, "[Unable to decrypt]".to_string());
+                    previews
+                        .write()
+                        .insert(pubkey, "[Unable to decrypt]".to_string());
                 }
             }
         } else {
@@ -106,64 +116,63 @@ pub fn DMs() -> Element {
     let mut decrypting = use_signal(|| false);
     let mut dm_poll_task = use_signal(|| None::<Task>);
     use_hook(move || PollTaskGuard { task: dm_poll_task });
-    use_effect(
-        use_reactive(
-            (&*nostr_client::CLIENT_INITIALIZED.read(), &auth_store::AUTH_STATE.read().is_authenticated),
-            move |(client_initialized, is_authenticated)| {
-                if !client_initialized {
-                    log::debug!(
-                        "Waiting for client initialization before loading DMs..."
-                    );
-                    return;
+    use_effect(use_reactive(
+        (
+            &*nostr_client::CLIENT_INITIALIZED.read(),
+            &auth_store::AUTH_STATE.read().is_authenticated,
+        ),
+        move |(client_initialized, is_authenticated)| {
+            if !client_initialized {
+                log::debug!("Waiting for client initialization before loading DMs...");
+                return;
+            }
+            if !is_authenticated {
+                previews.write().clear();
+                decrypting.set(false);
+                return;
+            }
+            loading.set(true);
+            error.set(None);
+            spawn(async move {
+                match dms::init_dms().await {
+                    Ok(_) => {
+                        log::info!("DMs loaded successfully");
+                        run_decrypt_if_idle(decrypting, previews).await;
+                    }
+                    Err(e) => {
+                        error.set(Some(e));
+                    }
                 }
-                if !is_authenticated {
-                    previews.write().clear();
-                    decrypting.set(false);
-                    return;
-                }
-                loading.set(true);
-                error.set(None);
-                spawn(async move {
-                    match dms::init_dms().await {
-                        Ok(_) => {
-                            log::info!("DMs loaded successfully");
+                loading.set(false);
+            });
+        },
+    ));
+    use_effect(use_reactive(
+        (
+            &*nostr_client::CLIENT_INITIALIZED.read(),
+            &auth_store::AUTH_STATE.read().is_authenticated,
+        ),
+        move |(client_initialized, is_authenticated)| {
+            if let Some(task) = dm_poll_task.peek().as_ref() {
+                task.cancel();
+            }
+            if !client_initialized || !is_authenticated {
+                return;
+            }
+            let task = spawn(async move {
+                loop {
+                    crate::platform::timer::sleep(std::time::Duration::from_secs(30)).await;
+                    if auth_store::is_authenticated() && is_page_visible() {
+                        log::debug!("Auto-refreshing DMs...");
+                        if dms::init_dms().await.is_ok() {
                             run_decrypt_if_idle(decrypting, previews).await;
                         }
-                        Err(e) => {
-                            error.set(Some(e));
-                        }
                     }
-                    loading.set(false);
-                });
-            },
-        ),
-    );
-    use_effect(
-        use_reactive(
-            (&*nostr_client::CLIENT_INITIALIZED.read(), &auth_store::AUTH_STATE.read().is_authenticated),
-            move |(client_initialized, is_authenticated)| {
-                if let Some(task) = dm_poll_task.peek().as_ref() {
-                    task.cancel();
                 }
-                if !client_initialized || !is_authenticated {
-                    return;
-                }
-                let task = spawn(async move {
-                    loop {
-                        gloo_timers::future::sleep(std::time::Duration::from_secs(30))
-                            .await;
-                        if auth_store::is_authenticated() && isPageVisible() {
-                            log::debug!("Auto-refreshing DMs...");
-                            if dms::init_dms().await.is_ok() {
-                                run_decrypt_if_idle(decrypting, previews).await;
-                            }
-                        }
-                    }
-                });
-                dm_poll_task.set(Some(task));
-            },
-        ),
-    );
+            });
+            dm_poll_task.set(Some(task));
+        },
+    ));
     let refresh_dms = move |_| {
         if *refreshing.read() {
             return;
@@ -337,7 +346,11 @@ fn ConversationListItem(
         .last()
         .map(|m| time::format_relative_time(m.created_at()))
         .unwrap_or_else(|| "".to_string());
-    let bg_class = if selected { "bg-accent" } else { "hover:bg-accent/50" };
+    let bg_class = if selected {
+        "bg-accent"
+    } else {
+        "hover:bg-accent/50"
+    };
     rsx! {
         div {
             class: "p-4 cursor-pointer transition {bg_class}",
@@ -373,9 +386,7 @@ fn ConversationView(pubkey: String) -> Element {
     let mut decrypted_messages = use_signal(Vec::<(ConversationMessage, String)>::new);
     let mut decrypt_loading = use_signal(|| true);
     let mut profile = use_signal(|| None::<profiles::Profile>);
-    let messages_container_id = use_signal(|| {
-        format!("messages-{}", uuid::Uuid::new_v4())
-    });
+    let messages_container_id = use_signal(|| format!("messages-{}", uuid::Uuid::new_v4()));
     let mut send_feedback = use_signal(|| Option::<(bool, String)>::None);
     let mut feedback_version = use_signal(|| 0u32);
     let mut poll_task = use_signal(|| None::<Task>);
@@ -395,45 +406,41 @@ fn ConversationView(pubkey: String) -> Element {
             }
         });
     });
-    use_effect(
-        use_reactive(
-            (&pubkey_for_poll, &*nostr_client::CLIENT_INITIALIZED.read()),
-            move |(pk, client_initialized)| {
-                if let Some(task) = poll_task.peek().as_ref() {
-                    task.cancel();
-                }
-                if !client_initialized {
-                    return;
-                }
-                let pk_clone = pk.clone();
-                let new_task = spawn(async move {
-                    loop {
-                        gloo_timers::future::TimeoutFuture::new(5000).await;
-                        if !isPageVisible() {
-                            continue;
-                        }
-                        if let Err(e) = dms::init_dms().await {
-                            log::warn!("DM poll refresh failed: {}", e);
-                            continue;
-                        }
-                        if let Some(conversation) = dms::get_conversation(&pk_clone) {
-                            let mut decrypted = Vec::new();
-                            for msg in conversation.messages {
-                                match dms::decrypt_dm(&msg).await {
-                                    Ok(content) => decrypted.push((msg, content)),
-                                    Err(_) => {
-                                        decrypted.push((msg, "[Failed to decrypt]".to_string()))
-                                    }
-                                }
-                            }
-                            decrypted_messages.set(decrypted);
-                        }
+    use_effect(use_reactive(
+        (&pubkey_for_poll, &*nostr_client::CLIENT_INITIALIZED.read()),
+        move |(pk, client_initialized)| {
+            if let Some(task) = poll_task.peek().as_ref() {
+                task.cancel();
+            }
+            if !client_initialized {
+                return;
+            }
+            let pk_clone = pk.clone();
+            let new_task = spawn(async move {
+                loop {
+                    crate::platform::timer::sleep_ms(5000).await;
+                    if !is_page_visible() {
+                        continue;
                     }
-                });
-                poll_task.set(Some(new_task));
-            },
-        ),
-    );
+                    if let Err(e) = dms::init_dms().await {
+                        log::warn!("DM poll refresh failed: {}", e);
+                        continue;
+                    }
+                    if let Some(conversation) = dms::get_conversation(&pk_clone) {
+                        let mut decrypted = Vec::new();
+                        for msg in conversation.messages {
+                            match dms::decrypt_dm(&msg).await {
+                                Ok(content) => decrypted.push((msg, content)),
+                                Err(_) => decrypted.push((msg, "[Failed to decrypt]".to_string())),
+                            }
+                        }
+                        decrypted_messages.set(decrypted);
+                    }
+                }
+            });
+            poll_task.set(Some(new_task));
+        },
+    ));
     use_hook(move || PollTaskGuard { task: poll_task });
     use_effect(move || {
         let pk = pubkey_for_effect.clone();
@@ -443,15 +450,14 @@ fn ConversationView(pubkey: String) -> Element {
             log::info!("Loading conversation for: {}", pk);
             if let Some(conversation) = dms::get_conversation(&pk) {
                 log::info!(
-                    "Found {} messages in conversation", conversation.messages.len()
+                    "Found {} messages in conversation",
+                    conversation.messages.len()
                 );
                 let mut decrypted = Vec::new();
                 for msg in conversation.messages {
                     match dms::decrypt_dm(&msg).await {
                         Ok(content) => {
-                            log::debug!(
-                                "Decrypted message: {}", & content[..content.len().min(50)]
-                            );
+                            log::debug!("Decrypted message: {}", &content[..content.len().min(50)]);
                             decrypted.push((msg, content));
                         }
                         Err(e) => {
@@ -476,12 +482,26 @@ fn ConversationView(pubkey: String) -> Element {
             return;
         }
         spawn(async move {
-            gloo_timers::future::TimeoutFuture::new(50).await;
-            if *is_first_load.peek() {
-                scrollDMsToBottom(&container_id);
-                is_first_load.set(false);
-            } else if isDMsScrolledNearBottom(&container_id, 100.0) {
-                scrollDMsToBottom(&container_id);
+            crate::platform::timer::sleep_ms(50).await;
+            #[cfg(feature = "web")]
+            {
+                if *is_first_load.peek() {
+                    scroll_dms_to_bottom(&container_id);
+                    is_first_load.set(false);
+                } else if is_dms_scrolled_near_bottom(&container_id, 100.0) {
+                    scroll_dms_to_bottom(&container_id);
+                }
+            }
+            #[cfg(not(feature = "web"))]
+            {
+                if *is_first_load.peek() {
+                    let script = format!(
+                        "(() => {{ const el = document.getElementById({}); if (el) {{ el.scrollTop = el.scrollHeight; }} return true; }})()",
+                        serde_json::to_string(&container_id).unwrap_or_else(|_| "\"\"".to_string())
+                    );
+                    let _ = document::eval(&script).await;
+                    is_first_load.set(false);
+                }
             }
         });
     });
@@ -500,11 +520,8 @@ fn ConversationView(pubkey: String) -> Element {
                     if !result.is_success() {
                         feedback_version.set(feedback_version() + 1);
                         let current_version = feedback_version();
-                        send_feedback
-                            .set(
-                                Some((false, "Failed to send to any relay".to_string())),
-                            );
-                        gloo_timers::future::TimeoutFuture::new(3000).await;
+                        send_feedback.set(Some((false, "Failed to send to any relay".to_string())));
+                        crate::platform::timer::sleep_ms(3000).await;
                         if feedback_version() == current_version {
                             send_feedback.set(None);
                         }
@@ -513,19 +530,16 @@ fn ConversationView(pubkey: String) -> Element {
                         log::info!("Message sent successfully");
                         feedback_version.set(feedback_version() + 1);
                         let current_version = feedback_version();
-                        send_feedback
-                            .set(
-                                Some((
-                                    true,
-                                    format!(
-                                        "Sent to {:.0}% of relays ({}/{})",
-                                        rate,
-                                        result.success_count(),
-                                        result.total_attempted(),
-                                    ),
-                                )),
-                            );
-                        gloo_timers::future::TimeoutFuture::new(3000).await;
+                        send_feedback.set(Some((
+                            true,
+                            format!(
+                                "Sent to {:.0}% of relays ({}/{})",
+                                rate,
+                                result.success_count(),
+                                result.total_attempted(),
+                            ),
+                        )));
+                        crate::platform::timer::sleep_ms(3000).await;
                         if feedback_version() == current_version {
                             send_feedback.set(None);
                         }
@@ -540,7 +554,7 @@ fn ConversationView(pubkey: String) -> Element {
                     feedback_version.set(feedback_version() + 1);
                     let current_version = feedback_version();
                     send_feedback.set(Some((false, format!("Error: {}", e))));
-                    gloo_timers::future::TimeoutFuture::new(5000).await;
+                    crate::platform::timer::sleep_ms(5000).await;
                     if feedback_version() == current_version {
                         send_feedback.set(None);
                     }
@@ -667,8 +681,7 @@ fn MessageBubble(
     is_mine: bool,
     timestamp: nostr_sdk::Timestamp,
     sender_pubkey: String,
-    #[props(default = "NIP-17".to_string())]
-    encryption_type: String,
+    #[props(default = "NIP-17".to_string())] encryption_type: String,
 ) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let sender_pk = sender_pubkey.clone();
@@ -710,8 +723,16 @@ fn MessageBubble(
             })
     };
     let time_ago = time::format_relative_time(timestamp);
-    let alignment = if is_mine { "flex-row-reverse" } else { "flex-row" };
-    let bg_color = if is_mine { "bg-blue-500 text-white" } else { "bg-accent" };
+    let alignment = if is_mine {
+        "flex-row-reverse"
+    } else {
+        "flex-row"
+    };
+    let bg_color = if is_mine {
+        "bg-blue-500 text-white"
+    } else {
+        "bg-accent"
+    };
     let items_align = if is_mine { "items-end" } else { "items-start" };
     let (badge_class, badge_icon) = match encryption_type.as_str() {
         "NIP-04" => ("text-orange-500 dark:text-orange-400", "⚠️"),

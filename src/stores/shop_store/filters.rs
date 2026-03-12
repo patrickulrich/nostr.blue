@@ -32,10 +32,14 @@ pub struct ShopFilterState {
 impl ShopFilterState {
     /// Check if any filters are active
     pub fn is_empty(&self) -> bool {
-        self.category.is_none() && self.min_price_sats.is_none()
-            && self.max_price_sats.is_none() && self.format.is_none()
-            && self.visibility.is_none() && self.merchant_pubkey.is_none()
-            && self.collection.is_none() && self.search_query.is_none()
+        self.category.is_none()
+            && self.min_price_sats.is_none()
+            && self.max_price_sats.is_none()
+            && self.format.is_none()
+            && self.visibility.is_none()
+            && self.merchant_pubkey.is_none()
+            && self.collection.is_none()
+            && self.search_query.is_none()
             && !self.in_stock_only
     }
 }
@@ -60,7 +64,11 @@ pub fn filter_products(products: &[Product], filters: &ShopFilterState) -> Vec<P
                 return false;
             }
             if let Some(category) = &filters.category {
-                if !product.categories.iter().any(|c| c.eq_ignore_ascii_case(category)) {
+                if !product
+                    .categories
+                    .iter()
+                    .any(|c| c.eq_ignore_ascii_case(category))
+                {
                     return false;
                 }
             }
@@ -106,9 +114,7 @@ pub fn filter_products(products: &[Product], filters: &ShopFilterState) -> Vec<P
                     .categories
                     .iter()
                     .any(|c| c.to_lowercase().contains(&query_lower));
-                if !matches_title && !matches_description && !matches_summary
-                    && !matches_category
-                {
+                if !matches_title && !matches_description && !matches_summary && !matches_category {
                     return false;
                 }
             }
@@ -148,26 +154,21 @@ pub fn sort_products(products: &mut [Product], sort_by: ProductSortBy) {
     match sort_by {
         ProductSortBy::Newest => products.sort_by(|a, b| b.created_at.cmp(&a.created_at)),
         ProductSortBy::Oldest => products.sort_by(|a, b| a.created_at.cmp(&b.created_at)),
-        ProductSortBy::PriceLow => {
-            products.sort_by(|a, b| {
-                let a_sats = a.price.to_sats().unwrap_or(u64::MAX);
-                let b_sats = b.price.to_sats().unwrap_or(u64::MAX);
-                a_sats.cmp(&b_sats)
-            })
-        }
-        ProductSortBy::PriceHigh => {
-            products.sort_by(|a, b| {
-                let a_sats = a.price.to_sats().unwrap_or(0);
-                let b_sats = b.price.to_sats().unwrap_or(0);
-                b_sats.cmp(&a_sats)
-            })
-        }
+        ProductSortBy::PriceLow => products.sort_by(|a, b| {
+            let a_sats = a.price.to_sats().unwrap_or(u64::MAX);
+            let b_sats = b.price.to_sats().unwrap_or(u64::MAX);
+            a_sats.cmp(&b_sats)
+        }),
+        ProductSortBy::PriceHigh => products.sort_by(|a, b| {
+            let a_sats = a.price.to_sats().unwrap_or(0);
+            let b_sats = b.price.to_sats().unwrap_or(0);
+            b_sats.cmp(&a_sats)
+        }),
         ProductSortBy::Rating => {
-            products
-                .sort_by_cached_key(|p| {
-                    let rating = get_product_average_rating(&p.coordinate).unwrap_or(0.0);
-                    std::cmp::Reverse(rating.to_bits())
-                });
+            products.sort_by_cached_key(|p| {
+                let rating = get_product_average_rating(&p.coordinate).unwrap_or(0.0);
+                std::cmp::Reverse(rating.to_bits())
+            });
         }
         ProductSortBy::Title => {
             products.sort_by_cached_key(|p| p.title.to_lowercase());
@@ -191,12 +192,18 @@ pub fn products_filter_paginated(limit: usize, until: Option<u64>) -> Filter {
 
 /// Build filter for fetching products by author (merchant)
 pub fn products_filter_by_author(pubkey: PublicKey, limit: usize) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_PRODUCT)).author(pubkey).limit(limit)
+    Filter::new()
+        .kind(Kind::Custom(KIND_PRODUCT))
+        .author(pubkey)
+        .limit(limit)
 }
 
 /// Build filter for fetching a specific product by coordinate
 pub fn product_filter_by_coordinate(pubkey: PublicKey, identifier: &str) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_PRODUCT)).author(pubkey).identifier(identifier)
+    Filter::new()
+        .kind(Kind::Custom(KIND_PRODUCT))
+        .author(pubkey)
+        .identifier(identifier)
 }
 
 /// Build filter for fetching reviews for a product

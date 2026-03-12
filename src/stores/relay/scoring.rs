@@ -12,17 +12,17 @@
 //! **IMPORTANT**: All functions take `client: &Client` as a parameter
 //! rather than calling `nostr_client::get_client()` internally. This avoids
 //! circular dependencies and follows the relay module design principle.
-#[cfg(target_arch = "wasm32")]
-use gloo_storage::{LocalStorage, Storage};
+#[cfg(feature = "web")]
+use crate::platform::storage;
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use std::collections::HashMap;
 /// Storage key for relay scores
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 const RELAY_SCORES_KEY: &str = "nostr_relay_scores_v2";
 /// Maximum number of relay scores to store (prevent localStorage bloat)
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 const MAX_STORED_RELAYS: usize = 100;
 /// Persisted relay score snapshot (localStorage)
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -57,7 +57,11 @@ pub async fn get_relay_score(client: &Client, url: &str) -> f64 {
             let stats = relay.stats();
             let live_score = {
                 let rate = stats.success_rate();
-                if rate.is_finite() { rate } else { 0.0 }
+                if rate.is_finite() {
+                    rate
+                } else {
+                    0.0
+                }
             };
             let connected_boost = if relay.is_connected() { 0.1 } else { 0.0 };
             return (live_score + connected_boost).min(1.0);
@@ -66,16 +70,13 @@ pub async fn get_relay_score(client: &Client, url: &str) -> f64 {
     get_persisted_score(url).unwrap_or(0.5)
 }
 /// Get persisted score from localStorage (WASM only)
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 fn get_persisted_score(url: &str) -> Option<f64> {
-    let snapshots: HashMap<String, RelayScoreSnapshot> = LocalStorage::get(
-            RELAY_SCORES_KEY,
-        )
-        .ok()?;
+    let snapshots: HashMap<String, RelayScoreSnapshot> = storage::get(RELAY_SCORES_KEY).ok()?;
     snapshots.get(url).map(|s| s.lifetime_success_rate)
 }
 /// Get persisted score - returns None on non-WASM platforms
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 fn get_persisted_score(_url: &str) -> Option<f64> {
     None
 }
@@ -106,15 +107,13 @@ pub async fn sort_relays_by_score(client: &Client, relays: Vec<String>) -> Vec<S
 ///
 /// # Arguments
 /// * `client` - The Nostr client instance
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 #[allow(dead_code)]
 pub async fn persist_relay_stats(client: &Client) {
     let relays = client.relays().await;
-    let mut snapshots: HashMap<String, RelayScoreSnapshot> = LocalStorage::get(
-            RELAY_SCORES_KEY,
-        )
-        .unwrap_or_default();
-    let now_ms = js_sys::Date::now() as u64;
+    let mut snapshots: HashMap<String, RelayScoreSnapshot> =
+        storage::get(RELAY_SCORES_KEY).unwrap_or_default();
+    let now_ms = crate::platform::timestamp::now_millis();
     for (url, relay) in relays {
         let url_str = url.to_string();
         let stats = relay.stats();
@@ -126,7 +125,11 @@ pub async fn persist_relay_stats(client: &Client) {
             });
         snapshot.lifetime_success_rate = {
             let rate = stats.success_rate();
-            if rate.is_finite() { rate } else { 0.0 }
+            if rate.is_finite() {
+                rate
+            } else {
+                0.0
+            }
         };
         snapshot.total_bytes_transferred = stats.bytes_sent() + stats.bytes_received();
         if relay.is_connected() {
@@ -143,55 +146,53 @@ pub async fn persist_relay_stats(client: &Client) {
     }
     if snapshots.len() > MAX_STORED_RELAYS {
         let mut entries: Vec<_> = snapshots.into_iter().collect();
-        entries
-            .sort_by(|a, b| {
-                b.1
-                    .last_seen_connected
-                    .unwrap_or(0)
-                    .cmp(&a.1.last_seen_connected.unwrap_or(0))
-            });
+        entries.sort_by(|a, b| {
+            b.1.last_seen_connected
+                .unwrap_or(0)
+                .cmp(&a.1.last_seen_connected.unwrap_or(0))
+        });
         entries.truncate(MAX_STORED_RELAYS);
         snapshots = entries.into_iter().collect();
     }
-    if let Err(e) = LocalStorage::set(RELAY_SCORES_KEY, &snapshots) {
+    if let Err(e) = storage::set(RELAY_SCORES_KEY, &snapshots) {
         log::warn!("Failed to persist relay scores: {}", e);
     } else {
         log::debug!("Persisted {} relay scores to localStorage", snapshots.len());
     }
 }
 /// Snapshot current SDK stats - no-op on non-WASM platforms
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 #[allow(dead_code)]
 pub async fn persist_relay_stats(_client: &Client) {}
 /// Get statistics about stored relay scores (WASM only)
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 #[allow(dead_code)]
 pub fn get_score_stats() -> Option<(usize, f64)> {
-    let snapshots: HashMap<String, RelayScoreSnapshot> = LocalStorage::get(
-            RELAY_SCORES_KEY,
-        )
-        .ok()?;
+    let snapshots: HashMap<String, RelayScoreSnapshot> = storage::get(RELAY_SCORES_KEY).ok()?;
     if snapshots.is_empty() {
         return None;
     }
-    let avg_score: f64 = snapshots.values().map(|s| s.lifetime_success_rate).sum::<f64>()
+    let avg_score: f64 = snapshots
+        .values()
+        .map(|s| s.lifetime_success_rate)
+        .sum::<f64>()
         / snapshots.len() as f64;
     Some((snapshots.len(), avg_score))
 }
 /// Get statistics about stored relay scores - returns None on non-WASM platforms
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 #[allow(dead_code)]
 pub fn get_score_stats() -> Option<(usize, f64)> {
     None
 }
 /// Clear all stored relay scores (WASM only)
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 #[allow(dead_code)]
 pub fn clear_relay_scores() {
-    LocalStorage::delete(RELAY_SCORES_KEY);
+    let _ = storage::delete(RELAY_SCORES_KEY);
     log::info!("Cleared stored relay scores");
 }
 /// Clear all stored relay scores - no-op on non-WASM platforms
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 #[allow(dead_code)]
 pub fn clear_relay_scores() {}

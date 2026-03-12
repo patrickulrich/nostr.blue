@@ -97,8 +97,11 @@ fn extract_file_path(line: &str) -> Option<&str> {
         Some(b_path)
     } else {
         // Fallback: try quoted paths (second token), strip a/ or b/ prefix
-        rest.split(' ').nth(1)
-            .map(|p| p.strip_prefix("b/").or_else(|| p.strip_prefix("a/")).unwrap_or(p))
+        rest.split(' ').nth(1).map(|p| {
+            p.strip_prefix("b/")
+                .or_else(|| p.strip_prefix("a/"))
+                .unwrap_or(p)
+        })
     }
 }
 
@@ -218,8 +221,6 @@ fn build_line_comment_map(comments: &[LineComment]) -> HashMap<(String, usize), 
     map
 }
 
-
-
 /// Diff viewer component
 ///
 /// Renders a unified or side-by-side diff with optional line-level
@@ -229,16 +230,12 @@ fn build_line_comment_map(comments: &[LineComment]) -> HashMap<(String, usize), 
 pub fn DiffViewer(
     content: String,
     is_cover_letter: bool,
-    #[props(default)]
-    pr_event_id: Option<String>,
-    #[props(default)]
-    line_comments: Vec<LineComment>,
-    #[props(default)]
-    on_line_comment: Option<EventHandler<(String, usize, String)>>,
+    #[props(default)] pr_event_id: Option<String>,
+    #[props(default)] line_comments: Vec<LineComment>,
+    #[props(default)] on_line_comment: Option<EventHandler<(String, usize, String)>>,
 ) -> Element {
     let mut view_mode = use_signal(|| DiffViewMode::Unified);
-    let mut collapsed_hunks: Signal<HashMap<(usize, usize), bool>> =
-        use_signal(HashMap::new);
+    let mut collapsed_hunks: Signal<HashMap<(usize, usize), bool>> = use_signal(HashMap::new);
     // Track which file+line has the inline comment form open
     let mut active_comment_line: Signal<Option<(String, usize)>> = use_signal(|| None);
     // Text content of the inline comment form
@@ -269,9 +266,7 @@ pub fn DiffViewer(
     }
 
     // Derive parsed diff directly from content prop
-    let parsed = use_memo(use_reactive(&content, |c| {
-        parse_diff_content(&c)
-    }));
+    let parsed = use_memo(use_reactive(&content, |c| parse_diff_content(&c)));
     let parsed_ref = parsed.read();
     let sections = &parsed_ref.sections;
     let section_hunks = &parsed_ref.section_hunks;
@@ -279,7 +274,9 @@ pub fn DiffViewer(
     let current_mode = *view_mode.read();
 
     // Build a lookup map for line comments by (file_path, line_number)
-    let comment_map = use_memo(use_reactive(&line_comments, |lc| build_line_comment_map(&lc)));
+    let comment_map = use_memo(use_reactive(&line_comments, |lc| {
+        build_line_comment_map(&lc)
+    }));
     let comment_map = comment_map.read();
 
     // Column count for spanning rows (unified mode)
@@ -747,13 +744,19 @@ fn parse_diff_content(content: &str) -> ParsedDiff {
     let mut in_header = false;
 
     let mut binary_hint: Option<String> = None;
+    let mut header_summary: Vec<String> = Vec::new();
 
     for line in &lines {
         if line.starts_with("diff --git") {
             // Flush previous section — even if current_lines is empty (header-only/binary diff)
             if let Some(ref file) = current_file {
                 if current_lines.is_empty() {
-                    let info_text = binary_hint.take().unwrap_or_else(|| "(Binary file or file metadata changed)".to_string());
+                    let info_text = binary_hint
+                        .take()
+                        .or_else(|| {
+                            (!header_summary.is_empty()).then(|| header_summary.join(" • "))
+                        })
+                        .unwrap_or_else(|| "(Binary file or file metadata changed)".to_string());
                     current_lines.push(DiffLine {
                         kind: LineKind::Info,
                         old_num: None,
@@ -772,22 +775,27 @@ fn parse_diff_content(content: &str) -> ParsedDiff {
                 });
             }
             binary_hint = None;
+            header_summary.clear();
             current_file = extract_file_path(line).map(|s| s.to_string());
             in_header = true;
             continue;
         }
 
         if in_header
-            && (line.starts_with("--- ")
-                || line.starts_with("+++ ")
-                || line.starts_with("index ")
-                || line.starts_with("old mode")
+            && (line.starts_with("--- ") || line.starts_with("+++ ") || line.starts_with("index "))
+        {
+            continue;
+        }
+
+        if in_header
+            && (line.starts_with("old mode")
                 || line.starts_with("new mode")
                 || line.starts_with("new file")
                 || line.starts_with("deleted file")
                 || line.starts_with("similarity")
                 || line.starts_with("rename"))
         {
+            header_summary.push(line.to_string());
             continue;
         }
 
@@ -867,7 +875,10 @@ fn parse_diff_content(content: &str) -> ParsedDiff {
     // Flush final section — handle header-only/binary diffs
     if let Some(ref file) = current_file {
         if current_lines.is_empty() {
-            let info_text = binary_hint.take().unwrap_or_else(|| "(Binary file or file metadata changed)".to_string());
+            let info_text = binary_hint
+                .take()
+                .or_else(|| (!header_summary.is_empty()).then(|| header_summary.join(" • ")))
+                .unwrap_or_else(|| "(Binary file or file metadata changed)".to_string());
             current_lines.push(DiffLine {
                 kind: LineKind::Info,
                 old_num: None,
@@ -917,5 +928,8 @@ fn parse_diff_content(content: &str) -> ParsedDiff {
         })
         .collect();
 
-    ParsedDiff { sections, section_hunks }
+    ParsedDiff {
+        sections,
+        section_hunks,
+    }
 }

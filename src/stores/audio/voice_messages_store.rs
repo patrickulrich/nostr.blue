@@ -31,19 +31,25 @@ impl Default for VoicePlaybackState {
 pub enum RecordingState {
     #[default]
     Idle,
-    Recording { started_at: f64, duration: f64 },
-    Paused { duration: f64 },
-    Completed { blob_url: String, duration: f64, waveform: Vec<u8> },
+    Recording {
+        started_at: f64,
+        duration: f64,
+    },
+    Paused {
+        duration: f64,
+    },
+    Completed {
+        blob_url: String,
+        duration: f64,
+        waveform: Vec<u8>,
+    },
 }
 /// Global playback state signal
-pub static VOICE_PLAYBACK: GlobalSignal<VoicePlaybackState> = Signal::global(
-    VoicePlaybackState::default,
-);
+pub static VOICE_PLAYBACK: GlobalSignal<VoicePlaybackState> =
+    Signal::global(VoicePlaybackState::default);
 /// Global recording state signal
 #[allow(dead_code)]
-pub static RECORDING_STATE: GlobalSignal<RecordingState> = Signal::global(
-    RecordingState::default,
-);
+pub static RECORDING_STATE: GlobalSignal<RecordingState> = Signal::global(RecordingState::default);
 /// Play a voice message (pauses any currently playing)
 #[allow(dead_code)]
 pub fn play_voice_message(event_id: EventId) {
@@ -72,10 +78,12 @@ pub fn is_playing(event_id: &EventId) -> bool {
     VOICE_PLAYBACK.read().currently_playing.as_ref() == Some(event_id)
 }
 /// Update current playback time
+#[allow(dead_code)]
 pub fn set_current_time(time: f64) {
     VOICE_PLAYBACK.write().current_time = time;
 }
 /// Update duration
+#[allow(dead_code)]
 pub fn set_duration(duration: f64) {
     VOICE_PLAYBACK.write().duration = duration;
 }
@@ -95,28 +103,24 @@ pub fn toggle_mute() {
 /// Start recording
 #[allow(dead_code)]
 pub fn start_recording() {
-    let now = js_sys::Date::now() / 1000.0;
+    let now = crate::platform::timestamp::now_secs() as f64;
     RECORDING_STATE
         .write()
-        .clone_from(
-            &RecordingState::Recording {
-                started_at: now,
-                duration: 0.0,
-            },
-        );
+        .clone_from(&RecordingState::Recording {
+            started_at: now,
+            duration: 0.0,
+        });
 }
 /// Stop recording
 #[allow(dead_code)]
 pub fn stop_recording(blob_url: String, duration: f64, waveform: Vec<u8>) {
     RECORDING_STATE
         .write()
-        .clone_from(
-            &RecordingState::Completed {
-                blob_url,
-                duration,
-                waveform,
-            },
-        );
+        .clone_from(&RecordingState::Completed {
+            blob_url,
+            duration,
+            waveform,
+        });
 }
 /// Cancel recording
 #[allow(dead_code)]

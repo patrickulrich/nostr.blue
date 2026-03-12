@@ -94,7 +94,11 @@ pub fn CodeImport() -> Element {
                     "wss://nos.lol",
                     "wss://relay.snort.social",
                 ];
-                let name_opt = if name.is_empty() { None } else { Some(name.as_str()) };
+                let name_opt = if name.is_empty() {
+                    None
+                } else {
+                    Some(name.as_str())
+                };
                 let desc_opt = if description.is_empty() {
                     None
                 } else {
@@ -102,16 +106,16 @@ pub fn CodeImport() -> Element {
                 };
                 let topics: Vec<&str> = repo.topics.iter().map(|t| t.as_str()).collect();
                 match publish_repository(
-                        &id,
-                        name_opt,
-                        desc_opt,
-                        &clone_urls,
-                        &web_urls,
-                        &relays,
-                        &[],
-                        &topics,
-                    )
-                    .await
+                    &id,
+                    name_opt,
+                    desc_opt,
+                    &clone_urls,
+                    &web_urls,
+                    &relays,
+                    &[],
+                    &topics,
+                )
+                .await
                 {
                     Ok(event_id) => {
                         published_naddr.set(Some(event_id.to_hex()));

@@ -40,7 +40,9 @@ pub fn CodeDiscussionNew(naddr: String) -> Element {
         spawn(async move {
             loading.set(true);
             let result = fetch_repository(&n).await;
-            if *fetch_gen.peek() != gen { return; }
+            if *fetch_gen.peek() != gen {
+                return;
+            }
             repo_result.set(Some(result));
             loading.set(false);
         });
@@ -53,7 +55,9 @@ pub fn CodeDiscussionNew(naddr: String) -> Element {
     let handle_submit = {
         let naddr = naddr.clone();
         move |_| {
-            if *is_publishing.peek() { return; }
+            if *is_publishing.peek() {
+                return;
+            }
             let subject_val = subject.read().clone();
             let content_val = content.read().clone();
             let category_val = category.read().clone();
@@ -78,9 +82,7 @@ pub fn CodeDiscussionNew(naddr: String) -> Element {
                 match publish_discussion_by_naddr(&naddr, subj, &content_val, cat, &[]).await {
                     Ok(event_id) => {
                         is_publishing.set(false);
-                        nav.push(Route::CodeDiscussionDetail {
-                            note_id: event_id,
-                        });
+                        nav.push(Route::CodeDiscussionDetail { note_id: event_id });
                     }
                     Err(e) => {
                         error_message.set(Some(e));

@@ -51,3 +51,147 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --target wasm32-unknown-unknown -- -D warnings
+
+  native-checks:
+    name: Native Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-native-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-native-cargo-
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build CSS and JS assets
+        run: npm run build:all
+
+      - name: Install Dioxus CLI
+        run: cargo install dioxus-cli --version 0.7.2 --locked --force
+
+      - name: Dioxus check
+        run: dx check --no-default-features --features desktop
+
+      - name: Cargo check
+        run: cargo check --no-default-features --features desktop
+
+      - name: Clippy host
+        run: cargo clippy --no-default-features --features desktop -- -D warnings
+
+      - name: Clippy wasm
+        run: cargo clippy --target wasm32-unknown-unknown -- -D warnings
+
+      - name: Cargo test
+        run: cargo test --no-default-features --features desktop
+
+  android-build:
+    name: Android APK Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-android-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-android-cargo-
+
+      - name: Setup Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;34.0.0" \
+            "ndk;27.0.12077973"
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build CSS and JS assets
+        run: npm run build:all
+
+      - name: Install Dioxus CLI
+        run: cargo install dioxus-cli --version 0.7.2 --locked --force
+
+      - name: Build Android APK
+        run: |
+          export GRADLE_USER_HOME="$GITHUB_WORKSPACE/.gradle-home"
+          export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.0.12077973"
+          ./scripts/build-android.sh
+
+      - name: Verify APK metadata
+        run: |
+          APK=nostrblue-debug.apk
+          VERSION="$(sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml | head -n1)"
+          AAPT="$ANDROID_SDK_ROOT/build-tools/34.0.0/aapt"
+          "$AAPT" dump badging "$APK" > apk-metadata.txt
+          grep -q "package: name='com.nostr.blue'" apk-metadata.txt
+          grep -q "versionName='$VERSION'" apk-metadata.txt
+          grep -q "application-label:'nostr.blue'" apk-metadata.txt
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: nostrblue-debug-apk
+          path: nostrblue-debug.apk

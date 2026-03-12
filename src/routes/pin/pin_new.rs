@@ -4,9 +4,7 @@
 use crate::components::{ClientInitializing, MediaUploader};
 use crate::routes::Route;
 use crate::stores::nostr_client::{self, HAS_SIGNER};
-use crate::stores::pin_boards_store::{
-    self, PinContentType, PinInput, PinReference, Pinboard,
-};
+use crate::stores::pin_boards_store::{self, PinContentType, PinInput, PinReference, Pinboard};
 use crate::utils::nip73::ExternalContentId;
 use crate::utils::pin_metadata::{self, PinPreviewMetadata};
 use dioxus::prelude::*;
@@ -173,8 +171,10 @@ fn is_image_url(url: &str) -> bool {
 }
 fn is_video_url(url: &str) -> bool {
     let extensions = [".mp4", ".webm", ".mov", ".avi", ".mkv"];
-    extensions.iter().any(|ext| url.ends_with(ext)) || url.contains("youtube.com")
-        || url.contains("youtu.be") || url.contains("vimeo.com")
+    extensions.iter().any(|ext| url.ends_with(ext))
+        || url.contains("youtube.com")
+        || url.contains("youtu.be")
+        || url.contains("vimeo.com")
 }
 fn infer_content_type_from_kind(kind: u16) -> PinContentType {
     match kind {
@@ -209,9 +209,7 @@ fn validate_board_address(input: &str) -> std::result::Result<String, String> {
     } else if trimmed.starts_with("30067:") {
         let parts: Vec<&str> = trimmed.splitn(3, ':').collect();
         if parts.len() != 3 {
-            return Err(
-                "Invalid coordinate format (expected 30067:pubkey:d-tag)".to_string(),
-            );
+            return Err("Invalid coordinate format (expected 30067:pubkey:d-tag)".to_string());
         }
         if parts[1].len() != 64 || !parts[1].chars().all(|c| c.is_ascii_hexdigit()) {
             return Err("Invalid pubkey in coordinate".to_string());
@@ -239,9 +237,7 @@ pub fn PinNew() -> Element {
     let mut other_board_error = use_signal(|| None::<String>);
     let mut is_submitting = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
-    let detected_type = use_memo(move || DetectedInputType::detect(
-        &reference_input.read(),
-    ));
+    let detected_type = use_memo(move || DetectedInputType::detect(&reference_input.read()));
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
@@ -264,12 +260,8 @@ pub fn PinNew() -> Element {
         fetch_state.set(FetchState::Fetching);
         spawn(async move {
             let result = match current_type {
-                DetectedInputType::Url(url) => {
-                    pin_metadata::fetch_url_preview(&url).await
-                }
-                DetectedInputType::EventId(id) => {
-                    pin_metadata::fetch_event_preview(&id).await
-                }
+                DetectedInputType::Url(url) => pin_metadata::fetch_url_preview(&url).await,
+                DetectedInputType::EventId(id) => pin_metadata::fetch_event_preview(&id).await,
                 DetectedInputType::Address(addr) => {
                     pin_metadata::fetch_address_preview(&addr).await
                 }
@@ -314,13 +306,9 @@ pub fn PinNew() -> Element {
         let pin_reference = match current_type.to_pin_reference() {
             Some(r) => r,
             None => {
-                error
-                    .set(
-                        Some(
-                            "Please enter a valid URL, nostr event, or address"
-                                .to_string(),
-                        ),
-                    );
+                error.set(Some(
+                    "Please enter a valid URL, nostr event, or address".to_string(),
+                ));
                 return;
             }
         };
@@ -371,8 +359,7 @@ pub fn PinNew() -> Element {
     let inferred_type = current_detected.inferred_content_type();
     let is_fetching = matches!(*fetch_state.read(), FetchState::Fetching);
     let fetch_succeeded = matches!(*fetch_state.read(), FetchState::Success);
-    let total_boards_selected = selected_board_addrs.read().len()
-        + other_boards.read().len();
+    let total_boards_selected = selected_board_addrs.read().len() + other_boards.read().len();
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
@@ -771,11 +758,7 @@ pub fn PinNew() -> Element {
 }
 /// Board checkbox component
 #[component]
-fn BoardCheckbox(
-    board: Pinboard,
-    is_selected: bool,
-    on_toggle: EventHandler<String>,
-) -> Element {
+fn BoardCheckbox(board: Pinboard, is_selected: bool, on_toggle: EventHandler<String>) -> Element {
     let a_tag = board.a_tag.clone();
     rsx! {
         button {

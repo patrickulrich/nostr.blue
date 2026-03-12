@@ -15,21 +15,20 @@
 //! 4. Recipient receives kind:9321, validates P2PK lock, redeems tokens
 //! 5. Recipient creates kind:7376 history with "redeemed" tag
 #![allow(dead_code)]
-use dioxus::prelude::*;
-use nostr_sdk::signer::NostrSigner;
-use nostr_sdk::{EventId, Filter, Kind, PublicKey, Tag, TagKind, Timestamp};
-use serde::{Deserialize, Serialize};
-use std::time::Duration;
 use super::internal::{collect_p2pk_signing_keys, create_ephemeral_wallet};
 use super::nutzap_signals::*;
 use super::proofs::cdk_proof_to_proof_data;
 use super::signals::{try_acquire_mint_lock, WALLET_STATE, WALLET_TOKENS};
 use super::types::{
-    ExtendedCashuProof, ExtendedTokenEvent, ProofData, TokenData,
-    WalletTokensStoreStoreExt,
+    ExtendedCashuProof, ExtendedTokenEvent, ProofData, TokenData, WalletTokensStoreStoreExt,
 };
 use super::utils::{mint_matches, normalize_mint_url};
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
+use dioxus::prelude::*;
+use nostr_sdk::signer::NostrSigner;
+use nostr_sdk::{EventId, Filter, Kind, PublicKey, Tag, TagKind, Timestamp};
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
 /// User's nutzap configuration (from kind:10019)
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NutzapInfo {
@@ -113,7 +112,10 @@ pub struct NutzapRedeemResult {
 pub fn get_nutzap_p2pk_pubkey() -> Result<String, String> {
     let wallet_state = WALLET_STATE.read();
     let state = wallet_state.as_ref().ok_or("Wallet not initialized")?;
-    let privkey = state.privkey.as_ref().ok_or("Wallet private key not available")?;
+    let privkey = state
+        .privkey
+        .as_ref()
+        .ok_or("Wallet private key not available")?;
     let secret_key = cdk::nuts::SecretKey::from_hex(privkey)
         .map_err(|e| format!("Invalid wallet privkey: {}", e))?;
     let pubkey = secret_key.public_key();
@@ -132,19 +134,22 @@ pub async fn publish_nutzap_info(
         .ok_or("No signer available")?
         .as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let _pubkey = PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let _pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let p2pk_pubkey = get_nutzap_p2pk_pubkey()?;
     let mut tags = Vec::new();
     for relay in &relays {
         tags.push(Tag::custom(TagKind::custom("relay"), [relay.as_str()]));
     }
     for mint in &mints {
-        tags.push(
-            Tag::custom(TagKind::custom("mint"), [mint.url.as_str(), mint.unit.as_str()]),
-        );
+        tags.push(Tag::custom(
+            TagKind::custom("mint"),
+            [mint.url.as_str(), mint.unit.as_str()],
+        ));
     }
-    tags.push(Tag::custom(TagKind::custom("pubkey"), [p2pk_pubkey.as_str()]));
+    tags.push(Tag::custom(
+        TagKind::custom("pubkey"),
+        [p2pk_pubkey.as_str()],
+    ));
     let builder = nostr_sdk::EventBuilder::new(Kind::from(10019), "").tags(tags);
     let client = nostr_client::NOSTR_CLIENT
         .read()
@@ -156,16 +161,16 @@ pub async fn publish_nutzap_info(
         .await
         .map_err(|e| format!("Failed to publish nutzap info: {}", e))?;
     if output.success.is_empty() {
-        return Err(
-            format!(
-                "Nutzap info failed on all relays: {:?}",
-                output.failed.keys().collect::<Vec<_>>(),
-            ),
-        );
+        return Err(format!(
+            "Nutzap info failed on all relays: {:?}",
+            output.failed.keys().collect::<Vec<_>>(),
+        ));
     }
     let event_id = output.id().to_hex();
     log::info!(
-        "Published nutzap info event: {} (to {} relays)", event_id, output.success.len()
+        "Published nutzap info event: {} (to {} relays)",
+        event_id,
+        output.success.len()
     );
     let info = NutzapInfo {
         pubkey: pubkey_str.clone(),
@@ -191,8 +196,7 @@ pub async fn fetch_nutzap_info(pubkey: &str) -> Result<NutzapInfo, String> {
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-    let pubkey_parsed = PublicKey::parse(pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey_parsed = PublicKey::parse(pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = Filter::new().author(pubkey_parsed).kind(Kind::from(10019));
     let events = client
         .fetch_events(filter, Duration::from_secs(5))
@@ -236,8 +240,8 @@ pub async fn fetch_nutzap_info(pubkey: &str) -> Result<NutzapInfo, String> {
             _ => {}
         }
     }
-    let p2pk_pubkey = p2pk_pubkey
-        .ok_or_else(|| format!("Nutzap info missing P2PK pubkey for {}", pubkey))?;
+    let p2pk_pubkey =
+        p2pk_pubkey.ok_or_else(|| format!("Nutzap info missing P2PK pubkey for {}", pubkey))?;
     if p2pk_pubkey.len() != 66 || !p2pk_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err(
             format!(
@@ -270,9 +274,7 @@ pub async fn validate_nutzap_recipient(pubkey: &str) -> Result<NutzapMint, Strin
 /// Validate nutzap recipient using pre-fetched info (avoids duplicate network fetch)
 ///
 /// CDK pattern: Always filter by unit when checking proof availability
-pub fn validate_nutzap_recipient_with_info(
-    info: &NutzapInfo,
-) -> Result<NutzapMint, String> {
+pub fn validate_nutzap_recipient_with_info(info: &NutzapInfo) -> Result<NutzapMint, String> {
     let our_mints = super::get_mints();
     for their_mint in &info.mints {
         let their_url = normalize_mint_url(&their_mint.url);
@@ -282,36 +284,38 @@ pub fn validate_nutzap_recipient_with_info(
                     Ok(proofs) if !proofs.is_empty() => {
                         log::debug!(
                             "Found compatible mint+unit: {} ({}) with {} proofs",
-                            their_url, their_mint.unit, proofs.len()
+                            their_url,
+                            their_mint.unit,
+                            proofs.len()
                         );
                         return Ok(their_mint.clone());
                     }
                     Ok(_) => {
                         log::debug!(
-                            "Mint {} matches but no proofs for unit {}", their_url,
+                            "Mint {} matches but no proofs for unit {}",
+                            their_url,
                             their_mint.unit
                         );
                     }
                     Err(e) => {
                         log::debug!(
-                            "Error checking proofs for {}/{}: {}", their_url, their_mint
-                            .unit, e
+                            "Error checking proofs for {}/{}: {}",
+                            their_url,
+                            their_mint.unit,
+                            e
                         );
                     }
                 }
             }
         }
     }
-    Err(
-        format!(
-            "No compatible mint+unit found. Recipient accepts: {:?}",
-            info
-                .mints
-                .iter()
-                .map(|m| format!("{}:{}", m.url, m.unit))
-                .collect::<Vec<_>>(),
-        ),
-    )
+    Err(format!(
+        "No compatible mint+unit found. Recipient accepts: {:?}",
+        info.mints
+            .iter()
+            .map(|m| format!("{}:{}", m.url, m.unit))
+            .collect::<Vec<_>>(),
+    ))
 }
 /// Send a nutzap to a recipient
 ///
@@ -330,8 +334,9 @@ pub async fn send_nutzap(
     use cdk::nuts::SpendingConditions;
     use cdk::Amount;
     log::info!(
-        "Sending {} sat nutzap to {}", amount, & recipient_pubkey[..8
-        .min(recipient_pubkey.len())]
+        "Sending {} sat nutzap to {}",
+        amount,
+        &recipient_pubkey[..8.min(recipient_pubkey.len())]
     );
     let recipient_info = fetch_nutzap_info(recipient_pubkey).await?;
     let compatible_mint = validate_nutzap_recipient_with_info(&recipient_info)?;
@@ -344,21 +349,17 @@ pub async fn send_nutzap(
     }
     let total_available: u64 = all_proofs.iter().map(|p| u64::from(p.amount)).sum();
     if total_available < amount {
-        return Err(
-            format!(
-                "Insufficient funds. Available: {} sats, Required: {} sats",
-                total_available,
-                amount,
-            ),
-        );
+        return Err(format!(
+            "Insufficient funds. Available: {} sats, Required: {} sats",
+            total_available, amount,
+        ));
     }
     let recipient_p2pk = cdk::nuts::PublicKey::from_hex(&recipient_info.p2pk_pubkey)
         .map_err(|e| format!("Invalid recipient P2PK pubkey: {}", e))?;
     let spending_conditions = SpendingConditions::new_p2pk(recipient_p2pk, None);
-    let _signer = crate::stores::signer::get_signer()
-        .ok_or("No signer available - cannot send nutzap")?;
-    let _pubkey = auth_store::get_pubkey()
-        .ok_or("Not authenticated - cannot send nutzap")?;
+    let _signer =
+        crate::stores::signer::get_signer().ok_or("No signer available - cannot send nutzap")?;
+    let _pubkey = auth_store::get_pubkey().ok_or("Not authenticated - cannot send nutzap")?;
     let client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
@@ -374,15 +375,10 @@ pub async fn send_nutzap(
         .checked_add(fee_u64)
         .ok_or("Amount overflow when adding fee")?;
     if total_available < required_with_fee {
-        return Err(
-            format!(
-                "Insufficient funds: need {} + {} fee = {}, have {}",
-                amount,
-                fee_u64,
-                required_with_fee,
-                total_available,
-            ),
-        );
+        return Err(format!(
+            "Insufficient funds: need {} + {} fee = {}, have {}",
+            amount, fee_u64, required_with_fee, total_available,
+        ));
     }
     let pre_swap_secrets: std::collections::HashSet<String> = wallet
         .get_unspent_proofs()
@@ -402,10 +398,8 @@ pub async fn send_nutzap(
         .await
         .map_err(|e| format!("Swap failed: {}", e))?
         .ok_or("Swap returned no proofs")?;
-    let send_secrets: std::collections::HashSet<String> = send_proofs
-        .iter()
-        .map(|p| p.secret.to_string())
-        .collect();
+    let send_secrets: std::collections::HashSet<String> =
+        send_proofs.iter().map(|p| p.secret.to_string()).collect();
     let keep_proofs: Vec<_> = wallet
         .get_unspent_proofs()
         .await
@@ -419,12 +413,12 @@ pub async fn send_nutzap(
     let pending_event_id = format!("pending_{}", uuid::Uuid::new_v4());
     let event_ids_to_delete = get_event_ids_for_mint(&mint_url, &compatible_mint.unit);
     update_local_state_after_nutzap_send(
-            &mint_url,
-            &compatible_mint.unit,
-            &keep_proofs,
-            &event_ids_to_delete,
-        )
-        .await?;
+        &mint_url,
+        &compatible_mint.unit,
+        &keep_proofs,
+        &event_ids_to_delete,
+    )
+    .await?;
     let mut tags = Vec::new();
     for proof in &send_proofs {
         let proof_json = serde_json::to_string(proof)
@@ -432,7 +426,10 @@ pub async fn send_nutzap(
         tags.push(Tag::custom(TagKind::custom("proof"), [proof_json.as_str()]));
     }
     tags.push(Tag::custom(TagKind::custom("u"), [mint_url.as_str()]));
-    tags.push(Tag::custom(TagKind::custom("unit"), [compatible_mint.unit.as_str()]));
+    tags.push(Tag::custom(
+        TagKind::custom("unit"),
+        [compatible_mint.unit.as_str()],
+    ));
     let recipient_nostr_pubkey = PublicKey::parse(recipient_pubkey)
         .map_err(|e| format!("Invalid recipient pubkey: {}", e))?;
     tags.push(Tag::public_key(recipient_nostr_pubkey));
@@ -440,15 +437,15 @@ pub async fn send_nutzap(
         if let Ok(event_id) = EventId::from_hex(target_id) {
             tags.push(Tag::event(event_id));
             if let Some(kind) = target_kind {
-                tags.push(
-                    Tag::custom(TagKind::custom("k"), [kind.to_string().as_str()]),
-                );
+                tags.push(Tag::custom(
+                    TagKind::custom("k"),
+                    [kind.to_string().as_str()],
+                ));
             }
         }
     }
     let content = comment.unwrap_or("");
-    let builder = nostr_sdk::EventBuilder::new(Kind::from(9321), content)
-        .tags(tags.clone());
+    let builder = nostr_sdk::EventBuilder::new(Kind::from(9321), content).tags(tags.clone());
     let recipient_relay_urls: Vec<nostr::RelayUrl> = recipient_info
         .relays
         .iter()
@@ -459,28 +456,31 @@ pub async fn send_nutzap(
         client.send_event_builder(builder.clone()).await
     } else {
         log::debug!(
-            "Publishing nutzap to {} recipient relays", recipient_relay_urls.len()
+            "Publishing nutzap to {} recipient relays",
+            recipient_relay_urls.len()
         );
-        client.send_event_builder_to(recipient_relay_urls, builder.clone()).await
+        client
+            .send_event_builder_to(recipient_relay_urls, builder.clone())
+            .await
     };
     let output = match output {
         Ok(out) => out,
         Err(e) => {
             log::warn!("Failed to publish nutzap, queuing for retry: {}", e);
             super::events::queue_event_for_retry(
-                    builder,
-                    super::types::PendingEventType::NutzapEvent,
-                    Some(pending_event_id.clone()),
-                    Some(mint_url.to_string()),
-                )
-                .await;
+                builder,
+                super::types::PendingEventType::NutzapEvent,
+                Some(pending_event_id.clone()),
+                Some(mint_url.to_string()),
+            )
+            .await;
             if let Err(e) = super::events::create_history_event(
-                    "out",
-                    amount,
-                    vec![],
-                    event_ids_to_delete.clone(),
-                )
-                .await
+                "out",
+                amount,
+                vec![],
+                event_ids_to_delete.clone(),
+            )
+            .await
             {
                 log::error!("Failed to create history event: {}", e);
             }
@@ -496,35 +496,31 @@ pub async fn send_nutzap(
         }
     };
     let (event_id, is_pending_retry) = if output.success.is_empty() {
-        let builder_for_retry = nostr_sdk::EventBuilder::new(Kind::from(9321), content)
-            .tags(tags);
+        let builder_for_retry = nostr_sdk::EventBuilder::new(Kind::from(9321), content).tags(tags);
         super::events::queue_event_for_retry(
-                builder_for_retry,
-                super::types::PendingEventType::NutzapEvent,
-                Some(pending_event_id.clone()),
-                Some(mint_url.to_string()),
-            )
-            .await;
+            builder_for_retry,
+            super::types::PendingEventType::NutzapEvent,
+            Some(pending_event_id.clone()),
+            Some(mint_url.to_string()),
+        )
+        .await;
         log::warn!(
-            "Nutzap failed on all relays, queued for retry: {:?}", output.failed.keys()
-            .collect::< Vec < _ >> ()
+            "Nutzap failed on all relays, queued for retry: {:?}",
+            output.failed.keys().collect::<Vec<_>>()
         );
         (pending_event_id.clone(), true)
     } else {
         let real_event_id = output.id().to_hex();
         log::info!(
-            "Published nutzap event: {} (to {} relays)", real_event_id, output.success
-            .len()
+            "Published nutzap event: {} (to {} relays)",
+            real_event_id,
+            output.success.len()
         );
         (real_event_id, false)
     };
-    if let Err(e) = super::events::create_history_event(
-            "out",
-            amount,
-            vec![],
-            event_ids_to_delete.clone(),
-        )
-        .await
+    if let Err(e) =
+        super::events::create_history_event("out", amount, vec![], event_ids_to_delete.clone())
+            .await
     {
         log::error!("Failed to create history event: {}", e);
     }
@@ -605,8 +601,8 @@ pub async fn start_nutzap_subscription() -> Result<(), String> {
         .clone()
         .ok_or("Nutzap info not published - enable receiving first")?;
     let my_pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let my_pubkey = PublicKey::parse(&my_pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let my_pubkey =
+        PublicKey::parse(&my_pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     {
         let mut active = NUTZAP_SUBSCRIPTION_ACTIVE.write();
         if *active {
@@ -641,12 +637,11 @@ pub async fn start_nutzap_subscription() -> Result<(), String> {
                     subscription_id,
                     event,
                     ..
-                } = notification {
+                } = notification
+                {
                     if subscription_id == sub_id && event.kind == Kind::from(9321) {
                         if let Err(e) = process_nutzap_event(&event).await {
-                            log::warn!(
-                                "Failed to process nutzap {}: {}", event.id.to_hex(), e
-                            );
+                            log::warn!("Failed to process nutzap {}: {}", event.id.to_hex(), e);
                         }
                     }
                 }
@@ -665,7 +660,9 @@ pub async fn start_nutzap_subscription() -> Result<(), String> {
 /// Returns `Ok(true)` if newly added, `Ok(false)` if duplicate.
 pub async fn process_nutzap_event(event: &nostr_sdk::Event) -> Result<bool, String> {
     log::info!("Processing nutzap event: {}", event.id.to_hex());
-    event.verify().map_err(|e| format!("Invalid signature on nutzap event: {}", e))?;
+    event
+        .verify()
+        .map_err(|e| format!("Invalid signature on nutzap event: {}", e))?;
     let mut proofs_json = Vec::new();
     let mut mint_url = None;
     let mut unit = "sat".to_string();
@@ -710,17 +707,12 @@ pub async fn process_nutzap_event(event: &nostr_sdk::Event) -> Result<bool, Stri
             let accepted = info
                 .mints
                 .iter()
-                .any(|m| {
-                    super::utils::mint_matches(&m.url, &mint_url) && m.unit == unit
-                });
+                .any(|m| super::utils::mint_matches(&m.url, &mint_url) && m.unit == unit);
             if !accepted {
-                return Err(
-                    format!(
-                        "Nutzap from unaccepted mint/unit: {} (unit: {})",
-                        mint_url,
-                        unit,
-                    ),
-                );
+                return Err(format!(
+                    "Nutzap from unaccepted mint/unit: {} (unit: {})",
+                    mint_url, unit,
+                ));
             }
         } else {
             return Err("Nutzap info not configured - cannot validate mint".to_string());
@@ -768,24 +760,24 @@ pub async fn process_nutzap_event(event: &nostr_sdk::Event) -> Result<bool, Stri
                     if !matches!(current_status, Some(NutzapStatus::Pending)) {
                         log::debug!(
                             "Nutzap {} status changed during redeem (now {:?}), skipping update",
-                            pending.event_id, current_status
+                            pending.event_id,
+                            current_status
                         );
                         return;
                     }
                     if is_transient_error(&e) {
                         log::warn!(
                             "Transient error auto-redeeming nutzap {}, will retry: {}",
-                            pending.event_id, e
+                            pending.event_id,
+                            e
                         );
                     } else {
                         log::error!(
-                            "Permanent error auto-redeeming nutzap {}: {}", pending
-                            .event_id, e
+                            "Permanent error auto-redeeming nutzap {}: {}",
+                            pending.event_id,
+                            e
                         );
-                        update_pending_nutzap_status(
-                            &pending.event_id,
-                            NutzapStatus::Failed(e),
-                        );
+                        update_pending_nutzap_status(&pending.event_id, NutzapStatus::Failed(e));
                     }
                 }
             }
@@ -796,8 +788,8 @@ pub async fn process_nutzap_event(event: &nostr_sdk::Event) -> Result<bool, Stri
 /// Validate that proofs are P2PK-locked to our pubkey
 fn validate_nutzap_p2pk(proofs_json: &[String], our_p2pk: &str) -> Result<(), String> {
     for proof_json in proofs_json {
-        let proof: serde_json::Value = serde_json::from_str(proof_json)
-            .map_err(|e| format!("Invalid proof JSON: {}", e))?;
+        let proof: serde_json::Value =
+            serde_json::from_str(proof_json).map_err(|e| format!("Invalid proof JSON: {}", e))?;
         let secret_str = proof
             .get("secret")
             .and_then(|s| s.as_str())
@@ -827,29 +819,25 @@ fn validate_nutzap_p2pk(proofs_json: &[String], our_p2pk: &str) -> Result<(), St
             .to_lowercase();
         let our_p2pk_lower = our_p2pk.to_lowercase();
         if locked_pubkey.len() != 66 {
-            return Err(
-                format!("Invalid pubkey length: {} (expected 66)", locked_pubkey.len()),
-            );
+            return Err(format!(
+                "Invalid pubkey length: {} (expected 66)",
+                locked_pubkey.len()
+            ));
         }
         if !locked_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err("Invalid pubkey hex".to_string());
         }
         if !locked_pubkey.starts_with("02") {
-            return Err(
-                format!(
-                    "Invalid pubkey prefix: {} (NIP-61 requires '02' prefix for client-generated keys)",
-                    &locked_pubkey[0..2],
-                ),
-            );
+            return Err(format!(
+                "Invalid pubkey prefix: {} (NIP-61 requires '02' prefix for client-generated keys)",
+                &locked_pubkey[0..2],
+            ));
         }
         if locked_pubkey != our_p2pk_lower {
-            return Err(
-                format!(
-                    "P2PK lock doesn't match our pubkey. Expected: {}, Got: {}",
-                    our_p2pk_lower,
-                    locked_pubkey,
-                ),
-            );
+            return Err(format!(
+                "P2PK lock doesn't match our pubkey. Expected: {}, Got: {}",
+                our_p2pk_lower, locked_pubkey,
+            ));
         }
     }
     Ok(())
@@ -909,20 +897,18 @@ async fn redeem_nutzap_inner(
         .collect();
     if new_proofs.is_empty() {
         log::warn!(
-            "Receive returned {} sats but no new proofs found in database", amount
+            "Receive returned {} sats but no new proofs found in database",
+            amount
         );
         return Err("Receive succeeded but no new proofs found".to_string());
     }
     log::debug!(
-        "Filtered to {} new proofs (excluded {} pre-existing)", new_proofs.len(),
+        "Filtered to {} new proofs (excluded {} pre-existing)",
+        new_proofs.len(),
         pre_receive_secrets.len()
     );
-    let new_event_id = publish_redeemed_token_event(mint_url, &pending.unit, &new_proofs)
-        .await?;
-    let proof_data: Vec<ProofData> = new_proofs
-        .iter()
-        .map(cdk_proof_to_proof_data)
-        .collect();
+    let new_event_id = publish_redeemed_token_event(mint_url, &pending.unit, &new_proofs).await?;
+    let proof_data: Vec<ProofData> = new_proofs.iter().map(cdk_proof_to_proof_data).collect();
     let token = TokenData {
         event_id: new_event_id.clone(),
         mint: mint_url.to_string(),
@@ -943,13 +929,13 @@ async fn redeem_nutzap_inner(
     super::proofs::register_proofs_in_event_map(&new_event_id, &proof_data);
     super::signals::update_wallet_balances();
     if let Err(e) = super::events::create_history_event_full(
-            "in",
-            amount,
-            vec![new_event_id.clone()],
-            vec![],
-            vec![event_id.to_string()],
-        )
-        .await
+        "in",
+        amount,
+        vec![new_event_id.clone()],
+        vec![],
+        vec![event_id.to_string()],
+    )
+    .await
     {
         log::error!("Failed to create history event: {}", e);
     }
@@ -980,7 +966,8 @@ pub async fn redeem_nutzap(event_id: &str) -> Result<NutzapRedeemResult, String>
             if is_transient_error(&e) {
                 log::warn!(
                     "Transient error redeeming nutzap {}, reverting to Pending: {}",
-                    event_id, e
+                    event_id,
+                    e
                 );
                 update_pending_nutzap_status(event_id, NutzapStatus::Pending);
             } else {
@@ -992,10 +979,7 @@ pub async fn redeem_nutzap(event_id: &str) -> Result<NutzapRedeemResult, String>
     }
 }
 /// Get CDK proofs for a specific mint and unit (only spendable proofs)
-fn get_proofs_for_mint(
-    mint_url: &str,
-    unit: &str,
-) -> Result<Vec<cdk::nuts::Proof>, String> {
+fn get_proofs_for_mint(mint_url: &str, unit: &str) -> Result<Vec<cdk::nuts::Proof>, String> {
     let store = WALLET_TOKENS.read();
     let data = store.data();
     let tokens = data.read();
@@ -1034,14 +1018,9 @@ async fn update_local_state_after_nutzap_send(
     event_ids_to_delete: &[String],
 ) -> Result<(), String> {
     if keep_proofs.is_empty() {
-        if let Err(e) = super::signals::atomic_token_replace(
-            vec![],
-            event_ids_to_delete,
-        ) {
+        if let Err(e) = super::signals::atomic_token_replace(vec![], event_ids_to_delete) {
             log::error!("Failed atomic token replace (delete): {}", e);
-            if let Err(sync_err) = crate::stores::cashu_cdk_bridge::sync_wallet_state()
-                .await
-            {
+            if let Err(sync_err) = crate::stores::cashu_cdk_bridge::sync_wallet_state().await {
                 log::warn!(
                     "Failed to sync wallet state after atomic_token_replace error: {}",
                     sync_err
@@ -1052,10 +1031,7 @@ async fn update_local_state_after_nutzap_send(
         return Ok(());
     }
     let pending_event_id = format!("pending_{}", uuid::Uuid::new_v4());
-    let keep_proof_data: Vec<ProofData> = keep_proofs
-        .iter()
-        .map(cdk_proof_to_proof_data)
-        .collect();
+    let keep_proof_data: Vec<ProofData> = keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
     let token = TokenData {
         event_id: pending_event_id.clone(),
         mint: mint_url.to_string(),
@@ -1063,13 +1039,9 @@ async fn update_local_state_after_nutzap_send(
         proofs: keep_proof_data.clone(),
         created_at: chrono::Utc::now().timestamp() as u64,
     };
-    if let Err(e) = super::signals::atomic_token_replace(
-        vec![token],
-        event_ids_to_delete,
-    ) {
+    if let Err(e) = super::signals::atomic_token_replace(vec![token], event_ids_to_delete) {
         log::error!("Failed atomic token replace: {}", e);
-        if let Err(sync_err) = crate::stores::cashu_cdk_bridge::sync_wallet_state().await
-        {
+        if let Err(sync_err) = crate::stores::cashu_cdk_bridge::sync_wallet_state().await {
             log::warn!(
                 "Failed to sync wallet state after atomic_token_replace error: {}",
                 sync_err
@@ -1078,13 +1050,8 @@ async fn update_local_state_after_nutzap_send(
         return Err(format!("Failed to update wallet tokens: {}", e));
     }
     super::proofs::register_proofs_in_event_map(&pending_event_id, &keep_proof_data);
-    let real_event_id = publish_change_token_event(
-            mint_url,
-            unit,
-            keep_proofs,
-            event_ids_to_delete,
-        )
-        .await?;
+    let real_event_id =
+        publish_change_token_event(mint_url, unit, keep_proofs, event_ids_to_delete).await?;
     if real_event_id != pending_event_id {
         super::events::update_token_event_id(&pending_event_id, &real_event_id);
         super::proofs::register_proofs_in_event_map(&real_event_id, &keep_proof_data);
@@ -1102,12 +1069,8 @@ async fn publish_change_token_event(
         .ok_or("No signer available")?
         .as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pubkey = PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let proof_data: Vec<ProofData> = proofs
-        .iter()
-        .map(cdk_proof_to_proof_data)
-        .collect();
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let proof_data: Vec<ProofData> = proofs.iter().map(cdk_proof_to_proof_data).collect();
     let extended_proofs: Vec<ExtendedCashuProof> = proof_data
         .iter()
         .map(|p| ExtendedCashuProof::from(p.clone()))
@@ -1136,25 +1099,26 @@ async fn publish_change_token_event(
             let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
             log::warn!("Failed to publish token event, queuing for retry: {}", e);
             super::events::queue_token_event_for_retry(
-                    builder,
-                    pending_id.clone(),
-                    mint_url.to_string(),
-                )
-                .await;
+                builder,
+                pending_id.clone(),
+                mint_url.to_string(),
+            )
+            .await;
             return Ok(pending_id);
         }
     };
     if output.success.is_empty() {
         let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
         log::warn!(
-            "No relays accepted change token event, using pending ID: {}", pending_id
+            "No relays accepted change token event, using pending ID: {}",
+            pending_id
         );
         super::events::queue_token_event_for_retry(
-                builder,
-                pending_id.clone(),
-                mint_url.to_string(),
-            )
-            .await;
+            builder,
+            pending_id.clone(),
+            mint_url.to_string(),
+        )
+        .await;
         return Ok(pending_id);
     }
     Ok(output.id().to_hex())
@@ -1174,15 +1138,18 @@ pub async fn fetch_pending_nutzaps() -> Result<usize, String> {
         None => return Ok(0),
     };
     let my_pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let my_pubkey = PublicKey::parse(&my_pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let my_pubkey =
+        PublicKey::parse(&my_pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
     let since = Timestamp::now() - Duration::from_secs(30 * 24 * 60 * 60);
-    let filter = Filter::new().kind(Kind::from(9321)).pubkey(my_pubkey).since(since);
+    let filter = Filter::new()
+        .kind(Kind::from(9321))
+        .pubkey(my_pubkey)
+        .since(since);
     let events = client
         .fetch_events(filter, Duration::from_secs(10))
         .await
@@ -1205,12 +1172,18 @@ mod tests {
     /// CDK pattern: These map to temporary failures, not protocol violations
     #[test]
     fn test_transient_errors_network() {
-        assert!(is_transient_error("network error"), "network should be transient");
+        assert!(
+            is_transient_error("network error"),
+            "network should be transient"
+        );
         assert!(
             is_transient_error("connection refused"),
             "connection should be transient",
         );
-        assert!(is_transient_error("request timeout"), "timeout should be transient");
+        assert!(
+            is_transient_error("request timeout"),
+            "timeout should be transient"
+        );
         assert!(
             is_transient_error("relay unavailable"),
             "unavailable should be transient",
@@ -1230,10 +1203,22 @@ mod tests {
     /// CDK pattern: These map to error codes 10xxx (proofs) and 11xxx (state)
     #[test]
     fn test_permanent_errors_cdk() {
-        assert!(!is_transient_error("TokenAlreadySpent"), "already spent is permanent");
-        assert!(!is_transient_error("token already spent"), "already spent variant");
-        assert!(!is_transient_error("InvalidProofs"), "invalid proofs is permanent");
-        assert!(!is_transient_error("KeysetNotFound"), "unknown keyset is permanent");
+        assert!(
+            !is_transient_error("TokenAlreadySpent"),
+            "already spent is permanent"
+        );
+        assert!(
+            !is_transient_error("token already spent"),
+            "already spent variant"
+        );
+        assert!(
+            !is_transient_error("InvalidProofs"),
+            "invalid proofs is permanent"
+        );
+        assert!(
+            !is_transient_error("KeysetNotFound"),
+            "unknown keyset is permanent"
+        );
     }
     #[test]
     fn test_permanent_errors_validation() {
@@ -1250,8 +1235,14 @@ mod tests {
             is_transient_error("some random error"),
             "unknown should default transient",
         );
-        assert!(is_transient_error("unexpected failure"), "unexpected should retry");
-        assert!(is_transient_error("oops something went wrong"), "generic errors retry");
+        assert!(
+            is_transient_error("unexpected failure"),
+            "unexpected should retry"
+        );
+        assert!(
+            is_transient_error("oops something went wrong"),
+            "generic errors retry"
+        );
     }
     /// Test precedence: permanent patterns checked before transient
     #[test]

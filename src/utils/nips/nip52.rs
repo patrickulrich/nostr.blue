@@ -118,7 +118,9 @@ impl std::fmt::Display for FreeBusy {
 pub enum EventSource {
     #[default]
     Public,
-    Calendar { calendar_id: String },
+    Calendar {
+        calendar_id: String,
+    },
 }
 /// Participant in a calendar event
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -137,23 +139,46 @@ pub enum EventTime {
     Date(String),
     /// Unix timestamp in seconds (for kind 31923)
     Timestamp(u64),
+    /// Local datetime with timezone (preserves TZID info).
+    ///
+    /// The `timestamp` field is a Unix epoch in **UTC** seconds.
+    /// The `timezone` field is only used for presentation/display purposes
+    /// (e.g., converting to local time for UI display), not for storage.
+    /// When serializing to a tag, only the UTC timestamp is used.
+    LocalDateTime {
+        /// Unix epoch seconds in UTC
+        timestamp: u64,
+        /// Timezone identifier for display (e.g., "America/New_York")
+        timezone: String,
+    },
 }
 impl EventTime {
     /// Parse from string based on event type
     pub fn parse(s: &str, event_type: CalendarEventType) -> Option<Self> {
         match event_type {
             CalendarEventType::DateBased => {
-                if s.len() == 10 && s.chars().nth(4) == Some('-')
-                    && s.chars().nth(7) == Some('-')
-                {
+                if s.len() == 10 && s.chars().nth(4) == Some('-') && s.chars().nth(7) == Some('-') {
+                    let parts: Vec<&str> = s.split('-').collect();
+                    if parts.len() != 3 {
+                        return None;
+                    }
+                    let year = parts[0].parse::<i32>().ok()?;
+                    let month = parts[1].parse::<i32>().ok()?;
+                    let day = parts[2].parse::<i32>().ok()?;
+                    if year < 1970 || !(1..=12).contains(&month) {
+                        return None;
+                    }
+                    let _is_leap = is_leap_year(year);
+                    let max_day = crate::utils::date_helpers::days_in_month(year, month);
+                    if max_day == 0 || !(1..=max_day).contains(&day) {
+                        return None;
+                    }
                     Some(EventTime::Date(s.to_string()))
                 } else {
                     None
                 }
             }
-            CalendarEventType::TimeBased => {
-                s.parse::<u64>().ok().map(EventTime::Timestamp)
-            }
+            CalendarEventType::TimeBased => s.parse::<u64>().ok().map(EventTime::Timestamp),
         }
     }
     /// Get as string for tag value
@@ -161,12 +186,14 @@ impl EventTime {
         match self {
             EventTime::Date(d) => d.clone(),
             EventTime::Timestamp(t) => t.to_string(),
+            EventTime::LocalDateTime { timestamp, .. } => timestamp.to_string(),
         }
     }
     /// Get timestamp (for sorting/comparison)
     pub fn to_timestamp(&self) -> Option<u64> {
         match self {
             EventTime::Timestamp(t) => Some(*t),
+            EventTime::LocalDateTime { timestamp, .. } => Some(*timestamp),
             EventTime::Date(d) => {
                 let parts: Vec<&str> = d.split('-').collect();
                 if parts.len() == 3 {
@@ -365,8 +392,8 @@ pub fn parse_calendar_event(event: &Event) -> Result<CalendarEvent, String> {
     let start = EventTime::parse(&start_str, event_type)
         .ok_or_else(|| format!("Invalid start time format: {}", start_str))?;
     let end = get_tag_value(event, "end").and_then(|s| EventTime::parse(&s, event_type));
-    let start_tzid = get_tag_value(event, "start_tzid")
-        .or_else(|| get_tag_value(event, "timezone"));
+    let start_tzid =
+        get_tag_value(event, "start_tzid").or_else(|| get_tag_value(event, "timezone"));
     let end_tzid = get_tag_value(event, "end_tzid");
     let summary = get_tag_value(event, "summary");
     let content = event.content.clone();
@@ -410,9 +437,11 @@ pub fn parse_calendar_event(event: &Event) -> Result<CalendarEvent, String> {
 /// Parse a Kind 31925 event into a CalendarRsvp
 pub fn parse_calendar_rsvp(event: &Event) -> Result<CalendarRsvp, String> {
     if event.kind.as_u16() != KIND_CALENDAR_RSVP {
-        return Err(
-            format!("Expected kind {}, got {}", KIND_CALENDAR_RSVP, event.kind.as_u16()),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_CALENDAR_RSVP,
+            event.kind.as_u16()
+        ));
     }
     let pubkey = event.pubkey.to_hex();
     let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
@@ -444,9 +473,11 @@ pub fn parse_calendar_rsvp(event: &Event) -> Result<CalendarRsvp, String> {
 /// Parse a Kind 31924 event into a Calendar
 pub fn parse_calendar(event: &Event) -> Result<Calendar, String> {
     if event.kind.as_u16() != KIND_CALENDAR {
-        return Err(
-            format!("Expected kind {}, got {}", KIND_CALENDAR, event.kind.as_u16()),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_CALENDAR,
+            event.kind.as_u16()
+        ));
     }
     let pubkey = event.pubkey.to_hex();
     let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
@@ -472,38 +503,33 @@ pub fn parse_calendar(event: &Event) -> Result<Calendar, String> {
     })
 }
 /// Parse a Kind 31926 event into an AvailabilityTemplate
-pub fn parse_availability_template(
-    event: &Event,
-) -> Result<AvailabilityTemplate, String> {
+pub fn parse_availability_template(event: &Event) -> Result<AvailabilityTemplate, String> {
     if event.kind.as_u16() != KIND_AVAILABILITY_TEMPLATE {
-        return Err(
-            format!(
-                "Expected kind {}, got {}",
-                KIND_AVAILABILITY_TEMPLATE,
-                event.kind.as_u16(),
-            ),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_AVAILABILITY_TEMPLATE,
+            event.kind.as_u16(),
+        ));
     }
     let pubkey = event.pubkey.to_hex();
     let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
     let coordinate = format!("{}:{}:{}", KIND_AVAILABILITY_TEMPLATE, pubkey, d_tag);
-    let naddr = build_naddr(KIND_AVAILABILITY_TEMPLATE, &pubkey, &d_tag)
-        .unwrap_or_default();
+    let naddr = build_naddr(KIND_AVAILABILITY_TEMPLATE, &pubkey, &d_tag).unwrap_or_default();
     let title = get_tag_value(event, "title").unwrap_or_default();
     let duration_minutes = get_tag_value(event, "duration")
         .and_then(|s| parse_iso_duration_minutes(&s))
         .ok_or("Missing or invalid 'duration' tag")?;
-    let interval_minutes = get_tag_value(event, "interval")
-        .and_then(|s| parse_iso_duration_minutes(&s));
-    let buffer_before = get_tag_value(event, "buffer_before")
-        .and_then(|s| parse_iso_duration_minutes(&s));
-    let buffer_after = get_tag_value(event, "buffer_after")
-        .and_then(|s| parse_iso_duration_minutes(&s));
+    let interval_minutes =
+        get_tag_value(event, "interval").and_then(|s| parse_iso_duration_minutes(&s));
+    let buffer_before =
+        get_tag_value(event, "buffer_before").and_then(|s| parse_iso_duration_minutes(&s));
+    let buffer_after =
+        get_tag_value(event, "buffer_after").and_then(|s| parse_iso_duration_minutes(&s));
     let timezone = get_tag_value(event, "tzid");
-    let min_notice_days = get_tag_value(event, "min_notice")
-        .and_then(|s| parse_iso_duration_days(&s));
-    let max_advance_days = get_tag_value(event, "max_advance")
-        .and_then(|s| parse_iso_duration_days(&s));
+    let min_notice_days =
+        get_tag_value(event, "min_notice").and_then(|s| parse_iso_duration_days(&s));
+    let max_advance_days =
+        get_tag_value(event, "max_advance").and_then(|s| parse_iso_duration_days(&s));
     let amount_sats = get_tag_value(event, "amount").and_then(|s| s.parse::<u64>().ok());
     let schedule = parse_schedule_entries(event);
     Ok(AvailabilityTemplate {
@@ -528,13 +554,11 @@ pub fn parse_availability_template(
 /// Parse a Kind 31927 event into an AvailabilityBlock
 pub fn parse_availability_block(event: &Event) -> Result<AvailabilityBlock, String> {
     if event.kind.as_u16() != KIND_AVAILABILITY_BLOCK {
-        return Err(
-            format!(
-                "Expected kind {}, got {}",
-                KIND_AVAILABILITY_BLOCK,
-                event.kind.as_u16(),
-            ),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_AVAILABILITY_BLOCK,
+            event.kind.as_u16(),
+        ));
     }
     let pubkey = event.pubkey.to_hex();
     let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
@@ -599,7 +623,10 @@ fn parse_participants(event: &Event) -> Vec<EventParticipant> {
                 .get(2)
                 .map(|s| s.to_string())
                 .filter(|s| !s.is_empty());
-            let role = slice.get(3).map(|s| s.to_string()).filter(|s| !s.is_empty());
+            let role = slice
+                .get(3)
+                .map(|s| s.to_string())
+                .filter(|s| !s.is_empty());
             Some(EventParticipant {
                 pubkey,
                 relay_hint,
@@ -654,6 +681,27 @@ fn build_naddr(kind: u16, pubkey: &str, d_tag: &str) -> Option<String> {
 }
 /// Calculate days since Unix epoch (simple implementation)
 fn days_since_epoch(year: i32, month: u32, day: u32) -> Option<i64> {
+    if year < 1970 {
+        return None;
+    }
+    if !(1..=12).contains(&month) {
+        return None;
+    }
+    let max_day = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if is_leap_year(year) {
+                29
+            } else {
+                28
+            }
+        }
+        _ => return None,
+    };
+    if day == 0 || day > max_day {
+        return None;
+    }
     let mut days: i64 = 0;
     for y in 1970..year {
         days += if is_leap_year(y) { 366 } else { 365 };
@@ -673,7 +721,7 @@ fn days_since_epoch(year: i32, month: u32, day: u32) -> Option<i64> {
     Some(days)
 }
 fn is_leap_year(year: i32) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+    crate::utils::date_helpers::is_leap_year(year)
 }
 /// Online location patterns for detection
 const ONLINE_PATTERNS: &[&str] = &[
@@ -706,14 +754,26 @@ mod tests {
     fn test_rsvp_status_from_str() {
         assert_eq!(RsvpStatus::from_str("accepted"), Some(RsvpStatus::Accepted));
         assert_eq!(RsvpStatus::from_str("DECLINED"), Some(RsvpStatus::Declined));
-        assert_eq!(RsvpStatus::from_str("tentative"), Some(RsvpStatus::Tentative));
+        assert_eq!(
+            RsvpStatus::from_str("tentative"),
+            Some(RsvpStatus::Tentative)
+        );
         assert_eq!(RsvpStatus::from_str("invalid"), None);
     }
     #[test]
     fn test_free_busy_from_rsvp_status() {
-        assert_eq!(FreeBusy::from_rsvp_status(RsvpStatus::Accepted), FreeBusy::Busy);
-        assert_eq!(FreeBusy::from_rsvp_status(RsvpStatus::Declined), FreeBusy::Free);
-        assert_eq!(FreeBusy::from_rsvp_status(RsvpStatus::Tentative), FreeBusy::Free);
+        assert_eq!(
+            FreeBusy::from_rsvp_status(RsvpStatus::Accepted),
+            FreeBusy::Busy
+        );
+        assert_eq!(
+            FreeBusy::from_rsvp_status(RsvpStatus::Declined),
+            FreeBusy::Free
+        );
+        assert_eq!(
+            FreeBusy::from_rsvp_status(RsvpStatus::Tentative),
+            FreeBusy::Free
+        );
     }
     #[test]
     fn test_event_time_date() {
@@ -721,6 +781,10 @@ mod tests {
         assert!(matches!(time, Some(EventTime::Date(_))));
         let time = EventTime::parse("invalid", CalendarEventType::DateBased);
         assert!(time.is_none());
+        let impossible = EventTime::parse("2024-02-30", CalendarEventType::DateBased);
+        assert!(impossible.is_none());
+        let pre_epoch = EventTime::parse("1969-12-31", CalendarEventType::DateBased);
+        assert!(pre_epoch.is_none());
     }
     #[test]
     fn test_event_time_timestamp() {
@@ -728,6 +792,37 @@ mod tests {
         assert!(matches!(time, Some(EventTime::Timestamp(1735123200))));
         let time = EventTime::parse("invalid", CalendarEventType::TimeBased);
         assert!(time.is_none());
+    }
+    #[test]
+    fn test_event_time_local_datetime_tag_value() {
+        let time = EventTime::LocalDateTime {
+            timestamp: 1735123200,
+            timezone: "America/New_York".to_string(),
+        };
+        assert_eq!(time.as_tag_value(), "1735123200");
+        let time = EventTime::LocalDateTime {
+            timestamp: 0,
+            timezone: "UTC".to_string(),
+        };
+        assert_eq!(time.as_tag_value(), "0");
+        let time = EventTime::LocalDateTime {
+            timestamp: 9999999999,
+            timezone: "Europe/London".to_string(),
+        };
+        assert_eq!(time.as_tag_value(), "9999999999");
+    }
+    #[test]
+    fn test_event_time_local_datetime_to_timestamp() {
+        let time = EventTime::LocalDateTime {
+            timestamp: 1735123200,
+            timezone: "America/New_York".to_string(),
+        };
+        assert_eq!(time.to_timestamp(), Some(1735123200));
+        let time = EventTime::LocalDateTime {
+            timestamp: 0,
+            timezone: "UTC".to_string(),
+        };
+        assert_eq!(time.to_timestamp(), Some(0));
     }
     #[test]
     fn test_iso_duration_minutes() {
@@ -766,5 +861,37 @@ mod tests {
     fn test_days_since_epoch() {
         assert_eq!(days_since_epoch(1970, 1, 1), Some(0));
         assert_eq!(days_since_epoch(1970, 1, 2), Some(1));
+    }
+    #[test]
+    fn test_parse_invalid_dates() {
+        use super::CalendarEventType;
+        use super::EventTime;
+        assert_eq!(
+            EventTime::parse("2024-02-30", CalendarEventType::DateBased),
+            None,
+            "Invalid day 30 in February should return None"
+        );
+        assert_eq!(
+            EventTime::parse("2024-00-00", CalendarEventType::DateBased),
+            None,
+            "Invalid month 0 and day 0 should return None"
+        );
+        assert_eq!(
+            EventTime::parse("2024-13-01", CalendarEventType::DateBased),
+            None,
+            "Invalid month 13 should return None"
+        );
+        assert_eq!(
+            EventTime::parse("0001-01-01", CalendarEventType::DateBased),
+            None,
+            "Pre-1970 date should return None"
+        );
+    }
+    #[test]
+    fn test_to_timestamp_pre_epoch() {
+        use super::CalendarEventType;
+        use super::EventTime;
+        let result = EventTime::parse("1969-01-01", CalendarEventType::DateBased);
+        assert_eq!(result, None, "Pre-1970 dates should not parse");
     }
 }

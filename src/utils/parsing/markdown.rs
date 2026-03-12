@@ -40,7 +40,12 @@ fn convert_mermaid_blocks(html: &str) -> String {
                 .replace("&#34;", "\"");
             let replacement = format!("<div class=\"mermaid\">{}</div>", decoded);
             let block_end = code_end + "</code></pre>".len();
-            result = format!("{}{}{}", &result[..start], replacement, &result[block_end..]);
+            result = format!(
+                "{}{}{}",
+                &result[..start],
+                replacement,
+                &result[block_end..]
+            );
         } else {
             break;
         }
@@ -53,25 +58,50 @@ pub fn sanitize_html(html: &str) -> String {
     use ammonia::Builder;
     use maplit::{hashmap, hashset};
     Builder::default()
-        .tags(
-            hashset![
-                "h1", "h2", "h3", "h4", "h5", "h6", "p", "br", "hr", "strong", "em", "u",
-                "s", "del", "ins", "a", "ul", "ol", "li", "blockquote", "code", "pre",
-                "table", "thead", "tbody", "tr", "th", "td", "img", "div", "span", "sup",
-                "sub",
-            ],
-        )
-        .tag_attributes(
-            hashmap![
-                "a" => hashset!["href", "title", "target", "class", "data-target"], "img"
-                => hashset!["src", "alt", "title", "width", "height"], "code" =>
-                hashset!["class"], "pre" => hashset!["class"], "div" =>
-                hashset!["class"], "span" => hashset!["class"], "th" =>
-                hashset!["align"], "td" => hashset!["align"], "h1" => hashset!["id"],
-                "h2" => hashset!["id"], "h3" => hashset!["id"], "h4" => hashset!["id"],
-                "h5" => hashset!["id"], "h6" => hashset!["id"],
-            ],
-        )
+        .tags(hashset![
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "p",
+            "br",
+            "hr",
+            "strong",
+            "em",
+            "u",
+            "s",
+            "del",
+            "ins",
+            "a",
+            "ul",
+            "ol",
+            "li",
+            "blockquote",
+            "code",
+            "pre",
+            "table",
+            "thead",
+            "tbody",
+            "tr",
+            "th",
+            "td",
+            "img",
+            "div",
+            "span",
+            "sup",
+            "sub",
+        ])
+        .tag_attributes(hashmap![
+            "a" => hashset!["href", "title", "target", "class", "data-target"], "img"
+            => hashset!["src", "alt", "title", "width", "height"], "code" =>
+            hashset!["class"], "pre" => hashset!["class"], "div" =>
+            hashset!["class"], "span" => hashset!["class"], "th" =>
+            hashset!["align"], "td" => hashset!["align"], "h1" => hashset!["id"],
+            "h2" => hashset!["id"], "h3" => hashset!["id"], "h4" => hashset!["id"],
+            "h5" => hashset!["id"], "h6" => hashset!["id"],
+        ])
         .url_schemes(hashset!["http", "https", "mailto"])
         .link_rel(Some("noopener noreferrer"))
         .clean(html)
@@ -207,7 +237,10 @@ mod tests {
     fn test_mermaid_block_script_tag_sanitized() {
         let input = "```mermaid\ngraph TD\n    A[<script>alert('xss')</script>] --> B\n```";
         let result = render_markdown(input);
-        assert!(!result.contains("<script"), "Script tags inside mermaid blocks must be sanitized");
+        assert!(
+            !result.contains("<script"),
+            "Script tags inside mermaid blocks must be sanitized"
+        );
         // Verify the mermaid content is still rendered (converted to div)
         assert!(result.contains("mermaid"));
     }

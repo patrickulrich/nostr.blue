@@ -29,7 +29,10 @@ pub fn MusicAlbum(album_id: String) -> Element {
     let tracks = use_memo(move || {
         album_state()
             .map(|a| {
-                a.tracks.iter().map(|t| t.clone().into()).collect::<Vec<MusicTrack>>()
+                a.tracks
+                    .iter()
+                    .map(|t| t.clone().into())
+                    .collect::<Vec<MusicTrack>>()
             })
             .unwrap_or_default()
     });

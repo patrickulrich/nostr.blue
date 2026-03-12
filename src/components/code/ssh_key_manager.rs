@@ -99,7 +99,10 @@ pub fn SshKeyManager() -> Element {
             error.set(Some("Title and SSH key are required".to_string()));
             return;
         } else if title.trim().chars().count() > MAX_TITLE_LEN {
-            error.set(Some(format!("Title must be {} characters or fewer", MAX_TITLE_LEN)));
+            error.set(Some(format!(
+                "Title must be {} characters or fewer",
+                MAX_TITLE_LEN
+            )));
             return;
         }
         // Basic SSH key format validation
@@ -129,13 +132,19 @@ pub fn SshKeyManager() -> Element {
         spawn(async move {
             match ssh_keys::publish_ssh_key(title.trim(), &trimmed).await {
                 Ok(_) => {
-                    if auth_store::get_pubkey() != captured_pubkey { adding.set(false); return; }
+                    if auth_store::get_pubkey() != captured_pubkey {
+                        adding.set(false);
+                        return;
+                    }
                     // Refresh the key list
                     if let Some(pubkey_hex) = auth_store::get_pubkey() {
                         if let Ok(pk) = PublicKey::from_hex(&pubkey_hex) {
                             match ssh_keys::fetch_ssh_keys(&pk).await {
                                 Ok(k) => {
-                                    if auth_store::get_pubkey() != captured_pubkey { adding.set(false); return; }
+                                    if auth_store::get_pubkey() != captured_pubkey {
+                                        adding.set(false);
+                                        return;
+                                    }
                                     keys.set(k);
                                 }
                                 Err(e) => log::warn!("SSH key added but list refresh failed: {e}"),
@@ -147,7 +156,10 @@ pub fn SshKeyManager() -> Element {
                     show_add_form.set(false);
                 }
                 Err(e) => {
-                    if auth_store::get_pubkey() != captured_pubkey { adding.set(false); return; }
+                    if auth_store::get_pubkey() != captured_pubkey {
+                        adding.set(false);
+                        return;
+                    }
                     error.set(Some(e));
                 }
             }
@@ -156,7 +168,9 @@ pub fn SshKeyManager() -> Element {
     };
 
     let mut handle_delete = move |eid_hex: String| {
-        if deleting_id.peek().is_some() { return; }
+        if deleting_id.peek().is_some() {
+            return;
+        }
         deleting_id.set(Some(eid_hex.clone()));
         error.set(None);
         let captured_pubkey = auth_store::get_pubkey();

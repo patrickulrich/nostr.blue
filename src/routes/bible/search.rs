@@ -1,10 +1,8 @@
 //! Bible Search Page
 //! Client-side search through cached chapters
+use crate::stores::bible_store::{cached_chapter_count, search_cached_verses, BibleSearchResult};
 use dioxus::html::input_data::keyboard_types::Key;
 use dioxus::prelude::*;
-use crate::stores::bible_store::{
-    cached_chapter_count, search_cached_verses, BibleSearchResult,
-};
 /// Bible Search Page
 #[component]
 pub fn BibleSearch() -> Element {
@@ -229,10 +227,7 @@ fn find_match_byte_range(haystack: &str, needle: &str) -> Option<(usize, usize)>
 fn SearchResultCard(result: BibleSearchResult, query: String) -> Element {
     let reference = format!(
         "{} {}:{} ({})",
-        result.book_name,
-        result.chapter,
-        result.verse,
-        result.translation,
+        result.book_name, result.chapter, result.verse, result.translation,
     );
     rsx! {
         Link {

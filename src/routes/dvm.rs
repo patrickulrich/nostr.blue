@@ -2,10 +2,6 @@
 //!
 //! Displays a feed of notes recommended by a Data Vending Machine (DVM).
 //! Users can select which DVM provider to use via a gear icon.
-use std::collections::HashMap;
-use std::time::Duration;
-use dioxus::prelude::*;
-use nostr_sdk::PublicKey;
 use crate::components::{ClientInitializing, DvmSelectorModal, NoteCard};
 use crate::hooks::use_mute_block_cache;
 use crate::services::aggregation::{
@@ -13,10 +9,13 @@ use crate::services::aggregation::{
     InteractionStreamHandle,
 };
 use crate::stores::dvm_store::{
-    DVM_FEED_ERROR, DVM_FEED_EVENTS, DVM_FEED_LOADING, DVM_PROVIDERS,
-    SELECTED_DVM_PROVIDER,
+    DVM_FEED_ERROR, DVM_FEED_EVENTS, DVM_FEED_LOADING, DVM_PROVIDERS, SELECTED_DVM_PROVIDER,
 };
 use crate::stores::{dvm_store, nostr_client};
+use dioxus::prelude::*;
+use nostr_sdk::PublicKey;
+use std::collections::HashMap;
+use std::time::Duration;
 /// Main DVM page component
 #[component]
 pub fn DVM() -> Element {
@@ -25,8 +24,8 @@ pub fn DVM() -> Element {
     let mut interaction_counts = use_signal(HashMap::<String, InteractionCounts>::new);
     let mut interactions_loaded = use_signal(|| false);
     let mut fetch_in_progress = use_signal(|| false);
-    let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> = use_signal(||
-    None);
+    let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> =
+        use_signal(|| None);
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
     let feed_loading = *DVM_FEED_LOADING.read();
     let feed_error = DVM_FEED_ERROR.read().clone();
@@ -73,12 +72,7 @@ pub fn DVM() -> Element {
         let trigger_snapshot = *refresh_trigger.peek();
         spawn(async move {
             let event_ids: Vec<_> = events.iter().map(|e| e.id).collect();
-            match fetch_interaction_counts_batch(
-                    event_ids.clone(),
-                    Duration::from_secs(5),
-                )
-                .await
-            {
+            match fetch_interaction_counts_batch(event_ids.clone(), Duration::from_secs(5)).await {
                 Ok(counts) => {
                     if *refresh_trigger.peek() != trigger_snapshot {
                         log::debug!("Discarding stale DVM interaction counts");
@@ -87,12 +81,8 @@ pub fn DVM() -> Element {
                     }
                     interaction_counts.set(counts);
                     interactions_loaded.set(true);
-                    if let Ok(handle) = stream_interaction_counts(
-                            event_ids,
-                            interaction_counts,
-                            Some(600),
-                        )
-                        .await
+                    if let Ok(handle) =
+                        stream_interaction_counts(event_ids, interaction_counts, Some(600)).await
                     {
                         if *refresh_trigger.peek() != trigger_snapshot {
                             log::debug!("Discarding stale DVM stream handle");

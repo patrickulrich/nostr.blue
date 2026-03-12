@@ -3,8 +3,7 @@ use crate::components::shop::{CartItemCard, CartSummary};
 use crate::routes::Route;
 use crate::stores::profiles::{self, Profile};
 use crate::stores::shop_store::{
-    clear_cart, get_cart_count, remove_from_cart, update_cart_quantity, CART_ITEMS,
-    CART_TOTAL_SATS,
+    clear_cart, get_cart_count, remove_from_cart, update_cart_quantity, CART_ITEMS, CART_TOTAL_SATS,
 };
 use crate::utils::format::{format_sats_with_separator, truncate_id};
 use crate::utils::nip99::CartItem;
@@ -19,7 +18,10 @@ pub fn ShopCart() -> Element {
     let merchant_groups: HashMap<String, Vec<CartItem>> = {
         let mut groups: HashMap<String, Vec<CartItem>> = HashMap::new();
         for item in cart_items.iter() {
-            groups.entry(item.product.pubkey.clone()).or_default().push(item.clone());
+            groups
+                .entry(item.product.pubkey.clone())
+                .or_default()
+                .push(item.clone());
         }
         groups
     };
@@ -33,14 +35,15 @@ pub fn ShopCart() -> Element {
         profiles_fetched.set(true);
         let pks = pubkeys.clone();
         spawn(async move {
-            let fetch_futures = pks
-                .iter()
-                .map(|pk| {
-                    let pk = pk.clone();
-                    async move {
-                        profiles::fetch_profile(pk.clone()).await.ok().map(|p| (pk, p))
-                    }
-                });
+            let fetch_futures = pks.iter().map(|pk| {
+                let pk = pk.clone();
+                async move {
+                    profiles::fetch_profile(pk.clone())
+                        .await
+                        .ok()
+                        .map(|p| (pk, p))
+                }
+            });
             let results = futures::future::join_all(fetch_futures).await;
             for result in results.into_iter().flatten() {
                 merchant_profiles.write().insert(result.0, result.1);

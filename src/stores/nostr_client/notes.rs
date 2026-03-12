@@ -1,12 +1,13 @@
 //! Text notes (kind 1)
 //!
 //! Publishing functions for text notes (NIP-01).
-use dioxus::prelude::ReadableExt;
-use nostr_sdk::prelude::*;
 use super::fetching::get_client;
 use super::signals::HAS_SIGNER;
 use super::types::PublishResult;
+use crate::utils::custom_emoji::build_custom_emoji_tags;
 use crate::utils::mention_extractor::{create_mention_tags, extract_mentioned_pubkeys};
+use dioxus::prelude::ReadableExt;
+use nostr_sdk::prelude::*;
 /// Extract quote tags from content containing nostr: URIs (NIP-18 compliance)
 /// Returns q tags for note1/nevent1/naddr1 references
 /// Deduplicates tags to avoid duplicate q tags for the same reference
@@ -17,9 +18,7 @@ fn extract_quote_tags(content: &str) -> Vec<nostr::Tag> {
     use std::collections::HashSet;
     let mut tags = Vec::new();
     let mut seen_identifiers = HashSet::new();
-    let re = match regex::Regex::new(
-        r"nostr:(note1[a-z0-9]+|nevent1[a-z0-9]+|naddr1[a-z0-9]+)",
-    ) {
+    let re = match regex::Regex::new(r"nostr:(note1[a-z0-9]+|nevent1[a-z0-9]+|naddr1[a-z0-9]+)") {
         Ok(r) => r,
         Err(e) => {
             log::error!("Failed to compile quote regex: {}", e);
@@ -35,33 +34,27 @@ fn extract_quote_tags(content: &str) -> Vec<nostr::Tag> {
             match Nip19::from_bech32(bech32) {
                 Ok(nip19) => {
                     let tag = match nip19 {
-                        Nip19::EventId(id) => {
-                            Some(
-                                nostr::Tag::from_standardized_without_cell(TagStandard::Quote {
-                                    event_id: id,
-                                    relay_url: None,
-                                    public_key: None,
-                                }),
-                            )
-                        }
-                        Nip19::Event(nevent) => {
-                            Some(
-                                nostr::Tag::from_standardized_without_cell(TagStandard::Quote {
-                                    event_id: nevent.event_id,
-                                    relay_url: nevent.relays.first().cloned(),
-                                    public_key: nevent.author,
-                                }),
-                            )
-                        }
-                        Nip19::Coordinate(coord) => {
-                            Some(
-                                nostr::Tag::from_standardized_without_cell(TagStandard::QuoteAddress {
-                                    coordinate: Coordinate::new(coord.kind, coord.public_key)
-                                        .identifier(coord.identifier.clone()),
-                                    relay_url: coord.relays.first().cloned(),
-                                }),
-                            )
-                        }
+                        Nip19::EventId(id) => Some(nostr::Tag::from_standardized_without_cell(
+                            TagStandard::Quote {
+                                event_id: id,
+                                relay_url: None,
+                                public_key: None,
+                            },
+                        )),
+                        Nip19::Event(nevent) => Some(nostr::Tag::from_standardized_without_cell(
+                            TagStandard::Quote {
+                                event_id: nevent.event_id,
+                                relay_url: nevent.relays.first().cloned(),
+                                public_key: nevent.author,
+                            },
+                        )),
+                        Nip19::Coordinate(coord) => Some(
+                            nostr::Tag::from_standardized_without_cell(TagStandard::QuoteAddress {
+                                coordinate: Coordinate::new(coord.kind, coord.public_key)
+                                    .identifier(coord.identifier.clone()),
+                                relay_url: coord.relays.first().cloned(),
+                            }),
+                        ),
                         _ => None,
                     };
                     if let Some(t) = tag {
@@ -90,21 +83,25 @@ pub async fn publish_note_tracked(
     log::info!("Publishing note with {} characters", content.len());
     let mentioned_pubkeys = extract_mentioned_pubkeys(&content);
     let mut mention_tags = create_mention_tags(&mentioned_pubkeys);
-    log::debug!("Extracted {} mentions from content", mentioned_pubkeys.len());
+    log::debug!(
+        "Extracted {} mentions from content",
+        mentioned_pubkeys.len()
+    );
     let nostr_tags = super::types::convert_raw_tags(tags);
     mention_tags.extend(nostr_tags);
     let quote_tags = extract_quote_tags(&content);
     mention_tags.extend(quote_tags);
+    let custom_emoji_tags = build_custom_emoji_tags(&content);
+    mention_tags.extend(custom_emoji_tags);
     let mut seen_pubkeys = std::collections::HashSet::new();
-    mention_tags
-        .retain(|tag| {
-            if tag.kind() == nostr::TagKind::p() {
-                if let Some(pk) = tag.content() {
-                    return seen_pubkeys.insert(pk.to_string());
-                }
+    mention_tags.retain(|tag| {
+        if tag.kind() == nostr::TagKind::p() {
+            if let Some(pk) = tag.content() {
+                return seen_pubkeys.insert(pk.to_string());
             }
-            true
-        });
+        }
+        true
+    });
     let builder = nostr::EventBuilder::text_note(&content).tags(mention_tags);
     let output = client
         .send_event_builder(builder)
@@ -112,8 +109,10 @@ pub async fn publish_note_tracked(
         .map_err(|e| format!("Failed to publish: {}", e))?;
     let result = PublishResult::from_output(output);
     log::info!(
-        "Note published: {} ({}/{} relays succeeded)", result.event_id, result
-        .success_count(), result.total_attempted()
+        "Note published: {} ({}/{} relays succeeded)",
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
     );
     if result.has_failures() {
         for (relay, error) in &result.failed_relays {
@@ -128,5 +127,7 @@ pub async fn publish_note(
     content: String,
     tags: Vec<Vec<String>>,
 ) -> std::result::Result<String, String> {
-    publish_note_tracked(content, tags).await.map(|result| result.event_id)
+    publish_note_tracked(content, tags)
+        .await
+        .map(|result| result.event_id)
 }

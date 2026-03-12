@@ -13,9 +13,7 @@ pub async fn ensure_orders_loaded() -> Result<()> {
         Some(db) => db.clone(),
         None => return Ok(()),
     };
-    if !ORDERS_LOADED_FROM_DB.load(Ordering::SeqCst)
-        && restore_orders_from_db(&db).await?
-    {
+    if !ORDERS_LOADED_FROM_DB.load(Ordering::SeqCst) && restore_orders_from_db(&db).await? {
         ORDERS_LOADED_FROM_DB.store(true, Ordering::SeqCst);
     }
     Ok(())
@@ -91,8 +89,9 @@ async fn restore_orders_from_db(db: &IndexedDbDatabase) -> Result<bool> {
         }
     }
     log::info!(
-        "Restored {} buyer orders, {} seller orders", buyer_orders.len(), seller_orders
-        .len()
+        "Restored {} buyer orders, {} seller orders",
+        buyer_orders.len(),
+        seller_orders.len()
     );
     *BUYER_ORDERS.write() = buyer_orders;
     *SELLER_ORDERS.write() = seller_orders;
@@ -167,11 +166,7 @@ impl OrderMessageContent {
         }
     }
 
-    pub fn new_payment(
-        order_id: &str,
-        payment_method: &str,
-        payment_proof: &str,
-    ) -> Self {
+    pub fn new_payment(order_id: &str, payment_method: &str, payment_proof: &str) -> Self {
         Self {
             message_type: OrderMessageType::PaymentRequest.as_str().to_string(),
             order_id: order_id.to_string(),
@@ -215,12 +210,7 @@ async fn send_gift_wrapped_rumor(
     rumor: nostr::UnsignedEvent,
     log_context: &str,
 ) -> Result<(String, String)> {
-    let receiver_gift_wrap = EventBuilder::gift_wrap(
-            signer,
-            &recipient_pk,
-            rumor.clone(),
-            [],
-        )
+    let receiver_gift_wrap = EventBuilder::gift_wrap(signer, &recipient_pk, rumor.clone(), [])
         .await
         .map_err(|e| format!("Failed to create receiver gift wrap: {}", e))?;
     let sender_gift_wrap = EventBuilder::gift_wrap(signer, &sender_pk, rumor, [])
@@ -230,12 +220,20 @@ async fn send_gift_wrapped_rumor(
         .send_event(&receiver_gift_wrap)
         .await
         .map_err(|e| format!("Failed to send to receiver: {}", e))?;
-    log::info!("Sent {} to receiver: {:?}", log_context, receiver_result.val);
+    log::info!(
+        "Sent {} to receiver: {:?}",
+        log_context,
+        receiver_result.val
+    );
     let sender_result = client
         .send_event(&sender_gift_wrap)
         .await
         .map_err(|e| format!("Failed to send sender copy: {}", e))?;
-    log::info!("Sent {} copy to sender: {:?}", log_context, sender_result.val);
+    log::info!(
+        "Sent {} copy to sender: {:?}",
+        log_context,
+        sender_result.val
+    );
     Ok((receiver_result.val.to_hex(), sender_result.val.to_hex()))
 }
 
@@ -265,19 +263,20 @@ pub async fn send_order_message(
     let message_json = serde_json::to_string(&content)
         .map_err(|e| format!("Failed to serialize order message: {}", e))?;
     log::info!(
-        "Sending order message to {}: type={}", recipient_pubkey, content.message_type
+        "Sending order message to {}: type={}",
+        recipient_pubkey,
+        content.message_type
     );
-    let rumor = EventBuilder::private_msg_rumor(recipient_pk, message_json)
-        .build(sender_pk);
+    let rumor = EventBuilder::private_msg_rumor(recipient_pk, message_json).build(sender_pk);
     send_gift_wrapped_rumor(
-            &client,
-            &signer,
-            recipient_pk,
-            sender_pk,
-            rumor,
-            "order message",
-        )
-        .await?;
+        &client,
+        &signer,
+        recipient_pk,
+        sender_pk,
+        rumor,
+        "order message",
+    )
+    .await?;
     Ok(content.order_id)
 }
 
@@ -301,8 +300,8 @@ pub async fn send_payment_receipt(
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
-    let recipient_pk = PublicKey::parse(merchant_pubkey)
-        .map_err(|e| format!("Invalid merchant pubkey: {}", e))?;
+    let recipient_pk =
+        PublicKey::parse(merchant_pubkey).map_err(|e| format!("Invalid merchant pubkey: {}", e))?;
     let signer = client
         .signer()
         .await
@@ -313,9 +312,7 @@ pub async fn send_payment_receipt(
         .map_err(|e| format!("Failed to get sender pubkey: {}", e))?;
     let content = format!(
         "Payment receipt for order {} - {} sats via {}",
-        order_id,
-        amount_sats,
-        payment_method,
+        order_id, amount_sats, payment_method,
     );
     let tags = vec![
         Tag::public_key(recipient_pk),
@@ -341,17 +338,19 @@ pub async fn send_payment_receipt(
         .tags(tags)
         .build(sender_pk);
     log::info!(
-        "Sending payment receipt for order {} to merchant {}", order_id, merchant_pubkey
+        "Sending payment receipt for order {} to merchant {}",
+        order_id,
+        merchant_pubkey
     );
     send_gift_wrapped_rumor(
-            &client,
-            &signer,
-            recipient_pk,
-            sender_pk,
-            rumor,
-            "payment receipt",
-        )
-        .await?;
+        &client,
+        &signer,
+        recipient_pk,
+        sender_pk,
+        rumor,
+        "payment receipt",
+    )
+    .await?;
     Ok(order_id.to_string())
 }
 
@@ -370,25 +369,19 @@ fn validate_payment_proof(payment_method: &str, payment_proof: &str) -> Result<(
                     continue;
                 }
                 if trimmed.len() != 64 {
-                    return Err(
-                        format!(
-                            "Invalid Lightning preimage length: expected 64 hex chars, got {}",
-                            trimmed.len(),
-                        ),
-                    );
+                    return Err(format!(
+                        "Invalid Lightning preimage length: expected 64 hex chars, got {}",
+                        trimmed.len(),
+                    ));
                 }
                 if !trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
-                    return Err(
-                        "Invalid Lightning preimage: must be hexadecimal".to_string(),
-                    );
+                    return Err("Invalid Lightning preimage: must be hexadecimal".to_string());
                 }
             }
         }
         "cashu" => {
             if !payment_proof.starts_with("cashu") {
-                return Err(
-                    "Invalid Cashu token format: must start with 'cashu'".to_string(),
-                );
+                return Err("Invalid Cashu token format: must start with 'cashu'".to_string());
             }
         }
         "bitcoin" => {
@@ -401,7 +394,8 @@ fn validate_payment_proof(payment_method: &str, payment_proof: &str) -> Result<(
         }
         _ => {
             log::warn!(
-                "Unknown payment method '{}', skipping proof validation", payment_method
+                "Unknown payment method '{}', skipping proof validation",
+                payment_method
             );
         }
     }
@@ -452,28 +446,24 @@ pub async fn create_shop_order(
             .ok_or_else(|| {
                 format!(
                     "Arithmetic overflow calculating total for '{}' (price {} x quantity {})",
-                    item.product.title,
-                    price_sats,
-                    item.quantity,
+                    item.product.title, price_sats, item.quantity,
                 )
             })?;
-        let entry = merchants.entry(merchant_pubkey).or_insert((Vec::new(), 0u64));
+        let entry = merchants
+            .entry(merchant_pubkey)
+            .or_insert((Vec::new(), 0u64));
         entry.0.push(order_item);
         entry.1 = entry
             .1
             .checked_add(item_total)
-            .ok_or_else(|| {
-                "Arithmetic overflow calculating merchant subtotal".to_string()
-            })?;
+            .ok_or_else(|| "Arithmetic overflow calculating merchant subtotal".to_string())?;
     }
     let total_sats: u64 = {
         let mut total = 0u64;
         for (_, subtotal) in merchants.values() {
             total = total
                 .checked_add(*subtotal)
-                .ok_or_else(|| {
-                    "Arithmetic overflow calculating order total".to_string()
-                })?;
+                .ok_or_else(|| "Arithmetic overflow calculating order total".to_string())?;
         }
         total
     };
@@ -492,21 +482,18 @@ pub async fn create_shop_order(
             shipping_option.clone(),
         );
         send_order_message(merchant_pubkey, order_msg).await?;
-        let payment_msg = OrderMessageContent::new_payment(
-            &order_id,
-            payment_method,
-            payment_proof,
-        );
+        let payment_msg =
+            OrderMessageContent::new_payment(&order_id, payment_method, payment_proof);
         send_order_message(merchant_pubkey, payment_msg).await?;
         if let Err(e) = send_payment_receipt(
-                merchant_pubkey,
-                &order_id,
-                total_sats,
-                payment_method,
-                &medium_reference,
-                payment_proof,
-            )
-            .await
+            merchant_pubkey,
+            &order_id,
+            total_sats,
+            payment_method,
+            &medium_reference,
+            payment_proof,
+        )
+        .await
         {
             log::warn!("Failed to send payment receipt: {}", e);
         }
@@ -550,7 +537,9 @@ pub async fn create_shop_order(
         add_buyer_order(order).await;
     }
     log::info!(
-        "Created order: {} with {} items, total: {} sats", order_id, items.len(),
+        "Created order: {} with {} items, total: {} sats",
+        order_id,
+        items.len(),
         total_sats
     );
     Ok(order_id)
@@ -580,9 +569,8 @@ pub async fn process_order_message(
             log::info!("Received new order: {}", order_id);
             if let Some(buyer) = sender_pubkey {
                 if let Some(items_value) = msg.payload.get("items") {
-                    if let Ok(items) = serde_json::from_value::<
-                        Vec<OrderItem>,
-                    >(items_value.clone()) {
+                    if let Ok(items) = serde_json::from_value::<Vec<OrderItem>>(items_value.clone())
+                    {
                         let shipping_address = msg
                             .payload
                             .get("shipping_address")
@@ -641,9 +629,7 @@ pub async fn process_order_message(
         Some(OrderMessageType::PaymentRequest) => {
             log::info!("Received payment for order: {}", order_id);
             let mut orders = BUYER_ORDERS.write();
-            updated_order = if let Some(order) = orders
-                .iter_mut()
-                .find(|o| o.order_id == *order_id)
+            updated_order = if let Some(order) = orders.iter_mut().find(|o| o.order_id == *order_id)
             {
                 order.status = OrderStatus::Confirmed;
                 order.paid_at = Some(msg.timestamp);
@@ -655,44 +641,38 @@ pub async fn process_order_message(
         }
         Some(OrderMessageType::StatusUpdate) => {
             let mut orders = BUYER_ORDERS.write();
-            updated_order = if let Some(status_str) = msg
-                .payload
-                .get("status")
-                .and_then(|v| v.as_str())
-            {
-                if let Some(new_status) = OrderStatus::from_str(status_str) {
-                    log::info!("Order {} status updated to: {}", order_id, new_status);
-                    if let Some(order) = orders
-                        .iter_mut()
-                        .find(|o| o.order_id == *order_id)
-                    {
-                        order.status = new_status;
-                        order.updated_at = msg.timestamp;
-                        if !new_status.is_active() {
-                            log::info!("Order {} is no longer active", order_id);
+            updated_order =
+                if let Some(status_str) = msg.payload.get("status").and_then(|v| v.as_str()) {
+                    if let Some(new_status) = OrderStatus::from_str(status_str) {
+                        log::info!("Order {} status updated to: {}", order_id, new_status);
+                        if let Some(order) = orders.iter_mut().find(|o| o.order_id == *order_id) {
+                            order.status = new_status;
+                            order.updated_at = msg.timestamp;
+                            if !new_status.is_active() {
+                                log::info!("Order {} is no longer active", order_id);
+                            }
+                            Some(order.clone())
+                        } else {
+                            None
                         }
-                        Some(order.clone())
                     } else {
                         None
                     }
                 } else {
                     None
-                }
-            } else {
-                None
-            };
+                };
         }
         Some(OrderMessageType::ShippingUpdate) => {
             let tracking = msg.payload.get("tracking_number").and_then(|v| v.as_str());
             let carrier = msg.payload.get("carrier").and_then(|v| v.as_str());
             let status_str = msg.payload.get("status").and_then(|v| v.as_str());
             log::info!(
-                "Shipping update for order {}: tracking={:?}", order_id, tracking
+                "Shipping update for order {}: tracking={:?}",
+                order_id,
+                tracking
             );
             let mut orders = BUYER_ORDERS.write();
-            updated_order = if let Some(order) = orders
-                .iter_mut()
-                .find(|o| o.order_id == *order_id)
+            updated_order = if let Some(order) = orders.iter_mut().find(|o| o.order_id == *order_id)
             {
                 if let Some(t) = tracking {
                     order.tracking_number = Some(t.to_string());
@@ -743,12 +723,18 @@ pub async fn listen_for_order_updates() -> Result<()> {
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-    let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
+    let signer = client
+        .signer()
+        .await
+        .map_err(|e| format!("No signer: {}", e))?;
     let my_pubkey = signer
         .get_public_key()
         .await
         .map_err(|e| format!("Failed to get pubkey: {}", e))?;
-    let filter = Filter::new().kind(Kind::GiftWrap).pubkey(my_pubkey).limit(100);
+    let filter = Filter::new()
+        .kind(Kind::GiftWrap)
+        .pubkey(my_pubkey)
+        .limit(100);
     log::info!("Fetching order update messages...");
     let events = client
         .fetch_events(filter, Duration::from_secs(10))
@@ -769,11 +755,7 @@ pub async fn listen_for_order_updates() -> Result<()> {
                     let sender_pubkey = rumor.pubkey.to_hex();
                     match serde_json::from_str::<OrderMessageContent>(&rumor.content) {
                         Ok(msg) => {
-                            if let Err(e) = process_order_message(
-                                    &msg,
-                                    Some(&sender_pubkey),
-                                )
-                                .await
+                            if let Err(e) = process_order_message(&msg, Some(&sender_pubkey)).await
                             {
                                 log::error!("Failed to process order message: {}", e);
                             }
@@ -795,12 +777,20 @@ pub async fn listen_for_order_updates() -> Result<()> {
 
 /// Get count of active orders (pending, confirmed, processing)
 pub fn get_active_order_count() -> usize {
-    BUYER_ORDERS.read().iter().filter(|o| o.status.is_active()).count()
+    BUYER_ORDERS
+        .read()
+        .iter()
+        .filter(|o| o.status.is_active())
+        .count()
 }
 
 /// Get count of seller's active orders
 pub fn get_seller_active_order_count() -> usize {
-    SELLER_ORDERS.read().iter().filter(|o| o.status.is_active()).count()
+    SELLER_ORDERS
+        .read()
+        .iter()
+        .filter(|o| o.status.is_active())
+        .count()
 }
 
 /// Update order status (seller action)

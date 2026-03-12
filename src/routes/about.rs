@@ -103,6 +103,15 @@ pub fn About() -> Element {
                     p {
                         "Nostr (Notes and Other Stuff Transmitted by Relays) is a simple, open protocol that enables global, decentralized, and censorship-resistant social media. Learn more:"
                     }
+                    p {
+                        "nostr.blue is built on a number of open standards and protocols. You can learn more about them in our "
+                        Link {
+                            to: crate::routes::Route::NipsHome {},
+                            class: "text-blue-500 hover:underline",
+                            "NIPs and protocol docs"
+                        }
+                        "."
+                    }
                     div { class: "flex gap-4 mt-4",
                         a {
                             href: "https://nostr.com",

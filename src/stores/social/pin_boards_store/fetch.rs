@@ -17,11 +17,8 @@ pub async fn fetch_pin_content_type(pin: &Pin) -> PinContentType {
                     .author(coord.public_key)
                     .identifier(&coord.identifier)
                     .limit(1);
-                if let Ok(events) = nostr_client::fetch_events_aggregated(
-                        filter,
-                        Duration::from_secs(5),
-                    )
-                    .await
+                if let Ok(events) =
+                    nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await
                 {
                     if let Some(event) = events.first() {
                         if event
@@ -88,11 +85,8 @@ pub async fn fetch_pin_metadata(pin: &Pin) -> PinMetadata {
                     .author(coord.public_key)
                     .identifier(&coord.identifier)
                     .limit(1);
-                if let Ok(events) = nostr_client::fetch_events_aggregated(
-                        filter,
-                        Duration::from_secs(5),
-                    )
-                    .await
+                if let Ok(events) =
+                    nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await
                 {
                     if let Some(event) = events.first() {
                         return extract_event_metadata(event, coord.kind.as_u16());
@@ -104,11 +98,8 @@ pub async fn fetch_pin_metadata(pin: &Pin) -> PinMetadata {
         PinReference::Event { id, .. } => {
             if let Ok(event_id) = EventId::from_hex(id) {
                 let filter = Filter::new().id(event_id).limit(1);
-                if let Ok(events) = nostr_client::fetch_events_aggregated(
-                        filter,
-                        Duration::from_secs(5),
-                    )
-                    .await
+                if let Ok(events) =
+                    nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await
                 {
                     if let Some(event) = events.first() {
                         return extract_event_metadata(event, event.kind.as_u16());
@@ -123,9 +114,7 @@ pub async fn fetch_pin_metadata(pin: &Pin) -> PinMetadata {
 
 /// Enrich a list of pins with full metadata by fetching referenced events.
 /// This is more comprehensive than enrich_pins_content_types - it also gets image, title, summary.
-pub async fn enrich_pins_metadata(
-    pins: &[Pin],
-) -> std::collections::HashMap<String, PinMetadata> {
+pub async fn enrich_pins_metadata(pins: &[Pin]) -> std::collections::HashMap<String, PinMetadata> {
     use futures::future::join_all;
     use std::collections::HashMap;
     let futures: Vec<_> = pins
@@ -149,27 +138,26 @@ pub async fn enrich_pins_metadata(
 }
 
 /// Fetch pinboards with aggregated DB + relay fetch
-pub async fn fetch_pinboards(
-    limit: usize,
-) -> std::result::Result<Vec<Pinboard>, String> {
+pub async fn fetch_pinboards(limit: usize) -> std::result::Result<Vec<Pinboard>, String> {
     *LOADING_PINBOARDS.write() = true;
     let filter = pinboards_filter(limit);
     let current_user = crate::stores::auth_store::get_pubkey();
     log::info!(
-        "Discover: Fetching pinboards with filter kind={}, limit={}", KIND_PINBOARD,
+        "Discover: Fetching pinboards with filter kind={}, limit={}",
+        KIND_PINBOARD,
         limit
     );
-    let result = nostr_client::fetch_events_from_relays(filter, Duration::from_secs(15))
-        .await;
+    let result = nostr_client::fetch_events_from_relays(filter, Duration::from_secs(15)).await;
     *LOADING_PINBOARDS.write() = false;
     match result {
         Ok(events) => {
             log::info!("Discover: Got {} raw events from relays", events.len());
-            let unique_authors: std::collections::HashSet<_> = events
-                .iter()
-                .map(|e| e.pubkey.to_hex())
-                .collect();
-            log::info!("Discover: Events from {} unique authors", unique_authors.len());
+            let unique_authors: std::collections::HashSet<_> =
+                events.iter().map(|e| e.pubkey.to_hex()).collect();
+            log::info!(
+                "Discover: Events from {} unique authors",
+                unique_authors.len()
+            );
             let boards: Vec<Pinboard> = events
                 .iter()
                 .filter_map(|e| parse_pinboard_event(e, current_user.as_deref()))
@@ -193,8 +181,7 @@ pub async fn fetch_pinboards_page(
 ) -> std::result::Result<Vec<Pinboard>, String> {
     let filter = pinboards_paginated_filter(limit, until);
     let current_user = crate::stores::auth_store::get_pubkey();
-    let events = nostr_client::fetch_events_from_relays(filter, Duration::from_secs(15))
-        .await?;
+    let events = nostr_client::fetch_events_from_relays(filter, Duration::from_secs(15)).await?;
     let boards: Vec<Pinboard> = events
         .iter()
         .filter_map(|e| parse_pinboard_event(e, current_user.as_deref()))
@@ -205,16 +192,13 @@ pub async fn fetch_pinboards_page(
 }
 
 /// Fetch cookbooks (pinboards tagged with "cookbook")
-pub async fn fetch_cookbooks(
-    limit: usize,
-) -> std::result::Result<Vec<Pinboard>, String> {
+pub async fn fetch_cookbooks(limit: usize) -> std::result::Result<Vec<Pinboard>, String> {
     let filter = Filter::new()
         .kind(Kind::Custom(KIND_PINBOARD))
         .hashtag("cookbook")
         .limit(limit);
     let current_user = crate::stores::auth_store::get_pubkey();
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15))
-        .await?;
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await?;
     let mut cookbooks: Vec<Pinboard> = events
         .iter()
         .filter_map(|e| parse_pinboard_event(e, current_user.as_deref()))
@@ -234,8 +218,7 @@ pub async fn fetch_user_cookbooks() -> std::result::Result<Vec<Pinboard>, String
         .kind(Kind::Custom(KIND_PINBOARD))
         .author(pubkey)
         .hashtag("cookbook");
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await?;
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
     let mut cookbooks: Vec<Pinboard> = events
         .iter()
         .filter_map(|e| parse_pinboard_event(e, Some(&current_user)))
@@ -247,18 +230,14 @@ pub async fn fetch_user_cookbooks() -> std::result::Result<Vec<Pinboard>, String
 }
 
 /// Fetch a pinboard by naddr
-pub async fn fetch_pinboard_by_naddr(
-    naddr: &str,
-) -> std::result::Result<Option<Pinboard>, String> {
+pub async fn fetch_pinboard_by_naddr(naddr: &str) -> std::result::Result<Option<Pinboard>, String> {
     if let Some(cached) = get_cached_pinboard_by_naddr(naddr) {
         return Ok(Some(cached));
     }
-    let coord = Coordinate::from_bech32(naddr)
-        .map_err(|e| format!("Invalid naddr: {}", e))?;
+    let coord = Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
     let filter = pinboard_by_coord_filter(coord.public_key, &coord.identifier);
     let current_user = crate::stores::auth_store::get_pubkey();
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await?;
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
     if let Some(event) = events.first() {
         if let Some(board) = parse_pinboard_event(event, current_user.as_deref()) {
             cache_pinboard(board.clone());
@@ -269,12 +248,9 @@ pub async fn fetch_pinboard_by_naddr(
 }
 
 /// Fetch pins for a board
-pub async fn fetch_pins_for_board(
-    board_a_tag: &str,
-) -> std::result::Result<Vec<Pin>, String> {
+pub async fn fetch_pins_for_board(board_a_tag: &str) -> std::result::Result<Vec<Pin>, String> {
     let filter = pins_for_board_filter(board_a_tag, 500);
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15))
-        .await?;
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await?;
     let mut pins: Vec<Pin> = events.iter().filter_map(parse_pin_event).collect();
     pins.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     cache_pins(&pins);
@@ -287,15 +263,17 @@ pub async fn fetch_owner_pins_for_board(
     board_a_tag: &str,
     owner_pubkey: &str,
 ) -> std::result::Result<Vec<Pin>, String> {
-    let pk = PublicKey::parse(owner_pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pk = PublicKey::parse(owner_pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = pins_by_author_for_board_filter(pk, board_a_tag, 500);
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15))
-        .await?;
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await?;
     let mut pins: Vec<Pin> = events.iter().filter_map(parse_pin_event).collect();
     pins.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     cache_pins(&pins);
-    log::info!("Fetched {} owner pins for board {}", pins.len(), board_a_tag);
+    log::info!(
+        "Fetched {} owner pins for board {}",
+        pins.len(),
+        board_a_tag
+    );
     Ok(pins)
 }
 
@@ -315,8 +293,7 @@ pub async fn fetch_pins_for_board_filtered(
         .custom_tag(SingleLetterTag::uppercase(Alphabet::A), board_a_tag)
         .limit(500);
     if let Some(owner) = owner_pubkey {
-        let pk = PublicKey::parse(owner)
-            .map_err(|e| format!("Invalid owner pubkey: {}", e))?;
+        let pk = PublicKey::parse(owner).map_err(|e| format!("Invalid owner pubkey: {}", e))?;
         filter = filter.author(pk);
     } else if let Some(ref authors) = allowed_authors {
         let pks: Vec<PublicKey> = authors
@@ -327,8 +304,7 @@ pub async fn fetch_pins_for_board_filtered(
             filter = filter.authors(pks);
         }
     }
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15))
-        .await?;
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await?;
     let mut pins: Vec<Pin> = events.iter().filter_map(parse_pin_event).collect();
     pins.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     cache_pins(&pins);
@@ -339,7 +315,12 @@ pub async fn fetch_pins_for_board_filtered(
     } else {
         "all-authors"
     };
-    log::info!("Fetched {} pins for board {} (mode: {})", pins.len(), board_a_tag, mode);
+    log::info!(
+        "Fetched {} pins for board {} (mode: {})",
+        pins.len(),
+        board_a_tag,
+        mode
+    );
     Ok(pins)
 }
 
@@ -363,8 +344,7 @@ pub async fn fetch_pinboards_by_author(
     let pk = PublicKey::parse(pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = pinboards_by_author_filter(pk, limit);
     let current_user = crate::stores::auth_store::get_pubkey();
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15))
-        .await?;
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await?;
     let boards: Vec<Pinboard> = events
         .iter()
         .filter_map(|e| parse_pinboard_event(e, current_user.as_deref()))
@@ -385,8 +365,7 @@ pub async fn fetch_my_pins() -> std::result::Result<Vec<Pin>, String> {
     let pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
     let pk = PublicKey::parse(&pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = pins_by_author_filter(pk, 500);
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15))
-        .await?;
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await?;
     let mut pins: Vec<Pin> = events.iter().filter_map(parse_pin_event).collect();
     pins.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     cache_pins(&pins);
@@ -406,7 +385,10 @@ pub fn search_pinboards_local(query: &str) -> Vec<Pinboard> {
                     .description
                     .as_ref()
                     .is_some_and(|d| d.to_lowercase().contains(&query_lower))
-                || board.tags.iter().any(|t| t.to_lowercase().contains(&query_lower))
+                || board
+                    .tags
+                    .iter()
+                    .any(|t| t.to_lowercase().contains(&query_lower))
         })
         .map(|(_, board)| board.clone())
         .collect()
@@ -435,9 +417,7 @@ pub async fn fetch_pinboard_reactions(
 }
 
 /// Fetch zap receipts for a pinboard
-pub async fn fetch_pinboard_zaps(
-    a_tag: &str,
-) -> std::result::Result<Vec<BoardZap>, String> {
+pub async fn fetch_pinboard_zaps(a_tag: &str) -> std::result::Result<Vec<BoardZap>, String> {
     let client = nostr_client::get_client().ok_or("Nostr client not initialized")?;
     let filter = pinboard_zaps_filter(a_tag, 500);
     let events = client
@@ -473,17 +453,26 @@ pub async fn fetch_pinboard_zap_total(a_tag: &str) -> std::result::Result<u64, S
 }
 
 /// Count reactions for a pinboard
-pub async fn fetch_pinboard_reaction_count(
-    a_tag: &str,
-) -> std::result::Result<usize, String> {
+pub async fn fetch_pinboard_reaction_count(a_tag: &str) -> std::result::Result<usize, String> {
     let reactions = fetch_pinboard_reactions(a_tag).await?;
     Ok(reactions.len())
 }
 
-/// Check if current user has reacted to a pinboard
-pub async fn has_user_reacted_to_pinboard(
+/// Fetch both reaction count and current-user reacted state from a single query
+pub async fn fetch_pinboard_reaction_state(
     a_tag: &str,
-) -> std::result::Result<bool, String> {
+) -> std::result::Result<(usize, bool), String> {
+    let current_pubkey = crate::stores::auth_store::get_pubkey();
+    let reactions = fetch_pinboard_reactions(a_tag).await?;
+    let reacted = current_pubkey
+        .as_ref()
+        .map(|pubkey| reactions.iter().any(|r| &r.pubkey == pubkey))
+        .unwrap_or(false);
+    Ok((reactions.len(), reacted))
+}
+
+/// Check if current user has reacted to a pinboard
+pub async fn has_user_reacted_to_pinboard(a_tag: &str) -> std::result::Result<bool, String> {
     let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
     let reactions = fetch_pinboard_reactions(a_tag).await?;
     Ok(reactions.iter().any(|r| r.pubkey == current_pubkey))
@@ -501,13 +490,8 @@ fn extract_zap_amount(event: &NostrEvent) -> u64 {
         }
         if tag.kind() == TagKind::Description {
             if let Some(desc) = tag.content() {
-                if let Ok(zap_request) = serde_json::from_str::<
-                    serde_json::Value,
-                >(desc) {
-                    if let Some(amount) = zap_request
-                        .get("amount")
-                        .and_then(|a| a.as_u64())
-                    {
+                if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(desc) {
+                    if let Some(amount) = zap_request.get("amount").and_then(|a| a.as_u64()) {
                         return amount;
                     }
                 }
@@ -560,13 +544,8 @@ fn extract_zap_sender(event: &NostrEvent) -> Option<String> {
     for tag in event.tags.iter() {
         if tag.kind() == TagKind::Description {
             if let Some(desc) = tag.content() {
-                if let Ok(zap_request) = serde_json::from_str::<
-                    serde_json::Value,
-                >(desc) {
-                    if let Some(pubkey) = zap_request
-                        .get("pubkey")
-                        .and_then(|p| p.as_str())
-                    {
+                if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(desc) {
+                    if let Some(pubkey) = zap_request.get("pubkey").and_then(|p| p.as_str()) {
                         return Some(pubkey.to_string());
                     }
                 }
@@ -581,13 +560,8 @@ fn extract_zap_comment(event: &NostrEvent) -> Option<String> {
     for tag in event.tags.iter() {
         if tag.kind() == TagKind::Description {
             if let Some(desc) = tag.content() {
-                if let Ok(zap_request) = serde_json::from_str::<
-                    serde_json::Value,
-                >(desc) {
-                    if let Some(content) = zap_request
-                        .get("content")
-                        .and_then(|c| c.as_str())
-                    {
+                if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(desc) {
+                    if let Some(content) = zap_request.get("content").and_then(|c| c.as_str()) {
                         if !content.is_empty() {
                             return Some(content.to_string());
                         }
@@ -600,16 +574,12 @@ fn extract_zap_comment(event: &NostrEvent) -> Option<String> {
 }
 
 /// Alias for old fetch function name
-pub async fn fetch_pin_boards(
-    limit: usize,
-) -> std::result::Result<Vec<Pinboard>, String> {
+pub async fn fetch_pin_boards(limit: usize) -> std::result::Result<Vec<Pinboard>, String> {
     fetch_pinboards(limit).await
 }
 
 /// Alias for old fetch function name
-pub async fn fetch_board_by_naddr(
-    naddr: &str,
-) -> std::result::Result<Option<Pinboard>, String> {
+pub async fn fetch_board_by_naddr(naddr: &str) -> std::result::Result<Option<Pinboard>, String> {
     fetch_pinboard_by_naddr(naddr).await
 }
 

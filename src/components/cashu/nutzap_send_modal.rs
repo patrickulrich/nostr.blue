@@ -30,57 +30,56 @@ pub fn NutzapSendModal(
     let mut request_version: Signal<u64> = use_signal(|| 0);
     let recipient_pubkey_for_effect = recipient_pubkey.clone();
     let client_initialized = *crate::stores::nostr_client::CLIENT_INITIALIZED.read();
-    use_effect(
-        use_reactive!(|(recipient_pubkey_for_effect, client_initialized,)| {
-            if !client_initialized {
-                log::debug!("Waiting for client initialization before fetching nutzap info");
-                return;
+    #[allow(unused_variables)]
+    use_effect(use_reactive!(|(
+        recipient_pubkey_for_effect,
+        client_initialized,
+    )| {
+        let recipient = recipient_pubkey_for_effect.clone();
+        // Use peek() to read without creating dependency, then increment
+        let version = *request_version.peek() + 1;
+        request_version.set(version);
+
+        // Reset synchronously - UI updates immediately
+        is_loading_info.set(true);
+        load_error.set(None);
+        recipient_info.set(None);
+        compatible_mint.set(None);
+
+        if !client_initialized {
+            // Early return without spawning - state already reset above
+            return;
+        }
+
+        spawn(async move {
+            match cashu::fetch_nutzap_info(&recipient).await {
+                Ok(info) => {
+                    // Stale check: use peek() to avoid subscription in async
+                    if *request_version.peek() != version {
+                        log::debug!("Stale nutzap fetch discarded (v{} != current)", version);
+                        return;
+                    }
+                    match cashu::validate_nutzap_recipient_with_info(&info) {
+                        Ok(mint) => compatible_mint.set(Some(mint)),
+                        Err(e) => {
+                            log::warn!("No compatible mint for nutzap: {}", e);
+                        }
+                    }
+                    recipient_info.set(Some(info));
+                }
+                Err(e) => {
+                    if *request_version.peek() != version {
+                        return;
+                    }
+                    load_error.set(Some(e));
+                }
             }
 
-            let recipient = recipient_pubkey_for_effect.clone();
-            // Use peek() to read without creating dependency, then increment
-            let version = *request_version.peek() + 1;
-            request_version.set(version);
-
-            // Reset synchronously - UI updates immediately
-            is_loading_info.set(true);
-            load_error.set(None);
-            recipient_info.set(None);
-            compatible_mint.set(None);
-
-            spawn(async move {
-                match cashu::fetch_nutzap_info(&recipient).await {
-                    Ok(info) => {
-                        // Stale check: use peek() to avoid subscription in async
-                        if *request_version.peek() != version {
-                            log::debug!(
-                                "Stale nutzap fetch discarded (v{} != current)",
-                                version
-                            );
-                            return;
-                        }
-                        match cashu::validate_nutzap_recipient_with_info(&info) {
-                            Ok(mint) => compatible_mint.set(Some(mint)),
-                            Err(e) => {
-                                log::warn!("No compatible mint for nutzap: {}", e);
-                            }
-                        }
-                        recipient_info.set(Some(info));
-                    }
-                    Err(e) => {
-                        if *request_version.peek() != version {
-                            return;
-                        }
-                        load_error.set(Some(e));
-                    }
-                }
-
-                if *request_version.peek() == version {
-                    is_loading_info.set(false);
-                }
-            });
-        }),
-    );
+            if *request_version.peek() == version {
+                is_loading_info.set(false);
+            }
+        });
+    }));
     let on_send = {
         let recipient_pubkey = recipient_pubkey.clone();
         let target_event_id = target_event_id.clone();
@@ -113,38 +112,26 @@ pub fn NutzapSendModal(
                     Some(comment_str.as_str())
                 };
                 match cashu::send_nutzap(
-                        &recipient,
-                        amount_sats,
-                        target_id.as_deref(),
-                        target_kind,
-                        comment_opt,
-                    )
-                    .await
+                    &recipient,
+                    amount_sats,
+                    target_id.as_deref(),
+                    target_kind,
+                    comment_opt,
+                )
+                .await
                 {
                     Ok(result) => {
                         if result.is_pending_retry {
-                            success_message
-                                .set(
-                                    Some(
-                                        format!(
-                                            "Sent {} sats (fee: {} sats) - publishing pending",
-                                            result.amount,
-                                            result.fee,
-                                        ),
-                                    ),
-                                );
+                            success_message.set(Some(format!(
+                                "Sent {} sats (fee: {} sats) - publishing pending",
+                                result.amount, result.fee,
+                            )));
                             is_sending.set(false);
                         } else {
-                            success_message
-                                .set(
-                                    Some(
-                                        format!(
-                                            "Sent {} sats (fee: {} sats)",
-                                            result.amount,
-                                            result.fee,
-                                        ),
-                                    ),
-                                );
+                            success_message.set(Some(format!(
+                                "Sent {} sats (fee: {} sats)",
+                                result.amount, result.fee,
+                            )));
                             is_sending.set(false);
                             amount.set(String::new());
                             comment.set(String::new());

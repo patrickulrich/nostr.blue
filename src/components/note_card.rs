@@ -1,45 +1,146 @@
-use std::collections::HashSet;
-use std::rc::Rc;
-use std::time::Duration;
-use dioxus::prelude::*;
-use nostr::nips::nip48::Protocol;
-use nostr_sdk::nips::nip19::Nip19Event;
-use nostr_sdk::{Event as NostrEvent, Filter, Kind, PublicKey, Timestamp, ToBech32};
 use crate::components::icons::{
-    BlueskyIcon, BookmarkIcon, ExternalLinkIcon, GlobeIcon, MastodonIcon,
-    MessageCircleIcon, Repeat2Icon, RssIcon, ShareIcon, ZapIcon,
+    BlueskyIcon, BookmarkIcon, ExternalLinkIcon, GlobeIcon, MastodonIcon, MessageCircleIcon,
+    Repeat2Icon, RssIcon, ShareIcon, ZapIcon,
 };
 use crate::components::{
-    ConfirmModal, ExternalContentList, NoteMenu, ReactionButton, ReplyComposer,
-    RichContent, ZapModal,
+    ConfirmModal, ExternalContentList, NoteMenu, ReactionButton, ReplyComposer, RichContent,
+    ZapModal,
 };
 use crate::hooks::use_reaction;
 use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
 use crate::stores::bookmarks;
-use crate::stores::nostr_client::{
-    self, delete_repost, get_client, publish_repost, HAS_SIGNER,
-};
+use crate::stores::nostr_client::{self, delete_repost, get_client, publish_repost, HAS_SIGNER};
 use crate::stores::signer::SIGNER_INFO;
 use crate::utils::{
-    format_relative_time_or, format_sats_compact, is_valid_http_url, nip48, nip73,
-    truncate_pubkey,
+    format_relative_time_or, format_sats_compact, is_valid_http_url, nip48, nip73, truncate_pubkey,
 };
+use dioxus::prelude::*;
+use nostr::nips::nip48::Protocol;
+use nostr_sdk::nips::nip19::Nip19Event;
+use nostr_sdk::{Event as NostrEvent, Filter, Kind, PublicKey, Timestamp, ToBech32};
+use std::collections::HashSet;
+use std::rc::Rc;
+use std::time::Duration;
+
+trait ProfileMetadataView {
+    fn name(&self) -> Option<&str>;
+    fn display_name(&self) -> Option<&str>;
+    fn about(&self) -> Option<&str>;
+    fn picture(&self) -> Option<&str>;
+    fn banner(&self) -> Option<&str>;
+    fn website(&self) -> Option<&str>;
+    fn nip05(&self) -> Option<&str>;
+    fn lud16(&self) -> Option<&str>;
+    fn lud06(&self) -> Option<&str>;
+}
+
+impl ProfileMetadataView for crate::stores::profiles::Profile {
+    fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+    fn display_name(&self) -> Option<&str> {
+        self.display_name.as_deref()
+    }
+    fn about(&self) -> Option<&str> {
+        self.about.as_deref()
+    }
+    fn picture(&self) -> Option<&str> {
+        self.picture.as_deref()
+    }
+    fn banner(&self) -> Option<&str> {
+        self.banner.as_deref()
+    }
+    fn website(&self) -> Option<&str> {
+        self.website.as_deref()
+    }
+    fn nip05(&self) -> Option<&str> {
+        self.nip05.as_deref()
+    }
+    fn lud16(&self) -> Option<&str> {
+        self.lud16.as_deref()
+    }
+    fn lud06(&self) -> Option<&str> {
+        self.lud06.as_deref()
+    }
+}
+
+impl ProfileMetadataView for nostr_sdk::Metadata {
+    fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+    fn display_name(&self) -> Option<&str> {
+        self.display_name.as_deref()
+    }
+    fn about(&self) -> Option<&str> {
+        self.about.as_deref()
+    }
+    fn picture(&self) -> Option<&str> {
+        self.picture.as_deref()
+    }
+    fn banner(&self) -> Option<&str> {
+        self.banner.as_deref()
+    }
+    fn website(&self) -> Option<&str> {
+        self.website.as_deref()
+    }
+    fn nip05(&self) -> Option<&str> {
+        self.nip05.as_deref()
+    }
+    fn lud16(&self) -> Option<&str> {
+        self.lud16.as_deref()
+    }
+    fn lud06(&self) -> Option<&str> {
+        self.lud06.as_deref()
+    }
+}
+
+fn metadata_from_profile_like<T: ProfileMetadataView>(profile: &T) -> nostr_sdk::Metadata {
+    let mut metadata = nostr_sdk::Metadata::new();
+    if let Some(name) = profile.name() {
+        metadata = metadata.name(name);
+    }
+    if let Some(display_name) = profile.display_name() {
+        metadata = metadata.display_name(display_name);
+    }
+    if let Some(about) = profile.about() {
+        metadata = metadata.about(about);
+    }
+    if let Some(picture) = profile.picture() {
+        if let Ok(url) = nostr_sdk::Url::parse(picture) {
+            metadata = metadata.picture(url);
+        }
+    }
+    if let Some(banner) = profile.banner() {
+        if let Ok(url) = nostr_sdk::Url::parse(banner) {
+            metadata = metadata.banner(url);
+        }
+    }
+    if let Some(website) = profile.website() {
+        if let Ok(url) = nostr_sdk::Url::parse(website) {
+            metadata = metadata.website(url);
+        }
+    }
+    if let Some(nip05) = profile.nip05() {
+        metadata = metadata.nip05(nip05);
+    }
+    if let Some(lud16) = profile.lud16() {
+        metadata = metadata.lud16(lud16);
+    }
+    if let Some(lud06) = profile.lud06() {
+        metadata = metadata.lud06(lud06);
+    }
+    metadata
+}
 #[component]
 pub fn NoteCard(
     event: NostrEvent,
-    #[props(default = None)]
-    repost_info: Option<(PublicKey, Timestamp)>,
-    #[props(default = None)]
-    precomputed_counts: Option<InteractionCounts>,
-    #[props(default = true)]
-    collapsible: bool,
-    #[props(default = None)]
-    cached_muted_posts: Option<Rc<HashSet<String>>>,
-    #[props(default = None)]
-    cached_blocked_users: Option<Rc<HashSet<String>>>,
-    #[props(default = None)]
-    on_reply: Option<EventHandler<NostrEvent>>,
+    #[props(default = None)] repost_info: Option<(PublicKey, Timestamp)>,
+    #[props(default = None)] precomputed_counts: Option<InteractionCounts>,
+    #[props(default = true)] collapsible: bool,
+    #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] on_reply: Option<EventHandler<NostrEvent>>,
 ) -> Element {
     let author_pubkey = event.pubkey.to_string();
     let author_pubkey_like = author_pubkey.clone();
@@ -63,12 +164,13 @@ pub fn NoteCard(
     let mut is_bookmarking = use_signal(|| false);
     let is_bookmarked = bookmarks::is_bookmarked(&event_id_memo);
     let has_signer = *HAS_SIGNER.read();
-    let mut is_muted = use_signal(|| false);
-    let mut is_author_blocked = use_signal(|| false);
+    let mut is_muted = use_signal(|| None::<bool>);
+    let mut is_author_blocked = use_signal(|| None::<bool>);
     let mut show_hidden_anyway = use_signal(|| false);
     let mut reply_count = use_signal(|| 0usize);
     let mut repost_count = use_signal(|| 0usize);
     let mut zap_amount_sats = use_signal(|| 0u64);
+    let mut count_request_gen = use_signal(|| 0u32);
     let reaction = use_reaction(
         event_id_like.clone(),
         author_pubkey_like.clone(),
@@ -76,351 +178,261 @@ pub fn NoteCard(
     );
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
     let mut reposter_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
-    use_effect(
-        use_reactive(
-            &precomputed_counts,
-            move |counts_opt| {
-                if let Some(counts) = counts_opt {
-                    let current_has_data = {
-                        let reply = *reply_count.peek();
-                        let repost = *repost_count.peek();
-                        let zap = *zap_amount_sats.peek();
-                        reply > 0 || repost > 0 || zap > 0
-                    };
-                    let new_has_data = counts.replies > 0 || counts.reposts > 0
-                        || counts.zap_amount_sats > 0;
-                    if new_has_data || !current_has_data {
-                        reply_count.set(counts.replies.min(500));
-                        repost_count.set(counts.reposts.min(500));
-                        zap_amount_sats.set(counts.zap_amount_sats);
-                    }
-                    is_reposted.set(counts.user_reposted.unwrap_or(false));
-                    user_repost_id.set(counts.user_repost_id.clone());
-                    is_zapped.set(counts.user_zapped.unwrap_or(false));
-                }
-            },
-        ),
-    );
+    let mut author_metadata_gen = use_signal(|| 0u32);
+    let mut reposter_metadata_gen = use_signal(|| 0u32);
+    use_effect(use_reactive(&precomputed_counts, move |counts_opt| {
+        if let Some(counts) = counts_opt {
+            reply_count.set(counts.replies);
+            repost_count.set(counts.reposts);
+            zap_amount_sats.set(counts.zap_amount_sats);
+            is_reposted.set(counts.user_reposted.unwrap_or(false));
+            user_repost_id.set(counts.user_repost_id.clone());
+            is_zapped.set(counts.user_zapped.unwrap_or(false));
+        }
+    }));
     let has_precomputed = precomputed_counts.is_some();
-    use_effect(
-        use_reactive(
-            &(event_id_counts, has_precomputed),
-            move |(event_id_for_counts, has_precomputed)| {
-                if has_precomputed {
-                    return;
-                }
-                spawn(async move {
-                    let client = match get_client() {
-                        Some(c) => c,
-                        None => return,
-                    };
-                    let event_id_parsed = match nostr_sdk::EventId::from_hex(
-                        &event_id_for_counts,
-                    ) {
-                        Ok(id) => id,
-                        Err(_) => return,
-                    };
-                    let combined_filter = Filter::new()
-                        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::ZapReceipt])
-                        .event(event_id_parsed)
-                        .limit(2000);
-                    if let Ok(events) = client
-                        .fetch_events(combined_filter, Duration::from_secs(5))
-                        .await
-                    {
-                        let current_user_pubkey = SIGNER_INFO
-                            .read()
-                            .as_ref()
-                            .map(|info| info.public_key.clone());
-                        let mut replies = 0;
-                        let mut reposts = 0;
-                        let mut total_sats = 0u64;
-                        let mut user_has_reposted = false;
-                        let mut user_repost_event_id: Option<String> = None;
-                        let mut user_has_zapped = false;
-                        for event in events {
-                            match event.kind {
-                                Kind::TextNote => replies += 1,
-                                Kind::Repost => {
-                                    reposts += 1;
-                                    if let Some(ref user_pk) = current_user_pubkey {
-                                        if event.pubkey.to_string() == *user_pk {
-                                            user_has_reposted = true;
-                                            user_repost_event_id = Some(event.id.to_hex());
+    use_effect(use_reactive(
+        &(event_id_counts, has_precomputed),
+        move |(event_id_for_counts, has_precomputed)| {
+            let current_gen = count_request_gen.peek().wrapping_add(1);
+            count_request_gen.set(current_gen);
+            if has_precomputed {
+                return;
+            }
+            reply_count.set(0);
+            repost_count.set(0);
+            zap_amount_sats.set(0);
+            is_reposted.set(false);
+            user_repost_id.set(None);
+            is_zapped.set(false);
+            // Read SIGNER_INFO synchronously so the effect tracks viewer changes
+            let current_user_pubkey = SIGNER_INFO
+                .read()
+                .as_ref()
+                .map(|info| info.public_key.clone());
+            spawn(async move {
+                let client = match get_client() {
+                    Some(c) => c,
+                    None => return,
+                };
+                let event_id_parsed = match nostr_sdk::EventId::from_hex(&event_id_for_counts) {
+                    Ok(id) => id,
+                    Err(_) => return,
+                };
+                let combined_filter = Filter::new()
+                    .kinds(vec![Kind::TextNote, Kind::Repost, Kind::ZapReceipt])
+                    .event(event_id_parsed)
+                    .limit(2000);
+                if let Ok(events) = client
+                    .fetch_events(combined_filter, Duration::from_secs(5))
+                    .await
+                {
+                    if *count_request_gen.peek() != current_gen {
+                        return;
+                    }
+                    let mut replies = 0;
+                    let mut reposts = 0;
+                    let mut total_sats = 0u64;
+                    let mut user_has_reposted = false;
+                    let mut user_repost_event_id: Option<String> = None;
+                    let mut user_has_zapped = false;
+                    for event in events {
+                        match event.kind {
+                            Kind::TextNote => replies += 1,
+                            Kind::Repost => {
+                                reposts += 1;
+                                if let Some(ref user_pk) = current_user_pubkey {
+                                    if event.pubkey.to_string() == *user_pk {
+                                        user_has_reposted = true;
+                                        user_repost_event_id = Some(event.id.to_hex());
+                                    }
+                                }
+                            }
+                            Kind::ZapReceipt => {
+                                if let Some(ref user_pk) = current_user_pubkey {
+                                    let zap_sender_pubkey = event.tags.iter().find_map(|tag| {
+                                        let slice = tag.as_slice();
+                                        if slice.first()?.as_str() == "description" {
+                                            let zap_request_json = slice.get(1)?.as_str();
+                                            if let Ok(zap_request) =
+                                                serde_json::from_str::<serde_json::Value>(
+                                                    zap_request_json,
+                                                )
+                                            {
+                                                return zap_request
+                                                    .get("pubkey")
+                                                    .and_then(|p| p.as_str())
+                                                    .map(|s| s.to_string());
+                                            }
+                                        }
+                                        None
+                                    });
+                                    if let Some(zap_sender) = zap_sender_pubkey {
+                                        if zap_sender == *user_pk {
+                                            user_has_zapped = true;
                                         }
                                     }
                                 }
-                                Kind::ZapReceipt => {
-                                    if let Some(ref user_pk) = current_user_pubkey {
-                                        let mut zap_sender_pubkey = event
-                                            .tags
-                                            .iter()
-                                            .find_map(|tag| {
-                                                let slice = tag.as_slice();
-                                                if slice.len() >= 2 && slice.first()?.as_str() == "P" {
-                                                    Some(slice.get(1)?.as_str().to_string())
-                                                } else {
-                                                    None
-                                                }
-                                            });
-                                        if zap_sender_pubkey.is_none() {
-                                            zap_sender_pubkey = event
-                                                .tags
-                                                .iter()
-                                                .find_map(|tag| {
-                                                    let slice = tag.as_slice();
-                                                    if slice.first()?.as_str() == "description" {
-                                                        let zap_request_json = slice.get(1)?.as_str();
-                                                        if let Ok(zap_request) = serde_json::from_str::<
-                                                            serde_json::Value,
-                                                        >(zap_request_json) {
-                                                            return zap_request
-                                                                .get("pubkey")
-                                                                .and_then(|p| p.as_str())
-                                                                .map(|s| s.to_string());
-                                                        }
-                                                    }
-                                                    None
-                                                });
-                                        }
-                                        if let Some(zap_sender) = zap_sender_pubkey {
-                                            if zap_sender == *user_pk {
-                                                user_has_zapped = true;
-                                            }
-                                        }
-                                    }
-                                    if let Some(amount) = event
-                                        .tags
-                                        .iter()
-                                        .find_map(|tag| {
-                                            let slice = tag.as_slice();
-                                            if slice.first()?.as_str() == "description" {
-                                                let zap_request_json = slice.get(1)?.as_str();
-                                                if let Ok(zap_request) = serde_json::from_str::<
-                                                    serde_json::Value,
-                                                >(zap_request_json) {
-                                                    if let Some(tags) = zap_request
-                                                        .get("tags")
-                                                        .and_then(|t| t.as_array())
-                                                    {
-                                                        for tag_array in tags {
-                                                            if let Some(tag_vals) = tag_array.as_array() {
-                                                                if tag_vals.first().and_then(|v| v.as_str())
-                                                                    == Some("amount")
+                                if let Some(amount) = event.tags.iter().find_map(|tag| {
+                                    let slice = tag.as_slice();
+                                    if slice.first()?.as_str() == "description" {
+                                        let zap_request_json = slice.get(1)?.as_str();
+                                        if let Ok(zap_request) =
+                                            serde_json::from_str::<serde_json::Value>(
+                                                zap_request_json,
+                                            )
+                                        {
+                                            if let Some(tags) =
+                                                zap_request.get("tags").and_then(|t| t.as_array())
+                                            {
+                                                for tag_array in tags {
+                                                    if let Some(tag_vals) = tag_array.as_array() {
+                                                        if tag_vals.first().and_then(|v| v.as_str())
+                                                            == Some("amount")
+                                                        {
+                                                            if let Some(amount_str) = tag_vals
+                                                                .get(1)
+                                                                .and_then(|v| v.as_str())
+                                                            {
+                                                                if let Ok(millisats) =
+                                                                    amount_str.parse::<u64>()
                                                                 {
-                                                                    if let Some(amount_str) = tag_vals
-                                                                        .get(1)
-                                                                        .and_then(|v| v.as_str())
-                                                                    {
-                                                                        if let Ok(millisats) = amount_str.parse::<u64>() {
-                                                                            return Some(millisats / 1000);
-                                                                        }
-                                                                    }
+                                                                    return Some(millisats / 1000);
                                                                 }
                                                             }
                                                         }
                                                     }
                                                 }
                                             }
-                                            None
-                                        })
-                                    {
-                                        total_sats += amount;
+                                        }
                                     }
+                                    None
+                                }) {
+                                    total_sats += amount;
                                 }
-                                _ => {}
                             }
+                            _ => {}
                         }
-                        let current_replies = *reply_count.peek();
-                        let current_reposts = *repost_count.peek();
-                        let current_zaps = *zap_amount_sats.peek();
-                        if replies > current_replies {
-                            reply_count.set(replies.min(500));
-                        }
-                        if reposts > current_reposts {
-                            repost_count.set(reposts.min(500));
-                        }
-                        if total_sats > current_zaps {
-                            zap_amount_sats.set(total_sats);
-                        }
-                        is_reposted.set(user_has_reposted);
-                        user_repost_id.set(user_repost_event_id);
-                        is_zapped.set(user_has_zapped);
                     }
-                });
-            },
-        ),
-    );
-    use_effect(
-        use_reactive(
-            &author_pubkey_for_fetch,
-            move |pubkey_str| {
-                author_metadata.set(None);
-                spawn(async move {
-                    if let Some(cached_profile) = crate::stores::profiles::get_cached_profile(
-                        &pubkey_str,
-                    ) {
-                        let mut metadata = nostr_sdk::Metadata::new();
-                        if let Some(name) = &cached_profile.name {
-                            metadata = metadata.name(name);
-                        }
-                        if let Some(display_name) = &cached_profile.display_name {
-                            metadata = metadata.display_name(display_name);
-                        }
-                        if let Some(about) = &cached_profile.about {
-                            metadata = metadata.about(about);
-                        }
-                        if let Some(picture) = &cached_profile.picture {
-                            if let Ok(url) = nostr_sdk::Url::parse(picture) {
-                                metadata = metadata.picture(url);
-                            }
-                        }
-                        if let Some(banner) = &cached_profile.banner {
-                            if let Ok(url) = nostr_sdk::Url::parse(banner) {
-                                metadata = metadata.banner(url);
-                            }
-                        }
-                        if let Some(website) = &cached_profile.website {
-                            if let Ok(url) = nostr_sdk::Url::parse(website) {
-                                metadata = metadata.website(url);
-                            }
-                        }
-                        if let Some(nip05) = &cached_profile.nip05 {
-                            metadata = metadata.nip05(nip05);
-                        }
-                        if let Some(lud16) = &cached_profile.lud16 {
-                            metadata = metadata.lud16(lud16);
-                        }
-                        author_metadata.set(Some(metadata));
+                    let current_replies = *reply_count.peek();
+                    let current_reposts = *repost_count.peek();
+                    let current_zaps = *zap_amount_sats.peek();
+                    if replies != current_replies {
+                        reply_count.set(replies);
+                    }
+                    if reposts != current_reposts {
+                        repost_count.set(reposts);
+                    }
+                    if total_sats != current_zaps {
+                        zap_amount_sats.set(total_sats);
+                    }
+                    is_reposted.set(user_has_reposted);
+                    user_repost_id.set(user_repost_event_id);
+                    is_zapped.set(user_has_zapped);
+                }
+            });
+        },
+    ));
+    use_effect(use_reactive(&author_pubkey_for_fetch, move |pubkey_str| {
+        let current_gen = author_metadata_gen.peek().wrapping_add(1);
+        author_metadata_gen.set(current_gen);
+        author_metadata.set(None);
+        spawn(async move {
+            if let Some(cached_profile) = crate::stores::profiles::get_cached_profile(&pubkey_str) {
+                let metadata = metadata_from_profile_like(&cached_profile);
+                if *author_metadata_gen.peek() != current_gen {
+                    return;
+                }
+                author_metadata.set(Some(metadata));
+                return;
+            }
+            match crate::stores::profiles::fetch_profile(pubkey_str.clone()).await {
+                Ok(profile) => {
+                    let metadata = metadata_from_profile_like(&profile);
+                    if *author_metadata_gen.peek() != current_gen {
                         return;
                     }
-                    match crate::stores::profiles::fetch_profile(pubkey_str.clone())
-                        .await
-                    {
-                        Ok(profile) => {
-                            let mut metadata = nostr_sdk::Metadata::new();
-                            if let Some(name) = &profile.name {
-                                metadata = metadata.name(name);
-                            }
-                            if let Some(display_name) = &profile.display_name {
-                                metadata = metadata.display_name(display_name);
-                            }
-                            if let Some(about) = &profile.about {
-                                metadata = metadata.about(about);
-                            }
-                            if let Some(picture) = &profile.picture {
-                                if let Ok(url) = nostr_sdk::Url::parse(picture) {
-                                    metadata = metadata.picture(url);
-                                }
-                            }
-                            if let Some(banner) = &profile.banner {
-                                if let Ok(url) = nostr_sdk::Url::parse(banner) {
-                                    metadata = metadata.banner(url);
-                                }
-                            }
-                            if let Some(website) = &profile.website {
-                                if let Ok(url) = nostr_sdk::Url::parse(website) {
-                                    metadata = metadata.website(url);
-                                }
-                            }
-                            if let Some(nip05) = &profile.nip05 {
-                                metadata = metadata.nip05(nip05);
-                            }
-                            if let Some(lud16) = &profile.lud16 {
-                                metadata = metadata.lud16(lud16);
-                            }
-                            author_metadata.set(Some(metadata));
-                        }
-                        Err(e) => {
-                            log::debug!(
-                                "Failed to fetch profile for {}: {}", pubkey_str, e
-                            );
-                        }
+                    author_metadata.set(Some(metadata));
+                }
+                Err(e) => {
+                    log::debug!("Failed to fetch profile for {}: {}", pubkey_str, e);
+                }
+            }
+        });
+    }));
+    use_effect(use_reactive(&repost_info, move |info_opt| {
+        let current_gen = reposter_metadata_gen.peek().wrapping_add(1);
+        reposter_metadata_gen.set(current_gen);
+        reposter_metadata.set(None);
+        if let Some((reposter_pubkey, _timestamp)) = info_opt {
+            let reposter_pubkey_str = reposter_pubkey.to_string();
+            spawn(async move {
+                if let Some(cached_profile) =
+                    crate::stores::profiles::get_cached_profile(&reposter_pubkey_str)
+                {
+                    let metadata = metadata_from_profile_like(&cached_profile);
+                    if *reposter_metadata_gen.peek() != current_gen {
+                        return;
                     }
-                });
-            },
-        ),
-    );
-    use_effect(
-        use_reactive(
-            &repost_info,
-            move |info_opt| {
-                reposter_metadata.set(None);
-                if let Some((reposter_pubkey, _timestamp)) = info_opt {
-                    let reposter_pubkey_str = reposter_pubkey.to_string();
-                    spawn(async move {
-                        if let Some(cached_profile) = crate::stores::profiles::get_cached_profile(
-                            &reposter_pubkey_str,
-                        ) {
-                            let mut metadata = nostr_sdk::Metadata::new();
-                            if let Some(name) = &cached_profile.name {
-                                metadata = metadata.name(name);
-                            }
-                            if let Some(display_name) = &cached_profile.display_name {
-                                metadata = metadata.display_name(display_name);
-                            }
-                            if let Some(picture) = &cached_profile.picture {
-                                if let Ok(url) = nostr_sdk::Url::parse(picture) {
-                                    metadata = metadata.picture(url);
-                                }
-                            }
-                            reposter_metadata.set(Some(metadata));
+                    reposter_metadata.set(Some(metadata));
+                    return;
+                }
+                match crate::stores::profiles::fetch_profile(reposter_pubkey_str.clone()).await {
+                    Ok(profile) => {
+                        let metadata = metadata_from_profile_like(&profile);
+                        if *reposter_metadata_gen.peek() != current_gen {
                             return;
                         }
-                        match crate::stores::profiles::fetch_profile(
-                                reposter_pubkey_str.clone(),
-                            )
-                            .await
-                        {
-                            Ok(profile) => {
-                                let mut metadata = nostr_sdk::Metadata::new();
-                                if let Some(name) = &profile.name {
-                                    metadata = metadata.name(name);
-                                }
-                                if let Some(display_name) = &profile.display_name {
-                                    metadata = metadata.display_name(display_name);
-                                }
-                                if let Some(picture) = &profile.picture {
-                                    if let Ok(url) = nostr_sdk::Url::parse(picture) {
-                                        metadata = metadata.picture(url);
-                                    }
-                                }
-                                reposter_metadata.set(Some(metadata));
-                            }
-                            Err(e) => {
-                                log::debug!("Failed to fetch reposter profile: {}", e);
-                            }
-                        }
-                    });
+                        reposter_metadata.set(Some(metadata));
+                    }
+                    Err(e) => {
+                        log::debug!("Failed to fetch reposter profile: {}", e);
+                    }
                 }
-            },
-        ),
-    );
+            });
+        }
+    }));
     let event_id_mute_check = event_id.clone();
     let author_pubkey_block_check = author_pubkey.clone();
-    use_effect(
-        use_reactive!(
-            | (cached_muted_posts, cached_blocked_users, event_id_mute_check,
-            author_pubkey_block_check,) | { let event_id = event_id_mute_check.clone();
-            let author_pubkey = author_pubkey_block_check.clone(); if let Some(ref
-            muted_set) = cached_muted_posts { if let Ok(muted) =
-            nostr_client::is_post_muted_cached(& event_id, muted_set) { is_muted
-            .set(muted); } } else { is_muted.set(false); }
-            if let Some(ref blocked_set) =
-            cached_blocked_users { if let Ok(blocked) =
-            nostr_client::is_user_blocked_cached(& author_pubkey, blocked_set) {
-            is_author_blocked.set(blocked); } } else { is_author_blocked.set(false); }
-            if cached_muted_posts.is_none() || cached_blocked_users.is_none() { let
-            need_muted = cached_muted_posts.is_none(); let need_blocked =
-            cached_blocked_users.is_none(); spawn(async move { if need_muted { match
-            nostr_client::is_post_muted(event_id.clone()). await { Ok(muted) => is_muted
-            .set(muted), Err(_) => is_muted.set(false), } }
-            if need_blocked { match
-            nostr_client::is_user_blocked(author_pubkey). await { Ok(blocked) =>
-            is_author_blocked.set(blocked), Err(_) => is_author_blocked.set(false), } }
-            }); } }
-        ),
-    );
+    use_effect(use_reactive!(|(
+        cached_muted_posts,
+        cached_blocked_users,
+        event_id_mute_check,
+        author_pubkey_block_check,
+    )| {
+        let event_id = event_id_mute_check.clone();
+        let author_pubkey = author_pubkey_block_check.clone();
+        // Check cached values first - these give us definitive Known(true/false)
+        if let Some(ref muted_set) = cached_muted_posts {
+            if let Ok(muted) = nostr_client::is_post_muted_cached(&event_id, muted_set) {
+                is_muted.set(Some(muted));
+            }
+        }
+        if let Some(ref blocked_set) = cached_blocked_users {
+            if let Ok(blocked) = nostr_client::is_user_blocked_cached(&author_pubkey, blocked_set) {
+                is_author_blocked.set(Some(blocked));
+            }
+        }
+        // Only spawn async if we don't have cached values (Unknown -> Known transition)
+        if cached_muted_posts.is_none() || cached_blocked_users.is_none() {
+            let need_muted = cached_muted_posts.is_none();
+            let need_blocked = cached_blocked_users.is_none();
+            spawn(async move {
+                if need_muted {
+                    match nostr_client::is_post_muted(event_id.clone()).await {
+                        Ok(muted) => is_muted.set(Some(muted)),
+                        Err(_) => is_muted.set(Some(false)),
+                    }
+                }
+                if need_blocked {
+                    match nostr_client::is_user_blocked(author_pubkey).await {
+                        Ok(blocked) => is_author_blocked.set(Some(blocked)),
+                        Err(_) => is_author_blocked.set(Some(false)),
+                    }
+                }
+            });
+        }
+    }));
     let timestamp = format_relative_time_or(created_at.as_secs(), "just now");
     let display_name = author_metadata
         .read()
@@ -457,20 +469,16 @@ pub fn NoteCard(
         .read()
         .as_ref()
         .and_then(|m| m.picture.clone());
-    let reposter_display_info = repost_info
-        .map(|(reposter_pubkey, repost_timestamp)| {
-            let reposter_pubkey_str = reposter_pubkey.to_string();
-            let reposter_display = reposter_metadata
-                .read()
-                .as_ref()
-                .and_then(|m| m.display_name.clone().or_else(|| m.name.clone()))
-                .unwrap_or_else(|| truncate_pubkey(&reposter_pubkey_str));
-            let repost_time = format_relative_time_or(
-                repost_timestamp.as_secs(),
-                "just now",
-            );
-            (reposter_pubkey_str, reposter_display, repost_time)
-        });
+    let reposter_display_info = repost_info.map(|(reposter_pubkey, repost_timestamp)| {
+        let reposter_pubkey_str = reposter_pubkey.to_string();
+        let reposter_display = reposter_metadata
+            .read()
+            .as_ref()
+            .and_then(|m| m.display_name.clone().or_else(|| m.name.clone()))
+            .unwrap_or_else(|| truncate_pubkey(&reposter_pubkey_str));
+        let repost_time = format_relative_time_or(repost_timestamp.as_secs(), "just now");
+        (reposter_pubkey_str, reposter_display, repost_time)
+    });
     let repost_button_class = if *is_reposted.read() {
         "flex items-center text-green-500 transition"
     } else {
@@ -488,7 +496,7 @@ pub fn NoteCard(
     };
     let nav = use_navigator();
     let event_id_nav = event_id.clone();
-    let is_hidden = (*is_muted.read() || *is_author_blocked.read())
+    let is_hidden = (is_muted.read().unwrap_or(false) || is_author_blocked.read().unwrap_or(false))
         && !*show_hidden_anyway.read();
     rsx! {
         article {
@@ -504,9 +512,9 @@ pub fn NoteCard(
             if is_hidden {
                 div { class: "flex items-center gap-3 py-4",
                     div { class: "flex-1 text-muted-foreground text-sm",
-                        if *is_author_blocked.read() {
+                        if is_author_blocked.read().unwrap_or(false) {
                             "Post from blocked user"
-                        } else if *is_muted.read() {
+                        } else if is_muted.read().unwrap_or(false) {
                             "Muted post"
                         }
                     }
@@ -694,6 +702,10 @@ pub fn NoteCard(
                                                     show_undo_repost_confirm.set(true);
                                                 } else {
                                                     let event_id_clone = event_id_repost.clone();
+                                                    let next_gen = count_request_gen
+                                                        .peek()
+                                                        .wrapping_add(1);
+                                                    count_request_gen.set(next_gen);
                                                     is_reposting.set(true);
                                                     spawn(async move {
                                                         match publish_repost(event_id_clone, None).await {
@@ -841,6 +853,8 @@ pub fn NoteCard(
                     show_reply_modal.set(false);
                 },
                 on_success: move |reply_event: NostrEvent| {
+                    let next_gen = count_request_gen.peek().wrapping_add(1);
+                    count_request_gen.set(next_gen);
                     // Increment reply count for immediate visual feedback
                     let current = *reply_count.read();
                     reply_count.set(current + 1);
@@ -875,6 +889,8 @@ pub fn NoteCard(
                 on_confirm: move |_| {
                     show_undo_repost_confirm.set(false);
                     if let Some(repost_id) = user_repost_id.read().clone() {
+                        let next_gen = count_request_gen.peek().wrapping_add(1);
+                        count_request_gen.set(next_gen);
                         is_reposting.set(true);
                         spawn(async move {
                             match delete_repost(repost_id).await {

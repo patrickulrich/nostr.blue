@@ -5,12 +5,12 @@
 //! - Selecting from existing people lists
 //! - Adding as public or private member (NIP-44 encrypted)
 //! - Creating a new list inline
-use dioxus::prelude::*;
-use std::sync::atomic::{AtomicU32, Ordering};
 use crate::hooks::{use_user_lists, UserList};
 use crate::stores::profiles;
 use crate::utils::list_encryption::add_person_to_list;
 use crate::utils::list_kinds::NAMED_PEOPLE;
+use dioxus::prelude::*;
+use std::sync::atomic::{AtomicU32, Ordering};
 /// Global counter for generating unique modal IDs
 static MODAL_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
 #[derive(Clone, PartialEq)]
@@ -52,18 +52,25 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
     let person_pubkey = props.person_pubkey.clone();
     let person_pubkey_for_effect = props.person_pubkey.clone();
     let mut person_metadata = use_signal(move || profiles::get_profile(&person_pubkey));
-    use_effect(
-        use_reactive(
-            (&person_pubkey_for_effect,),
-            move |(pk,)| {
-                spawn(async move {
-                    if profiles::fetch_profile(pk.clone()).await.is_ok() {
-                        person_metadata.set(profiles::get_profile(&pk));
-                    }
-                });
-            },
-        ),
-    );
+    let mut profile_fetch_version = use_signal(|| 0u32);
+    use_effect(use_reactive((&person_pubkey_for_effect,), move |(pk,)| {
+        let _ = profiles::PROFILE_CACHE.read();
+        person_metadata.set(profiles::get_profile(&pk));
+    }));
+    use_effect(use_reactive((&person_pubkey_for_effect,), move |(pk,)| {
+        let version = profile_fetch_version.with_mut(|v| {
+            *v = v.wrapping_add(1);
+            *v
+        });
+        person_metadata.set(profiles::get_profile(&pk));
+        spawn(async move {
+            if profiles::fetch_profile(pk.clone()).await.is_ok()
+                && *profile_fetch_version.peek() == version
+            {
+                person_metadata.set(profiles::get_profile(&pk));
+            }
+        });
+    }));
     let person_pubkey_for_display = props.person_pubkey.clone();
     let person_name = use_memo(move || {
         person_metadata
@@ -72,7 +79,10 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
             .and_then(|m| m.display_name.clone().or(m.name.clone()))
             .unwrap_or_else(|| {
                 if person_pubkey_for_display.chars().count() >= 12 {
-                    person_pubkey_for_display.chars().take(12).collect::<String>()
+                    person_pubkey_for_display
+                        .chars()
+                        .take(12)
+                        .collect::<String>()
                 } else {
                     person_pubkey_for_display.clone()
                 }
@@ -102,11 +112,7 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                 Ok(_) => {
                     log::debug!("Added person to list (private: {})", is_private);
                     success_msg.set(Some(format!("Added to \"{}\"", list.name)));
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        use gloo_timers::future::TimeoutFuture;
-                        TimeoutFuture::new(1000).await;
-                    }
+                    crate::platform::timer::sleep_ms(1000).await;
                     loading.set(false);
                     on_added.call(());
                 }
@@ -136,24 +142,19 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
             success_msg.set(None);
             spawn(async move {
                 match crate::utils::list_encryption::create_people_list(
-                        name.clone(),
-                        None,
-                        is_private,
-                    )
-                    .await
+                    name.clone(),
+                    None,
+                    is_private,
+                )
+                .await
                 {
                     Ok(event) => {
                         log::debug!("Created new people list");
                         match add_person_to_list(&event, &pubkey, is_private).await {
                             Ok(_) => {
                                 log::debug!("Added person to new list");
-                                success_msg
-                                    .set(Some(format!("Created \"{}\" and added", name)));
-                                #[cfg(target_arch = "wasm32")]
-                                {
-                                    use gloo_timers::future::TimeoutFuture;
-                                    TimeoutFuture::new(1000).await;
-                                }
+                                success_msg.set(Some(format!("Created \"{}\" and added", name)));
+                                crate::platform::timer::sleep_ms(1000).await;
                                 loading.set(false);
                                 on_added.call(());
                             }
@@ -203,16 +204,8 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                 aria_labelledby: "{title_id}",
                 tabindex: "-1",
                 onclick: move |e| e.stop_propagation(),
-                onmounted: move |evt| {
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        let element = evt.data();
-                        if let Some(html_element) = element.downcast::<web_sys::HtmlElement>() {
-                            let _ = html_element.focus();
-                        }
-                    }
-                    #[cfg(not(target_arch = "wasm32"))]
-                    let _ = evt;
+                onmounted: move |evt| async move {
+                    let _ = evt.data().set_focus(true).await;
                 },
                 div { class: "flex justify-between items-center mb-4",
                     h2 { class: "text-xl font-bold", id: "{title_id}", "Add to List" }

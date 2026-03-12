@@ -110,7 +110,9 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
                 fetch_repo_issues(&n),
                 fetch_repo_prs(&n)
             );
-            if *gen.peek() != captured_gen { return; }
+            if *gen.peek() != captured_gen {
+                return;
+            }
 
             match repo_result {
                 Ok(r) => repo.set(Some(r)),
@@ -158,10 +160,9 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
     rsx! {
         div { class: "min-h-screen",
             if let Some(r) = repo.read().as_ref() {
-                // TODO(#218): add "projects" tab to RepoTabNav; active_tab left empty until tab exists
                 RepoTabNav {
                     naddr: naddr.clone(),
-                    active_tab: "".to_string(),
+                    active_tab: "projects".to_string(),
                     issue_count: Some(r.issue_count),
                     pr_count: Some(r.pr_count),
                 }
@@ -258,7 +259,12 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
 
 /// A single kanban column showing items of one status
 #[component]
-fn BoardColumn(title: &'static str, color: &'static str, count: usize, items: Vec<BoardItem>) -> Element {
+fn BoardColumn(
+    title: &'static str,
+    color: &'static str,
+    count: usize,
+    items: Vec<BoardItem>,
+) -> Element {
     rsx! {
         div { class: "min-w-72 flex-shrink-0 bg-muted/30 rounded-lg",
             // Column header

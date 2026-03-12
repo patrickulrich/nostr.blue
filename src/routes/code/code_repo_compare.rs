@@ -46,7 +46,9 @@ pub fn CodeRepoCompare(naddr: String) -> Element {
         let base = base_branch.read().trim().to_string();
         let head = head_branch.read().trim().to_string();
         if base.is_empty() || head.is_empty() {
-            error.set(Some("Please specify both base and head branches".to_string()));
+            error.set(Some(
+                "Please specify both base and head branches".to_string(),
+            ));
             return;
         }
         let repo = match &*repo_result.read() {
@@ -71,25 +73,36 @@ pub fn CodeRepoCompare(naddr: String) -> Element {
             if git_service::GitService::is_initialized()
                 || git_service::GitService::init().await.is_ok()
             {
-                match git_service::git_service().compare_refs(&repo, &base, &head).await {
+                match git_service::git_service()
+                    .compare_refs(&repo, &base, &head)
+                    .await
+                {
                     Ok(diff) => {
-                        if *compare_gen.peek() != gen { return; }
+                        if *compare_gen.peek() != gen {
+                            return;
+                        }
                         diff_content.set(diff);
                         loading.set(false);
                         return;
                     }
                     Err(e) => {
-                        if *compare_gen.peek() != gen { return; }
+                        if *compare_gen.peek() != gen {
+                            return;
+                        }
                         error.set(Some(e));
                         diff_content.set(String::new());
                     }
                 }
             } else {
-                if *compare_gen.peek() != gen { return; }
+                if *compare_gen.peek() != gen {
+                    return;
+                }
                 error.set(Some("Failed to initialize git service".to_string()));
                 diff_content.set(String::new());
             }
-            if *compare_gen.peek() != gen { return; }
+            if *compare_gen.peek() != gen {
+                return;
+            }
             loading.set(false);
         });
     };

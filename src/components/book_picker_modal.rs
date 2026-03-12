@@ -2,13 +2,11 @@
 //! Select publications and book references to insert into wiki pages and publications
 use crate::components::icons::{BookOpenIcon, ChevronDownIcon, SearchIcon, XIcon};
 use crate::stores::publication_store::{
-    fetch_publications, get_all_cached_publications, search_publications,
-    PublicationIndex,
+    fetch_publications, get_all_cached_publications, search_publications, PublicationIndex,
 };
 use crate::utils::nkbip08::BookReference;
 use dioxus::prelude::*;
 use dioxus_core::Task;
-use gloo_timers::future::TimeoutFuture;
 /// Validate book identifier (d-tag or chapter) against NKBIP-08 format.
 /// Only lowercase letters, digits, and hyphens are allowed.
 fn is_valid_book_id(input: &str) -> bool {
@@ -33,7 +31,10 @@ fn is_valid_book_sections(input: &str) -> bool {
     if input.is_empty() {
         return false;
     }
-    if !input.chars().all(|c| c.is_ascii_digit() || c == ',' || c == '-') {
+    if !input
+        .chars()
+        .all(|c| c.is_ascii_digit() || c == ',' || c == '-')
+    {
         return false;
     }
     for segment in input.split(',') {
@@ -121,56 +122,53 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     let mut fetch_error = use_signal(|| None::<String>);
     let mut publications_version = use_signal(|| 0usize);
     let mut fetch_generation = use_signal(|| 0u64);
-    use_effect(
-        use_reactive(
-            &*props.show.read(),
-            move |is_shown| {
-                if is_shown {
-                    // Increment generation token to invalidate any in-flight requests
-                    let current_generation = *fetch_generation.peek() + 1;
-                    fetch_generation.set(current_generation);
+    use_effect(use_reactive(&*props.show.read(), move |is_shown| {
+        if is_shown {
+            let has_cached_publications = !get_all_cached_publications().is_empty();
+            // Increment generation token to invalidate any in-flight requests
+            let current_generation = *fetch_generation.peek() + 1;
+            fetch_generation.set(current_generation);
 
-                    loading.set(true);
-                    fetch_error.set(None);
-                    spawn(async move {
-                        let result = fetch_publications(100, None).await;
+            loading.set(!has_cached_publications);
+            fetch_error.set(None);
+            spawn(async move {
+                let result = fetch_publications(100, None).await;
 
-                        // Check staleness before state updates
-                        if *fetch_generation.peek() != current_generation {
-                            return;
-                        }
-
-                        match result {
-                            Ok(_) => {
-                                fetch_error.set(None);
-                                publications_version.set(publications_version() + 1);
-                            }
-                            Err(e) => {
-                                crate::utils::log_fetch_error("publications", e.clone());
-                                fetch_error
-                                    .set(Some(format!("Failed to load publications: {}", e)));
-                            }
-                        }
-                        loading.set(false);
-                    });
-                    selected_publication.set(None);
-                    selected_chapter.set(None);
-                    selected_sections.set(String::new());
-                    selected_version.set(String::new());
-                    version_error.set(false);
-                    sections_error.set(false);
-                    book_id_error.set(false);
-                    search_query.set(String::new());
-                    search_results.set(Vec::new());
-                    is_searching.set(false);
-                    if let Some(task) = search_task.take() {
-                        task.cancel();
-                    }
-                    debounce_counter.set(0);
+                // Check staleness before state updates
+                if *fetch_generation.peek() != current_generation {
+                    return;
                 }
-            },
-        ),
-    );
+
+                match result {
+                    Ok(_) => {
+                        fetch_error.set(None);
+                        publications_version.set(publications_version() + 1);
+                    }
+                    Err(e) => {
+                        crate::utils::log_fetch_error("publications", e.clone());
+                        if !has_cached_publications {
+                            fetch_error.set(Some(format!("Failed to load publications: {}", e)));
+                        }
+                    }
+                }
+                loading.set(false);
+            });
+            selected_publication.set(None);
+            selected_chapter.set(None);
+            selected_sections.set(String::new());
+            selected_version.set(String::new());
+            version_error.set(false);
+            sections_error.set(false);
+            book_id_error.set(false);
+            search_query.set(String::new());
+            search_results.set(Vec::new());
+            is_searching.set(false);
+            if let Some(task) = search_task.take() {
+                task.cancel();
+            }
+            debounce_counter.set(0);
+        }
+    }));
     let mut handle_search = move |query: String| {
         search_query.set(query.clone());
         if query.is_empty() {
@@ -194,7 +192,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
             task.cancel();
         }
         let new_task = spawn(async move {
-            TimeoutFuture::new(300).await;
+            crate::platform::timer::sleep_ms(300).await;
             if debounce_counter() != current_counter {
                 return;
             }
@@ -220,21 +218,18 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     };
     let publications_to_display = use_memo(move || {
         let _ = *publications_version.read();
-        if *active_tab.read() == BookPickerTab::Search && !search_query.read().is_empty()
-        {
+        if *active_tab.read() == BookPickerTab::Search && !search_query.read().is_empty() {
             search_results.read().clone()
         } else {
             get_all_cached_publications()
         }
     });
-    use_effect(
-        use_reactive!(
-            | (selected_version, selected_sections) | { let version = selected_version
-            .read(); let sections = selected_sections.read(); version_error.set(! version
-            .is_empty() && ! is_valid_book_version(& version)); sections_error.set(!
-            sections.is_empty() && ! is_valid_book_sections(& sections)); }
-        ),
-    );
+    use_effect(use_reactive!(|(selected_version, selected_sections)| {
+        let version = selected_version.read();
+        let sections = selected_sections.read();
+        version_error.set(!version.is_empty() && !is_valid_book_version(&version));
+        sections_error.set(!sections.is_empty() && !is_valid_book_sections(&sections));
+    }));
     // Validate selected_publication d_tag in an effect (side effects don't belong in memos)
     // Track selected_chapter to re-validate when "Entire book" is selected
     use_effect(move || {
@@ -244,52 +239,56 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
         }
     });
     let book_reference = use_memo(move || {
-        selected_publication
+        selected_publication.read().as_ref().and_then(|pub_| {
+            if !is_valid_book_id(&pub_.d_tag) {
+                log::warn!("Invalid publication d_tag: {}", pub_.d_tag);
+                return None;
+            }
+            let mut reference = BookReference::new(&pub_.d_tag);
+            let version_input = selected_version.read();
+            if !version_input.is_empty() && is_valid_book_version(&version_input) {
+                reference = reference.with_version(&version_input);
+            }
+            if let Some(ref chapter) = *selected_chapter.read() {
+                if is_valid_book_id(chapter) {
+                    reference = reference.with_chapter(chapter);
+                } else {
+                    log::warn!("Invalid chapter id: {}", chapter);
+                }
+            }
+            let sections_str = selected_sections.read();
+            if !sections_str.is_empty() && is_valid_book_sections(&sections_str) {
+                for section in sections_str.split(',') {
+                    if !section.is_empty() {
+                        reference = reference.with_section(section);
+                    }
+                }
+            }
+            Some(reference)
+        })
+    });
+    let has_validation_error =
+        use_memo(move || *version_error.read() || *sections_error.read() || *book_id_error.read());
+    let markup_preview = use_memo(move || {
+        book_reference
             .read()
             .as_ref()
-            .and_then(|pub_| {
-                if !is_valid_book_id(&pub_.d_tag) {
-                    log::warn!("Invalid publication d_tag: {}", pub_.d_tag);
-                    return None;
-                }
-                let mut reference = BookReference::new(&pub_.d_tag);
-                let version_input = selected_version.read();
-                if !version_input.is_empty() && is_valid_book_version(&version_input) {
-                    reference = reference.with_version(&version_input);
-                }
-                if let Some(ref chapter) = *selected_chapter.read() {
-                    if is_valid_book_id(chapter) {
-                        reference = reference.with_chapter(chapter);
-                    } else {
-                        log::warn!("Invalid chapter id: {}", chapter);
-                    }
-                }
-                let sections_str = selected_sections.read();
-                if !sections_str.is_empty() && is_valid_book_sections(&sections_str) {
-                    for section in sections_str.split(',') {
-                        if !section.is_empty() {
-                            reference = reference.with_section(section);
-                        }
-                    }
-                }
-                Some(reference)
-            })
-    });
-    let has_validation_error = use_memo(move || {
-        *version_error.read() || *sections_error.read() || *book_id_error.read()
-    });
-    let markup_preview = use_memo(move || {
-        book_reference.read().as_ref().map(|r| r.raw.clone()).unwrap_or_default()
+            .map(|r| r.raw.clone())
+            .unwrap_or_default()
     });
     let close_modal = move |_| {
         if *is_searching.read() {
-            let confirmed = web_sys::window()
-                .and_then(|w| {
-                    w.confirm_with_message("A search is in progress. Close anyway?").ok()
-                })
-                .unwrap_or(false);
-            if !confirmed {
-                return;
+            #[cfg(feature = "web")]
+            {
+                let confirmed = web_sys::window()
+                    .and_then(|w| {
+                        w.confirm_with_message("A search is in progress. Close anyway?")
+                            .ok()
+                    })
+                    .unwrap_or(false);
+                if !confirmed {
+                    return;
+                }
             }
         }
         props.show.set(false);
@@ -332,7 +331,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                 "aria-labelledby": "book-picker-title",
                 tabindex: "-1",
                 onmounted: move |_evt| {
-                    #[cfg(target_arch = "wasm32")]
+                    #[cfg(feature = "web")]
                     {
                         if let Some(html_element) = _evt.data().downcast::<web_sys::HtmlElement>() {
                             let _ = html_element.focus();
@@ -343,14 +342,17 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                 onkeydown: move |evt: KeyboardEvent| {
                     if evt.key() == Key::Escape {
                         if *is_searching.read() {
-                            let confirmed = web_sys::window()
-                                .and_then(|w| {
-                                    w.confirm_with_message("A search is in progress. Close anyway?")
-                                        .ok()
-                                })
-                                .unwrap_or(false);
-                            if !confirmed {
-                                return;
+                            #[cfg(feature = "web")]
+                            {
+                                let confirmed = web_sys::window()
+                                    .and_then(|w| {
+                                        w.confirm_with_message("A search is in progress. Close anyway?")
+                                            .ok()
+                                    })
+                                    .unwrap_or(false);
+                                if !confirmed {
+                                    return;
+                                }
                             }
                         }
                         props.show.set(false);

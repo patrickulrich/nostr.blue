@@ -3,14 +3,12 @@ use crate::stores::{nostr_client, relay};
 use crate::utils::{generate_option_id, time::calculate_end_time};
 use dioxus::prelude::*;
 use nostr_sdk::{
-    nips::nip19::Nip19Event, nips::nip88::{PollOption, PollType},
+    nips::nip19::Nip19Event,
+    nips::nip88::{PollOption, PollType},
     EventId, ToBech32,
 };
 #[component]
-pub fn PollCreatorModal(
-    show: Signal<bool>,
-    on_poll_created: EventHandler<String>,
-) -> Element {
+pub fn PollCreatorModal(show: Signal<bool>, on_poll_created: EventHandler<String>) -> Element {
     let mut poll_question = use_signal(String::new);
     let mut poll_type = use_signal(|| PollType::SingleChoice);
     let mut options = use_signal(|| {
@@ -34,26 +32,25 @@ pub fn PollCreatorModal(
     let can_publish = use_memo(move || {
         let question = poll_question.read();
         let opts = options.read();
-        !question.trim().is_empty() && opts.len() >= 2 && opts.len() <= 10
+        !question.trim().is_empty()
+            && opts.len() >= 2
+            && opts.len() <= 10
             && opts.iter().all(|opt| !opt.text.trim().is_empty())
             && !*is_publishing.read()
     });
     let mut reset_form = move || {
         poll_question.set(String::new());
         poll_type.set(PollType::SingleChoice);
-        options
-            .set(
-                vec![
-                    PollOptionData {
-                        id: generate_option_id(),
-                        text: String::new(),
-                    },
-                    PollOptionData {
-                        id: generate_option_id(),
-                        text: String::new(),
-                    },
-                ],
-            );
+        options.set(vec![
+            PollOptionData {
+                id: generate_option_id(),
+                text: String::new(),
+            },
+            PollOptionData {
+                id: generate_option_id(),
+                text: String::new(),
+            },
+        ]);
         end_time_preset.set(String::from("1day"));
         custom_end_time.set(String::new());
         hashtags_input.set(String::new());
@@ -80,13 +77,9 @@ pub fn PollCreatorModal(
         let custom_end_time_val = custom_end_time.read().clone();
         let ends_at = calculate_end_time(&end_time_preset_val, &custom_end_time_val);
         if end_time_preset_val == "custom" && ends_at.is_none() {
-            error_message
-                .set(
-                    Some(
-                        "Invalid or past end time. Please select a future date/time."
-                            .to_string(),
-                    ),
-                );
+            error_message.set(Some(
+                "Invalid or past end time. Please select a future date/time.".to_string(),
+            ));
             return;
         }
         is_publishing.set(true);
@@ -104,7 +97,11 @@ pub fn PollCreatorModal(
                 .read()
                 .as_ref()
                 .map(|m| {
-                    m.relays.iter().filter(|r| r.write).map(|r| r.url.clone()).collect()
+                    m.relays
+                        .iter()
+                        .filter(|r| r.write)
+                        .map(|r| r.url.clone())
+                        .collect()
                 })
                 .unwrap_or_default();
             if relays.is_empty() {
@@ -113,14 +110,14 @@ pub fn PollCreatorModal(
                 );
             }
             match nostr_client::publish_poll(
-                    question,
-                    poll_type_val,
-                    poll_options,
-                    relays,
-                    ends_at,
-                    hashtags,
-                )
-                .await
+                question,
+                poll_type_val,
+                poll_options,
+                relays,
+                ends_at,
+                hashtags,
+            )
+            .await
             {
                 Ok(event_id_hex) => {
                     log::info!("Poll published successfully: {}", event_id_hex);
@@ -357,8 +354,11 @@ fn extract_hashtags(question: &str, additional: &str) -> Vec<String> {
     }
     for tag in additional.split(',') {
         let cleaned = tag.trim().trim_start_matches('#').to_lowercase();
-        if !cleaned.is_empty() && cleaned.len() <= 50
-            && cleaned.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        if !cleaned.is_empty()
+            && cleaned.len() <= 50
+            && cleaned
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
         {
             hashtags.insert(cleaned);
         }

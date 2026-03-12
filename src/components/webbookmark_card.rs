@@ -1,16 +1,32 @@
 use crate::components::icons::BookmarkIcon;
 use crate::stores::webbookmarks::{
-    delete_webbookmark, get_display_hashtags, get_domain, get_image, get_published_at,
-    get_title, get_url, is_archived, is_favorite, toggle_favorite,
+    delete_webbookmark, get_display_hashtags, get_domain, get_image, get_published_at, get_title,
+    get_url, is_archived, is_favorite, toggle_favorite,
 };
 use crate::utils::format_relative_time_or;
 use dioxus::prelude::*;
+use dioxus_primitives::toast::consume_toast;
+#[cfg(not(feature = "web"))]
+use dioxus_primitives::toast::ToastOptions;
 use nostr_sdk::Event as NostrEvent;
+#[cfg(not(feature = "web"))]
+use std::time::Duration;
+#[cfg(not(feature = "web"))]
+use url::Url;
+
+#[cfg(not(feature = "web"))]
+fn redact_url_for_log(url: &str) -> String {
+    Url::parse(url)
+        .ok()
+        .map(|parsed| {
+            let scheme = parsed.scheme();
+            let host = parsed.host_str().unwrap_or("unknown-host");
+            format!("{}://{}", scheme, host)
+        })
+        .unwrap_or_else(|| "invalid-url".to_string())
+}
 #[component]
-pub fn WebBookmarkCard(
-    event: NostrEvent,
-    on_edit: Option<EventHandler<NostrEvent>>,
-) -> Element {
+pub fn WebBookmarkCard(event: NostrEvent, on_edit: Option<EventHandler<NostrEvent>>) -> Element {
     let url = get_url(&event);
     let title = get_title(&event);
     let description = if event.content.is_empty() {
@@ -26,25 +42,21 @@ pub fn WebBookmarkCard(
     let deleting = use_signal(|| false);
     let toggling_favorite = use_signal(|| false);
     let mut show_actions = use_signal(|| false);
+    let toast = consume_toast();
     let domain = url.as_ref().map(|u| get_domain(u)).unwrap_or_default();
-    let full_url = url
-        .as_ref()
-        .map(|u| {
-            if u.starts_with("http://") || u.starts_with("https://") {
-                u.clone()
-            } else {
-                format!("https://{}", u)
-            }
-        });
+    let full_url = url.as_ref().map(|u| {
+        if u.starts_with("http://") || u.starts_with("https://") {
+            u.clone()
+        } else {
+            format!("https://{}", u)
+        }
+    });
     let display_title = title
         .or_else(|| url.clone())
         .unwrap_or_else(|| "Untitled Bookmark".to_string());
     let timestamp_str = published_at
         .map(|ts| format_relative_time_or(ts.as_secs(), "Unknown"))
-        .unwrap_or_else(|| format_relative_time_or(
-            event.created_at.as_secs(),
-            "Unknown",
-        ));
+        .unwrap_or_else(|| format_relative_time_or(event.created_at.as_secs(), "Unknown"));
     let handle_delete = {
         let event_clone = event.clone();
         let mut deleting = deleting;
@@ -97,17 +109,44 @@ pub fn WebBookmarkCard(
     };
     let handle_open = {
         let full_url_clone = full_url.clone();
+        #[allow(unused_variables)]
+        let toast_api = toast;
         move |_| {
             if let Some(ref url) = full_url_clone {
-                #[cfg(target_arch = "wasm32")]
+                #[cfg(feature = "web")]
                 {
                     if let Some(window) = web_sys::window() {
-                        let _ = window.open_with_url_and_target(url, "_blank");
+                        let _ = window.open_with_url_and_target_and_features(
+                            url,
+                            "_blank",
+                            "noopener,noreferrer",
+                        );
                     }
                 }
-                #[cfg(not(target_arch = "wasm32"))]
+                #[cfg(not(feature = "web"))]
                 {
-                    log::info!("Open URL: {}", url);
+                    let url_to_open = url.clone();
+                    let redacted_url = redact_url_for_log(&url_to_open);
+                    let toast_for_open = toast_api;
+                    let open_script = format!(
+                        "(function() {{ const w = window.open({}, '_blank', 'noopener,noreferrer'); if (w) {{ try {{ w.opener = null; }} catch (_) {{}} }} return !!w; }})()",
+                        serde_json::to_string(&url_to_open).unwrap_or_else(|_| "\"\"".to_string())
+                    );
+                    spawn(async move {
+                        match document::eval(&open_script).await {
+                            Ok(val) if val.as_bool().unwrap_or(false) => {
+                                log::info!("Opened URL: {}", redacted_url);
+                            }
+                            _ => {
+                                toast_for_open.error(
+                                    "Unable to open URL on this platform".to_string(),
+                                    ToastOptions::new()
+                                        .duration(Duration::from_secs(3))
+                                        .permanent(false),
+                                );
+                            }
+                        }
+                    });
                 }
             }
         }

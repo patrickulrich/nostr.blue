@@ -263,9 +263,7 @@ pub fn extract_conditions_from_cdk(
                     ext.pubkeys = Some(pks);
                 }
                 if let Some(refund_keys) = &cond.refund_keys {
-                    ext.refund_keys = Some(
-                        refund_keys.iter().map(|pk| pk.to_hex()).collect(),
-                    );
+                    ext.refund_keys = Some(refund_keys.iter().map(|pk| pk.to_hex()).collect());
                 }
                 ext.num_sigs = cond.num_sigs;
                 ext.num_sigs_refund = cond.num_sigs_refund;
@@ -276,7 +274,10 @@ pub fn extract_conditions_from_cdk(
             }
             Some(ext)
         }
-        SpendingConditions::HTLCConditions { data: _, conditions } => {
+        SpendingConditions::HTLCConditions {
+            data: _,
+            conditions,
+        } => {
             let mut ext = ExtendedConditions::default();
             if let Some(cond) = conditions {
                 ext.locktime = cond.locktime;
@@ -284,9 +285,7 @@ pub fn extract_conditions_from_cdk(
                     ext.pubkeys = Some(pubkeys.iter().map(|pk| pk.to_hex()).collect());
                 }
                 if let Some(refund_keys) = &cond.refund_keys {
-                    ext.refund_keys = Some(
-                        refund_keys.iter().map(|pk| pk.to_hex()).collect(),
-                    );
+                    ext.refund_keys = Some(refund_keys.iter().map(|pk| pk.to_hex()).collect());
                 }
                 ext.num_sigs = cond.num_sigs;
                 ext.num_sigs_refund = cond.num_sigs_refund;
@@ -300,9 +299,7 @@ pub fn extract_conditions_from_cdk(
     }
 }
 /// Create CDK SpendingConditions with SIG_ALL flag
-pub fn create_p2pk_sig_all(
-    pubkey: cdk::nuts::PublicKey,
-) -> cdk::nuts::SpendingConditions {
+pub fn create_p2pk_sig_all(pubkey: cdk::nuts::PublicKey) -> cdk::nuts::SpendingConditions {
     use cdk::nuts::{Conditions, SpendingConditions};
     SpendingConditions::P2PKConditions {
         data: pubkey,
@@ -369,13 +366,7 @@ mod tests {
         let secrets = vec!["secret1".to_string()];
         let c_points = vec!["C1".to_string()];
         let quote_id = "quote123";
-        let msg = build_sig_all_message_for_melt(
-            &secrets,
-            &c_points,
-            None,
-            None,
-            quote_id,
-        );
+        let msg = build_sig_all_message_for_melt(&secrets, &c_points, None, None, quote_id);
         assert_eq!(msg, "secret1C1quote123");
     }
     #[test]

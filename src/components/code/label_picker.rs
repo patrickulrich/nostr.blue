@@ -19,7 +19,9 @@ const DEFAULT_LABELS: &[&str] = &[
 /// Get a deterministic color class for a label based on its name.
 /// Uses the project's semantic theme tokens instead of hardcoded colors.
 fn label_color(label: &str) -> &'static str {
-    let hash: u32 = label.bytes().fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
+    let hash: u32 = label
+        .bytes()
+        .fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
     match hash % 4 {
         0 => "bg-muted text-foreground border border-border",
         1 => "bg-accent text-foreground border border-border",
@@ -33,8 +35,7 @@ fn label_color(label: &str) -> &'static str {
 pub fn LabelPicker(
     selected_labels: Vec<String>,
     on_change: EventHandler<Vec<String>>,
-    #[props(default = vec![])]
-    existing_labels: Vec<String>,
+    #[props(default = vec![])] existing_labels: Vec<String>,
 ) -> Element {
     let mut new_label_input = use_signal(String::new);
     let mut show_suggestions = use_signal(|| false);
@@ -129,7 +130,7 @@ pub fn LabelPicker(
                         // Delay hiding to check if focus moved within the component
                         let gen = *focus_gen.peek();
                         spawn(async move {
-                            gloo_timers::future::TimeoutFuture::new(200).await;
+                            crate::platform::timer::sleep_ms(200).await;
                             if *focus_gen.peek() == gen {
                                 show_suggestions.set(false);
                             }
@@ -171,7 +172,7 @@ pub fn LabelPicker(
                                         onfocusout: move |_| {
                                             let gen = *focus_gen.peek();
                                             spawn(async move {
-                                                gloo_timers::future::TimeoutFuture::new(200).await;
+                                                crate::platform::timer::sleep_ms(200).await;
                                                 if *focus_gen.peek() == gen {
                                                     show_suggestions.set(false);
                                                 }

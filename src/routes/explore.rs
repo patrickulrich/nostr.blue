@@ -2,10 +2,6 @@
 //!
 //! Displays a feed of notes recommended by a Data Vending Machine (DVM).
 //! Users can select which DVM provider to use via a gear icon.
-use std::collections::HashMap;
-use std::time::Duration;
-use dioxus::prelude::*;
-use nostr_sdk::PublicKey;
 use crate::components::{ClientInitializing, DvmSelectorModal, NoteCard};
 use crate::hooks::use_mute_block_cache;
 use crate::services::aggregation::{
@@ -13,10 +9,13 @@ use crate::services::aggregation::{
     InteractionStreamHandle,
 };
 use crate::stores::dvm_store::{
-    DVM_FEED_ERROR, DVM_FEED_EVENTS, DVM_FEED_LOADING, DVM_PROVIDERS,
-    SELECTED_DVM_PROVIDER,
+    DVM_FEED_ERROR, DVM_FEED_EVENTS, DVM_FEED_LOADING, DVM_PROVIDERS, SELECTED_DVM_PROVIDER,
 };
 use crate::stores::{dvm_store, nostr_client};
+use dioxus::prelude::*;
+use nostr_sdk::PublicKey;
+use std::collections::HashMap;
+use std::time::Duration;
 /// Main Explore page component - DVM-powered content discovery
 #[component]
 pub fn Explore() -> Element {
@@ -66,21 +65,12 @@ pub fn Explore() -> Element {
         }
         spawn(async move {
             let event_ids: Vec<_> = events.iter().map(|e| e.id).collect();
-            match fetch_interaction_counts_batch(
-                    event_ids.clone(),
-                    Duration::from_secs(5),
-                )
-                .await
-            {
+            match fetch_interaction_counts_batch(event_ids.clone(), Duration::from_secs(5)).await {
                 Ok(counts) => {
                     interaction_counts.set(counts);
                     interactions_loaded.set(true);
-                    if let Ok(handle) = stream_interaction_counts(
-                            event_ids,
-                            interaction_counts,
-                            Some(600),
-                        )
-                        .await
+                    if let Ok(handle) =
+                        stream_interaction_counts(event_ids, interaction_counts, Some(600)).await
                     {
                         interaction_stream_handle.set(Some(handle));
                     }

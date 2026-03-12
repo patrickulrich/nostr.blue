@@ -15,11 +15,7 @@ pub struct PublishResult {
 impl PublishResult {
     /// Create from SDK Output
     pub fn from_output(output: nostr_relay_pool::Output<nostr::EventId>) -> Self {
-        let successful: Vec<String> = output
-            .success
-            .iter()
-            .map(|url| url.to_string())
-            .collect();
+        let successful: Vec<String> = output.success.iter().map(|url| url.to_string()).collect();
         let failed: Vec<(String, String)> = output
             .failed
             .iter()
@@ -110,13 +106,10 @@ pub(crate) fn rebuild_mute_list_tags(tags: &MuteListTags) -> Vec<nostr::Tag> {
         all_tags.push(nostr::Tag::hashtag(hashtag.clone()));
     }
     for word in &tags.words {
-        all_tags
-            .push(
-                nostr::Tag::custom(
-                    nostr::TagKind::Custom("word".into()),
-                    vec![word.clone()],
-                ),
-            );
+        all_tags.push(nostr::Tag::custom(
+            nostr::TagKind::Custom("word".into()),
+            vec![word.clone()],
+        ));
     }
     all_tags.extend(tags.other_tags.clone());
     all_tags
@@ -144,44 +137,38 @@ pub fn convert_raw_tags(tags: Vec<Vec<String>>) -> Vec<nostr::Tag> {
                         } else {
                             None
                         };
-                        Some(
-                            nostr::Tag::from(nostr::TagStandard::Event {
-                                event_id,
-                                relay_url,
-                                marker: Some(m),
-                                public_key: None,
-                                uppercase: false,
-                            }),
-                        )
+                        Some(nostr::Tag::from(nostr::TagStandard::Event {
+                            event_id,
+                            relay_url,
+                            marker: Some(m),
+                            public_key: None,
+                            uppercase: false,
+                        }))
                     } else {
-                        Some(
-                            nostr::Tag::custom(
-                                nostr::TagKind::e(),
-                                tag_vec[1..].to_vec(),
-                            ),
-                        )
+                        Some(nostr::Tag::custom(
+                            nostr::TagKind::e(),
+                            tag_vec[1..].to_vec(),
+                        ))
                     }
                 }
                 "e" if tag_vec.len() >= 2 => {
                     if tag_vec.len() > 2 {
-                        Some(
-                            nostr::Tag::custom(
-                                nostr::TagKind::e(),
-                                tag_vec[1..].to_vec(),
-                            ),
-                        )
+                        Some(nostr::Tag::custom(
+                            nostr::TagKind::e(),
+                            tag_vec[1..].to_vec(),
+                        ))
                     } else {
-                        nostr::EventId::from_hex(&tag_vec[1]).ok().map(nostr::Tag::event)
+                        nostr::EventId::from_hex(&tag_vec[1])
+                            .ok()
+                            .map(nostr::Tag::event)
                     }
                 }
                 "p" if tag_vec.len() >= 2 => {
                     if tag_vec.len() > 2 {
-                        Some(
-                            nostr::Tag::custom(
-                                nostr::TagKind::p(),
-                                tag_vec[1..].to_vec(),
-                            ),
-                        )
+                        Some(nostr::Tag::custom(
+                            nostr::TagKind::p(),
+                            tag_vec[1..].to_vec(),
+                        ))
                     } else {
                         nostr::PublicKey::from_hex(&tag_vec[1])
                             .ok()
@@ -189,16 +176,10 @@ pub fn convert_raw_tags(tags: Vec<Vec<String>>) -> Vec<nostr::Tag> {
                     }
                 }
                 "t" if tag_vec.len() >= 2 => Some(nostr::Tag::hashtag(&tag_vec[1])),
-                _ => {
-                    Some(
-                        nostr::Tag::custom(
-                            nostr::TagKind::Custom(
-                                std::borrow::Cow::Owned(tag_vec[0].clone()),
-                            ),
-                            tag_vec[1..].to_vec(),
-                        ),
-                    )
-                }
+                _ => Some(nostr::Tag::custom(
+                    nostr::TagKind::Custom(std::borrow::Cow::Owned(tag_vec[0].clone())),
+                    tag_vec[1..].to_vec(),
+                )),
             }
         })
         .collect()

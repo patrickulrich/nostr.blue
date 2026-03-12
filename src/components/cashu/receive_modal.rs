@@ -27,7 +27,7 @@ pub fn CashuReceiveModal(on_close: EventHandler<()>) -> Element {
             is_previewing.set(true);
             let token_snapshot = trimmed.clone();
             let new_task = spawn(async move {
-                gloo_timers::future::TimeoutFuture::new(300).await;
+                crate::platform::timer::sleep_ms(300).await;
                 match cashu::preview_token(token_snapshot.clone()).await {
                     Ok(p) => {
                         if token_string.read().trim() == token_snapshot {

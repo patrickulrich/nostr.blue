@@ -1,8 +1,6 @@
 //! Wallet Health Modal Component
 //!
 //! Shows detailed wallet health info and recovery options for stuck proofs.
-use std::collections::HashMap;
-use dioxus::prelude::*;
 use crate::components::modal::{Modal, ModalBody, ModalFooter, ModalHeader};
 use crate::stores::cashu::proof_recovery::{
     self, StuckProofInfo, UrgencyLevel, WalletHealthStats, PENDING_SPENT_TIMEOUT_DEFAULT,
@@ -10,6 +8,8 @@ use crate::stores::cashu::proof_recovery::{
 };
 use crate::stores::cashu::types::ProofState;
 use crate::utils::format_sats_with_separator;
+use dioxus::prelude::*;
+use std::collections::HashMap;
 /// A group of stuck proofs from the same mint and transaction
 struct ProofGroup {
     mint_url: String,
@@ -25,11 +25,19 @@ fn format_duration(secs: u64) -> String {
     } else if secs < 86400 {
         let hours = secs / 3600;
         let mins = (secs % 3600) / 60;
-        if mins > 0 { format!("{}h {}m", hours, mins) } else { format!("{}h", hours) }
+        if mins > 0 {
+            format!("{}h {}m", hours, mins)
+        } else {
+            format!("{}h", hours)
+        }
     } else {
         let days = secs / 86400;
         let hours = (secs % 86400) / 3600;
-        if hours > 0 { format!("{}d {}h", days, hours) } else { format!("{}d", days) }
+        if hours > 0 {
+            format!("{}d {}h", days, hours)
+        } else {
+            format!("{}d", days)
+        }
     }
 }
 /// Group stuck proofs by mint URL and transaction ID
@@ -52,22 +60,21 @@ fn group_by_transaction(proofs: &[StuckProofInfo]) -> Vec<ProofGroup> {
             proofs,
         })
         .collect();
-    result
-        .sort_by(|a, b| {
-            let a_max_urgency = a
-                .proofs
-                .iter()
-                .map(|p| p.urgency)
-                .max()
-                .unwrap_or(UrgencyLevel::Normal);
-            let b_max_urgency = b
-                .proofs
-                .iter()
-                .map(|p| p.urgency)
-                .max()
-                .unwrap_or(UrgencyLevel::Normal);
-            b_max_urgency.cmp(&a_max_urgency)
-        });
+    result.sort_by(|a, b| {
+        let a_max_urgency = a
+            .proofs
+            .iter()
+            .map(|p| p.urgency)
+            .max()
+            .unwrap_or(UrgencyLevel::Normal);
+        let b_max_urgency = b
+            .proofs
+            .iter()
+            .map(|p| p.urgency)
+            .max()
+            .unwrap_or(UrgencyLevel::Normal);
+        b_max_urgency.cmp(&a_max_urgency)
+    });
     result
 }
 /// Get urgency icon
@@ -105,12 +112,13 @@ fn remaining_until_recovery(proofs: &[StuckProofInfo]) -> Option<u64> {
 }
 /// Transaction group within the modal
 #[component]
-fn TransactionGroup(
-    transaction_id: Option<u64>,
-    proofs: Vec<StuckProofInfo>,
-) -> Element {
+fn TransactionGroup(transaction_id: Option<u64>, proofs: Vec<StuckProofInfo>) -> Element {
     let total: u64 = proofs.iter().map(|p| p.amount).sum();
-    let urgency = proofs.iter().map(|p| p.urgency).max().unwrap_or(UrgencyLevel::Normal);
+    let urgency = proofs
+        .iter()
+        .map(|p| p.urgency)
+        .max()
+        .unwrap_or(UrgencyLevel::Normal);
     let can_recover = proofs.iter().any(|p| p.can_recover);
     let icon = urgency_icon(urgency);
     let icon_color = urgency_color_class(urgency);
@@ -177,14 +185,12 @@ pub fn WalletHealthModal(open: Signal<bool>, on_close: EventHandler<()>) -> Elem
             let msg = if result.recovered_count > 0 {
                 format!(
                     "Recovered {} proofs ({} sats)",
-                    result.recovered_count,
-                    result.recovered_value,
+                    result.recovered_count, result.recovered_value,
                 )
             } else if result.spent_count > 0 && result.errors.is_empty() {
                 format!(
                     "Recovered 0 proofs (spent {} proofs / {} sats)",
-                    result.spent_count,
-                    result.spent_value,
+                    result.spent_count, result.spent_value,
                 )
             } else if result.spent_count > 0 && !result.errors.is_empty() {
                 let display = if result.errors.len() <= 3 {
@@ -198,8 +204,7 @@ pub fn WalletHealthModal(open: Signal<bool>, on_close: EventHandler<()>) -> Elem
                 };
                 format!(
                     "{} spent, recovery completed with errors: {}",
-                    result.spent_count,
-                    display,
+                    result.spent_count, display,
                 )
             } else if !result.errors.is_empty() {
                 let display = if result.errors.len() <= 3 {

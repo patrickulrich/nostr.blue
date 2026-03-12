@@ -5,8 +5,6 @@
 //!
 //! SAFETY: This module checks with mints before recovering proofs to prevent
 //! fund loss from recovering proofs that are actually in-flight.
-use std::collections::HashMap;
-use dioxus::prelude::{ReadableExt, WritableExt};
 use super::internal::get_or_create_wallet;
 use super::proofs::proof_data_to_cdk_proof;
 use super::signals::{IN_FLIGHT_MELT_REQUESTS, IN_FLIGHT_SEND_REQUESTS, WALLET_TOKENS};
@@ -15,6 +13,8 @@ use super::types::{
     PENDING_SPENT_TIMEOUT_SECS, RESERVED_PROOF_TIMEOUT_SECS,
 };
 use super::utils::now_secs;
+use dioxus::prelude::{ReadableExt, WritableExt};
+use std::collections::HashMap;
 /// Default timeout for Reserved proofs before checking mint state
 /// Uses the more aggressive timeout from types.rs for faster recovery
 pub const RESERVED_TIMEOUT_SECS: u64 = RESERVED_PROOF_TIMEOUT_SECS;
@@ -53,14 +53,13 @@ pub fn detect_stuck_proofs(timeout_secs: u64) -> Vec<TrackedProofState> {
                     None => false,
                 };
                 if is_stuck {
-                    stuck_proofs
-                        .push(TrackedProofState {
-                            secret: proof.secret.clone(),
-                            state: proof.state,
-                            state_set_at: proof.state_set_at.unwrap_or(0),
-                            transaction_id: proof.transaction_id,
-                            mint_url: token.mint.clone(),
-                        });
+                    stuck_proofs.push(TrackedProofState {
+                        secret: proof.secret.clone(),
+                        state: proof.state,
+                        state_set_at: proof.state_set_at.unwrap_or(0),
+                        transaction_id: proof.transaction_id,
+                        mint_url: token.mint.clone(),
+                    });
                 }
             }
         }
@@ -204,24 +203,27 @@ pub async fn recover_reserved_proofs() -> ProofRecoveryResult {
         safe_to_recover.retain(|p| !send_secrets.contains(p.secret.as_str()));
         let filtered = before_count - safe_to_recover.len();
         if filtered > 0 {
-            log::debug!("Excluded {} proofs from active send/swap operations", filtered);
+            log::debug!(
+                "Excluded {} proofs from active send/swap operations",
+                filtered
+            );
         }
     }
     if safe_to_recover.is_empty() {
-        log::debug!(
-            "All reserved proofs are still pending at mint or in active operations"
-        );
+        log::debug!("All reserved proofs are still pending at mint or in active operations");
         return ProofRecoveryResult::default();
     }
     log::info!(
-        "Checking {} timed-out reserved proofs with mints", safe_to_recover.len()
+        "Checking {} timed-out reserved proofs with mints",
+        safe_to_recover.len()
     );
     let mut result = ProofRecoveryResult::default();
     let proof_data_by_mint: std::collections::HashMap<String, Vec<ProofData>> = {
         let store = WALLET_TOKENS();
         let data = store.data();
         let tokens = data.read();
-        let mut by_mint: std::collections::HashMap<String, Vec<ProofData>> = std::collections::HashMap::new();
+        let mut by_mint: std::collections::HashMap<String, Vec<ProofData>> =
+            std::collections::HashMap::new();
         for tracked in &safe_to_recover {
             for token in tokens.iter() {
                 if super::utils::mint_matches(&token.mint, &tracked.mint_url) {
@@ -255,7 +257,8 @@ pub async fn recover_reserved_proofs() -> ProofRecoveryResult {
         recalculate_balance();
         log::info!(
             "Recovered {} reserved proofs worth {} sats (confirmed unspent by mint)",
-            result.recovered_count, result.recovered_value
+            result.recovered_count,
+            result.recovered_value
         );
     }
     result
@@ -311,7 +314,10 @@ async fn check_and_recover_proofs(
         }
     }
     if conversion_errors > 0 {
-        log::warn!("Skipped {} proofs due to conversion errors", conversion_errors);
+        log::warn!(
+            "Skipped {} proofs due to conversion errors",
+            conversion_errors
+        );
     }
     if cdk_proofs.is_empty() {
         return Ok(ProofRecoveryResult::default());
@@ -387,19 +393,18 @@ pub async fn run_full_recovery() -> ProofRecoveryResult {
     log::info!("Running full proof recovery");
     let reserved_result = recover_reserved_proofs().await;
     let pending_result = recover_pending_spent_proofs().await;
-    let total_recovered = reserved_result.recovered_count
-        + pending_result.recovered_count;
+    let total_recovered = reserved_result.recovered_count + pending_result.recovered_count;
     let total_spent = reserved_result.spent_count + pending_result.spent_count;
     if total_recovered > 0 || total_spent > 0 {
         log::info!(
-            "Proof recovery complete: {} recovered, {} confirmed spent", total_recovered,
+            "Proof recovery complete: {} recovered, {} confirmed spent",
+            total_recovered,
             total_spent
         );
     }
     ProofRecoveryResult {
         recovered_count: total_recovered,
-        recovered_value: reserved_result.recovered_value
-            + pending_result.recovered_value,
+        recovered_value: reserved_result.recovered_value + pending_result.recovered_value,
         spent_count: total_spent,
         spent_value: reserved_result.spent_value + pending_result.spent_value,
         errors: [reserved_result.errors, pending_result.errors].concat(),
@@ -418,7 +423,12 @@ pub fn get_recovery_stats() -> (usize, u64, usize, u64) {
         .iter()
         .map(|(_, p)| p.amount)
         .fold(0u64, |acc, amt| acc.saturating_add(amt));
-    (reserved.len(), reserved_value, pending_spent.len(), pending_value)
+    (
+        reserved.len(),
+        reserved_value,
+        pending_spent.len(),
+        pending_value,
+    )
 }
 /// Recalculate and update wallet balance
 pub(crate) fn recalculate_balance() {
@@ -455,7 +465,9 @@ fn can_recover_proof(state: ProofState, duration_secs: u64) -> bool {
 /// Proofs are considered "stuck" if they've been pending longer than TRANSACTION_TIMEOUT_SECS.
 pub fn get_wallet_health_stats() -> WalletHealthStats {
     let now = now_secs();
-    let spendable = crate::stores::cashu_cdk_bridge::WALLET_BALANCES.read().available;
+    let spendable = crate::stores::cashu_cdk_bridge::WALLET_BALANCES
+        .read()
+        .available;
     let store = WALLET_TOKENS();
     let data = store.data();
     let tokens = data.read();
@@ -472,17 +484,16 @@ pub fn get_wallet_health_stats() -> WalletHealthStats {
                 let urgency = calculate_urgency(duration);
                 let can_recover = can_recover_proof(proof.state, duration);
                 if duration > TRANSACTION_TIMEOUT_SECS {
-                    stuck_proofs
-                        .push(StuckProofInfo {
-                            hashed_id: hash_proof_id(&proof.secret),
-                            mint_url: token.mint.clone(),
-                            amount: proof.amount,
-                            state: proof.state,
-                            stuck_duration_secs: duration,
-                            transaction_id: proof.transaction_id,
-                            urgency,
-                            can_recover,
-                        });
+                    stuck_proofs.push(StuckProofInfo {
+                        hashed_id: hash_proof_id(&proof.secret),
+                        mint_url: token.mint.clone(),
+                        amount: proof.amount,
+                        state: proof.state,
+                        stuck_duration_secs: duration,
+                        transaction_id: proof.transaction_id,
+                        urgency,
+                        can_recover,
+                    });
                 } else {
                     pending_balance = pending_balance.saturating_add(proof.amount);
                     pending_count += 1;
@@ -492,10 +503,11 @@ pub fn get_wallet_health_stats() -> WalletHealthStats {
     }
     let stuck_balance: u64 = stuck_proofs.iter().map(|p| p.amount).sum();
     let stuck_count = stuck_proofs.len();
-    stuck_proofs
-        .sort_by(|a, b| {
-            b.urgency.cmp(&a.urgency).then_with(|| b.amount.cmp(&a.amount))
-        });
+    stuck_proofs.sort_by(|a, b| {
+        b.urgency
+            .cmp(&a.urgency)
+            .then_with(|| b.amount.cmp(&a.amount))
+    });
     WalletHealthStats {
         spendable_balance: spendable,
         pending_balance,

@@ -1,10 +1,6 @@
-#[cfg(target_arch = "wasm32")]
 use nostr::util::BoxedFuture;
-#[cfg(target_arch = "wasm32")]
 use nostr_relay_pool::policy::{AdmitPolicy, AdmitStatus, PolicyError};
-#[cfg(target_arch = "wasm32")]
 use nostr_sdk::prelude::*;
-#[cfg(target_arch = "wasm32")]
 use nostr_sdk::FromBech32;
 /// Custom admission policy for nostr.blue
 ///
@@ -13,10 +9,9 @@ use nostr_sdk::FromBech32;
 /// - Reduce database size
 /// - Improve query performance
 /// - Enhance user experience
-#[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct NostrBlueAdmissionPolicy;
-#[cfg(target_arch = "wasm32")]
 impl AdmitPolicy for NostrBlueAdmissionPolicy {
     fn admit_event<'a>(
         &'a self,
@@ -27,8 +22,10 @@ impl AdmitPolicy for NostrBlueAdmissionPolicy {
         Box::pin(async move {
             if event.content.len() > 100_000 {
                 log::warn!(
-                    "Rejected oversized event {} from {} ({} bytes)", event.id, event
-                    .pubkey, event.content.len()
+                    "Rejected oversized event {} from {} ({} bytes)",
+                    event.id,
+                    event.pubkey,
+                    event.content.len()
                 );
                 return Ok(AdmitStatus::rejected("Event content too large (>100KB)"));
             }
@@ -45,36 +42,34 @@ impl AdmitPolicy for NostrBlueAdmissionPolicy {
                 let Some(pk_str) = current_pubkey else {
                     log::debug!(
                         "Rejected protected event {} from {} (no authenticated user)",
-                        event.id, event.pubkey
+                        event.id,
+                        event.pubkey
                     );
-                    return Ok(
-                        AdmitStatus::rejected(
-                            "Protected event requires authenticated user (NIP-70)",
-                        ),
-                    );
+                    return Ok(AdmitStatus::rejected(
+                        "Protected event requires authenticated user (NIP-70)",
+                    ));
                 };
-                let current_pk = match PublicKey::from_bech32(&pk_str)
-                    .or_else(|_| PublicKey::from_hex(&pk_str))
-                {
-                    Ok(pk) => pk,
-                    Err(e) => {
-                        log::warn!(
+                let current_pk =
+                    match PublicKey::from_bech32(&pk_str).or_else(|_| PublicKey::from_hex(&pk_str))
+                    {
+                        Ok(pk) => pk,
+                        Err(e) => {
+                            log::warn!(
                             "Failed to parse stored pubkey '{}': {} - rejecting protected event {}",
                             pk_str, e, event.id
                         );
-                        return Ok(
-                            AdmitStatus::rejected("Invalid stored pubkey (NIP-70)"),
-                        );
-                    }
-                };
+                            return Ok(AdmitStatus::rejected("Invalid stored pubkey (NIP-70)"));
+                        }
+                    };
                 if current_pk != event.pubkey {
                     log::debug!(
-                        "Rejected protected event {} from {} (not current user)", event
-                        .id, event.pubkey
+                        "Rejected protected event {} from {} (not current user)",
+                        event.id,
+                        event.pubkey
                     );
-                    return Ok(
-                        AdmitStatus::rejected("Protected event from other user (NIP-70)"),
-                    );
+                    return Ok(AdmitStatus::rejected(
+                        "Protected event from other user (NIP-70)",
+                    ));
                 }
             }
             Ok(AdmitStatus::success())

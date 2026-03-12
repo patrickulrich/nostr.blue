@@ -3,6 +3,11 @@
 //! Displays a single podcast episode with play controls,
 //! supporting both Nostr and RSS podcast episodes.
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
+use dioxus::web::WebEventExt;
+/// Default episode artwork fallback URL (local asset)
+const DEFAULT_EPISODE_ARTWORK: &str = "/icons/icon-512.svg";
+
 /// D-tag used for podcast metadata events (Kind 30078)
 /// This is a convention for Nostr podcast coordination
 const PODCAST_METADATA_D_TAG: &str = "podcast-metadata";
@@ -12,9 +17,7 @@ use crate::services::podcast_index::{Episode as PodcastIndexEpisode, PodcastFeed
 use crate::services::podcast_rss::{format_duration, RssEpisode, RssPodcast};
 use crate::stores::music_player::{self, MusicTrack};
 use crate::stores::nostr_music::TrackSource;
-use crate::utils::podcast::{
-    Person, PodcastEpisode, Soundbite, TranscriptRef, ValueBlock,
-};
+use crate::utils::podcast::{Person, PodcastEpisode, Soundbite, TranscriptRef, ValueBlock};
 /// Unified podcast episode for display
 #[derive(Clone, Debug, PartialEq)]
 pub struct DisplayEpisode {
@@ -60,6 +63,10 @@ pub struct DisplayEpisode {
     pub is_live: bool,
 }
 impl DisplayEpisode {
+    fn rss_episode_track_id(feed_key: &str, episode_guid: &str) -> String {
+        format!("rss-podcast:{feed_key}:{episode_guid}")
+    }
+
     /// Create from Nostr podcast episode
     pub fn from_nostr_episode(
         episode: &PodcastEpisode,
@@ -102,7 +109,7 @@ impl DisplayEpisode {
             .and_then(|d| parse_rfc2822_to_timestamp(d))
             .unwrap_or(0);
         Self {
-            id: episode.guid.clone(),
+            id: Self::rss_episode_track_id(&podcast.feed_url, &episode.guid),
             title: episode.title.clone(),
             description: episode.description.clone(),
             image: episode.image.clone(),
@@ -130,18 +137,16 @@ impl DisplayEpisode {
         }
     }
     /// Create from Podcast Index API episode
-    pub fn from_podcast_index_episode(
-        episode: &PodcastIndexEpisode,
-        feed: &PodcastFeed,
-    ) -> Self {
-        let created_at = episode.date_published.unwrap_or(0) as u64;
-        let pub_date = episode
+    pub fn from_podcast_index_episode(episode: &PodcastIndexEpisode, feed: &PodcastFeed) -> Self {
+        let created_at = episode
             .date_published
-            .map(|ts| {
-                chrono::DateTime::from_timestamp(ts, 0)
-                    .map(|dt| dt.format("%b %d, %Y").to_string())
-                    .unwrap_or_else(|| "Unknown date".to_string())
-            });
+            .and_then(|ts| u64::try_from(ts).ok())
+            .unwrap_or(0);
+        let pub_date = episode.date_published.map(|ts| {
+            chrono::DateTime::from_timestamp(ts, 0)
+                .map(|dt| dt.format("%b %d, %Y").to_string())
+                .unwrap_or_else(|| "Unknown date".to_string())
+        });
         let transcripts: Vec<TranscriptRef> = episode
             .transcripts
             .iter()
@@ -170,7 +175,7 @@ impl DisplayEpisode {
             })
             .collect();
         Self {
-            id: episode.id.to_string(),
+            id: Self::rss_episode_track_id(&feed.id.to_string(), &episode.id.to_string()),
             title: episode.title.clone(),
             description: episode.description.clone(),
             image: episode.get_image().map(|s| s.to_string()),
@@ -190,40 +195,36 @@ impl DisplayEpisode {
                 episode_guid: episode.id.to_string(),
                 podcast_title: feed.title.clone(),
             },
-            value: episode
-                .value
-                .as_ref()
-                .or(feed.value.as_ref())
-                .map(|v| {
-                    let model = v.model.as_ref();
-                    crate::utils::podcast::ValueBlock {
-                        value_type: model
-                            .and_then(|m| m.model_type.clone())
-                            .unwrap_or_else(|| "lightning".to_string()),
-                        method: model
-                            .and_then(|m| m.method.clone())
-                            .unwrap_or_else(|| "keysend".to_string()),
-                        suggested: model
-                            .and_then(|m| m.suggested.as_ref())
-                            .and_then(|s| s.parse().ok()),
-                        recipients: v
-                            .destinations
-                            .iter()
-                            .map(|d| crate::utils::podcast::ValueRecipient {
-                                name: d.name.clone(),
-                                recipient_type: d
-                                    .dest_type
-                                    .clone()
-                                    .unwrap_or_else(|| "node".to_string()),
-                                address: d.address.clone().unwrap_or_default(),
-                                custom_key: None,
-                                custom_value: None,
-                                split: d.split.unwrap_or(100),
-                                fee: None,
-                            })
-                            .collect(),
-                    }
-                }),
+            value: episode.value.as_ref().or(feed.value.as_ref()).map(|v| {
+                let model = v.model.as_ref();
+                crate::utils::podcast::ValueBlock {
+                    value_type: model
+                        .and_then(|m| m.model_type.clone())
+                        .unwrap_or_else(|| "lightning".to_string()),
+                    method: model
+                        .and_then(|m| m.method.clone())
+                        .unwrap_or_else(|| "keysend".to_string()),
+                    suggested: model
+                        .and_then(|m| m.suggested.as_ref())
+                        .and_then(|s| s.parse().ok()),
+                    recipients: v
+                        .destinations
+                        .iter()
+                        .map(|d| crate::utils::podcast::ValueRecipient {
+                            name: d.name.clone(),
+                            recipient_type: d
+                                .dest_type
+                                .clone()
+                                .unwrap_or_else(|| "node".to_string()),
+                            address: d.address.clone().unwrap_or_default(),
+                            custom_key: None,
+                            custom_value: None,
+                            split: d.split.unwrap_or(100),
+                            fee: None,
+                        })
+                        .collect(),
+                }
+            }),
             transcripts,
             soundbites,
             persons: Vec::new(),
@@ -237,7 +238,7 @@ impl DisplayEpisode {
     ) -> Self {
         let mut ep = Self::from_podcast_index_episode(episode, feed);
         ep.is_live = true;
-        ep.created_at = (js_sys::Date::now() / 1000.0) as u64;
+        ep.created_at = crate::platform::timestamp::now_secs();
         ep
     }
     /// Convert to MusicTrack for player
@@ -270,8 +271,8 @@ impl DisplayEpisode {
             TrackSource::NostrPodcast { pubkey, .. } => {
                 use nostr::prelude::*;
                 if let Ok(pk) = PublicKey::from_hex(pubkey) {
-                    let coord = Coordinate::new(Kind::from(30078), pk)
-                        .identifier(PODCAST_METADATA_D_TAG);
+                    let coord =
+                        Coordinate::new(Kind::from(30078), pk).identifier(PODCAST_METADATA_D_TAG);
                     let nip19_coord = Nip19Coordinate::new(coord, vec![]);
                     if let Ok(naddr) = nip19_coord.to_bech32() {
                         return Some(Route::PodcastNostrDetail { naddr });
@@ -280,10 +281,9 @@ impl DisplayEpisode {
                 None
             }
             TrackSource::RssPodcast { podcast_id, .. } => {
-                podcast_id
-                    .map(|id| Route::PodcastRssFeedDetail {
-                        podcast_id: id.to_string(),
-                    })
+                podcast_id.map(|id| Route::PodcastRssFeedDetail {
+                    podcast_id: id.to_string(),
+                })
             }
             _ => None,
         }
@@ -297,20 +297,19 @@ impl DisplayEpisode {
                     let coord = Coordinate::new(Kind::from(30054), pk).identifier(d_tag);
                     let nip19_coord = Nip19Coordinate::new(coord, vec![]);
                     if let Ok(naddr) = nip19_coord.to_bech32() {
-                        return Some(Route::PodcastNostrEpisodeDetail {
-                            naddr,
-                        });
+                        return Some(Route::PodcastNostrEpisodeDetail { naddr });
                     }
                 }
                 None
             }
-            TrackSource::RssPodcast { podcast_id, episode_guid, .. } => {
-                podcast_id
-                    .map(|id| Route::PodcastRssEpisodeDetail {
-                        podcast_id: id.to_string(),
-                        episode_id: urlencoding::encode(episode_guid).to_string(),
-                    })
-            }
+            TrackSource::RssPodcast {
+                podcast_id,
+                episode_guid,
+                ..
+            } => podcast_id.map(|id| Route::PodcastRssEpisodeDetail {
+                podcast_id: id.to_string(),
+                episode_id: urlencoding::encode(episode_guid).to_string(),
+            }),
             _ => None,
         }
     }
@@ -334,8 +333,7 @@ pub struct PodcastEpisodeCardProps {
 #[component]
 pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
     let episode = &props.episode;
-    let episode_id = episode.id.clone();
-    let episode_id_for_memo = episode_id.clone();
+    let episode_id_for_memo = episode.id.clone();
     let is_playing = use_memo(move || {
         let player_state = music_player::MUSIC_PLAYER.read();
         if let Some(ref current) = player_state.current_track {
@@ -347,21 +345,32 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
     let playlist = props.playlist.clone();
     let handle_play = {
         let episode = episode.clone();
-        let episode_id = episode.id.clone();
         let playlist = playlist.clone();
-        move |_| {
-            let player_state = music_player::MUSIC_PLAYER.read();
-            if let Some(ref current) = player_state.current_track {
-                if current.id == episode_id && player_state.is_playing {
-                    drop(player_state);
-                    music_player::toggle_play();
-                    return;
+        move |_e: Event<MouseData>| {
+            // Guard against clicks on interactive elements inside the card
+            #[cfg(feature = "web")]
+            {
+                use wasm_bindgen::JsCast;
+                use web_sys::Element;
+                // Use the event in web builds to check target
+                let e = _e;
+                if let Some(target) = e
+                    .data()
+                    .try_as_web_event()
+                    .and_then(|evt: web_sys::MouseEvent| evt.target())
+                    .and_then(|t| t.dyn_into::<Element>().ok())
+                {
+                    if let Some(_closest) = target.closest(
+                        "a,button,input,textarea,select,summary,[role='button'],[role='link'],[contenteditable='true']"
+                    ).ok().flatten() {
+                        // Click was on an interactive element - don't trigger play
+                        return;
+                    }
                 }
             }
-            drop(player_state);
             let track = episode.to_music_track();
             let playlist_vec = playlist.as_ref().map(|rc| (**rc).clone());
-            music_player::play_track(track, playlist_vec, None);
+            music_player::play_or_toggle_track(track, playlist_vec, None);
         }
     };
     let duration_str = episode
@@ -372,9 +381,7 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
         .image
         .clone()
         .or(episode.podcast_image.clone())
-        .unwrap_or_else(|| {
-            format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", episode.id)
-        });
+        .unwrap_or_else(|| DEFAULT_EPISODE_ARTWORK.to_string());
     let episode_label = match (episode.season, episode.episode_number) {
         (Some(s), Some(e)) => Some(format!("S{}E{}", s, e)),
         (None, Some(e)) => Some(format!("Ep. {}", e)),
@@ -387,7 +394,9 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
     };
     let has_v4v = episode.value.is_some();
     rsx! {
-        div { class: "flex items-start gap-3 p-3 hover:bg-muted/50 rounded-lg transition group",
+        div {
+            class: "flex items-start gap-3 p-3 hover:bg-muted/50 rounded-lg transition group cursor-pointer",
+            onclick: handle_play,
             div { class: "relative shrink-0",
                 img {
                     src: "{image_url}",
@@ -406,7 +415,16 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
                 }
                 button {
                     class: "absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition rounded-lg",
-                    onclick: handle_play,
+                    onclick: {
+                        let episode = episode.clone();
+                        let playlist = playlist.clone();
+                        move |e: Event<MouseData>| {
+                            e.stop_propagation();
+                            let track = episode.to_music_track();
+                            let playlist_vec = playlist.as_ref().map(|rc| (**rc).clone());
+                            music_player::play_or_toggle_track(track, playlist_vec, None);
+                        }
+                    },
                     dangerous_inner_html: if *is_playing.read() { icons::PAUSE } else { icons::PLAY },
                 }
             }
@@ -486,10 +504,11 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
                     onclick: {
                         let episode = episode.clone();
                         let playlist = playlist.clone();
-                        move |_| {
+                        move |e: Event<MouseData>| {
+                            e.stop_propagation();
                             let track = episode.to_music_track();
                             let playlist_vec = playlist.as_ref().map(|rc| (**rc).clone());
-                            music_player::play_track(track, playlist_vec, None);
+                            music_player::play_or_toggle_track(track, playlist_vec, None);
                         }
                     },
                     dangerous_inner_html: if *is_playing.read() { icons::PAUSE } else { icons::PLAY },
@@ -500,7 +519,8 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
                         title: "Send a boost",
                         onclick: {
                             let episode = episode.clone();
-                            move |e: Event<MouseData>| {
+        #[cfg_attr(not(feature = "web"), allow(unused_variables))]
+        move |e: Event<MouseData>| {
                                 e.stop_propagation();
                                 let track = episode.to_music_track();
                                 music_player::show_zap_dialog_for_track(Some(track));
@@ -535,7 +555,12 @@ pub fn PodcastEpisodeCardSkeleton() -> Element {
 fn strip_html(html: &str) -> String {
     use ammonia::Builder;
     use std::collections::HashSet;
-    Builder::new().tags(HashSet::new()).clean(html).to_string().trim().to_string()
+    Builder::new()
+        .tags(HashSet::new())
+        .clean(html)
+        .to_string()
+        .trim()
+        .to_string()
 }
 /// Format date string for display
 fn format_date(date_str: &str) -> String {

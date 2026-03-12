@@ -38,14 +38,11 @@ impl PodcastShow {
         let naddr = PublicKey::from_hex(&metadata.pubkey)
             .ok()
             .map(|pk| {
-                let coord = Coordinate::new(Kind::from(30078), pk)
-                    .identifier(&metadata.d_tag);
+                let coord = Coordinate::new(Kind::from(30078), pk).identifier(&metadata.d_tag);
                 let nip19_coord = Nip19Coordinate::new(coord, vec![]);
                 nip19_coord
                     .to_bech32()
-                    .unwrap_or_else(|_| {
-                        format!("30078:{}:{}", metadata.pubkey, metadata.d_tag)
-                    })
+                    .unwrap_or_else(|_| format!("30078:{}:{}", metadata.pubkey, metadata.d_tag))
             })
             .unwrap_or_else(|| format!("30078:{}:{}", metadata.pubkey, metadata.d_tag));
         Self {
@@ -82,11 +79,9 @@ pub struct PodcastShowCardProps {
 pub fn PodcastShowCard(props: PodcastShowCardProps) -> Element {
     let show = &props.show;
     let route = match &show.source {
-        PodcastSource::Nostr { coordinate, .. } => {
-            Route::PodcastNostrDetail {
-                naddr: coordinate.clone(),
-            }
-        }
+        PodcastSource::Nostr { coordinate, .. } => Route::PodcastNostrDetail {
+            naddr: coordinate.clone(),
+        },
         PodcastSource::Rss { podcast_id, .. } => {
             if let Some(id) = podcast_id {
                 Route::PodcastRssFeedDetail {
@@ -98,9 +93,7 @@ pub fn PodcastShowCard(props: PodcastShowCardProps) -> Element {
         }
     };
     let source_badge = match &show.source {
-        PodcastSource::Nostr { .. } => {
-            ("N", "Nostr Podcast", "bg-purple-500/20 text-purple-400")
-        }
+        PodcastSource::Nostr { .. } => ("N", "Nostr Podcast", "bg-purple-500/20 text-purple-400"),
         PodcastSource::Rss { .. } => ("R", "RSS Feed", "bg-green-500/20 text-green-400"),
     };
     let image_class = if props.compact {
@@ -111,9 +104,7 @@ pub fn PodcastShowCard(props: PodcastShowCardProps) -> Element {
     let image_url = show
         .image
         .clone()
-        .unwrap_or_else(|| {
-            format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", show.id)
-        });
+        .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", show.id));
     let has_v4v = show.value.is_some();
     rsx! {
         Link {

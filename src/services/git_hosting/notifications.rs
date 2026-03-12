@@ -127,12 +127,18 @@ impl CodeNotification {
             }
         });
 
-        let parent_event_id = event.tags.find(TagKind::e())
+        let parent_event_id = event
+            .tags
+            .find(TagKind::e())
             .and_then(|t| t.content().map(|s| s.to_string()));
 
         let parent_kind = event.tags.iter().find_map(|t| {
             let v = t.as_slice();
-            if v.len() >= 2 && v[0] == "K" { v[1].parse::<u16>().ok() } else { None }
+            if v.len() >= 2 && v[0] == "K" {
+                v[1].parse::<u16>().ok()
+            } else {
+                None
+            }
         });
 
         let content = event.content.to_string();
@@ -163,8 +169,7 @@ impl CodeNotification {
 /// across code-related event kinds.
 pub async fn fetch_code_notifications(limit: usize) -> Result<Vec<CodeNotification>, String> {
     let pubkey_hex = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pubkey =
-        PublicKey::from_hex(&pubkey_hex).map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::from_hex(&pubkey_hex).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     // Fetch events that tag the user via p-tag (mentions, reviews, etc.)
     let filter = Filter::new()

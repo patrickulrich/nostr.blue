@@ -1,13 +1,18 @@
 //! Calendar View Component
 //!
 //! Displays events in Day, Week, or Month views
-use dioxus::prelude::*;
-use std::collections::BTreeMap;
+
 use crate::routes::Route;
 use crate::stores::calendar_store::UnifiedEvent;
+#[cfg(not(feature = "web"))]
+use crate::utils::date_helpers::{civil_from_days, days_from_civil};
 use crate::utils::date_helpers::{
     get_day_number, get_event_date, get_month_dates, get_month_from_date, get_today,
 };
+use dioxus::prelude::*;
+#[cfg(feature = "web")]
+use js_sys;
+use std::collections::BTreeMap;
 const HOUR_HEIGHT_PX: f32 = 64.0;
 const MIN_EVENT_HEIGHT_PX: f32 = 30.0;
 /// Calendar view mode
@@ -332,71 +337,131 @@ fn MonthView(props: MonthViewProps) -> Element {
     }
 }
 /// Get short weekday name
-fn get_weekday_short(date: &str) -> String {
-    let parts: Vec<&str> = date.split('-').collect();
+fn get_weekday_short(date_str: &str) -> String {
+    let parts: Vec<&str> = date_str.split('-').collect();
     if parts.len() != 3 {
         return "?".to_string();
     }
-    let year: u32 = parts[0].parse().unwrap_or(2024);
-    let month: i32 = parts[1].parse().unwrap_or(1);
-    let day: i32 = parts[2].parse().unwrap_or(1);
-    let date = js_sys::Date::new_with_year_month_day(year, month - 1, day);
-    let weekday = date.get_day() as usize;
-    const WEEKDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    WEEKDAYS.get(weekday).unwrap_or(&"???").to_string()
+    #[cfg(feature = "web")]
+    {
+        let year: u32 = parts[0].parse().unwrap_or(2024);
+        let month: i32 = parts[1].parse().unwrap_or(1);
+        let day: i32 = parts[2].parse().unwrap_or(1);
+        let date = js_sys::Date::new_with_year_month_day(year, month - 1, day);
+        let weekday = date.get_day() as usize;
+        const WEEKDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+        WEEKDAYS.get(weekday).unwrap_or(&"???").to_string()
+    }
+    #[cfg(not(feature = "web"))]
+    {
+        // Simple day-of-week calculation using Zeller-like approach
+        let year: i32 = parts[0].parse().unwrap_or(2024);
+        let month: i32 = parts[1].parse().unwrap_or(1);
+        let day: i32 = parts[2].parse().unwrap_or(1);
+        let (y, m) = if month <= 2 {
+            (year - 1, month + 12)
+        } else {
+            (year, month)
+        };
+        let weekday = ((day + (13 * (m + 1)) / 5 + y + y / 4 - y / 100 + y / 400) % 7 + 6) % 7;
+        const WEEKDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+        WEEKDAYS.get(weekday as usize).unwrap_or(&"???").to_string()
+    }
 }
 /// Format hour for display
 fn format_hour(hour: u32) -> String {
     if hour == 0 {
-        "12 AM".to_string()
+        "12 AM UTC".to_string()
     } else if hour < 12 {
-        format!("{} AM", hour)
+        format!("{} AM UTC", hour)
     } else if hour == 12 {
-        "12 PM".to_string()
+        "12 PM UTC".to_string()
     } else {
-        format!("{} PM", hour - 12)
+        format!("{} PM UTC", hour - 12)
     }
 }
 /// Format day header
-fn format_day_header(date: &str) -> String {
-    let parts: Vec<&str> = date.split('-').collect();
+fn format_day_header(date_str: &str) -> String {
+    let parts: Vec<&str> = date_str.split('-').collect();
     if parts.len() != 3 {
-        return date.to_string();
+        return date_str.to_string();
     }
-    let year: u32 = parts[0].parse().unwrap_or(2024);
     let month: i32 = parts[1].parse().unwrap_or(1);
     let day: i32 = parts[2].parse().unwrap_or(1);
-    let js_date = js_sys::Date::new_with_year_month_day(year, month - 1, day);
-    let weekday = js_date.get_day() as usize;
-    const WEEKDAY_NAMES: [&str; 7] = [
-        "Sunday",
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday",
-    ];
-    const MONTH_NAMES: [&str; 12] = [
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
-    ];
-    let weekday_name = WEEKDAY_NAMES.get(weekday).unwrap_or(&"");
-    let month_idx = month.saturating_sub(1) as usize;
-    let month_name = MONTH_NAMES.get(month_idx).unwrap_or(&"");
-    format!("{}, {} {}, {}", weekday_name, month_name, day, year)
+    #[cfg(feature = "web")]
+    {
+        let year: u32 = parts[0].parse().unwrap_or(2024);
+        let js_date = js_sys::Date::new_with_year_month_day(year, month - 1, day);
+        let weekday = js_date.get_day() as usize;
+        const WEEKDAY_NAMES: [&str; 7] = [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+        ];
+        const MONTH_NAMES: [&str; 12] = [
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
+        ];
+        let weekday_name = WEEKDAY_NAMES.get(weekday).unwrap_or(&"");
+        let month_idx = month.saturating_sub(1) as usize;
+        let month_name = MONTH_NAMES.get(month_idx).unwrap_or(&"");
+        let year = parts[0].parse::<u32>().unwrap_or(2024);
+        format!("{}, {} {}, {}", weekday_name, month_name, day, year)
+    }
+    #[cfg(not(feature = "web"))]
+    {
+        let year: i32 = parts[0].parse().unwrap_or(2024);
+        let (y, m) = if month <= 2 {
+            (year - 1, month + 12)
+        } else {
+            (year, month)
+        };
+        let weekday = ((day + (13 * (m + 1)) / 5 + y + y / 4 - y / 100 + y / 400) % 7 + 6) % 7;
+        const WEEKDAY_NAMES: [&str; 7] = [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+        ];
+        const MONTH_NAMES: [&str; 12] = [
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
+        ];
+        let weekday_name = WEEKDAY_NAMES.get(weekday as usize).unwrap_or(&"");
+        let month_idx = month.saturating_sub(1) as usize;
+        let month_name = MONTH_NAMES.get(month_idx).unwrap_or(&"");
+        format!("{}, {} {}, {}", weekday_name, month_name, day, year)
+    }
 }
 /// Get week dates for a given date
+#[cfg(feature = "web")]
 fn get_week_dates(date: &str) -> Vec<String> {
     let parts: Vec<&str> = date.split('-').collect();
     if parts.len() != 3 {
@@ -406,21 +471,43 @@ fn get_week_dates(date: &str) -> Vec<String> {
     let month: i32 = parts[1].parse::<i32>().unwrap_or(1).clamp(1, 12) - 1;
     let day: i32 = parts[2].parse().unwrap_or(1);
     let js_date = js_sys::Date::new_with_year_month_day(year, month, day);
-    let current_weekday = js_date.get_day();
-    const MS_PER_DAY: f64 = 24.0 * 60.0 * 60.0 * 1000.0;
-    js_date.set_time(js_date.get_time() - (current_weekday as f64 * MS_PER_DAY));
+    let current_weekday = js_date.get_day() as i32;
+    let current_day = js_date.get_date() as i32;
+    let anchor = current_day - current_weekday;
+    let js_date = js_sys::Date::new_with_year_month_day(year, month, anchor);
     let mut dates = Vec::with_capacity(7);
     for _ in 0..7 {
-        dates
-            .push(
-                format!(
-                    "{:04}-{:02}-{:02}",
-                    js_date.get_full_year(),
-                    js_date.get_month() + 1,
-                    js_date.get_date(),
-                ),
-            );
+        dates.push(format!(
+            "{:04}-{:02}-{:02}",
+            js_date.get_full_year(),
+            js_date.get_month() + 1,
+            js_date.get_date(),
+        ));
         js_date.set_date(js_date.get_date() + 1);
+    }
+    dates
+}
+
+#[cfg(not(feature = "web"))]
+fn get_week_dates(date: &str) -> Vec<String> {
+    // Use shared date helpers from date_helpers module
+    let parts: Vec<&str> = date.split('-').collect();
+    if parts.len() != 3 {
+        return vec![];
+    }
+    let year: i32 = parts[0].parse().unwrap_or(2024);
+    let month: i32 = parts[1].parse().unwrap_or(1);
+    let day: i32 = parts[2].parse().unwrap_or(1);
+
+    let total_days = days_from_civil(year, month, day);
+    let dow = ((total_days % 7) + 7) % 7;
+    let sunday_offset = (dow + 3) % 7;
+    let sunday_days = total_days - sunday_offset;
+
+    let mut dates = Vec::with_capacity(7);
+    for i in 0..7 {
+        let (y, m, d) = civil_from_days(sunday_days + i);
+        dates.push(format!("{:04}-{:02}-{:02}", y, m, d));
     }
     dates
 }
@@ -435,8 +522,32 @@ fn position_day_events(events: &[UnifiedEvent], _date: &str) -> Vec<PositionedEv
     let mut columns: Vec<Vec<usize>> = vec![];
     for (idx, event) in timed.iter().enumerate() {
         let ts = event.start_timestamp();
-        let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
-        let start_minutes = (date.get_hours() * 60 + date.get_minutes()) as f32;
+        let start_minutes = {
+            #[cfg(feature = "web")]
+            {
+                let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
+                let offset_minutes = date.get_timezone_offset() as i32;
+                let local_hours = date.get_hours() as i32;
+                let local_minutes = date.get_minutes() as i32;
+                let utc_minutes =
+                    (local_hours * 60 + local_minutes + offset_minutes).rem_euclid(1440);
+                utc_minutes as f32
+            }
+            #[cfg(not(feature = "web"))]
+            {
+                use chrono::{TimeZone, Timelike, Utc};
+                // Clamp timestamp to max safe value (9999-12-31) before i64 cast to prevent overflow
+                let ts_clamped = ts.min(253_402_300_799) as i64;
+                let dt = match Utc.timestamp_opt(ts_clamped, 0).single() {
+                    Some(dt) => dt,
+                    None => {
+                        log::warn!("Invalid timestamp {} fell back to epoch", ts);
+                        Utc.timestamp_opt(0, 0).single().unwrap_or_default()
+                    }
+                };
+                (dt.hour() * 60 + dt.minute()) as f32
+            }
+        };
         let duration_minutes = get_event_duration(event);
         let top = (start_minutes / 60.0) * HOUR_HEIGHT_PX;
         let height = f32::max(
@@ -445,37 +556,15 @@ fn position_day_events(events: &[UnifiedEvent], _date: &str) -> Vec<PositionedEv
         );
         let mut placed = false;
         for (col_idx, col) in columns.iter_mut().enumerate() {
-            let overlaps = col
-                .iter()
-                .any(|&other_idx| {
-                    let other = &positioned[other_idx];
-                    let other_end = other.position.top + other.position.height;
-                    let this_end = top + height;
-                    !(other_end <= top || this_end <= other.position.top)
-                });
+            let overlaps = col.iter().any(|&other_idx| {
+                let other = &positioned[other_idx];
+                let other_end = other.position.top + other.position.height;
+                let this_end = top + height;
+                !(other_end <= top || this_end <= other.position.top)
+            });
             if !overlaps {
                 col.push(idx);
-                positioned
-                    .push(PositionedEvent {
-                        event: event.clone(),
-                        position: EventPosition {
-                            top,
-                            height,
-                            left: 0.0,
-                            width: 100.0,
-                            column: col_idx,
-                            total_columns: 1,
-                        },
-                    });
-                placed = true;
-                break;
-            }
-        }
-        if !placed {
-            let col_idx = columns.len();
-            columns.push(vec![idx]);
-            positioned
-                .push(PositionedEvent {
+                positioned.push(PositionedEvent {
                     event: event.clone(),
                     position: EventPosition {
                         top,
@@ -486,6 +575,24 @@ fn position_day_events(events: &[UnifiedEvent], _date: &str) -> Vec<PositionedEv
                         total_columns: 1,
                     },
                 });
+                placed = true;
+                break;
+            }
+        }
+        if !placed {
+            let col_idx = columns.len();
+            columns.push(vec![idx]);
+            positioned.push(PositionedEvent {
+                event: event.clone(),
+                position: EventPosition {
+                    top,
+                    height,
+                    left: 0.0,
+                    width: 100.0,
+                    column: col_idx,
+                    total_columns: 1,
+                },
+            });
         }
     }
     let n = positioned.len();
@@ -529,8 +636,7 @@ fn position_day_events(events: &[UnifiedEvent], _date: &str) -> Vec<PositionedEv
         let col_width = 95.0 / cluster_total as f32;
         for &i in &cluster {
             positioned[i].position.total_columns = cluster_total;
-            positioned[i].position.left = (positioned[i].position.column as f32
-                * col_width) + 2.0;
+            positioned[i].position.left = (positioned[i].position.column as f32 * col_width) + 2.0;
             positioned[i].position.width = col_width - 2.0;
         }
     }
@@ -608,11 +714,7 @@ fn render_positioned_event(
     let bg_color = get_event_color(&pe.event);
     let style = format!(
         "position: absolute; top: {}px; left: {}%; width: {}%; height: {}px; background-color: {};",
-        pe.position.top,
-        pe.position.left,
-        pe.position.width,
-        pe.position.height,
-        bg_color,
+        pe.position.top, pe.position.left, pe.position.width, pe.position.height, bg_color,
     );
     if let Some(handler) = on_event_click {
         let event = pe.event.clone();
@@ -669,15 +771,57 @@ fn format_event_time(event: &UnifiedEvent) -> String {
     if ts == 0 {
         return "Time TBD".to_string();
     }
-    let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
-    let hours = date.get_hours();
-    let minutes = date.get_minutes();
-    let am_pm = if hours >= 12 { "PM" } else { "AM" };
-    let hour_12 = if hours == 0 { 12 } else if hours > 12 { hours - 12 } else { hours };
-    if minutes == 0 {
-        format!("{} {}", hour_12, am_pm)
-    } else {
-        format!("{}:{:02} {}", hour_12, minutes, am_pm)
+    #[cfg(feature = "web")]
+    {
+        let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
+        let offset_minutes = date.get_timezone_offset() as i32;
+        let local_hours = date.get_hours() as i32;
+        let local_minutes = date.get_minutes() as i32;
+        let utc_total_minutes =
+            (local_hours * 60 + local_minutes + offset_minutes).rem_euclid(1440);
+        let hours = utc_total_minutes / 60;
+        let minutes = utc_total_minutes % 60;
+        let am_pm = if hours >= 12 { "PM" } else { "AM" };
+        let hour_12 = if hours == 0 {
+            12
+        } else if hours > 12 {
+            hours - 12
+        } else {
+            hours
+        };
+        if minutes == 0 {
+            format!("{} {} UTC", hour_12, am_pm)
+        } else {
+            format!("{}:{:02} {} UTC", hour_12, minutes, am_pm)
+        }
+    }
+    #[cfg(not(feature = "web"))]
+    {
+        use chrono::{TimeZone, Timelike, Utc};
+        // Clamp timestamp to max safe value (9999-12-31) before i64 cast to prevent overflow
+        let ts_clamped = ts.min(253_402_300_799) as i64;
+        let dt = match Utc.timestamp_opt(ts_clamped, 0).single() {
+            Some(dt) => dt,
+            None => {
+                log::warn!("Invalid timestamp {} fell back to epoch", ts);
+                Utc.timestamp_opt(0, 0).single().unwrap_or_default()
+            }
+        };
+        let hours = dt.hour();
+        let minutes = dt.minute();
+        let am_pm = if hours >= 12 { "PM" } else { "AM" };
+        let hour_12 = if hours == 0 {
+            12
+        } else if hours > 12 {
+            hours - 12
+        } else {
+            hours
+        };
+        if minutes == 0 {
+            format!("{} {} UTC", hour_12, am_pm)
+        } else {
+            format!("{}:{:02} {} UTC", hour_12, minutes, am_pm)
+        }
     }
 }
 /// Format event for month view

@@ -40,7 +40,9 @@ pub fn is_valid_http_url(url_str: &str) -> bool {
 /// * `Some(Url)` - Valid parsed URL with http/https scheme
 /// * `None` - Invalid URL or non-http/https scheme
 pub fn parse_http_url(url_str: &str) -> Option<Url> {
-    Url::parse(url_str).ok().filter(|u| matches!(u.scheme(), "http" | "https"))
+    Url::parse(url_str)
+        .ok()
+        .filter(|u| matches!(u.scheme(), "http" | "https"))
 }
 /// Result type for signer validation operations
 pub enum SignerValidationResult {
@@ -62,12 +64,10 @@ pub enum SignerValidationResult {
 /// - `SignerValidationResult::InvalidPubkey` - Signer info present but malformed
 pub fn get_current_user_pubkey() -> SignerValidationResult {
     match SIGNER_INFO.read().as_ref() {
-        Some(info) => {
-            match PublicKey::from_hex(&info.public_key) {
-                Ok(pk) => SignerValidationResult::Ok(pk),
-                Err(_) => SignerValidationResult::InvalidPubkey,
-            }
-        }
+        Some(info) => match PublicKey::from_hex(&info.public_key) {
+            Ok(pk) => SignerValidationResult::Ok(pk),
+            Err(_) => SignerValidationResult::InvalidPubkey,
+        },
         None => SignerValidationResult::NotSignedIn,
     }
 }
@@ -103,8 +103,10 @@ pub fn try_get_current_user_pubkey() -> Option<PublicKey> {
 /// ```
 pub fn sanitize_lightning_invoice(invoice: &str) -> Option<String> {
     let lower = invoice.to_lowercase();
-    if !lower.starts_with("lnbc") && !lower.starts_with("lntb")
-        && !lower.starts_with("lnbcrt") && !lower.starts_with("lnsb")
+    if !lower.starts_with("lnbc")
+        && !lower.starts_with("lntb")
+        && !lower.starts_with("lnbcrt")
+        && !lower.starts_with("lnsb")
     {
         return None;
     }
@@ -179,10 +181,12 @@ pub fn validate_css_dimension(dimension: &str) -> Option<&str> {
         return None;
     }
     let lower = trimmed.to_lowercase();
-    if lower.contains("expression") || lower.contains("javascript")
-        || lower.contains("url")
-    {
+    if lower.contains("expression") || lower.contains("javascript") || lower.contains("url") {
         return None;
     }
-    if CSS_DIMENSION_PATTERN.is_match(trimmed) { Some(trimmed) } else { None }
+    if CSS_DIMENSION_PATTERN.is_match(trimmed) {
+        Some(trimmed)
+    } else {
+        None
+    }
 }

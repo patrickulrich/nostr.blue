@@ -2,10 +2,10 @@
 //!
 //! Reusable hook for fetching Nostr events by coordinate (naddr) with proper state management.
 //! Uses `use_resource` for automatic cancellation when the naddr changes.
+use crate::stores::nostr_client;
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip19::Nip19;
 use nostr_sdk::{Event as NostrEvent, FromBech32};
-use crate::stores::nostr_client;
 /// Wrapper struct for coordinate-based event fetching with custom not-found message.
 ///
 /// Uses `Resource` internally for automatic cancellation of inflight fetches.
@@ -62,10 +62,11 @@ pub fn use_fetch_event_by_coordinate_with_message(
     not_found_message: &'static str,
 ) -> UseFetchEventByCoordinate {
     let mut naddr_signal = use_signal(|| naddr.clone());
-    use_effect(use_reactive!(| naddr | { naddr_signal.set(naddr); }));
-    let resource = use_resource(move || async move {
-        fetch_event_by_coordinate(&naddr_signal()).await
-    });
+    use_effect(use_reactive!(|naddr| {
+        naddr_signal.set(naddr);
+    }));
+    let resource =
+        use_resource(move || async move { fetch_event_by_coordinate(&naddr_signal()).await });
     UseFetchEventByCoordinate {
         resource,
         not_found_message,
@@ -114,19 +115,15 @@ async fn fetch_event_by_coordinate(naddr: &str) -> Result<Option<NostrEvent>, St
         .unwrap_or(trimmed);
     match Nip19::from_bech32(normalized) {
         Ok(Nip19::Coordinate(coord)) => {
-            let relay_hints: Vec<String> = coord
-                .relays
-                .iter()
-                .map(|r| r.to_string())
-                .collect();
+            let relay_hints: Vec<String> = coord.relays.iter().map(|r| r.to_string()).collect();
             nostr_client::fetch_event_by_coordinate_with_relays(
-                    coord.kind.as_u16(),
-                    coord.public_key.to_hex(),
-                    coord.identifier.clone(),
-                    relay_hints,
-                )
-                .await
-                .map_err(|e| e.to_string())
+                coord.kind.as_u16(),
+                coord.public_key.to_hex(),
+                coord.identifier.clone(),
+                relay_hints,
+            )
+            .await
+            .map_err(|e| e.to_string())
         }
         Ok(_) => Err("Invalid coordinate address format".to_string()),
         Err(e) => Err(format!("Failed to parse address: {}", e)),

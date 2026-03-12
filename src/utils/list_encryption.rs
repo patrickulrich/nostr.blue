@@ -3,9 +3,9 @@
 //! Handles encrypting/decrypting private list members using NIP-44.
 //! Private members are stored as a JSON array in the event content,
 //! encrypted to the user's own public key.
-use nostr_sdk::{Event, EventBuilder, Kind, PublicKey, Tag};
 use crate::stores::nostr_client;
 use crate::utils::list_kinds::NAMED_PEOPLE;
+use nostr_sdk::{Event, EventBuilder, Kind, PublicKey, Tag};
 /// Decrypt private tags from a list event's content
 ///
 /// Private tags are stored as a NIP-44 encrypted JSON array in the event content.
@@ -15,7 +15,10 @@ pub async fn decrypt_private_tags(event: &Event) -> Result<Vec<Tag>, String> {
         return Ok(Vec::new());
     }
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
+    let signer = client
+        .signer()
+        .await
+        .map_err(|e| format!("No signer: {}", e))?;
     let decrypted = signer
         .nip44_decrypt(&event.pubkey, &event.content)
         .await
@@ -32,9 +35,7 @@ pub async fn decrypt_private_tags(event: &Event) -> Result<Vec<Tag>, String> {
                 return None;
             }
             match arr[0].as_str() {
-                "p" if arr.len() >= 2 => {
-                    PublicKey::parse(&arr[1]).ok().map(Tag::public_key)
-                }
+                "p" if arr.len() >= 2 => PublicKey::parse(&arr[1]).ok().map(Tag::public_key),
                 _ => None,
             }
         })
@@ -49,14 +50,17 @@ pub async fn encrypt_private_tags(tags: &[Tag]) -> Result<String, String> {
         return Ok(String::new());
     }
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
+    let signer = client
+        .signer()
+        .await
+        .map_err(|e| format!("No signer: {}", e))?;
     let pubkey = nostr_client::get_cached_pubkey()?;
     let tag_arrays: Vec<Vec<String>> = tags
         .iter()
         .map(|tag| tag.as_slice().iter().map(|s| s.to_string()).collect())
         .collect();
-    let json = serde_json::to_string(&tag_arrays)
-        .map_err(|e| format!("Failed to serialize: {}", e))?;
+    let json =
+        serde_json::to_string(&tag_arrays).map_err(|e| format!("Failed to serialize: {}", e))?;
     signer
         .nip44_encrypt(&pubkey, &json)
         .await
@@ -71,34 +75,31 @@ pub async fn add_person_to_list(
     is_private: bool,
 ) -> Result<(), String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let target_pubkey = PublicKey::parse(person_pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let target_pubkey =
+        PublicKey::parse(person_pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let mut public_tags: Vec<Tag> = list_event.tags.clone().into_iter().collect();
-    let mut private_tags = decrypt_private_tags(list_event)
-        .await
-        .map_err(|e| {
-            log::error!("Failed to decrypt private tags: {}", e);
-            format!("Cannot modify list: failed to decrypt private members ({})", e)
-        })?;
+    let mut private_tags = decrypt_private_tags(list_event).await.map_err(|e| {
+        log::error!("Failed to decrypt private tags: {}", e);
+        format!(
+            "Cannot modify list: failed to decrypt private members ({})",
+            e
+        )
+    })?;
     let pubkey_hex = target_pubkey.to_hex();
-    let already_public = public_tags
-        .iter()
-        .any(|tag| {
-            tag.kind() == nostr_sdk::TagKind::p()
-                && tag
-                    .content()
-                    .map(|c| c.eq_ignore_ascii_case(&pubkey_hex))
-                    .unwrap_or(false)
-        });
-    let already_private = private_tags
-        .iter()
-        .any(|tag| {
-            tag.kind() == nostr_sdk::TagKind::p()
-                && tag
-                    .content()
-                    .map(|c| c.eq_ignore_ascii_case(&pubkey_hex))
-                    .unwrap_or(false)
-        });
+    let already_public = public_tags.iter().any(|tag| {
+        tag.kind() == nostr_sdk::TagKind::p()
+            && tag
+                .content()
+                .map(|c| c.eq_ignore_ascii_case(&pubkey_hex))
+                .unwrap_or(false)
+    });
+    let already_private = private_tags.iter().any(|tag| {
+        tag.kind() == nostr_sdk::TagKind::p()
+            && tag
+                .content()
+                .map(|c| c.eq_ignore_ascii_case(&pubkey_hex))
+                .unwrap_or(false)
+    });
     if already_public || already_private {
         return Err("Person is already in this list".to_string());
     }
@@ -109,8 +110,7 @@ pub async fn add_person_to_list(
         public_tags.push(new_tag);
     }
     let encrypted_content = encrypt_private_tags(&private_tags).await?;
-    let builder = EventBuilder::new(list_event.kind, encrypted_content)
-        .tags(public_tags);
+    let builder = EventBuilder::new(list_event.kind, encrypted_content).tags(public_tags);
     client
         .send_event_builder(builder)
         .await
@@ -123,8 +123,8 @@ pub async fn remove_person_from_list(
     person_pubkey: &str,
 ) -> Result<(), String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let target_pubkey = PublicKey::parse(person_pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let target_pubkey =
+        PublicKey::parse(person_pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let pubkey_hex = target_pubkey.to_hex();
     let public_tags: Vec<Tag> = list_event
         .tags
@@ -142,7 +142,10 @@ pub async fn remove_person_from_list(
         .await
         .map_err(|e| {
             log::error!("Failed to decrypt private tags: {}", e);
-            format!("Cannot modify list: failed to decrypt private members ({})", e)
+            format!(
+                "Cannot modify list: failed to decrypt private members ({})",
+                e
+            )
         })?
         .into_iter()
         .filter(|tag| {
@@ -154,8 +157,7 @@ pub async fn remove_person_from_list(
         })
         .collect();
     let encrypted_content = encrypt_private_tags(&private_tags).await?;
-    let builder = EventBuilder::new(list_event.kind, encrypted_content)
-        .tags(public_tags);
+    let builder = EventBuilder::new(list_event.kind, encrypted_content).tags(public_tags);
     client
         .send_event_builder(builder)
         .await
@@ -193,12 +195,13 @@ pub async fn get_all_list_members_with_status(
             }
         }
     }
-    let (private_tags, decryption_succeeded) = match decrypt_private_tags(list_event)
-        .await
-    {
+    let (private_tags, decryption_succeeded) = match decrypt_private_tags(list_event).await {
         Ok(tags) => (tags, true),
         Err(e) => {
-            log::warn!("Failed to decrypt private members, showing public only: {}", e);
+            log::warn!(
+                "Failed to decrypt private members, showing public only: {}",
+                e
+            );
             (Vec::new(), false)
         }
     };
@@ -230,7 +233,10 @@ pub async fn create_people_list(
     is_private_default: bool,
 ) -> Result<Event, String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
+    let signer = client
+        .signer()
+        .await
+        .map_err(|e| format!("No signer: {}", e))?;
     let name = name.trim();
     if name.is_empty() {
         return Err("List name cannot be empty".to_string());
@@ -253,14 +259,10 @@ pub async fn create_people_list(
     if let Some(desc) = description {
         let desc = desc.trim();
         if !desc.is_empty() {
-            tags.push(
-                Tag::custom(
-                    nostr_sdk::TagKind::Custom(
-                        std::borrow::Cow::Borrowed("description"),
-                    ),
-                    vec![desc.to_string()],
-                ),
-            );
+            tags.push(Tag::custom(
+                nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("description")),
+                vec![desc.to_string()],
+            ));
         }
     }
     let content = if is_private_default {

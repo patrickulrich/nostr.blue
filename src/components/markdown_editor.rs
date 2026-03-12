@@ -2,13 +2,15 @@
 //!
 //! A full-featured markdown editor with preview modes, formatting toolbar,
 //! and keyboard shortcut support.
-use dioxus::prelude::*;
-use std::rc::Rc;
+use super::markdown_toolbar::apply_markdown_format;
+#[cfg(feature = "web")]
+use super::markdown_toolbar::set_textarea_cursor;
 use super::markdown_toolbar::{
-    apply_markdown_format, get_textarea_cursor, set_textarea_cursor, MarkdownFormat,
-    MarkdownToolbar,
+    get_textarea_cursor, textarea_selection_supported, MarkdownFormat, MarkdownToolbar,
 };
 use crate::utils::markdown::render_markdown;
+use dioxus::prelude::*;
+use std::rc::Rc;
 #[derive(Clone, Copy, PartialEq)]
 pub enum EditorMode {
     Edit,
@@ -55,52 +57,48 @@ pub fn MarkdownEditor(mut props: MarkdownEditorProps) -> Element {
         move |format: MarkdownFormat| {
             let current_content = content.read().clone();
             let id_str = (*textarea_id.read()).clone();
-            let (cursor_start, cursor_end) = get_textarea_cursor(
-                &id_str,
-                &current_content,
-            );
-            let (new_content, new_cursor) = apply_markdown_format(
-                &current_content,
-                cursor_start,
-                cursor_end,
-                format,
-            );
+            let (cursor_start, cursor_end) = get_textarea_cursor(&id_str, &current_content)
+                .unwrap_or((current_content.len(), current_content.len()));
+            let (new_content, cursor_after_format) =
+                apply_markdown_format(&current_content, cursor_start, cursor_end, format);
             content.set(new_content.clone());
-            let id_clone = id_str.clone();
-            spawn(async move {
-                #[cfg(target_family = "wasm")]
-                gloo_timers::future::TimeoutFuture::new(10).await;
-                set_textarea_cursor(&id_clone, new_cursor, &new_content);
-            });
+            #[cfg(feature = "web")]
+            {
+                let id_clone = id_str.clone();
+                let new_cursor = cursor_after_format;
+                spawn(async move {
+                    crate::platform::timer::sleep_ms(10).await;
+                    set_textarea_cursor(&id_clone, new_cursor, &new_content);
+                });
+            }
+            #[cfg(not(feature = "web"))]
+            {
+                let _ = cursor_after_format;
+            }
         }
     };
     let handle_keydown = {
         let mut handle_format = handle_format;
         move |evt: Event<KeyboardData>| {
-            let key = evt.key();
             let modifiers = evt.modifiers();
             let ctrl_or_cmd = modifiers.ctrl() || modifiers.meta();
-            if !ctrl_or_cmd {
-                return;
-            }
-            let format = match key {
-                Key::Character(ref c) if c.to_lowercase() == "b" => {
-                    Some(MarkdownFormat::Bold)
+            if ctrl_or_cmd {
+                let key = evt.key();
+                let format = match key {
+                    Key::Character(ref c) if c.to_lowercase() == "b" => Some(MarkdownFormat::Bold),
+                    Key::Character(ref c) if c.to_lowercase() == "i" => {
+                        Some(MarkdownFormat::Italic)
+                    }
+                    Key::Character(ref c) if c.to_lowercase() == "k" => Some(MarkdownFormat::Link),
+                    Key::Character(ref c) if c.to_lowercase() == "`" => {
+                        Some(MarkdownFormat::InlineCode)
+                    }
+                    _ => None,
+                };
+                if let Some(f) = format {
+                    evt.prevent_default();
+                    handle_format(f);
                 }
-                Key::Character(ref c) if c.to_lowercase() == "i" => {
-                    Some(MarkdownFormat::Italic)
-                }
-                Key::Character(ref c) if c.to_lowercase() == "k" => {
-                    Some(MarkdownFormat::Link)
-                }
-                Key::Character(ref c) if c.to_lowercase() == "`" => {
-                    Some(MarkdownFormat::InlineCode)
-                }
-                _ => None,
-            };
-            if let Some(f) = format {
-                evt.prevent_default();
-                handle_format(f);
             }
         }
     };
@@ -123,6 +121,7 @@ pub fn MarkdownEditor(mut props: MarkdownEditorProps) -> Element {
                     on_image_upload_request: props.on_image_upload_request,
                     on_mention_request: props.on_mention_request,
                     disabled: *mode.read() == EditorMode::Preview,
+                    selection_supported: textarea_selection_supported(),
                 }
             }
             div { class: "flex border-b border-border bg-muted/20",
@@ -216,24 +215,26 @@ pub fn MarkdownEditor(mut props: MarkdownEditorProps) -> Element {
             }
             div { class: "px-4 py-2 text-xs text-muted-foreground bg-muted/30 border-t border-border flex items-center justify-between",
                 span { "Markdown supported" }
-                div { class: "flex items-center gap-3",
-                    span { class: "hidden sm:inline-flex items-center gap-1",
-                        kbd { class: "px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono",
-                            "Ctrl+B"
+                if cfg!(feature = "web") {
+                    div { class: "flex items-center gap-3",
+                        span { class: "hidden sm:inline-flex items-center gap-1",
+                            kbd { class: "px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono",
+                                "Ctrl+B"
+                            }
+                            span { "Bold" }
                         }
-                        span { "Bold" }
-                    }
-                    span { class: "hidden sm:inline-flex items-center gap-1",
-                        kbd { class: "px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono",
-                            "Ctrl+I"
+                        span { class: "hidden sm:inline-flex items-center gap-1",
+                            kbd { class: "px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono",
+                                "Ctrl+I"
+                            }
+                            span { "Italic" }
                         }
-                        span { "Italic" }
-                    }
-                    span { class: "hidden md:inline-flex items-center gap-1",
-                        kbd { class: "px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono",
-                            "Ctrl+K"
+                        span { class: "hidden md:inline-flex items-center gap-1",
+                            kbd { class: "px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono",
+                                "Ctrl+K"
+                            }
+                            span { "Link" }
                         }
-                        span { "Link" }
                     }
                 }
             }
@@ -243,21 +244,30 @@ pub fn MarkdownEditor(mut props: MarkdownEditorProps) -> Element {
 /// Insert text at the current cursor position in the editor
 ///
 /// This is useful for inserting content from external sources (e.g., image upload, mention dialog)
-pub fn insert_at_cursor(
-    content: &mut Signal<String>,
-    textarea_id: &str,
-    text_to_insert: &str,
-) {
+pub fn insert_at_cursor(content: &mut Signal<String>, textarea_id: &str, text_to_insert: &str) {
     let current_content = content.read().clone();
-    let (cursor_start, _cursor_end) = get_textarea_cursor(textarea_id, &current_content);
+    let cursor_start = get_textarea_cursor(textarea_id, &current_content)
+        .map(|(start, _)| start)
+        .unwrap_or_else(|| current_content.len());
+    let cursor_start = if current_content.is_char_boundary(cursor_start) {
+        cursor_start
+    } else {
+        (0..=cursor_start)
+            .rev()
+            .find(|&i| current_content.is_char_boundary(i))
+            .unwrap_or(0)
+    };
     let before = &current_content[..cursor_start];
     let after = &current_content[cursor_start..];
     let new_content = format!("{}{}{}", before, text_to_insert, after);
-    let new_cursor = cursor_start + text_to_insert.len();
     content.set(new_content.clone());
-    let id = textarea_id.to_string();
-    spawn(async move {
-        #[cfg(target_family = "wasm")] gloo_timers::future::TimeoutFuture::new(10).await;
-        set_textarea_cursor(&id, new_cursor, &new_content);
-    });
+    #[cfg(feature = "web")]
+    {
+        let id = textarea_id.to_string();
+        let new_cursor = cursor_start + text_to_insert.len();
+        spawn(async move {
+            crate::platform::timer::sleep_ms(10).await;
+            set_textarea_cursor(&id, new_cursor, &new_content);
+        });
+    }
 }

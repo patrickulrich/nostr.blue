@@ -29,8 +29,8 @@ pub fn Chats() -> Element {
     let mut search_query = use_signal(String::new);
     let mut search_results = use_signal(|| None::<Vec<Channel>>);
     let mut search_loading = use_signal(|| false);
-    let mut search_version = use_signal(|| 0u64);
-    let mut load_request_id = use_signal(|| 0u64);
+    let mut search_version = use_signal(|| 0u32);
+    let mut load_request_id = use_signal(|| 0u32);
 
     // Initial load
     use_effect(move || {
@@ -43,7 +43,9 @@ pub fn Chats() -> Element {
             loading.set(true);
             match fetch_channels_page(PAGE_SIZE, None).await {
                 Ok(parsed) => {
-                    if *load_request_id.peek() != current_id { return; }
+                    if *load_request_id.peek() != current_id {
+                        return;
+                    }
                     if let Some(last) = parsed.last() {
                         oldest_timestamp.set(Some(last.created_at));
                     }
@@ -61,19 +63,18 @@ pub fn Chats() -> Element {
     use_effect(move || {
         let query = search_query.read().clone();
         if query.len() < 2 {
-            search_version.with_mut(|v| *v += 1);
+            search_version.with_mut(|v| *v = v.wrapping_add(1));
             search_results.set(None);
             search_loading.set(false);
             return;
         }
         let version = search_version.with_mut(|v| {
-            *v += 1;
+            *v = v.wrapping_add(1);
             *v
         });
         search_loading.set(true);
         spawn(async move {
-            #[cfg(target_arch = "wasm32")]
-            gloo_timers::future::TimeoutFuture::new(300).await;
+            crate::platform::timer::sleep_ms(300).await;
             if *search_version.peek() != version {
                 return;
             }
@@ -102,8 +103,12 @@ pub fn Chats() -> Element {
         if search_results.peek().is_some() {
             return;
         }
-        if *search_loading.peek() { return; }
-        if !search_query.peek().is_empty() { return; }
+        if *search_loading.peek() {
+            return;
+        }
+        if !search_query.peek().is_empty() {
+            return;
+        }
         pagination_loading.set(true);
         let until = *oldest_timestamp.peek();
         spawn(async move {

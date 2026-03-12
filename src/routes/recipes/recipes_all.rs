@@ -61,14 +61,11 @@ pub fn RecipesAll() -> Element {
                         has_more.set(false);
                     } else {
                         if let Some(oldest) = valid.last() {
-                            oldest_timestamp
-                                .set(Some(oldest.event.created_at.as_secs()));
+                            oldest_timestamp.set(Some(oldest.event.created_at.as_secs()));
                         }
                         let mut current = recipes.peek().clone();
-                        let existing_ids: std::collections::HashSet<_> = current
-                            .iter()
-                            .map(|r| r.event.id.to_hex())
-                            .collect();
+                        let existing_ids: std::collections::HashSet<_> =
+                            current.iter().map(|r| r.event.id.to_hex()).collect();
                         for recipe in valid {
                             if !existing_ids.contains(&recipe.event.id.to_hex()) {
                                 current.push(recipe);

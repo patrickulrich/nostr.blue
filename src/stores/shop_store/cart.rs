@@ -14,12 +14,11 @@ pub fn add_to_cart(product: Product, quantity: u32) {
     {
         existing.quantity += quantity;
     } else {
-        items
-            .push(CartItem {
-                product,
-                quantity,
-                selected_shipping: None,
-            });
+        items.push(CartItem {
+            product,
+            quantity,
+            selected_shipping: None,
+        });
     }
     drop(items);
     recalculate_cart_total();
@@ -30,8 +29,7 @@ pub fn update_cart_quantity(naddr: &str, quantity: u32) {
     let mut items = CART_ITEMS.write();
     if quantity == 0 {
         items.retain(|item| item.product.naddr != naddr);
-    } else if let Some(item) = items.iter_mut().find(|item| item.product.naddr == naddr)
-    {
+    } else if let Some(item) = items.iter_mut().find(|item| item.product.naddr == naddr) {
         item.quantity = quantity;
     }
     drop(items);
@@ -64,7 +62,11 @@ pub fn clear_cart() {
 
 /// Get cart item count
 pub fn get_cart_count() -> usize {
-    CART_ITEMS.read().iter().map(|item| item.quantity as usize).sum()
+    CART_ITEMS
+        .read()
+        .iter()
+        .map(|item| item.quantity as usize)
+        .sum()
 }
 
 /// Recalculate cart total (internal helper)
@@ -76,8 +78,10 @@ pub(super) fn recalculate_cart_total() {
             total += sats * item.quantity as u64;
         } else {
             log::warn!(
-                "Unable to convert {} {} to sats for product {}", item.product.price
-                .amount, item.product.price.currency, item.product.title
+                "Unable to convert {} {} to sats for product {}",
+                item.product.price.amount,
+                item.product.price.currency,
+                item.product.title
             );
         }
         if let Some(shipping_naddr) = &item.selected_shipping {
@@ -86,8 +90,10 @@ pub(super) fn recalculate_cart_total() {
                     total += shipping_sats;
                 } else {
                     log::warn!(
-                        "Unable to convert shipping cost {} {} to sats for {}", shipping
-                        .base_price, shipping.currency, shipping.title
+                        "Unable to convert shipping cost {} {} to sats for {}",
+                        shipping.base_price,
+                        shipping.currency,
+                        shipping.title
                     );
                 }
             }

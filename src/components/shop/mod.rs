@@ -23,13 +23,13 @@ pub use category_selector::CategorySelector;
 pub use condition_badge::ConditionBadge;
 pub use image_carousel::ImageCarousel;
 pub use merchant_card::MerchantCard;
+#[allow(unused_imports)]
+pub use order_card::OrderCard;
 pub use order_status_badge::OrderStatusBadge;
 pub use price_display::PriceDisplay;
 pub use product_card::{ProductCard, ProductCardSkeleton};
+#[allow(unused_imports)]
+pub use product_grid::ProductGrid;
 pub use quantity_selector::QuantitySelector;
 pub use review_card::ReviewCard;
 pub use review_form::ReviewForm;
-#[allow(unused_imports)]
-pub use order_card::OrderCard;
-#[allow(unused_imports)]
-pub use product_grid::ProductGrid;

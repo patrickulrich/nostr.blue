@@ -14,20 +14,20 @@
 //! - After: Rendering 1000 notes = ~20 DOM nodes (fast, constant memory)
 //! - Maintains 60fps even with 10,000+ items
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-#[cfg(target_arch = "wasm32")]
-use std::cell::RefCell;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 thread_local! {
     /// Track if a scroll update is pending (prevents flooding with rAF callbacks)
     static SCROLL_UPDATE_PENDING: RefCell<bool> = const { RefCell::new(false) };
 }
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_name = requestAnimationFrame)]
@@ -120,13 +120,11 @@ impl VirtualState {
             }
         }
         let start_with_overscan = start_index.saturating_sub(self.config.overscan_count);
-        let end_with_overscan = (end_index + self.config.overscan_count)
-            .min(self.total_items);
+        let end_with_overscan = (end_index + self.config.overscan_count).min(self.total_items);
         let range_size = end_with_overscan - start_with_overscan;
         if range_size < self.config.min_batch_size {
             let additional_needed = self.config.min_batch_size - range_size;
-            let end_adjusted = (end_with_overscan + additional_needed)
-                .min(self.total_items);
+            let end_adjusted = (end_with_overscan + additional_needed).min(self.total_items);
             (start_with_overscan, end_adjusted)
         } else {
             (start_with_overscan, end_with_overscan)
@@ -142,14 +140,13 @@ impl VirtualState {
     }
     /// Update measured height for an item
     fn set_item_height(&mut self, index: usize, height: f64) {
-        self.item_heights
-            .insert(
-                index,
-                ItemHeight {
-                    height,
-                    is_measured: true,
-                },
-            );
+        self.item_heights.insert(
+            index,
+            ItemHeight {
+                height,
+                is_measured: true,
+            },
+        );
     }
 }
 /// Props for VirtualList component
@@ -191,23 +188,21 @@ pub struct VirtualListProps<T: PartialEq + 'static> {
 pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Element {
     let config = props.config.unwrap_or_default();
     let mut virtual_state = use_signal(|| VirtualState::new(props.items.len(), config));
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     let mut container_element = use_signal(|| None::<web_sys::HtmlElement>);
-    use_effect(
-        use_reactive(
-            &props.items,
-            move |items| {
-                virtual_state.write().total_items = items.len();
-            },
-        ),
-    );
+    use_effect(use_reactive(&props.items, move |items| {
+        virtual_state.write().total_items = items.len();
+    }));
     let state = virtual_state.read();
     let (start_index, end_index) = state.calculate_visible_range();
     let total_height = state.calculate_total_height();
     let start_offset = state.calculate_item_offset(start_index);
     log::debug!(
-        "VirtualList: Rendering items {}-{} of {} (viewport at {}px)", start_index,
-        end_index, props.items.len(), state.scroll_top
+        "VirtualList: Rendering items {}-{} of {} (viewport at {}px)",
+        start_index,
+        end_index,
+        props.items.len(),
+        state.scroll_top
     );
     drop(state);
     let visible_items = use_memo(move || {
@@ -225,7 +220,7 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
             class: "{props.container_class}",
             style: "overflow-y: auto; position: relative; height: 100%;",
             onmounted: move |_evt| {
-                #[cfg(target_arch = "wasm32")]
+                #[cfg(feature = "web")]
                 {
                     let element = _evt.data();
                     if let Some(html_element) = element.downcast::<web_sys::HtmlElement>() {
@@ -239,7 +234,7 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
                 }
             },
             onscroll: move |_evt| {
-                #[cfg(target_arch = "wasm32")]
+                #[cfg(feature = "web")]
                 {
                     let already_pending = SCROLL_UPDATE_PENDING
                         .with(|pending| {
@@ -269,7 +264,7 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
                     });
                     request_animation_frame(closure.unchecked_ref());
                 }
-                #[cfg(not(target_arch = "wasm32"))]
+                #[cfg(not(feature = "web"))]
                 {
                     use std::sync::atomic::{AtomicU64, Ordering};
                     static LAST_SCROLL_UPDATE: AtomicU64 = AtomicU64::new(0);
@@ -300,7 +295,7 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
                                 key: "{index}",
                                 class: "virtual-item",
                                 onmounted: move |_evt| {
-                                    #[cfg(target_arch = "wasm32")]
+                                    #[cfg(feature = "web")]
                                     {
                                         let mut state = state;
                                         spawn(async move {

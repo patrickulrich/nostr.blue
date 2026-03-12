@@ -1,13 +1,14 @@
 //! Unified signer management for all authentication methods
+#[cfg(feature = "mobile")]
+use crate::platform::Nip55Signer;
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
-use gloo_storage::{LocalStorage, Storage};
 use nostr::{Keys, PublicKey};
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 #[cfg(target_family = "wasm")]
 use nostr_browser_signer::BrowserSigner;
 use nostr_connect::client::NostrConnect;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 /// Types of signers supported by the application
 #[derive(Debug, Clone)]
 pub enum SignerType {
@@ -18,6 +19,9 @@ pub enum SignerType {
     BrowserExtension(Arc<BrowserSigner>),
     /// Remote signer (NIP-46)
     NostrConnect(Arc<NostrConnect>),
+    /// Android signer (NIP-55)
+    #[cfg(feature = "mobile")]
+    AndroidSigner(Arc<Nip55Signer>),
 }
 impl SignerType {
     /// Get the public key for this signer
@@ -30,18 +34,22 @@ impl SignerType {
                 signer
                     .get_public_key()
                     .await
-                    .map_err(|e| {
-                        format!("Failed to get public key from browser extension: {}", e)
-                    })
+                    .map_err(|e| format!("Failed to get public key from browser extension: {}", e))
             }
             SignerType::NostrConnect(nostr_connect) => {
                 use nostr::signer::NostrSigner;
                 nostr_connect
                     .get_public_key()
                     .await
-                    .map_err(|e| {
-                        format!("Failed to get public key from remote signer: {}", e)
-                    })
+                    .map_err(|e| format!("Failed to get public key from remote signer: {}", e))
+            }
+            #[cfg(feature = "mobile")]
+            SignerType::AndroidSigner(signer) => {
+                use nostr::signer::NostrSigner;
+                signer
+                    .get_public_key()
+                    .await
+                    .map_err(|e| format!("Failed to get public key from Android signer: {}", e))
             }
         }
     }
@@ -52,6 +60,8 @@ impl SignerType {
             #[cfg(target_family = "wasm")]
             SignerType::BrowserExtension(_) => "Browser Extension",
             SignerType::NostrConnect(_) => "Remote Signer",
+            #[cfg(feature = "mobile")]
+            SignerType::AndroidSigner(_) => "Android Signer",
         }
     }
     /// Convert to Arc<dyn NostrSigner> for use with Client
@@ -62,6 +72,8 @@ impl SignerType {
             #[cfg(target_family = "wasm")]
             SignerType::BrowserExtension(signer) => signer,
             SignerType::NostrConnect(nostr_connect) => nostr_connect,
+            #[cfg(feature = "mobile")]
+            SignerType::AndroidSigner(signer) => signer,
         }
     }
     /// Get a reference as Arc<dyn NostrSigner>
@@ -71,6 +83,8 @@ impl SignerType {
             #[cfg(target_family = "wasm")]
             SignerType::BrowserExtension(signer) => signer.clone(),
             SignerType::NostrConnect(nostr_connect) => nostr_connect.clone(),
+            #[cfg(feature = "mobile")]
+            SignerType::AndroidSigner(signer) => signer.clone(),
         }
     }
 }
@@ -87,6 +101,8 @@ pub enum SignerBackend {
     #[cfg(target_family = "wasm")]
     BrowserExtension,
     RemoteSigner,
+    #[cfg(feature = "mobile")]
+    AndroidSigner,
 }
 impl SignerBackend {
     #[allow(dead_code)]
@@ -96,15 +112,16 @@ impl SignerBackend {
             #[cfg(target_family = "wasm")]
             SignerBackend::BrowserExtension => "browser_extension",
             SignerBackend::RemoteSigner => "remote_signer",
+            #[cfg(feature = "mobile")]
+            SignerBackend::AndroidSigner => "android_signer",
         }
     }
 }
 /// Global signal for the current signer
 pub static CURRENT_SIGNER: GlobalSignal<Option<SignerType>> = Signal::global(|| None);
 /// Global signal for signer info (persisted)
-pub static SIGNER_INFO: GlobalSignal<Option<SignerInfo>> = Signal::global(|| {
-    LocalStorage::get("signer_info").ok()
-});
+pub static SIGNER_INFO: GlobalSignal<Option<SignerInfo>> =
+    Signal::global(|| crate::platform::storage::get("signer_info").ok());
 /// Set the current signer and persist session info
 pub async fn set_signer(signer: SignerType) -> Result<(), String> {
     let public_key = signer.public_key().await?;
@@ -113,12 +130,14 @@ pub async fn set_signer(signer: SignerType) -> Result<(), String> {
         #[cfg(target_family = "wasm")]
         SignerType::BrowserExtension(_) => SignerBackend::BrowserExtension,
         SignerType::NostrConnect(_) => SignerBackend::RemoteSigner,
+        #[cfg(feature = "mobile")]
+        SignerType::AndroidSigner(_) => SignerBackend::AndroidSigner,
     };
     let info = SignerInfo {
         public_key: public_key.to_string(),
         backend,
     };
-    LocalStorage::set("signer_info", &info)
+    crate::platform::storage::set("signer_info", &info)
         .map_err(|e| format!("Failed to persist signer info: {}", e))?;
     *SIGNER_INFO.write() = Some(info);
     *CURRENT_SIGNER.write() = Some(signer);
@@ -127,7 +146,7 @@ pub async fn set_signer(signer: SignerType) -> Result<(), String> {
 /// Clear the current signer and remove persisted session
 #[allow(dead_code)]
 pub fn clear_signer() {
-    LocalStorage::delete("signer_info");
+    let _ = crate::platform::storage::delete("signer_info");
     *SIGNER_INFO.write() = None;
     *CURRENT_SIGNER.write() = None;
 }
@@ -152,27 +171,23 @@ pub async fn restore_session() -> Result<(), String> {
     if let Some(info) = get_signer_info() {
         match info.backend {
             #[cfg(target_family = "wasm")]
-            SignerBackend::BrowserExtension => {
-                match BrowserSigner::new() {
-                    Ok(signer) => {
-                        let signer_type = SignerType::BrowserExtension(Arc::new(signer));
-                        let pk = signer_type.public_key().await?;
-                        if pk.to_string() == info.public_key {
-                            *CURRENT_SIGNER.write() = Some(signer_type);
-                            return Ok(());
-                        } else {
-                            clear_signer();
-                            return Err(
-                                "Public key mismatch with stored session".to_string(),
-                            );
-                        }
-                    }
-                    Err(_) => {
+            SignerBackend::BrowserExtension => match BrowserSigner::new() {
+                Ok(signer) => {
+                    let signer_type = SignerType::BrowserExtension(Arc::new(signer));
+                    let pk = signer_type.public_key().await?;
+                    if pk.to_string() == info.public_key {
+                        *CURRENT_SIGNER.write() = Some(signer_type);
+                        return Ok(());
+                    } else {
                         clear_signer();
-                        return Err("Browser extension no longer available".to_string());
+                        return Err("Public key mismatch with stored session".to_string());
                     }
                 }
-            }
+                Err(_) => {
+                    clear_signer();
+                    return Err("Browser extension no longer available".to_string());
+                }
+            },
             SignerBackend::Keys => {
                 clear_signer();
                 return Err("Private key session requires re-login".to_string());
@@ -180,6 +195,17 @@ pub async fn restore_session() -> Result<(), String> {
             SignerBackend::RemoteSigner => {
                 clear_signer();
                 return Err("Remote signer session requires re-login".to_string());
+            }
+            #[cfg(feature = "mobile")]
+            SignerBackend::AndroidSigner => {
+                let pubkey = PublicKey::parse(&info.public_key)
+                    .map_err(|e| format!("Invalid stored public key: {}", e))?;
+                let package = crate::platform::storage::get::<String>("signer_package")
+                    .unwrap_or_else(|_| Nip55Signer::default_package().to_string());
+                let signer = Nip55Signer::new(pubkey, package);
+                let signer_type = SignerType::AndroidSigner(Arc::new(signer));
+                *CURRENT_SIGNER.write() = Some(signer_type);
+                return Ok(());
             }
         }
     }

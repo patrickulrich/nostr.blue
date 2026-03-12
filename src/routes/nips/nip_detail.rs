@@ -12,7 +12,8 @@ use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 use std::time::Duration;
 fn extract_title_from_content(content: &str) -> Option<String> {
-    content.lines()
+    content
+        .lines()
         .find(|l| l.starts_with("# ") || l.starts_with("## "))
         .map(|l| l.trim_start_matches('#').trim().to_string())
 }
@@ -21,7 +22,9 @@ fn extract_title_from_content(content: &str) -> Option<String> {
 /// e.g. prefix="NUT", num="00", title="NUT-00: Notation..." → "NUT-00: Notation..."
 fn format_spec_title(prefix: &str, num: &str, extracted_title: &str) -> String {
     let prefix_pattern = format!("{}-{}: ", prefix, num);
-    let clean = extracted_title.strip_prefix(&prefix_pattern).unwrap_or(extracted_title);
+    let clean = extracted_title
+        .strip_prefix(&prefix_pattern)
+        .unwrap_or(extracted_title);
     format!("{}-{}: {}", prefix, num, clean)
 }
 
@@ -67,12 +70,8 @@ pub fn NipDetail(nip_id: String) -> Element {
     let mut is_custom = use_signal(|| false);
     let mut custom_event = use_signal(|| None::<NostrEvent>);
     let mut related_kinds = use_signal(Vec::<String>::new);
-    let author_pubkey = use_memo(move || {
-        custom_event.read().as_ref().map(|e| e.pubkey.to_hex())
-    });
-    let author_metadata = use_author_metadata(
-        author_pubkey.read().clone().unwrap_or_default(),
-    );
+    let author_pubkey = use_memo(move || custom_event.read().as_ref().map(|e| e.pubkey.to_hex()));
+    let author_metadata = use_author_metadata(author_pubkey.read().clone().unwrap_or_default());
     let mut comments = use_signal(Vec::<NostrEvent>::new);
     let mut loading_comments = use_signal(|| false);
     let mut show_comment_composer = use_signal(|| false);
@@ -91,22 +90,56 @@ pub fn NipDetail(nip_id: String) -> Element {
             error.set(None);
             if let Some(num) = id.strip_prefix("nut-") {
                 let result = github_nips::fetch_nut_content(num).await;
-                load_spec("NUT", Some(num), result, is_custom, nip_title, nip_content, loading, error);
+                load_spec(
+                    "NUT",
+                    Some(num),
+                    result,
+                    is_custom,
+                    nip_title,
+                    nip_content,
+                    loading,
+                    error,
+                );
             } else if let Some(num) = id.strip_prefix("bud-") {
                 let result = github_nips::fetch_bud_content(num).await;
-                load_spec("BUD", Some(num), result, is_custom, nip_title, nip_content, loading, error);
+                load_spec(
+                    "BUD",
+                    Some(num),
+                    result,
+                    is_custom,
+                    nip_title,
+                    nip_content,
+                    loading,
+                    error,
+                );
             } else if let Some(num) = id.strip_prefix("nkbip-") {
                 let result = github_nips::fetch_nkbip_content(num).await;
-                load_spec("NKBIP", Some(num), result, is_custom, nip_title, nip_content, loading, error);
+                load_spec(
+                    "NKBIP",
+                    Some(num),
+                    result,
+                    is_custom,
+                    nip_title,
+                    nip_content,
+                    loading,
+                    error,
+                );
             } else if id == "market-spec" {
                 let result = github_nips::fetch_market_spec().await;
-                load_spec("Market Specification", None, result, is_custom, nip_title, nip_content, loading, error);
+                load_spec(
+                    "Market Specification",
+                    None,
+                    result,
+                    is_custom,
+                    nip_title,
+                    nip_content,
+                    loading,
+                    error,
+                );
             } else if id.starts_with("naddr") {
                 is_custom.set(true);
                 if !client_initialized {
-                    log::info!(
-                        "Waiting for client initialization before loading custom NIP..."
-                    );
+                    log::info!("Waiting for client initialization before loading custom NIP...");
                     return;
                 }
                 match nostr_client::fetch_custom_nip_by_naddr(&id).await {
@@ -122,9 +155,9 @@ pub fn NipDetail(nip_id: String) -> Element {
                             .iter()
                             .filter(|t| {
                                 t.kind()
-                                    == TagKind::SingleLetter(
-                                        SingleLetterTag::lowercase(Alphabet::K),
-                                    )
+                                    == TagKind::SingleLetter(SingleLetterTag::lowercase(
+                                        Alphabet::K,
+                                    ))
                             })
                             .filter_map(|t| t.content().map(|s| s.to_string()))
                             .collect();
@@ -169,21 +202,11 @@ pub fn NipDetail(nip_id: String) -> Element {
             let event_id = e.id;
             spawn(async move {
                 loading_comments.set(true);
-                let filter = Filter::new()
-                    .kind(Kind::Comment)
-                    .event(event_id)
-                    .limit(500);
-                match nostr_client::fetch_events_aggregated(
-                        filter,
-                        Duration::from_secs(10),
-                    )
-                    .await
-                {
+                let filter = Filter::new().kind(Kind::Comment).event(event_id).limit(500);
+                match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
                     Ok(mut comment_events) => {
                         comment_events.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-                        log::info!(
-                            "Loaded {} comments for custom NIP", comment_events.len()
-                        );
+                        log::info!("Loaded {} comments for custom NIP", comment_events.len());
                         comments.set(comment_events);
                     }
                     Err(e) => {
@@ -204,7 +227,10 @@ pub fn NipDetail(nip_id: String) -> Element {
                         Ok(output) => {
                             let subscription_id = output.val;
                             comment_sub_id.set(Some(subscription_id.clone()));
-                            log::debug!("Subscribed for new comments on custom NIP {}", event_id.to_hex());
+                            log::debug!(
+                                "Subscribed for new comments on custom NIP {}",
+                                event_id.to_hex()
+                            );
 
                             spawn(async move {
                                 let mut notifications = client.notifications();
@@ -264,29 +290,26 @@ pub fn NipDetail(nip_id: String) -> Element {
                     .kind(Kind::Reaction)
                     .event(event_id)
                     .limit(1000);
-                match nostr_client::fetch_events_aggregated(
-                        filter,
-                        Duration::from_secs(10),
-                    )
-                    .await
-                {
+                match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
                     Ok(reactions) => {
                         let positive_count = reactions
                             .iter()
                             .filter(|r| {
-                                r.content == "+" || r.content == "❤️"
-                                    || r.content == "👍" || r.content.is_empty()
+                                r.content == "+"
+                                    || r.content == "❤️"
+                                    || r.content == "👍"
+                                    || r.content.is_empty()
                             })
                             .count();
                         like_count.set(positive_count);
                         if let Some(user_pk) = current_user_pubkey {
-                            let user_has_liked = reactions
-                                .iter()
-                                .any(|r| {
-                                    r.pubkey.to_hex() == user_pk
-                                        && (r.content == "+" || r.content == "❤️"
-                                            || r.content == "👍" || r.content.is_empty())
-                                });
+                            let user_has_liked = reactions.iter().any(|r| {
+                                r.pubkey.to_hex() == user_pk
+                                    && (r.content == "+"
+                                        || r.content == "❤️"
+                                        || r.content == "👍"
+                                        || r.content.is_empty())
+                            });
                             is_liked.set(user_has_liked);
                         }
                     }
@@ -308,12 +331,12 @@ pub fn NipDetail(nip_id: String) -> Element {
             is_liking.set(true);
             spawn(async move {
                 match nostr_client::publish_reaction(
-                        event_id.to_hex(),
-                        event_pubkey.to_hex(),
-                        "+".to_string(),
-                        None,
-                    )
-                    .await
+                    event_id.to_hex(),
+                    event_pubkey.to_hex(),
+                    "+".to_string(),
+                    None,
+                )
+                .await
                 {
                     Ok(_) => {
                         is_liked.set(true);
@@ -544,6 +567,7 @@ pub fn NipDetail(nip_id: String) -> Element {
                 if let Some(event) = custom_event.read().clone() {
                     ShareModal {
                         event,
+                        web_url: Some(format!("https://nostr.blue/nips/{}", nip_id_for_render)),
                         on_close: move |_| show_share_modal.set(false),
                     }
                 }

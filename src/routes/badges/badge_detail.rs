@@ -1,14 +1,14 @@
 //! Badge Detail Page
 //!
 //! Full page view of a badge definition with accept/reject actions.
-use dioxus::prelude::*;
-use nostr_sdk::prelude::*;
 use crate::components::ClientInitializing;
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, profiles};
 use crate::utils::nip58::{self, BadgeAward, BadgeDefinition};
 use crate::utils::time::format_relative_time;
 use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
+use nostr_sdk::prelude::*;
 /// Badge detail page component
 #[component]
 pub fn BadgeDetail(naddr: String) -> Element {
@@ -21,52 +21,43 @@ pub fn BadgeDetail(naddr: String) -> Element {
     let navigator = use_navigator();
     let is_authenticated = auth_store::is_authenticated();
     let user_pubkey = auth_store::get_pubkey();
-    use_effect(
-        use_reactive(
-            &naddr,
-            move |addr| {
-                let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-                if !client_initialized {
-                    return;
-                }
-                let pubkey = user_pubkey.clone();
-                spawn(async move {
-                    loading.set(true);
-                    error.set(None);
-                    match nip58::fetch_badge_definition(&addr).await {
-                        Ok(b) => {
-                            badge.set(Some(b.clone()));
-                            if let Some(pk) = &pubkey {
-                                if let Ok(entries) = nip58::fetch_profile_badges(pk).await {
-                                    is_accepted
-                                        .set(
-                                            entries
-                                                .iter()
-                                                .any(|e| e.definition_coordinate == b.coordinate),
-                                        );
-                                }
-                                if let Ok(awards) = nip58::fetch_pending_badge_awards(pk)
-                                    .await
-                                {
-                                    pending_award
-                                        .set(
-                                            awards
-                                                .into_iter()
-                                                .find(|a| a.definition_coordinate == b.coordinate),
-                                        );
-                                }
-                            }
+    use_effect(use_reactive(&naddr, move |addr| {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            return;
+        }
+        let pubkey = user_pubkey.clone();
+        spawn(async move {
+            loading.set(true);
+            error.set(None);
+            match nip58::fetch_badge_definition(&addr).await {
+                Ok(b) => {
+                    badge.set(Some(b.clone()));
+                    if let Some(pk) = &pubkey {
+                        if let Ok(entries) = nip58::fetch_profile_badges(pk).await {
+                            is_accepted.set(
+                                entries
+                                    .iter()
+                                    .any(|e| e.definition_coordinate == b.coordinate),
+                            );
                         }
-                        Err(e) => {
-                            log::error!("Failed to fetch badge: {}", e);
-                            error.set(Some(e));
+                        if let Ok(awards) = nip58::fetch_pending_badge_awards(pk).await {
+                            pending_award.set(
+                                awards
+                                    .into_iter()
+                                    .find(|a| a.definition_coordinate == b.coordinate),
+                            );
                         }
                     }
-                    loading.set(false);
-                });
-            },
-        ),
-    );
+                }
+                Err(e) => {
+                    log::error!("Failed to fetch badge: {}", e);
+                    error.set(Some(e));
+                }
+            }
+            loading.set(false);
+        });
+    }));
     let mut issuer_profile = use_signal(|| None::<Metadata>);
     use_effect(move || {
         if let Some(b) = badge.read().clone() {
@@ -87,7 +78,9 @@ pub fn BadgeDetail(naddr: String) -> Element {
     }
     let badge_data = badge.read().clone();
     let (issuer_display_name, created_timestamp) = if let Some(ref b) = badge_data {
-        let name = issuer_name.clone().unwrap_or_else(|| truncate_pubkey(&b.pubkey));
+        let name = issuer_name
+            .clone()
+            .unwrap_or_else(|| truncate_pubkey(&b.pubkey));
         let ts = Timestamp::from(b.created_at);
         (name, ts)
     } else {

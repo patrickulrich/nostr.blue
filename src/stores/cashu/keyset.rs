@@ -3,14 +3,14 @@
 //! Handles keyset rotation detection, proof migration, and keyset state tracking.
 //! Implements CDK patterns for keyset lifecycle management.
 #![allow(dead_code)]
-use std::collections::HashMap;
-use std::str::FromStr;
-use cdk::nuts::Id;
-use dioxus::prelude::ReadableExt;
 use super::cache::{CachedKeyset, MINT_CACHE};
 use super::signals::WALLET_TOKENS;
 use super::types::{ProofData, WalletTokensStoreStoreExt};
 use super::utils::mint_matches;
+use cdk::nuts::Id;
+use dioxus::prelude::ReadableExt;
+use std::collections::HashMap;
+use std::str::FromStr;
 /// Extended keyset info with local tracking
 #[derive(Debug, Clone)]
 pub struct KeysetState {
@@ -70,7 +70,10 @@ pub fn get_active_keyset_ids(mint_url: &str) -> Vec<String> {
 }
 /// Get all keyset IDs (active and inactive) for a mint from local cache
 pub fn get_all_keyset_ids(mint_url: &str) -> Vec<String> {
-    get_cached_keysets(mint_url).iter().map(|ks| ks.id.clone()).collect()
+    get_cached_keysets(mint_url)
+        .iter()
+        .map(|ks| ks.id.clone())
+        .collect()
 }
 /// Check if a keyset is active
 pub fn is_keyset_active(mint_url: &str, keyset_id: &str) -> bool {
@@ -84,7 +87,10 @@ pub fn get_proofs_by_keyset(mint_url: &str) -> HashMap<String, Vec<ProofData>> {
     let mut by_keyset: HashMap<String, Vec<ProofData>> = HashMap::new();
     for token in tokens.iter().filter(|t| mint_matches(&t.mint, mint_url)) {
         for proof in &token.proofs {
-            by_keyset.entry(proof.id.clone()).or_default().push(proof.clone());
+            by_keyset
+                .entry(proof.id.clone())
+                .or_default()
+                .push(proof.clone());
         }
     }
     by_keyset
@@ -163,10 +169,7 @@ pub async fn refresh_keysets(mint_url: &str) -> Result<KeysetRefreshResult, Stri
         }
         entry.version += 1;
     }
-    let new_keyset_ids: Vec<String> = fresh_keysets
-        .iter()
-        .map(|k| k.id.to_string())
-        .collect();
+    let new_keyset_ids: Vec<String> = fresh_keysets.iter().map(|k| k.id.to_string()).collect();
     let new_active_ids: Vec<String> = fresh_keysets
         .iter()
         .filter(|k| k.active)
@@ -196,8 +199,10 @@ pub async fn refresh_keysets(mint_url: &str) -> Result<KeysetRefreshResult, Stri
     };
     if !result.rotated_keysets.is_empty() {
         log::warn!(
-            "Detected {} rotated keysets with {} proofs ({} sats) to migrate", result
-            .rotated_keysets.len(), result.proofs_to_migrate, result.value_to_migrate
+            "Detected {} rotated keysets with {} proofs ({} sats) to migrate",
+            result.rotated_keysets.len(),
+            result.proofs_to_migrate,
+            result.value_to_migrate
         );
     }
     if !result.new_keysets.is_empty() {
@@ -209,13 +214,14 @@ pub async fn refresh_keysets(mint_url: &str) -> Result<KeysetRefreshResult, Stri
 ///
 /// This swaps all proofs from rotated/inactive keysets to the current active keyset.
 /// Should be called after detecting keyset rotation to prevent loss of funds.
-pub async fn migrate_inactive_proofs(
-    mint_url: &str,
-) -> Result<KeysetMigrationResult, String> {
+pub async fn migrate_inactive_proofs(mint_url: &str) -> Result<KeysetMigrationResult, String> {
     use super::internal::get_or_create_wallet;
     use super::proofs::proof_data_to_cdk_proof;
     use cdk::amount::SplitTarget;
-    log::info!("Migrating proofs from inactive keysets for mint: {}", mint_url);
+    log::info!(
+        "Migrating proofs from inactive keysets for mint: {}",
+        mint_url
+    );
     let proofs_to_migrate = get_proofs_to_migrate(mint_url);
     if proofs_to_migrate.is_empty() {
         log::info!("No proofs to migrate");
@@ -232,7 +238,8 @@ pub async fn migrate_inactive_proofs(
         .fold(0u64, |acc, amt| acc.saturating_add(amt));
     let proof_count = proofs_to_migrate.len();
     log::info!(
-        "Found {} proofs ({} sats) in inactive keysets to migrate", proof_count,
+        "Found {} proofs ({} sats) in inactive keysets to migrate",
+        proof_count,
         total_value
     );
     let cdk_proofs: Vec<cdk::nuts::Proof> = proofs_to_migrate
@@ -241,7 +248,8 @@ pub async fn migrate_inactive_proofs(
         .collect();
     if cdk_proofs.len() != proof_count {
         log::warn!(
-            "Some proofs failed to convert: {} of {}", proof_count - cdk_proofs.len(),
+            "Some proofs failed to convert: {} of {}",
+            proof_count - cdk_proofs.len(),
             proof_count
         );
     }
@@ -266,7 +274,10 @@ pub async fn migrate_inactive_proofs(
     let fee_paid = total_value.saturating_sub(output_value);
     log::info!(
         "Migration complete: {} proofs ({} sats) migrated to keyset {}, fee: {} sats",
-        proof_count, output_value, active_keyset.id, fee_paid
+        proof_count,
+        output_value,
+        active_keyset.id,
+        fee_paid
     );
     Ok(KeysetMigrationResult {
         proofs_migrated: proof_count,
@@ -285,7 +296,11 @@ pub fn should_migrate(mint_url: &str) -> bool {
 /// Get migration recommendation with details
 pub fn get_migration_recommendation(mint_url: &str) -> Option<(usize, u64)> {
     let (_, inactive_count, _, inactive_value) = count_proofs_by_status(mint_url);
-    if inactive_count > 0 { Some((inactive_count, inactive_value)) } else { None }
+    if inactive_count > 0 {
+        Some((inactive_count, inactive_value))
+    } else {
+        None
+    }
 }
 /// Get the fee per proof (ppk) for a keyset
 pub fn get_keyset_fee_ppk(mint_url: &str, keyset_id: &str) -> Option<u64> {

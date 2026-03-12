@@ -2,12 +2,12 @@
 //!
 //! Handles fetching and publishing NIP-34 Git repository events (Kind 30617).
 #![allow(dead_code)]
-use dioxus::signals::ReadableExt;
-use nostr_sdk::prelude::*;
-use std::time::Duration;
 use crate::stores::code_store::{cache_repo_events, get_cached_repo};
 use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
 use crate::utils::nip34::{decode_repo_naddr, Repository};
+use dioxus::signals::ReadableExt;
+use nostr_sdk::prelude::*;
+use std::time::Duration;
 /// Default timeout for fetching events
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 /// Fetch a repository by its naddr coordinate
@@ -15,8 +15,8 @@ pub async fn fetch_repository(naddr: &str) -> Result<Repository, String> {
     if let Some(repo) = get_cached_repo(naddr) {
         return Ok(repo);
     }
-    let (coordinate, _relay_hints) = decode_repo_naddr(naddr)
-        .map_err(|e| format!("Invalid naddr: {}", e))?;
+    let (coordinate, _relay_hints) =
+        decode_repo_naddr(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
     let filter = Filter::new()
         .kind(Kind::GitRepoAnnouncement)
         .author(coordinate.public_key)
@@ -92,7 +92,17 @@ pub async fn publish_repository(
     topics: &[&str],
 ) -> Result<EventId, String> {
     let topic_tags: Vec<Tag> = topics.iter().map(|t| Tag::hashtag(*t)).collect();
-    publish_repository_with_extras(id, name, description, clone_urls, web_urls, relays, maintainers, &topic_tags).await
+    publish_repository_with_extras(
+        id,
+        name,
+        description,
+        clone_urls,
+        web_urls,
+        relays,
+        maintainers,
+        &topic_tags,
+    )
+    .await
 }
 /// Publish a repository announcement with additional custom tags (zap splits, milestones, etc.)
 #[allow(clippy::too_many_arguments)]
@@ -186,7 +196,12 @@ pub async fn publish_fork(
         .map_err(|e| format!("Failed to build event: {}", e))?
         .tag(Tag::custom(
             TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
-            [orig_id.to_hex(), String::new(), String::new(), "fork".to_string()],
+            [
+                orig_id.to_hex(),
+                String::new(),
+                String::new(),
+                "fork".to_string(),
+            ],
         ));
     let output = client
         .send_event_builder(builder)
@@ -219,6 +234,8 @@ pub async fn delete_repository(coordinate: &Coordinate) -> Result<(), String> {
         coordinate.public_key.to_hex(),
         coordinate.identifier,
     );
-    crate::stores::code_store::CODE_REPOS_CACHE.write().pop(&coord_str);
+    crate::stores::code_store::CODE_REPOS_CACHE
+        .write()
+        .pop(&coord_str);
     Ok(())
 }

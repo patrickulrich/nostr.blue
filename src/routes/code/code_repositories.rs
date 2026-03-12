@@ -18,35 +18,35 @@ pub fn CodeRepositories() -> Element {
     let auth = auth_store::AUTH_STATE.read();
     let pubkey_hex = auth.pubkey.clone().unwrap_or_default();
     let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-    use_effect(
-        use_reactive(
-            &(pubkey_hex, client_initialized),
-            move |(pk, initialized)| {
-                if !initialized {
-                    return;
-                }
-                request_gen.with_mut(|v| *v = v.wrapping_add(1));
-                let captured_gen = *request_gen.peek();
-                repos_result.set(None);
-                spawn(async move {
-                    if pk.is_empty() {
-                        if *request_gen.peek() != captured_gen { return; }
-                        repos_result.set(Some(Err("No public key".to_string())));
-                        return;
-                    }
-                    let result = if let Ok(pubkey) = PublicKey::parse(&pk) {
-                        fetch_user_repositories(&pubkey, 50).await
-                    } else {
-                        Err("Invalid public key".to_string())
-                    };
+    use_effect(use_reactive(
+        &(pubkey_hex, client_initialized),
+        move |(pk, initialized)| {
+            if !initialized {
+                return;
+            }
+            request_gen.with_mut(|v| *v = v.wrapping_add(1));
+            let captured_gen = *request_gen.peek();
+            repos_result.set(None);
+            spawn(async move {
+                if pk.is_empty() {
                     if *request_gen.peek() != captured_gen {
                         return;
                     }
-                    repos_result.set(Some(result));
-                });
-            },
-        ),
-    );
+                    repos_result.set(Some(Err("No public key".to_string())));
+                    return;
+                }
+                let result = if let Ok(pubkey) = PublicKey::parse(&pk) {
+                    fetch_user_repositories(&pubkey, 50).await
+                } else {
+                    Err("Invalid public key".to_string())
+                };
+                if *request_gen.peek() != captured_gen {
+                    return;
+                }
+                repos_result.set(Some(result));
+            });
+        },
+    ));
 
     if !auth.is_authenticated {
         return rsx! {

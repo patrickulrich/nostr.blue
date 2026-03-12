@@ -1,10 +1,10 @@
 use crate::components::citation::card::get_citation_style;
 use crate::components::icons::{self, HashIcon, NostrBlueMiniLogo};
 use crate::routes::Route;
-use crate::stores::social::channel_store::{parse_channel_creation, get_channel_display_info};
 use crate::stores::nostr_music::{NostrPlaylist, NostrTrack};
 use crate::stores::pin_boards_store::Pinboard;
 use crate::stores::publication_store::PublicationIndex;
+use crate::stores::social::channel_store::{get_channel_display_info, parse_channel_creation};
 use crate::utils::article_meta::{get_image, get_summary, get_title};
 use crate::utils::nip34::{Issue, IssueStatus, PullRequest};
 use crate::utils::nip58::BadgeDefinition;
@@ -31,10 +31,18 @@ pub(super) fn render_embedded_article(
             .clone()
             .or_else(|| meta.name.clone())
             .unwrap_or_else(|| {
-                format!("{}...{}", &pubkey_str[..8], &pubkey_str[pubkey_str.len() - 4..])
+                format!(
+                    "{}...{}",
+                    &pubkey_str[..8],
+                    &pubkey_str[pubkey_str.len() - 4..]
+                )
             })
     } else {
-        format!("{}...{}", &pubkey_str[..8], &pubkey_str[pubkey_str.len() - 4..])
+        format!(
+            "{}...{}",
+            &pubkey_str[..8],
+            &pubkey_str[pubkey_str.len() - 4..]
+        )
     };
     let display_summary = if let Some(sum) = summary {
         let char_count = sum.chars().count();
@@ -100,7 +108,11 @@ pub(super) fn render_embedded_article(
 }
 
 /// Render a wiki article minicard with HoverCard preview
-pub(super) fn render_wiki_minicard(wiki: &crate::utils::nip54::WikiArticle, _naddr: &str, _event: &Event) -> Element {
+pub(super) fn render_wiki_minicard(
+    wiki: &crate::utils::nip54::WikiArticle,
+    _naddr: &str,
+    _event: &Event,
+) -> Element {
     let title = wiki.title.clone();
     let identifier = wiki.identifier.clone();
     rsx! {
@@ -148,7 +160,11 @@ pub(super) fn render_product_minicard(product: &Product, naddr: &str, _event: &E
     } else {
         None
     };
-    let image_url = product.images.first().map(|i| i.url.clone()).filter(|u| is_valid_http_url(u));
+    let image_url = product
+        .images
+        .first()
+        .map(|i| i.url.clone())
+        .filter(|u| is_valid_http_url(u));
     let naddr_owned = naddr.to_string();
     rsx! {
         div {
@@ -271,13 +287,11 @@ pub(super) fn render_badge_minicard(badge: &BadgeDefinition, naddr: &str) -> Ele
 pub(super) fn render_track_minicard(track: &NostrTrack, _naddr: &str) -> Element {
     let title = track.title.clone();
     let image = track.image.clone().filter(|u| is_valid_http_url(u));
-    let duration = track
-        .duration
-        .map(|d| {
-            let mins = d / 60;
-            let secs = d % 60;
-            format!("{}:{:02}", mins, secs)
-        });
+    let duration = track.duration.map(|d| {
+        let mins = d / 60;
+        let secs = d % 60;
+        format!("{}:{:02}", mins, secs)
+    });
     rsx! {
         div {
             class: "relative my-2",
@@ -401,7 +415,10 @@ pub(super) fn render_recipe_minicard(
     _event: &Event,
 ) -> Element {
     let title = meta.title.clone();
-    let image_url = meta.primary_image().cloned().filter(|u| is_valid_http_url(u));
+    let image_url = meta
+        .primary_image()
+        .cloned()
+        .filter(|u| is_valid_http_url(u));
     let summary = meta.summary.clone();
     let tags = meta.tags.clone();
     let naddr_owned = naddr.to_string();
@@ -477,7 +494,10 @@ pub(super) fn render_recipe_minicard(
 pub(super) fn render_publication_minicard(pub_index: &PublicationIndex, naddr: &str) -> Element {
     let title = pub_index.title.clone();
     let summary = pub_index.summary.clone();
-    let cover_image = pub_index.cover_image.clone().filter(|u| is_valid_http_url(u));
+    let cover_image = pub_index
+        .cover_image
+        .clone()
+        .filter(|u| is_valid_http_url(u));
     let section_count = pub_index.section_addresses.len();
     let naddr_owned = naddr.to_string();
     rsx! {
@@ -751,11 +771,20 @@ pub(super) fn render_issue_minicard(issue: &Issue) -> Element {
 /// Render a Git PR minicard with HoverCard preview
 pub(super) fn render_pr_minicard(pr: &PullRequest) -> Element {
     let title = if pr.is_cover_letter {
-        pr.content.lines().next().unwrap_or("Pull Request").to_string()
+        pr.content
+            .lines()
+            .next()
+            .unwrap_or("Pull Request")
+            .to_string()
     } else {
         format!(
             "Patch: {}",
-            pr.commit.as_deref().unwrap_or("").chars().take(8).collect::<String>(),
+            pr.commit
+                .as_deref()
+                .unwrap_or("")
+                .chars()
+                .take(8)
+                .collect::<String>(),
         )
     };
     let status = pr.status;

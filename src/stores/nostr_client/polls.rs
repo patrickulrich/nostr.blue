@@ -1,12 +1,12 @@
 //! Polls (kind 1068)
 //!
 //! Functions for creating and voting on polls (NIP-88).
-use dioxus::prelude::ReadableExt;
-use nostr_sdk::prelude::*;
 use super::fetching::{ensure_relays_ready, get_client};
 use super::signals::HAS_SIGNER;
 use super::types::PublishResult;
 use crate::stores::relay;
+use dioxus::prelude::ReadableExt;
+use nostr_sdk::prelude::*;
 /// Get user's public key from cache (no signer call needed)
 ///
 /// This is much faster than calling signer().get_public_key() especially for:
@@ -31,19 +31,19 @@ pub async fn publish_poll_vote_tracked(
         return Err("No signer attached. Cannot publish events.".to_string());
     }
     let referenced_poll_id = match &response {
-        nostr::nips::nip88::PollResponse::SingleChoice { poll_id: ref_id, .. } => ref_id,
-        nostr::nips::nip88::PollResponse::MultipleChoice { poll_id: ref_id, .. } => {
-            ref_id
-        }
+        nostr::nips::nip88::PollResponse::SingleChoice {
+            poll_id: ref_id, ..
+        } => ref_id,
+        nostr::nips::nip88::PollResponse::MultipleChoice {
+            poll_id: ref_id, ..
+        } => ref_id,
     };
     if *referenced_poll_id != poll_id {
-        return Err(
-            format!(
-                "Poll ID mismatch: expected {}, but PollResponse references {}",
-                poll_id.to_hex(),
-                referenced_poll_id.to_hex(),
-            ),
-        );
+        return Err(format!(
+            "Poll ID mismatch: expected {}, but PollResponse references {}",
+            poll_id.to_hex(),
+            referenced_poll_id.to_hex(),
+        ));
     }
     log::info!("Publishing poll vote for poll: {}", poll_id.to_hex());
     let builder = nostr::EventBuilder::poll_response(response);
@@ -58,8 +58,9 @@ pub async fn publish_poll_vote_tracked(
             );
         } else {
             log::debug!(
-                "{}/{} poll relays connected", connected_poll_relays.len(), poll_relays
-                .len()
+                "{}/{} poll relays connected",
+                connected_poll_relays.len(),
+                poll_relays.len()
             );
         }
         let relay_urls: Vec<nostr::Url> = if !connected_poll_relays.is_empty() {
@@ -71,13 +72,14 @@ pub async fn publish_poll_vote_tracked(
             vec![]
         };
         let result = if !relay_urls.is_empty() {
-            log::info!("Publishing vote to {} connected poll relays", relay_urls.len());
+            log::info!(
+                "Publishing vote to {} connected poll relays",
+                relay_urls.len()
+            );
             client
                 .send_event_builder_to(relay_urls, builder)
                 .await
-                .map_err(|e| {
-                    format!("Failed to publish poll vote to poll relays: {}", e)
-                })
+                .map_err(|e| format!("Failed to publish poll vote to poll relays: {}", e))
         } else {
             client
                 .send_event_builder(builder)
@@ -94,8 +96,10 @@ pub async fn publish_poll_vote_tracked(
     };
     let result = PublishResult::from_output(output);
     log::info!(
-        "Poll vote published: {} ({}/{} relays succeeded)", result.event_id, result
-        .success_count(), result.total_attempted()
+        "Poll vote published: {} ({}/{} relays succeeded)",
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
     );
     if result.has_failures() {
         for (relay, error) in &result.failed_relays {
@@ -170,8 +174,9 @@ pub async fn publish_poll_tracked(
             );
         } else {
             log::debug!(
-                "{}/{} poll relays connected", connected_poll_relays.len(), relay_urls
-                .len()
+                "{}/{} poll relays connected",
+                connected_poll_relays.len(),
+                relay_urls.len()
             );
         }
         let result = if !connected_poll_relays.is_empty() {
@@ -183,9 +188,7 @@ pub async fn publish_poll_tracked(
             client
                 .send_event_builder_to(urls, builder)
                 .await
-                .map_err(|e| {
-                    format!("Failed to publish poll to specified relays: {}", e)
-                })
+                .map_err(|e| format!("Failed to publish poll to specified relays: {}", e))
         } else {
             client
                 .send_event_builder(builder)
@@ -202,8 +205,11 @@ pub async fn publish_poll_tracked(
     };
     let result = PublishResult::from_output(output);
     log::info!(
-        "Poll '{}' published: {} ({}/{} relays succeeded)", title, result.event_id,
-        result.success_count(), result.total_attempted()
+        "Poll '{}' published: {} ({}/{} relays succeeded)",
+        title,
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
     );
     if result.has_failures() {
         for (relay, error) in &result.failed_relays {

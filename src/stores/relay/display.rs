@@ -66,26 +66,30 @@ pub async fn get_relay_display_info(client: &Client) -> Vec<RelayDisplayInfo> {
     for (url, relay) in relays {
         let stats = relay.stats();
         let flags = relay.flags();
-        result
-            .push(RelayDisplayInfo {
-                url: url.to_string(),
-                status: relay.status(),
-                bytes_sent: stats.bytes_sent(),
-                bytes_received: stats.bytes_received(),
-                has_read: flags.has_read(),
-                has_write: flags.has_write(),
-                is_gossip: flags.has_gossip(),
-                connection_attempts: stats.attempts(),
-                successful_connections: stats.success(),
-                success_rate: {
-                    let rate = stats.success_rate();
-                    if rate.is_finite() { rate * 100.0 } else { 0.0 }
-                },
-            });
-    }
-    result
-        .sort_by(|a, b| {
-            a.status_order().cmp(&b.status_order()).then_with(|| a.url.cmp(&b.url))
+        result.push(RelayDisplayInfo {
+            url: url.to_string(),
+            status: relay.status(),
+            bytes_sent: stats.bytes_sent(),
+            bytes_received: stats.bytes_received(),
+            has_read: flags.has_read(),
+            has_write: flags.has_write(),
+            is_gossip: flags.has_gossip(),
+            connection_attempts: stats.attempts(),
+            successful_connections: stats.success(),
+            success_rate: {
+                let rate = stats.success_rate();
+                if rate.is_finite() {
+                    rate * 100.0
+                } else {
+                    0.0
+                }
+            },
         });
+    }
+    result.sort_by(|a, b| {
+        a.status_order()
+            .cmp(&b.status_order())
+            .then_with(|| a.url.cmp(&b.url))
+    });
     result
 }

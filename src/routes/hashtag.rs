@@ -1,9 +1,9 @@
-use std::time::Duration;
-use dioxus::prelude::*;
-use nostr_sdk::{Event, Filter, Kind, Timestamp};
 use crate::components::{ClientInitializing, NoteCard};
 use crate::hooks::{use_infinite_scroll, use_mute_block_cache};
 use crate::stores::nostr_client;
+use dioxus::prelude::*;
+use nostr_sdk::{Event, Filter, Kind, Timestamp};
+use std::time::Duration;
 #[component]
 pub fn Hashtag(tag: String) -> Element {
     let mut events = use_signal(Vec::<Event>::new);
@@ -61,11 +61,8 @@ pub fn Hashtag(tag: String) -> Element {
                         loading.set(false);
                         return;
                     }
-                    let existing_ids: std::collections::HashSet<_> = events
-                        .read()
-                        .iter()
-                        .map(|e| e.id)
-                        .collect();
+                    let existing_ids: std::collections::HashSet<_> =
+                        events.read().iter().map(|e| e.id).collect();
                     let current = events.read().clone();
                     let unique_events: Vec<_> = new_events
                         .iter()

@@ -8,20 +8,11 @@ use crate::utils::time::format_relative_time;
 use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 use nostr::Timestamp;
+#[cfg(feature = "web")]
 const MONTH_NAMES: [&str; 12] = [
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
+#[cfg(feature = "web")]
 const WEEKDAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 /// Build route based on event type
 /// - Livestreams (30311) go to /videos/live/:naddr
@@ -71,11 +62,7 @@ fn render_badges(event: &UnifiedEvent) -> Element {
 /// Event Card for grid/list display
 /// `from` parameter indicates source page for back navigation ("events" or "calendar")
 #[component]
-pub fn EventCard(
-    event: UnifiedEvent,
-    #[props(default)]
-    from: Option<String>,
-) -> Element {
+pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>) -> Element {
     let time_display = format_event_time(&event);
     let location_info = get_location_info(&event);
     let rsvp_count = if event.is_calendar_event() {
@@ -84,12 +71,7 @@ pub fn EventCard(
         0
     };
     let all_hashtags = event.hashtags();
-    let hashtags: Vec<(usize, &str)> = all_hashtags
-        .iter()
-        .take(3)
-        .copied()
-        .enumerate()
-        .collect();
+    let hashtags: Vec<(usize, &str)> = all_hashtags.iter().take(3).copied().enumerate().collect();
     let extra_tags = all_hashtags.len().saturating_sub(3);
     let detail_route = get_event_detail_route(&event, from);
     rsx! {
@@ -240,11 +222,7 @@ pub fn EventCard(
 }
 /// Compact Event Card for sidebar/list views
 #[component]
-pub fn EventCardCompact(
-    event: UnifiedEvent,
-    #[props(default)]
-    from: Option<String>,
-) -> Element {
+pub fn EventCardCompact(event: UnifiedEvent, #[props(default)] from: Option<String>) -> Element {
     let time_display = format_event_time_short(&event);
     let detail_route = get_event_detail_route(&event, from);
     rsx! {
@@ -337,24 +315,26 @@ pub fn EventCardCompactSkeleton() -> Element {
     }
 }
 /// Format event time for display
+#[cfg(feature = "web")]
 fn format_event_time(event: &UnifiedEvent) -> String {
-    let ts = event.start_timestamp();
+    const MAX_TIMESTAMP: u64 = 253_402_300_799;
+    let ts = event.start_timestamp().min(MAX_TIMESTAMP);
     if ts == 0 {
         return "TBD".to_string();
     }
     let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
     if event.is_all_day() {
-        let month = date.get_month() as usize;
-        let day = date.get_date();
-        let weekday = date.get_day() as usize;
+        let month = date.get_utc_month() as usize;
+        let day = date.get_utc_date();
+        let weekday = date.get_utc_day() as usize;
         let weekday_name = WEEKDAY_NAMES.get(weekday).unwrap_or(&"");
         let month_name = MONTH_NAMES.get(month).unwrap_or(&"");
         format!("{}, {} {}", weekday_name, month_name, day)
     } else {
-        let month = date.get_month() as usize;
-        let day = date.get_date();
-        let hours = date.get_hours();
-        let minutes = date.get_minutes();
+        let month = date.get_utc_month() as usize;
+        let day = date.get_utc_date();
+        let hours = date.get_utc_hours();
+        let minutes = date.get_utc_minutes();
         let am_pm = if hours >= 12 { "PM" } else { "AM" };
         let hour_12 = if hours == 0 {
             12
@@ -364,25 +344,64 @@ fn format_event_time(event: &UnifiedEvent) -> String {
             hours
         };
         let month_name = MONTH_NAMES.get(month).unwrap_or(&"");
-        format!("{} {} at {}:{:02} {}", month_name, day, hour_12, minutes, am_pm)
+        format!(
+            "{} {} at {}:{:02} {} UTC",
+            month_name, day, hour_12, minutes, am_pm
+        )
     }
 }
-/// Format event time (short version for compact cards)
-fn format_event_time_short(event: &UnifiedEvent) -> String {
+
+#[cfg(not(feature = "web"))]
+fn format_event_time(event: &UnifiedEvent) -> String {
+    use chrono::{TimeZone, Utc};
     let ts = event.start_timestamp();
     if ts == 0 {
         return "TBD".to_string();
     }
-    let now_secs = (js_sys::Date::now() / 1000.0) as u64;
+    const MAX_TIMESTAMP: i64 = 253_402_300_799;
+    let ts_i64 = i64::try_from(ts)
+        .unwrap_or(MAX_TIMESTAMP)
+        .min(MAX_TIMESTAMP);
+    let Some(dt) = Utc.timestamp_opt(ts_i64, 0).single() else {
+        return "TBD".to_string();
+    };
+    if event.is_all_day() {
+        return dt.format("%b %-d").to_string();
+    }
+    dt.format("%b %-d at %-I:%M %p UTC").to_string()
+}
+/// Format event time (short version for compact cards)
+fn format_event_time_short(event: &UnifiedEvent) -> String {
+    const MAX_TIMESTAMP: u64 = 253_402_300_799;
+    let ts = event.start_timestamp().min(MAX_TIMESTAMP);
+    if ts == 0 {
+        return "TBD".to_string();
+    }
+    let now_secs = crate::platform::timestamp::now_secs();
     let diff = ts.abs_diff(now_secs);
     if diff < 7 * 86400 {
         format_relative_time(Timestamp::from(ts))
     } else {
-        let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
-        let month = date.get_month() as usize;
-        let day = date.get_date();
-        let month_str = MONTH_NAMES.get(month).unwrap_or(&"");
-        format!("{} {}", month_str, day)
+        #[cfg(feature = "web")]
+        {
+            let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
+            let month = date.get_utc_month() as usize;
+            let day = date.get_utc_date();
+            let month_str = MONTH_NAMES.get(month).unwrap_or(&"");
+            format!("{} {}", month_str, day)
+        }
+        #[cfg(not(feature = "web"))]
+        {
+            use chrono::{TimeZone, Utc};
+            const MAX_TIMESTAMP: i64 = 253_402_300_799;
+            let ts_i64 = i64::try_from(ts)
+                .unwrap_or(MAX_TIMESTAMP)
+                .min(MAX_TIMESTAMP);
+            let Some(dt) = Utc.timestamp_opt(ts_i64, 0).single() else {
+                return "TBD".to_string();
+            };
+            dt.format("%b %-d").to_string()
+        }
     }
 }
 /// Get location info (location string, is_online flag)
@@ -414,17 +433,19 @@ fn get_event_status(event: &UnifiedEvent) -> EventStatus {
     if event.is_live() {
         return EventStatus::Live;
     }
-    let now_secs = (js_sys::Date::now() / 1000.0) as u64;
+    let now_secs = crate::platform::timestamp::now_secs();
     let start_ts = event.start_timestamp();
     if start_ts == 0 {
         return EventStatus::None;
     }
     if event.is_calendar_event() {
-        let end_ts = event
-            .end_timestamp()
-            .unwrap_or_else(|| {
-                if event.is_all_day() { start_ts + 86400 } else { start_ts }
-            });
+        let end_ts = event.end_timestamp().unwrap_or_else(|| {
+            if event.is_all_day() {
+                start_ts.saturating_add(86400)
+            } else {
+                start_ts
+            }
+        });
         if end_ts <= now_secs {
             EventStatus::Ended
         } else if start_ts > now_secs {

@@ -23,8 +23,8 @@ pub fn format_commit_date(date_str: &str) -> String {
 }
 /// Format a Unix timestamp as relative time (e.g., "2h ago", "3d ago")
 ///
-/// This version takes a raw `u64` timestamp and is WASM-compatible,
-/// using `js_sys::Date::now()` in WASM and `std::time::SystemTime` otherwise.
+/// This version takes a raw `u64` timestamp and is cross-platform,
+/// using `crate::platform::timestamp::now_secs()` for current time.
 ///
 /// # Examples
 /// - Recent: "just now"
@@ -34,13 +34,7 @@ pub fn format_commit_date(date_str: &str) -> String {
 /// - Weeks: "2w ago"
 /// - Months: "3mo ago"
 pub fn format_time_ago(timestamp: u64) -> String {
-    #[cfg(target_family = "wasm")]
-    let now = (js_sys::Date::now() / 1000.0) as u64;
-    #[cfg(not(target_family = "wasm"))]
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let now = crate::platform::timestamp::now_secs();
     let diff = now.saturating_sub(timestamp);
     if diff < 60 {
         "just now".to_string()
@@ -78,7 +72,11 @@ pub fn safe_duration_millis(seconds: f64) -> u32 {
         return 0;
     }
     let millis = seconds * 1000.0;
-    if millis > u32::MAX as f64 { u32::MAX } else { millis as u32 }
+    if millis > u32::MAX as f64 {
+        u32::MAX
+    } else {
+        millis as u32
+    }
 }
 /// Format a timestamp as relative time
 ///
@@ -172,8 +170,7 @@ pub fn format_relative_time(timestamp: Timestamp) -> String {
 /// Format a timestamp as a human-readable date and time
 #[allow(dead_code)]
 pub fn format_datetime(timestamp: Timestamp) -> String {
-    let dt = DateTime::from_timestamp(timestamp.as_secs() as i64, 0)
-        .unwrap_or_else(Utc::now);
+    let dt = DateTime::from_timestamp(timestamp.as_secs() as i64, 0).unwrap_or_else(Utc::now);
     dt.format("%Y-%m-%d %H:%M:%S").to_string()
 }
 /// Calculate end timestamp based on preset or custom time
@@ -198,10 +195,7 @@ pub fn calculate_end_time(preset: &str, custom_time: &str) -> Option<Timestamp> 
             if custom_time.is_empty() {
                 return None;
             }
-            if let Ok(naive_dt) = NaiveDateTime::parse_from_str(
-                custom_time,
-                "%Y-%m-%dT%H:%M",
-            ) {
+            if let Ok(naive_dt) = NaiveDateTime::parse_from_str(custom_time, "%Y-%m-%dT%H:%M") {
                 if let Some(local_dt) = Local.from_local_datetime(&naive_dt).earliest() {
                     let utc_dt = local_dt.with_timezone(&Utc);
                     let timestamp = utc_dt.timestamp();

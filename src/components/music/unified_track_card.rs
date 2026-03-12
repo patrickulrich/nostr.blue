@@ -37,39 +37,36 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
     let artist_pubkey = track.artist_npub.clone();
     let artist_is_empty = track.artist.is_empty();
     let mut artist_name = use_signal(|| track.artist.clone());
-    use_effect(
-        use_reactive(
-            (&artist_pubkey, &artist_is_empty),
-            move |(pubkey_opt, is_empty)| {
-                if let Some(pubkey) = pubkey_opt.clone() {
-                    if is_empty {
-                        spawn(async move {
-                            if let Ok(profile) = profiles::fetch_profile(pubkey).await {
+    let mut artist_lookup_gen = use_signal(|| 0u32);
+    use_effect(use_reactive(
+        (&track.id, &track.artist, &artist_pubkey, &artist_is_empty),
+        move |(track_id, track_artist, pubkey_opt, is_empty)| {
+            let _ = track_id;
+            artist_name.set(track_artist.clone());
+            let gen = artist_lookup_gen.with_mut(|g| {
+                *g = g.wrapping_add(1);
+                *g
+            });
+            if let Some(pubkey) = pubkey_opt.clone() {
+                if is_empty {
+                    spawn(async move {
+                        if let Ok(profile) = profiles::fetch_profile(pubkey).await {
+                            if *artist_lookup_gen.peek() == gen {
                                 artist_name.set(profile.get_display_name());
                             }
-                        });
-                    }
+                        }
+                    });
                 }
-            },
-        ),
-    );
+            }
+        },
+    ));
     let playlist = props.playlist.clone();
     let handle_play = {
         let track = track.clone();
-        let track_id_clone = track_id.clone();
         let playlist = playlist.clone();
         move |_| {
-            let player_state = music_player::MUSIC_PLAYER.read();
-            if let Some(ref current) = player_state.current_track {
-                if current.id == track_id_clone && player_state.is_playing {
-                    drop(player_state);
-                    music_player::toggle_play();
-                    return;
-                }
-            }
-            drop(player_state);
             let playlist_vec = playlist.as_ref().map(|arc| (**arc).clone());
-            music_player::play_track(track.clone(), playlist_vec, None);
+            music_player::play_or_toggle_track(track.clone(), playlist_vec, None);
         }
     };
     let duration_str = track
@@ -80,115 +77,99 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
             format!("{:02}:{:02}", mins, secs)
         })
         .unwrap_or_else(|| "--:--".to_string());
-    let sats_display = track
-        .msat_total
-        .map(|msats| {
-            let sats = msats / 1000;
-            if sats >= 1_000_000 {
-                format!("{}M sats", sats / 1_000_000)
-            } else if sats >= 1_000 {
-                format!("{}K sats", sats / 1_000)
-            } else {
-                format!("{} sats", sats)
-            }
-        });
-    let source_info = match &track.source {
-        TrackSource::Wavlake { .. } => {
-            ("W", "Wavlake", "bg-orange-500/20 text-orange-400")
+    let sats_display = track.msat_total.map(|msats| {
+        let sats = msats / 1000;
+        if sats >= 1_000_000 {
+            format!("{}M sats", sats / 1_000_000)
+        } else if sats >= 1_000 {
+            format!("{}K sats", sats / 1_000)
+        } else {
+            format!("{} sats", sats)
         }
+    });
+    let source_info = match &track.source {
+        TrackSource::Wavlake { .. } => ("W", "Wavlake", "bg-orange-500/20 text-orange-400"),
         TrackSource::Nostr { .. } => ("N", "Nostr", "bg-purple-500/20 text-purple-400"),
         TrackSource::NostrPodcast { .. } => {
             ("P", "Nostr Podcast", "bg-green-500/20 text-green-400")
         }
-        TrackSource::RssPodcast { .. } => {
-            ("R", "RSS Podcast", "bg-green-500/20 text-green-400")
-        }
-        TrackSource::RssMusic { .. } => {
-            ("RSS", "Podcasting 2.0 Music", "bg-orange-500/20 text-orange-400")
-        }
-        TrackSource::Radio { .. } => {
-            ("LIVE", "Internet Radio", "bg-red-500/20 text-red-400")
-        }
+        TrackSource::RssPodcast { .. } => ("R", "RSS Podcast", "bg-green-500/20 text-green-400"),
+        TrackSource::RssMusic { .. } => (
+            "RSS",
+            "Podcasting 2.0 Music",
+            "bg-orange-500/20 text-orange-400",
+        ),
+        TrackSource::Radio { .. } => ("LIVE", "Internet Radio", "bg-red-500/20 text-red-400"),
     };
     let artwork_url = track
         .album_art_url
         .clone()
-        .unwrap_or_else(|| {
-            "https://api.dicebear.com/7.x/shapes/svg?seed=music".to_string()
-        });
+        .unwrap_or_else(|| "https://api.dicebear.com/7.x/shapes/svg?seed=music".to_string());
     let (share_url, share_content_type) = match &track.source {
-        TrackSource::Wavlake { .. } => {
-            (format!("https://wavlake.com/track/{}", track.id), ContentType::MusicTrack)
-        }
-        TrackSource::Nostr { coordinate, .. } => {
-            (
-                format!("https://nostr.blue/music/track/{}", coordinate),
-                ContentType::MusicTrack,
-            )
-        }
-        TrackSource::NostrPodcast { coordinate, .. } => {
-            (
-                format!("https://nostr.blue/podcast/episode/{}", coordinate),
-                ContentType::PodcastEpisode,
-            )
-        }
-        TrackSource::RssPodcast { feed_url, episode_guid, .. } => {
-            (
-                format!(
-                    "https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
-                    urlencoding::encode(feed_url),
-                    urlencoding::encode(episode_guid),
-                ),
-                ContentType::PodcastEpisode,
-            )
-        }
-        TrackSource::RssMusic { feed_id, episode_id, .. } => {
-            (
-                format!(
-                    "https://nostr.blue/music/rss/album/{}#track-{}",
-                    feed_id,
-                    episode_id,
-                ),
-                ContentType::MusicTrack,
-            )
-        }
-        TrackSource::Radio { d_tag, .. } => {
-            (
-                format!("https://nostr.blue/radio/{}", urlencoding::encode(d_tag)),
-                ContentType::MusicTrack,
-            )
-        }
+        TrackSource::Wavlake { .. } => (
+            format!("https://wavlake.com/track/{}", track.id),
+            ContentType::MusicTrack,
+        ),
+        TrackSource::Nostr { coordinate, .. } => (
+            format!("https://nostr.blue/music/track/{}", coordinate),
+            ContentType::MusicTrack,
+        ),
+        TrackSource::NostrPodcast { coordinate, .. } => (
+            format!("https://nostr.blue/podcast/episode/{}", coordinate),
+            ContentType::PodcastEpisode,
+        ),
+        TrackSource::RssPodcast {
+            feed_url,
+            episode_guid,
+            ..
+        } => (
+            format!(
+                "https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
+                urlencoding::encode(feed_url),
+                urlencoding::encode(episode_guid),
+            ),
+            ContentType::PodcastEpisode,
+        ),
+        TrackSource::RssMusic {
+            feed_id,
+            episode_id,
+            ..
+        } => (
+            format!(
+                "https://nostr.blue/music/rss/album/{}#track-{}",
+                feed_id, episode_id,
+            ),
+            ContentType::MusicTrack,
+        ),
+        TrackSource::Radio { d_tag, .. } => (
+            format!("https://nostr.blue/radio/{}", urlencoding::encode(d_tag)),
+            ContentType::MusicTrack,
+        ),
     };
     let artist_route = match &track.source {
-        TrackSource::Wavlake { artist_id, .. } => {
-            Route::MusicArtist {
-                artist_id: artist_id.clone(),
-            }
+        TrackSource::Wavlake { artist_id, .. } => Some(Route::MusicArtist {
+            artist_id: artist_id.clone(),
+        }),
+        TrackSource::Nostr { pubkey, .. } => Some(Route::MusicArtist {
+            artist_id: pubkey.clone(),
+        }),
+        TrackSource::NostrPodcast { pubkey, .. } => Some(Route::Profile {
+            pubkey: pubkey.clone(),
+        }),
+        TrackSource::RssPodcast { podcast_id, .. } => {
+            podcast_id.map(|id| Route::PodcastRssFeedDetail {
+                podcast_id: id.to_string(),
+            })
         }
-        TrackSource::Nostr { pubkey, .. } => {
-            Route::MusicArtist {
-                artist_id: pubkey.clone(),
-            }
-        }
-        TrackSource::NostrPodcast { pubkey, .. } => {
-            Route::Profile {
-                pubkey: pubkey.clone(),
-            }
-        }
-        TrackSource::RssPodcast { .. } => Route::Home { list: String::new() },
-        TrackSource::RssMusic { feed_id, .. } => {
-            Route::MusicRssAlbum {
-                feed_id: *feed_id,
-            }
-        }
-        TrackSource::Radio { pubkey, .. } => {
-            Route::Profile {
-                pubkey: pubkey.clone(),
-            }
-        }
+        TrackSource::RssMusic { feed_id, .. } => Some(Route::MusicRssAlbum { feed_id: *feed_id }),
+        TrackSource::Radio { pubkey, .. } => Some(Route::Profile {
+            pubkey: pubkey.clone(),
+        }),
     };
     rsx! {
-        div { class: "flex items-center gap-3 p-3 hover:bg-muted/50 rounded-lg transition group",
+        div {
+            class: "flex items-center gap-3 p-3 hover:bg-muted/50 rounded-lg transition group cursor-pointer",
+            onclick: handle_play,
             div { class: "relative shrink-0",
                 img {
                     src: "{artwork_url}",
@@ -205,7 +186,6 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
                 }
                 button {
                     class: "absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition rounded",
-                    onclick: handle_play,
                     dangerous_inner_html: if *is_playing.read() { icons::PAUSE } else { icons::PLAY },
                 }
             }
@@ -239,11 +219,15 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
                     }
                 }
                 div { class: "text-xs text-muted-foreground truncate",
-                    Link {
-                        to: artist_route.clone(),
-                        class: "hover:text-foreground hover:underline",
-                        onclick: move |e: Event<MouseData>| e.stop_propagation(),
-                        "{artist_name}"
+                    if let Some(route) = artist_route.clone() {
+                        Link {
+                            to: route,
+                            class: "hover:text-foreground hover:underline",
+                            onclick: move |e: Event<MouseData>| e.stop_propagation(),
+                            "{artist_name}"
+                        }
+                    } else {
+                        span { "{artist_name}" }
                     }
                 }
                 if props.show_album {

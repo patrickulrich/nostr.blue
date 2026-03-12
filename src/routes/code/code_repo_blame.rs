@@ -7,8 +7,7 @@ use crate::components::code::split_path;
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::git_hosting::{
-    fetch_repository,
-    file_fetcher,
+    fetch_repository, file_fetcher,
     git_service::extract_github_info,
     github_import::{fetch_file_commits, GitHubCommit},
 };
@@ -31,13 +30,11 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: Vec<String>) -> Eleme
     let mut repo_signal = use_signal(|| None::<Repository>);
     let mut github_info = use_signal(|| None::<(String, String)>);
     let path_parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    let filename = path
-        .rsplit('/')
-        .next()
-        .unwrap_or(&path)
-        .to_string();
+    let filename = path.rsplit('/').next().unwrap_or(&path).to_string();
     let mut gen = use_signal(|| 0u32);
-    use_effect(use_reactive((&naddr, &git_ref, &path), move |(naddr, git_ref, path)| {
+    use_effect(use_reactive(
+        (&naddr, &git_ref, &path),
+        move |(naddr, git_ref, path)| {
             let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
             if !client_initialized {
                 return;
@@ -57,20 +54,23 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: Vec<String>) -> Eleme
                 let repo = match fetch_repository(&naddr).await {
                     Ok(r) => r,
                     Err(e) => {
-                        if *gen.read() != current_gen { return; }
+                        if *gen.read() != current_gen {
+                            return;
+                        }
                         error.set(Some(format!("Repository not found: {}", e)));
                         loading.set(false);
                         return;
                     }
                 };
-                if *gen.read() != current_gen { return; }
+                if *gen.read() != current_gen {
+                    return;
+                }
                 repo_signal.set(Some(repo.clone()));
                 let gh_info = extract_github_info(&repo);
                 github_info.set(gh_info.clone());
                 if gh_info.is_none() {
                     error.set(Some(
-                        "Blame view is only available for GitHub-hosted repositories."
-                            .to_string(),
+                        "Blame view is only available for GitHub-hosted repositories.".to_string(),
                     ));
                     loading.set(false);
                     return;
@@ -87,7 +87,9 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: Vec<String>) -> Eleme
                         fetch_file_commits(&owner, &repo_name, &path, &git_ref, 30);
                     futures::join!(file_future, commits_future)
                 };
-                if *gen.read() != current_gen { return; }
+                if *gen.read() != current_gen {
+                    return;
+                }
                 match file_result {
                     Ok(content) => file_content.set(content),
                     Err(e) => {
@@ -105,7 +107,8 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: Vec<String>) -> Eleme
                 }
                 loading.set(false);
             });
-    }));
+        },
+    ));
     let github_blame_url = {
         let gh = github_info();
         let dp = path.clone();
@@ -116,7 +119,10 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: Vec<String>) -> Eleme
                 urlencoding::encode(&owner),
                 urlencoding::encode(&repo_name),
                 urlencoding::encode(&gr),
-                dp.split('/').map(|seg| urlencoding::encode(seg)).collect::<Vec<_>>().join("/")
+                dp.split('/')
+                    .map(|seg| urlencoding::encode(seg))
+                    .collect::<Vec<_>>()
+                    .join("/")
             )
         })
     };
@@ -347,7 +353,11 @@ fn BlameFileContent(content: String, filename: String) -> Element {
     let all_lines: Vec<&str> = content.lines().collect();
     let line_count = all_lines.len();
     let truncated = line_count > MAX_BLAME_DISPLAY_LINES;
-    let lines: Vec<&str> = if truncated { all_lines[..MAX_BLAME_DISPLAY_LINES].to_vec() } else { all_lines };
+    let lines: Vec<&str> = if truncated {
+        all_lines[..MAX_BLAME_DISPLAY_LINES].to_vec()
+    } else {
+        all_lines
+    };
     let gutter_width = if line_count >= 1000 {
         "w-16"
     } else if line_count >= 100 {

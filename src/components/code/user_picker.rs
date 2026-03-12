@@ -2,13 +2,15 @@
 //!
 //! Reusable autocomplete for selecting Nostr users by name, npub, or hex pubkey.
 //! Used by repo settings, zap distribution, and issue assignees.
-use std::collections::HashSet;
+use crate::services::search::profile_search::{
+    search_cached_profiles, search_profiles, ProfileSearchResult,
+};
+use crate::stores::profiles::PROFILE_CACHE;
+use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use dioxus_core::Task;
 use nostr_sdk::prelude::PublicKey;
-use crate::services::search::profile_search::{search_cached_profiles, search_profiles, ProfileSearchResult};
-use crate::stores::profiles::PROFILE_CACHE;
-use crate::utils::truncate_pubkey;
+use std::collections::HashSet;
 
 /// Reusable Nostr user picker with autocomplete
 #[component]
@@ -24,6 +26,9 @@ pub fn NostrUserPicker(
     /// Priority pubkeys shown first (e.g., repo contributors)
     #[props(default = Vec::new())]
     priority_pubkeys: Vec<String>,
+    /// Disable all interactions
+    #[props(default = false)]
+    disabled: bool,
     /// Callback when selection changes
     on_change: EventHandler<Vec<String>>,
 ) -> Element {
@@ -33,10 +38,14 @@ pub fn NostrUserPicker(
     let mut show_dropdown = use_signal(|| false);
     let mut is_searching = use_signal(|| false);
     let mut search_task = use_signal(|| None::<Task>);
+    let mut blur_hide_task = use_signal(|| None::<Task>);
 
     let at_max = max_selections > 0 && selected.read().len() >= max_selections;
 
     let mut do_select = move |pubkey: String| {
+        if disabled {
+            return;
+        }
         if max_selections > 0 && selected.read().len() >= max_selections {
             return;
         }
@@ -50,6 +59,12 @@ pub fn NostrUserPicker(
 
     // Handle search input
     let handle_input = move |evt: Event<FormData>| {
+        if disabled {
+            return;
+        }
+        if let Some(task) = blur_hide_task.take() {
+            task.cancel();
+        }
         let val = evt.value();
         query.set(val.clone());
         selected_index.set(0);
@@ -110,7 +125,9 @@ pub fn NostrUserPicker(
         filtered.sort_by(|a, b| {
             let a_pri = priority_set.contains(a.pubkey.to_hex().as_str());
             let b_pri = priority_set.contains(b.pubkey.to_hex().as_str());
-            b_pri.cmp(&a_pri).then_with(|| b.relevance.cmp(&a.relevance))
+            b_pri
+                .cmp(&a_pri)
+                .then_with(|| b.relevance.cmp(&a.relevance))
         });
         results.set(filtered);
         show_dropdown.set(true);
@@ -135,7 +152,7 @@ pub fn NostrUserPicker(
             let priority_snapshot = priority_pubkeys.clone();
             is_searching.set(true);
             let new_task = spawn(async move {
-                gloo_timers::future::TimeoutFuture::new(300).await;
+                crate::platform::timer::sleep_ms(300).await;
                 match search_profiles(&query_snapshot, 8, true).await {
                     Ok(relay_results) => {
                         if *query.peek() == query_snapshot {
@@ -144,11 +161,14 @@ pub fn NostrUserPicker(
                                 .into_iter()
                                 .filter(|r| !selected_snapshot.contains(&r.pubkey.to_hex()))
                                 .collect();
-                            let priority_set: HashSet<&str> = priority_snapshot.iter().map(|s| s.as_str()).collect();
+                            let priority_set: HashSet<&str> =
+                                priority_snapshot.iter().map(|s| s.as_str()).collect();
                             filtered.sort_by(|a, b| {
                                 let a_pri = priority_set.contains(a.pubkey.to_hex().as_str());
                                 let b_pri = priority_set.contains(b.pubkey.to_hex().as_str());
-                                b_pri.cmp(&a_pri).then_with(|| b.relevance.cmp(&a.relevance))
+                                b_pri
+                                    .cmp(&a_pri)
+                                    .then_with(|| b.relevance.cmp(&a.relevance))
                             });
                             results.set(filtered);
                             selected_index.set(0);
@@ -168,6 +188,9 @@ pub fn NostrUserPicker(
 
     // Handle keyboard navigation
     let handle_keydown = move |evt: Event<KeyboardData>| {
+        if disabled {
+            return;
+        }
         if !*show_dropdown.read() {
             return;
         }
@@ -217,6 +240,9 @@ pub fn NostrUserPicker(
                             on_remove: {
                                 let pubkey = pubkey.clone();
                                 move |_| {
+                                    if disabled {
+                                        return;
+                                    }
                                     let mut current = selected.read().clone();
                                     current.retain(|p| p != &pubkey);
                                     selected.set(current.clone());
@@ -231,17 +257,41 @@ pub fn NostrUserPicker(
             if !at_max {
                 div { class: "relative",
                     input {
-                        class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
+                        class: if disabled {
+                            "w-full px-3 py-2 bg-muted rounded-lg text-sm opacity-50 cursor-not-allowed"
+                        } else {
+                            "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary"
+                        },
                         r#type: "text",
                         placeholder: "{placeholder}",
                         value: "{query}",
+                        disabled: disabled,
                         oninput: handle_input,
                         onkeydown: handle_keydown,
+                        onfocus: move |_| {
+                            if disabled {
+                                return;
+                            }
+                            if let Some(task) = blur_hide_task.take() {
+                                task.cancel();
+                            }
+                            if !query.read().trim().is_empty() && (!results.read().is_empty() || *is_searching.read()) {
+                                show_dropdown.set(true);
+                            }
+                        },
                         onfocusout: move |_| {
-                            spawn(async move {
-                                gloo_timers::future::TimeoutFuture::new(200).await;
+                            if disabled {
+                                return;
+                            }
+                            if let Some(task) = blur_hide_task.take() {
+                                task.cancel();
+                            }
+                            let task = spawn(async move {
+                                crate::platform::timer::sleep_ms(200).await;
                                 show_dropdown.set(false);
+                                blur_hide_task.set(None);
                             });
+                            blur_hide_task.set(Some(task));
                         },
                     }
                     // Dropdown
@@ -269,6 +319,9 @@ pub fn NostrUserPicker(
                                             onmousedown: {
                                                 let hex = hex.clone();
                                                 move |evt: MouseEvent| {
+                                                    if disabled {
+                                                        return;
+                                                    }
                                                     evt.prevent_default();
                                                     do_select(hex.clone());
                                                     query.set(String::new());
