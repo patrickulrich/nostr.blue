@@ -157,9 +157,7 @@ fn parse_discoverable_pack(event: &nostr_sdk::Event) -> Option<DiscoverableEmoji
     })
 }
 
-fn parse_emoji_collection(
-    event: &nostr_sdk::Event,
-) -> (Vec<CustomEmoji>, Vec<EmojiPackReference>) {
+fn parse_emoji_collection(event: &nostr_sdk::Event) -> (Vec<CustomEmoji>, Vec<EmojiPackReference>) {
     let mut custom_emojis = Vec::new();
     let mut emoji_pack_refs = Vec::new();
 
@@ -233,8 +231,11 @@ async fn load_latest_event(
     filter: Filter,
     label: &str,
 ) -> Option<nostr_sdk::Event> {
-    match crate::stores::nostr_client::fetch_events_aggregated(filter.clone(), Duration::from_secs(5))
-        .await
+    match crate::stores::nostr_client::fetch_events_aggregated(
+        filter.clone(),
+        Duration::from_secs(5),
+    )
+    .await
     {
         Ok(events) if !events.is_empty() => {
             log::info!("Loaded {} {} event(s) from fetch path", events.len(), label);
@@ -242,7 +243,11 @@ async fn load_latest_event(
         }
         Ok(_) => {}
         Err(e) => {
-            log::warn!("Failed to fetch {} from relays: {}, falling back to DB", label, e);
+            log::warn!(
+                "Failed to fetch {} from relays: {}, falling back to DB",
+                label,
+                e
+            );
         }
     }
 
@@ -422,18 +427,16 @@ pub async fn fetch_discoverable_emoji_packs(limit: usize) -> std::result::Result
     *DISCOVERABLE_EMOJI_PACKS_LOADING.write() = true;
 
     let filter = Filter::new().kind(Kind::EmojiSet).limit(limit);
-    let events = match crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(10),
-    )
-    .await
-    {
-        Ok(events) => events,
-        Err(e) => {
-            *DISCOVERABLE_EMOJI_PACKS_LOADING.write() = false;
-            return Err(e);
-        }
-    };
+    let events =
+        match crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await
+        {
+            Ok(events) => events,
+            Err(e) => {
+                *DISCOVERABLE_EMOJI_PACKS_LOADING.write() = false;
+                return Err(e);
+            }
+        };
 
     let mut seen = HashSet::new();
     let mut packs: Vec<DiscoverableEmojiPack> = events

@@ -3,7 +3,7 @@ use crate::components::{EmojiPicker, RichContent};
 use crate::routes::Route;
 use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
 use crate::stores::profiles;
-use crate::utils::custom_emoji::EmojiSelection;
+use crate::utils::custom_emoji::{build_custom_emoji_tags, EmojiSelection};
 use crate::utils::profile_prefetch;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
@@ -60,6 +60,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
         (&stream_author_pubkey, &stream_d_tag),
         move |(author, dtag)| {
             let tag = format!("30311:{}:{}", author, dtag);
+            let realtime_since = Timestamp::now();
             let current_gen = request_gen.peek().wrapping_add(1);
             request_gen.set(current_gen);
             messages.set(Vec::new());
@@ -108,7 +109,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
                             nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::A),
                             tag.as_str(),
                         )
-                        .since(Timestamp::now())
+                        .since(realtime_since)
                         .limit(0);
 
                     match client.subscribe(realtime_filter, None).await {
@@ -166,6 +167,12 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
         },
     ));
     let mut is_first_load = use_signal(|| true);
+    use_effect(use_reactive(
+        (&stream_author_pubkey, &stream_d_tag),
+        move |_| {
+            is_first_load.set(true);
+        },
+    ));
     use_effect(move || {
         let msg_count = messages.read().len();
         let container_id = chat_id_for_auto_scroll.clone();
@@ -212,7 +219,9 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
             match get_client() {
                 Some(client) => {
                     let tag = Tag::custom(TagKind::a(), vec![tag_clone.clone()]);
-                    let builder = EventBuilder::new(Kind::from(1311), content.clone()).tag(tag);
+                    let builder = EventBuilder::new(Kind::from(1311), content.clone())
+                        .tag(tag)
+                        .tags(build_custom_emoji_tags(&content));
                     // Sign first to get the full event
                     match client.sign_event_builder(builder).await {
                         Ok(event) => {

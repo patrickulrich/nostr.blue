@@ -113,6 +113,9 @@ pub fn ZapDistribution(
     let mut selected_pubkeys = use_signal(|| initial_defaults.clone());
     let mut last_auto_synced_defaults = use_signal(|| initial_defaults.clone());
     use_effect(move || {
+        if *is_sending.read() {
+            return;
+        }
         let new_defaults = deduped_splits
             .read()
             .iter()
@@ -439,6 +442,7 @@ pub fn ZapDistribution(
                                         } else {
                                             "px-3 py-1.5 text-sm rounded-lg bg-muted hover:bg-accent transition"
                                         },
+                                        disabled: *is_sending.read(),
                                         onclick: move |_| {
                                             total_amount.set(amt_val);
                                             custom_amount.set(String::new());
@@ -454,6 +458,7 @@ pub fn ZapDistribution(
                         r#type: "number",
                         placeholder: "Custom amount...",
                         value: "{custom_amount}",
+                        disabled: *is_sending.read(),
                         oninput: move |e| {
                             let val = e.value();
                             custom_amount.set(val.clone());
@@ -559,6 +564,7 @@ pub fn ZapDistribution(
                         selected: selected_pubkeys,
                         placeholder: "Search or paste npub...".to_string(),
                         max_selections: 0,
+                        disabled: *is_sending.read(),
                         // NostrUserPicker mutates `selected_pubkeys` signal directly;
                         // the use_effect above reacts to changes. on_change is a no-op placeholder.
                         on_change: move |_new: Vec<String>| {},

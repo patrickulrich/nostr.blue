@@ -95,7 +95,11 @@ pub fn build_custom_emoji_tags(content: &str) -> Vec<Tag> {
         };
 
         let Ok(url) = Url::parse(url_str) else {
-            log::warn!("Skipping invalid custom emoji URL for shortcode {}: {}", shortcode, url_str);
+            log::warn!(
+                "Skipping invalid custom emoji URL for shortcode {}: {}",
+                shortcode,
+                url_str
+            );
             continue;
         };
 

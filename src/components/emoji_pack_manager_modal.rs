@@ -16,6 +16,7 @@ pub struct EmojiPackManagerModalProps {
 pub fn EmojiPackManagerModal(props: EmojiPackManagerModalProps) -> Element {
     let mut search_query = use_signal(String::new);
     let mut pending_coordinate = use_signal(|| None::<String>);
+    let mut pending_any_toggle = use_signal(|| false);
     let mut error_message = use_signal(|| None::<String>);
 
     let installed_sets = EMOJI_SETS.read();
@@ -76,7 +77,12 @@ pub fn EmojiPackManagerModal(props: EmojiPackManagerModalProps) -> Element {
             }
 
             pack.name.to_lowercase().contains(&query)
-                || pack.about.clone().unwrap_or_default().to_lowercase().contains(&query)
+                || pack
+                    .about
+                    .clone()
+                    .unwrap_or_default()
+                    .to_lowercase()
+                    .contains(&query)
                 || pack.author.to_lowercase().contains(&query)
                 || pack
                     .emojis
@@ -140,6 +146,7 @@ pub fn EmojiPackManagerModal(props: EmojiPackManagerModalProps) -> Element {
                                         {
                                             let coordinate = format!("30030:{}:{}", set.author, set.identifier);
                                             let is_pending = pending_coordinate.read().as_ref() == Some(&coordinate);
+                                            let any_pending = *pending_any_toggle.read();
                                             let display_name = set.name.clone().unwrap_or_else(|| set.identifier.clone());
                                             let emoji_count = set.emojis.len();
                                             let preview = set.emojis.iter().take(18).cloned().collect::<Vec<_>>();
@@ -182,11 +189,12 @@ pub fn EmojiPackManagerModal(props: EmojiPackManagerModalProps) -> Element {
                                                     if is_authenticated {
                                                         button {
                                                             class: "w-full rounded-xl border border-border px-4 py-2 text-sm font-medium hover:bg-accent transition disabled:opacity-50",
-                                                            disabled: is_pending,
+                                                            disabled: any_pending,
                                                             onclick: {
                                                                 let coordinate = coordinate.clone();
                                                                 move |_| {
                                                                     let pack_coordinate = coordinate.clone();
+                                                                    pending_any_toggle.set(true);
                                                                     pending_coordinate.set(Some(pack_coordinate.clone()));
                                                                     error_message.set(None);
                                                                     spawn(async move {
@@ -195,6 +203,7 @@ pub fn EmojiPackManagerModal(props: EmojiPackManagerModalProps) -> Element {
                                                                             error_message.set(Some(e));
                                                                         }
                                                                         pending_coordinate.set(None);
+                                                                        pending_any_toggle.set(false);
                                                                     });
                                                                 }
                                                             },
@@ -232,6 +241,7 @@ pub fn EmojiPackManagerModal(props: EmojiPackManagerModalProps) -> Element {
                                         {
                                             let coordinate = pack.coordinate.clone();
                                             let is_pending = pending_coordinate.read().as_ref() == Some(&coordinate);
+                                            let any_pending = *pending_any_toggle.read();
                                             let emoji_count = pack.emojis.len();
                                             let preview = pack.emojis.iter().take(18).cloned().collect::<Vec<_>>();
                                             let picture = pack.picture.clone();
@@ -275,11 +285,12 @@ pub fn EmojiPackManagerModal(props: EmojiPackManagerModalProps) -> Element {
                                                     if is_authenticated {
                                                         button {
                                                             class: "w-full rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition disabled:opacity-50",
-                                                            disabled: is_pending,
+                                                            disabled: any_pending,
                                                             onclick: {
                                                                 let coordinate = coordinate.clone();
                                                                 move |_| {
                                                                     let pack_coordinate = coordinate.clone();
+                                                                    pending_any_toggle.set(true);
                                                                     pending_coordinate.set(Some(pack_coordinate.clone()));
                                                                     error_message.set(None);
                                                                     spawn(async move {
@@ -288,6 +299,7 @@ pub fn EmojiPackManagerModal(props: EmojiPackManagerModalProps) -> Element {
                                                                             error_message.set(Some(e));
                                                                         }
                                                                         pending_coordinate.set(None);
+                                                                        pending_any_toggle.set(false);
                                                                     });
                                                                 }
                                                             },

@@ -26,6 +26,9 @@ pub fn NostrUserPicker(
     /// Priority pubkeys shown first (e.g., repo contributors)
     #[props(default = Vec::new())]
     priority_pubkeys: Vec<String>,
+    /// Disable all interactions
+    #[props(default = false)]
+    disabled: bool,
     /// Callback when selection changes
     on_change: EventHandler<Vec<String>>,
 ) -> Element {
@@ -40,6 +43,9 @@ pub fn NostrUserPicker(
     let at_max = max_selections > 0 && selected.read().len() >= max_selections;
 
     let mut do_select = move |pubkey: String| {
+        if disabled {
+            return;
+        }
         if max_selections > 0 && selected.read().len() >= max_selections {
             return;
         }
@@ -53,6 +59,9 @@ pub fn NostrUserPicker(
 
     // Handle search input
     let handle_input = move |evt: Event<FormData>| {
+        if disabled {
+            return;
+        }
         if let Some(task) = blur_hide_task.take() {
             task.cancel();
         }
@@ -179,6 +188,9 @@ pub fn NostrUserPicker(
 
     // Handle keyboard navigation
     let handle_keydown = move |evt: Event<KeyboardData>| {
+        if disabled {
+            return;
+        }
         if !*show_dropdown.read() {
             return;
         }
@@ -228,6 +240,9 @@ pub fn NostrUserPicker(
                             on_remove: {
                                 let pubkey = pubkey.clone();
                                 move |_| {
+                                    if disabled {
+                                        return;
+                                    }
                                     let mut current = selected.read().clone();
                                     current.retain(|p| p != &pubkey);
                                     selected.set(current.clone());
@@ -242,13 +257,21 @@ pub fn NostrUserPicker(
             if !at_max {
                 div { class: "relative",
                     input {
-                        class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
+                        class: if disabled {
+                            "w-full px-3 py-2 bg-muted rounded-lg text-sm opacity-50 cursor-not-allowed"
+                        } else {
+                            "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary"
+                        },
                         r#type: "text",
                         placeholder: "{placeholder}",
                         value: "{query}",
+                        disabled: disabled,
                         oninput: handle_input,
                         onkeydown: handle_keydown,
                         onfocus: move |_| {
+                            if disabled {
+                                return;
+                            }
                             if let Some(task) = blur_hide_task.take() {
                                 task.cancel();
                             }
@@ -257,6 +280,9 @@ pub fn NostrUserPicker(
                             }
                         },
                         onfocusout: move |_| {
+                            if disabled {
+                                return;
+                            }
                             if let Some(task) = blur_hide_task.take() {
                                 task.cancel();
                             }
@@ -293,6 +319,9 @@ pub fn NostrUserPicker(
                                             onmousedown: {
                                                 let hex = hex.clone();
                                                 move |evt: MouseEvent| {
+                                                    if disabled {
+                                                        return;
+                                                    }
                                                     evt.prevent_default();
                                                     do_select(hex.clone());
                                                     query.set(String::new());

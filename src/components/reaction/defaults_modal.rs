@@ -78,8 +78,12 @@ pub fn ReactionDefaultsModal(props: ReactionDefaultsModalProps) -> Element {
             return;
         }
         let reaction = match emoji {
-            EmojiSelection::Custom { shortcode, url, .. } => PreferredReaction::Custom { shortcode, url },
-            EmojiSelection::Native { emoji } => PreferredReaction::Standard { emoji: emoji.trim().to_string() },
+            EmojiSelection::Custom { shortcode, url, .. } => {
+                PreferredReaction::Custom { shortcode, url }
+            }
+            EmojiSelection::Native { emoji } => PreferredReaction::Standard {
+                emoji: emoji.trim().to_string(),
+            },
         };
         if !is_duplicate_reaction(&local_reactions.read(), &reaction) {
             local_reactions.write().push(reaction);

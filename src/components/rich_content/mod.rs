@@ -25,8 +25,8 @@ use nostr_blue_renderers::{
 
 use crate::components::CashuTokenCard;
 use crate::routes::Route;
-use crate::utils::custom_emoji::render_custom_emoji_text;
 use crate::utils::content_parser::{parse_content, ContentToken};
+use crate::utils::custom_emoji::render_custom_emoji_text;
 use dioxus::prelude::*;
 use nostr_sdk::Tag;
 use std::collections::HashMap;

@@ -89,6 +89,7 @@ pub fn ChannelChat(channel_id: String) -> Element {
 
             messages.write().clear();
             channel_info.set(None);
+            relay_url_for_send.set(None);
             loading.set(true);
 
             let (event_id, relay_hints) = match decode_channel_id(&cid) {

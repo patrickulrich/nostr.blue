@@ -10,9 +10,9 @@ use std::fmt;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 
+use nostr::secp256k1::schnorr::Signature;
 use nostr::signer::{NostrSigner, SignerBackend, SignerError};
 use nostr::{Event, PublicKey, UnsignedEvent};
-use nostr::secp256k1::schnorr::Signature;
 
 const SIGN_EVENT_REJECTED: &str = "NIP-55 signer rejected sign_event or not pre-approved";
 const APPROVAL_POLL_INTERVAL: Duration = Duration::from_millis(500);
@@ -431,8 +431,11 @@ impl Nip55Signer {
                             ..
                         } => {
                             if let Some(event_json) = event {
-                                let event =
-                                    Self::validate_signed_event(&unsigned, &event_json, current_user)?;
+                                let event = Self::validate_signed_event(
+                                    &unsigned,
+                                    &event_json,
+                                    current_user,
+                                )?;
                                 serde_json::to_string(&event).map_err(SignerError::backend)
                             } else if let Some(signature) = result {
                                 let event = Self::validate_signature_result(unsigned, &signature)?;
@@ -518,10 +521,7 @@ impl NostrSigner for Nip55Signer {
             };
 
             Self::launch_foreground_operation(&package, &operation).map_err(|e| {
-                SignerError::from(format!(
-                    "{} (kind {}): {}",
-                    SIGN_EVENT_REJECTED, kind, e
-                ))
+                SignerError::from(format!("{} (kind {}): {}", SIGN_EVENT_REJECTED, kind, e))
             })?;
 
             let signed_json = self.wait_for_foreground_operation(operation).await?;

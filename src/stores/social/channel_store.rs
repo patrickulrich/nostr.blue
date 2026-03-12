@@ -16,6 +16,7 @@ use std::num::NonZeroUsize;
 use std::time::Duration;
 
 use crate::stores::nostr_client::{fetch_events_aggregated, get_client};
+use crate::utils::custom_emoji::build_custom_emoji_tags;
 
 const CHANNEL_CACHE_SIZE: usize = 100;
 
@@ -341,7 +342,8 @@ pub async fn send_channel_message(
     content: &str,
 ) -> std::result::Result<Event, String> {
     let client = get_client().ok_or("Client not initialized")?;
-    let builder = EventBuilder::channel_msg(channel_id, relay_url, content);
+    let builder = EventBuilder::channel_msg(channel_id, relay_url, content)
+        .tags(build_custom_emoji_tags(content));
     let event = client
         .sign_event_builder(builder)
         .await

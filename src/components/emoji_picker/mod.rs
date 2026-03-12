@@ -97,6 +97,13 @@ fn resolve_recent_selection(entry: &str) -> Option<EmojiSelection> {
     None
 }
 
+fn emoji_selection_shortcode(selection: &EmojiSelection) -> String {
+    match selection {
+        EmojiSelection::Native { emoji } => emoji.clone(),
+        EmojiSelection::Custom { shortcode, .. } => shortcode.clone(),
+    }
+}
+
 fn custom_result_rank(shortcode: &str, query: &str) -> i32 {
     if shortcode == query {
         0
@@ -305,13 +312,13 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                 }
                                 for set in emoji_sets.data().read().iter() {
                                     {
-                                        let identifier = set.identifier.clone();
+                                        let coordinate = format!("30030:{}:{}", set.author, set.identifier);
                                         let display_name = set.name.clone().unwrap_or_else(|| set.identifier.clone());
                                         rsx! {
                                             button {
-                                                key: "set-{identifier}",
-                                                class: if *selected_category.read() == EmojiCategory::Set(identifier.clone()) { "px-2 py-1 bg-accent text-foreground rounded text-xs font-medium whitespace-nowrap" } else { "px-2 py-1 text-muted-foreground hover:bg-accent rounded text-xs whitespace-nowrap" },
-                                                onclick: move |_| selected_category.set(EmojiCategory::Set(identifier.clone())),
+                                                key: "set-{coordinate}",
+                                                class: if *selected_category.read() == EmojiCategory::Set(coordinate.clone()) { "px-2 py-1 bg-accent text-foreground rounded text-xs font-medium whitespace-nowrap" } else { "px-2 py-1 text-muted-foreground hover:bg-accent rounded text-xs whitespace-nowrap" },
+                                                onclick: move |_| selected_category.set(EmojiCategory::Set(coordinate.clone())),
                                                 "📦 {display_name}"
                                             }
                                         }
@@ -361,7 +368,9 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                     let shortcode_value = shortcode.clone();
                                                     let url_value = url.clone();
                                                     let title = format!(":{shortcode_value}:");
-                                                    let has_error = !is_valid_http_url(url) || failed_images.read().contains(url);
+                                                    let invalid_url = !is_valid_http_url(url);
+                                                    let transient_failed = failed_images.read().contains(url);
+                                                    let has_error = invalid_url || transient_failed;
                                                     let pack_ref = pack_coordinate.clone();
                                                     rsx! {
                                                         button {
@@ -369,6 +378,9 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                             class: "hover:bg-accent rounded p-2 transition flex items-center justify-center",
                                                             title: "{title}",
                                                             onclick: move |_| {
+                                                                if invalid_url {
+                                                                    return;
+                                                                }
                                                                 emit_selection(EmojiSelection::Custom {
                                                                     shortcode: shortcode_value.clone(),
                                                                     url: url_value.clone(),
@@ -402,12 +414,16 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                 match selected_category.read().clone() {
                                     EmojiCategory::Recent => rsx! {
                                         div { class: "grid grid-cols-5 sm:grid-cols-6 gap-2",
-                                            for (emoji_idx, emoji) in recent_emojis.iter().enumerate() {
-                                                if let Some(selection) = resolve_recent_selection(emoji) {
+                                            for (emoji_idx, (entry, selection)) in recent_emojis
+                                                .iter()
+                                                .filter_map(|emoji| resolve_recent_selection(emoji).map(|selection| (emoji.clone(), selection)))
+                                                .enumerate()
+                                            {
+                                                {
                                                     {
-                                                        let entry = emoji.clone();
                                                         let selection_for_click = selection.clone();
                                                         let has_error = is_valid_http_url(&entry) && failed_images.read().contains(&entry);
+                                                        let fallback_text = emoji_selection_shortcode(&selection);
                                                         rsx! {
                                                             button {
                                                                 key: "recent-{emoji_idx}",
@@ -415,7 +431,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                                 onclick: move |_| emit_selection(selection_for_click.clone()),
                                                                 if is_valid_http_url(&entry) {
                                                                     if has_error {
-                                                                        span { class: "text-xs text-muted-foreground", ":{emoji_idx}:" }
+                                                                        span { class: "text-xs text-muted-foreground", ":{fallback_text}:" }
                                                                     } else {
                                                                         img {
                                                                             src: "{entry}",
@@ -438,7 +454,10 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                     }
                                                 }
                                             }
-                                            if recent_emojis.is_empty() {
+                                            if recent_emojis
+                                                .iter()
+                                                .all(|emoji| resolve_recent_selection(emoji).is_none())
+                                            {
                                                 p { class: "col-span-full text-center text-muted-foreground text-sm py-4",
                                                     "No recent emojis yet. Select some emojis to see them here!"
                                                 }
@@ -452,13 +471,18 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                     let shortcode_value = shortcode.clone();
                                                     let url_value = url.clone();
                                                     let pack_ref = pack_coordinate.clone();
-                                                    let has_error = !is_valid_http_url(url) || failed_images.read().contains(url);
+                                                    let invalid_url = !is_valid_http_url(url);
+                                                    let transient_failed = failed_images.read().contains(url);
+                                                    let has_error = invalid_url || transient_failed;
                                                     rsx! {
                                                         button {
                                                             key: "custom-{index}",
                                                             class: "hover:bg-accent rounded p-2 transition flex items-center justify-center",
                                                             title: ":{shortcode_value}:",
                                                             onclick: move |_| {
+                                                                if invalid_url {
+                                                                    return;
+                                                                }
                                                                 emit_selection(EmojiSelection::Custom {
                                                                     shortcode: shortcode_value.clone(),
                                                                     url: url_value.clone(),
@@ -487,10 +511,10 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                             }
                                         }
                                     },
-                                    EmojiCategory::Set(identifier) => {
+                                    EmojiCategory::Set(coordinate) => {
                                         let sets_data = emoji_sets.data();
                                         let sets_guard = sets_data.read();
-                                        let set = sets_guard.iter().find(|s| s.identifier == identifier);
+                                        let set = sets_guard.iter().find(|s| format!("30030:{}:{}", s.author, s.identifier) == coordinate);
                                         rsx! {
                                             div { class: "grid grid-cols-4 sm:grid-cols-5 gap-2",
                                                 if let Some(set) = set {
@@ -499,13 +523,18 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                             let shortcode = custom_emoji.shortcode.clone();
                                                             let url = custom_emoji.image_url.clone();
                                                             let pack_coordinate = Some(format!("30030:{}:{}", set.author, set.identifier));
-                                                            let has_error = !is_valid_http_url(&url) || failed_images.read().contains(&url);
+                                                            let invalid_url = !is_valid_http_url(&url);
+                                                            let transient_failed = failed_images.read().contains(&url);
+                                                            let has_error = invalid_url || transient_failed;
                                                             rsx! {
                                                                 button {
-                                                                    key: "set-{identifier}-{index}",
+                                                                    key: "set-{coordinate}-{index}",
                                                                     class: "hover:bg-accent rounded p-2 transition flex items-center justify-center",
                                                                     title: ":{shortcode}:",
                                                                     onclick: move |_| {
+                                                                        if invalid_url {
+                                                                            return;
+                                                                        }
                                                                         emit_selection(EmojiSelection::Custom {
                                                                             shortcode: shortcode.clone(),
                                                                             url: url.clone(),
