@@ -2,10 +2,10 @@
 //!
 //! A toolbar with buttons for common markdown formatting operations.
 //! Uses dioxus-primitives Toolbar for accessibility (keyboard navigation, roving focus).
-use dioxus::prelude::*;
-use dioxus_primitives::toolbar::{Toolbar, ToolbarButton, ToolbarSeparator};
 #[cfg(feature = "web")]
 use crate::utils::text::utf16_to_utf8_index;
+use dioxus::prelude::*;
+use dioxus_primitives::toolbar::{Toolbar, ToolbarButton, ToolbarSeparator};
 /// Type of markdown formatting to apply
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MarkdownFormat {

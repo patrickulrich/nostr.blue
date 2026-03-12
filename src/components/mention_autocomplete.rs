@@ -1,8 +1,8 @@
 use crate::services::profile_search::{
     get_contact_pubkeys, search_cached_profiles, search_profiles, ProfileSearchResult,
 };
-use crate::utils::text::utf16_to_utf8_index;
 use crate::utils::is_valid_http_url;
+use crate::utils::text::utf16_to_utf8_index;
 use dioxus::prelude::Event as DioxusEvent;
 use dioxus::prelude::*;
 use dioxus_core::Task;

@@ -33,6 +33,41 @@ enum PaymentStatus {
     Timeout(String),
 }
 
+fn compute_allocations(
+    weight_map: &std::collections::HashMap<String, u64>,
+    pubkeys: &[String],
+    amount: u64,
+) -> Vec<(String, u64, u64)> {
+    let weights: Vec<u64> = pubkeys
+        .iter()
+        .map(|pk| weight_map.get(pk).copied().unwrap_or(1))
+        .collect();
+    let total_weight: u64 = weights.iter().sum();
+    if total_weight == 0 || pubkeys.is_empty() {
+        return pubkeys.iter().map(|pk| (pk.clone(), 0, 0)).collect();
+    }
+    let mut floors: Vec<u64> = weights
+        .iter()
+        .map(|w| ((amount as u128) * (*w as u128) / (total_weight as u128)) as u64)
+        .collect();
+    let allocated: u64 = floors.iter().sum();
+    let remainder = amount.saturating_sub(allocated) as usize;
+    let mut remainders: Vec<(usize, u128)> = weights
+        .iter()
+        .enumerate()
+        .map(|(i, w)| (i, (amount as u128) * (*w as u128) % (total_weight as u128)))
+        .collect();
+    remainders.sort_by(|a, b| b.1.cmp(&a.1));
+    for &(i, _) in remainders.iter().take(remainder) {
+        floors[i] += 1;
+    }
+    pubkeys
+        .iter()
+        .enumerate()
+        .map(|(i, pk)| (pk.clone(), weights[i], floors[i]))
+        .collect()
+}
+
 /// Zap distribution modal for splitting payments across contributors
 #[component]
 pub fn ZapDistribution(
@@ -55,47 +90,36 @@ pub fn ZapDistribution(
     let mut timed_out_pubkeys = use_signal(HashSet::<String>::new);
 
     // Deduplicate zap_splits by pubkey, summing weights for duplicates
-    let deduped_splits: Vec<(String, u64)> = {
+    let deduped_splits = use_memo(use_reactive((&zap_splits,), |(splits,)| {
         let mut deduped = Vec::<(String, u64)>::new();
         let mut indices = std::collections::HashMap::<String, usize>::new();
-        for (pk, _, w) in &zap_splits {
-            if let Some(idx) = indices.get(pk).copied() {
-                deduped[idx].1 = deduped[idx].1.saturating_add(*w as u64);
+        for (pk, _, w) in splits {
+            if let Some(idx) = indices.get(&pk).copied() {
+                deduped[idx].1 = deduped[idx].1.saturating_add(w as u64);
             } else {
                 indices.insert(pk.clone(), deduped.len());
-                deduped.push((pk.clone(), *w as u64));
+                deduped.push((pk.clone(), w as u64));
             }
         }
         deduped
-    };
+    }));
+    let initial_defaults = deduped_splits
+        .read()
+        .iter()
+        .map(|(pk, _)| pk.clone())
+        .collect::<Vec<String>>();
 
     // Manage selected pubkeys for the user picker
-    let mut selected_pubkeys = use_signal({
-        let deduped_splits = deduped_splits.clone();
-        move || {
-            deduped_splits
-                .iter()
-                .map(|(pk, _)| pk.clone())
-                .collect::<Vec<String>>()
-        }
-    });
-    let mut last_auto_synced_defaults = use_signal({
-        let deduped_splits = deduped_splits.clone();
-        move || {
-            deduped_splits
-                .iter()
-                .map(|(pk, _)| pk.clone())
-                .collect::<Vec<String>>()
-        }
-    });
-    let deduped_splits_for_effect = deduped_splits.clone();
+    let mut selected_pubkeys = use_signal(|| initial_defaults.clone());
+    let mut last_auto_synced_defaults = use_signal(|| initial_defaults.clone());
     use_effect(move || {
-        let new_defaults = deduped_splits_for_effect
+        let new_defaults = deduped_splits
+            .read()
             .iter()
             .map(|(pk, _)| pk.clone())
             .collect::<Vec<String>>();
-        let previous_defaults = last_auto_synced_defaults.peek().clone();
-        let current_selection = selected_pubkeys.peek().clone();
+        let previous_defaults = last_auto_synced_defaults.read().clone();
+        let current_selection = selected_pubkeys.read().clone();
         let merged = if current_selection == previous_defaults {
             new_defaults.clone()
         } else {
@@ -121,47 +145,13 @@ pub fn ZapDistribution(
             }
             merged
         };
-        last_auto_synced_defaults.set(new_defaults);
-        selected_pubkeys.set(merged);
-    });
-
-    // Pure allocation: largest-remainder method to avoid rounding loss
-    let compute_allocations = {
-        let weight_map: std::collections::HashMap<String, u64> =
-            deduped_splits.iter().cloned().collect();
-        move |pubkeys: &[String], amount: u64| -> Vec<(String, u64, u64)> {
-            let weights: Vec<u64> = pubkeys
-                .iter()
-                .map(|pk| weight_map.get(pk).copied().unwrap_or(1))
-                .collect();
-            let total_weight: u64 = weights.iter().sum();
-            if total_weight == 0 || pubkeys.is_empty() {
-                return pubkeys.iter().map(|pk| (pk.clone(), 0, 0)).collect();
-            }
-            // Compute exact shares using integer arithmetic to avoid f64 precision loss
-            let mut floors: Vec<u64> = weights
-                .iter()
-                .map(|w| ((amount as u128) * (*w as u128) / (total_weight as u128)) as u64)
-                .collect();
-            let allocated: u64 = floors.iter().sum();
-            let remainder = amount.saturating_sub(allocated) as usize;
-            // Distribute remainder to entries with largest fractional parts (by remainder of integer division)
-            let mut remainders: Vec<(usize, u128)> = weights
-                .iter()
-                .enumerate()
-                .map(|(i, w)| (i, (amount as u128) * (*w as u128) % (total_weight as u128)))
-                .collect();
-            remainders.sort_by(|a, b| b.1.cmp(&a.1));
-            for &(i, _) in remainders.iter().take(remainder) {
-                floors[i] += 1;
-            }
-            pubkeys
-                .iter()
-                .enumerate()
-                .map(|(i, pk)| (pk.clone(), weights[i], floors[i]))
-                .collect()
+        if previous_defaults != new_defaults {
+            last_auto_synced_defaults.set(new_defaults);
         }
-    };
+        if current_selection != merged {
+            selected_pubkeys.set(merged);
+        }
+    });
 
     // Recalculate when amount or selection changes
     use_effect(move || {
@@ -170,7 +160,9 @@ pub fn ZapDistribution(
         }
         let amount = *total_amount.read();
         let pubkeys = selected_pubkeys.read().clone();
-        let allocations = compute_allocations(&pubkeys, amount);
+        let weight_map: std::collections::HashMap<String, u64> =
+            deduped_splits.read().iter().cloned().collect();
+        let allocations = compute_allocations(&weight_map, &pubkeys, amount);
         let current = recipients.peek().clone();
         recipients.set(
             allocations
@@ -206,10 +198,9 @@ pub fn ZapDistribution(
         if *is_sending.peek() {
             return;
         }
-        // Resolve lud16 from profile cache at send time
         let recips = recipients.read().clone();
         let timed_out = timed_out_pubkeys.peek().clone();
-        let sendable: Vec<(ZapRecipient, String)> = recips
+        let eligible_base: Vec<ZapRecipient> = recips
             .into_iter()
             .filter(|r| {
                 r.amount > 0
@@ -217,20 +208,67 @@ pub fn ZapDistribution(
                     && !matches!(r.status, PaymentStatus::Timeout(_))
                     && !timed_out.contains(&r.pubkey)
             })
-            .filter_map(|r| {
-                let lud16 = PROFILE_CACHE
-                    .read()
-                    .peek(&r.pubkey)
-                    .and_then(|p| p.lud16.clone())?;
-                Some((r, lud16))
-            })
             .collect();
-        if sendable.is_empty() {
+        if eligible_base.is_empty() {
             toast.warning(
                 "No recipients eligible for sending".to_string(),
                 ToastOptions::new(),
             );
             return;
+        }
+        let mut eligible_with_lud16 = Vec::<(ZapRecipient, String)>::new();
+        for recip in eligible_base {
+            let lud16 = PROFILE_CACHE
+                .read()
+                .peek(&recip.pubkey)
+                .and_then(|p| p.lud16.clone());
+            match lud16 {
+                Some(addr) => eligible_with_lud16.push((recip, addr)),
+                None => {
+                    toast.error(
+                        "One or more selected recipients do not have a Lightning address"
+                            .to_string(),
+                        ToastOptions::new(),
+                    );
+                    return;
+                }
+            }
+        }
+        let eligible_pubkeys = eligible_with_lud16
+            .iter()
+            .map(|(recip, _)| recip.pubkey.clone())
+            .collect::<Vec<_>>();
+        let send_amount = eligible_with_lud16
+            .iter()
+            .map(|(recip, _)| recip.amount)
+            .sum::<u64>();
+        let weight_map: std::collections::HashMap<String, u64> =
+            deduped_splits.read().iter().cloned().collect();
+        let reallocated = compute_allocations(&weight_map, &eligible_pubkeys, send_amount);
+        let amount_map = reallocated
+            .into_iter()
+            .map(|(pubkey, _, amount)| (pubkey, amount))
+            .collect::<std::collections::HashMap<_, _>>();
+        let sendable: Vec<(ZapRecipient, String)> = eligible_with_lud16
+            .into_iter()
+            .map(|(mut recip, lud16)| {
+                if let Some(amount) = amount_map.get(&recip.pubkey).copied() {
+                    recip.amount = amount;
+                }
+                (recip, lud16)
+            })
+            .collect();
+        {
+            let sendable_amounts = sendable
+                .iter()
+                .map(|(recip, _)| (recip.pubkey.clone(), recip.amount))
+                .collect::<std::collections::HashMap<_, _>>();
+            let mut current = recipients.write();
+            for recip in current.iter_mut() {
+                if let Some(amount) = sendable_amounts.get(&recip.pubkey).copied() {
+                    recip.amount = amount;
+                }
+            }
         }
         is_sending.set(true);
         send_progress.set(0);

@@ -4,6 +4,7 @@ mod sidebar_icons;
 use nav_link::NavLink;
 use sidebar_icons::render_sidebar_icon;
 pub mod about;
+pub mod ai_chat;
 pub mod articles;
 pub mod badges;
 pub mod bible;
@@ -53,6 +54,7 @@ pub mod voice;
 pub mod webbookmarks;
 pub mod wiki;
 use about::About;
+use ai_chat::AIChat;
 use articles::{
     ArticleDetail, ArticleNew, Articles, PublicationDetail, PublicationNew, PublicationSearch,
     PublicationsHome,
@@ -458,6 +460,8 @@ pub enum Route {
     BibleSearch {},
     #[route("/highlights")]
     Highlights {},
+    #[route("/ai-chat")]
+    AIChat {},
     #[route("/settings")]
     Settings {},
     #[route("/settings/blocklist")]
@@ -551,6 +555,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::BlossomPage {}
         | Route::BibleHome {}
         | Route::Highlights {}
+        | Route::AIChat {}
         | Route::Settings {}
         | Route::WebBookmarks {} => None,
         Route::Search { .. }

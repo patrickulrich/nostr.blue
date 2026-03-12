@@ -126,7 +126,9 @@ async fn run_native_setup(
                 state.error.set(Some(err_msg.to_string()));
                 state.playback_blocked.set(false);
             } else if result == "cancelled" {
-                state.error.set(Some("Stream setup was cancelled".to_string()));
+                state
+                    .error
+                    .set(Some("Stream setup was cancelled".to_string()));
                 state.playback_blocked.set(false);
             } else if result == "blocked" {
                 state.error.set(None);
@@ -141,7 +143,9 @@ async fn run_native_setup(
             if !*state.mounted.peek() || *state.init_gen.peek() != gen {
                 return;
             }
-            state.error.set(Some(format!("Failed to setup stream: {:?}", e)));
+            state
+                .error
+                .set(Some(format!("Failed to setup stream: {:?}", e)));
             state.loading.set(false);
         }
     }

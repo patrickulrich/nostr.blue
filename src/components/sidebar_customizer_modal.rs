@@ -2,8 +2,8 @@
 //! Supports drag-to-reorder with visual page boundary dividers
 use crate::components::icons::{
     self as icons, BellIcon, BookOpenIcon, BookmarkIcon, CameraIcon, CompassIcon, HomeIcon,
-    MailIcon, MessageCircleIcon, PinIcon, SettingsIcon, ShoppingBagIcon, UserIcon, UsersIcon,
-    VideoIcon,
+    MailIcon, MessageCircleIcon, PinIcon, SettingsIcon, ShoppingBagIcon, SparklesIcon, UserIcon,
+    UsersIcon, VideoIcon,
 };
 use crate::stores::sidebar_store::{
     default_sidebar_items, save_sidebar_preferences, SidebarItem, DEFAULT_MAIN_SIDEBAR_SLOTS,
@@ -1002,6 +1002,11 @@ fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                     path { d: "m9 11-6 6v3h9l3-3" }
                     path { d: "m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4" }
                 }
+            }
+        }
+        SidebarItem::AIChat => {
+            rsx! {
+                SparklesIcon { class: class.to_string() }
             }
         }
     }

@@ -484,10 +484,18 @@ pub fn ContentShareModal(
                             label { class: "text-sm font-medium", "Compose your note" }
                             textarea {
                                 id: "{textarea_id}",
-                                class: "w-full min-h-[120px] p-3 bg-background border border-border rounded-lg resize-none focus:outline-hidden focus:ring-2 focus:ring-primary",
+                                class: if *is_publishing.read() {
+                                    "w-full min-h-[120px] p-3 bg-muted border border-border rounded-lg resize-none cursor-not-allowed opacity-70"
+                                } else {
+                                    "w-full min-h-[120px] p-3 bg-background border border-border rounded-lg resize-none focus:outline-hidden focus:ring-2 focus:ring-primary"
+                                },
                                 placeholder: "{content_type.post_placeholder()}",
                                 value: "{nostr_text}",
+                                disabled: *is_publishing.read(),
                                 oninput: move |e| {
+                                    if *is_publishing.read() {
+                                        return;
+                                    }
                                     nostr_text.set(e.value().clone());
                                     nostr_error.set(None);
                                     if let Some(pos) = get_cursor_position(&textarea_id.read(), &e.value()) {
@@ -496,6 +504,9 @@ pub fn ContentShareModal(
                                     }
                                 },
                                 onclick: move |_| {
+                                    if *is_publishing.read() {
+                                        return;
+                                    }
                                     let text = nostr_text.read();
                                     if let Some(pos) = get_cursor_position(&textarea_id.read(), &text) {
                                         let utf8_pos = utf16_to_utf8_index(&text, pos);
@@ -503,6 +514,9 @@ pub fn ContentShareModal(
                                     }
                                 },
                                 onkeyup: move |_| {
+                                    if *is_publishing.read() {
+                                        return;
+                                    }
                                     let text = nostr_text.read();
                                     if let Some(pos) = get_cursor_position(&textarea_id.read(), &text) {
                                         let utf8_pos = utf16_to_utf8_index(&text, pos);
@@ -524,8 +538,16 @@ pub fn ContentShareModal(
                                             let verse_title = title.clone();
                                             rsx! {
                                                 button {
-                                                    class: "px-3 py-1.5 text-sm border border-border rounded-md hover:bg-accent transition flex items-center gap-1",
+                                                    class: if *is_publishing.read() {
+                                                        "px-3 py-1.5 text-sm border border-border rounded-md opacity-50 cursor-not-allowed flex items-center gap-1"
+                                                    } else {
+                                                        "px-3 py-1.5 text-sm border border-border rounded-md hover:bg-accent transition flex items-center gap-1"
+                                                    },
+                                                    disabled: *is_publishing.read(),
                                                     onclick: move |_| {
+                                                        if *is_publishing.read() {
+                                                            return;
+                                                        }
                                                         let mut current = nostr_text.read().clone();
                                                         if !current.is_empty() {
                                                             current.push_str("\n\n");
@@ -546,10 +568,18 @@ pub fn ContentShareModal(
                                     }
                                 }
                                 button {
-                                    class: "px-3 py-1.5 text-sm border border-border rounded-md hover:bg-accent transition flex items-center gap-1",
+                                    class: if *is_publishing.read() {
+                                        "px-3 py-1.5 text-sm border border-border rounded-md opacity-50 cursor-not-allowed flex items-center gap-1"
+                                    } else {
+                                        "px-3 py-1.5 text-sm border border-border rounded-md hover:bg-accent transition flex items-center gap-1"
+                                    },
+                                    disabled: *is_publishing.read(),
                                     onclick: {
                                         let url_for_button = url.clone();
                                         move |_| {
+                                            if *is_publishing.read() {
+                                                return;
+                                            }
                                             let mut current = nostr_text.read().clone();
                                             if !current.is_empty() {
                                                 current.push(' ');
@@ -566,10 +596,19 @@ pub fn ContentShareModal(
                             div { class: "flex items-center gap-2",
                                 if cfg!(feature = "web") {
                                     button {
-                                        class: if *show_image_uploader.read() { "p-2 rounded-full bg-primary text-primary-foreground transition" } else { "p-2 rounded-full hover:bg-accent transition" },
+                                        class: if *is_publishing.read() {
+                                            "p-2 rounded-full opacity-50 cursor-not-allowed"
+                                        } else if *show_image_uploader.read() {
+                                            "p-2 rounded-full bg-primary text-primary-foreground transition"
+                                        } else {
+                                            "p-2 rounded-full hover:bg-accent transition"
+                                        },
                                         title: "Add media",
                                         aria_label: "Add media",
                                         onclick: move |_| {
+                                            if *is_publishing.read() {
+                                                return;
+                                            }
                                             let current = *show_image_uploader.read();
                                             show_image_uploader.set(!current);
                                         },
@@ -587,10 +626,19 @@ pub fn ContentShareModal(
                                         }
                                     }
                                     button {
-                                        class: "p-2 rounded-full hover:bg-accent transition",
+                                        class: if *is_publishing.read() {
+                                            "p-2 rounded-full opacity-50 cursor-not-allowed"
+                                        } else {
+                                            "p-2 rounded-full hover:bg-accent transition"
+                                        },
                                         title: "Create poll",
                                         aria_label: "Create poll",
-                                        onclick: move |_| show_poll_modal.set(true),
+                                        onclick: move |_| {
+                                            if *is_publishing.read() {
+                                                return;
+                                            }
+                                            show_poll_modal.set(true);
+                                        },
                                         disabled: *is_publishing.read(),
                                         BarChartIcon { class: "w-5 h-5" }
                                     }

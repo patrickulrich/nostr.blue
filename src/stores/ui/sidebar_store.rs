@@ -82,6 +82,7 @@ pub enum SidebarItem {
     Blossom,
     Bible,
     Highlights,
+    AIChat,
 }
 impl SidebarItem {
     /// Returns true if this item requires authentication
@@ -104,6 +105,7 @@ impl SidebarItem {
                 | SidebarItem::Badges
                 | SidebarItem::Citations
                 | SidebarItem::Blossom
+                | SidebarItem::AIChat
         )
     }
     /// Items temporarily hidden from sidebar and customizer.
@@ -154,6 +156,7 @@ impl SidebarItem {
             SidebarItem::Blossom => "Blossom",
             SidebarItem::Bible => "Bible",
             SidebarItem::Highlights => "Highlights",
+            SidebarItem::AIChat => "AI Chat",
         }
     }
     /// Returns the Route for this sidebar item
@@ -204,6 +207,7 @@ impl SidebarItem {
             SidebarItem::Blossom => Some(Route::BlossomPage {}),
             SidebarItem::Bible => Some(Route::BibleHome {}),
             SidebarItem::Highlights => Some(Route::Highlights {}),
+            SidebarItem::AIChat => Some(Route::AIChat {}),
         }
     }
 }
@@ -307,6 +311,7 @@ pub fn default_sidebar_items() -> Vec<SidebarItem> {
         SidebarItem::Blossom,
         SidebarItem::Bible,
         SidebarItem::Highlights,
+        SidebarItem::AIChat,
     ]
 }
 /// Global state for sidebar items

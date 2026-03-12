@@ -363,10 +363,11 @@ pub fn PRReviewSection(
                             return;
                         }
                         let mut current = reviews.write();
-                        if let Some(r) = current
-                            .iter_mut()
-                            .find(|r| r.pubkey == saved_pubkey && r.event_id.is_empty())
-                        {
+                        if let Some(r) = current.iter_mut().find(|r| {
+                            r.pubkey == saved_pubkey
+                                && r.content == saved_content
+                                && r.event_id.is_empty()
+                        }) {
                             r.event_id = event_id;
                         }
                         drop(current);

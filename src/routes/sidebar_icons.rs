@@ -205,5 +205,10 @@ pub(super) fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 crate::components::icons::HighlighterIcon { class: class.to_string() }
             }
         }
+        SidebarItem::AIChat => {
+            rsx! {
+                crate::components::icons::SparklesIcon { class: class.to_string() }
+            }
+        }
     }
 }
