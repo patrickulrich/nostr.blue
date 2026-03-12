@@ -177,6 +177,9 @@ pub fn ContentShareModal(
         }
     };
     let handle_image_uploaded = move |url: String| {
+        if *is_publishing.read() {
+            return;
+        }
         insert_with_spacing(url);
     };
     let handle_emoji_selected = move |emoji: String| {
@@ -227,6 +230,9 @@ pub fn ContentShareModal(
         }
     };
     let handle_share_to_nostr = move |_| {
+        if *is_publishing.read() {
+            return;
+        }
         if !*HAS_SIGNER.read() {
             log::error!("Attempted to share to Nostr without a signer");
             nostr_error.set(Some(
@@ -271,6 +277,9 @@ pub fn ContentShareModal(
         let url_dm = url.clone();
         let content_type_dm = content_type;
         move |_| {
+            if *is_publishing.read() {
+                return;
+            }
             // Guard: check signer availability before proceeding
             if !*HAS_SIGNER.read() {
                 log::error!("Attempted to send DM without a signer");

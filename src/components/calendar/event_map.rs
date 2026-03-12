@@ -571,36 +571,14 @@ pub fn EventMap(props: EventMapProps) -> Element {
             if *map_initialized.read()
                 && !*loading_geo.read()
                 && events_count > 0
-                && (geocode_error_message.read().is_some() || geocoded_events.read().is_empty())
+                && geocoded_events.read().is_empty()
+                && geocode_error_message.read().is_some()
             {
                 div { class: "absolute inset-0 flex items-center justify-center bg-background/80",
                     div { class: "text-center p-4",
                         if let Some(message) = geocode_error_message.read().as_ref() {
-                            if geocoded_events.read().is_empty() {
-                                svg {
-                                    class: "w-12 h-12 mx-auto text-amber-500 mb-2",
-                                    xmlns: "http://www.w3.org/2000/svg",
-                                    fill: "none",
-                                    view_box: "0 0 24 24",
-                                    stroke: "currentColor",
-                                    stroke_width: "1.5",
-                                    path {
-                                        stroke_linecap: "round",
-                                        stroke_linejoin: "round",
-                                        d: "M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z",
-                                    }
-                                }
-                                p { class: "text-sm font-medium text-foreground", "Map data is temporarily incomplete" }
-                                p { class: "mt-1 text-sm text-muted-foreground", "{message}" }
-                            } else {
-                                div { class: "rounded-md border border-amber-500/30 bg-background/95 px-3 py-2 shadow-sm",
-                                    p { class: "text-xs font-medium text-amber-600 dark:text-amber-400", "Some event locations could not be mapped" }
-                                    p { class: "mt-1 max-w-sm text-xs text-muted-foreground", "{message}" }
-                                }
-                            }
-                        } else if geocoded_events.read().is_empty() {
                             svg {
-                                class: "w-12 h-12 mx-auto text-muted-foreground mb-2",
+                                class: "w-12 h-12 mx-auto text-amber-500 mb-2",
                                 xmlns: "http://www.w3.org/2000/svg",
                                 fill: "none",
                                 view_box: "0 0 24 24",
@@ -609,16 +587,54 @@ pub fn EventMap(props: EventMapProps) -> Element {
                                 path {
                                     stroke_linecap: "round",
                                     stroke_linejoin: "round",
-                                    d: "M15 10.5a3 3 0 11-6 0 3 3 0 016 0z",
-                                }
-                                path {
-                                    stroke_linecap: "round",
-                                    stroke_linejoin: "round",
-                                    d: "M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z",
+                                    d: "M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z",
                                 }
                             }
-                            p { class: "text-muted-foreground", "No events with physical locations found" }
+                            p { class: "text-sm font-medium text-foreground", "Map data is temporarily incomplete" }
+                            p { class: "mt-1 text-sm text-muted-foreground", "{message}" }
                         }
+                    }
+                }
+            }
+            if *map_initialized.read()
+                && !*loading_geo.read()
+                && !geocoded_events.read().is_empty()
+                && geocode_error_message.read().is_some()
+            {
+                div { class: "absolute right-2 top-2 max-w-sm rounded-md border border-amber-500/30 bg-background/95 px-3 py-2 shadow-sm",
+                    p { class: "text-xs font-medium text-amber-600 dark:text-amber-400", "Some event locations could not be mapped" }
+                    if let Some(message) = geocode_error_message.read().as_ref() {
+                        p { class: "mt-1 text-xs text-muted-foreground", "{message}" }
+                    }
+                }
+            }
+            if *map_initialized.read()
+                && !*loading_geo.read()
+                && events_count > 0
+                && geocoded_events.read().is_empty()
+                && geocode_error_message.read().is_none()
+            {
+                div { class: "absolute inset-0 flex items-center justify-center bg-background/80",
+                    div { class: "text-center p-4",
+                        svg {
+                            class: "w-12 h-12 mx-auto text-muted-foreground mb-2",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            fill: "none",
+                            view_box: "0 0 24 24",
+                            stroke: "currentColor",
+                            stroke_width: "1.5",
+                            path {
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                d: "M15 10.5a3 3 0 11-6 0 3 3 0 016 0z",
+                            }
+                            path {
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                d: "M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z",
+                            }
+                        }
+                        p { class: "text-muted-foreground", "No events with physical locations found" }
                     }
                 }
             }

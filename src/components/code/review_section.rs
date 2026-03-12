@@ -401,7 +401,9 @@ pub fn PRReviewSection(
                         drop(current);
                         // Restore form so user can retry
                         show_form.set(true);
-                        review_body.set(saved_content);
+                        if review_body.peek().is_empty() {
+                            review_body.set(saved_content);
+                        }
                     }
                 }
             });
@@ -599,7 +601,12 @@ pub fn PRReviewSection(
                     } else {
                         button {
                             class: "w-full px-3 py-2 text-sm border border-border rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition",
-                            onclick: move |_| show_form.set(true),
+                            onclick: move |_| {
+                                if *submitting.peek() {
+                                    return;
+                                }
+                                show_form.set(true);
+                            },
                             "Add Review"
                         }
                     }

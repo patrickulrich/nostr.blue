@@ -318,8 +318,7 @@ pub fn MusicZapDialog() -> Element {
         if show_dialog {
             div {
                 id: "wavlake-zap-dialog",
-                style: "position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 99999; display: flex; align-items: center; justify-content: center;",
-                class: "bg-background/80 backdrop-blur-sm overflow-y-auto p-4",
+                class: "fixed inset-0 z-[99999] flex items-center justify-center bg-background/80 backdrop-blur-sm overflow-y-auto p-4",
                 onclick: move |_: Event<MouseData>| {
                     music_player::hide_zap_dialog();
                     invoice.set(None);

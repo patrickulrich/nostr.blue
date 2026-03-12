@@ -176,12 +176,19 @@ pub fn ZapDistribution(
             allocations
                 .into_iter()
                 .map(|(pk, weight, amt)| {
-                    let status = current
-                        .iter()
-                        .find(|r| r.pubkey == pk)
-                        .filter(|r| r.status != PaymentStatus::Pending && r.amount == amt)
-                        .map(|r| r.status.clone())
-                        .unwrap_or(PaymentStatus::Pending);
+                    let status = if let Some(existing) = current.iter().find(|r| r.pubkey == pk) {
+                        let should_preserve_timeout = timed_out_pubkeys.peek().contains(&pk)
+                            && matches!(existing.status, PaymentStatus::Timeout(_));
+                        if should_preserve_timeout
+                            || (existing.status != PaymentStatus::Pending && existing.amount == amt)
+                        {
+                            existing.status.clone()
+                        } else {
+                            PaymentStatus::Pending
+                        }
+                    } else {
+                        PaymentStatus::Pending
+                    };
                     ZapRecipient {
                         pubkey: pk,
                         weight,

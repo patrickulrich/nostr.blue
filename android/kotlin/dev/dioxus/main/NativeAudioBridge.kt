@@ -210,11 +210,8 @@ object NativeAudioBridge {
         return try {
             ensureInitialized(context)
             if (queue.isEmpty()) return "ok"
-            // Only advance if not at last index
-            if (currentIndex < queue.lastIndex) {
-                currentIndex += 1
-                prepareCurrent(playWhenReady)
-            }
+            currentIndex = (currentIndex + 1).mod(queue.size)
+            prepareCurrent(playWhenReady)
             "ok"
         } catch (e: Exception) {
             Log.e(AUDIO_TAG, "skipNext failed", e)
@@ -231,7 +228,7 @@ object NativeAudioBridge {
             if (currentPosition > 3_000) {
                 player?.seekTo(0)
             } else {
-                currentIndex = (currentIndex - 1).coerceAtLeast(0)
+                currentIndex = if (currentIndex == 0) queue.lastIndex else currentIndex - 1
                 prepareCurrent(playWhenReady)
             }
             "ok"
@@ -350,10 +347,7 @@ object NativeAudioBridge {
             setOnCompletionListener {
                 synchronized(this@NativeAudioBridge) {
                     isPreparing = false
-                    if (currentIndex < queue.lastIndex) {
-                        currentIndex += 1
-                        prepareCurrent(true)
-                    } else {
+                    if (queue.isEmpty()) {
                         playWhenReady = false
                         releasePlayer()
                         updatePlaybackState(false, PlaybackState.STATE_STOPPED)
@@ -361,7 +355,10 @@ object NativeAudioBridge {
                         // Clear service state before updating notification to prevent re-triggering startForeground()
                         serviceRef = null
                         updateNotification()
+                        return@synchronized
                     }
+                    currentIndex = (currentIndex + 1).mod(queue.size)
+                    prepareCurrent(true)
                 }
             }
             setOnErrorListener { _, _, _ ->
