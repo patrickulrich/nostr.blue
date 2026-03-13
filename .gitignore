@@ -54,6 +54,9 @@ yarn-error.log*
 
 # Android build output
 *.apk
+*.jks
+*.keystore
+android-release-credentials.txt
 .gradle-home/
 
 # Generated assets

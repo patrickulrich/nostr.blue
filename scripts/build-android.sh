@@ -94,6 +94,51 @@ PY
     echo "Normalized Gradle properties"
 }
 
+require_env() {
+    local name="$1"
+    if [ -z "${!name:-}" ]; then
+        echo "ERROR: Required environment variable is missing: $name" >&2
+        exit 1
+    fi
+}
+
+cleanup() {
+    if [ -n "${DIOXUS_CONFIG_BACKUP:-}" ] && [ -f "${DIOXUS_CONFIG_BACKUP}" ]; then
+        mv "${DIOXUS_CONFIG_BACKUP}" "$DIOXUS_CONFIG"
+    fi
+}
+
+configure_release_signing() {
+    require_env ANDROID_KEYSTORE_FILE
+    require_env ANDROID_KEYSTORE_PASSWORD
+    require_env ANDROID_KEY_ALIAS
+    require_env ANDROID_KEY_PASSWORD
+
+    if grep -q '^\[bundle\.android\]' "$DIOXUS_CONFIG"; then
+        echo "ERROR: Dioxus.toml already defines [bundle.android]; refusing to overwrite it" >&2
+        exit 1
+    fi
+
+    DIOXUS_CONFIG_BACKUP="${DIOXUS_CONFIG}.bak"
+    cp "$DIOXUS_CONFIG" "$DIOXUS_CONFIG_BACKUP"
+
+    python3 - "$DIOXUS_CONFIG" "$ANDROID_KEYSTORE_FILE" "$ANDROID_KEYSTORE_PASSWORD" "$ANDROID_KEY_ALIAS" "$ANDROID_KEY_PASSWORD" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+path = Path(sys.argv[1])
+jks_file, jks_password, key_alias, key_password = sys.argv[2:]
+
+with path.open("a", encoding="utf-8") as f:
+    f.write("\n[bundle.android]\n")
+    f.write(f"jks_file = {json.dumps(jks_file)}\n")
+    f.write(f"jks_password = {json.dumps(jks_password)}\n")
+    f.write(f"key_alias = {json.dumps(key_alias)}\n")
+    f.write(f"key_password = {json.dumps(key_password)}\n")
+PY
+}
+
 # Android SDK/NDK paths
 ANDROID_HOME="${ANDROID_HOME:-${HOME}/Android/Sdk}"
 if [ -z "$ANDROID_NDK_HOME" ]; then
@@ -134,12 +179,33 @@ PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DX_ANDROID="$PROJECT_ROOT/target/dx/nostrblue/release/android/app"
 ANDROID_RES_SRC="$PROJECT_ROOT/android/res"
 ANDROID_KOTLIN_SRC="$PROJECT_ROOT/android/kotlin"
+DIOXUS_CONFIG="$PROJECT_ROOT/Dioxus.toml"
 APP_ID="com.nostr.blue"
 CARGO_VERSION="$(version_field version)"
 ANDROID_VERSION_CODE="$(version_code_from_semver "$CARGO_VERSION")"
 GRADLE_APP="$DX_ANDROID/app/build.gradle.kts"
 GENERATED_MAIN_ACTIVITY="$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main/MainActivity.kt"
 GRADLE_USER_HOME="${GRADLE_USER_HOME:-$PROJECT_ROOT/.gradle-home}"
+ANDROID_BUILD_MODE="${ANDROID_BUILD_MODE:-debug}"
+
+case "$ANDROID_BUILD_MODE" in
+    debug)
+        FINAL_GRADLE_TASK="assembleDebug"
+        APK_SRC_REL="app/build/outputs/apk/debug/app-debug.apk"
+        APK_DST="$PROJECT_ROOT/nostrblue-debug.apk"
+        ;;
+    release)
+        FINAL_GRADLE_TASK="assembleRelease"
+        APK_SRC_REL="app/build/outputs/apk/release/app-release.apk"
+        APK_DST="$PROJECT_ROOT/nostrblue-release.apk"
+        ;;
+    *)
+        echo "ERROR: Unsupported ANDROID_BUILD_MODE: $ANDROID_BUILD_MODE (expected debug or release)" >&2
+        exit 1
+        ;;
+esac
+
+trap cleanup EXIT
 
 mkdir -p "$GRADLE_USER_HOME"
 export GRADLE_USER_HOME
@@ -160,8 +226,13 @@ echo "=== nostr.blue Android Build ==="
 echo "Project: $PROJECT_ROOT"
 echo "NDK: $ANDROID_NDK_HOME"
 echo "Version: $CARGO_VERSION ($ANDROID_VERSION_CODE)"
+echo "Build mode: $ANDROID_BUILD_MODE"
 echo "Gradle home: $GRADLE_USER_HOME"
 echo "Android resources: $ANDROID_RES_SRC"
+
+if [ "$ANDROID_BUILD_MODE" = "release" ]; then
+    configure_release_signing
+fi
 
 # 1. Clean stale architecture artifacts
 echo ""
@@ -381,13 +452,12 @@ require_files \
 echo ""
 echo "--- Step 5: Re-run Gradle ---"
 cd "$DX_ANDROID"
-./gradlew assembleDebug
+./gradlew "$FINAL_GRADLE_TASK"
 
 # 6. Copy output APK
 echo ""
 echo "--- Step 6: Copy APK ---"
-APK_SRC="$DX_ANDROID/app/build/outputs/apk/debug/app-debug.apk"
-APK_DST="$PROJECT_ROOT/nostrblue-debug.apk"
+APK_SRC="$DX_ANDROID/$APK_SRC_REL"
 if [ -f "$APK_SRC" ]; then
     cp "$APK_SRC" "$APK_DST"
     echo "APK: $APK_DST"
