@@ -135,10 +135,16 @@ jobs:
       - name: Install Linux desktop dependencies
         run: |
           sudo apt-get update
+          if apt-cache show libfuse2t64 >/dev/null 2>&1; then
+            FUSE_PKG=libfuse2t64
+          else
+            FUSE_PKG=libfuse2
+          fi
           sudo apt-get install -y \
             unzip \
             file \
             patchelf \
+            squashfs-tools \
             desktop-file-utils \
             pkg-config \
             libglib2.0-dev \
@@ -153,12 +159,15 @@ jobs:
             libatk1.0-dev \
             libcairo2-dev \
             libpango1.0-dev \
-            libgdk-pixbuf-2.0-dev
+            libgdk-pixbuf-2.0-dev \
+            "$FUSE_PKG"
 
       - name: Install Dioxus CLI
         run: cargo install dioxus-cli --version "$DX_VERSION" --locked --force
 
       - name: Build AppImage bundle
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
         run: dx bundle --platform desktop --package-types appimage --out-dir dist/linux-release --release --no-default-features --features desktop
 
       - name: Stage release asset
