@@ -82,7 +82,7 @@ jobs:
         run: npm run build:all
 
       - name: Install Dioxus CLI
-        run: cargo install dioxus-cli --version $DX_VERSION --locked --force
+        run: cargo install dioxus-cli --version "$DX_VERSION" --locked --force
 
       - name: Build with Dioxus
         run: dx build --release
@@ -156,7 +156,7 @@ jobs:
             libgdk-pixbuf-2.0-dev
 
       - name: Install Dioxus CLI
-        run: cargo install dioxus-cli --version $DX_VERSION --locked --force
+        run: cargo install dioxus-cli --version "$DX_VERSION" --locked --force
 
       - name: Build AppImage bundle
         run: dx bundle --platform desktop --package-types appimage --out-dir dist/linux-release --release --no-default-features --features desktop
@@ -243,7 +243,7 @@ jobs:
         run: npm run build:all
 
       - name: Install Dioxus CLI
-        run: cargo install dioxus-cli --version $DX_VERSION --locked --force
+        run: cargo install dioxus-cli --version "$DX_VERSION" --locked --force
 
       - name: Decode Android keystore
         env:
@@ -313,36 +313,45 @@ jobs:
           cp release-assets/linux-release/nostrblue-linux-x86_64.AppImage release-upload/
           cp release-assets/android-release/nostrblue-android-arm64-release.apk release-upload/
 
-      - name: Update release tag
+      - name: Validate release tag
         env:
           TAG: ${{ needs.metadata.outputs.tag }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch --tags --force
           if git rev-parse "$TAG" >/dev/null 2>&1; then
-            git tag -f "$TAG" "$GITHUB_SHA"
+            TAG_SHA="$(git rev-list -n 1 "$TAG")"
+            if [ "$TAG_SHA" != "$GITHUB_SHA" ]; then
+              echo "Release tag $TAG already exists at $TAG_SHA, expected $GITHUB_SHA" >&2
+              exit 1
+            fi
+            echo "Existing tag $TAG already points to $GITHUB_SHA"
           else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git tag "$TAG" "$GITHUB_SHA"
+            git push origin "refs/tags/$TAG"
           fi
-          git push origin "refs/tags/$TAG" --force
 
-      - name: Create or update release
+      - name: Create release
+        id: create_release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.metadata.outputs.tag }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title "$TAG" --notes "$RELEASE_NOTES" --latest
+            echo "GitHub release $TAG already exists; leaving it unchanged."
+            echo "created=false" >> "$GITHUB_OUTPUT"
           else
             gh release create "$TAG" --title "$TAG" --notes "$RELEASE_NOTES" --latest
+            echo "created=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Upload release assets
+        if: steps.create_release.outputs.created == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.metadata.outputs.tag }}
-        run: gh release upload "$TAG" release-upload/* --clobber
+        run: gh release upload "$TAG" release-upload/*
 
   deploy:
     name: Deploy Website

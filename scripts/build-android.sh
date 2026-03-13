@@ -126,13 +126,17 @@ configure_release_signing() {
     DIOXUS_CONFIG_BACKUP="${DIOXUS_CONFIG}.bak"
     cp "$DIOXUS_CONFIG" "$DIOXUS_CONFIG_BACKUP"
 
-    python3 - "$DIOXUS_CONFIG" "$ANDROID_KEYSTORE_FILE" "$ANDROID_KEYSTORE_PASSWORD" "$ANDROID_KEY_ALIAS" "$ANDROID_KEY_PASSWORD" <<'PY'
+    python3 - "$DIOXUS_CONFIG" <<'PY'
 from pathlib import Path
 import json
+import os
 import sys
 
 path = Path(sys.argv[1])
-jks_file, jks_password, key_alias, key_password = sys.argv[2:]
+jks_file = os.environ["ANDROID_KEYSTORE_FILE"]
+jks_password = os.environ["ANDROID_KEYSTORE_PASSWORD"]
+key_alias = os.environ["ANDROID_KEY_ALIAS"]
+key_password = os.environ["ANDROID_KEY_PASSWORD"]
 
 with path.open("a", encoding="utf-8") as f:
     f.write("\n[bundle.android]\n")
