@@ -1,10 +1,6 @@
 //! Badge Detail Modal Component
 //!
 //! Displays full badge information with accept/reject actions.
-use dioxus::dioxus_core::Task;
-use dioxus::prelude::*;
-use nostr_sdk::prelude::*;
-use std::time::Duration;
 use crate::routes::Route;
 use crate::stores::nostr_client::get_client;
 use crate::stores::profiles;
@@ -12,6 +8,10 @@ use crate::utils::nip58::{BadgeAward, BadgeDefinition};
 use crate::utils::time::format_relative_time;
 use crate::utils::truncate_pubkey;
 use crate::utils::validation::is_valid_http_url;
+use dioxus::dioxus_core::Task;
+use dioxus::prelude::*;
+use nostr_sdk::prelude::*;
+use std::time::Duration;
 /// Processing state for accept/decline buttons
 #[derive(Clone, Copy, PartialEq, Default)]
 enum ProcessingState {
@@ -34,12 +34,10 @@ pub fn BadgeDetailModal(
 ) -> Element {
     let mut processing_state = use_signal(ProcessingState::default);
     let mut timeout_task: Signal<Option<Task>> = use_signal(|| None);
-    use_effect(
-        use_reactive!(
-            | is_accepted | { processing_state.set(ProcessingState::Idle); let _ =
-            is_accepted; }
-        ),
-    );
+    use_effect(use_reactive!(|is_accepted| {
+        processing_state.set(ProcessingState::Idle);
+        let _ = is_accepted;
+    }));
     use_effect(move || {
         let current_state = *processing_state.read();
 
@@ -51,7 +49,7 @@ pub fn BadgeDetailModal(
             }
             // Spawn new timer
             let task = spawn(async move {
-                gloo_timers::future::TimeoutFuture::new(10_000).await;
+                crate::platform::timer::sleep_ms(10_000).await;
                 // Use peek() in async to avoid subscription
                 if *processing_state.peek() != ProcessingState::Idle {
                     log::warn!("Processing state timed out, resetting to Idle");
@@ -66,73 +64,74 @@ pub fn BadgeDetailModal(
     let badge_pubkey = badge.pubkey.clone();
     let mut fetch_task: Signal<Option<Task>> = use_signal(|| None);
     let mut target_pubkey: Signal<String> = use_signal(|| badge_pubkey.clone());
-    use_effect(
-        use_reactive!(|badge_pubkey| {
-            if let Some(existing_task) = fetch_task.write().take() {
-                existing_task.cancel();
-            }
-            target_pubkey.set(badge_pubkey.clone());
-            issuer_profile.set(None);
-            if let Some(profile) = profiles::get_profile(&badge_pubkey) {
-                issuer_profile.set(Some(profile));
-            } else {
-                let pubkey_str = badge_pubkey.clone();
-                let new_task = spawn(async move {
-                    let pubkey = match PublicKey::from_hex(&pubkey_str)
-                        .or_else(|_| PublicKey::from_bech32(&pubkey_str))
-                    {
-                        Ok(pk) => pk,
-                        Err(e) => {
-                            log::warn!("Invalid issuer pubkey: {}", e);
-                            return;
-                        }
-                    };
-                    let client = match get_client() {
-                        Some(c) => c,
-                        None => {
-                            log::error!(
-                                "Client not initialized, cannot fetch issuer metadata"
-                            );
-                            return;
-                        }
-                    };
-                    match client.database().metadata(pubkey).await {
-                        Ok(Some(metadata)) => {
-                            // Use peek() to avoid subscription in async context
-                            if *target_pubkey.peek() == pubkey_str {
-                                issuer_profile.set(Some(metadata));
-                            }
-                            return;
-                        }
-                        Ok(None) => {}
-                        Err(e) => {
-                            log::warn!("Database fetch failed for {}: {}", pubkey_str, e);
-                        }
-                    }
-                    // Staleness check before network fetch
-                    if *target_pubkey.peek() != pubkey_str {
-                        log::debug!("Pubkey changed during DB lookup, skipping network fetch");
+    let mut gen_counter = use_signal(|| 0u32);
+    use_effect(use_reactive!(|badge_pubkey| {
+        if let Some(existing_task) = fetch_task.write().take() {
+            existing_task.cancel();
+        }
+        let current_gen = gen_counter.peek().wrapping_add(1);
+        gen_counter.set(current_gen);
+        target_pubkey.set(badge_pubkey.clone());
+        issuer_profile.set(None);
+        if let Some(profile) = profiles::get_profile(&badge_pubkey) {
+            issuer_profile.set(Some(profile));
+        } else {
+            let pubkey_str = badge_pubkey.clone();
+            let new_task = spawn(async move {
+                let pubkey = match PublicKey::from_hex(&pubkey_str)
+                    .or_else(|_| PublicKey::from_bech32(&pubkey_str))
+                {
+                    Ok(pk) => pk,
+                    Err(e) => {
+                        log::warn!("Invalid issuer pubkey: {}", e);
                         return;
                     }
-                    match client.fetch_metadata(pubkey, Duration::from_secs(5)).await {
-                        Ok(Some(metadata)) => {
-                            // Use peek() to avoid subscription in async context
-                            if *target_pubkey.peek() == pubkey_str {
-                                issuer_profile.set(Some(metadata));
-                            }
+                };
+                let client = match get_client() {
+                    Some(c) => c,
+                    None => {
+                        log::error!("Client not initialized, cannot fetch issuer metadata");
+                        return;
+                    }
+                };
+                match client.database().metadata(pubkey).await {
+                    Ok(Some(metadata)) => {
+                        // Use peek() to avoid subscription in async context
+                        if *target_pubkey.peek() == pubkey_str && *gen_counter.peek() == current_gen
+                        {
+                            issuer_profile.set(Some(metadata));
                         }
-                        Ok(None) => {
-                            log::debug!("No metadata found for {}", pubkey_str);
-                        }
-                        Err(e) => {
-                            log::warn!("Network fetch failed for {}: {}", pubkey_str, e);
+                        return;
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        log::warn!("Database fetch failed for {}: {}", pubkey_str, e);
+                    }
+                }
+                // Staleness check before network fetch
+                if *target_pubkey.peek() != pubkey_str {
+                    log::debug!("Pubkey changed during DB lookup, skipping network fetch");
+                    return;
+                }
+                match client.fetch_metadata(pubkey, Duration::from_secs(5)).await {
+                    Ok(Some(metadata)) => {
+                        // Use peek() to avoid subscription in async context
+                        if *target_pubkey.peek() == pubkey_str && *gen_counter.peek() == current_gen
+                        {
+                            issuer_profile.set(Some(metadata));
                         }
                     }
-                });
-                fetch_task.set(Some(new_task));
-            }
-        }),
-    );
+                    Ok(None) => {
+                        log::debug!("No metadata found for {}", pubkey_str);
+                    }
+                    Err(e) => {
+                        log::warn!("Network fetch failed for {}: {}", pubkey_str, e);
+                    }
+                }
+            });
+            fetch_task.set(Some(new_task));
+        }
+    }));
     let issuer_name = issuer_profile
         .read()
         .as_ref()

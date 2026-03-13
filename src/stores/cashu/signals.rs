@@ -2,52 +2,42 @@
 //!
 //! All Dioxus GlobalSignal definitions for wallet state management.
 #![allow(dead_code)]
+use super::types::*;
 use dioxus::prelude::*;
 use dioxus_stores::Store;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use super::types::*;
 /// Global signal for wallet state (privkey, mints list)
 pub static WALLET_STATE: GlobalSignal<Option<WalletState>> = Signal::global(|| None);
 /// Global signal for tokens (NIP-60 token events)
-pub static WALLET_TOKENS: GlobalSignal<Store<WalletTokensStore>> = Signal::global(|| Store::new(
-    WalletTokensStore::default(),
-));
+pub static WALLET_TOKENS: GlobalSignal<Store<WalletTokensStore>> =
+    Signal::global(|| Store::new(WalletTokensStore::default()));
 /// Global signal for transaction history
-pub static WALLET_HISTORY: GlobalSignal<Store<WalletHistoryStore>> = Signal::global(|| Store::new(
-    WalletHistoryStore::default(),
-));
+pub static WALLET_HISTORY: GlobalSignal<Store<WalletHistoryStore>> =
+    Signal::global(|| Store::new(WalletHistoryStore::default()));
 /// Global signal for wallet status (loading state)
-pub static WALLET_STATUS: GlobalSignal<WalletStatus> = Signal::global(|| {
-    WalletStatus::Uninitialized
-});
+pub static WALLET_STATUS: GlobalSignal<WalletStatus> =
+    Signal::global(|| WalletStatus::Uninitialized);
 /// Global signal for terms acceptance status
 /// None = not yet checked, Some(true) = accepted, Some(false) = not accepted
 pub static TERMS_ACCEPTED: GlobalSignal<Option<bool>> = Signal::global(|| None);
 /// Operation lock to prevent concurrent wallet operations on the same mint
 /// Uses GlobalSignal with HashSet to track mints currently being operated on
-pub static MINT_OPERATION_LOCK: GlobalSignal<HashSet<String>> = Signal::global(
-    HashSet::new,
-);
+pub static MINT_OPERATION_LOCK: GlobalSignal<HashSet<String>> = Signal::global(HashSet::new);
 /// Proof-to-EventId mapping for fast lookup of which Nostr event contains each proof
 /// Key: proof secret, Value: event_id of the token event containing this proof
 /// This enables correct deletion events when spending proofs
-pub static PROOF_EVENT_MAP: GlobalSignal<HashMap<String, String>> = Signal::global(
-    HashMap::new,
-);
+pub static PROOF_EVENT_MAP: GlobalSignal<HashMap<String, String>> = Signal::global(HashMap::new);
 /// Global signal for active transactions (local-only tracking)
-pub static ACTIVE_TRANSACTIONS: GlobalSignal<Vec<ActiveTransaction>> = Signal::global(
-    Vec::new,
-);
+pub static ACTIVE_TRANSACTIONS: GlobalSignal<Vec<ActiveTransaction>> = Signal::global(Vec::new);
 /// Proof secrets that the mint has reported as PENDING state
 /// Different from local pending (is_pending flag) - this tracks proofs
 /// where the mint itself says they're pending (e.g., lightning payment in-flight)
 ///
 /// CDK best practice: Track timestamps for TTL cleanup to prevent stale entries
 /// Key: proof secret, Value: timestamp when registered (seconds since epoch)
-pub static PENDING_BY_MINT_SECRETS: GlobalSignal<HashMap<String, u64>> = Signal::global(
-    HashMap::new,
-);
+pub static PENDING_BY_MINT_SECRETS: GlobalSignal<HashMap<String, u64>> =
+    Signal::global(HashMap::new);
 /// In-flight melt requests for crash recovery
 ///
 /// Persisted to IndexedDB BEFORE the melt network call to ensure we can
@@ -55,16 +45,13 @@ pub static PENDING_BY_MINT_SECRETS: GlobalSignal<HashMap<String, u64>> = Signal:
 ///
 /// SAFETY: This is critical for fund safety - without this, a crash during
 /// melt could lose change proofs that the mint has already issued.
-pub static IN_FLIGHT_MELT_REQUESTS: GlobalSignal<Vec<InFlightMeltRequest>> = Signal::global(
-    Vec::new,
-);
+pub static IN_FLIGHT_MELT_REQUESTS: GlobalSignal<Vec<InFlightMeltRequest>> =
+    Signal::global(Vec::new);
 /// Currently executing operations (by transaction_id)
 ///
 /// Used to prevent timeout recovery from interfering with active operations.
 /// Operations must register here before starting and unregister when done.
-pub static ACTIVE_OPERATIONS: GlobalSignal<HashSet<String>> = Signal::global(
-    HashSet::new,
-);
+pub static ACTIVE_OPERATIONS: GlobalSignal<HashSet<String>> = Signal::global(HashSet::new);
 /// In-flight send/swap requests for proof recovery protection
 ///
 /// Tracks active send/swap operations to prevent proof_recovery from
@@ -72,9 +59,8 @@ pub static ACTIVE_OPERATIONS: GlobalSignal<HashSet<String>> = Signal::global(
 ///
 /// SAFETY: This is critical for fund safety - without this, recovery could
 /// reclaim proofs from active send/swap operations, causing fund loss.
-pub static IN_FLIGHT_SEND_REQUESTS: GlobalSignal<
-    Vec<super::types::InFlightSendRequest>,
-> = Signal::global(Vec::new);
+pub static IN_FLIGHT_SEND_REQUESTS: GlobalSignal<Vec<super::types::InFlightSendRequest>> =
+    Signal::global(Vec::new);
 /// Add an in-flight melt request to tracking
 pub fn add_in_flight_melt_request(request: InFlightMeltRequest) {
     let tx_id = request.transaction_id.clone();
@@ -91,7 +77,9 @@ pub fn add_in_flight_melt_request(request: InFlightMeltRequest) {
 }
 /// Remove an in-flight melt request from tracking
 pub fn remove_in_flight_melt_request(transaction_id: &str) {
-    IN_FLIGHT_MELT_REQUESTS.write().retain(|r| r.transaction_id != transaction_id);
+    IN_FLIGHT_MELT_REQUESTS
+        .write()
+        .retain(|r| r.transaction_id != transaction_id);
     ACTIVE_OPERATIONS.write().remove(transaction_id);
     log::debug!("Removed in-flight melt request: {}", transaction_id);
 }
@@ -128,7 +116,9 @@ pub fn add_in_flight_send_request(request: super::types::InFlightSendRequest) {
 /// SAFETY: Must be called AFTER the send/swap operation completes (success or error)
 /// to allow proofs to be recovered if needed.
 pub fn remove_in_flight_send_request(transaction_id: &str) {
-    IN_FLIGHT_SEND_REQUESTS.write().retain(|r| r.transaction_id != transaction_id);
+    IN_FLIGHT_SEND_REQUESTS
+        .write()
+        .retain(|r| r.transaction_id != transaction_id);
     ACTIVE_OPERATIONS.write().remove(transaction_id);
     log::debug!("Removed in-flight send request: {}", transaction_id);
 }
@@ -149,7 +139,10 @@ pub async fn persist_in_flight_melt_requests() -> Result<(), String> {
         .save_in_flight_melt_requests(&requests)
         .await
         .map_err(|e| format!("Failed to persist in-flight melt requests: {}", e))?;
-    log::debug!("Persisted {} in-flight melt requests to IndexedDB", requests.len());
+    log::debug!(
+        "Persisted {} in-flight melt requests to IndexedDB",
+        requests.len()
+    );
     Ok(())
 }
 /// Persist a single in-flight melt request atomically
@@ -163,15 +156,21 @@ pub async fn persist_single_in_flight_request(
 ) -> Result<(), String> {
     {
         let mut requests = IN_FLIGHT_MELT_REQUESTS.write();
-        if requests.iter().any(|r| r.transaction_id == request.transaction_id) {
+        if requests
+            .iter()
+            .any(|r| r.transaction_id == request.transaction_id)
+        {
             log::debug!(
-                "In-flight request {} already exists, skipping", request.transaction_id
+                "In-flight request {} already exists, skipping",
+                request.transaction_id
             );
             return Ok(());
         }
         requests.push(request.clone());
     }
-    ACTIVE_OPERATIONS.write().insert(request.transaction_id.clone());
+    ACTIVE_OPERATIONS
+        .write()
+        .insert(request.transaction_id.clone());
     let localstore = SHARED_LOCALSTORE
         .read()
         .as_ref()
@@ -185,12 +184,15 @@ pub async fn persist_single_in_flight_request(
         }
         ACTIVE_OPERATIONS.write().remove(&request.transaction_id);
         log::warn!(
-            "Rolled back in-memory state after persist failure for {}", request
-            .transaction_id
+            "Rolled back in-memory state after persist failure for {}",
+            request.transaction_id
         );
         return Err(format!("Failed to save in-flight request: {}", e));
     }
-    log::debug!("Persisted in-flight melt request {}", request.transaction_id);
+    log::debug!(
+        "Persisted in-flight melt request {}",
+        request.transaction_id
+    );
     Ok(())
 }
 /// Atomically update tokens and recalculate balance
@@ -210,12 +212,11 @@ where
     let mut working_copy = tokens_write.clone();
     mutate_fn(&mut working_copy)?;
     *tokens_write = working_copy;
-    let (available, pending) = tokens_write
-        .iter()
-        .flat_map(|t| &t.proofs)
-        .fold(
-            (0u64, 0u64),
-            |(avail, pend), proof| {
+    let (available, pending) =
+        tokens_write
+            .iter()
+            .flat_map(|t| &t.proofs)
+            .fold((0u64, 0u64), |(avail, pend), proof| {
                 if proof.state.is_spendable() {
                     (avail + proof.amount, pend)
                 } else if proof.state.is_pending() {
@@ -223,13 +224,13 @@ where
                 } else {
                     (avail, pend)
                 }
-            },
-        );
-    *crate::stores::cashu_cdk_bridge::WALLET_BALANCES.write() = crate::stores::cashu_cdk_bridge::WalletBalances {
-        total: available + pending,
-        available,
-        pending,
-    };
+            });
+    *crate::stores::cashu_cdk_bridge::WALLET_BALANCES.write() =
+        crate::stores::cashu_cdk_bridge::WalletBalances {
+            total: available + pending,
+            available,
+            pending,
+        };
     Ok(available)
 }
 /// Crash-safe token replacement: add new tokens BEFORE deleting old ones
@@ -259,12 +260,11 @@ pub fn update_wallet_balances() {
     let store = WALLET_TOKENS.read();
     let data = store.data();
     let tokens = data.read();
-    let (available, pending) = tokens
-        .iter()
-        .flat_map(|t| &t.proofs)
-        .fold(
-            (0u64, 0u64),
-            |(avail, pend), proof| {
+    let (available, pending) =
+        tokens
+            .iter()
+            .flat_map(|t| &t.proofs)
+            .fold((0u64, 0u64), |(avail, pend), proof| {
                 if proof.state.is_spendable() {
                     (avail + proof.amount, pend)
                 } else if proof.state.is_pending() {
@@ -272,14 +272,14 @@ pub fn update_wallet_balances() {
                 } else {
                     (avail, pend)
                 }
-            },
-        );
+            });
     let total = available + pending;
-    *crate::stores::cashu_cdk_bridge::WALLET_BALANCES.write() = crate::stores::cashu_cdk_bridge::WalletBalances {
-        total,
-        available,
-        pending,
-    };
+    *crate::stores::cashu_cdk_bridge::WALLET_BALANCES.write() =
+        crate::stores::cashu_cdk_bridge::WalletBalances {
+            total,
+            available,
+            pending,
+        };
 }
 /// Load in-flight melt requests from IndexedDB (call on startup)
 ///
@@ -296,7 +296,8 @@ pub async fn load_in_flight_melt_requests() {
         Ok(Some(requests)) => {
             if !requests.is_empty() {
                 log::info!(
-                    "Loaded {} in-flight melt requests from storage", requests.len()
+                    "Loaded {} in-flight melt requests from storage",
+                    requests.len()
                 );
                 {
                     let mut active_ops = ACTIVE_OPERATIONS.write();
@@ -323,14 +324,14 @@ pub async fn load_in_flight_melt_requests() {
 /// This ensures pending-at-mint state survives app restarts.
 /// Uses spawn to avoid blocking the caller.
 pub fn schedule_persist_pending_secrets() {
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
         use dioxus::prelude::spawn;
         spawn(async move {
             persist_pending_secrets_impl().await;
         });
     }
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(feature = "web"))]
     {
         log::debug!("schedule_persist_pending_secrets: no-op on non-WASM target");
     }
@@ -340,9 +341,7 @@ async fn persist_pending_secrets_impl() {
     let localstore = match SHARED_LOCALSTORE.read().as_ref() {
         Some(store) => store.clone(),
         None => {
-            log::debug!(
-                "Skipping pending secrets persistence: localstore not initialized"
-            );
+            log::debug!("Skipping pending secrets persistence: localstore not initialized");
             return;
         }
     };
@@ -395,7 +394,8 @@ pub async fn cleanup_expired_pending_secrets() {
     };
     if removed_count > 0 {
         log::info!(
-            "Cleaned up {} expired pending secrets ({} remaining)", removed_count,
+            "Cleaned up {} expired pending secrets ({} remaining)",
+            removed_count,
             before_count - removed_count
         );
         persist_pending_secrets_impl().await;
@@ -410,28 +410,23 @@ pub static SHARED_LOCALSTORE: GlobalSignal<
     Option<Arc<crate::stores::indexeddb_database::IndexedDbDatabase>>,
 > = Signal::global(|| None);
 /// Pending Nostr events (offline queue)
-pub static PENDING_NOSTR_EVENTS: GlobalSignal<Vec<PendingNostrEvent>> = Signal::global(
-    Vec::new,
-);
+pub static PENDING_NOSTR_EVENTS: GlobalSignal<Vec<PendingNostrEvent>> = Signal::global(Vec::new);
 /// Global signal for pending mint quotes (lightning receive)
-pub static PENDING_MINT_QUOTES: GlobalSignal<Store<PendingMintQuotesStore>> = Signal::global(||
-Store::new(PendingMintQuotesStore::default()));
+pub static PENDING_MINT_QUOTES: GlobalSignal<Store<PendingMintQuotesStore>> =
+    Signal::global(|| Store::new(PendingMintQuotesStore::default()));
 /// Global signal for pending melt quotes (lightning send)
-pub static PENDING_MELT_QUOTES: GlobalSignal<Store<PendingMeltQuotesStore>> = Signal::global(||
-Store::new(PendingMeltQuotesStore::default()));
+pub static PENDING_MELT_QUOTES: GlobalSignal<Store<PendingMeltQuotesStore>> =
+    Signal::global(|| Store::new(PendingMeltQuotesStore::default()));
 /// Global signal for melt progress (lightning payment progress)
 pub static MELT_PROGRESS: GlobalSignal<Option<MeltProgress>> = Signal::global(|| None);
 /// Global signal for transfer progress (cross-mint transfer)
-pub static TRANSFER_PROGRESS: GlobalSignal<Option<TransferProgress>> = Signal::global(|| {
-    None
-});
+pub static TRANSFER_PROGRESS: GlobalSignal<Option<TransferProgress>> = Signal::global(|| None);
 /// Global signal for payment request progress (NUT-18)
-pub static PAYMENT_REQUEST_PROGRESS: GlobalSignal<Option<PaymentRequestProgress>> = Signal::global(||
-None);
+pub static PAYMENT_REQUEST_PROGRESS: GlobalSignal<Option<PaymentRequestProgress>> =
+    Signal::global(|| None);
 /// Global signal for pending payment requests waiting for payment
-pub static PENDING_PAYMENT_REQUESTS: GlobalSignal<
-    HashMap<String, NostrPaymentWaitInfo>,
-> = Signal::global(HashMap::new);
+pub static PENDING_PAYMENT_REQUESTS: GlobalSignal<HashMap<String, NostrPaymentWaitInfo>> =
+    Signal::global(HashMap::new);
 /// Counter backups for mint removal/re-addition
 /// When a mint is removed, its proof counters are backed up here
 /// When the same mint is re-added, counters are restored
@@ -439,9 +434,8 @@ pub static COUNTER_BACKUPS: GlobalSignal<Vec<CounterBackup>> = Signal::global(Ve
 /// NIP-78 d-tag identifier for Cashu wallet terms agreement
 pub const TERMS_D_TAG: &str = "nostr.blue/cashu/terms";
 /// Counter for generating unique transaction IDs
-pub static TRANSACTION_ID_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(
-    1,
-);
+pub static TRANSACTION_ID_COUNTER: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(1);
 /// Maximum number of proofs to sync at once (NUT-07 state check)
 pub const MAX_SYNC_INPUT_SIZE: usize = 200;
 /// Maximum number of proofs to swap at once
@@ -517,7 +511,8 @@ pub fn reset_wallet_state() {
         data.write().clear();
     }
     *WALLET_STATUS.write() = WalletStatus::Uninitialized;
-    *crate::stores::cashu_cdk_bridge::WALLET_BALANCES.write() = crate::stores::cashu_cdk_bridge::WalletBalances::default();
+    *crate::stores::cashu_cdk_bridge::WALLET_BALANCES.write() =
+        crate::stores::cashu_cdk_bridge::WalletBalances::default();
     *TERMS_ACCEPTED.write() = None;
     MINT_OPERATION_LOCK.write().clear();
     PROOF_EVENT_MAP.write().clear();

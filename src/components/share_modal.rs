@@ -1,16 +1,17 @@
 use crate::components::icons::{
-    ArrowLeftIcon, BarChartIcon, CameraIcon, CheckIcon, CopyIcon, FileVideoIcon,
-    HashIcon, Link2Icon, MessageCircleIcon, SendIcon, ShareIcon,
+    ArrowLeftIcon, BarChartIcon, CameraIcon, CheckIcon, CopyIcon, FileVideoIcon, HashIcon,
+    Link2Icon, MessageCircleIcon, SendIcon, ShareIcon,
 };
 use crate::components::{EmojiPicker, GifPicker, MediaUploader, PollCreatorModal};
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::{dms, nostr_client};
 use crate::utils::clipboard::copy_to_clipboard;
+use crate::utils::custom_emoji::{build_custom_emoji_tags, EmojiSelection};
 use dioxus::html::input_data::keyboard_types::Key;
 use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, EventBuilder, FromBech32, PublicKey};
 use std::sync::atomic::{AtomicU32, Ordering};
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 /// Global counter for generating unique modal IDs
 static SHARE_MODAL_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -25,6 +26,9 @@ enum ShareMode {
 pub fn ShareModal(
     /// The event being shared
     event: NostrEvent,
+    /// Optional canonical web URL override for route-specific pages
+    #[props(default)]
+    web_url: Option<String>,
     /// Handler to close the modal
     on_close: EventHandler<()>,
 ) -> Element {
@@ -45,18 +49,14 @@ pub fn ShareModal(
     let has_signer = *HAS_SIGNER.read();
     #[allow(unused_variables)]
     fn get_cursor_position(textarea_id: &str, current_text: &str) -> usize {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
             if let Some(window) = web_sys::window() {
                 if let Some(document) = window.document() {
                     if let Some(element) = document.get_element_by_id(textarea_id) {
-                        if let Some(textarea) = element
-                            .dyn_ref::<web_sys::HtmlTextAreaElement>()
-                        {
-                            return textarea
-                                .selection_start()
-                                .unwrap_or(Some(0))
-                                .unwrap_or(0) as usize;
+                        if let Some(textarea) = element.dyn_ref::<web_sys::HtmlTextAreaElement>() {
+                            return textarea.selection_start().unwrap_or(Some(0)).unwrap_or(0)
+                                as usize;
                         }
                     }
                 }
@@ -85,7 +85,10 @@ pub fn ShareModal(
             let safe_pos = if current.is_char_boundary(pos) {
                 pos
             } else {
-                (0..=pos).rev().find(|&i| current.is_char_boundary(i)).unwrap_or(0)
+                (0..=pos)
+                    .rev()
+                    .find(|&i| current.is_char_boundary(i))
+                    .unwrap_or(0)
             };
             current.insert_str(safe_pos, &text);
             nostr_text.set(current);
@@ -123,8 +126,8 @@ pub fn ShareModal(
     let handle_image_uploaded = move |url: String| {
         insert_with_spacing(url);
     };
-    let handle_emoji_selected = move |emoji: String| {
-        insert_at_cursor(emoji);
+    let handle_emoji_selected = move |selection: EmojiSelection| {
+        insert_at_cursor(selection.insertion_text());
     };
     let handle_gif_selected = move |gif_url: String| {
         insert_with_spacing(gif_url);
@@ -144,24 +147,23 @@ pub fn ShareModal(
         .iter()
         .filter(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("imeta"))
         .filter_map(|tag| {
-            tag.as_slice()
-                .iter()
-                .skip(1)
-                .find_map(|part| {
-                    let s = part.as_str();
-                    if s.starts_with("url ") {
-                        Some(s.trim_start_matches("url ").to_string())
-                    } else {
-                        None
-                    }
-                })
+            tag.as_slice().iter().skip(1).find_map(|part| {
+                let s = part.as_str();
+                if s.starts_with("url ") {
+                    Some(s.trim_start_matches("url ").to_string())
+                } else {
+                    None
+                }
+            })
         })
         .next()
         .unwrap_or_default();
     use nostr_sdk::{Kind, ToBech32};
     let is_recipe = event.tags.hashtags().any(|tag| tag == "nostrcooking");
     let is_article = event.kind == Kind::LongFormTextNote && !is_recipe;
-    let content_url = if event.kind.is_addressable() {
+    let content_url = if let Some(url) = web_url.clone() {
+        url
+    } else if event.kind.is_addressable() {
         if let Some(coord) = event.coordinate() {
             match coord.to_bech32() {
                 Ok(naddr) => {
@@ -188,7 +190,9 @@ pub fn ShareModal(
             spawn(async move {
                 let nip19_str = if event_for_async.kind.is_addressable() {
                     if let Some(coord) = event_for_async.coordinate() {
-                        coord.to_bech32().unwrap_or_else(|_| event_for_async.id.to_hex())
+                        coord
+                            .to_bech32()
+                            .unwrap_or_else(|_| event_for_async.id.to_hex())
                     } else {
                         event_for_async
                             .id
@@ -215,15 +219,7 @@ pub fn ShareModal(
                         copied.set(true);
                         log::info!("Link copied to clipboard");
                         spawn(async move {
-                            #[cfg(target_arch = "wasm32")]
-                            {
-                                gloo_timers::future::TimeoutFuture::new(2000).await;
-                            }
-                            #[cfg(not(target_arch = "wasm32"))]
-                            {
-                                tokio::time::sleep(std::time::Duration::from_millis(2000))
-                                    .await;
-                            }
+                            crate::platform::timer::sleep_ms(2000).await;
                             copied.set(false);
                         });
                     }
@@ -247,13 +243,12 @@ pub fn ShareModal(
                 Some(c) => c,
                 None => {
                     log::error!("Client not initialized");
-                    nostr_error
-                        .set(Some("Failed to initialize Nostr client".to_string()));
+                    nostr_error.set(Some("Failed to initialize Nostr client".to_string()));
                     is_publishing.set(false);
                     return;
                 }
             };
-            let builder = EventBuilder::text_note(&text);
+            let builder = EventBuilder::text_note(&text).tags(build_custom_emoji_tags(&text));
             match client.send_event_builder(builder).await {
                 Ok(output) => {
                     log::info!("Shared to Nostr: {:?}", output.val);
@@ -285,21 +280,16 @@ pub fn ShareModal(
             let is_recipe_clone = is_recipe_dm;
             let is_article_clone = is_article_dm;
             spawn(async move {
-                let recipient_hex = if let Ok(pubkey) = PublicKey::from_bech32(
-                    &manual_recipient,
-                ) {
+                let recipient_hex = if let Ok(pubkey) = PublicKey::from_bech32(&manual_recipient) {
                     pubkey.to_hex()
                 } else if let Ok(pubkey) = PublicKey::parse(&manual_recipient) {
                     pubkey.to_hex()
                 } else {
                     log::error!("Invalid recipient pubkey: {}", manual_recipient);
-                    dm_error
-                        .set(
-                            Some(
-                                "Invalid recipient. Please enter a valid npub or hex public key."
-                                    .to_string(),
-                            ),
-                        );
+                    dm_error.set(Some(
+                        "Invalid recipient. Please enter a valid npub or hex public key."
+                            .to_string(),
+                    ));
                     is_publishing.set(false);
                     return;
                 };
@@ -312,8 +302,7 @@ pub fn ShareModal(
                 };
                 let message = format!(
                     "Check out this {} on nostr.blue: {}",
-                    content_type,
-                    content_url_clone,
+                    content_type, content_url_clone,
                 );
                 match dms::send_dm(recipient_hex.clone(), message).await {
                     Ok(_) => {
@@ -345,7 +334,7 @@ pub fn ShareModal(
                 aria_describedby: if *share_mode.read() == ShareMode::Main { Some(desc_id.clone()) } else { None },
                 tabindex: "-1",
                 onmounted: move |_evt| {
-                    #[cfg(target_arch = "wasm32")]
+                    #[cfg(feature = "web")]
                     {
                         if let Some(html_element) = _evt.data().downcast::<web_sys::HtmlElement>() {
                             let _ = html_element.focus();

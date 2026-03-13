@@ -42,35 +42,30 @@ pub fn PodcastAddFeedModal(
             match podcast_index::get_podcast_by_url(&url).await {
                 Ok(feed) => {
                     log::info!(
-                        "Found podcast: {} (id: {}, guid: {:?})", feed.title, feed.id,
+                        "Found podcast: {} (id: {}, guid: {:?})",
+                        feed.title,
+                        feed.id,
                         feed.podcast_guid
                     );
                     let Some(guid) = feed.podcast_guid.clone() else {
-                        error_msg
-                            .set(
-                                Some(
-                                    "Podcast does not have a GUID - cannot subscribe"
-                                        .to_string(),
-                                ),
-                            );
+                        error_msg.set(Some(
+                            "Podcast does not have a GUID - cannot subscribe".to_string(),
+                        ));
                         is_fetching.set(false);
                         return;
                     };
                     let has_v4v = feed.has_v4v();
                     let image = feed.get_image().map(String::from);
-                    preview
-                        .set(
-                            Some(PodcastPreview {
-                                podcast_guid: guid,
-                                podcast_id: feed.id,
-                                title: feed.title,
-                                description: feed.description,
-                                image,
-                                author: feed.author,
-                                has_v4v,
-                                feed_url: url,
-                            }),
-                        );
+                    preview.set(Some(PodcastPreview {
+                        podcast_guid: guid,
+                        podcast_id: feed.id,
+                        title: feed.title,
+                        description: feed.description,
+                        image,
+                        author: feed.author,
+                        has_v4v,
+                        feed_url: url,
+                    }));
                     is_fetching.set(false);
                 }
                 Err(e) => {
@@ -100,16 +95,18 @@ pub fn PodcastAddFeedModal(
         error_msg.set(None);
         spawn(async move {
             match podcast_subscription::add_rss_subscription(
-                    &podcast_guid,
-                    Some(podcast_id),
-                    Some(&url),
-                )
-                .await
+                &podcast_guid,
+                Some(podcast_id),
+                Some(&url),
+            )
+            .await
             {
                 Ok(()) => {
                     log::info!(
-                        "Subscribed to podcast: {} (guid: {}, id: {})", url,
-                        podcast_guid, podcast_id
+                        "Subscribed to podcast: {} (guid: {}, id: {})",
+                        url,
+                        podcast_guid,
+                        podcast_id
                     );
                     is_saving.set(false);
                     on_added.call(url);

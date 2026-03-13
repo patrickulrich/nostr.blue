@@ -9,19 +9,13 @@ pub async fn fetch_topic_posts(
 ) -> std::result::Result<Vec<TopicPost>, String> {
     *LOADING_TOPIC_POSTS.write() = true;
     let filter = topic_posts_filter(topic, limit, until);
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(15),
-    )
-    .await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
     *LOADING_TOPIC_POSTS.write() = false;
 
     match result {
         Ok(events) => {
-            let mut posts: Vec<TopicPost> = events
-                .iter()
-                .filter_map(parse_topic_post)
-                .collect();
+            let mut posts: Vec<TopicPost> = events.iter().filter_map(parse_topic_post).collect();
             posts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
             cache_topic_posts(&posts);
             log::info!("Fetched {} posts for topic #{}", posts.len(), topic);
@@ -41,19 +35,13 @@ pub async fn fetch_recent_posts(
 ) -> std::result::Result<Vec<TopicPost>, String> {
     *LOADING_TOPIC_POSTS.write() = true;
     let filter = recent_topic_posts_filter(limit, until);
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(15),
-    )
-    .await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
     *LOADING_TOPIC_POSTS.write() = false;
 
     match result {
         Ok(events) => {
-            let mut posts: Vec<TopicPost> = events
-                .iter()
-                .filter_map(parse_topic_post)
-                .collect();
+            let mut posts: Vec<TopicPost> = events.iter().filter_map(parse_topic_post).collect();
             posts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
             cache_topic_posts(&posts);
             log::info!("Fetched {} recent topic posts", posts.len());
@@ -82,28 +70,19 @@ pub async fn fetch_subscribed_feed(
     let topic_tags: Vec<String> = topics.iter().map(|t| format!("#{}", t)).collect();
     let mut filter = Filter::new()
         .kind(Kind::Comment)
-        .custom_tags(
-            SingleLetterTag::uppercase(Alphabet::I),
-            topic_tags,
-        )
+        .custom_tags(SingleLetterTag::uppercase(Alphabet::I), topic_tags)
         .limit(limit);
     if let Some(ts) = until {
         filter = filter.until(Timestamp::from(ts));
     }
 
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(15),
-    )
-    .await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
     *LOADING_TOPIC_POSTS.write() = false;
 
     match result {
         Ok(events) => {
-            let mut posts: Vec<TopicPost> = events
-                .iter()
-                .filter_map(parse_topic_post)
-                .collect();
+            let mut posts: Vec<TopicPost> = events.iter().filter_map(parse_topic_post).collect();
             posts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
             cache_topic_posts(&posts);
             log::info!("Fetched {} posts for subscribed feed", posts.len());
@@ -117,24 +96,16 @@ pub async fn fetch_subscribed_feed(
 }
 
 /// Fetch a user's topic subscriptions (kind 10073)
-pub async fn fetch_subscriptions(
-    pubkey: PublicKey,
-) -> std::result::Result<Vec<String>, String> {
+pub async fn fetch_subscriptions(pubkey: PublicKey) -> std::result::Result<Vec<String>, String> {
     *LOADING_SUBSCRIPTIONS.write() = true;
     let filter = subscriptions_filter(pubkey);
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(10),
-    )
-    .await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await;
     *LOADING_SUBSCRIPTIONS.write() = false;
 
     match result {
         Ok(events) => {
-            let topics = events
-                .first()
-                .map(parse_subscriptions)
-                .unwrap_or_default();
+            let topics = events.first().map(parse_subscriptions).unwrap_or_default();
 
             // Update the subscriptions cache
             let mut cache = SUBSCRIBED_TOPICS.write();
@@ -163,11 +134,9 @@ pub async fn fetch_votes_batch(
     }
 
     let filter = votes_filter(event_ids.clone());
-    let events = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(10),
-    )
-    .await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
 
     // Aggregate votes, deduplicating by latest per pubkey per post
     let mut vote_map: HashMap<String, HashMap<String, (VoteDirection, u64)>> = HashMap::new();
@@ -212,21 +181,16 @@ pub async fn fetch_votes_batch(
 }
 
 /// Fetch a single post by event ID
-pub async fn fetch_post_by_id(
-    event_id: &str,
-) -> std::result::Result<Option<TopicPost>, String> {
+pub async fn fetch_post_by_id(event_id: &str) -> std::result::Result<Option<TopicPost>, String> {
     if let Some(cached) = get_cached_topic_post(event_id) {
         return Ok(Some(cached));
     }
 
-    let id = EventId::from_hex(event_id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
+    let id = EventId::from_hex(event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
     let filter = Filter::new().id(id).limit(1);
-    let events = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(10),
-    )
-    .await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
 
     if let Some(event) = events.first() {
         if let Some(post) = parse_topic_post(event) {
@@ -244,11 +208,9 @@ pub async fn fetch_post_replies(
     limit: usize,
 ) -> std::result::Result<Vec<TopicPost>, String> {
     let filter = post_replies_filter(post_id, limit);
-    let events = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(10),
-    )
-    .await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
 
     let mut posts: Vec<TopicPost> = events
         .iter()
@@ -262,15 +224,11 @@ pub async fn fetch_post_replies(
 }
 
 /// Discover popular topics by fetching recent kind 1111 events and counting unique topics
-pub async fn discover_topics(
-    limit: usize,
-) -> std::result::Result<Vec<TopicInfo>, String> {
+pub async fn discover_topics(limit: usize) -> std::result::Result<Vec<TopicInfo>, String> {
     let filter = recent_topic_posts_filter(500, None);
-    let events = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(15),
-    )
-    .await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15))
+            .await?;
 
     let mut topic_counts: HashMap<String, (usize, u64)> = HashMap::new();
     for event in &events {

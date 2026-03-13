@@ -5,16 +5,7 @@ use crate::stores::p2p_store::P2PFilterState;
 use crate::utils::nip69::{Layer, Network, OrderStatus};
 use dioxus::prelude::*;
 /// Common currencies for quick selection
-const COMMON_CURRENCIES: &[&str] = &[
-    "USD",
-    "EUR",
-    "GBP",
-    "BRL",
-    "MXN",
-    "ARS",
-    "CAD",
-    "AUD",
-];
+const COMMON_CURRENCIES: &[&str] = &["USD", "EUR", "GBP", "BRL", "MXN", "ARS", "CAD", "AUD"];
 /// Generic filter chip that renders a toggle button with active/inactive states.
 /// Reduces duplication across status, network, layer, and payment method chips.
 #[component]
@@ -48,19 +39,29 @@ pub fn P2POrderFilters(
     on_apply: EventHandler<()>,
     on_clear: EventHandler<()>,
 ) -> Element {
-    let mut currency_input = use_signal(|| {
-        filters.read().currency.clone().unwrap_or_default()
-    });
+    let mut currency_input = use_signal(|| filters.read().currency.clone().unwrap_or_default());
     let mut min_amount = use_signal(|| {
-        filters.read().min_amount.map(|a| a.to_string()).unwrap_or_default()
+        filters
+            .read()
+            .min_amount
+            .map(|a| a.to_string())
+            .unwrap_or_default()
     });
     let mut max_amount = use_signal(|| {
-        filters.read().max_amount.map(|a| a.to_string()).unwrap_or_default()
+        filters
+            .read()
+            .max_amount
+            .map(|a| a.to_string())
+            .unwrap_or_default()
     });
     let apply_filters = move |_| {
         let mut f = filters.write();
         let curr = currency_input.read().trim().to_string();
-        f.currency = if curr.is_empty() { None } else { Some(curr.to_uppercase()) };
+        f.currency = if curr.is_empty() {
+            None
+        } else {
+            Some(curr.to_uppercase())
+        };
         f.min_amount = min_amount.read().parse().ok();
         f.max_amount = max_amount.read().parse().ok();
         drop(f);
@@ -259,7 +260,11 @@ fn NetworkFilterChip(
     filters: Signal<P2PFilterState>,
     label: &'static str,
 ) -> Element {
-    let is_active = filters.read().network.map(|n| n == network).unwrap_or(false);
+    let is_active = filters
+        .read()
+        .network
+        .map(|n| n == network)
+        .unwrap_or(false);
     rsx! {
         FilterChip {
             label: label.to_string(),
@@ -276,11 +281,7 @@ fn NetworkFilterChip(
 }
 /// Layer filter chip - uses generic FilterChip
 #[component]
-fn LayerFilterChip(
-    layer: Layer,
-    filters: Signal<P2PFilterState>,
-    label: &'static str,
-) -> Element {
+fn LayerFilterChip(layer: Layer, filters: Signal<P2PFilterState>, label: &'static str) -> Element {
     let is_active = filters.read().layer.map(|l| l == layer).unwrap_or(false);
     rsx! {
         FilterChip {

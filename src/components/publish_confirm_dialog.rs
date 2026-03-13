@@ -2,9 +2,9 @@
 //!
 //! A dialog for confirming article publication with preview
 //! and optional "promote to feed" functionality.
-use dioxus::prelude::*;
 use super::dialog::{DialogContent, DialogDescription, DialogRoot, DialogTitle};
 use crate::utils::markdown::render_markdown;
+use dioxus::prelude::*;
 /// Configuration for what to publish
 #[derive(Clone, Debug, Default)]
 pub struct PublishConfig {
@@ -59,10 +59,9 @@ pub fn PublishConfirmDialog(props: PublishConfirmDialogProps) -> Element {
     let handle_confirm = {
         let on_confirm = props.on_confirm;
         move |_| {
-            on_confirm
-                .call(PublishConfig {
-                    promote_to_feed: *promote_to_feed.read(),
-                });
+            on_confirm.call(PublishConfig {
+                promote_to_feed: *promote_to_feed.read(),
+            });
         }
     };
     let handle_cancel = {

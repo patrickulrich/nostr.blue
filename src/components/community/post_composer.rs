@@ -1,9 +1,7 @@
 //! Community Post Composer Component
 //! Modal for creating new posts or replies in a community
-use crate::components::RichContent;
-use crate::stores::community_store::{
-    post_to_community, reply_to_post, Community, CommunityPost,
-};
+use crate::components::{ConfirmModal, RichContent};
+use crate::stores::community_store::{post_to_community, reply_to_post, Community, CommunityPost};
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
@@ -11,15 +9,14 @@ use dioxus::prelude::*;
 #[component]
 pub fn CommunityPostComposer(
     community: Community,
-    #[props(default)]
-    reply_to: Option<CommunityPost>,
+    #[props(default)] reply_to: Option<CommunityPost>,
     on_close: EventHandler<()>,
-    #[props(default)]
-    on_success: Option<EventHandler<String>>,
+    #[props(default)] on_success: Option<EventHandler<String>>,
 ) -> Element {
     let mut content = use_signal(String::new);
     let mut posting = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
+    let mut show_discard_confirm = use_signal(|| false);
     let has_signer = *HAS_SIGNER.read();
     let is_reply = reply_to.is_some();
     let community_for_post = community.clone();
@@ -63,17 +60,12 @@ pub fn CommunityPostComposer(
         });
     };
     let on_close_backdrop = on_close;
-    let confirm_close = move |handler: EventHandler<()>| {
-        let has_content = !content.read().trim().is_empty();
-        if has_content {
-            let confirmed = web_sys::window()
-                .and_then(|w| {
-                    w.confirm_with_message("You have unsaved content. Discard it?").ok()
-                })
-                .unwrap_or(false);
-            if confirmed {
-                handler.call(());
-            }
+    let mut request_close = move |handler: EventHandler<()>| {
+        if *posting.read() {
+            return;
+        }
+        if !content.read().trim().is_empty() {
+            show_discard_confirm.set(true);
         } else {
             handler.call(());
         }
@@ -83,8 +75,8 @@ pub fn CommunityPostComposer(
     let on_close_for_cancel = on_close;
     rsx! {
         div {
-            class: "fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4",
-            onclick: move |_| confirm_close(on_close_for_backdrop),
+            class: "fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4",
+            onclick: move |_| request_close(on_close_for_backdrop),
             div {
                 class: "bg-background rounded-lg p-6 max-w-lg w-full shadow-xl max-h-[90vh] overflow-y-auto",
                 onclick: move |e| e.stop_propagation(),
@@ -98,7 +90,10 @@ pub fn CommunityPostComposer(
                     }
                     button {
                         class: "p-2 hover:bg-accent rounded-full transition",
-                        onclick: move |_| confirm_close(on_close_for_button),
+                        disabled: *posting.read(),
+                        aria_label: "Close composer",
+                        title: "Close composer",
+                        onclick: move |_| request_close(on_close_for_button),
                         svg {
                             class: "w-5 h-5",
                             xmlns: "http://www.w3.org/2000/svg",
@@ -221,7 +216,8 @@ pub fn CommunityPostComposer(
                 div { class: "mt-4 flex justify-end gap-2",
                     button {
                         class: "px-4 py-2 border border-border rounded-lg hover:bg-accent transition",
-                        onclick: move |_| confirm_close(on_close_for_cancel),
+                        disabled: *posting.read(),
+                        onclick: move |_| request_close(on_close_for_cancel),
                         "Cancel"
                     }
                     button {
@@ -278,6 +274,22 @@ pub fn CommunityPostComposer(
                     }
                 }
             }
+            if *show_discard_confirm.read() {
+                div {
+                    onclick: move |e| e.stop_propagation(),
+                    ConfirmModal {
+                        title: "Discard draft?".to_string(),
+                        message: "You have unsaved content. Discard it and close this composer?".to_string(),
+                        confirm_text: Some("Discard".to_string()),
+                        cancel_text: Some("Keep editing".to_string()),
+                        on_confirm: move |_| {
+                            show_discard_confirm.set(false);
+                            on_close.call(());
+                        },
+                        on_cancel: move |_| show_discard_confirm.set(false),
+                    }
+                }
+            }
         }
     }
 }
@@ -285,8 +297,7 @@ pub fn CommunityPostComposer(
 #[component]
 pub fn CommunityPostComposerInline(
     community: Community,
-    #[props(default)]
-    on_success: Option<EventHandler<String>>,
+    #[props(default)] on_success: Option<EventHandler<String>>,
 ) -> Element {
     let mut content = use_signal(String::new);
     let mut posting = use_signal(|| false);

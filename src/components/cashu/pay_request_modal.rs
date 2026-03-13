@@ -32,13 +32,13 @@ pub fn CashuPayRequestModal(on_close: EventHandler<()>) -> Element {
     let balance = use_memo(move || WALLET_BALANCES.read().available);
     let handle_paste = move |_| {
         spawn(async move {
-            if let Some(window) = web_sys::window() {
-                let clipboard = window.navigator().clipboard();
-                let promise = clipboard.read_text();
-                if let Ok(text) = wasm_bindgen_futures::JsFuture::from(promise).await {
-                    if let Some(s) = text.as_string() {
-                        request_input.set(s);
-                    }
+            match crate::platform::clipboard::read_text_from_clipboard().await {
+                Ok(text) => {
+                    request_input.set(text);
+                    pay_state.set(PayState::Input);
+                }
+                Err(message) => {
+                    pay_state.set(PayState::Error { message });
                 }
             }
         });
@@ -46,10 +46,9 @@ pub fn CashuPayRequestModal(on_close: EventHandler<()>) -> Element {
     let handle_parse = move |_| {
         let input = request_input.read().trim().to_string();
         if input.is_empty() {
-            pay_state
-                .set(PayState::Error {
-                    message: "Please enter a payment request".to_string(),
-                });
+            pay_state.set(PayState::Error {
+                message: "Please enter a payment request".to_string(),
+            });
             return;
         }
         match cashu::parse_payment_request(&input) {
@@ -73,10 +72,9 @@ pub fn CashuPayRequestModal(on_close: EventHandler<()>) -> Element {
             match custom_amt_str.parse::<u64>() {
                 Ok(a) if a > 0 => Some(a),
                 _ => {
-                    pay_state
-                        .set(PayState::Error {
-                            message: "Invalid custom amount".to_string(),
-                        });
+                    pay_state.set(PayState::Error {
+                        message: "Invalid custom amount".to_string(),
+                    });
                     return;
                 }
             }
@@ -132,10 +130,12 @@ pub fn CashuPayRequestModal(on_close: EventHandler<()>) -> Element {
                                     oninput: move |e| request_input.set(e.value()),
                                 }
                             }
-                            button {
-                                class: "w-full py-2 mb-4 bg-accent hover:bg-accent/80 rounded-lg transition flex items-center justify-center gap-2",
-                                onclick: handle_paste,
-                                span { "Paste from Clipboard" }
+                            if cfg!(feature = "web") {
+                                button {
+                                    class: "w-full py-2 mb-4 bg-accent hover:bg-accent/80 rounded-lg transition flex items-center justify-center gap-2",
+                                    onclick: handle_paste,
+                                    span { "Paste from Clipboard" }
+                                }
                             }
                             button {
                                 class: "w-full py-3 bg-blue-500 hover:bg-blue-600 disabled:bg-muted disabled:cursor-not-allowed text-white rounded-lg font-semibold transition",

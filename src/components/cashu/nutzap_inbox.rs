@@ -23,8 +23,7 @@ pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {
             match cashu::fetch_pending_nutzaps().await {
                 Ok(count) => {
                     if count > 0 {
-                        success_message
-                            .set(Some(format!("Found {} new nutzaps", count)));
+                        success_message.set(Some(format!("Found {} new nutzaps", count)));
                     } else {
                         success_message.set(Some("No new nutzaps found".to_string()));
                     }
@@ -44,8 +43,7 @@ pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {
         spawn(async move {
             match cashu::redeem_nutzap(&event_id_clone).await {
                 Ok(result) => {
-                    success_message
-                        .set(Some(format!("Redeemed {} sats!", result.amount)));
+                    success_message.set(Some(format!("Redeemed {} sats!", result.amount)));
                 }
                 Err(e) => {
                     error_message.set(Some(format!("Redemption failed: {}", e)));
@@ -89,40 +87,22 @@ pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {
                     }
                 }
                 redeeming_ids.write().remove(&event_id);
-                #[cfg(target_arch = "wasm32")]
-                {
-                    gloo_timers::future::TimeoutFuture::new(100).await;
-                }
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                }
+                crate::platform::timer::sleep_ms(100).await;
             }
             if error_count == 0 {
-                success_message
-                    .set(
-                        Some(
-                            format!(
-                                "Redeemed {} nutzaps ({} sats total)",
-                                success_count,
-                                total_redeemed,
-                            ),
-                        ),
-                    );
+                success_message.set(Some(format!(
+                    "Redeemed {} nutzaps ({} sats total)",
+                    success_count, total_redeemed,
+                )));
             } else {
                 // Use error_message for partial failures
-                error_message
-                    .set(
-                        Some(
-                            format!(
-                                "Redeemed {}/{} nutzaps ({} sats). {} failed.",
-                                success_count,
-                                success_count + error_count,
-                                total_redeemed,
-                                error_count,
-                            ),
-                        ),
-                    );
+                error_message.set(Some(format!(
+                    "Redeemed {}/{} nutzaps ({} sats). {} failed.",
+                    success_count,
+                    success_count + error_count,
+                    total_redeemed,
+                    error_count,
+                )));
             }
             is_redeeming_all.set(false);
         });
@@ -139,7 +119,7 @@ pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {
         .count();
     rsx! {
         div {
-            class: "fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4",
+            class: "fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4",
             onclick: move |_| on_close.call(()),
             div {
                 class: "bg-card border border-border rounded-lg max-w-lg w-full shadow-xl max-h-[80vh] overflow-hidden flex flex-col",

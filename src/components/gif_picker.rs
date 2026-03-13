@@ -1,8 +1,7 @@
 use crate::components::gif_upload_modal::GifUploadModal;
 use crate::stores::gif_store::{
-    add_recent_gif, load_initial_gifs, load_more_gifs, search_gifs,
-    GifResultsStoreStoreExt, RecentGifsStoreStoreExt, GIF_LOADING, GIF_RESULTS,
-    RECENT_GIFS,
+    add_recent_gif, load_initial_gifs, load_more_gifs, search_gifs, GifResultsStoreStoreExt,
+    RecentGifsStoreStoreExt, GIF_LOADING, GIF_RESULTS, RECENT_GIFS,
 };
 use dioxus::prelude::*;
 #[derive(Props, Clone, PartialEq)]
@@ -23,20 +22,20 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
     let mut show_upload_modal = use_signal(|| false);
     let mut initialized = use_signal(|| false);
     let mut search_query = use_signal(String::new);
+    let mut search_gen = use_signal(|| 0u32);
     let gif_results = GIF_RESULTS.read();
     let gif_loading = GIF_LOADING.read();
     let recent_gifs = RECENT_GIFS.read();
     use_effect(move || {
         let query = search_query.read().clone();
         if *initialized.read() {
+            // Increment generation to invalidate any pending searches
+            search_gen.with_mut(|g| *g = g.wrapping_add(1));
+            let this_gen = *search_gen.peek();
             spawn(async move {
-                #[cfg(target_family = "wasm")]
-                {
-                    gloo_timers::future::TimeoutFuture::new(300).await;
-                }
-                #[cfg(not(target_family = "wasm"))]
-                {
-                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                crate::platform::timer::sleep_ms(300).await;
+                if *search_gen.peek() != this_gen {
+                    return;
                 }
                 search_gifs(query).await;
             });

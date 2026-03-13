@@ -29,7 +29,12 @@ fn compute_depth_data(orders: &[P2POrder]) -> DepthData {
     let mut data = DepthData::new();
     let pending_orders: Vec<&P2POrder> = orders
         .iter()
-        .filter(|o| o.status == OrderStatus::Pending && o.premium.is_some())
+        .filter(|o| {
+            o.status == OrderStatus::Pending
+                && o.premium
+                    .map(|premium| premium.is_finite())
+                    .unwrap_or(false)
+        })
         .collect();
     if pending_orders.is_empty() {
         return data;
@@ -44,27 +49,28 @@ fn compute_depth_data(orders: &[P2POrder]) -> DepthData {
         .filter(|o| o.order_type == OrderType::Buy)
         .copied()
         .collect();
-    sell_orders
-        .sort_by(|a, b| {
-            a.premium
-                .unwrap_or(0.0)
-                .partial_cmp(&b.premium.unwrap_or(0.0))
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-    buy_orders
-        .sort_by(|a, b| {
-            b.premium
-                .unwrap_or(0.0)
-                .partial_cmp(&a.premium.unwrap_or(0.0))
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+    sell_orders.sort_by(|a, b| {
+        b.premium
+            .expect("finite premium filtered above")
+            .partial_cmp(&a.premium.expect("finite premium filtered above"))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    buy_orders.sort_by(|a, b| {
+        a.premium
+            .expect("finite premium filtered above")
+            .partial_cmp(&b.premium.expect("finite premium filtered above"))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let mut cumulative: u64 = 0;
     for order in &sell_orders {
         if order.amount_sats == 0 {
             continue;
         }
         cumulative = cumulative.saturating_add(order.amount_sats);
-        data.sells.push((order.premium.unwrap_or(0.0), cumulative));
+        data.sells.push((
+            order.premium.expect("finite premium filtered above"),
+            cumulative,
+        ));
     }
     data.max_cumulative = data.max_cumulative.max(cumulative);
     cumulative = 0;
@@ -73,7 +79,10 @@ fn compute_depth_data(orders: &[P2POrder]) -> DepthData {
             continue;
         }
         cumulative = cumulative.saturating_add(order.amount_sats);
-        data.buys.push((order.premium.unwrap_or(0.0), cumulative));
+        data.buys.push((
+            order.premium.expect("finite premium filtered above"),
+            cumulative,
+        ));
     }
     data.max_cumulative = data.max_cumulative.max(cumulative);
     if data.max_cumulative == 0 {
@@ -87,8 +96,7 @@ fn premium_to_x(premium: f64, width: f64, padding: f64) -> f64 {
     let min_premium = -10.0;
     let max_premium = 20.0;
     let clamped = premium.clamp(min_premium, max_premium);
-    padding
-        + (clamped - min_premium) / (max_premium - min_premium) * (width - 2.0 * padding)
+    padding + (clamped - min_premium) / (max_premium - min_premium) * (width - 2.0 * padding)
 }
 /// Convert sats to Y coordinate
 fn sats_to_y(sats: u64, max_sats: u64, height: f64, padding: f64) -> f64 {
@@ -106,19 +114,25 @@ fn build_area_path(
     if data.is_empty() {
         return String::new();
     }
+    use std::fmt::Write;
     let baseline = height - padding;
     let first_x = premium_to_x(data[0].0, width, padding);
-    let mut path = format!("M {} {}", first_x, baseline);
-    path.push_str(
-        &format!(" L {} {}", first_x, sats_to_y(data[0].1, max_sats, height, padding)),
-    );
+    let mut path = String::new();
+    write!(path, "M {} {}", first_x, baseline).unwrap();
+    write!(
+        path,
+        " L {} {}",
+        first_x,
+        sats_to_y(data[0].1, max_sats, height, padding)
+    )
+    .unwrap();
     for (premium, cumulative) in data.iter().skip(1) {
         let x = premium_to_x(*premium, width, padding);
         let y = sats_to_y(*cumulative, max_sats, height, padding);
-        path.push_str(&format!(" L {} {}", x, y));
+        write!(path, " L {} {}", x, y).unwrap();
     }
     let last_x = premium_to_x(data.last().unwrap().0, width, padding);
-    path.push_str(&format!(" L {} {} Z", last_x, baseline));
+    write!(path, " L {} {} Z", last_x, baseline).unwrap();
     path
 }
 /// P2P Depth Chart component

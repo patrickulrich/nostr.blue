@@ -109,7 +109,10 @@ impl MintCapabilities {
     /// Get list of missing required NUTs for an operation
     pub fn missing_nuts_for(&self, operation: OperationKind) -> Vec<Nut> {
         let required = operation.required_nuts();
-        required.into_iter().filter(|nut| !self.supports_nut(*nut)).collect()
+        required
+            .into_iter()
+            .filter(|nut| !self.supports_nut(*nut))
+            .collect()
     }
 }
 /// Operation kinds for capability checking
@@ -170,21 +173,17 @@ pub async fn get_mint_capabilities(mint_url: &str) -> Result<MintCapabilities, S
         for method in &mint_info.nuts.nut04.methods {
             if let Some(max) = method.max_amount {
                 let amt = u64::from(max);
-                caps.max_mint_amount = Some(
-                    match caps.max_mint_amount {
-                        None => amt,
-                        Some(prev) => prev.min(amt),
-                    },
-                );
+                caps.max_mint_amount = Some(match caps.max_mint_amount {
+                    None => amt,
+                    Some(prev) => prev.min(amt),
+                });
             }
             if let Some(min) = method.min_amount {
                 let amt = u64::from(min);
-                caps.min_mint_amount = Some(
-                    match caps.min_mint_amount {
-                        None => amt,
-                        Some(prev) => prev.max(amt),
-                    },
-                );
+                caps.min_mint_amount = Some(match caps.min_mint_amount {
+                    None => amt,
+                    Some(prev) => prev.max(amt),
+                });
             }
         }
     }
@@ -201,21 +200,17 @@ pub async fn get_mint_capabilities(mint_url: &str) -> Result<MintCapabilities, S
         for method in &mint_info.nuts.nut05.methods {
             if let Some(max) = method.max_amount {
                 let amt = u64::from(max);
-                caps.max_melt_amount = Some(
-                    match caps.max_melt_amount {
-                        None => amt,
-                        Some(prev) => prev.min(amt),
-                    },
-                );
+                caps.max_melt_amount = Some(match caps.max_melt_amount {
+                    None => amt,
+                    Some(prev) => prev.min(amt),
+                });
             }
             if let Some(min) = method.min_amount {
                 let amt = u64::from(min);
-                caps.min_melt_amount = Some(
-                    match caps.min_melt_amount {
-                        None => amt,
-                        Some(prev) => prev.max(amt),
-                    },
-                );
+                caps.min_melt_amount = Some(match caps.min_melt_amount {
+                    None => amt,
+                    Some(prev) => prev.max(amt),
+                });
             }
         }
     }
@@ -246,9 +241,7 @@ pub async fn get_mint_capabilities(mint_url: &str) -> Result<MintCapabilities, S
     if !mint_info.nuts.nut17.supported.is_empty() {
         caps.supported_nuts.push(17);
     }
-    if !mint_info.nuts.nut19.cached_endpoints.is_empty()
-        || mint_info.nuts.nut19.ttl.is_some()
-    {
+    if !mint_info.nuts.nut19.cached_endpoints.is_empty() || mint_info.nuts.nut19.ttl.is_some() {
         caps.supported_nuts.push(19);
     }
     if mint_info.nuts.nut20.supported {
@@ -284,12 +277,10 @@ pub async fn check_operation_supported(
             .iter()
             .map(|n| format!("NUT-{}", *n as u8))
             .collect();
-        Err(
-            format!(
-                "Mint does not support required features: {}",
-                missing_str.join(", "),
-            ),
-        )
+        Err(format!(
+            "Mint does not support required features: {}",
+            missing_str.join(", "),
+        ))
     }
 }
 /// Quick check if P2PK is supported (cached)
@@ -318,16 +309,18 @@ pub async fn check_mint_limits(mint_url: &str, amount: u64) -> Result<(), String
     let caps = get_mint_capabilities(mint_url).await?;
     if let Some(max) = caps.max_mint_amount {
         if amount > max {
-            return Err(
-                format!("Amount {} exceeds mint maximum of {} sats", amount, max),
-            );
+            return Err(format!(
+                "Amount {} exceeds mint maximum of {} sats",
+                amount, max
+            ));
         }
     }
     if let Some(min) = caps.min_mint_amount {
         if amount < min {
-            return Err(
-                format!("Amount {} is below mint minimum of {} sats", amount, min),
-            );
+            return Err(format!(
+                "Amount {} is below mint minimum of {} sats",
+                amount, min
+            ));
         }
     }
     Ok(())
@@ -337,16 +330,18 @@ pub async fn check_melt_limits(mint_url: &str, amount: u64) -> Result<(), String
     let caps = get_mint_capabilities(mint_url).await?;
     if let Some(max) = caps.max_melt_amount {
         if amount > max {
-            return Err(
-                format!("Amount {} exceeds melt maximum of {} sats", amount, max),
-            );
+            return Err(format!(
+                "Amount {} exceeds melt maximum of {} sats",
+                amount, max
+            ));
         }
     }
     if let Some(min) = caps.min_melt_amount {
         if amount < min {
-            return Err(
-                format!("Amount {} is below melt minimum of {} sats", amount, min),
-            );
+            return Err(format!(
+                "Amount {} is below melt minimum of {} sats",
+                amount, min
+            ));
         }
     }
     Ok(())

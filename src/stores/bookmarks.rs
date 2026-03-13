@@ -5,11 +5,24 @@ use dioxus_stores::Store;
 use nostr_sdk::nips::nip51::Bookmarks;
 use nostr_sdk::{Event, EventBuilder, EventId, Filter, Kind, PublicKey};
 use std::time::Duration;
-#[cfg(target_arch = "wasm32")]
+
+#[cfg(all(feature = "web", feature = "desktop"))]
+compile_error!("Cannot enable both 'web' and 'desktop' features");
+
+#[cfg(all(feature = "web", feature = "mobile"))]
+compile_error!("Cannot enable both 'web' and 'mobile' features");
+
+#[cfg(all(feature = "desktop", feature = "mobile"))]
+compile_error!("Cannot enable both 'desktop' and 'mobile' features");
+
+#[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile")))]
+compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature");
+
+#[cfg(feature = "web")]
 use gloo_timers::callback::Timeout;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use std::cell::RefCell;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen_futures::spawn_local;
 /// Store for bookmarked event IDs with fine-grained reactivity
 #[derive(Clone, Debug, Default, Store)]
@@ -22,8 +35,8 @@ pub struct BookmarkRollbackStore {
     pub data: Option<Vec<String>>,
 }
 /// Global signal to track bookmarked event IDs
-pub static BOOKMARKED_EVENTS: GlobalSignal<Store<BookmarkedEventsStore>> = Signal::global(||
-Store::new(BookmarkedEventsStore::default()));
+pub static BOOKMARKED_EVENTS: GlobalSignal<Store<BookmarkedEventsStore>> =
+    Signal::global(|| Store::new(BookmarkedEventsStore::default()));
 /// Sync status for bookmark publishing
 #[derive(Clone, Debug, PartialEq)]
 pub enum BookmarkSyncStatus {
@@ -35,13 +48,14 @@ pub enum BookmarkSyncStatus {
     Failed { error: String, retry_count: u32 },
 }
 /// Global signal to track bookmark sync status
-pub static BOOKMARK_SYNC_STATUS: GlobalSignal<BookmarkSyncStatus> = Signal::global(|| {
-    BookmarkSyncStatus::Idle
-});
+pub static BOOKMARK_SYNC_STATUS: GlobalSignal<BookmarkSyncStatus> =
+    Signal::global(|| BookmarkSyncStatus::Idle);
 /// Previous bookmark state for rollback on failure
-pub static BOOKMARK_ROLLBACK_STATE: GlobalSignal<Store<BookmarkRollbackStore>> = Signal::global(||
-Store::new(BookmarkRollbackStore::default()));
-#[cfg(target_arch = "wasm32")]
+pub static BOOKMARK_ROLLBACK_STATE: GlobalSignal<Store<BookmarkRollbackStore>> =
+    Signal::global(|| Store::new(BookmarkRollbackStore::default()));
+/// Generation counter to track bookmark changes and prevent stale publishes
+static BOOKMARK_GENERATION: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+#[cfg(feature = "web")]
 thread_local! {
     /// Pending bookmark publish timeout (for debouncing)
     static BOOKMARK_PUBLISH_TIMEOUT: RefCell<Option<Timeout>> = const {
@@ -56,19 +70,22 @@ pub async fn init_bookmarks() -> Result<(), String> {
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-    let pubkey = PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     log::info!("Loading bookmarks for {}", pubkey_str);
     let filter = Filter::new().author(pubkey).kind(Kind::Bookmarks).limit(1);
     nostr_client::ensure_relays_ready(&client).await;
-    log::info!("Fetching bookmarks with filter: kind=10003, author={}", pubkey_str);
+    log::info!(
+        "Fetching bookmarks with filter: kind=10003, author={}",
+        pubkey_str
+    );
     match client.fetch_events(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             let events_vec: Vec<_> = events.into_iter().collect();
             log::info!("Received {} bookmark events from relays", events_vec.len());
             if let Some(event) = events_vec.into_iter().next() {
                 log::info!(
-                    "Bookmark event found: id={}, tags count={}", event.id.to_hex(),
+                    "Bookmark event found: id={}, tags count={}",
+                    event.id.to_hex(),
                     event.tags.len()
                 );
                 for tag in event.tags.iter() {
@@ -98,7 +115,8 @@ pub async fn init_bookmarks() -> Result<(), String> {
                         .collect()
                 };
                 log::info!(
-                    "Extracted {} bookmark entries from 'e' tags", bookmarked.len()
+                    "Extracted {} bookmark entries from 'e' tags",
+                    bookmarked.len()
                 );
                 for entry in &bookmarked {
                     log::debug!("  Bookmark: id={}", entry);
@@ -120,15 +138,19 @@ pub async fn init_bookmarks() -> Result<(), String> {
 /// Check if an event is bookmarked
 /// Uses peek() to avoid creating subscriptions that could conflict with writes
 pub fn is_bookmarked(event_id: &str) -> bool {
-    BOOKMARKED_EVENTS.peek().data().peek().iter().any(|id| id == event_id)
+    BOOKMARKED_EVENTS
+        .peek()
+        .data()
+        .peek()
+        .iter()
+        .any(|id| id == event_id)
 }
 /// Add event to bookmarks
 ///
 /// # Arguments
 /// * `event_id` - The event ID to bookmark
 pub async fn bookmark_event(event_id: String) -> Result<(), String> {
-    EventId::from_hex(&event_id)
-        .map_err(|e| format!("Invalid event ID '{}': {}", event_id, e))?;
+    EventId::from_hex(&event_id).map_err(|e| format!("Invalid event ID '{}': {}", event_id, e))?;
     let mut bookmarks = BOOKMARKED_EVENTS.peek().data().peek().clone();
     if bookmarks.iter().any(|id| id == &event_id) {
         return Ok(());
@@ -138,25 +160,24 @@ pub async fn bookmark_event(event_id: String) -> Result<(), String> {
     }
     bookmarks.push(event_id);
     *BOOKMARKED_EVENTS.peek().data().write() = bookmarks.clone();
-    #[cfg(target_arch = "wasm32")]
+    let generation = BOOKMARK_GENERATION
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        .wrapping_add(1);
+    #[cfg(feature = "web")]
     {
-        BOOKMARK_PUBLISH_TIMEOUT
-            .with(|timeout| {
-                *timeout.borrow_mut() = None;
-                let timeout_handle = Timeout::new(
-                    1000,
-                    move || {
-                        spawn_local(async move {
-                            publish_with_retry(bookmarks, 0).await;
-                        });
-                    },
-                );
-                *timeout.borrow_mut() = Some(timeout_handle);
+        BOOKMARK_PUBLISH_TIMEOUT.with(|timeout| {
+            *timeout.borrow_mut() = None;
+            let timeout_handle = Timeout::new(1000, move || {
+                spawn_local(async move {
+                    publish_with_retry(bookmarks, 0, generation).await;
+                });
             });
+            *timeout.borrow_mut() = Some(timeout_handle);
+        });
     }
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(feature = "web"))]
     {
-        publish_with_retry(bookmarks, 0).await;
+        publish_with_retry(bookmarks, 0, generation).await;
     }
     Ok(())
 }
@@ -168,78 +189,182 @@ pub async fn unbookmark_event(event_id: String) -> Result<(), String> {
     }
     bookmarks.retain(|id| id != &event_id);
     *BOOKMARKED_EVENTS.peek().data().write() = bookmarks.clone();
-    #[cfg(target_arch = "wasm32")]
+    let generation = BOOKMARK_GENERATION
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        .wrapping_add(1);
+    #[cfg(feature = "web")]
     {
-        BOOKMARK_PUBLISH_TIMEOUT
-            .with(|timeout| {
-                *timeout.borrow_mut() = None;
-                let timeout_handle = Timeout::new(
-                    1000,
-                    move || {
-                        spawn_local(async move {
-                            publish_with_retry(bookmarks, 0).await;
-                        });
-                    },
-                );
-                *timeout.borrow_mut() = Some(timeout_handle);
+        BOOKMARK_PUBLISH_TIMEOUT.with(|timeout| {
+            *timeout.borrow_mut() = None;
+            let timeout_handle = Timeout::new(1000, move || {
+                spawn_local(async move {
+                    publish_with_retry(bookmarks, 0, generation).await;
+                });
             });
+            *timeout.borrow_mut() = Some(timeout_handle);
+        });
     }
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(feature = "web"))]
     {
-        publish_with_retry(bookmarks, 0).await;
+        publish_with_retry(bookmarks, 0, generation).await;
     }
     Ok(())
 }
-/// Publish bookmarks with retry and exponential backoff
+/// Publish bookmarks with retry and exponential backoff (native - requires Send)
+#[cfg(not(feature = "web"))]
 fn publish_with_retry(
     bookmarks: Vec<String>,
     retry_count: u32,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static>> {
+    generation: u32,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>> {
     Box::pin(async move {
+        // Check if this publish is still current (not stale)
+        let current_generation = BOOKMARK_GENERATION.load(std::sync::atomic::Ordering::SeqCst);
+        if generation != current_generation {
+            log::debug!(
+                "Skipping stale bookmark publish (gen {} != {})",
+                generation,
+                current_generation
+            );
+            return;
+        }
+
         const MAX_RETRIES: u32 = 3;
         *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Syncing;
         match publish_bookmarks(bookmarks.clone()).await {
             Ok(_) => {
+                let current_generation =
+                    BOOKMARK_GENERATION.load(std::sync::atomic::Ordering::SeqCst);
+                if generation != current_generation {
+                    log::debug!("Stale bookmark publish succeeded, skipping state update");
+                    return;
+                }
                 *BOOKMARK_ROLLBACK_STATE.peek().data().write() = None;
                 *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Idle;
                 log::info!("Bookmarks published successfully");
             }
             Err(e) => {
                 log::error!(
-                    "Failed to publish bookmarks (attempt {}): {}", retry_count + 1, e
+                    "Failed to publish bookmarks (attempt {}): {}",
+                    retry_count + 1,
+                    e
                 );
+                let current_generation =
+                    BOOKMARK_GENERATION.load(std::sync::atomic::Ordering::SeqCst);
+                if generation != current_generation {
+                    log::debug!("Stale bookmark publish failed, skipping retry");
+                    return;
+                }
                 if retry_count < MAX_RETRIES {
                     let delay_ms = 1000u32 * (1 << retry_count);
                     log::info!(
-                        "Retrying bookmark publish in {}ms (attempt {}/{})", delay_ms,
-                        retry_count + 1, MAX_RETRIES
+                        "Retrying bookmark publish in {}ms (attempt {}/{})",
+                        delay_ms,
+                        retry_count + 1,
+                        MAX_RETRIES
                     );
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        let timeout_handle = Timeout::new(
-                            delay_ms,
-                            move || {
-                                spawn_local(async move {
-                                    publish_with_retry(bookmarks, retry_count + 1).await;
-                                });
-                            },
-                        );
-                        std::mem::forget(timeout_handle);
-                    }
-                    #[cfg(not(target_arch = "wasm32"))]
-                    {
-                        tokio::time::sleep(Duration::from_millis(delay_ms as u64)).await;
-                        publish_with_retry(bookmarks, retry_count + 1).await;
-                    }
+                    crate::platform::timer::sleep(std::time::Duration::from_millis(
+                        delay_ms as u64,
+                    ))
+                    .await;
+                    publish_with_retry(bookmarks, retry_count + 1, generation).await;
                 } else {
                     log::error!(
-                        "Bookmark publish failed after {} retries: {}", MAX_RETRIES, e
+                        "Bookmark publish failed after {} retries: {}",
+                        MAX_RETRIES,
+                        e
                     );
-                    if let Some(previous_state) = BOOKMARK_ROLLBACK_STATE
-                        .peek()
-                        .data()
-                        .peek()
-                        .clone()
+                    if let Some(previous_state) =
+                        BOOKMARK_ROLLBACK_STATE.peek().data().peek().clone()
+                    {
+                        log::warn!(
+                            "Automatically rolling back bookmarks to previous state due to publish failure"
+                        );
+                        *BOOKMARKED_EVENTS.peek().data().write() = previous_state;
+                    }
+                    *BOOKMARK_ROLLBACK_STATE.peek().data().write() = None;
+                    *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Failed {
+                        error: e.clone(),
+                        retry_count,
+                    };
+                }
+            }
+        }
+    })
+}
+
+/// Publish bookmarks with retry and exponential backoff (web - no Send bound)
+#[cfg(feature = "web")]
+fn publish_with_retry(
+    bookmarks: Vec<String>,
+    retry_count: u32,
+    generation: u32,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static>> {
+    Box::pin(async move {
+        // Check if this publish is still current (not stale)
+        let current_generation = BOOKMARK_GENERATION.load(std::sync::atomic::Ordering::SeqCst);
+        if generation != current_generation {
+            log::debug!(
+                "Skipping stale bookmark publish (gen {} != {})",
+                generation,
+                current_generation
+            );
+            return;
+        }
+
+        const MAX_RETRIES: u32 = 3;
+        *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Syncing;
+        match publish_bookmarks(bookmarks.clone()).await {
+            Ok(_) => {
+                let current_generation =
+                    BOOKMARK_GENERATION.load(std::sync::atomic::Ordering::SeqCst);
+                if generation != current_generation {
+                    log::debug!("Stale bookmark publish succeeded, skipping state update");
+                    return;
+                }
+                *BOOKMARK_ROLLBACK_STATE.peek().data().write() = None;
+                *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Idle;
+                log::info!("Bookmarks published successfully");
+            }
+            Err(e) => {
+                log::error!(
+                    "Failed to publish bookmarks (attempt {}): {}",
+                    retry_count + 1,
+                    e
+                );
+                let current_generation =
+                    BOOKMARK_GENERATION.load(std::sync::atomic::Ordering::SeqCst);
+                if generation != current_generation {
+                    log::debug!("Stale bookmark publish failed, skipping retry");
+                    return;
+                }
+                if retry_count < MAX_RETRIES {
+                    let delay_ms = 1000u32 * (1 << retry_count);
+                    log::info!(
+                        "Retrying bookmark publish in {}ms (attempt {}/{})",
+                        delay_ms,
+                        retry_count + 1,
+                        MAX_RETRIES
+                    );
+                    let timeout_handle = Timeout::new(delay_ms, move || {
+                        spawn_local(async move {
+                            publish_with_retry(bookmarks, retry_count + 1, generation).await;
+                        });
+                    });
+                    // Intentionally forget the timeout handle to prevent the scheduled retry
+                    // from being cancelled. When a Timeout is dropped, it cancels the callback.
+                    // We use fire-and-forget here so the retry runs even after this scope ends.
+                    // This is a deliberate WASM pattern - the small memory leak is acceptable
+                    // because the callback runs once and the module lifetime is the app lifetime.
+                    std::mem::forget(timeout_handle);
+                } else {
+                    log::error!(
+                        "Bookmark publish failed after {} retries: {}",
+                        MAX_RETRIES,
+                        e
+                    );
+                    if let Some(previous_state) =
+                        BOOKMARK_ROLLBACK_STATE.peek().data().peek().clone()
                     {
                         log::warn!(
                             "Automatically rolling back bookmarks to previous state due to publish failure"
@@ -272,8 +397,11 @@ pub fn rollback_bookmarks() {
 #[allow(dead_code)]
 pub async fn retry_bookmark_publish() {
     let current_bookmarks = BOOKMARKED_EVENTS.peek().data().peek().clone();
+    let generation = BOOKMARK_GENERATION
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        .wrapping_add(1);
     log::info!("Manually retrying bookmark publish");
-    publish_with_retry(current_bookmarks, 0).await;
+    publish_with_retry(current_bookmarks, 0, generation).await;
 }
 /// Dismiss failed status and keep local changes
 #[allow(dead_code)]
@@ -300,7 +428,9 @@ async fn publish_bookmarks(bookmarks: Vec<String>) -> Result<(), String> {
             Err(e) => {
                 log::warn!(
                     "Skipping malformed bookmark ID at index {}: '{}' (error: {})",
-                    index, id, e
+                    index,
+                    id,
+                    e
                 );
             }
         }
@@ -308,7 +438,8 @@ async fn publish_bookmarks(bookmarks: Vec<String>) -> Result<(), String> {
     if event_ids.len() < bookmarks.len() {
         log::warn!(
             "publish_bookmarks: {} of {} bookmark IDs were invalid and skipped",
-            bookmarks.len() - event_ids.len(), bookmarks.len()
+            bookmarks.len() - event_ids.len(),
+            bookmarks.len()
         );
     }
     let bookmark_list = Bookmarks {
@@ -324,8 +455,10 @@ async fn publish_bookmarks(bookmarks: Vec<String>) -> Result<(), String> {
             let failed_count = output.failed.len();
             let total = success_count + failed_count;
             log::info!(
-                "Bookmarks published: {} ({}/{} relays succeeded)", output.id().to_hex(),
-                success_count, total
+                "Bookmarks published: {} ({}/{} relays succeeded)",
+                output.id().to_hex(),
+                success_count,
+                total
             );
             if !output.failed.is_empty() {
                 for (relay, error) in &output.failed {
@@ -386,7 +519,8 @@ pub async fn fetch_bookmarked_events_paginated(
     if event_ids.len() < bookmarks_slice.len() {
         log::warn!(
             "fetch_bookmarked_events: {} of {} bookmark IDs were invalid and skipped",
-            bookmarks_slice.len() - event_ids.len(), bookmarks_slice.len()
+            bookmarks_slice.len() - event_ids.len(),
+            bookmarks_slice.len()
         );
     }
     log::info!("Fetching {} bookmarked event IDs", event_ids.len());
@@ -395,18 +529,20 @@ pub async fn fetch_bookmarked_events_paginated(
     }
     let filter = Filter::new().ids(event_ids.clone());
     nostr_client::ensure_relays_ready(&client).await;
-    match client.fetch_events(filter.clone(), Duration::from_secs(15)).await {
+    match client
+        .fetch_events(filter.clone(), Duration::from_secs(15))
+        .await
+    {
         Ok(events) => {
             let mut event_vec: Vec<Event> = events.into_iter().collect();
             event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
             log::info!(
-                "Fetched {} bookmarked events (skip: {}, limit: {:?})", event_vec.len(),
-                skip, limit
+                "Fetched {} bookmarked events (skip: {}, limit: {:?})",
+                event_vec.len(),
+                skip,
+                limit
             );
-            let found_ids: Vec<String> = event_vec
-                .iter()
-                .map(|e| e.id.to_hex())
-                .collect();
+            let found_ids: Vec<String> = event_vec.iter().map(|e| e.id.to_hex()).collect();
             for id in &event_ids {
                 let hex = id.to_hex();
                 if found_ids.contains(&hex) {

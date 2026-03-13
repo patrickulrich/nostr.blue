@@ -4,19 +4,17 @@
 //! It provides synchronization between CDK's internal state and Dioxus GlobalSignals
 //! for UI reactivity.
 #![allow(dead_code)]
-use cdk::nuts::CurrencyUnit;
-use cdk::wallet::multi_mint_wallet::MultiMintWallet;
-use dioxus::prelude::*;
-use std::sync::Arc;
 use super::cashu::{
     DleqData, ProofData, ProofState, TokenData, WalletStatus, WalletTokensStoreStoreExt,
     WALLET_STATE, WALLET_STATUS, WALLET_TOKENS,
 };
+use cdk::nuts::CurrencyUnit;
+use cdk::wallet::multi_mint_wallet::MultiMintWallet;
+use dioxus::prelude::*;
+use std::sync::Arc;
 /// Global MultiMintWallet instance
 /// Replaces the previous WALLET_CACHE HashMap approach
-pub static MULTI_WALLET: GlobalSignal<Option<Arc<MultiMintWallet>>> = Signal::global(|| {
-    None
-});
+pub static MULTI_WALLET: GlobalSignal<Option<Arc<MultiMintWallet>>> = Signal::global(|| None);
 #[allow(unused_imports)]
 pub use super::cashu::mpp::{
     calculate_mpp_split, create_mpp_melt_quotes, execute_mpp_melt, get_balances_per_mint,
@@ -30,9 +28,7 @@ pub struct WalletBalances {
     pub pending: u64,
 }
 /// Global signal for balance breakdown
-pub static WALLET_BALANCES: GlobalSignal<WalletBalances> = Signal::global(
-    WalletBalances::default,
-);
+pub static WALLET_BALANCES: GlobalSignal<WalletBalances> = Signal::global(WalletBalances::default);
 /// Initialize the MultiMintWallet with the given seed and localstore
 pub async fn init_multi_wallet(
     localstore: Arc<super::indexeddb_database::IndexedDbDatabase>,
@@ -56,7 +52,9 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
         .as_ref()
         .ok_or("MultiMintWallet not initialized")?
         .clone();
-    let mint_url = mint_url.parse().map_err(|e| format!("Invalid mint URL: {}", e))?;
+    let mint_url = mint_url
+        .parse()
+        .map_err(|e| format!("Invalid mint URL: {}", e))?;
     multi_wallet
         .add_mint(mint_url)
         .await
@@ -71,7 +69,9 @@ pub async fn remove_mint(mint_url: &str) -> Result<(), String> {
         .as_ref()
         .ok_or("MultiMintWallet not initialized")?
         .clone();
-    let mint_url = mint_url.parse().map_err(|e| format!("Invalid mint URL: {}", e))?;
+    let mint_url = mint_url
+        .parse()
+        .map_err(|e| format!("Invalid mint URL: {}", e))?;
     multi_wallet.remove_mint(&mint_url).await;
     sync_wallet_state().await?;
     Ok(())
@@ -83,7 +83,9 @@ pub async fn get_wallet(mint_url: &str) -> Result<cdk::Wallet, String> {
         .as_ref()
         .ok_or("MultiMintWallet not initialized")?
         .clone();
-    let mint_url = mint_url.parse().map_err(|e| format!("Invalid mint URL: {}", e))?;
+    let mint_url = mint_url
+        .parse()
+        .map_err(|e| format!("Invalid mint URL: {}", e))?;
     multi_wallet
         .get_wallet(&mint_url)
         .await
@@ -150,33 +152,30 @@ pub async fn sync_wallet_state() -> Result<(), String> {
                         Ok(s) => Some(s),
                         Err(e) => {
                             log::warn!(
-                                "Failed to serialize witness for proof {}: {}", p.keyset_id,
+                                "Failed to serialize witness for proof {}: {}",
+                                p.keyset_id,
                                 e
                             );
                             None
                         }
                     }),
-                dleq: p
-                    .dleq
-                    .as_ref()
-                    .map(|d| DleqData {
-                        e: d.e.to_string(),
-                        s: d.s.to_string(),
-                        r: d.r.to_string(),
-                    }),
+                dleq: p.dleq.as_ref().map(|d| DleqData {
+                    e: d.e.to_string(),
+                    s: d.s.to_string(),
+                    r: d.r.to_string(),
+                }),
                 state: ProofState::Unspent,
                 transaction_id: None,
                 state_set_at: None,
             })
             .collect();
-        tokens
-            .push(TokenData {
-                event_id: String::new(),
-                mint: mint_url.to_string(),
-                unit: "sat".to_string(),
-                proofs: proof_data,
-                created_at: 0,
-            });
+        tokens.push(TokenData {
+            event_id: String::new(),
+            mint: mint_url.to_string(),
+            unit: "sat".to_string(),
+            proofs: proof_data,
+            created_at: 0,
+        });
     }
     let existing_tokens = WALLET_TOKENS.read().data().read().clone();
     for token in &mut tokens {

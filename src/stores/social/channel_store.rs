@@ -16,6 +16,7 @@ use std::num::NonZeroUsize;
 use std::time::Duration;
 
 use crate::stores::nostr_client::{fetch_events_aggregated, get_client};
+use crate::utils::custom_emoji::build_custom_emoji_tags;
 
 const CHANNEL_CACHE_SIZE: usize = 100;
 
@@ -74,7 +75,10 @@ pub fn parse_channel_creation(event: &Event) -> Option<Channel> {
 }
 
 /// Parse a kind 41 channel metadata event, validating creator pubkey
-pub fn parse_channel_metadata(event: &Event, creator_pubkey: &str) -> Option<ChannelMetadataUpdate> {
+pub fn parse_channel_metadata(
+    event: &Event,
+    creator_pubkey: &str,
+) -> Option<ChannelMetadataUpdate> {
     if event.kind != Kind::ChannelMetadata {
         return None;
     }
@@ -105,11 +109,22 @@ pub fn parse_channel_metadata(event: &Event, creator_pubkey: &str) -> Option<Cha
 }
 
 /// Parse JSON content for name/about/picture/relays
-fn parse_channel_content(content: &str) -> (Option<String>, Option<String>, Option<String>, Vec<String>) {
+fn parse_channel_content(
+    content: &str,
+) -> (Option<String>, Option<String>, Option<String>, Vec<String>) {
     let parsed: serde_json::Value = serde_json::from_str(content).unwrap_or_default();
-    let name = parsed.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let about = parsed.get("about").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let picture = parsed.get("picture").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let name = parsed
+        .get("name")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let about = parsed
+        .get("about")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let picture = parsed
+        .get("picture")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     let relays = parsed
         .get("relays")
         .and_then(|v| v.as_array())
@@ -139,7 +154,9 @@ pub fn cache_channel_metadata(meta: ChannelMetadataUpdate) {
 }
 
 /// Get effective channel info (base + latest metadata overlay)
-pub fn get_channel_display_info(channel: &Channel) -> (Option<String>, Option<String>, Option<String>) {
+pub fn get_channel_display_info(
+    channel: &Channel,
+) -> (Option<String>, Option<String>, Option<String>) {
     let meta_cache = CHANNEL_METADATA_CACHE.read();
     if let Some(meta) = meta_cache.get(&channel.id) {
         (
@@ -148,7 +165,11 @@ pub fn get_channel_display_info(channel: &Channel) -> (Option<String>, Option<St
             meta.picture.clone().or_else(|| channel.picture.clone()),
         )
     } else {
-        (channel.name.clone(), channel.about.clone(), channel.picture.clone())
+        (
+            channel.name.clone(),
+            channel.about.clone(),
+            channel.picture.clone(),
+        )
     }
 }
 
@@ -224,8 +245,7 @@ pub async fn search_channels(
         .await
     {
         if !events.is_empty() {
-            let channels: Vec<Channel> =
-                events.iter().filter_map(parse_channel_creation).collect();
+            let channels: Vec<Channel> = events.iter().filter_map(parse_channel_creation).collect();
             for ch in &channels {
                 cache_channel(ch.clone());
             }
@@ -276,7 +296,9 @@ pub async fn search_channels(
 // -- Event ID decoding --
 
 /// Decode a channel_id string (nevent1.../note1.../hex) into EventId + relay hints
-pub fn decode_channel_id(channel_id_str: &str) -> std::result::Result<(EventId, Vec<RelayUrl>), String> {
+pub fn decode_channel_id(
+    channel_id_str: &str,
+) -> std::result::Result<(EventId, Vec<RelayUrl>), String> {
     // Try bech32 first (nevent1... or note1...)
     if let Ok(nip19) = Nip19::from_bech32(channel_id_str) {
         match nip19 {
@@ -320,7 +342,8 @@ pub async fn send_channel_message(
     content: &str,
 ) -> std::result::Result<Event, String> {
     let client = get_client().ok_or("Client not initialized")?;
-    let builder = EventBuilder::channel_msg(channel_id, relay_url, content);
+    let builder = EventBuilder::channel_msg(channel_id, relay_url, content)
+        .tags(build_custom_emoji_tags(content));
     let event = client
         .sign_event_builder(builder)
         .await
@@ -344,7 +367,8 @@ pub async fn create_channel(
         metadata = metadata.about(about);
     }
     if !picture.is_empty() {
-        metadata = metadata.picture(Url::parse(picture).map_err(|e| format!("Invalid picture URL: {}", e))?);
+        metadata = metadata
+            .picture(Url::parse(picture).map_err(|e| format!("Invalid picture URL: {}", e))?);
     }
     let builder = EventBuilder::channel(&metadata);
     let event = client

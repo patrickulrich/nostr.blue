@@ -28,81 +28,107 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
     let mut is_directory = use_signal(|| false);
     let filename = path_str.rsplit('/').next().unwrap_or(&path_str).to_string();
     let mut gen = use_signal(|| 0u32);
-    use_effect(use_reactive((&naddr, &git_ref, &path_str), move |(naddr, git_ref, path_str)| {
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !client_initialized {
-            return;
-        }
-        is_directory.set(false);
-        repo_signal.set(None);
-        content.set(String::new());
-        branches.set(Vec::new());
-        let current_gen = gen.peek().wrapping_add(1);
-        gen.set(current_gen);
-        loading.set(true);
-        error.set(None);
-        spawn(async move {
-            if !is_safe_path(&path_str) {
-                log::warn!("Path traversal attempt blocked: {}", path_str);
-                if *gen.peek() != current_gen { return; }
-                error.set(Some("Invalid path".to_string()));
-                loading.set(false);
+    use_effect(use_reactive(
+        (&naddr, &git_ref, &path_str),
+        move |(naddr, git_ref, path_str)| {
+            let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+            if !client_initialized {
                 return;
             }
-            let repo = match fetch_repository(&naddr).await {
-                Ok(r) => r,
-                Err(e) => {
-                    if *gen.peek() != current_gen { return; }
-                    error.set(Some(format!("Failed to load repository: {}", e)));
+            is_directory.set(false);
+            repo_signal.set(None);
+            content.set(String::new());
+            branches.set(Vec::new());
+            let current_gen = gen.peek().wrapping_add(1);
+            gen.set(current_gen);
+            loading.set(true);
+            error.set(None);
+            spawn(async move {
+                if !is_safe_path(&path_str) {
+                    log::warn!("Path traversal attempt blocked: {}", path_str);
+                    if *gen.peek() != current_gen {
+                        return;
+                    }
+                    error.set(Some("Invalid path".to_string()));
                     loading.set(false);
                     return;
                 }
-            };
-            if *gen.peek() != current_gen { return; }
-            repo_signal.set(Some(repo.clone()));
-            if !git_service::GitService::is_initialized() {
-                if let Err(e) = git_service::GitService::init().await {
-                    if *gen.peek() != current_gen { return; }
-                    error.set(Some(format!("Failed to initialize git: {}", e)));
-                    loading.set(false);
+                let repo = match fetch_repository(&naddr).await {
+                    Ok(r) => r,
+                    Err(e) => {
+                        if *gen.peek() != current_gen {
+                            return;
+                        }
+                        error.set(Some(format!("Failed to load repository: {}", e)));
+                        loading.set(false);
+                        return;
+                    }
+                };
+                if *gen.peek() != current_gen {
                     return;
                 }
-            }
-            if *gen.peek() != current_gen { return; }
-            match git_service().read_file(&repo, &path_str, Some(&git_ref)).await
-            {
-                Ok(file_content) => {
-                    if *gen.peek() != current_gen { return; }
-                    content.set(file_content);
-                }
-                Err(e) => {
-                    if *gen.peek() != current_gen { return; }
-                    if is_tree_error(&e) {
-                        is_directory.set(true);
-                    } else {
-                        error.set(Some(format!("Failed to load file: {}", e)));
+                repo_signal.set(Some(repo.clone()));
+                if !git_service::GitService::is_initialized() {
+                    if let Err(e) = git_service::GitService::init().await {
+                        if *gen.peek() != current_gen {
+                            return;
+                        }
+                        error.set(Some(format!("Failed to initialize git: {}", e)));
+                        loading.set(false);
+                        return;
                     }
                 }
-            }
-            if *gen.peek() != current_gen { return; }
-            let branch_result = git_service().get_branches(&repo).await;
-            if *gen.peek() != current_gen { return; }
-            if let Ok(branch_list) = branch_result {
-                branches.set(branch_list);
-            }
-            loading.set(false);
-        });
-    }));
-    use_effect(use_reactive((&naddr, &git_ref, &path, &path_str), move |(naddr, git_ref, path, path_str)| {
-        if *is_directory.read() && is_safe_path(&path_str) {
-            let nav = navigator();
-            nav.replace(Route::CodeRepoTree {
-                naddr,
-                git_ref,
-                path,
+                if *gen.peek() != current_gen {
+                    return;
+                }
+                match git_service()
+                    .read_file(&repo, &path_str, Some(&git_ref))
+                    .await
+                {
+                    Ok(file_content) => {
+                        if *gen.peek() != current_gen {
+                            return;
+                        }
+                        content.set(file_content);
+                    }
+                    Err(e) => {
+                        if *gen.peek() != current_gen {
+                            return;
+                        }
+                        if is_tree_error(&e) {
+                            is_directory.set(true);
+                        } else {
+                            error.set(Some(format!("Failed to load file: {}", e)));
+                        }
+                    }
+                }
+                if *gen.peek() != current_gen {
+                    return;
+                }
+                let branch_result = git_service().get_branches(&repo).await;
+                if *gen.peek() != current_gen {
+                    return;
+                }
+                if let Ok(branch_list) = branch_result {
+                    branches.set(branch_list);
+                }
+                loading.set(false);
             });
-        }
-    }));
+        },
+    ));
+    use_effect(use_reactive(
+        (&naddr, &git_ref, &path, &path_str),
+        move |(naddr, git_ref, path, path_str)| {
+            if *is_directory.read() && is_safe_path(&path_str) {
+                let nav = navigator();
+                nav.replace(Route::CodeRepoTree {
+                    naddr,
+                    git_ref,
+                    path,
+                });
+            }
+        },
+    ));
     let repo_name = repo_signal()
         .map(|r| r.display_name().to_string())
         .unwrap_or_else(|| "Repository".to_string());

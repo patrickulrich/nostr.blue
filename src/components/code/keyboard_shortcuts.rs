@@ -11,10 +11,11 @@
 #[allow(unused_imports)]
 use crate::routes::Route;
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
 use dioxus_core::use_drop;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 
 #[component]
@@ -26,17 +27,21 @@ pub fn CodeKeyboardShortcuts() -> Element {
     let nav = navigator();
 
     // Store JS function reference for event listener cleanup on unmount
-    #[allow(unused_variables, unused_mut)]
+    #[cfg(feature = "web")]
     let mut cleanup_fn = use_signal(|| None::<js_sys::Function>);
+    #[cfg(feature = "web")]
+    let mut timeout_closure = use_signal(|| None::<Closure<dyn FnMut()>>);
     // Store timeout ID for cleanup on unmount
-    #[allow(unused_variables, unused_mut)]
+    #[cfg(feature = "web")]
     let mut timeout_id = use_signal(|| None::<i32>);
 
     // Set up keyboard event listener once
+    #[cfg(feature = "web")]
     use_effect(move || {
-        #[cfg(target_arch = "wasm32")]
         {
-            let Some(window) = web_sys::window() else { return; };
+            let Some(window) = web_sys::window() else {
+                return;
+            };
 
             let closure = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
                 // Check if target is input/textarea/select - skip shortcuts if so
@@ -72,6 +77,7 @@ pub fn CodeKeyboardShortcuts() -> Element {
                             w.clear_timeout_with_handle(id);
                         }
                         timeout_id.set(None);
+                        timeout_closure.set(None);
                     }
                     return;
                 }
@@ -87,6 +93,7 @@ pub fn CodeKeyboardShortcuts() -> Element {
                             w.clear_timeout_with_handle(id);
                         }
                         timeout_id.set(None);
+                        timeout_closure.set(None);
                     }
                     return;
                 }
@@ -94,19 +101,26 @@ pub fn CodeKeyboardShortcuts() -> Element {
                 // Handle `g` prefix
                 if key == "g" && !*pending_g.read() {
                     event.prevent_default();
-                    pending_g.set(true);
 
                     // Reset after 1 second timeout, storing the ID for cleanup
-                    let Some(window_clone) = web_sys::window() else { return; };
+                    let Some(window_clone) = web_sys::window() else {
+                        return;
+                    };
                     let callback = Closure::wrap(Box::new(move || {
                         pending_g.set(false);
                         timeout_id.set(None);
+                        timeout_closure.set(None);
                     }) as Box<dyn FnMut()>);
-                    if let Ok(id) = window_clone.set_timeout_with_callback_and_timeout_and_arguments_0(
-                        callback.into_js_value().as_ref().unchecked_ref(),
-                        1000
-                    ) {
+                    let js_callback = callback
+                        .as_ref()
+                        .unchecked_ref::<js_sys::Function>()
+                        .clone();
+                    if let Ok(id) = window_clone
+                        .set_timeout_with_callback_and_timeout_and_arguments_0(&js_callback, 1000)
+                    {
+                        pending_g.set(true);
                         timeout_id.set(Some(id));
+                        timeout_closure.set(Some(callback));
                     }
                     return;
                 }
@@ -122,6 +136,7 @@ pub fn CodeKeyboardShortcuts() -> Element {
                             w.clear_timeout_with_handle(id);
                         }
                         timeout_id.set(None);
+                        timeout_closure.set(None);
                     }
 
                     match key.as_str() {
@@ -145,24 +160,28 @@ pub fn CodeKeyboardShortcuts() -> Element {
                 }
             }) as Box<dyn FnMut(_)>);
 
-            let js_fn: js_sys::Function = closure.as_ref().unchecked_ref::<js_sys::Function>().clone();
-            window.add_event_listener_with_callback("keydown", &js_fn).ok();
-            cleanup_fn.set(Some(js_fn));
-            closure.forget();
+            let js_fn: js_sys::Function =
+                closure.as_ref().unchecked_ref::<js_sys::Function>().clone();
+            if window
+                .add_event_listener_with_callback("keydown", &js_fn)
+                .is_ok()
+            {
+                cleanup_fn.set(Some(js_fn));
+                closure.forget();
+            }
         }
     });
 
+    #[cfg(feature = "web")]
     use_drop(move || {
-        #[cfg(target_arch = "wasm32")]
-        {
-            if let Some(window) = web_sys::window() {
-                if let Some(js_fn) = cleanup_fn.peek().as_ref() {
-                    let _ = window.remove_event_listener_with_callback("keydown", js_fn);
-                }
-                if let Some(id) = *timeout_id.peek() {
-                    window.clear_timeout_with_handle(id);
-                }
+        if let Some(window) = web_sys::window() {
+            if let Some(js_fn) = cleanup_fn.peek().as_ref() {
+                let _ = window.remove_event_listener_with_callback("keydown", js_fn);
             }
+            if let Some(id) = *timeout_id.peek() {
+                window.clear_timeout_with_handle(id);
+            }
+            timeout_closure.set(None);
         }
     });
 

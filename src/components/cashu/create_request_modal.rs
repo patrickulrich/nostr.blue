@@ -11,8 +11,10 @@ pub fn CashuCreateRequestModal(on_close: EventHandler<()>) -> Element {
     let mut current_request_id = use_signal(|| Option::<String>::None);
     let mut is_creating = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
+    #[allow(unused_mut)]
     let mut copied = use_signal(|| false);
     let mut copy_error = use_signal(|| Option::<String>::None);
+    let mut copy_token = use_signal(|| 0u64);
 
     // Memoize payment_received for reactivity
     let payment_received = use_memo(move || {
@@ -57,7 +59,11 @@ pub fn CashuCreateRequestModal(on_close: EventHandler<()>) -> Element {
                 }
             }
         };
-        let desc = if description.is_empty() { None } else { Some(description) };
+        let desc = if description.is_empty() {
+            None
+        } else {
+            Some(description)
+        };
         error_message.set(None);
         is_creating.set(true);
         spawn(async move {
@@ -68,9 +74,7 @@ pub fn CashuCreateRequestModal(on_close: EventHandler<()>) -> Element {
                         current_request_id.set(Some(info.request_id.clone()));
                         let request_id = info.request_id.clone();
                         spawn(async move {
-                            match cashu::wait_for_nostr_payment(request_id.clone(), 300)
-                                .await
-                            {
+                            match cashu::wait_for_nostr_payment(request_id.clone(), 300).await {
                                 Ok(amount) => {
                                     log::info!("Received payment of {} sats", amount);
                                     // Only clear if this is still the active request
@@ -102,33 +106,28 @@ pub fn CashuCreateRequestModal(on_close: EventHandler<()>) -> Element {
     let handle_copy = move |_| {
         if let Some(req) = request_string.read().as_ref() {
             let req_clone = req.clone();
+            let current_token = copy_token.with_mut(|token| {
+                *token = token.wrapping_add(1);
+                *token
+            });
             copy_error.set(None);
             spawn(async move {
-                if let Some(window) = web_sys::window() {
-                    let clipboard = window.navigator().clipboard();
-                    match wasm_bindgen_futures::JsFuture::from(
-                            clipboard.write_text(&req_clone),
-                        )
-                        .await
-                    {
-                        Ok(_) => {
-                            copied.set(true);
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                match crate::platform::clipboard::copy_to_clipboard(&req_clone).await {
+                    Ok(_) => {
+                        copied.set(true);
+                        crate::platform::timer::sleep_ms(2000).await;
+                        if *copy_token.peek() == current_token {
                             copied.set(false);
                         }
-                        Err(e) => {
-                            let err_msg = format!("{:?}", e);
-                            log::error!("Failed to copy to clipboard: {}", err_msg);
-                            copy_error.set(Some("Copy failed".to_string()));
-                            gloo_timers::future::TimeoutFuture::new(3000).await;
+                    }
+                    Err(e) => {
+                        log::error!("Failed to copy to clipboard: {}", e);
+                        copy_error.set(Some("Copy failed".to_string()));
+                        crate::platform::timer::sleep_ms(3000).await;
+                        if *copy_token.peek() == current_token {
                             copy_error.set(None);
                         }
                     }
-                } else {
-                    log::error!("Failed to copy: window not available");
-                    copy_error.set(Some("Copy failed".to_string()));
-                    gloo_timers::future::TimeoutFuture::new(3000).await;
-                    copy_error.set(None);
                 }
             });
         }

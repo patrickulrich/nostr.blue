@@ -3,10 +3,7 @@ use dioxus::prelude::*;
 use crate::stores::sidebar_store::SidebarItem;
 
 /// Helper function to render sidebar icons for dynamic sidebar
-pub(super) fn render_sidebar_icon(
-    item: &SidebarItem,
-    class: &str,
-) -> Element {
+pub(super) fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
     match item {
         SidebarItem::Home => {
             rsx! {
@@ -206,6 +203,11 @@ pub(super) fn render_sidebar_icon(
         SidebarItem::Highlights => {
             rsx! {
                 crate::components::icons::HighlighterIcon { class: class.to_string() }
+            }
+        }
+        SidebarItem::AIChat => {
+            rsx! {
+                crate::components::icons::SparklesIcon { class: class.to_string() }
             }
         }
     }

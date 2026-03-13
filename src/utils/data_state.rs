@@ -100,12 +100,10 @@ impl<T> DataState<T> {
         match self {
             DataState::Pending => DataState::Pending,
             DataState::Loading => DataState::Loading,
-            DataState::Loaded(data) => {
-                match f(data) {
-                    Ok(new_data) => DataState::Loaded(new_data),
-                    Err(err) => DataState::Error(err),
-                }
-            }
+            DataState::Loaded(data) => match f(data) {
+                Ok(new_data) => DataState::Loaded(new_data),
+                Err(err) => DataState::Error(err),
+            },
             DataState::Error(msg) => DataState::Error(msg),
         }
     }

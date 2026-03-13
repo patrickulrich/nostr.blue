@@ -2,26 +2,24 @@
 //!
 //! Handles fetching and publishing Kind 9806 bounty events for git issues.
 #![allow(dead_code)]
-use dioxus::signals::ReadableExt;
-use nostr_sdk::prelude::*;
-use std::borrow::Cow;
-use std::time::Duration;
 use crate::stores::code_store::{cache_bounty_events, get_cached_bounties};
 use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
 use crate::stores::nwc_store;
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::nip34::{Bounty, BountyStatus};
+use dioxus::signals::ReadableExt;
+use nostr_sdk::prelude::*;
+use std::borrow::Cow;
+use std::time::Duration;
 /// Default timeout for fetching events
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 /// Fetch bounties for an issue by event ID hex
-pub async fn fetch_bounties_for_issue(
-    issue_event_id: &str,
-) -> Result<Vec<Bounty>, String> {
+pub async fn fetch_bounties_for_issue(issue_event_id: &str) -> Result<Vec<Bounty>, String> {
     if let Some(bounties) = get_cached_bounties(issue_event_id) {
         return Ok(bounties);
     }
-    let event_id = EventId::from_hex(issue_event_id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
+    let event_id =
+        EventId::from_hex(issue_event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
     let filter = Filter::new()
         .kind(Kind::Custom(Bounty::KIND))
         .event(event_id);
@@ -146,8 +144,14 @@ pub async fn claim_bounty(
         }
     }
 
-    let signer = client.signer().await.map_err(|e| format!("Failed to get signer: {}", e))?;
-    let claimer_pubkey = signer.get_public_key().await.map_err(|e| format!("Failed to get public key: {}", e))?;
+    let signer = client
+        .signer()
+        .await
+        .map_err(|e| format!("Failed to get signer: {}", e))?;
+    let claimer_pubkey = signer
+        .get_public_key()
+        .await
+        .map_err(|e| format!("Failed to get public key: {}", e))?;
     let mut builder = EventBuilder::new(Kind::Custom(Bounty::KIND), "")
         .tag(Tag::event(issue_event_id))
         .tag(Tag::event(bounty_event_id))
@@ -195,7 +199,8 @@ pub async fn release_bounty(
     let bounty_events = fetch_events_aggregated(bounty_filter, FETCH_TIMEOUT)
         .await
         .map_err(|e| format!("Failed to verify bounty state: {e}"))?;
-    let bounty_event = bounty_events.first()
+    let bounty_event = bounty_events
+        .first()
         .ok_or_else(|| "Bounty event not found".to_string())?;
     let current = Bounty::from_event(bounty_event)
         .ok_or_else(|| "Failed to parse bounty event".to_string())?;
@@ -240,7 +245,14 @@ pub async fn release_bounty(
 
     // Step 1: Transition to "paying" state before sending payment to prevent
     // double-payment from concurrent calls.
-    update_bounty_status(bounty_event_id, issue_event_id, "paying", amount_sats, repository).await?;
+    update_bounty_status(
+        bounty_event_id,
+        issue_event_id,
+        "paying",
+        amount_sats,
+        repository,
+    )
+    .await?;
 
     // Look up claimer's lightning address
     let lud16 = {
@@ -252,26 +264,35 @@ pub async fn release_bounty(
     })?;
 
     // Step 2: Generate invoice and pay via NWC
-    let invoice = crate::services::payments::lnurl::get_invoice_from_lud16(&lud16, amount_sats, Some("Bounty payment"))
-        .await
-        .map_err(|e| format!("Failed to get invoice: {}", e))?;
+    let invoice = crate::services::payments::lnurl::get_invoice_from_lud16(
+        &lud16,
+        amount_sats,
+        Some("Bounty payment"),
+    )
+    .await
+    .map_err(|e| format!("Failed to get invoice: {}", e))?;
 
     nwc_store::pay_invoice(invoice)
         .await
         .map_err(|e| format!("Payment failed: {}", e))?;
 
     // Step 3: Payment succeeded — mark as paid
-    let new_event_id = update_bounty_status(bounty_event_id, issue_event_id, "paid", amount_sats, repository).await?;
+    let new_event_id = update_bounty_status(
+        bounty_event_id,
+        issue_event_id,
+        "paid",
+        amount_sats,
+        repository,
+    )
+    .await?;
 
     Ok(new_event_id)
 }
 
 /// Fetch bounties for an issue by event ID string (convenience wrapper)
-pub async fn fetch_bounties_for_issue_by_id(
-    issue_ref: &str,
-) -> Result<Vec<Bounty>, String> {
+pub async fn fetch_bounties_for_issue_by_id(issue_ref: &str) -> Result<Vec<Bounty>, String> {
     use crate::utils::nip34::decode_event_id;
-    let event_id = decode_event_id(issue_ref)
-        .map_err(|e| format!("Invalid event reference: {}", e))?;
+    let event_id =
+        decode_event_id(issue_ref).map_err(|e| format!("Invalid event reference: {}", e))?;
     fetch_bounties_for_issue(&event_id.to_hex()).await
 }

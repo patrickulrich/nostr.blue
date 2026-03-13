@@ -60,11 +60,11 @@ pub fn CodeIssueNew(naddr: String) -> Element {
         existing_labels.set(vec![]);
         spawn(async move {
             if let Ok(issues) = fetch_repo_issues(&n).await {
-                if *labels_gen.peek() != gen { return; }
-                let mut labels: Vec<String> = issues
-                    .iter()
-                    .flat_map(|i| i.labels.clone())
-                    .collect();
+                if *labels_gen.peek() != gen {
+                    return;
+                }
+                let mut labels: Vec<String> =
+                    issues.iter().flat_map(|i| i.labels.clone()).collect();
                 labels.sort();
                 labels.dedup();
                 existing_labels.set(labels);
@@ -79,7 +79,9 @@ pub fn CodeIssueNew(naddr: String) -> Element {
     let handle_submit = {
         let naddr = naddr.clone();
         move |_| {
-            if *is_publishing.peek() { return; }
+            if *is_publishing.peek() {
+                return;
+            }
             let title_val = title.read().clone();
             let content_val = content.read().clone();
             let labels_val = selected_labels.read().clone();
@@ -96,7 +98,11 @@ pub fn CodeIssueNew(naddr: String) -> Element {
                 let assignee_list: Vec<&str> = if assignees_val.is_empty() {
                     vec![]
                 } else {
-                    assignees_val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
+                    assignees_val
+                        .split(',')
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .collect()
                 };
                 let mut seen = HashSet::new();
                 let mut canonical_assignees: Vec<String> = Vec::new();
@@ -120,15 +126,20 @@ pub fn CodeIssueNew(naddr: String) -> Element {
                 } else {
                     Some(title_val.as_str())
                 };
-                let canonical_refs: Vec<&str> = canonical_assignees.iter().map(|s| s.as_str()).collect();
-                match publish_issue_by_naddr(&naddr, subject, &content_val, &label_list, &canonical_refs)
-                    .await
+                let canonical_refs: Vec<&str> =
+                    canonical_assignees.iter().map(|s| s.as_str()).collect();
+                match publish_issue_by_naddr(
+                    &naddr,
+                    subject,
+                    &content_val,
+                    &label_list,
+                    &canonical_refs,
+                )
+                .await
                 {
                     Ok(event_id) => {
                         is_publishing.set(false);
-                        nav.push(Route::CodeIssueDetail {
-                            note_id: event_id,
-                        });
+                        nav.push(Route::CodeIssueDetail { note_id: event_id });
                     }
                     Err(e) => {
                         error_message.set(Some(e));

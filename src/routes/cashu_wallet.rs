@@ -46,7 +46,10 @@ pub fn CashuWallet() -> Element {
             return;
         }
         if terms == Some(true)
-            && matches!(*cashu::WALLET_STATUS.read(), cashu::WalletStatus::Uninitialized)
+            && matches!(
+                *cashu::WALLET_STATUS.read(),
+                cashu::WalletStatus::Uninitialized
+            )
         {
             init_started.set(true);
             spawn(async move {
@@ -59,7 +62,8 @@ pub fn CashuWallet() -> Element {
     let should_show_wizard = wallet_state
         .as_ref()
         .map(|w| !w.initialized)
-        .unwrap_or(false) || *show_setup_wizard.read();
+        .unwrap_or(false)
+        || *show_setup_wizard.read();
     let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
     rsx! {
         div { class: "min-h-screen bg-background",

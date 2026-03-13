@@ -7,12 +7,13 @@
 use crate::utils::markdown::render_markdown;
 use dioxus::prelude::*;
 use std::sync::atomic::{AtomicU32, Ordering};
+#[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
-#[wasm_bindgen(
-    inline_js = r#"
+#[cfg(feature = "web")]
+#[wasm_bindgen(inline_js = r#"
 export function initMermaidDiagrams(rootId) {
     const root = rootId ? document.getElementById(rootId) : document;
     if (!root) return;
@@ -132,8 +133,7 @@ export function injectCodeBlockCopyButtons(rootId) {
         pre.appendChild(btn);
     });
 }
-"#
-)]
+"#)]
 extern "C" {
     fn initMermaidDiagrams(root_id: &str);
     fn injectCodeBlockCopyButtons(root_id: &str);
@@ -141,30 +141,30 @@ extern "C" {
 /// README viewer with loading/error states
 #[component]
 pub fn ReadmeViewer(
-    #[props(default = None)]
-    content: Option<String>,
-    #[props(default = false)]
-    loading: bool,
-    #[props(default = None)]
-    error: Option<String>,
-    #[props(default = "README.md".to_string())]
-    filename: String,
+    #[props(default = None)] content: Option<String>,
+    #[props(default = false)] loading: bool,
+    #[props(default = None)] error: Option<String>,
+    #[props(default = "README.md".to_string())] filename: String,
 ) -> Element {
-    let viewer_id = use_hook(|| format!("readme-viewer-{}", COUNTER.fetch_add(1, Ordering::Relaxed)));
+    let viewer_id =
+        use_hook(|| format!("readme-viewer-{}", COUNTER.fetch_add(1, Ordering::Relaxed)));
     // Initialize mermaid.js after the README HTML is rendered into the DOM.
     // Call initMermaidDiagrams whenever content is present; the JS function
     // already no-ops if there are no .mermaid nodes in the DOM.
+    #[allow(unused_variables)]
+    let viewer_id_for_effect = viewer_id.clone();
     use_effect(use_reactive((&content, &loading, &error), {
-        let viewer_id = viewer_id.clone();
         move |(content, loading, error)| {
             if content.is_some() && !loading && error.is_none() {
-                let viewer_id = viewer_id.clone();
-                spawn(async move {
-                    // Allow DOM to settle before mermaid scans for nodes (initMermaidDiagrams/injectCodeBlockCopyButtons)
-                    gloo_timers::future::TimeoutFuture::new(100).await;
-                    initMermaidDiagrams(&viewer_id);
-                    injectCodeBlockCopyButtons(&viewer_id);
-                });
+                #[cfg(feature = "web")]
+                {
+                    let viewer_id = viewer_id_for_effect.clone();
+                    spawn(async move {
+                        crate::platform::timer::sleep_ms(100).await;
+                        initMermaidDiagrams(&viewer_id);
+                        injectCodeBlockCopyButtons(&viewer_id);
+                    });
+                }
             }
         }
     }));

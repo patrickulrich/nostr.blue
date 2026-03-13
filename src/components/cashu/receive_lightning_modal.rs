@@ -23,7 +23,7 @@ async fn try_mint_tokens(
     delay_ms: u32,
     is_cancelled: impl Fn() -> bool,
 ) -> MintResult {
-    gloo_timers::future::TimeoutFuture::new(delay_ms).await;
+    crate::platform::timer::sleep_ms(delay_ms).await;
 
     if is_cancelled() {
         return MintResult::Cancelled;
@@ -67,7 +67,7 @@ async fn poll_mint_quote_http(
         match cashu::check_mint_quote_status(mint_url.clone(), quote_id.clone()).await {
             Ok(cashu::MintQuoteState::Paid) => {
                 mint_status.set(Some("Payment detected! Minting...".to_string()));
-                gloo_timers::future::TimeoutFuture::new(2000).await;
+                crate::platform::timer::sleep_ms(2000).await;
 
                 if !*is_polling.read() || quote_info.read().is_none() {
                     break;
@@ -78,12 +78,13 @@ async fn poll_mint_quote_http(
                         if !*is_polling.read() || quote_info.read().is_none() {
                             break;
                         }
-                        success_message.set(Some(format!("Successfully received {} sats!", amount)));
+                        success_message
+                            .set(Some(format!("Successfully received {} sats!", amount)));
                         quote_info.set(None);
                         is_polling.set(false);
                         mint_status.set(None);
                         spawn(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            crate::platform::timer::sleep_ms(2000).await;
                             on_close.call(());
                         });
                     }
@@ -104,7 +105,7 @@ async fn poll_mint_quote_http(
                 is_polling.set(false);
                 mint_status.set(None);
                 spawn(async move {
-                    gloo_timers::future::TimeoutFuture::new(2000).await;
+                    crate::platform::timer::sleep_ms(2000).await;
                     on_close.call(());
                 });
                 break;
@@ -128,7 +129,7 @@ async fn poll_mint_quote_http(
         }
 
         attempts += 1;
-        gloo_timers::future::TimeoutFuture::new(2000).await;
+        crate::platform::timer::sleep_ms(2000).await;
     }
 }
 
@@ -143,6 +144,7 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
     let mut is_polling = use_signal(|| false);
     let mut success_message = use_signal(|| Option::<String>::None);
     let mut mint_status = use_signal(|| Option::<String>::None);
+    let mut copy_error = use_signal(|| Option::<String>::None);
     use_effect(move || {
         let current_mints = cashu::get_mints();
         let current_selection = selected_mint.read().clone();
@@ -169,11 +171,11 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
                 let quote_info_clone = quote_info;
                 spawn(async move {
                     let ws_result = cashu_ws::subscribe_to_quote(
-                            mint_url.clone(),
-                            quote_id.clone(),
-                            cashu_ws::SubscriptionKind::Bolt11MintQuote,
-                        )
-                        .await;
+                        mint_url.clone(),
+                        quote_id.clone(),
+                        cashu_ws::SubscriptionKind::Bolt11MintQuote,
+                    )
+                    .await;
                     match ws_result {
                         Ok(mut rx) => {
                             log::info!("Using WebSocket for quote status updates");
@@ -181,17 +183,14 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
                             let timeout_secs = 600;
                             let start = instant::Instant::now();
                             loop {
-                                if !*is_polling_clone.read()
-                                    || quote_info_clone.read().is_none()
-                                {
+                                if !*is_polling_clone.read() || quote_info_clone.read().is_none() {
                                     log::info!("WebSocket polling cancelled");
                                     break;
                                 }
                                 if start.elapsed().as_secs() > timeout_secs {
-                                    error_message
-                                        .set(
-                                            Some("Invoice expired. Please try again.".to_string()),
-                                        );
+                                    error_message.set(Some(
+                                        "Invoice expired. Please try again.".to_string(),
+                                    ));
                                     is_polling.set(false);
                                     quote_info.set(None);
                                     break;
@@ -219,7 +218,7 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
                                                         is_polling.set(false);
                                                         mint_status.set(None);
                                                         spawn(async move {
-                                                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                                                            crate::platform::timer::sleep_ms(2000).await;
                                                             on_close.call(());
                                                         });
                                                     }
@@ -243,7 +242,7 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
                                                 is_polling.set(false);
                                                 mint_status.set(None);
                                                 spawn(async move {
-                                                    gloo_timers::future::TimeoutFuture::new(2000).await;
+                                                    crate::platform::timer::sleep_ms(2000).await;
                                                     on_close.call(());
                                                 });
                                                 break;
@@ -279,7 +278,7 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
                                         }
                                     }
 
-                                    _ = gloo_timers::future::TimeoutFuture::new(5000) => {
+                                    _ = crate::platform::timer::sleep_ms(5000) => {
                                         match cashu::check_mint_quote_status(mint_url.clone(), quote_id.clone()).await {
                                             Ok(cashu::MintQuoteState::Paid) => {
                                                 log::info!("Payment detected via HTTP backup check, minting tokens...");
@@ -301,7 +300,7 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
                                                         is_polling.set(false);
                                                         mint_status.set(None);
                                                         spawn(async move {
-                                                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                                                            crate::platform::timer::sleep_ms(2000).await;
                                                             on_close.call(());
                                                         });
                                                     }
@@ -325,7 +324,7 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
                                                 is_polling.set(false);
                                                 mint_status.set(None);
                                                 spawn(async move {
-                                                    gloo_timers::future::TimeoutFuture::new(2000).await;
+                                                    crate::platform::timer::sleep_ms(2000).await;
                                                     on_close.call(());
                                                 });
                                                 break;
@@ -338,9 +337,7 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
                             }
                         }
                         Err(e) => {
-                            log::warn!(
-                                "WebSocket not available ({}), using HTTP polling", e
-                            );
+                            log::warn!("WebSocket not available ({}), using HTTP polling", e);
                             poll_mint_quote_http(
                                 mint_url,
                                 quote_id,
@@ -449,7 +446,7 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
                                         readonly: true,
                                         value: q.invoice.clone(),
                                         onclick: move |_| {
-                                            #[cfg(target_arch = "wasm32")]
+                                            #[cfg(feature = "web")]
                                             {
                                                 use wasm_bindgen::JsCast;
                                                 if let Some(window) = web_sys::window() {
@@ -473,19 +470,21 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
                                     button {
                                         class: "px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white text-xs rounded transition",
                                         onclick: move |_| {
-                                            #[cfg(target_arch = "wasm32")]
-                                            {
-                                                if let Some(invoice_to_copy) = quote_info.read().as_ref() {
-                                                    if let Some(window) = web_sys::window() {
-                                                        let navigator = window.navigator();
-                                                        let clipboard = navigator.clipboard();
-                                                        let _ = clipboard.write_text(&invoice_to_copy.invoice);
+                                            if let Some(invoice_to_copy) = quote_info.read().as_ref() {
+                                                let invoice = invoice_to_copy.invoice.clone();
+                                                spawn(async move {
+                                                    match crate::platform::clipboard::copy_to_clipboard(&invoice).await {
+                                                        Ok(()) => copy_error.set(None),
+                                                        Err(e) => copy_error.set(Some(e)),
                                                     }
-                                                }
+                                                });
                                             }
                                         },
                                         "Copy"
                                     }
+                                }
+                                if let Some(copy_err) = copy_error.read().as_ref() {
+                                    p { class: "text-xs text-red-500", "{copy_err}" }
                                 }
                             }
                             if *is_polling.read() {

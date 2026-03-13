@@ -2,19 +2,17 @@
 //!
 //! A dialog for searching and inserting Nostr references (npub, note, naddr).
 //! Provides tabbed interface for searching users, notes, and articles.
-use dioxus::prelude::*;
-use dioxus_core::Task;
-use nostr_sdk::prelude::*;
 use crate::components::icons::SearchIcon;
 use crate::components::modal::{Modal, ModalHeader};
-use crate::services::content_search::{
-    search_articles, search_text_notes, ContentSearchResult,
-};
+use crate::services::content_search::{search_articles, search_text_notes, ContentSearchResult};
 use crate::services::profile_search::{
     get_contact_pubkeys, search_cached_profiles, search_profiles,
 };
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::format_time_ago;
+use dioxus::prelude::*;
+use dioxus_core::Task;
+use nostr_sdk::prelude::*;
 /// Selection result from the mention dialog
 #[derive(Clone, Debug)]
 pub struct MentionSelection {
@@ -149,10 +147,7 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
                 user_results.set(mapped);
                 is_searching_users.set(true);
                 let new_task = spawn(async move {
-                    #[cfg(target_family = "wasm")]
-                    gloo_timers::future::TimeoutFuture::new(300).await;
-                    #[cfg(not(target_family = "wasm"))]
-                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    crate::platform::timer::sleep_ms(300).await;
                     match search_profiles(&query_snapshot, 20, true).await {
                         Ok(results) => {
                             if search_query.read().as_str() == query_snapshot.as_str() {
@@ -177,10 +172,7 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
             MentionTab::Notes => {
                 is_searching_notes.set(true);
                 let new_task = spawn(async move {
-                    #[cfg(target_family = "wasm")]
-                    gloo_timers::future::TimeoutFuture::new(300).await;
-                    #[cfg(not(target_family = "wasm"))]
-                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    crate::platform::timer::sleep_ms(300).await;
                     match search_text_notes(&query_snapshot, 20, &contacts).await {
                         Ok(results) => {
                             if search_query.read().as_str() == query_snapshot.as_str() {
@@ -201,10 +193,7 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
             MentionTab::Articles => {
                 is_searching_articles.set(true);
                 let new_task = spawn(async move {
-                    #[cfg(target_family = "wasm")]
-                    gloo_timers::future::TimeoutFuture::new(300).await;
-                    #[cfg(not(target_family = "wasm"))]
-                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    crate::platform::timer::sleep_ms(300).await;
                     match search_articles(&query_snapshot, 20, &contacts).await {
                         Ok(results) => {
                             if search_query.read().as_str() == query_snapshot.as_str() {
@@ -238,13 +227,11 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
             .unwrap_or_else(|_| profile.pubkey.to_hex());
         let uri = format!("nostr:{}", npub);
         let display_text = profile.get_display_name();
-        props
-            .on_select
-            .call(MentionSelection {
-                uri,
-                display_text,
-                mention_type: MentionType::User,
-            });
+        props.on_select.call(MentionSelection {
+            uri,
+            display_text,
+            mention_type: MentionType::User,
+        });
         open.set(false);
     };
     let mut handle_note_select = move |result: ContentSearchResult| {
@@ -253,15 +240,17 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
             .to_bech32()
             .unwrap_or_else(|_| result.event.id.to_hex());
         let uri = format!("nostr:{}", nevent);
-        let display_text = result.event.content.chars().take(50).collect::<String>()
-            + if result.event.content.len() > 50 { "..." } else { "" };
-        props
-            .on_select
-            .call(MentionSelection {
-                uri,
-                display_text,
-                mention_type: MentionType::Note,
-            });
+        let truncated: String = result.event.content.chars().take(50).collect();
+        let display_text = if result.event.content.chars().count() > 50 {
+            format!("{truncated}...")
+        } else {
+            truncated
+        };
+        props.on_select.call(MentionSelection {
+            uri,
+            display_text,
+            mention_type: MentionType::Note,
+        });
         open.set(false);
     };
     let mut handle_article_select = move |result: ContentSearchResult| {
@@ -273,8 +262,8 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
             .and_then(|t| t.content())
             .map(String::from)
             .unwrap_or_default();
-        let coordinate = Coordinate::new(Kind::from(30023), result.event.pubkey)
-            .identifier(d_tag.clone());
+        let coordinate =
+            Coordinate::new(Kind::from(30023), result.event.pubkey).identifier(d_tag.clone());
         let naddr = Nip19Coordinate::new(coordinate, vec![])
             .to_bech32()
             .unwrap_or_else(|_| result.event.id.to_hex());
@@ -287,13 +276,11 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
             .and_then(|t| t.content())
             .map(String::from)
             .unwrap_or_else(|| "Untitled".to_string());
-        props
-            .on_select
-            .call(MentionSelection {
-                uri,
-                display_text: title,
-                mention_type: MentionType::Article,
-            });
+        props.on_select.call(MentionSelection {
+            uri,
+            display_text: title,
+            mention_type: MentionType::Article,
+        });
         open.set(false);
     };
     let close_modal = move |_| {

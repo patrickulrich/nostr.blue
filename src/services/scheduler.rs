@@ -1,7 +1,7 @@
 //! Background task scheduler for nostr.blue
 //!
 //! Provides periodic background tasks using Dioxus `use_future` pattern.
-//! WASM-compatible using gloo_timers for delays.
+//! Cross-platform using crate::platform::timer for delays.
 //!
 //! Note: NIP-65/NIP-17 relay sync is NOT needed here - nostr-sdk's gossip
 //! layer handles that automatically on-demand.
@@ -12,7 +12,7 @@ use std::time::Duration;
 pub fn use_background_scheduler() {
     use_future(|| async {
         loop {
-            gloo_timers::future::sleep(Duration::from_secs(3600)).await;
+            crate::platform::timer::sleep(Duration::from_secs(3600)).await;
             run_stale_profile_cleanup().await;
         }
     });

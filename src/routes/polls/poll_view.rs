@@ -19,22 +19,20 @@ pub fn PollView(noteid: String) -> Element {
             loading.set(true);
             error.set(None);
             match decode_event_id(&noteid_str) {
-                Ok(event_id) => {
-                    match fetch_poll_by_id(event_id).await {
-                        Ok(Some(event)) => {
-                            poll_event.set(Some(event));
-                            loading.set(false);
-                        }
-                        Ok(None) => {
-                            error.set(Some("Poll not found".to_string()));
-                            loading.set(false);
-                        }
-                        Err(e) => {
-                            error.set(Some(e));
-                            loading.set(false);
-                        }
+                Ok(event_id) => match fetch_poll_by_id(event_id).await {
+                    Ok(Some(event)) => {
+                        poll_event.set(Some(event));
+                        loading.set(false);
                     }
-                }
+                    Ok(None) => {
+                        error.set(Some("Poll not found".to_string()));
+                        loading.set(false);
+                    }
+                    Err(e) => {
+                        error.set(Some(e));
+                        loading.set(false);
+                    }
+                },
                 Err(e) => {
                     error.set(Some(e));
                     loading.set(false);

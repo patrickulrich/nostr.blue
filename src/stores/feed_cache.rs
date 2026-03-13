@@ -19,27 +19,27 @@
 //! feed_cache::store_feed_items(&key, &merged).await?;
 //! feed_cache::run_eviction_if_needed().await?;
 //! ```
-use crate::utils::FeedItem;
-use std::collections::HashSet;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use super::feed_cache_db::{
     CachedFeedItem, CachedFeedItemType, FeedCacheDb, FeedCacheMetadata, LruEntry,
 };
-#[cfg(target_arch = "wasm32")]
-use std::sync::OnceLock;
-#[cfg(target_arch = "wasm32")]
+use crate::utils::FeedItem;
+#[cfg(feature = "web")]
 use nostr_sdk::Event;
+use std::collections::HashSet;
+#[cfg(feature = "web")]
+use std::sync::OnceLock;
 /// Maximum items per feed type
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub const MAX_ITEMS_PER_FEED: usize = 500;
 /// Maximum total items across all feeds
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub const MAX_TOTAL_ITEMS: usize = 5000;
 /// Number of items to evict when over limit
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 const EVICTION_BATCH_SIZE: usize = 100;
 /// Minimum age (in seconds) before item can be evicted
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 const MIN_AGE_BEFORE_EVICTION_SECS: u64 = 3600;
 /// Identifies a specific feed for caching
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -67,7 +67,7 @@ pub enum FeedCacheKey {
 }
 impl FeedCacheKey {
     /// Convert to string key for IndexedDB storage
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     pub fn to_string_key(&self) -> String {
         match self {
             FeedCacheKey::Following { pubkey } => format!("following:{}", pubkey),
@@ -87,26 +87,20 @@ impl FeedCacheKey {
         }
     }
 }
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 pub async fn init_feed_cache() -> Result<(), String> {
     log::warn!("Feed cache not available on native targets");
     Ok(())
 }
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn load_cached_feed(
-    _key: &FeedCacheKey,
-    _limit: usize,
-) -> Result<Vec<FeedItem>, String> {
+#[cfg(not(feature = "web"))]
+pub async fn load_cached_feed(_key: &FeedCacheKey, _limit: usize) -> Result<Vec<FeedItem>, String> {
     Ok(Vec::new())
 }
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn store_feed_items(
-    _key: &FeedCacheKey,
-    _items: &[FeedItem],
-) -> Result<(), String> {
+#[cfg(not(feature = "web"))]
+pub async fn store_feed_items(_key: &FeedCacheKey, _items: &[FeedItem]) -> Result<(), String> {
     Ok(())
 }
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 pub fn merge_feed_items(cached: Vec<FeedItem>, network: Vec<FeedItem>) -> Vec<FeedItem> {
     let mut seen = HashSet::new();
     let mut merged = Vec::new();
@@ -125,20 +119,20 @@ pub fn merge_feed_items(cached: Vec<FeedItem>, network: Vec<FeedItem>) -> Vec<Fe
     merged.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
     merged
 }
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 pub async fn run_eviction_if_needed() -> Result<usize, String> {
     Ok(0)
 }
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 #[allow(dead_code)]
 pub async fn touch_items(_event_ids: &[String]) -> Result<(), String> {
     Ok(())
 }
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 static FEED_CACHE_DB: OnceLock<FeedCacheDb> = OnceLock::new();
 /// Initialize the feed cache database
 /// Should be called once at application startup
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub async fn init_feed_cache() -> Result<(), String> {
     if FEED_CACHE_DB.get().is_some() {
         return Ok(());
@@ -149,16 +143,13 @@ pub async fn init_feed_cache() -> Result<(), String> {
     Ok(())
 }
 /// Get the feed cache database instance
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 fn get_db() -> Option<&'static FeedCacheDb> {
     FEED_CACHE_DB.get()
 }
 /// Load cached feed items for instant display
-#[cfg(target_arch = "wasm32")]
-pub async fn load_cached_feed(
-    key: &FeedCacheKey,
-    limit: usize,
-) -> Result<Vec<FeedItem>, String> {
+#[cfg(feature = "web")]
+pub async fn load_cached_feed(key: &FeedCacheKey, limit: usize) -> Result<Vec<FeedItem>, String> {
     let db = match get_db() {
         Some(db) => db,
         None => return Ok(Vec::new()),
@@ -175,15 +166,15 @@ pub async fn load_cached_feed(
     let cached_result = db.get_feed_items_by_ids(&event_ids).await?;
     if cached_result.failed_count > 0 {
         log::warn!(
-            "Feed cache: {} items failed deserialization (keys: {:?})", cached_result
-            .failed_count, cached_result.failed_keys
+            "Feed cache: {} items failed deserialization (keys: {:?})",
+            cached_result.failed_count,
+            cached_result.failed_keys
         );
         if let Ok(Some(mut updated_metadata)) = db.get_feed_metadata(&feed_key).await {
-            let failed_set: HashSet<&String> = cached_result
-                .failed_keys
-                .iter()
-                .collect();
-            updated_metadata.event_ids.retain(|id| !failed_set.contains(id));
+            let failed_set: HashSet<&String> = cached_result.failed_keys.iter().collect();
+            updated_metadata
+                .event_ids
+                .retain(|id| !failed_set.contains(id));
             if let Err(e) = db.put_feed_metadata(&feed_key, &updated_metadata).await {
                 log::error!("Failed to persist pruned feed metadata: {}", e);
             }
@@ -197,19 +188,21 @@ pub async fn load_cached_feed(
         };
         let feed_item = match cached.item_type {
             CachedFeedItemType::OriginalPost => FeedItem::OriginalPost(event),
-            CachedFeedItemType::Repost { reposted_by, repost_timestamp } => {
+            CachedFeedItemType::Repost {
+                reposted_by,
+                repost_timestamp,
+            } => {
                 use nostr_sdk::{PublicKey, Timestamp};
                 match PublicKey::parse(&reposted_by) {
-                    Ok(pubkey) => {
-                        FeedItem::Repost {
-                            original: event,
-                            reposted_by: pubkey,
-                            repost_timestamp: Timestamp::from(repost_timestamp),
-                        }
-                    }
+                    Ok(pubkey) => FeedItem::Repost {
+                        original: event,
+                        reposted_by: pubkey,
+                        repost_timestamp: Timestamp::from(repost_timestamp),
+                    },
                     Err(e) => {
                         log::warn!(
-                            "Invalid reposted_by pubkey '{}': {}, skipping", reposted_by,
+                            "Invalid reposted_by pubkey '{}': {}, skipping",
+                            reposted_by,
                             e
                         );
                         continue;
@@ -223,17 +216,20 @@ pub async fn load_cached_feed(
     let now = current_timestamp();
     for item in &feed_items {
         let event_id = item.event().id.to_string();
-        let _ = db.put_lru_entry(&event_id, &LruEntry { last_access: now }).await;
+        let _ = db
+            .put_lru_entry(&event_id, &LruEntry { last_access: now })
+            .await;
     }
-    log::info!("Loaded {} items from cache for {}", feed_items.len(), feed_key);
+    log::info!(
+        "Loaded {} items from cache for {}",
+        feed_items.len(),
+        feed_key
+    );
     Ok(feed_items)
 }
 /// Store feed items in cache
-#[cfg(target_arch = "wasm32")]
-pub async fn store_feed_items(
-    key: &FeedCacheKey,
-    items: &[FeedItem],
-) -> Result<(), String> {
+#[cfg(feature = "web")]
+pub async fn store_feed_items(key: &FeedCacheKey, items: &[FeedItem]) -> Result<(), String> {
     let db = match get_db() {
         Some(db) => db,
         None => return Ok(()),
@@ -265,19 +261,22 @@ pub async fn store_feed_items(
                 .map_err(|e| format!("Serialize error: {}", e))?,
             item_type: match item {
                 FeedItem::OriginalPost(_) => CachedFeedItemType::OriginalPost,
-                FeedItem::Repost { reposted_by, repost_timestamp, .. } => {
-                    CachedFeedItemType::Repost {
-                        reposted_by: reposted_by.to_string(),
-                        repost_timestamp: repost_timestamp.as_secs(),
-                    }
-                }
+                FeedItem::Repost {
+                    reposted_by,
+                    repost_timestamp,
+                    ..
+                } => CachedFeedItemType::Repost {
+                    reposted_by: reposted_by.to_string(),
+                    repost_timestamp: repost_timestamp.as_secs(),
+                },
             },
             sort_timestamp: sort_ts,
             cached_at: now,
             feed_keys,
         };
         db.put_feed_item(&event_id, &cached_item).await?;
-        db.put_lru_entry(&event_id, &LruEntry { last_access: now }).await?;
+        db.put_lru_entry(&event_id, &LruEntry { last_access: now })
+            .await?;
         event_ids.push(event_id);
     }
     let metadata = FeedCacheMetadata {
@@ -289,12 +288,14 @@ pub async fn store_feed_items(
     };
     db.put_feed_metadata(&feed_key, &metadata).await?;
     log::info!(
-        "Stored {} items to cache for {}", items.len().min(MAX_ITEMS_PER_FEED), feed_key
+        "Stored {} items to cache for {}",
+        items.len().min(MAX_ITEMS_PER_FEED),
+        feed_key
     );
     Ok(())
 }
 /// Merge cached items with network items, deduplicating by event ID
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub fn merge_feed_items(cached: Vec<FeedItem>, network: Vec<FeedItem>) -> Vec<FeedItem> {
     let mut seen = HashSet::new();
     let mut merged = Vec::new();
@@ -314,7 +315,7 @@ pub fn merge_feed_items(cached: Vec<FeedItem>, network: Vec<FeedItem>) -> Vec<Fe
     merged
 }
 /// Run LRU eviction if cache exceeds limits
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub async fn run_eviction_if_needed() -> Result<usize, String> {
     let db = match get_db() {
         Some(db) => db,
@@ -335,17 +336,20 @@ pub async fn run_eviction_if_needed() -> Result<usize, String> {
         .take(EVICTION_BATCH_SIZE)
         .cloned()
         .collect();
-    let eviction_candidates = if eviction_candidates.is_empty()
-        && total_items > MAX_TOTAL_ITEMS as u32
-    {
-        log::warn!(
-            "All items are recent but over hard cap, evicting oldest {} items",
-            EVICTION_BATCH_SIZE
-        );
-        lru_entries.iter().take(EVICTION_BATCH_SIZE).cloned().collect()
-    } else {
-        eviction_candidates
-    };
+    let eviction_candidates =
+        if eviction_candidates.is_empty() && total_items > MAX_TOTAL_ITEMS as u32 {
+            log::warn!(
+                "All items are recent but over hard cap, evicting oldest {} items",
+                EVICTION_BATCH_SIZE
+            );
+            lru_entries
+                .iter()
+                .take(EVICTION_BATCH_SIZE)
+                .cloned()
+                .collect()
+        } else {
+            eviction_candidates
+        };
     let mut evicted = 0;
     let mut evicted_ids: Vec<String> = Vec::new();
     for (event_id, _) in eviction_candidates {
@@ -369,7 +373,7 @@ pub async fn run_eviction_if_needed() -> Result<usize, String> {
     Ok(evicted)
 }
 /// Update LRU timestamps for displayed items
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 #[allow(dead_code)]
 pub async fn touch_items(event_ids: &[String]) -> Result<(), String> {
     let db = match get_db() {
@@ -378,11 +382,13 @@ pub async fn touch_items(event_ids: &[String]) -> Result<(), String> {
     };
     let now = current_timestamp();
     for event_id in event_ids {
-        let _ = db.put_lru_entry(event_id, &LruEntry { last_access: now }).await;
+        let _ = db
+            .put_lru_entry(event_id, &LruEntry { last_access: now })
+            .await;
     }
     Ok(())
 }
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 fn current_timestamp() -> u64 {
     use web_sys::js_sys::Date;
     (Date::now() / 1000.0) as u64

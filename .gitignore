@@ -50,9 +50,13 @@ yarn-error.log*
 
 # Screenshots
 *.png
+!android/res/mipmap-*/ic_launcher_foreground.png
+
+# Android build output
+*.apk
+.gradle-home/
 
 # Generated assets
 /assets/tailwind.css
 /public/tailwind.css
 /public/git-worker.js
-

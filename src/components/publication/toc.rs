@@ -3,8 +3,8 @@
 use crate::components::icons::{ArrowLeftIcon, ChevronDownIcon};
 use crate::stores::nostr_client;
 use crate::stores::publication_store::{
-    parse_publication_section, sections_by_addresses_filter, PublicationSection,
-    PublicationTree, SectionReference,
+    parse_publication_section, sections_by_addresses_filter, PublicationSection, PublicationTree,
+    SectionReference,
 };
 use dioxus::prelude::*;
 use std::time::Duration;
@@ -24,9 +24,17 @@ pub fn PublicationTocDynamic(
     on_back: EventHandler<()>,
 ) -> Element {
     let items_to_show: Vec<String> = if let Some(ref parent) = current_parent {
-        parent.child_addresses.iter().map(|a| a.address.clone()).collect()
+        parent
+            .child_addresses
+            .iter()
+            .map(|a| a.address.clone())
+            .collect()
     } else {
-        tree.root.section_addresses.iter().map(|a| a.address.clone()).collect()
+        tree.root
+            .section_addresses
+            .iter()
+            .map(|a| a.address.clone())
+            .collect()
     };
     let current_title = current_parent
         .as_ref()
@@ -91,11 +99,8 @@ fn DynamicTocList(
             let mut found_sections: Vec<PublicationSection> = Vec::new();
             let filters = sections_by_addresses_filter(&refs);
             for filter in filters {
-                if let Ok(events) = nostr_client::fetch_events_aggregated(
-                        filter,
-                        Duration::from_secs(10),
-                    )
-                    .await
+                if let Ok(events) =
+                    nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
                 {
                     for event in events {
                         if let Some(section) = parse_publication_section(&event) {
@@ -115,9 +120,7 @@ fn DynamicTocList(
                 .map(|(i, a)| (a.clone(), i))
                 .collect();
             found_sections
-                .sort_by_key(|s| {
-                    address_order.get(&s.a_tag).copied().unwrap_or(usize::MAX)
-                });
+                .sort_by_key(|s| address_order.get(&s.a_tag).copied().unwrap_or(usize::MAX));
             sections.set(found_sections);
             loading.set(false);
         });
@@ -188,7 +191,9 @@ pub fn PublicationTocHorizontal(
         .section_addresses
         .iter()
         .filter_map(|s| {
-            tree.sections.get(&s.address).map(|sec| (s.address.clone(), sec.clone()))
+            tree.sections
+                .get(&s.address)
+                .map(|sec| (s.address.clone(), sec.clone()))
         })
         .collect();
     rsx! {
@@ -216,10 +221,7 @@ pub fn PublicationTocHorizontal(
 }
 /// Progress indicator showing reading position
 #[component]
-pub fn PublicationProgress(
-    tree: PublicationTree,
-    current_section: Option<String>,
-) -> Element {
+pub fn PublicationProgress(tree: PublicationTree, current_section: Option<String>) -> Element {
     let total = tree.sections.len();
     let all_sections: Vec<String> = tree
         .root

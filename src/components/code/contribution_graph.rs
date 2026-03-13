@@ -62,11 +62,9 @@ fn intensity_class(count: u32, max_count: u32) -> &'static str {
 
 #[component]
 pub fn ContributionGraph(pubkey: String) -> Element {
-    let contribution_data = use_resource(use_reactive(&pubkey, |pk| {
-        async move {
-            let parsed = PublicKey::parse(&pk).map_err(|e| format!("Invalid pubkey: {e}"))?;
-            fetch_contribution_graph(&parsed).await
-        }
+    let contribution_data = use_resource(use_reactive(&pubkey, |pk| async move {
+        let parsed = PublicKey::parse(&pk).map_err(|e| format!("Invalid pubkey: {e}"))?;
+        fetch_contribution_graph(&parsed).await
     }));
 
     rsx! {
@@ -100,7 +98,12 @@ pub fn ContributionGraph(pubkey: String) -> Element {
 fn ContributionGrid(weeks: Vec<ContributionWeek>) -> Element {
     // Compute total contributions and max daily count
     let total: u32 = weeks.iter().flat_map(|w| w.days.iter()).sum();
-    let max_count: u32 = weeks.iter().flat_map(|w| w.days.iter()).copied().max().unwrap_or(0);
+    let max_count: u32 = weeks
+        .iter()
+        .flat_map(|w| w.days.iter())
+        .copied()
+        .max()
+        .unwrap_or(0);
 
     // Build month labels: detect when the month changes across weeks.
     // Use mid-week date (week_start + 3 days) so the label reflects

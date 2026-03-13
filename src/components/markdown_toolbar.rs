@@ -2,6 +2,8 @@
 //!
 //! A toolbar with buttons for common markdown formatting operations.
 //! Uses dioxus-primitives Toolbar for accessibility (keyboard navigation, roving focus).
+#[cfg(feature = "web")]
+use crate::utils::text::utf16_to_utf8_index;
 use dioxus::prelude::*;
 use dioxus_primitives::toolbar::{Toolbar, ToolbarButton, ToolbarSeparator};
 /// Type of markdown formatting to apply
@@ -36,6 +38,7 @@ pub enum MarkdownFormat {
     /// Horizontal rule: ---
     HorizontalRule,
 }
+#[cfg_attr(not(any(feature = "web", test)), allow(dead_code))]
 impl MarkdownFormat {
     /// Get the markdown prefix to insert
     pub fn prefix(&self) -> &'static str {
@@ -89,12 +92,12 @@ impl MarkdownFormat {
         matches!(
             self,
             Self::Bold
-            | Self::Italic
-            | Self::Strikethrough
-            | Self::InlineCode
-            | Self::CodeBlock
-            | Self::Link
-            | Self::Image
+                | Self::Italic
+                | Self::Strikethrough
+                | Self::InlineCode
+                | Self::CodeBlock
+                | Self::Link
+                | Self::Image
         )
     }
     /// Whether this format should be inserted at line start
@@ -102,11 +105,11 @@ impl MarkdownFormat {
         matches!(
             self,
             Self::Heading1
-            | Self::Heading2
-            | Self::Heading3
-            | Self::BulletList
-            | Self::NumberedList
-            | Self::Quote
+                | Self::Heading2
+                | Self::Heading3
+                | Self::BulletList
+                | Self::NumberedList
+                | Self::Quote
         )
     }
 }
@@ -123,10 +126,24 @@ pub struct MarkdownToolbarProps {
     /// Whether the toolbar is disabled
     #[props(default = false)]
     pub disabled: bool,
+    /// Whether selection/caret APIs are available for textarea formatting actions
+    #[props(default = textarea_selection_supported())]
+    pub selection_supported: bool,
     /// Additional CSS classes for the toolbar container
     #[props(default)]
     pub class: String,
 }
+
+#[cfg(feature = "web")]
+pub const fn textarea_selection_supported() -> bool {
+    true
+}
+
+#[cfg(not(feature = "web"))]
+pub const fn textarea_selection_supported() -> bool {
+    false
+}
+
 #[component]
 pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
     let mut disabled = use_signal(|| props.disabled);
@@ -134,6 +151,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
         disabled.set(props.disabled);
     });
     let on_format = props.on_format;
+    let selection_actions_disabled = props.disabled || !props.selection_supported;
     rsx! {
         Toolbar {
             aria_label: "Markdown formatting",
@@ -142,6 +160,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 0usize,
                 on_click: move |_| on_format.call(MarkdownFormat::Bold),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Bold (Ctrl+B)",
                 svg {
@@ -157,6 +176,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 1usize,
                 on_click: move |_| on_format.call(MarkdownFormat::Italic),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Italic (Ctrl+I)",
                 svg {
@@ -188,6 +208,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 2usize,
                 on_click: move |_| on_format.call(MarkdownFormat::Strikethrough),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Strikethrough",
                 svg {
@@ -205,6 +226,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 3usize,
                 on_click: move |_| on_format.call(MarkdownFormat::Heading1),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Heading 1",
                 span { class: "font-bold text-sm", "H1" }
@@ -212,6 +234,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 4usize,
                 on_click: move |_| on_format.call(MarkdownFormat::Heading2),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Heading 2",
                 span { class: "font-bold text-sm", "H2" }
@@ -219,6 +242,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 5usize,
                 on_click: move |_| on_format.call(MarkdownFormat::Heading3),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Heading 3",
                 span { class: "font-bold text-sm", "H3" }
@@ -227,6 +251,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 6usize,
                 on_click: move |_| on_format.call(MarkdownFormat::BulletList),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Bullet list",
                 svg {
@@ -276,6 +301,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 7usize,
                 on_click: move |_| on_format.call(MarkdownFormat::NumberedList),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Numbered list",
                 svg {
@@ -328,6 +354,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 8usize,
                 on_click: move |_| on_format.call(MarkdownFormat::Quote),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Quote",
                 svg {
@@ -341,6 +368,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 9usize,
                 on_click: move |_| on_format.call(MarkdownFormat::InlineCode),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Inline code",
                 svg {
@@ -356,6 +384,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 10usize,
                 on_click: move |_| on_format.call(MarkdownFormat::CodeBlock),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Code block",
                 svg {
@@ -385,6 +414,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 11usize,
                 on_click: move |_| on_format.call(MarkdownFormat::Link),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Insert link",
                 svg {
@@ -404,6 +434,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
                         ToolbarButton {
                             index: 12usize,
                             on_click: move |_| on_upload.call(()),
+                            disabled: props.disabled,
                             class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                             title: "Upload image",
                             svg {
@@ -430,6 +461,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
                 ToolbarButton {
                     index: 12usize,
                     on_click: move |_| on_format.call(MarkdownFormat::Image),
+                    disabled: selection_actions_disabled,
                     class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                     title: "Insert image",
                     svg {
@@ -459,6 +491,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
                         ToolbarButton {
                             index: 13usize,
                             on_click: move |_| on_mention.call(()),
+                            disabled: props.disabled,
                             class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                             title: "Insert Nostr mention",
                             svg {
@@ -478,6 +511,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
             ToolbarButton {
                 index: 14usize,
                 on_click: move |_| on_format.call(MarkdownFormat::HorizontalRule),
+                disabled: selection_actions_disabled,
                 class: "p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition",
                 title: "Horizontal rule",
                 svg {
@@ -507,6 +541,7 @@ pub fn MarkdownToolbar(props: MarkdownToolbarProps) -> Element {
 ///
 /// # Returns
 /// Tuple of (new content, new cursor position)
+#[cfg_attr(not(any(feature = "web", test)), allow(dead_code))]
 pub fn apply_markdown_format(
     content: &str,
     cursor_start: usize,
@@ -555,14 +590,13 @@ pub fn apply_markdown_format(
     }
 }
 /// Set cursor position in a textarea element (WASM only)
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub fn set_textarea_cursor(textarea_id: &str, position: usize, content: &str) {
     use wasm_bindgen::JsCast;
     if let Some(window) = web_sys::window() {
         if let Some(document) = window.document() {
             if let Some(element) = document.get_element_by_id(textarea_id) {
-                if let Ok(textarea) = element.dyn_into::<web_sys::HtmlTextAreaElement>()
-                {
+                if let Ok(textarea) = element.dyn_into::<web_sys::HtmlTextAreaElement>() {
                     let utf16_pos = utf8_to_utf16_index(content, position) as u32;
                     let _ = textarea.set_selection_range(utf16_pos, utf16_pos);
                     let _ = textarea.focus();
@@ -571,50 +605,34 @@ pub fn set_textarea_cursor(textarea_id: &str, position: usize, content: &str) {
         }
     }
 }
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
+#[allow(dead_code)]
 pub fn set_textarea_cursor(_textarea_id: &str, _position: usize, _content: &str) {}
-/// Get cursor position from a textarea element (WASM only)
-#[cfg(target_arch = "wasm32")]
-pub fn get_textarea_cursor(textarea_id: &str, content: &str) -> (usize, usize) {
+/// Get the current UTF-8 cursor/selection range for a textarea when the platform exposes it.
+#[cfg(feature = "web")]
+pub fn get_textarea_cursor(textarea_id: &str, content: &str) -> Option<(usize, usize)> {
     use wasm_bindgen::JsCast;
     if let Some(window) = web_sys::window() {
         if let Some(document) = window.document() {
             if let Some(element) = document.get_element_by_id(textarea_id) {
-                if let Ok(textarea) = element.dyn_into::<web_sys::HtmlTextAreaElement>()
-                {
-                    let start = textarea.selection_start().ok().flatten().unwrap_or(0)
-                        as usize;
-                    let end = textarea.selection_end().ok().flatten().unwrap_or(0)
-                        as usize;
+                if let Ok(textarea) = element.dyn_into::<web_sys::HtmlTextAreaElement>() {
+                    let start = textarea.selection_start().ok().flatten()? as usize;
+                    let end = textarea.selection_end().ok().flatten()? as usize;
                     let start_utf8 = utf16_to_utf8_index(content, start);
                     let end_utf8 = utf16_to_utf8_index(content, end);
-                    return (start_utf8, end_utf8);
+                    return Some((start_utf8, end_utf8));
                 }
             }
         }
     }
-    (0, 0)
+    None
 }
-#[cfg(not(target_arch = "wasm32"))]
-pub fn get_textarea_cursor(_textarea_id: &str, _content: &str) -> (usize, usize) {
-    (0, 0)
-}
-/// Convert UTF-16 code unit index (from DOM) to UTF-8 byte index (for Rust string slicing)
-#[cfg(target_arch = "wasm32")]
-fn utf16_to_utf8_index(text: &str, utf16_index: usize) -> usize {
-    let mut utf16_count = 0;
-    let mut utf8_byte_index = 0;
-    for ch in text.chars() {
-        if utf16_count >= utf16_index {
-            break;
-        }
-        utf16_count += ch.len_utf16();
-        utf8_byte_index += ch.len_utf8();
-    }
-    utf8_byte_index.min(text.len())
+#[cfg(not(feature = "web"))]
+pub fn get_textarea_cursor(_textarea_id: &str, _content: &str) -> Option<(usize, usize)> {
+    None
 }
 /// Convert UTF-8 byte index (from Rust string) to UTF-16 code unit index (for DOM)
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 fn utf8_to_utf16_index(text: &str, utf8_index: usize) -> usize {
     let utf8_index = utf8_index.min(text.len());
     let mut utf16_count = 0;
@@ -634,72 +652,42 @@ mod tests {
     #[test]
     fn test_bold_format_empty_selection() {
         let content = "hello world";
-        let (result, cursor) = apply_markdown_format(
-            content,
-            6,
-            6,
-            MarkdownFormat::Bold,
-        );
+        let (result, cursor) = apply_markdown_format(content, 6, 6, MarkdownFormat::Bold);
         assert_eq!(result, "hello **text**world");
         assert_eq!(cursor, 14);
     }
     #[test]
     fn test_bold_format_with_selection() {
         let content = "hello world";
-        let (result, cursor) = apply_markdown_format(
-            content,
-            0,
-            5,
-            MarkdownFormat::Bold,
-        );
+        let (result, cursor) = apply_markdown_format(content, 0, 5, MarkdownFormat::Bold);
         assert_eq!(result, "**hello** world");
         assert_eq!(cursor, 9);
     }
     #[test]
     fn test_heading_format() {
         let content = "hello world";
-        let (result, cursor) = apply_markdown_format(
-            content,
-            6,
-            6,
-            MarkdownFormat::Heading1,
-        );
+        let (result, cursor) = apply_markdown_format(content, 6, 6, MarkdownFormat::Heading1);
         assert_eq!(result, "# hello world");
         assert_eq!(cursor, 8);
     }
     #[test]
     fn test_heading_format_middle_of_line() {
         let content = "line one\nline two";
-        let (result, cursor) = apply_markdown_format(
-            content,
-            12,
-            12,
-            MarkdownFormat::Heading2,
-        );
+        let (result, cursor) = apply_markdown_format(content, 12, 12, MarkdownFormat::Heading2);
         assert_eq!(result, "line one\n## line two");
         assert_eq!(cursor, 15);
     }
     #[test]
     fn test_code_block_format() {
         let content = "hello world";
-        let (result, cursor) = apply_markdown_format(
-            content,
-            6,
-            11,
-            MarkdownFormat::CodeBlock,
-        );
+        let (result, cursor) = apply_markdown_format(content, 6, 11, MarkdownFormat::CodeBlock);
         assert_eq!(result, "hello ```\nworld\n```");
         assert_eq!(cursor, 19);
     }
     #[test]
     fn test_link_format() {
         let content = "check this out";
-        let (result, cursor) = apply_markdown_format(
-            content,
-            6,
-            10,
-            MarkdownFormat::Link,
-        );
+        let (result, cursor) = apply_markdown_format(content, 6, 10, MarkdownFormat::Link);
         assert_eq!(result, "check [this](url) out");
         assert_eq!(cursor, 13);
     }

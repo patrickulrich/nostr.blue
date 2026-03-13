@@ -5,9 +5,9 @@
 use dioxus::prelude::*;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 /// Result of the unsaved changes hook
 ///
@@ -82,10 +82,16 @@ pub fn use_unsaved_changes(content_hash: Memo<u64>) -> UseUnsavedChanges {
             }
         }
     });
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
+        let mut closure_id = use_signal(|| 0u32);
         use_effect(move || {
-            register_beforeunload(is_dirty);
+            closure_id.set(register_beforeunload(is_dirty));
+        });
+        use_drop(move || {
+            if *closure_id.read() != 0 {
+                unregister_beforeunload_id(*closure_id.read());
+            }
         });
     }
     UseUnsavedChanges {
@@ -109,76 +115,88 @@ pub fn calculate_multi_hash(fields: &[&str]) -> u64 {
     }
     hasher.finish()
 }
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 thread_local! {
     #[allow(clippy::type_complexity)]
-    static BEFOREUNLOAD_CLOSURE: std::cell::RefCell<
-        Option<Closure<dyn FnMut(web_sys::BeforeUnloadEvent)>>,
-    > = const { std::cell::RefCell::new(None) };
+    static BEFOREUNLOAD_CLOSURES: std::cell::RefCell<
+        Vec<(u32, Closure<dyn FnMut(web_sys::BeforeUnloadEvent)>)>,
+    > = const { std::cell::RefCell::new(Vec::new()) };
+    static NEXT_CLOSURE_ID: std::cell::RefCell<u32> = const { std::cell::RefCell::new(1) };
 }
-#[cfg(target_arch = "wasm32")]
-fn register_beforeunload(is_dirty: Signal<bool>) {
+#[cfg(feature = "web")]
+fn register_beforeunload(is_dirty: Signal<bool>) -> u32 {
     use web_sys::BeforeUnloadEvent;
+    let window = match web_sys::window() {
+        Some(w) => w,
+        None => return 0,
+    };
+    let closure = Closure::wrap(Box::new(move |event: BeforeUnloadEvent| {
+        if *is_dirty.read() {
+            event.set_return_value("You have unsaved changes. Are you sure you want to leave?");
+            event.prevent_default();
+        }
+    }) as Box<dyn FnMut(BeforeUnloadEvent)>);
+    let closure_id = NEXT_CLOSURE_ID.with(|cell| {
+        let id = *cell.borrow();
+        let mut cell_mut = cell.borrow_mut();
+        let mut next = id.wrapping_add(1);
+        if next == 0 {
+            next = 1;
+        }
+        *cell_mut = next;
+        id
+    });
+    if let Err(e) =
+        window.add_event_listener_with_callback("beforeunload", closure.as_ref().unchecked_ref())
+    {
+        log::warn!("Failed to add beforeunload listener: {:?}", e);
+        return 0;
+    }
+    BEFOREUNLOAD_CLOSURES.with(|cell| {
+        cell.borrow_mut().push((closure_id, closure));
+    });
+    closure_id
+}
+/// Unregister a specific beforeunload handler by its ID
+#[allow(dead_code)]
+#[cfg(feature = "web")]
+pub fn unregister_beforeunload_id(closure_id: u32) {
     let window = match web_sys::window() {
         Some(w) => w,
         None => return,
     };
-    let closure = Closure::wrap(
-        Box::new(move |event: BeforeUnloadEvent| {
-            if *is_dirty.read() {
-                event
-                    .set_return_value(
-                        "You have unsaved changes. Are you sure you want to leave?",
-                    );
-                event.prevent_default();
-            }
-        }) as Box<dyn FnMut(BeforeUnloadEvent)>,
-    );
-    BEFOREUNLOAD_CLOSURE
-        .with(|cell| {
-            if let Some(old_closure) = cell.borrow_mut().take() {
-                let _ = window
-                    .remove_event_listener_with_callback(
-                        "beforeunload",
-                        old_closure.as_ref().unchecked_ref(),
-                    );
-            }
-        });
-    if let Err(e) = window
-        .add_event_listener_with_callback(
-            "beforeunload",
-            closure.as_ref().unchecked_ref(),
-        )
-    {
-        log::warn!("Failed to add beforeunload listener: {:?}", e);
-    }
-    BEFOREUNLOAD_CLOSURE
-        .with(|cell| {
-            *cell.borrow_mut() = Some(closure);
-        });
+    BEFOREUNLOAD_CLOSURES.with(|cell| {
+        let mut vec = cell.borrow_mut();
+        if let Some(pos) = vec.iter().position(|(id, _)| *id == closure_id) {
+            let (_, closure) = vec.remove(pos);
+            let _ = window.remove_event_listener_with_callback(
+                "beforeunload",
+                closure.as_ref().unchecked_ref(),
+            );
+        }
+    });
 }
 /// Unregister the beforeunload handler (call on component unmount if needed)
-/// Kept for future explicit cleanup when needed
+/// Kept for backward compatibility - unregisters all handlers
 #[allow(dead_code)]
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub fn unregister_beforeunload() {
     let window = match web_sys::window() {
         Some(w) => w,
         None => return,
     };
-    BEFOREUNLOAD_CLOSURE
-        .with(|cell| {
-            if let Some(closure) = cell.borrow_mut().take() {
-                let _ = window
-                    .remove_event_listener_with_callback(
-                        "beforeunload",
-                        closure.as_ref().unchecked_ref(),
-                    );
-            }
-        });
+    BEFOREUNLOAD_CLOSURES.with(|cell| {
+        let mut vec = cell.borrow_mut();
+        for (_id, closure) in vec.drain(..) {
+            let _ = window.remove_event_listener_with_callback(
+                "beforeunload",
+                closure.as_ref().unchecked_ref(),
+            );
+        }
+    });
 }
 #[allow(dead_code)]
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 pub fn unregister_beforeunload() {}
 /// State for showing a leave confirmation dialog
 /// Kept for future in-app navigation warning implementation

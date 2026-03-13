@@ -364,7 +364,10 @@ pub fn TokenList() -> Element {
         let mut tokens_by_mint: HashMap<String, Vec<TokenData>> = HashMap::new();
         for token in tokens_data.iter() {
             let normalized_url = normalize_mint_url(&token.mint);
-            tokens_by_mint.entry(normalized_url).or_default().push(token.clone());
+            tokens_by_mint
+                .entry(normalized_url)
+                .or_default()
+                .push(token.clone());
         }
         let wallet_mints = cashu::get_mints();
         for mint_url in wallet_mints {
@@ -375,22 +378,11 @@ pub fn TokenList() -> Element {
             .into_iter()
             .map(|(mint_url, tokens_vec)| (mint_url, Rc::new(tokens_vec)))
             .collect();
-        sorted_mints
-            .sort_by(|a, b| {
-                let balance_a: u64 = a
-                    .1
-                    .iter()
-                    .flat_map(|t| &t.proofs)
-                    .map(|p| p.amount)
-                    .sum();
-                let balance_b: u64 = b
-                    .1
-                    .iter()
-                    .flat_map(|t| &t.proofs)
-                    .map(|p| p.amount)
-                    .sum();
-                balance_b.cmp(&balance_a)
-            });
+        sorted_mints.sort_by(|a, b| {
+            let balance_a: u64 = a.1.iter().flat_map(|t| &t.proofs).map(|p| p.amount).sum();
+            let balance_b: u64 = b.1.iter().flat_map(|t| &t.proofs).map(|p| p.amount).sum();
+            balance_b.cmp(&balance_a)
+        });
         sorted_mints
     });
     rsx! {
@@ -438,7 +430,9 @@ fn shorten_mint_url(url: &str) -> String {
     if url.is_empty() {
         return "Unknown mint".to_string();
     }
-    let url = url.trim_start_matches("https://").trim_start_matches("http://");
+    let url = url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
     if url.is_empty() {
         return "Unknown mint".to_string();
     }

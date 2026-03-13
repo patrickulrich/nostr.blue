@@ -112,24 +112,22 @@ fn SnippetContent(snippet: DisplaySnippet, copied: Signal<bool>) -> Element {
     #[allow(unused_variables)]
     let code_for_copy = snippet.code.clone();
     let handle_copy = move |_| {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
             let window = web_sys::window().unwrap();
             let navigator = window.navigator();
             let clipboard = navigator.clipboard();
             let code_to_copy = code_for_copy.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                let _ = wasm_bindgen_futures::JsFuture::from(
-                        clipboard.write_text(&code_to_copy),
-                    )
-                    .await;
+                let _ =
+                    wasm_bindgen_futures::JsFuture::from(clipboard.write_text(&code_to_copy)).await;
             });
         }
         copied.set(true);
         spawn(async move {
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "web")]
             {
-                gloo_timers::future::TimeoutFuture::new(2000).await;
+                crate::platform::timer::sleep_ms(2000).await;
             }
             copied.set(false);
         });

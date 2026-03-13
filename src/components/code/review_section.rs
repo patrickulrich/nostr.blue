@@ -4,8 +4,8 @@
 //! to submit reviews with Approve/Request Changes/Comment states.
 //! Reviews are cached in-memory per PR event ID.
 use crate::services::git_hosting::reviews::fetch_pr_reviews;
-use crate::stores::profiles::PROFILE_CACHE;
 use crate::stores::nostr_client::{get_client, CLIENT_INITIALIZED, HAS_SIGNER};
+use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::format_relative_time_or;
 use crate::utils::nip34::PersistedReview;
 use crate::utils::truncate_pubkey;
@@ -16,13 +16,18 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 
 /// Publish a review as a Kind 9807 event on Nostr
-pub async fn publish_review_event(pr_event_id: &str, pr_author_pubkey: &str, state: crate::utils::nip34::ReviewState, content: &str) -> std::result::Result<String, String> {
+pub async fn publish_review_event(
+    pr_event_id: &str,
+    pr_author_pubkey: &str,
+    state: crate::utils::nip34::ReviewState,
+    content: &str,
+) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
-    let event_id = EventId::from_hex(pr_event_id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
+    let event_id =
+        EventId::from_hex(pr_event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
     let author_pk = PublicKey::from_hex(pr_author_pubkey)
         .map_err(|e| format!("Invalid author pubkey: {}", e))?;
     let builder = EventBuilder::new(Kind::Custom(PersistedReview::KIND), content)
@@ -32,7 +37,9 @@ pub async fn publish_review_event(pr_event_id: &str, pr_author_pubkey: &str, sta
             TagKind::Custom(Cow::Borrowed("state")),
             [state.as_str()],
         ));
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish review: {}", e))?;
     Ok(output.id().to_hex())
 }
@@ -75,6 +82,120 @@ impl LocalReviewState {
     }
 }
 
+fn should_replace_review(existing: &PersistedReview, candidate: &PersistedReview) -> bool {
+    if candidate.created_at > existing.created_at {
+        return true;
+    }
+    if !existing.event_id.is_empty()
+        && !candidate.event_id.is_empty()
+        && existing.event_id == candidate.event_id
+        && candidate.created_at != existing.created_at
+    {
+        return true;
+    }
+    if candidate.created_at == existing.created_at {
+        // If existing is optimistic (no event_id), only replace if candidate is semantically the same
+        if existing.event_id.is_empty() && !candidate.event_id.is_empty() {
+            // Compare semantic fields to ensure it's the same review
+            return existing.pubkey == candidate.pubkey
+                && existing.state == candidate.state
+                && existing.content == candidate.content;
+        }
+        // For persisted reviews, use event_id as tie-breaker (NIP-01 style: lower ID wins)
+        if !existing.event_id.is_empty() && !candidate.event_id.is_empty() {
+            return candidate.event_id < existing.event_id;
+        }
+    }
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::nip34::ReviewState;
+
+    fn review(event_id: &str, created_at: u64) -> PersistedReview {
+        PersistedReview {
+            pr_event_id: "pr".to_string(),
+            content: "content".to_string(),
+            state: ReviewState::Approved,
+            event_id: event_id.to_string(),
+            pubkey: "pubkey".to_string(),
+            created_at,
+        }
+    }
+
+    fn review_with_content(
+        event_id: &str,
+        created_at: u64,
+        content: &str,
+        state: ReviewState,
+    ) -> PersistedReview {
+        PersistedReview {
+            pr_event_id: "pr".to_string(),
+            content: content.to_string(),
+            state,
+            event_id: event_id.to_string(),
+            pubkey: "pubkey".to_string(),
+            created_at,
+        }
+    }
+
+    #[test]
+    fn lower_event_id_wins_for_equal_persisted_reviews() {
+        let existing = review("ff", 100);
+        let candidate = review("0a", 100);
+        assert!(should_replace_review(&existing, &candidate));
+        assert!(!should_replace_review(&candidate, &existing));
+    }
+
+    #[test]
+    fn optimistic_same_fields_replaces() {
+        // Existing optimistic review (no event_id)
+        let existing = review_with_content("", 100, "Great PR!", ReviewState::Approved);
+        // Candidate persisted review with identical semantic fields
+        let candidate = review_with_content("abc123", 100, "Great PR!", ReviewState::Approved);
+        // Should replace because semantic fields match
+        assert!(should_replace_review(&existing, &candidate));
+    }
+
+    #[test]
+    fn optimistic_different_content_no_replace() {
+        // Existing optimistic review with one content
+        let existing = review_with_content("", 100, "Great PR!", ReviewState::Approved);
+        // Candidate persisted review with different content
+        let candidate = review_with_content("abc123", 100, "Needs work", ReviewState::Approved);
+        // Should NOT replace because content differs
+        assert!(!should_replace_review(&existing, &candidate));
+    }
+
+    #[test]
+    fn newer_timestamp_wins() {
+        // Existing review with older timestamp
+        let existing = review("abc", 100);
+        // Candidate review with newer timestamp
+        let candidate = review("def", 200);
+        // Should replace because candidate is newer
+        assert!(should_replace_review(&existing, &candidate));
+        // Should NOT replace in reverse direction
+        assert!(!should_replace_review(&candidate, &existing));
+    }
+
+    #[test]
+    fn same_event_id_with_different_timestamp_replaces() {
+        let existing = review("same-event", 100);
+        let candidate = review("same-event", 200);
+        assert!(should_replace_review(&existing, &candidate));
+    }
+
+    #[test]
+    fn same_event_id_older_candidate_still_replaces() {
+        let existing = review("same-event", 200);
+        let candidate = review("same-event", 100);
+        assert!(should_replace_review(&existing, &candidate));
+    }
+}
+
 /// PR Review Section component
 #[component]
 pub fn PRReviewSection(
@@ -83,14 +204,11 @@ pub fn PRReviewSection(
     maintainers: Vec<String>,
     user_pubkey: String,
     is_authenticated: bool,
-    #[props(default = None)]
-    required_approvals: Option<u32>,
-    #[props(default = None)]
-    on_review_submitted: Option<EventHandler<()>>,
+    #[props(default = None)] required_approvals: Option<u32>,
+    #[props(default = None)] on_review_submitted: Option<EventHandler<()>>,
 ) -> Element {
-    let can_review = is_authenticated
-        && user_pubkey != pr_pubkey
-        && maintainers.contains(&user_pubkey);
+    let can_review =
+        is_authenticated && user_pubkey != pr_pubkey && maintainers.contains(&user_pubkey);
     let mut show_form = use_signal(|| false);
     let mut selected_state = use_signal(|| LocalReviewState::Approved);
     let mut review_body = use_signal(String::new);
@@ -99,66 +217,92 @@ pub fn PRReviewSection(
     let mut fetch_error = use_signal(|| None::<String>);
     let mut submitting = use_signal(|| false);
 
-    // Fetch persisted reviews from relays on mount, with generation counter
-    // to discard stale responses when pr_id changes rapidly
+    // Increment the generation and reset local UI state only when the PR changes.
     let mut gen = use_signal(|| 0u32);
-    use_effect(
-        use_reactive(
-            &pr_id,
-            move |id| {
-                if !*CLIENT_INITIALIZED.read() { return; }
-                let current_gen = gen.peek().wrapping_add(1);
-                gen.set(current_gen);
-                reviews.set(Vec::new());
-                publish_error.set(None);
-                fetch_error.set(None);
-                show_form.set(false);
-                review_body.set(String::new());
-                spawn(async move {
-                    match fetch_pr_reviews(&id).await {
-                        Ok(persisted) => {
-                            if *gen.peek() != current_gen { return; }
-                            // Dedup persisted reviews: keep latest per pubkey
-                            let mut by_pubkey = std::collections::HashMap::<String, PersistedReview>::new();
-                            for r in persisted {
-                                by_pubkey.entry(r.pubkey.clone())
-                                    .and_modify(|existing| {
-                                        if r.created_at > existing.created_at
-                                            || (r.created_at == existing.created_at && r.event_id > existing.event_id)
-                                        {
-                                            *existing = r.clone();
-                                        }
-                                    })
-                                    .or_insert(r);
-                            }
-                            // Merge: optimistic entries override persisted via insert()
-                            let current = reviews.read().clone();
-                            for r in current.into_iter().filter(|r| r.event_id.is_empty()) {
-                                by_pubkey.insert(r.pubkey.clone(), r);
-                            }
-                            let mut sorted: Vec<_> = by_pubkey.into_values().collect();
-                            sorted.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-                            reviews.set(sorted);
+    use_effect(use_reactive(&pr_id, move |id| {
+        let _ = id;
+        let current_gen = gen.peek().wrapping_add(1);
+        gen.set(current_gen);
+        reviews.set(Vec::new());
+        publish_error.set(None);
+        fetch_error.set(None);
+        show_form.set(false);
+        submitting.set(false);
+        review_body.set(String::new());
+        selected_state.set(LocalReviewState::Approved);
+    }));
+
+    // Fetch persisted reviews when the PR changes or the client becomes ready.
+    use_effect(use_reactive(
+        (&pr_id, &*CLIENT_INITIALIZED.read()),
+        move |(id, is_ready)| {
+            if !is_ready {
+                return;
+            }
+            let current_gen = *gen.peek();
+            spawn(async move {
+                match fetch_pr_reviews(&id).await {
+                    Ok(persisted) => {
+                        if *gen.peek() != current_gen {
+                            return;
                         }
-                        Err(e) => {
-                            if *gen.peek() != current_gen { return; }
-                            log::warn!("Failed to fetch PR reviews for {}: {}", id, e);
-                            fetch_error.set(Some(format!("Failed to load reviews: {}", e)));
+                        // Clear any previous fetch error on success
+                        fetch_error.set(None);
+                        let mut by_pubkey =
+                            std::collections::HashMap::<String, PersistedReview>::new();
+                        for r in reviews.read().iter().cloned() {
+                            by_pubkey
+                                .entry(r.pubkey.clone())
+                                .and_modify(|existing| {
+                                    if should_replace_review(existing, &r) {
+                                        *existing = r.clone();
+                                    }
+                                })
+                                .or_insert(r);
                         }
+                        for r in persisted {
+                            by_pubkey
+                                .entry(r.pubkey.clone())
+                                .and_modify(|existing| {
+                                    if should_replace_review(existing, &r) {
+                                        *existing = r.clone();
+                                    }
+                                })
+                                .or_insert(r);
+                        }
+                        let mut sorted: Vec<_> = by_pubkey.into_values().collect();
+                        sorted.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                        reviews.set(sorted);
                     }
-                });
-            },
-        ),
-    );
+                    Err(e) => {
+                        if *gen.peek() != current_gen {
+                            return;
+                        }
+                        log::warn!("Failed to fetch PR reviews for {}: {}", id, e);
+                        fetch_error.set(Some(format!("Failed to load reviews: {}", e)));
+                    }
+                }
+            });
+        },
+    ));
 
     let review_list = reviews.read();
     let maintainer_set: HashSet<&String> = HashSet::from_iter(maintainers.iter());
-    let approve_count = review_list.iter()
-        .filter(|r| r.state == crate::utils::nip34::ReviewState::Approved && maintainer_set.contains(&r.pubkey) && r.pubkey != pr_pubkey)
+    let approve_count = review_list
+        .iter()
+        .filter(|r| {
+            r.state == crate::utils::nip34::ReviewState::Approved
+                && maintainer_set.contains(&r.pubkey)
+                && r.pubkey != pr_pubkey
+        })
         .count();
     let changes_count = review_list
         .iter()
-        .filter(|r| r.state == crate::utils::nip34::ReviewState::ChangesRequested && maintainer_set.contains(&r.pubkey) && r.pubkey != pr_pubkey)
+        .filter(|r| {
+            r.state == crate::utils::nip34::ReviewState::ChangesRequested
+                && maintainer_set.contains(&r.pubkey)
+                && r.pubkey != pr_pubkey
+        })
         .count();
 
     let handle_submit = {
@@ -166,7 +310,13 @@ pub fn PRReviewSection(
         let user_pubkey = user_pubkey.clone();
         let saved_pr_pubkey = pr_pubkey.clone();
         move |_| {
-            if *submitting.peek() { return; }
+            if *submitting.peek() {
+                return;
+            }
+            if !*HAS_SIGNER.read() {
+                publish_error.set(Some("No signer attached".to_string()));
+                return;
+            }
             submitting.set(true);
             let state = *selected_state.read();
             let body = review_body.read().clone();
@@ -176,7 +326,7 @@ pub fn PRReviewSection(
                 body
             };
             let review_state = state.to_review_state();
-            let now = js_sys::Date::now() as u64 / 1000;
+            let now = crate::platform::timestamp::now_secs();
             // Capture prior review for rollback
             let prior_review = {
                 let current = reviews.read();
@@ -205,11 +355,19 @@ pub fn PRReviewSection(
             let saved_pubkey = user_pubkey.clone();
             let author_pk = saved_pr_pubkey.clone();
             let on_review_submitted = on_review_submitted;
+            let submit_gen = *gen.peek();
             spawn(async move {
                 match publish_review_event(&id, &author_pk, review_state, &saved_content).await {
                     Ok(event_id) => {
+                        if *gen.peek() != submit_gen {
+                            return;
+                        }
                         let mut current = reviews.write();
-                        if let Some(r) = current.iter_mut().find(|r| r.pubkey == saved_pubkey && r.event_id.is_empty()) {
+                        if let Some(r) = current.iter_mut().find(|r| {
+                            r.pubkey == saved_pubkey
+                                && r.content == saved_content
+                                && r.event_id.is_empty()
+                        }) {
                             r.event_id = event_id;
                         }
                         drop(current);
@@ -219,19 +377,34 @@ pub fn PRReviewSection(
                         }
                     }
                     Err(e) => {
+                        if *gen.peek() != submit_gen {
+                            return;
+                        }
                         submitting.set(false);
                         publish_error.set(Some(e.to_string()));
                         // Rollback: remove the optimistic entry and restore prior review
                         let mut current = reviews.write();
-                        current.retain(|r| !(r.pubkey == saved_pubkey && r.content == saved_content && r.event_id.is_empty()));
+                        current.retain(|r| {
+                            !(r.pubkey == saved_pubkey
+                                && r.content == saved_content
+                                && r.event_id.is_empty())
+                        });
                         if let Some(prior) = prior_review {
-                            current.push(prior);
-                            current.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                            // Only restore if no newer persisted review exists for this pubkey
+                            let has_newer = current.iter().any(|r| {
+                                r.pubkey == prior.pubkey && r.created_at >= prior.created_at
+                            });
+                            if !has_newer {
+                                current.push(prior);
+                                current.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                            }
                         }
                         drop(current);
                         // Restore form so user can retry
                         show_form.set(true);
-                        review_body.set(saved_content);
+                        if review_body.peek().is_empty() {
+                            review_body.set(saved_content);
+                        }
                     }
                 }
             });
@@ -429,7 +602,12 @@ pub fn PRReviewSection(
                     } else {
                         button {
                             class: "w-full px-3 py-2 text-sm border border-border rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition",
-                            onclick: move |_| show_form.set(true),
+                            onclick: move |_| {
+                                if *submitting.peek() {
+                                    return;
+                                }
+                                show_form.set(true);
+                            },
                             "Add Review"
                         }
                     }

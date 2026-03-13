@@ -60,8 +60,7 @@ async fn decode_and_redirect(identifier: &str) -> std::result::Result<Route, Str
     }
     if identifier.starts_with("nrelay") {
         return Err(
-            "Relay URLs (nrelay) are not yet supported. Relay management coming soon."
-                .to_string(),
+            "Relay URLs (nrelay) are not yet supported. Relay management coming soon.".to_string(),
         );
     }
     match Nip19::from_bech32(identifier) {
@@ -206,14 +205,10 @@ async fn decode_and_redirect(identifier: &str) -> std::result::Result<Route, Str
                 }
             }
         }
-        Err(e) => {
-            Err(
-                format!(
-                    "Failed to decode NIP-19 identifier '{}...': {}",
-                    identifier.chars().take(20).collect::<String>(),
-                    e,
-                ),
-            )
-        }
+        Err(e) => Err(format!(
+            "Failed to decode NIP-19 identifier '{}...': {}",
+            identifier.chars().take(20).collect::<String>(),
+            e,
+        )),
     }
 }

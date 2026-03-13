@@ -1,8 +1,8 @@
 //! Content Menu Component
 //! A reusable dropdown menu for Wiki, Recipe, Publication, and other content types
 //! Similar to NoteMenu but designed for addressable events with naddr
-use crate::components::icons::MoreHorizontalIcon;
 use crate::components::board::item_selector::PinToBoardModal;
+use crate::components::icons::MoreHorizontalIcon;
 use crate::components::{AddToListModal, ReportModal};
 use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::stores::pin_boards_store::{PinContentType, PinReference};
@@ -72,6 +72,7 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
     let mut is_following = use_signal(|| false);
     let mut is_loading_follow_state = use_signal(|| true);
     let mut is_updating_follow = use_signal(|| false);
+    let mut follow_check_gen = use_signal(|| 0u32);
     let mut show_report_modal = use_signal(|| false);
     let mut show_add_to_list_modal = use_signal(|| false);
     let mut show_pin_to_board_modal = use_signal(|| false);
@@ -86,32 +87,51 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
     let naddr = props.naddr.clone();
     let event_id_hex = props.event_id.clone().unwrap_or_default();
     let clean_naddr: String = if naddr.to_ascii_lowercase().starts_with("nostr:") {
-        naddr.split_once(':').map(|(_, rest)| rest).unwrap_or(&naddr).to_string()
+        naddr
+            .split_once(':')
+            .map(|(_, rest)| rest)
+            .unwrap_or(&naddr)
+            .to_string()
     } else {
         naddr.clone()
     };
     let clean_naddr_copy = clean_naddr.clone();
     let has_copyable_link = !clean_naddr.is_empty() || !event_id_hex.is_empty();
     let event_id_hex_copy = event_id_hex.clone();
-    use_effect(
-        use_reactive(
-            &author_pubkey_follow_check,
-            move |pubkey| {
-                spawn(async move {
-                    match nostr_client::is_following(pubkey).await {
-                        Ok(following) => {
-                            is_following.set(following);
-                            is_loading_follow_state.set(false);
+    use_effect(use_reactive(
+        (&author_pubkey_follow_check, &*HAS_SIGNER.read()),
+        move |(pubkey, has_signer)| {
+            let gen = follow_check_gen.with_mut(|current| {
+                *current = current.wrapping_add(1);
+                *current
+            });
+            if !has_signer {
+                is_following.set(false);
+                is_loading_follow_state.set(false);
+                return;
+            }
+            is_loading_follow_state.set(true);
+            spawn(async move {
+                match nostr_client::is_following(pubkey).await {
+                    Ok(following) => {
+                        if *follow_check_gen.peek() != gen {
+                            return;
                         }
-                        Err(e) => {
-                            log::warn!("Failed to check follow status: {}", e);
-                            is_loading_follow_state.set(false);
-                        }
+                        is_following.set(following);
+                        is_loading_follow_state.set(false);
                     }
-                });
-            },
-        ),
-    );
+                    Err(e) => {
+                        if *follow_check_gen.peek() != gen {
+                            return;
+                        }
+                        log::warn!("Failed to check follow status: {}", e);
+                        is_following.set(false);
+                        is_loading_follow_state.set(false);
+                    }
+                }
+            });
+        },
+    ));
     let content_name = content_type.display_name();
     let pin_title = props
         .title
@@ -271,21 +291,8 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                                     return;
                                 };
                                 spawn(async move {
-                                    let Some(window) = web_sys::window() else {
-                                        toast_api
-                                            .error(
-                                                "Clipboard not available".to_string(),
-                                                ToastOptions::new()
-                                                    .description("Browser window not accessible".to_string())
-                                                    .duration(Duration::from_secs(2))
-                                                    .permanent(false),
-                                            );
-                                        return;
-                                    };
-                                    let clipboard = window.navigator().clipboard();
-                                    let promise = clipboard.write_text(&nostr_uri);
-                                    match wasm_bindgen_futures::JsFuture::from(promise).await {
-                                        Ok(_) => {
+                                    match crate::platform::clipboard::copy_to_clipboard(&nostr_uri).await {
+                                        Ok(()) => {
                                             toast_api
                                                 .success(
                                                     "Copied!".to_string(),
@@ -297,7 +304,8 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                                                         .permanent(false),
                                                 );
                                         }
-                                        Err(_) => {
+                                        Err(e) => {
+                                            log::error!("Failed to copy clipboard for {}: {:?}", content_name, e);
                                             toast_api
                                                 .error(
                                                     "Failed to copy".to_string(),

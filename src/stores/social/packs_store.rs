@@ -147,8 +147,7 @@ pub async fn fetch_starter_packs(limit: usize) -> StdResult<Vec<StarterPack>, St
         .limit(limit);
 
     let result =
-        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15))
-            .await;
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
     *LOADING_PACKS.write() = false;
 
     match result {
@@ -173,8 +172,7 @@ pub async fn fetch_packs_by_author(
     pubkey_hex: &str,
     limit: usize,
 ) -> StdResult<Vec<StarterPack>, String> {
-    let pubkey =
-        PublicKey::from_hex(pubkey_hex).map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::from_hex(pubkey_hex).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = Filter::new()
         .kind(Kind::Custom(STARTER_PACK_KIND))
         .author(pubkey)
@@ -252,8 +250,7 @@ pub async fn fetch_pack_by_naddr(naddr: &str) -> StdResult<Option<StarterPack>, 
         return Ok(Some(cached));
     }
 
-    let coord =
-        Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
+    let coord = Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
 
     let filter = Filter::new()
         .kind(Kind::Custom(STARTER_PACK_KIND))
@@ -301,16 +298,13 @@ pub async fn publish_starter_pack(
     members: &[PackMember],
     d_tag: Option<&str>,
 ) -> StdResult<String, String> {
-    let client =
-        crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
 
-    let d = d_tag
-        .map(|s| s.to_string())
-        .unwrap_or_else(generate_d_tag);
+    let d = d_tag.map(|s| s.to_string()).unwrap_or_else(generate_d_tag);
 
     let mut tags: Vec<Tag> = vec![Tag::identifier(&d), Tag::title(name)];
 
@@ -333,12 +327,14 @@ pub async fn publish_starter_pack(
             .map_err(|e| format!("Invalid member pubkey {}: {}", member.pubkey, e))?;
         if let Some(ref hint) = member.relay_hint {
             let relay_url = nostr::RelayUrl::parse(hint).ok();
-            tags.push(Tag::from_standardized_without_cell(TagStandard::PublicKey {
-                public_key: pk,
-                relay_url,
-                alias: None,
-                uppercase: false,
-            }));
+            tags.push(Tag::from_standardized_without_cell(
+                TagStandard::PublicKey {
+                    public_key: pk,
+                    relay_url,
+                    alias: None,
+                    uppercase: false,
+                },
+            ));
         } else {
             tags.push(Tag::public_key(pk));
         }
@@ -353,8 +349,7 @@ pub async fn publish_starter_pack(
 
     let pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
     let naddr =
-        crate::stores::nostr_client::make_naddr_with_hints(STARTER_PACK_KIND, &pubkey, &d)
-            .await?;
+        crate::stores::nostr_client::make_naddr_with_hints(STARTER_PACK_KIND, &pubkey, &d).await?;
 
     log::info!("Starter pack published: {}", naddr);
     Ok(naddr)
@@ -362,15 +357,13 @@ pub async fn publish_starter_pack(
 
 /// Delete a starter pack (NIP-09)
 pub async fn delete_starter_pack(pack: &StarterPack) -> StdResult<(), String> {
-    let client =
-        crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
 
-    let current_pubkey =
-        crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
+    let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
     if pack.author_pubkey != current_pubkey {
         return Err("You can only delete your own packs".to_string());
     }
@@ -378,8 +371,7 @@ pub async fn delete_starter_pack(pack: &StarterPack) -> StdResult<(), String> {
     let author_pk = PublicKey::from_hex(&pack.author_pubkey)
         .map_err(|e| format!("Invalid author pubkey: {}", e))?;
 
-    let coord = Coordinate::new(Kind::Custom(STARTER_PACK_KIND), author_pk)
-        .identifier(&pack.d_tag);
+    let coord = Coordinate::new(Kind::Custom(STARTER_PACK_KIND), author_pk).identifier(&pack.d_tag);
 
     let deletion_request = EventDeletionRequest::new().coordinate(coord);
     let builder = EventBuilder::delete(deletion_request);
@@ -420,9 +412,11 @@ pub async fn fetch_pack_member_posts(
         filter = filter.until(Timestamp::from(ts.saturating_sub(1)));
     }
 
-    let mut events =
-        crate::stores::nostr_client::fetch_events_from_connected_relays(filter, Duration::from_secs(10))
-            .await?;
+    let mut events = crate::stores::nostr_client::fetch_events_from_connected_relays(
+        filter,
+        Duration::from_secs(10),
+    )
+    .await?;
 
     events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     Ok(events)

@@ -19,10 +19,8 @@ struct TabConfig {
 pub fn RepoTabNav(
     naddr: String,
     active_tab: String,
-    #[props(default = None)]
-    issue_count: Option<u32>,
-    #[props(default = None)]
-    pr_count: Option<u32>,
+    #[props(default = None)] issue_count: Option<u32>,
+    #[props(default = None)] pr_count: Option<u32>,
 ) -> Element {
     let mut show_overflow = use_signal(|| false);
     let tabs = [
@@ -63,6 +61,15 @@ pub fn RepoTabNav(
                 naddr: naddr.clone(),
             },
             count: pr_count,
+        },
+        TabConfig {
+            id: "projects",
+            label: "Projects",
+            icon: r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="10" rx="1"/></svg>"#,
+            route: Route::CodeRepoProjects {
+                naddr: naddr.clone(),
+            },
+            count: None,
         },
         TabConfig {
             id: "commits",
@@ -248,6 +255,13 @@ pub fn RepoTabNavCompact(naddr: String, active_tab: String) -> Element {
             "pulls",
             "PRs",
             Route::CodeRepoPulls {
+                naddr: naddr.clone(),
+            },
+        ),
+        (
+            "projects",
+            "Projects",
+            Route::CodeRepoProjects {
                 naddr: naddr.clone(),
             },
         ),

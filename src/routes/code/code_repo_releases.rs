@@ -5,14 +5,16 @@
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::git_hosting::fetch_repository;
-use crate::services::git_hosting::releases::{delete_release, fetch_repo_releases, publish_release};
-use crate::stores::{auth_store, nostr_client};
+use crate::services::git_hosting::releases::{
+    delete_release, fetch_repo_releases, publish_release,
+};
 use crate::stores::profiles::PROFILE_CACHE;
+use crate::stores::{auth_store, nostr_client};
 use crate::utils::format_relative_time_or;
 use crate::utils::nip34::{decode_naddr, Release, Repository};
 use crate::utils::permissions;
-use crate::utils::validation::is_valid_http_url;
 use crate::utils::truncate_pubkey;
+use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::EventId;
 use std::collections::HashMap;
@@ -41,11 +43,11 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
         loading.set(true);
         spawn(async move {
             let n_clone = n.clone();
-            let (repo_res, releases_res) = futures::join!(
-                fetch_repository(&n),
-                fetch_repo_releases(&n_clone)
-            );
-            if *request_gen.peek() != captured_gen { return; }
+            let (repo_res, releases_res) =
+                futures::join!(fetch_repository(&n), fetch_repo_releases(&n_clone));
+            if *request_gen.peek() != captured_gen {
+                return;
+            }
             match repo_res {
                 Ok(repo) => {
                     repo_data.set(Some(repo));
@@ -73,7 +75,11 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
                             .or_insert(release);
                     }
                     let mut deduped: Vec<Release> = by_tag.into_values().collect();
-                    deduped.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.event_id.cmp(&a.event_id)));
+                    deduped.sort_by(|a, b| {
+                        b.created_at
+                            .cmp(&a.created_at)
+                            .then_with(|| b.event_id.cmp(&a.event_id))
+                    });
                     releases.set(deduped);
                     error.set(None);
                 }
@@ -407,7 +413,9 @@ fn EditReleaseForm(
         let naddr = naddr.clone();
         let tag_name_for_submit = tag_name.clone();
         move |_| {
-            if *is_publishing.peek() { return; }
+            if *is_publishing.peek() {
+                return;
+            }
             let tag = tag_name_for_submit.clone();
             let title_val = title.read().clone();
             let desc = description.read().clone();
@@ -612,7 +620,9 @@ fn NewReleaseForm(naddr: String, on_published: EventHandler<()>) -> Element {
     let handle_submit = {
         let naddr = naddr.clone();
         move |_| {
-            if *is_publishing.peek() { return; }
+            if *is_publishing.peek() {
+                return;
+            }
             let tag = tag_name.read().trim().to_string();
             let title_val = title.read().clone();
             let desc = description.read().clone();

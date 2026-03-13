@@ -1,8 +1,8 @@
 //! Wallet Health Indicator Component
 //!
 //! Displays a badge when there are stuck/pending proofs and opens a health modal.
-use dioxus::prelude::*;
 use crate::stores::cashu::proof_recovery;
+use dioxus::prelude::*;
 /// Inline wallet health indicator shown in the wallet card.
 ///
 /// Shows pending balance and stuck proofs badge (if any).

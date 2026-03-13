@@ -1,8 +1,6 @@
 //! Shop Collection New - Create a new product collection (NIP-99 Kind 30405)
 use crate::routes::Route;
-use crate::stores::shop_store::{
-    fetch_my_products, publish_collection, CollectionFormData,
-};
+use crate::stores::shop_store::{fetch_my_products, publish_collection, CollectionFormData};
 use crate::utils::nip99::Product;
 use dioxus::prelude::*;
 /// Collection creation form

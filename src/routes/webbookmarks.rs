@@ -82,12 +82,8 @@ pub fn WebBookmarks() -> Element {
         has_more.set(true);
         spawn(async move {
             let result = match current_feed_type {
-                FeedType::Following => {
-                    webbookmarks::load_following_webbookmarks(None, 50).await
-                }
-                FeedType::Global => {
-                    webbookmarks::load_global_webbookmarks(None, 50).await
-                }
+                FeedType::Following => webbookmarks::load_following_webbookmarks(None, 50).await,
+                FeedType::Global => webbookmarks::load_global_webbookmarks(None, 50).await,
             };
             match result {
                 Ok(feed_events) => {
@@ -122,12 +118,8 @@ pub fn WebBookmarks() -> Element {
         loading.set(true);
         spawn(async move {
             let result = match current_feed_type {
-                FeedType::Following => {
-                    webbookmarks::load_following_webbookmarks(until, 50).await
-                }
-                FeedType::Global => {
-                    webbookmarks::load_global_webbookmarks(until, 50).await
-                }
+                FeedType::Following => webbookmarks::load_following_webbookmarks(until, 50).await,
+                FeedType::Global => webbookmarks::load_global_webbookmarks(until, 50).await,
             };
             match result {
                 Ok(new_bookmarks) => {
@@ -138,10 +130,8 @@ pub fn WebBookmarks() -> Element {
                     let returned_count = new_bookmarks.len();
                     let last_event_in_batch = new_bookmarks.last().cloned();
                     let current = bookmarks.read().clone();
-                    let existing_ids: std::collections::HashSet<_> = current
-                        .iter()
-                        .map(|e| e.id)
-                        .collect();
+                    let existing_ids: std::collections::HashSet<_> =
+                        current.iter().map(|e| e.id).collect();
                     let filtered_bookmarks: Vec<_> = new_bookmarks
                         .into_iter()
                         .filter(|bookmark| !existing_ids.contains(&bookmark.id))
@@ -180,9 +170,7 @@ pub fn WebBookmarks() -> Element {
         }
         quick_adding.set(true);
         spawn(async move {
-            match webbookmarks::add_webbookmark(url, None, None, None, None, vec![])
-                .await
-            {
+            match webbookmarks::add_webbookmark(url, None, None, None, None, vec![]).await {
                 Ok(_) => {
                     log::info!("Quick bookmark added successfully");
                     quick_url.set(String::new());
@@ -205,15 +193,12 @@ pub fn WebBookmarks() -> Element {
         let sort = *sort_order.read();
         let mut filtered: Vec<Event> = bookmarks_list
             .iter()
-            .filter(|event| {
-                match current_tab {
-                    FilterTab::All => !webbookmarks::is_archived(event),
-                    FilterTab::Favorites => {
-                        webbookmarks::is_favorite(event)
-                            && !webbookmarks::is_archived(event)
-                    }
-                    FilterTab::Archived => webbookmarks::is_archived(event),
+            .filter(|event| match current_tab {
+                FilterTab::All => !webbookmarks::is_archived(event),
+                FilterTab::Favorites => {
+                    webbookmarks::is_favorite(event) && !webbookmarks::is_archived(event)
                 }
+                FilterTab::Archived => webbookmarks::is_archived(event),
             })
             .filter(|event| {
                 if search.is_empty() {
@@ -226,8 +211,7 @@ pub fn WebBookmarks() -> Element {
                     .unwrap_or_default()
                     .to_lowercase();
                 let desc = event.content.to_lowercase();
-                title.contains(&search) || url.contains(&search)
-                    || desc.contains(&search)
+                title.contains(&search) || url.contains(&search) || desc.contains(&search)
             })
             .filter(|event| {
                 if let Some(ref tag) = tag_filter {
@@ -243,26 +227,22 @@ pub fn WebBookmarks() -> Element {
                 filtered.sort_by(|a, b| b.created_at.cmp(&a.created_at));
             }
             SortOrder::DatePublished => {
-                filtered
-                    .sort_by(|a, b| {
-                        let a_ts = webbookmarks::get_published_at(a)
-                            .unwrap_or(a.created_at);
-                        let b_ts = webbookmarks::get_published_at(b)
-                            .unwrap_or(b.created_at);
-                        b_ts.cmp(&a_ts)
-                    });
+                filtered.sort_by(|a, b| {
+                    let a_ts = webbookmarks::get_published_at(a).unwrap_or(a.created_at);
+                    let b_ts = webbookmarks::get_published_at(b).unwrap_or(b.created_at);
+                    b_ts.cmp(&a_ts)
+                });
             }
             SortOrder::Title => {
-                filtered
-                    .sort_by(|a, b| {
-                        let a_title = webbookmarks::get_title(a)
-                            .unwrap_or_default()
-                            .to_lowercase();
-                        let b_title = webbookmarks::get_title(b)
-                            .unwrap_or_default()
-                            .to_lowercase();
-                        a_title.cmp(&b_title)
-                    });
+                filtered.sort_by(|a, b| {
+                    let a_title = webbookmarks::get_title(a)
+                        .unwrap_or_default()
+                        .to_lowercase();
+                    let b_title = webbookmarks::get_title(b)
+                        .unwrap_or_default()
+                        .to_lowercase();
+                    a_title.cmp(&b_title)
+                });
             }
         }
         filtered

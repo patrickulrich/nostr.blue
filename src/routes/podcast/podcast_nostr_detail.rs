@@ -166,18 +166,16 @@ fn PodcastDetailContent(props: PodcastDetailContentProps) -> Element {
     let metadata = &props.metadata;
     let auth = auth_store::AUTH_STATE.read();
     let mut show_share_modal = use_signal(|| false);
-    let image_url = metadata
-        .image
-        .clone()
-        .unwrap_or_else(|| {
-            format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", metadata.title)
-        });
+    let image_url = metadata.image.clone().unwrap_or_else(|| {
+        format!(
+            "https://api.dicebear.com/7.x/shapes/svg?seed={}",
+            metadata.title
+        )
+    });
     let has_v4v = metadata.value.is_some();
     let coordinate = format!("30078:{}:{}", metadata.pubkey, metadata.d_tag);
     let coordinate_for_memo = coordinate.clone();
-    let is_subscribed = use_memo(move || podcast_subscription::is_subscribed(
-        &coordinate_for_memo,
-    ));
+    let is_subscribed = use_memo(move || podcast_subscription::is_subscribed(&coordinate_for_memo));
     let mut subscribing = use_signal(|| false);
     let episode_count = props.episodes.len();
     rsx! {
@@ -392,11 +390,8 @@ async fn fetch_nostr_podcast_metadata(
         .author(PublicKey::from_hex(&pubkey).map_err(|e| e.to_string())?)
         .custom_tag(SingleLetterTag::from_char('d').unwrap(), d_tag.clone())
         .limit(1);
-    let metadata_events = nostr_client::fetch_events_aggregated(
-            metadata_filter,
-            Duration::from_secs(10),
-        )
-        .await?;
+    let metadata_events =
+        nostr_client::fetch_events_aggregated(metadata_filter, Duration::from_secs(10)).await?;
     let metadata_event = metadata_events
         .first()
         .ok_or_else(|| "Podcast not found".to_string())?;
@@ -442,8 +437,7 @@ async fn fetch_nostr_episodes(
 fn parse_coordinate(coord: &str) -> Result<(String, String), String> {
     use nostr::prelude::*;
     if coord.starts_with("naddr") {
-        let nip19 = Nip19::from_bech32(coord)
-            .map_err(|e| format!("Invalid naddr: {}", e))?;
+        let nip19 = Nip19::from_bech32(coord).map_err(|e| format!("Invalid naddr: {}", e))?;
         match nip19 {
             Nip19::Coordinate(nip19_coord) => {
                 let pubkey = nip19_coord.coordinate.public_key.to_hex();

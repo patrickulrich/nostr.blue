@@ -1,6 +1,7 @@
 use crate::stores::cashu;
 use crate::stores::cashu::MintInfoDisplay;
 use dioxus::prelude::*;
+use url::Url;
 #[component]
 pub fn CashuAddMintModal(
     on_close: EventHandler<()>,
@@ -18,9 +19,29 @@ pub fn CashuAddMintModal(
             error_message.set(Some("Please enter a mint URL".to_string()));
             return;
         }
-        if !url.starts_with("https://") && !url.starts_with("http://") {
-            error_message
-                .set(Some("URL must start with http:// or https://".to_string()));
+        let parsed_url = match Url::parse(&url) {
+            Ok(url) => url,
+            Err(_) => {
+                error_message.set(Some("Please enter a valid mint URL".to_string()));
+                return;
+            }
+        };
+        if !parsed_url.username().is_empty() || parsed_url.password().is_some() {
+            error_message.set(Some(
+                "Mint URL must not include embedded credentials".to_string(),
+            ));
+            return;
+        }
+        let is_loopback_http = parsed_url.scheme() == "http"
+            && matches!(
+                parsed_url.host_str(),
+                Some("localhost") | Some("127.0.0.1") | Some("::1")
+            );
+        if parsed_url.scheme() != "https" && !is_loopback_http {
+            error_message.set(Some(
+                "URL must start with https:// (or http:// for localhost, 127.0.0.1, or ::1)"
+                    .to_string(),
+            ));
             return;
         }
         is_checking.set(true);

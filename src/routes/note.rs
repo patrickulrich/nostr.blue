@@ -7,13 +7,18 @@ use std::time::Duration;
 use crate::components::{ClientInitializing, NoteCard, ThreadedComment, VoiceMessageCard};
 use crate::hooks::use_mute_block_cache;
 use crate::routes::Route;
+use crate::stores::back_navigation;
 use crate::stores::nostr_client;
 use crate::utils::{build_thread_tree, event::is_voice_message};
 
 async fn fetch_main_note(event_id: EventId) -> std::result::Result<NostrEvent, String> {
     let filter = Filter::new().id(event_id);
-    let events = nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await?;
-    events.into_iter().next().ok_or("Event not found".to_string())
+    let events =
+        nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await?;
+    events
+        .into_iter()
+        .next()
+        .ok_or("Event not found".to_string())
 }
 
 /// Extract parent event IDs from note tags (NIP-10 lowercase 'e' and NIP-22 uppercase 'E')
@@ -53,12 +58,20 @@ async fn fetch_parents_by_ids(
 async fn fetch_replies(event_id: EventId) -> std::result::Result<Vec<NostrEvent>, String> {
     let event_id_hex = event_id.to_hex();
     let filter_lower = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::VoiceMessage, Kind::VoiceMessageReply])
+        .kinds(vec![
+            Kind::TextNote,
+            Kind::VoiceMessage,
+            Kind::VoiceMessageReply,
+        ])
         .event(event_id)
         .limit(100);
     let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
     let filter_upper = Filter::new()
-        .kinds(vec![Kind::VoiceMessage, Kind::VoiceMessageReply, Kind::Comment])
+        .kinds(vec![
+            Kind::VoiceMessage,
+            Kind::VoiceMessageReply,
+            Kind::Comment,
+        ])
         .custom_tag(upper_e_tag, event_id_hex)
         .limit(100);
     let mut all_replies = Vec::new();
@@ -96,6 +109,11 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
     use_effect(use_reactive!(|note_id| {
         let note_id_str = note_id.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        back_navigation::set_active_note_back_context(
+            note_id_str.clone(),
+            Vec::new(),
+            initial_is_voice,
+        );
         if !client_initialized {
             log::info!("Waiting for client initialization before loading note...");
             return;
@@ -107,23 +125,28 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
             error.set(None);
             crate::stores::profiles::PROFILE_CACHE.write().clear();
 
-            let event_id =
-                match EventId::from_bech32(&note_id_str).or_else(|_| EventId::from_hex(&note_id_str))
-                {
-                    Ok(id) => id,
-                    Err(e) => {
-                        error.set(Some(format!("Invalid note ID: {}", e)));
-                        loading.set(false);
-                        loading_parents.set(false);
-                        loading_replies.set(false);
-                        return;
-                    }
-                };
+            let event_id = match EventId::from_bech32(&note_id_str)
+                .or_else(|_| EventId::from_hex(&note_id_str))
+            {
+                Ok(id) => id,
+                Err(e) => {
+                    error.set(Some(format!("Invalid note ID: {}", e)));
+                    loading.set(false);
+                    loading_parents.set(false);
+                    loading_replies.set(false);
+                    return;
+                }
+            };
 
             let note_result = fetch_main_note(event_id).await;
             let parent_ids = match &note_result {
                 Ok(event) => {
                     note_data.set(Some(event.clone()));
+                    back_navigation::set_active_note_back_context(
+                        note_id_str.clone(),
+                        Vec::new(),
+                        is_voice_message(event),
+                    );
                     loading.set(false);
                     extract_parent_ids(event)
                 }
@@ -141,6 +164,11 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
 
             if let Ok(mut parents) = parents_result {
                 parents.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                back_navigation::set_active_note_back_context(
+                    note_id_str.clone(),
+                    parents.iter().map(|event| event.id.to_hex()).collect(),
+                    note_data.read().as_ref().is_some_and(is_voice_message),
+                );
                 parent_events.set(parents);
             }
             if let Ok(mut reply_vec) = replies_result {
@@ -215,6 +243,7 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
 
     // Cleanup subscription on unmount
     use_drop(move || {
+        back_navigation::clear_active_note_back_context(&note_id);
         if let Some(sub_id) = reply_sub_id.peek().clone() {
             spawn(async move {
                 if let Some(client) = nostr_client::get_client() {

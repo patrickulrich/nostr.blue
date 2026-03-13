@@ -2,13 +2,12 @@
 //! Select publications and book references to insert into wiki pages and publications
 use crate::components::icons::{BookOpenIcon, ChevronDownIcon, SearchIcon, XIcon};
 use crate::stores::publication_store::{
-    fetch_publications, get_all_cached_publications, search_publications,
-    PublicationIndex,
+    fetch_publications, get_all_cached_publications, has_cached_publications_snapshot,
+    search_publications, PublicationIndex,
 };
 use crate::utils::nkbip08::BookReference;
 use dioxus::prelude::*;
 use dioxus_core::Task;
-use gloo_timers::future::TimeoutFuture;
 /// Validate book identifier (d-tag or chapter) against NKBIP-08 format.
 /// Only lowercase letters, digits, and hyphens are allowed.
 fn is_valid_book_id(input: &str) -> bool {
@@ -33,7 +32,10 @@ fn is_valid_book_sections(input: &str) -> bool {
     if input.is_empty() {
         return false;
     }
-    if !input.chars().all(|c| c.is_ascii_digit() || c == ',' || c == '-') {
+    if !input
+        .chars()
+        .all(|c| c.is_ascii_digit() || c == ',' || c == '-')
+    {
         return false;
     }
     for segment in input.split(',') {
@@ -114,67 +116,73 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     let mut selected_chapter = use_signal(|| None::<String>);
     let mut selected_sections = use_signal(String::new);
     let mut selected_version = use_signal(String::new);
-    let mut version_error = use_signal(|| false);
-    let mut sections_error = use_signal(|| false);
     let mut book_id_error = use_signal(|| false);
     let mut loading = use_signal(|| false);
     let mut fetch_error = use_signal(|| None::<String>);
     let mut publications_version = use_signal(|| 0usize);
     let mut fetch_generation = use_signal(|| 0u64);
-    use_effect(
-        use_reactive(
-            &*props.show.read(),
-            move |is_shown| {
-                if is_shown {
-                    // Increment generation token to invalidate any in-flight requests
-                    let current_generation = *fetch_generation.peek() + 1;
-                    fetch_generation.set(current_generation);
+    let mut fetch_task: Signal<Option<Task>> = use_signal(|| None);
+    use_effect(use_reactive(&*props.show.read(), move |is_shown| {
+        if is_shown {
+            let has_cached_publications = has_cached_publications_snapshot();
+            // Increment generation token to invalidate any in-flight requests
+            let current_generation = fetch_generation.peek().wrapping_add(1);
+            fetch_generation.set(current_generation);
+            if let Some(task) = fetch_task.take() {
+                task.cancel();
+            }
 
-                    loading.set(true);
-                    fetch_error.set(None);
-                    spawn(async move {
-                        let result = fetch_publications(100, None).await;
+            loading.set(!has_cached_publications);
+            fetch_error.set(None);
+            let task = spawn(async move {
+                let result = fetch_publications(100, None).await;
 
-                        // Check staleness before state updates
-                        if *fetch_generation.peek() != current_generation {
-                            return;
-                        }
-
-                        match result {
-                            Ok(_) => {
-                                fetch_error.set(None);
-                                publications_version.set(publications_version() + 1);
-                            }
-                            Err(e) => {
-                                crate::utils::log_fetch_error("publications", e.clone());
-                                fetch_error
-                                    .set(Some(format!("Failed to load publications: {}", e)));
-                            }
-                        }
-                        loading.set(false);
-                    });
-                    selected_publication.set(None);
-                    selected_chapter.set(None);
-                    selected_sections.set(String::new());
-                    selected_version.set(String::new());
-                    version_error.set(false);
-                    sections_error.set(false);
-                    book_id_error.set(false);
-                    search_query.set(String::new());
-                    search_results.set(Vec::new());
-                    is_searching.set(false);
-                    if let Some(task) = search_task.take() {
-                        task.cancel();
-                    }
-                    debounce_counter.set(0);
+                // Check staleness before state updates
+                if *fetch_generation.peek() != current_generation {
+                    return;
                 }
-            },
-        ),
-    );
+
+                match result {
+                    Ok(_) => {
+                        fetch_error.set(None);
+                        publications_version.set(publications_version().wrapping_add(1));
+                    }
+                    Err(e) => {
+                        crate::utils::log_fetch_error("publications", e.clone());
+                        if !has_cached_publications_snapshot() {
+                            fetch_error.set(Some(format!("Failed to load publications: {}", e)));
+                        }
+                    }
+                }
+                loading.set(false);
+            });
+            fetch_task.set(Some(task));
+            selected_publication.set(None);
+            selected_chapter.set(None);
+            selected_sections.set(String::new());
+            selected_version.set(String::new());
+            book_id_error.set(false);
+            search_query.set(String::new());
+            search_results.set(Vec::new());
+            is_searching.set(false);
+            if let Some(task) = search_task.take() {
+                task.cancel();
+            }
+            debounce_counter.set(0);
+        } else if let Some(task) = fetch_task.take() {
+            task.cancel();
+            if let Some(search_task) = search_task.take() {
+                search_task.cancel();
+            }
+        }
+    }));
     let mut handle_search = move |query: String| {
         search_query.set(query.clone());
         if query.is_empty() {
-            debounce_counter.set(debounce_counter() + 1);
+            debounce_counter.set(debounce_counter().wrapping_add(1));
+            if let Some(search_task) = search_task.take() {
+                search_task.cancel();
+            }
             search_results.set(Vec::new());
             is_searching.set(false);
             let should_clear = fetch_error
@@ -187,14 +195,14 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
             }
             return;
         }
-        debounce_counter.set(debounce_counter() + 1);
+        debounce_counter.set(debounce_counter().wrapping_add(1));
         let current_counter = debounce_counter();
         is_searching.set(true);
         if let Some(task) = search_task.take() {
             task.cancel();
         }
         let new_task = spawn(async move {
-            TimeoutFuture::new(300).await;
+            crate::platform::timer::sleep_ms(300).await;
             if debounce_counter() != current_counter {
                 return;
             }
@@ -220,21 +228,12 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     };
     let publications_to_display = use_memo(move || {
         let _ = *publications_version.read();
-        if *active_tab.read() == BookPickerTab::Search && !search_query.read().is_empty()
-        {
+        if *active_tab.read() == BookPickerTab::Search && !search_query.read().is_empty() {
             search_results.read().clone()
         } else {
             get_all_cached_publications()
         }
     });
-    use_effect(
-        use_reactive!(
-            | (selected_version, selected_sections) | { let version = selected_version
-            .read(); let sections = selected_sections.read(); version_error.set(! version
-            .is_empty() && ! is_valid_book_version(& version)); sections_error.set(!
-            sections.is_empty() && ! is_valid_book_sections(& sections)); }
-        ),
-    );
     // Validate selected_publication d_tag in an effect (side effects don't belong in memos)
     // Track selected_chapter to re-validate when "Entire book" is selected
     use_effect(move || {
@@ -243,53 +242,66 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
             book_id_error.set(!is_valid_book_id(&pub_.d_tag));
         }
     });
+    let version_has_error = use_memo(move || {
+        let version = selected_version.read();
+        !version.is_empty() && !is_valid_book_version(&version)
+    });
+    let sections_has_error = use_memo(move || {
+        let sections = selected_sections.read();
+        !sections.is_empty() && !is_valid_book_sections(&sections)
+    });
     let book_reference = use_memo(move || {
-        selected_publication
-            .read()
-            .as_ref()
-            .and_then(|pub_| {
-                if !is_valid_book_id(&pub_.d_tag) {
-                    log::warn!("Invalid publication d_tag: {}", pub_.d_tag);
-                    return None;
+        selected_publication.read().as_ref().and_then(|pub_| {
+            if !is_valid_book_id(&pub_.d_tag) {
+                log::warn!("Invalid publication d_tag: {}", pub_.d_tag);
+                return None;
+            }
+            let mut reference = BookReference::new(&pub_.d_tag);
+            let version_input = selected_version.read();
+            if !version_input.is_empty() && is_valid_book_version(&version_input) {
+                reference = reference.with_version(&version_input);
+            }
+            if let Some(ref chapter) = *selected_chapter.read() {
+                if is_valid_book_id(chapter) {
+                    reference = reference.with_chapter(chapter);
+                } else {
+                    log::warn!("Invalid chapter id: {}", chapter);
                 }
-                let mut reference = BookReference::new(&pub_.d_tag);
-                let version_input = selected_version.read();
-                if !version_input.is_empty() && is_valid_book_version(&version_input) {
-                    reference = reference.with_version(&version_input);
-                }
-                if let Some(ref chapter) = *selected_chapter.read() {
-                    if is_valid_book_id(chapter) {
-                        reference = reference.with_chapter(chapter);
-                    } else {
-                        log::warn!("Invalid chapter id: {}", chapter);
+            }
+            let sections_str = selected_sections.read();
+            if !sections_str.is_empty() && is_valid_book_sections(&sections_str) {
+                for section in sections_str.split(',') {
+                    if !section.is_empty() {
+                        reference = reference.with_section(section);
                     }
                 }
-                let sections_str = selected_sections.read();
-                if !sections_str.is_empty() && is_valid_book_sections(&sections_str) {
-                    for section in sections_str.split(',') {
-                        if !section.is_empty() {
-                            reference = reference.with_section(section);
-                        }
-                    }
-                }
-                Some(reference)
-            })
+            }
+            Some(reference)
+        })
     });
     let has_validation_error = use_memo(move || {
-        *version_error.read() || *sections_error.read() || *book_id_error.read()
+        *version_has_error.read() || *sections_has_error.read() || *book_id_error.read()
     });
     let markup_preview = use_memo(move || {
-        book_reference.read().as_ref().map(|r| r.raw.clone()).unwrap_or_default()
+        book_reference
+            .read()
+            .as_ref()
+            .map(|r| r.raw.clone())
+            .unwrap_or_default()
     });
     let close_modal = move |_| {
         if *is_searching.read() {
-            let confirmed = web_sys::window()
-                .and_then(|w| {
-                    w.confirm_with_message("A search is in progress. Close anyway?").ok()
-                })
-                .unwrap_or(false);
-            if !confirmed {
-                return;
+            #[cfg(feature = "web")]
+            {
+                let confirmed = web_sys::window()
+                    .and_then(|w| {
+                        w.confirm_with_message("A search is in progress. Close anyway?")
+                            .ok()
+                    })
+                    .unwrap_or(false);
+                if !confirmed {
+                    return;
+                }
             }
         }
         props.show.set(false);
@@ -332,7 +344,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                 "aria-labelledby": "book-picker-title",
                 tabindex: "-1",
                 onmounted: move |_evt| {
-                    #[cfg(target_arch = "wasm32")]
+                    #[cfg(feature = "web")]
                     {
                         if let Some(html_element) = _evt.data().downcast::<web_sys::HtmlElement>() {
                             let _ = html_element.focus();
@@ -343,14 +355,17 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                 onkeydown: move |evt: KeyboardEvent| {
                     if evt.key() == Key::Escape {
                         if *is_searching.read() {
-                            let confirmed = web_sys::window()
-                                .and_then(|w| {
-                                    w.confirm_with_message("A search is in progress. Close anyway?")
-                                        .ok()
-                                })
-                                .unwrap_or(false);
-                            if !confirmed {
-                                return;
+                            #[cfg(feature = "web")]
+                            {
+                                let confirmed = web_sys::window()
+                                    .and_then(|w| {
+                                        w.confirm_with_message("A search is in progress. Close anyway?")
+                                            .ok()
+                                    })
+                                    .unwrap_or(false);
+                                if !confirmed {
+                                    return;
+                                }
                             }
                         }
                         props.show.set(false);
@@ -380,7 +395,10 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                             class: if *active_tab.read() == BookPickerTab::Browse { "px-3 py-1.5 text-sm font-medium rounded-lg bg-primary text-primary-foreground" } else { "px-3 py-1.5 text-sm font-medium rounded-lg text-muted-foreground hover:bg-accent transition-colors" },
                             onclick: move |_| {
                                 active_tab.set(BookPickerTab::Browse);
-                                debounce_counter.set(debounce_counter() + 1);
+                                debounce_counter.set(debounce_counter().wrapping_add(1));
+                                if let Some(search_task) = search_task.take() {
+                                    search_task.cancel();
+                                }
                                 search_query.set(String::new());
                                 search_results.set(Vec::new());
                                 is_searching.set(false);
@@ -535,12 +553,12 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                     }
                                     input {
                                         r#type: "text",
-                                        class: if *sections_error.read() { "w-full px-3 py-2 bg-background border-2 border-red-500 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-red-500/50" } else { "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50" },
+                                        class: if *sections_has_error.read() { "w-full px-3 py-2 bg-background border-2 border-red-500 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-red-500/50" } else { "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50" },
                                         placeholder: "e.g., 4-9 or 1,3,5",
                                         value: "{selected_sections}",
                                         oninput: move |e| selected_sections.set(e.value()),
                                     }
-                                    if *sections_error.read() {
+                                    if *sections_has_error.read() {
                                         p { class: "text-xs text-red-600 dark:text-red-400 mt-1",
                                             "Only digits, commas, and hyphens allowed (no spaces)"
                                         }
@@ -556,12 +574,12 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                     }
                                     input {
                                         r#type: "text",
-                                        class: if *version_error.read() { "w-full px-3 py-2 bg-background border-2 border-red-500 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-red-500/50" } else { "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50" },
+                                        class: if *version_has_error.read() { "w-full px-3 py-2 bg-background border-2 border-red-500 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-red-500/50" } else { "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50" },
                                         placeholder: "e.g., kjv, 1st-edition",
                                         value: "{selected_version}",
                                         oninput: move |e| selected_version.set(e.value()),
                                     }
-                                    if *version_error.read() {
+                                    if *version_has_error.read() {
                                         p { class: "text-xs text-red-600 dark:text-red-400 mt-1",
                                             "Only lowercase letters, numbers, and hyphens allowed"
                                         }

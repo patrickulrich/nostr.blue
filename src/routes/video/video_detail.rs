@@ -1,20 +1,21 @@
 use crate::components::{
-    icons::MessageCircleIcon, ClientInitializing, CommentComposer, ShareModal,
-    ThreadedComment,
+    icons::MessageCircleIcon, ClientInitializing, CommentComposer, ShareModal, ThreadedComment,
 };
 use crate::error::NostrBlueError;
 use crate::stores::signer::SIGNER_INFO;
 use crate::stores::{auth_store, nostr_client};
+use crate::utils::build_thread_tree;
 use crate::utils::format::{format_relative_time_or, truncate_pubkey};
 use crate::utils::format_sats_compact;
-use crate::utils::build_thread_tree;
 use crate::utils::video_kinds::{all_video_kinds, is_vertical_video, vertical_kinds};
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
 use nostr_sdk::prelude::*;
 use nostr_sdk::{Event, EventId, PublicKey};
 use std::time::Duration;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
+#[cfg(feature = "web")]
 use web_sys::HtmlVideoElement;
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum FeedType {
@@ -108,9 +109,7 @@ fn LandscapePlayer(event: Event) -> Element {
     use_effect(move || {
         spawn(async move {
             loading_comments.set(true);
-            let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(
-                nostr_sdk::Alphabet::E,
-            );
+            let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
             let filter_upper = Filter::new()
                 .kind(Kind::Comment)
                 .custom_tag(upper_e_tag, event_id.to_hex())
@@ -120,19 +119,13 @@ fn LandscapePlayer(event: Event) -> Element {
                 .event(event_id)
                 .limit(500);
             let mut all_comments = Vec::new();
-            if let Ok(upper_comments) = nostr_client::fetch_events_aggregated(
-                    filter_upper,
-                    Duration::from_secs(10),
-                )
-                .await
+            if let Ok(upper_comments) =
+                nostr_client::fetch_events_aggregated(filter_upper, Duration::from_secs(10)).await
             {
                 all_comments.extend(upper_comments.into_iter());
             }
-            if let Ok(lower_comments) = nostr_client::fetch_events_aggregated(
-                    filter_lower,
-                    Duration::from_secs(10),
-                )
-                .await
+            if let Ok(lower_comments) =
+                nostr_client::fetch_events_aggregated(filter_lower, Duration::from_secs(10)).await
             {
                 all_comments.extend(lower_comments.into_iter());
             }
@@ -449,9 +442,7 @@ fn ShortsPlayer(
                         if unique_events.is_empty() {
                             has_more.set(false);
                             loading.set(false);
-                            log::info!(
-                                "No new unique shorts found, stopping pagination"
-                            );
+                            log::info!("No new unique shorts found, stopping pagination");
                         } else {
                             if let Some(last_event) = unique_events.last() {
                                 oldest_timestamp.set(Some(last_event.created_at.as_secs()));
@@ -551,25 +542,23 @@ fn VerticalVideoPlayer(
     let video_id = format!("video-{}", &event.id.to_hex()[..8]);
     let video_id_for_effect = video_id.clone();
     let video_meta = parse_video_meta(&event);
-    use_effect(
-        use_reactive(
-            &is_muted,
-            move |muted| {
-                let id = video_id_for_effect.clone();
-                spawn(async move {
-                    if let Some(window) = web_sys::window() {
-                        if let Some(document) = window.document() {
-                            if let Some(element) = document.get_element_by_id(&id) {
-                                if let Ok(video) = element.dyn_into::<HtmlVideoElement>() {
-                                    video.set_muted(muted);
-                                }
-                            }
+    use_effect(use_reactive(&is_muted, move |muted| {
+        let id = video_id_for_effect.clone();
+        spawn(async move {
+            #[cfg(feature = "web")]
+            if let Some(window) = web_sys::window() {
+                if let Some(document) = window.document() {
+                    if let Some(element) = document.get_element_by_id(&id) {
+                        if let Ok(video) = element.dyn_into::<HtmlVideoElement>() {
+                            video.set_muted(muted);
                         }
                     }
-                });
-            },
-        ),
-    );
+                }
+            }
+            #[cfg(not(feature = "web"))]
+            let _ = (&id, muted);
+        });
+    }));
     rsx! {
         div { class: "relative w-full h-full flex items-center justify-center bg-black",
             if let Some(url) = video_meta.url.clone() {
@@ -624,199 +613,160 @@ fn VideoInfo(
     let mut comments = use_signal(Vec::<Event>::new);
     let mut loading_comments = use_signal(|| false);
     let mut show_share_modal = use_signal(|| false);
-    use_effect(
-        use_reactive(
-            &event_id_counts,
-            move |event_id_for_counts| {
-                spawn(async move {
-                    let client = match nostr_client::get_client() {
-                        Some(c) => c,
-                        None => return,
-                    };
-                    let event_id_parsed = match nostr_sdk::EventId::from_hex(
-                        &event_id_for_counts,
-                    ) {
-                        Ok(id) => id,
-                        Err(_) => return,
-                    };
-                    let combined_filter = Filter::new()
-                        .kinds(
-                            vec![
-                                Kind::TextNote,
-                                Kind::Comment,
-                                Kind::Reaction,
-                                Kind::ZapReceipt,
-                            ],
-                        )
-                        .event(event_id_parsed)
-                        .limit(2000);
-                    if let Ok(events) = client
-                        .fetch_events(combined_filter, Duration::from_secs(5))
-                        .await
-                    {
-                        let current_user_pubkey = SIGNER_INFO
-                            .read()
-                            .as_ref()
-                            .map(|info| info.public_key.clone());
-                        let mut replies = 0;
-                        let mut likes = 0;
-                        let mut total_sats = 0u64;
-                        let mut user_has_liked = false;
-                        for event in events {
-                            match event.kind {
-                                Kind::TextNote | Kind::Comment => replies += 1,
-                                Kind::Reaction => {
-                                    likes += 1;
-                                    if let Some(ref user_pk) = current_user_pubkey {
-                                        if event.pubkey.to_string() == *user_pk {
-                                            user_has_liked = true;
-                                        }
-                                    }
+    use_effect(use_reactive(&event_id_counts, move |event_id_for_counts| {
+        spawn(async move {
+            let client = match nostr_client::get_client() {
+                Some(c) => c,
+                None => return,
+            };
+            let event_id_parsed = match nostr_sdk::EventId::from_hex(&event_id_for_counts) {
+                Ok(id) => id,
+                Err(_) => return,
+            };
+            let combined_filter = Filter::new()
+                .kinds(vec![
+                    Kind::TextNote,
+                    Kind::Comment,
+                    Kind::Reaction,
+                    Kind::ZapReceipt,
+                ])
+                .event(event_id_parsed)
+                .limit(2000);
+            if let Ok(events) = client
+                .fetch_events(combined_filter, Duration::from_secs(5))
+                .await
+            {
+                let current_user_pubkey = SIGNER_INFO
+                    .read()
+                    .as_ref()
+                    .map(|info| info.public_key.clone());
+                let mut replies = 0;
+                let mut likes = 0;
+                let mut total_sats = 0u64;
+                let mut user_has_liked = false;
+                for event in events {
+                    match event.kind {
+                        Kind::TextNote | Kind::Comment => replies += 1,
+                        Kind::Reaction => {
+                            likes += 1;
+                            if let Some(ref user_pk) = current_user_pubkey {
+                                if event.pubkey.to_string() == *user_pk {
+                                    user_has_liked = true;
                                 }
-                                Kind::ZapReceipt => {
-                                    if let Some(amount) = event
-                                        .tags
-                                        .iter()
-                                        .find_map(|tag| {
-                                            let tag_vec = tag.clone().to_vec();
-                                            if tag_vec.first()?.as_str() == "description" {
-                                                let zap_request_json = tag_vec.get(1)?.as_str();
-                                                if let Ok(zap_request) = serde_json::from_str::<
-                                                    serde_json::Value,
-                                                >(zap_request_json) {
-                                                    if let Some(tags) = zap_request
-                                                        .get("tags")
-                                                        .and_then(|t| t.as_array())
+                            }
+                        }
+                        Kind::ZapReceipt => {
+                            if let Some(amount) = event.tags.iter().find_map(|tag| {
+                                let tag_vec = tag.clone().to_vec();
+                                if tag_vec.first()?.as_str() == "description" {
+                                    let zap_request_json = tag_vec.get(1)?.as_str();
+                                    if let Ok(zap_request) =
+                                        serde_json::from_str::<serde_json::Value>(zap_request_json)
+                                    {
+                                        if let Some(tags) =
+                                            zap_request.get("tags").and_then(|t| t.as_array())
+                                        {
+                                            for tag_array in tags {
+                                                if let Some(tag_vals) = tag_array.as_array() {
+                                                    if tag_vals.first().and_then(|v| v.as_str())
+                                                        == Some("amount")
                                                     {
-                                                        for tag_array in tags {
-                                                            if let Some(tag_vals) = tag_array.as_array() {
-                                                                if tag_vals.first().and_then(|v| v.as_str())
-                                                                    == Some("amount")
-                                                                {
-                                                                    if let Some(amount_str) = tag_vals
-                                                                        .get(1)
-                                                                        .and_then(|v| v.as_str())
-                                                                    {
-                                                                        if let Ok(millisats) = amount_str.parse::<u64>() {
-                                                                            return Some(millisats / 1000);
-                                                                        }
-                                                                    }
-                                                                }
+                                                        if let Some(amount_str) =
+                                                            tag_vals.get(1).and_then(|v| v.as_str())
+                                                        {
+                                                            if let Ok(millisats) =
+                                                                amount_str.parse::<u64>()
+                                                            {
+                                                                return Some(millisats / 1000);
                                                             }
                                                         }
                                                     }
                                                 }
                                             }
-                                            None
-                                        })
-                                    {
-                                        total_sats += amount;
+                                        }
                                     }
                                 }
-                                _ => {}
+                                None
+                            }) {
+                                total_sats += amount;
                             }
                         }
-                        reply_count.set(replies.min(500));
-                        like_count.set(likes.min(500));
-                        zap_amount_sats.set(total_sats);
-                        is_liked.set(user_has_liked);
+                        _ => {}
                     }
-                });
-            },
-        ),
-    );
-    use_effect(
-        use_reactive(
-            &author_pubkey_for_fetch,
-            move |pubkey_str| {
-                spawn(async move {
-                    let pubkey = match PublicKey::from_hex(&pubkey_str)
-                        .or_else(|_| PublicKey::from_bech32(&pubkey_str))
+                }
+                reply_count.set(replies.min(500));
+                like_count.set(likes.min(500));
+                zap_amount_sats.set(total_sats);
+                is_liked.set(user_has_liked);
+            }
+        });
+    }));
+    use_effect(use_reactive(&author_pubkey_for_fetch, move |pubkey_str| {
+        spawn(async move {
+            let pubkey = match PublicKey::from_hex(&pubkey_str)
+                .or_else(|_| PublicKey::from_bech32(&pubkey_str))
+            {
+                Ok(pk) => pk,
+                Err(_) => return,
+            };
+            let filter = Filter::new().author(pubkey).kind(Kind::Metadata).limit(1);
+            if let Ok(events) =
+                nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await
+            {
+                if let Some(event) = events.into_iter().next() {
+                    if let Ok(metadata) =
+                        serde_json::from_str::<nostr_sdk::Metadata>(&event.content)
                     {
-                        Ok(pk) => pk,
-                        Err(_) => return,
-                    };
-                    let filter = Filter::new()
-                        .author(pubkey)
-                        .kind(Kind::Metadata)
-                        .limit(1);
-                    if let Ok(events) = nostr_client::fetch_events_aggregated(
-                            filter,
-                            Duration::from_secs(5),
-                        )
-                        .await
-                    {
-                        if let Some(event) = events.into_iter().next() {
-                            if let Ok(metadata) = serde_json::from_str::<
-                                nostr_sdk::Metadata,
-                            >(&event.content) {
-                                author_metadata.set(Some(metadata));
-                            }
-                        }
+                        author_metadata.set(Some(metadata));
                     }
-                });
-            },
-        ),
-    );
-    use_effect(
-        use_reactive(
-            &event_id_for_comments,
-            move |event_id_str| {
-                let event_id_clone = event_id_str.to_string();
-                spawn(async move {
-                    loading_comments.set(true);
-                    let event_id_parsed = match nostr_sdk::EventId::from_hex(
-                        &event_id_clone,
-                    ) {
-                        Ok(id) => id,
-                        Err(_) => {
-                            loading_comments.set(false);
-                            return;
-                        }
-                    };
-                    let event_id_hex = event_id_parsed.to_hex();
-                    let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(
-                        nostr_sdk::Alphabet::E,
-                    );
-                    let filter_upper = Filter::new()
-                        .kind(Kind::Comment)
-                        .custom_tag(upper_e_tag, event_id_hex.clone())
-                        .limit(500);
-                    let filter_lower = Filter::new()
-                        .kinds(vec![Kind::TextNote, Kind::Comment])
-                        .event(event_id_parsed)
-                        .limit(500);
-                    let mut all_comments = Vec::new();
-                    if let Ok(upper_comments) = nostr_client::fetch_events_aggregated(
-                            filter_upper,
-                            Duration::from_secs(10),
-                        )
-                        .await
-                    {
-                        all_comments.extend(upper_comments.into_iter());
-                    }
-                    if let Ok(lower_comments) = nostr_client::fetch_events_aggregated(
-                            filter_lower,
-                            Duration::from_secs(10),
-                        )
-                        .await
-                    {
-                        all_comments.extend(lower_comments.into_iter());
-                    }
-                    let mut seen_ids = std::collections::HashSet::new();
-                    let unique_comments: Vec<Event> = all_comments
-                        .into_iter()
-                        .filter(|event| seen_ids.insert(event.id))
-                        .collect();
-                    let mut sorted_comments = unique_comments;
-                    sorted_comments.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-                    log::info!("VideoInfo loaded {} comments", sorted_comments.len());
-                    comments.set(sorted_comments);
+                }
+            }
+        });
+    }));
+    use_effect(use_reactive(&event_id_for_comments, move |event_id_str| {
+        let event_id_clone = event_id_str.to_string();
+        spawn(async move {
+            loading_comments.set(true);
+            let event_id_parsed = match nostr_sdk::EventId::from_hex(&event_id_clone) {
+                Ok(id) => id,
+                Err(_) => {
                     loading_comments.set(false);
-                });
-            },
-        ),
-    );
+                    return;
+                }
+            };
+            let event_id_hex = event_id_parsed.to_hex();
+            let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
+            let filter_upper = Filter::new()
+                .kind(Kind::Comment)
+                .custom_tag(upper_e_tag, event_id_hex.clone())
+                .limit(500);
+            let filter_lower = Filter::new()
+                .kinds(vec![Kind::TextNote, Kind::Comment])
+                .event(event_id_parsed)
+                .limit(500);
+            let mut all_comments = Vec::new();
+            if let Ok(upper_comments) =
+                nostr_client::fetch_events_aggregated(filter_upper, Duration::from_secs(10)).await
+            {
+                all_comments.extend(upper_comments.into_iter());
+            }
+            if let Ok(lower_comments) =
+                nostr_client::fetch_events_aggregated(filter_lower, Duration::from_secs(10)).await
+            {
+                all_comments.extend(lower_comments.into_iter());
+            }
+            let mut seen_ids = std::collections::HashSet::new();
+            let unique_comments: Vec<Event> = all_comments
+                .into_iter()
+                .filter(|event| seen_ids.insert(event.id))
+                .collect();
+            let mut sorted_comments = unique_comments;
+            sorted_comments.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+            log::info!("VideoInfo loaded {} comments", sorted_comments.len());
+            comments.set(sorted_comments);
+            loading_comments.set(false);
+        });
+    }));
     let display_name = author_metadata
         .read()
         .as_ref()
@@ -825,7 +775,10 @@ fn VideoInfo(
             let pk = event.pubkey.to_string();
             truncate_pubkey(&pk)
         });
-    let profile_image = author_metadata.read().as_ref().and_then(|m| m.picture.clone());
+    let profile_image = author_metadata
+        .read()
+        .as_ref()
+        .and_then(|m| m.picture.clone());
     rsx! {
         div { class: "absolute bottom-0 left-0 right-0 p-6 pb-20 bg-gradient-to-t from-black/80 to-transparent",
             div { class: "flex items-end justify-between",
@@ -1078,11 +1031,7 @@ fn VideoInfo(
     }
 }
 #[component]
-fn VideoInteractions(
-    event: Event,
-    is_muted: bool,
-    on_mute_toggle: EventHandler<()>,
-) -> Element {
+fn VideoInteractions(event: Event, is_muted: bool, on_mute_toggle: EventHandler<()>) -> Element {
     let event_id = event.id.to_string();
     let event_id_counts = event_id.clone();
     let mut reply_count = use_signal(|| 0usize);
@@ -1090,107 +1039,94 @@ fn VideoInteractions(
     let mut zap_amount_sats = use_signal(|| 0u64);
     let mut is_liked = use_signal(|| false);
     let mut is_liking = use_signal(|| false);
-    use_effect(
-        use_reactive(
-            &event_id_counts,
-            move |event_id_for_counts| {
-                spawn(async move {
-                    let client = match nostr_client::get_client() {
-                        Some(c) => c,
-                        None => return,
-                    };
-                    let event_id_parsed = match nostr_sdk::EventId::from_hex(
-                        &event_id_for_counts,
-                    ) {
-                        Ok(id) => id,
-                        Err(_) => return,
-                    };
-                    let combined_filter = Filter::new()
-                        .kinds(
-                            vec![
-                                Kind::TextNote,
-                                Kind::Comment,
-                                Kind::Reaction,
-                                Kind::ZapReceipt,
-                            ],
-                        )
-                        .event(event_id_parsed)
-                        .limit(2000);
-                    if let Ok(events) = client
-                        .fetch_events(combined_filter, Duration::from_secs(5))
-                        .await
-                    {
-                        let current_user_pubkey = SIGNER_INFO
-                            .read()
-                            .as_ref()
-                            .map(|info| info.public_key.clone());
-                        let mut replies = 0;
-                        let mut likes = 0;
-                        let mut total_sats = 0u64;
-                        let mut user_has_liked = false;
-                        for event in events {
-                            match event.kind {
-                                Kind::TextNote | Kind::Comment => replies += 1,
-                                Kind::Reaction => {
-                                    likes += 1;
-                                    if let Some(ref user_pk) = current_user_pubkey {
-                                        if event.pubkey.to_string() == *user_pk {
-                                            user_has_liked = true;
-                                        }
-                                    }
+    use_effect(use_reactive(&event_id_counts, move |event_id_for_counts| {
+        spawn(async move {
+            let client = match nostr_client::get_client() {
+                Some(c) => c,
+                None => return,
+            };
+            let event_id_parsed = match nostr_sdk::EventId::from_hex(&event_id_for_counts) {
+                Ok(id) => id,
+                Err(_) => return,
+            };
+            let combined_filter = Filter::new()
+                .kinds(vec![
+                    Kind::TextNote,
+                    Kind::Comment,
+                    Kind::Reaction,
+                    Kind::ZapReceipt,
+                ])
+                .event(event_id_parsed)
+                .limit(2000);
+            if let Ok(events) = client
+                .fetch_events(combined_filter, Duration::from_secs(5))
+                .await
+            {
+                let current_user_pubkey = SIGNER_INFO
+                    .read()
+                    .as_ref()
+                    .map(|info| info.public_key.clone());
+                let mut replies = 0;
+                let mut likes = 0;
+                let mut total_sats = 0u64;
+                let mut user_has_liked = false;
+                for event in events {
+                    match event.kind {
+                        Kind::TextNote | Kind::Comment => replies += 1,
+                        Kind::Reaction => {
+                            likes += 1;
+                            if let Some(ref user_pk) = current_user_pubkey {
+                                if event.pubkey.to_string() == *user_pk {
+                                    user_has_liked = true;
                                 }
-                                Kind::ZapReceipt => {
-                                    if let Some(amount) = event
-                                        .tags
-                                        .iter()
-                                        .find_map(|tag| {
-                                            let tag_vec = tag.clone().to_vec();
-                                            if tag_vec.first()?.as_str() == "description" {
-                                                let zap_request_json = tag_vec.get(1)?.as_str();
-                                                if let Ok(zap_request) = serde_json::from_str::<
-                                                    serde_json::Value,
-                                                >(zap_request_json) {
-                                                    if let Some(tags) = zap_request
-                                                        .get("tags")
-                                                        .and_then(|t| t.as_array())
+                            }
+                        }
+                        Kind::ZapReceipt => {
+                            if let Some(amount) = event.tags.iter().find_map(|tag| {
+                                let tag_vec = tag.clone().to_vec();
+                                if tag_vec.first()?.as_str() == "description" {
+                                    let zap_request_json = tag_vec.get(1)?.as_str();
+                                    if let Ok(zap_request) =
+                                        serde_json::from_str::<serde_json::Value>(zap_request_json)
+                                    {
+                                        if let Some(tags) =
+                                            zap_request.get("tags").and_then(|t| t.as_array())
+                                        {
+                                            for tag_array in tags {
+                                                if let Some(tag_vals) = tag_array.as_array() {
+                                                    if tag_vals.first().and_then(|v| v.as_str())
+                                                        == Some("amount")
                                                     {
-                                                        for tag_array in tags {
-                                                            if let Some(tag_vals) = tag_array.as_array() {
-                                                                if tag_vals.first().and_then(|v| v.as_str())
-                                                                    == Some("amount")
-                                                                {
-                                                                    if let Some(amount_str) = tag_vals
-                                                                        .get(1)
-                                                                        .and_then(|v| v.as_str())
-                                                                    {
-                                                                        if let Ok(millisats) = amount_str.parse::<u64>() {
-                                                                            return Some(millisats / 1000);
-                                                                        }
-                                                                    }
-                                                                }
+                                                        if let Some(amount_str) =
+                                                            tag_vals.get(1).and_then(|v| v.as_str())
+                                                        {
+                                                            if let Ok(millisats) =
+                                                                amount_str.parse::<u64>()
+                                                            {
+                                                                return Some(millisats / 1000);
                                                             }
                                                         }
                                                     }
                                                 }
                                             }
-                                            None
-                                        })
-                                    {
-                                        total_sats += amount;
+                                        }
                                     }
                                 }
-                                _ => {}
+                                None
+                            }) {
+                                total_sats += amount;
                             }
                         }
-                        reply_count.set(replies.min(500));
-                        like_count.set(likes.min(500));
-                        zap_amount_sats.set(total_sats);
-                        is_liked.set(user_has_liked);
+                        _ => {}
                     }
-                });
-            },
-        ),
-    );
+                }
+                reply_count.set(replies.min(500));
+                like_count.set(likes.min(500));
+                zap_amount_sats.set(total_sats);
+                is_liked.set(user_has_liked);
+            }
+        });
+    }));
     rsx! {
         div { class: "flex gap-3 pt-4 border-t border-border",
             button {
@@ -1281,16 +1217,13 @@ fn AuthorInfo(pubkey: String) -> Element {
                 .author(pubkey_parsed)
                 .kind(Kind::Metadata)
                 .limit(1);
-            if let Ok(events) = nostr_client::fetch_events_aggregated(
-                    filter,
-                    Duration::from_secs(5),
-                )
-                .await
+            if let Ok(events) =
+                nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await
             {
                 if let Some(event) = events.into_iter().next() {
-                    if let Ok(metadata) = serde_json::from_str::<
-                        nostr_sdk::Metadata,
-                    >(&event.content) {
+                    if let Ok(metadata) =
+                        serde_json::from_str::<nostr_sdk::Metadata>(&event.content)
+                    {
                         author_metadata.set(Some(metadata));
                     }
                 }
@@ -1302,7 +1235,10 @@ fn AuthorInfo(pubkey: String) -> Element {
         .as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| truncate_pubkey(&pubkey));
-    let profile_image = author_metadata.read().as_ref().and_then(|m| m.picture.clone());
+    let profile_image = author_metadata
+        .read()
+        .as_ref()
+        .and_then(|m| m.picture.clone());
     rsx! {
         Link {
             to: crate::routes::Route::Profile {
@@ -1402,7 +1338,10 @@ async fn load_video_by_id(video_id: &str) -> std::result::Result<Event, NostrBlu
             if !all_video_kinds().contains(&kind) {
                 return Err(NostrBlueError::Other(format!(
                     "Invalid video kind in naddr: expected one of {:?}, got {}",
-                    all_video_kinds().iter().map(|k| k.as_u16()).collect::<Vec<_>>(),
+                    all_video_kinds()
+                        .iter()
+                        .map(|k| k.as_u16())
+                        .collect::<Vec<_>>(),
                     kind.as_u16()
                 )));
             }
@@ -1413,12 +1352,17 @@ async fn load_video_by_id(video_id: &str) -> std::result::Result<Event, NostrBlu
                 .limit(20);
             let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5))
                 .await
-                .map_err(|e| NostrBlueError::Other(format!("Failed to fetch addressable video: {}", e)))?;
-            return events.into_iter()
+                .map_err(|e| {
+                    NostrBlueError::Other(format!("Failed to fetch addressable video: {}", e))
+                })?;
+            return events
+                .into_iter()
                 .max_by_key(|e| e.created_at)
                 .ok_or_else(|| NostrBlueError::Other("Addressable video not found".into()));
         }
-        return Err(NostrBlueError::Other("Invalid naddr format for video".into()));
+        return Err(NostrBlueError::Other(
+            "Invalid naddr format for video".into(),
+        ));
     }
 
     // Handle regular event ID (hex or nevent)
@@ -1428,7 +1372,10 @@ async fn load_video_by_id(video_id: &str) -> std::result::Result<Event, NostrBlu
     let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5))
         .await
         .map_err(|e| NostrBlueError::Other(format!("Failed to fetch video: {}", e)))?;
-    events.into_iter().next().ok_or_else(|| NostrBlueError::Other("Video not found".into()))
+    events
+        .into_iter()
+        .next()
+        .ok_or_else(|| NostrBlueError::Other("Video not found".into()))
 }
 async fn load_shorts_following(until: Option<u64>) -> std::result::Result<Vec<Event>, String> {
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
@@ -1451,7 +1398,10 @@ async fn load_shorts_following(until: Option<u64>) -> std::result::Result<Vec<Ev
     if authors.is_empty() {
         return load_shorts_global(until).await;
     }
-    let mut filter = Filter::new().kinds(vertical_kinds()).authors(authors).limit(50);
+    let mut filter = Filter::new()
+        .kinds(vertical_kinds())
+        .authors(authors)
+        .limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }

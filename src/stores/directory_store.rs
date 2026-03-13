@@ -43,9 +43,15 @@ pub struct DriveEvent {
 #[derive(Clone, Debug, PartialEq)]
 pub enum DirectoryEntry {
     /// Reference to another event (file content)
-    File { event_id: String, relay_hint: Option<String> },
+    File {
+        event_id: String,
+        relay_hint: Option<String>,
+    },
     /// Reference to a subdirectory (kind 30045)
-    Subdirectory { address: String, relay_hint: Option<String> },
+    Subdirectory {
+        address: String,
+        relay_hint: Option<String>,
+    },
 }
 /// Directory event
 #[derive(Clone, Debug, PartialEq)]
@@ -125,22 +131,18 @@ impl DriveTree {
             let children: Vec<DirectoryNode> = dir
                 .entries
                 .iter()
-                .filter_map(|entry| {
-                    match entry {
-                        DirectoryEntry::Subdirectory { address, .. } => {
-                            self.build_node(address, depth + 1)
-                        }
-                        DirectoryEntry::File { event_id, .. } => {
-                            Some(DirectoryNode {
-                                address: event_id.clone(),
-                                name: event_id[..8].to_string(),
-                                is_directory: false,
-                                children: vec![],
-                                depth: depth + 1,
-                                expanded: false,
-                            })
-                        }
+                .filter_map(|entry| match entry {
+                    DirectoryEntry::Subdirectory { address, .. } => {
+                        self.build_node(address, depth + 1)
                     }
+                    DirectoryEntry::File { event_id, .. } => Some(DirectoryNode {
+                        address: event_id.clone(),
+                        name: event_id[..8].to_string(),
+                        is_directory: false,
+                        children: vec![],
+                        depth: depth + 1,
+                        expanded: false,
+                    }),
                 })
                 .collect();
             Some(DirectoryNode {
@@ -157,11 +159,11 @@ impl DriveTree {
     }
 }
 /// Drive cache (keyed by a_tag)
-pub static DRIVES_CACHE: GlobalSignal<LruCache<String, DriveEvent>> = GlobalSignal::new(||
-LruCache::new(NonZeroUsize::new(DRIVE_CACHE_SIZE).unwrap()));
+pub static DRIVES_CACHE: GlobalSignal<LruCache<String, DriveEvent>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(DRIVE_CACHE_SIZE).unwrap()));
 /// Directory cache (keyed by a_tag)
-pub static DIRECTORIES_CACHE: GlobalSignal<LruCache<String, DirectoryEvent>> = GlobalSignal::new(||
-LruCache::new(NonZeroUsize::new(DIRECTORY_CACHE_SIZE).unwrap()));
+pub static DIRECTORIES_CACHE: GlobalSignal<LruCache<String, DirectoryEvent>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(DIRECTORY_CACHE_SIZE).unwrap()));
 /// Active drive tree
 pub static ACTIVE_DRIVE: GlobalSignal<Option<DriveTree>> = GlobalSignal::new(|| None);
 /// Current path (for breadcrumb navigation)
@@ -178,7 +180,10 @@ pub fn get_cached_drive(a_tag: &str) -> Option<DriveEvent> {
 /// Get a drive by naddr
 pub fn get_cached_drive_by_naddr(naddr: &str) -> Option<DriveEvent> {
     let cache = DRIVES_CACHE.read();
-    cache.iter().find(|(_, d)| d.naddr == naddr).map(|(_, d)| d.clone())
+    cache
+        .iter()
+        .find(|(_, d)| d.naddr == naddr)
+        .map(|(_, d)| d.clone())
 }
 /// Cache a drive
 pub fn cache_drive(drive: DriveEvent) {
@@ -197,7 +202,9 @@ pub fn get_cached_directory(a_tag: &str) -> Option<DirectoryEvent> {
 }
 /// Cache a directory
 pub fn cache_directory(directory: DirectoryEvent) {
-    DIRECTORIES_CACHE.write().put(directory.a_tag.clone(), directory);
+    DIRECTORIES_CACHE
+        .write()
+        .put(directory.a_tag.clone(), directory);
 }
 /// Cache multiple directories
 pub fn cache_directories(directories: &[DirectoryEvent]) {
@@ -279,21 +286,19 @@ pub fn parse_directory_event(event: &NostrEvent) -> Option<DirectoryEvent> {
             Some("a") => {
                 if let Some(addr) = slice.get(1) {
                     let relay_hint = slice.get(2).map(|s| s.to_string());
-                    entries
-                        .push(DirectoryEntry::Subdirectory {
-                            address: addr.to_string(),
-                            relay_hint,
-                        });
+                    entries.push(DirectoryEntry::Subdirectory {
+                        address: addr.to_string(),
+                        relay_hint,
+                    });
                 }
             }
             Some("e") => {
                 if let Some(event_id) = slice.get(1) {
                     let relay_hint = slice.get(2).map(|s| s.to_string());
-                    entries
-                        .push(DirectoryEntry::File {
-                            event_id: event_id.to_string(),
-                            relay_hint,
-                        });
+                    entries.push(DirectoryEntry::File {
+                        event_id: event_id.to_string(),
+                        relay_hint,
+                    });
                 }
             }
             _ => {}
@@ -399,19 +404,30 @@ pub fn drives_filter(limit: usize) -> Filter {
 }
 /// Build filter for drives by author
 pub fn drives_by_author_filter(pubkey: PublicKey, limit: usize) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_DRIVE)).author(pubkey).limit(limit)
+    Filter::new()
+        .kind(Kind::Custom(KIND_DRIVE))
+        .author(pubkey)
+        .limit(limit)
 }
 /// Build filter for a specific drive
 pub fn drive_by_coord_filter(pubkey: PublicKey, identifier: &str) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_DRIVE)).author(pubkey).identifier(identifier)
+    Filter::new()
+        .kind(Kind::Custom(KIND_DRIVE))
+        .author(pubkey)
+        .identifier(identifier)
 }
 /// Build filter for directories
 pub fn directories_filter(limit: usize) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_DIRECTORY)).limit(limit)
+    Filter::new()
+        .kind(Kind::Custom(KIND_DIRECTORY))
+        .limit(limit)
 }
 /// Build filter for directories by author
 pub fn directories_by_author_filter(pubkey: PublicKey, limit: usize) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_DIRECTORY)).author(pubkey).limit(limit)
+    Filter::new()
+        .kind(Kind::Custom(KIND_DIRECTORY))
+        .author(pubkey)
+        .limit(limit)
 }
 /// Build filter for a specific directory
 pub fn directory_by_coord_filter(pubkey: PublicKey, identifier: &str) -> Filter {
@@ -432,27 +448,18 @@ pub fn symlinks_filter(limit: usize) -> Filter {
     Filter::new().kind(Kind::Custom(KIND_SYMLINK)).limit(limit)
 }
 /// Fetch drives with pagination
-pub async fn fetch_drives(
-    limit: usize,
-    until: Option<u64>,
-) -> StdResult<Vec<DriveEvent>, String> {
+pub async fn fetch_drives(limit: usize, until: Option<u64>) -> StdResult<Vec<DriveEvent>, String> {
     *LOADING_DRIVES.write() = true;
     let mut filter = drives_filter(limit);
     if let Some(ts) = until {
         filter = filter.until(Timestamp::from(ts));
     }
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(15),
-        )
-        .await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
     *LOADING_DRIVES.write() = false;
     match result {
         Ok(events) => {
-            let drives: Vec<DriveEvent> = events
-                .iter()
-                .filter_map(parse_drive_event)
-                .collect();
+            let drives: Vec<DriveEvent> = events.iter().filter_map(parse_drive_event).collect();
             cache_drives(&drives);
             *DIRECTORY_STORE_INITIALIZED.write() = true;
             log::info!("Fetched {} drives", drives.len());
@@ -469,18 +476,14 @@ pub async fn fetch_drive_by_naddr(naddr: &str) -> StdResult<Option<DriveEvent>, 
     if let Some(drive) = get_cached_drive_by_naddr(naddr) {
         return Ok(Some(drive));
     }
-    let coord = Coordinate::from_bech32(naddr)
-        .map_err(|e| format!("Invalid naddr: {}", e))?;
+    let coord = Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
     let identifier = coord.identifier;
     if identifier.is_empty() {
         return Err("No identifier in naddr".to_string());
     }
     let filter = drive_by_coord_filter(coord.public_key, &identifier);
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await;
     match result {
         Ok(events) => {
             if let Some(event) = events.first() {
@@ -505,19 +508,17 @@ pub async fn fetch_directory_by_address(
     if parts.len() < 3 {
         return Err("Invalid directory address format".to_string());
     }
-    let kind = parts[0].parse::<u16>().map_err(|_| "Invalid kind in address")?;
+    let kind = parts[0]
+        .parse::<u16>()
+        .map_err(|_| "Invalid kind in address")?;
     if kind != KIND_DIRECTORY {
         return Err("Address is not a directory".to_string());
     }
-    let pubkey = PublicKey::from_hex(parts[1])
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::from_hex(parts[1]).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let d_tag = parts[2..].join(":");
     let filter = directory_by_coord_filter(pubkey, &d_tag);
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await;
     match result {
         Ok(events) => {
             if let Some(event) = events.first() {
@@ -536,20 +537,13 @@ pub async fn fetch_drives_by_author(
     pubkey_hex: &str,
     limit: usize,
 ) -> StdResult<Vec<DriveEvent>, String> {
-    let pubkey = PublicKey::from_hex(pubkey_hex)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::from_hex(pubkey_hex).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = drives_by_author_filter(pubkey, limit);
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await;
     match result {
         Ok(events) => {
-            let drives: Vec<DriveEvent> = events
-                .iter()
-                .filter_map(parse_drive_event)
-                .collect();
+            let drives: Vec<DriveEvent> = events.iter().filter_map(parse_drive_event).collect();
             cache_drives(&drives);
             Ok(drives)
         }
@@ -558,7 +552,9 @@ pub async fn fetch_drives_by_author(
 }
 /// Build and fetch complete drive tree
 pub async fn fetch_drive_tree(naddr: &str) -> StdResult<DriveTree, String> {
-    let drive = fetch_drive_by_naddr(naddr).await?.ok_or("Drive not found")?;
+    let drive = fetch_drive_by_naddr(naddr)
+        .await?
+        .ok_or("Drive not found")?;
     let mut tree = DriveTree::new(drive.clone());
     for dir_addr in &drive.root_directories {
         if let Ok(Some(dir)) = fetch_directory_by_address(dir_addr).await {
@@ -570,10 +566,7 @@ pub async fn fetch_drive_tree(naddr: &str) -> StdResult<DriveTree, String> {
     Ok(tree)
 }
 /// Recursively fetch subdirectories
-async fn fetch_subdirectories_recursive(
-    tree: &mut DriveTree,
-    directory: &DirectoryEvent,
-) {
+async fn fetch_subdirectories_recursive(tree: &mut DriveTree, directory: &DirectoryEvent) {
     for entry in &directory.entries {
         if let DirectoryEntry::Subdirectory { address, .. } = entry {
             if !tree.directories.contains_key(address) {
@@ -591,20 +584,23 @@ pub async fn publish_drive(
     description: Option<&str>,
     root_directories: &[String],
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
     let d_tag = normalize_wiki_dtag(name);
     let mut tags: Vec<Tag> = vec![Tag::identifier(&d_tag)];
     if let Some(desc) = description {
-        tags.push(
-            Tag::custom(TagKind::Custom("description".into()), vec![desc.to_string()]),
-        );
+        tags.push(Tag::custom(
+            TagKind::Custom("description".into()),
+            vec![desc.to_string()],
+        ));
     }
     for dir_addr in root_directories {
-        tags.push(Tag::custom(TagKind::Custom("a".into()), vec![dir_addr.clone()]));
+        tags.push(Tag::custom(
+            TagKind::Custom("a".into()),
+            vec![dir_addr.clone()],
+        ));
     }
     for mime_tag in generate_mime_tags(KIND_DRIVE) {
         tags.push(mime_tag);
@@ -622,8 +618,7 @@ pub async fn publish_directory(
     name: &str,
     entries: &[DirectoryEntry],
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -634,14 +629,20 @@ pub async fn publish_directory(
     ];
     for entry in entries {
         match entry {
-            DirectoryEntry::File { event_id, relay_hint } => {
+            DirectoryEntry::File {
+                event_id,
+                relay_hint,
+            } => {
                 let mut values = vec![event_id.clone()];
                 if let Some(relay) = relay_hint {
                     values.push(relay.clone());
                 }
                 tags.push(Tag::custom(TagKind::Custom("e".into()), values));
             }
-            DirectoryEntry::Subdirectory { address, relay_hint } => {
+            DirectoryEntry::Subdirectory {
+                address,
+                relay_hint,
+            } => {
                 let mut values = vec![address.clone()];
                 if let Some(relay) = relay_hint {
                     values.push(relay.clone());
@@ -669,23 +670,34 @@ pub async fn publish_symlink(
     context_directory: Option<&str>,
     drive: Option<&str>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
     let d_tag = normalize_wiki_dtag(name);
     let mut tags: Vec<Tag> = vec![Tag::identifier(&d_tag)];
     if target_is_address {
-        tags.push(Tag::custom(TagKind::Custom("a".into()), vec![target.to_string()]));
+        tags.push(Tag::custom(
+            TagKind::Custom("a".into()),
+            vec![target.to_string()],
+        ));
     } else {
-        tags.push(Tag::custom(TagKind::Custom("e".into()), vec![target.to_string()]));
+        tags.push(Tag::custom(
+            TagKind::Custom("e".into()),
+            vec![target.to_string()],
+        ));
     }
     if let Some(ctx) = context_directory {
-        tags.push(Tag::custom(TagKind::Custom("A".into()), vec![ctx.to_string()]));
+        tags.push(Tag::custom(
+            TagKind::Custom("A".into()),
+            vec![ctx.to_string()],
+        ));
     }
     if let Some(drv) = drive {
-        tags.push(Tag::custom(TagKind::Custom("A".into()), vec![drv.to_string()]));
+        tags.push(Tag::custom(
+            TagKind::Custom("A".into()),
+            vec![drv.to_string()],
+        ));
     }
     for mime_tag in generate_mime_tags(KIND_SYMLINK) {
         tags.push(mime_tag);
@@ -741,7 +753,10 @@ mod tests {
             relay_hint: Some("wss://relay.example.com".to_string()),
         };
         match entry {
-            DirectoryEntry::Subdirectory { address, relay_hint } => {
+            DirectoryEntry::Subdirectory {
+                address,
+                relay_hint,
+            } => {
                 assert_eq!(address, "30045:pubkey:subdir");
                 assert_eq!(relay_hint, Some("wss://relay.example.com".to_string()));
             }

@@ -26,23 +26,22 @@ fn parse_query_to_reference(query: &str) -> Option<BookReference> {
             }
         }
     }
-    title
-        .map(|t| {
-            let mut reference = BookReference::new(&t);
-            if let Some(c) = collection {
-                reference = reference.with_collection(&c);
-            }
-            if let Some(ch) = chapter {
-                reference = reference.with_chapter(&ch);
-            }
-            for s in sections {
-                reference = reference.with_section(&s);
-            }
-            if let Some(v) = version {
-                reference = reference.with_version(&v);
-            }
-            reference
-        })
+    title.map(|t| {
+        let mut reference = BookReference::new(&t);
+        if let Some(c) = collection {
+            reference = reference.with_collection(&c);
+        }
+        if let Some(ch) = chapter {
+            reference = reference.with_chapter(&ch);
+        }
+        for s in sections {
+            reference = reference.with_section(&s);
+        }
+        if let Some(v) = version {
+            reference = reference.with_version(&v);
+        }
+        reference
+    })
 }
 /// Publication search route - handles book wikilink URLs
 #[component]
@@ -61,9 +60,7 @@ pub fn PublicationSearch(query: String) -> Element {
             let filter = book_ref.to_filter(None);
             spawn(async move {
                 loading.set(true);
-                match publication_store::search_publications_with_filter(filter, 50)
-                    .await
-                {
+                match publication_store::search_publications_with_filter(filter, 50).await {
                     Ok(pubs) => {
                         results.set(pubs);
                         loading.set(false);

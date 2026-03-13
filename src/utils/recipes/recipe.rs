@@ -143,10 +143,7 @@ pub fn parse_recipe(markdown: &str) -> Result<ParsedRecipe, ValidationError> {
     Ok(recipe)
 }
 /// Parse the Details section content
-fn parse_details(
-    content: &str,
-    details: &mut RecipeDetails,
-) -> Result<(), ValidationError> {
+fn parse_details(content: &str, details: &mut RecipeDetails) -> Result<(), ValidationError> {
     for line in content.lines() {
         let line = line.trim();
         if let Some(rest) = line.strip_prefix("- ") {
@@ -209,15 +206,10 @@ fn parse_directions(content: &str) -> Result<Vec<String>, ValidationError> {
             let step_num: usize = cap.get(1).unwrap().as_str().parse().unwrap_or(0);
             let step_text = cap.get(2).map(|m| m.as_str().trim()).unwrap_or("");
             if step_num != expected_step {
-                return Err(
-                    ValidationError::InvalidDirectionFormat(
-                        format!(
-                            "Expected step {}, found step {}",
-                            expected_step,
-                            step_num,
-                        ),
-                    ),
-                );
+                return Err(ValidationError::InvalidDirectionFormat(format!(
+                    "Expected step {}, found step {}",
+                    expected_step, step_num,
+                )));
             }
             directions.push(step_text.to_string());
             expected_step += 1;
@@ -290,7 +282,10 @@ pub fn extract_metadata(event: &Event) -> RecipeMetadata {
 }
 /// Check if an event is a recipe (has nostrcooking or zapcooking tag)
 pub fn is_recipe_event(event: &Event) -> bool {
-    event.tags.hashtags().any(|tag| RECIPE_TAG_PREFIXES.contains(&tag))
+    event
+        .tags
+        .hashtags()
+        .any(|tag| RECIPE_TAG_PREFIXES.contains(&tag))
 }
 #[cfg(test)]
 mod tests {
@@ -326,7 +321,10 @@ Check out my other recipes!
         let result = parse_recipe(VALID_RECIPE);
         assert!(result.is_ok());
         let recipe = result.unwrap();
-        assert_eq!(recipe.chef_notes, Some("This is a simple test recipe.".to_string()));
+        assert_eq!(
+            recipe.chef_notes,
+            Some("This is a simple test recipe.".to_string())
+        );
         assert_eq!(recipe.details.prep_time, Some("10 minutes".to_string()));
         assert_eq!(recipe.details.cook_time, Some("20 minutes".to_string()));
         assert_eq!(recipe.details.servings, Some("4".to_string()));

@@ -1,56 +1,65 @@
 use crate::components::{NoteCard, NoteCardSkeleton};
 use crate::hooks::use_mute_block_cache;
-use crate::services::trending::{get_trending_notes, TrendingNote};
+use crate::services::search::sidebar_discovery::{self, HotPostItem, HotPostSource};
+use crate::services::trending::TrendingNote;
 use crate::stores::nostr_client;
 use dioxus::prelude::*;
 use nostr::secp256k1::schnorr::Signature;
 use nostr_sdk::{Event as NostrEvent, EventId, Kind, PublicKey, Tag, Timestamp};
+
 #[component]
-pub fn Trending() -> Element {
-    let mut trending_notes = use_signal(Vec::<TrendingNote>::new);
+pub fn Trending(source: Option<String>) -> Element {
+    let source = source
+        .as_deref()
+        .and_then(HotPostSource::from_query)
+        .unwrap_or(HotPostSource::NostrWine);
     let mut events = use_signal(Vec::<NostrEvent>::new);
     let mut loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut refresh_trigger = use_signal(|| 0);
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
+
     use_effect(move || {
         let _ = refresh_trigger.read();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+
         loading.set(true);
         error.set(None);
         spawn(async move {
-            match get_trending_notes(Some(100)).await {
-                Ok(notes) => {
-                    let mut converted_events = Vec::new();
-                    for note in &notes {
-                        if let Ok(event) = convert_trending_to_event(note) {
-                            converted_events.push(event);
-                        }
-                    }
-                    trending_notes.set(notes);
-                    events.set(converted_events);
+            match load_trending_events(source).await {
+                Ok(fetched_events) => {
+                    events.set(fetched_events);
                     loading.set(false);
                 }
                 Err(e) => {
-                    error.set(Some(format!("Nostr.band API currently down: {}", e)));
+                    error.set(Some(e));
                     loading.set(false);
                 }
             }
         });
     });
+
+    let subtitle = match source {
+        HotPostSource::NostrWine => "Top trending posts from nostr.wine",
+        HotPostSource::Ditto => "Top hot posts from Ditto",
+    };
+
     rsx! {
         div { class: "min-h-screen",
-            div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
-                div { class: "px-4 py-3 flex items-center justify-between",
-                    h2 { class: "text-xl font-bold flex items-center gap-2",
-                        span { "📈" }
-                        "Trending"
+            div { class: "sticky top-0 z-20 border-b border-border bg-background/80 backdrop-blur-sm",
+                div { class: "flex items-center justify-between px-4 py-3",
+                    div {
+                        h2 { class: "flex items-center gap-2 text-xl font-bold",
+                            span { "📈" }
+                            "Trending"
+                        }
+                        p { class: "text-sm text-muted-foreground", "{subtitle}" }
                     }
                     button {
-                        class: "p-2 hover:bg-accent rounded-full transition disabled:opacity-50",
+                        class: "rounded-full p-2 transition hover:bg-accent disabled:opacity-50",
                         disabled: *loading.read(),
                         onclick: move |_| {
                             let current = *refresh_trigger.read();
@@ -58,23 +67,22 @@ pub fn Trending() -> Element {
                         },
                         title: "Refresh feed",
                         if *loading.read() && events.read().is_empty() {
-                            span { class: "inline-block w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" }
+                            span { class: "inline-block h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" }
                         } else {
                             "🔄"
                         }
                     }
                 }
-                div { class: "px-4 pb-3",
-                    p { class: "text-sm text-muted-foreground", "Top trending posts from Nostr.Band" }
-                }
             }
+
             if let Some(err) = error.read().as_ref() {
                 div { class: "p-4",
-                    div { class: "p-4 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded-lg",
+                    div { class: "rounded-lg bg-red-100 p-4 text-red-800 dark:bg-red-900 dark:text-red-200",
                         "❌ {err}"
                     }
                 }
             }
+
             if *loading.read() && events.read().is_empty() {
                 div { class: "divide-y divide-border",
                     for _ in 0..5 {
@@ -82,6 +90,7 @@ pub fn Trending() -> Element {
                     }
                 }
             }
+
             if !events.read().is_empty() {
                 div { class: "divide-y divide-border",
                     for event in events.read().iter() {
@@ -95,22 +104,54 @@ pub fn Trending() -> Element {
                     }
                 }
             }
+
             if !*loading.read() && events.read().is_empty() && error.read().is_none() {
-                div { class: "text-center py-12",
-                    div { class: "text-6xl mb-4", "📈" }
-                    h3 { class: "text-xl font-semibold mb-2", "No trending posts" }
+                div { class: "py-12 text-center",
+                    div { class: "mb-4 text-6xl", "📈" }
+                    h3 { class: "mb-2 text-xl font-semibold", "No trending posts" }
                     p { class: "text-muted-foreground", "Check back later for trending content" }
                 }
             }
         }
     }
 }
-/// Convert a TrendingNote to a nostr_sdk::Event
+
+async fn load_trending_events(source: HotPostSource) -> Result<Vec<NostrEvent>, String> {
+    let items = sidebar_discovery::get_hot_posts(source, 100).await?;
+    let filtered = filter_hot_posts(items).await;
+    filtered
+        .into_iter()
+        .map(|item| match item {
+            HotPostItem::NostrWine(note) => convert_trending_to_event(&note),
+            HotPostItem::Ditto(event) => Ok(event),
+        })
+        .collect()
+}
+
+async fn filter_hot_posts(items: Vec<HotPostItem>) -> Vec<HotPostItem> {
+    let mute_data = nostr_client::get_mute_list_data().await.unwrap_or_default();
+    items
+        .into_iter()
+        .filter(|item| match item {
+            HotPostItem::NostrWine(note) => {
+                !mute_data.blocked_users.contains(&note.event.pubkey)
+                    && !mute_data.muted_posts.contains(&note.event.id)
+            }
+            HotPostItem::Ditto(event) => {
+                let event_id = event.id.to_hex();
+                let pubkey = event.pubkey.to_hex();
+                !mute_data.blocked_users.contains(&pubkey)
+                    && !mute_data.muted_posts.contains(&event_id)
+            }
+        })
+        .collect()
+}
+
 fn convert_trending_to_event(note: &TrendingNote) -> Result<NostrEvent, String> {
-    let event_id = EventId::from_hex(&note.event.id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
-    let pubkey = PublicKey::from_hex(&note.event.pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let event_id =
+        EventId::from_hex(&note.event.id).map_err(|e| format!("Invalid event ID: {}", e))?;
+    let pubkey =
+        PublicKey::from_hex(&note.event.pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let created_at = Timestamp::from(note.event.created_at);
     let kind = Kind::from(note.event.kind);
     let tags: Vec<Tag> = note
@@ -124,19 +165,16 @@ fn convert_trending_to_event(note: &TrendingNote) -> Result<NostrEvent, String> 
             Tag::parse(tag_vec.iter().map(|s| s.as_str())).ok()
         })
         .collect();
-    let sig_bytes = hex::decode(&note.event.sig)
-        .map_err(|e| format!("Invalid signature hex: {}", e))?;
-    let sig = Signature::from_slice(&sig_bytes)
-        .map_err(|e| format!("Invalid signature: {}", e))?;
-    Ok(
-        NostrEvent::new(
-            event_id,
-            pubkey,
-            created_at,
-            kind,
-            tags,
-            note.event.content.clone(),
-            sig,
-        ),
-    )
+    let sig_bytes =
+        hex::decode(&note.event.sig).map_err(|e| format!("Invalid signature hex: {}", e))?;
+    let sig = Signature::from_slice(&sig_bytes).map_err(|e| format!("Invalid signature: {}", e))?;
+    Ok(NostrEvent::new(
+        event_id,
+        pubkey,
+        created_at,
+        kind,
+        tags,
+        note.event.content.clone(),
+        sig,
+    ))
 }

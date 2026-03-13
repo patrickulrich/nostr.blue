@@ -18,12 +18,8 @@ pub fn TrendingNotes() -> Element {
             error.set(false);
             match get_trending_notes(Some(15)).await {
                 Ok(notes) => {
-                    let blocked_users = nostr_client::get_blocked_users()
-                        .await
-                        .unwrap_or_default();
-                    let muted_posts = nostr_client::get_muted_posts()
-                        .await
-                        .unwrap_or_default();
+                    let blocked_users = nostr_client::get_blocked_users().await.unwrap_or_default();
+                    let muted_posts = nostr_client::get_muted_posts().await.unwrap_or_default();
                     let filtered_notes: Vec<TrendingNote> = notes
                         .into_iter()
                         .filter(|note| {
@@ -89,7 +85,7 @@ pub fn TrendingNotes() -> Element {
             if !*loading.read() && !*error.read() && !trending_notes.read().is_empty() {
                 div { class: "border-t border-border shrink-0",
                     Link {
-                        to: Route::Trending {},
+                        to: Route::Trending { source: None },
                         class: "block w-full px-4 py-3 text-blue-500 hover:bg-accent/50 transition-colors text-left text-sm",
                         "Show more"
                     }

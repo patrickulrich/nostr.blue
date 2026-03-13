@@ -1,8 +1,8 @@
 //! Wiki Card Component
 //! Display card for wiki pages (NIP-54 Kind 30818)
-use crate::components::publication::asciidoc_content::AsciiDocPreview;
 use crate::components::content_menu::{ContentMenu, ContentMenuType};
 use crate::components::icons::{FileVideoIcon, Link2Icon};
+use crate::components::publication::asciidoc_content::AsciiDocPreview;
 use crate::routes::Route;
 use crate::stores::profiles;
 use crate::stores::wiki_store::{CachedWikiPage, WikiMetadata};
@@ -122,8 +122,7 @@ pub fn WikiCardCompact(page: CachedWikiPage) -> Element {
 #[component]
 pub fn WikiCardSearchResult(
     page: CachedWikiPage,
-    #[props(default = None)]
-    highlight: Option<String>,
+    #[props(default = None)] highlight: Option<String>,
 ) -> Element {
     let nav = use_navigator();
     let identifier = page.article.identifier.clone();
@@ -176,11 +175,7 @@ pub fn WikiCardSkeleton() -> Element {
 }
 /// Wiki page grid
 #[component]
-pub fn WikiGrid(
-    pages: Vec<CachedWikiPage>,
-    #[props(default = false)]
-    loading: bool,
-) -> Element {
+pub fn WikiGrid(pages: Vec<CachedWikiPage>, #[props(default = false)] loading: bool) -> Element {
     rsx! {
         div { class: "grid grid-cols-1 md:grid-cols-2 gap-4",
             for page in pages.iter() {
@@ -197,11 +192,7 @@ pub fn WikiGrid(
 /// Wiki metadata card (for sidebar)
 #[component]
 pub fn WikiMetadataCard(metadata: WikiMetadata) -> Element {
-    let time_ago = format_relative_time_ex(
-        Timestamp::from(metadata.created_at),
-        true,
-        true,
-    );
+    let time_ago = format_relative_time_ex(Timestamp::from(metadata.created_at), true, true);
     let author_profile = profiles::get_profile(&metadata.author_pubkey);
     let author_name = author_profile
         .as_ref()

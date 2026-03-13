@@ -29,9 +29,25 @@ pub struct LiveStreamMeta {
 /// Parse NIP-53 Kind 30311 live streaming event into LiveStreamCard's meta format
 pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
     let live_event = parse_nip53_live_event(event)?;
+    let streaming_log = live_event
+        .streaming
+        .as_ref()
+        .and_then(|url| {
+            url::Url::parse(url.as_ref()).ok().map(|parsed| {
+                format!(
+                    "{}://{}",
+                    parsed.scheme(),
+                    parsed.host_str().unwrap_or("<redacted>")
+                )
+            })
+        })
+        .unwrap_or_else(|| "<redacted>".to_string());
     log::debug!(
-        "Parsed LiveEvent: d_tag={}, title={:?}, streaming={:?}, status={:?}", live_event
-        .id, live_event.title, live_event.streaming, live_event.status
+        "Parsed LiveEvent: d_tag={}, title={:?}, streaming={}, status={:?}",
+        live_event.id,
+        live_event.title,
+        streaming_log,
+        live_event.status
     );
     let host = extract_live_event_host(event, &live_event);
     let host_pubkey = host.as_ref().map(|h| h.public_key.clone());
@@ -126,28 +142,23 @@ pub fn LiveStreamCard(event: NostrEvent) -> Element {
     let author_pubkey_display = author_pubkey.clone();
     let host_verified = stream_meta.host_verified;
     let created_at = event.created_at;
-    let coord = Coordinate::new(Kind::from(30311), event.pubkey)
-        .identifier(&stream_meta.d_tag);
+    let coord = Coordinate::new(Kind::from(30311), event.pubkey).identifier(&stream_meta.d_tag);
     let naddr = coord
         .to_bech32()
         .unwrap_or_else(|_| format!("30311:{}:{}", event.pubkey, stream_meta.d_tag));
-    let author_metadata = use_memo(move || profiles::get_profile(
-        &author_pubkey_for_fetch,
+    let author_metadata = profiles::get_profile(&author_pubkey_for_fetch);
+    use_effect(use_reactive(
+        (&author_pubkey_display, &*CLIENT_INITIALIZED.read()),
+        move |(pk, client_initialized)| {
+            if !client_initialized {
+                return;
+            }
+            spawn(async move {
+                let _ = profiles::fetch_profile(pk).await;
+            });
+        },
     ));
-    use_effect(
-        use_reactive(
-            (&author_pubkey_display, &*CLIENT_INITIALIZED.read()),
-            move |(pk, client_initialized)| {
-                if !client_initialized {
-                    return;
-                }
-                spawn(async move {
-                    let _ = profiles::fetch_profile(pk).await;
-                });
-            },
-        ),
-    );
-    let author_name = if let Some(ref metadata) = *author_metadata.read() {
+    let author_name = if let Some(ref metadata) = author_metadata {
         metadata
             .display_name
             .clone()
@@ -157,7 +168,6 @@ pub fn LiveStreamCard(event: NostrEvent) -> Element {
         truncate_pubkey(&author_pubkey_display)
     };
     let author_picture = author_metadata
-        .read()
         .as_ref()
         .and_then(|m| m.picture.as_ref().map(|u| u.to_string()));
     rsx! {

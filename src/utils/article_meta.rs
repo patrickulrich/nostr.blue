@@ -75,7 +75,12 @@ pub fn get_content_preview(content: &str, max_chars: usize) -> String {
 #[allow(dead_code)]
 pub fn get_coordinate(event: &Event) -> Option<String> {
     let identifier = get_identifier(event)?;
-    Some(format!("{}:{}:{}", event.kind.as_u16(), event.pubkey.to_hex(), identifier))
+    Some(format!(
+        "{}:{}:{}",
+        event.kind.as_u16(),
+        event.pubkey.to_hex(),
+        identifier
+    ))
 }
 /// Convert coordinate to naddr (NIP-19 format)
 /// This is used for creating shareable links with relay hints
@@ -90,13 +95,13 @@ pub fn coordinate_to_naddr(
     use nostr::types::url::RelayUrl;
     let pk = PublicKey::from_hex(pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let coord = Coordinate::new(Kind::from(kind), pk).identifier(identifier);
-    let relay_urls: Result<Vec<RelayUrl>, _> = relays
-        .into_iter()
-        .map(|r| RelayUrl::parse(&r))
-        .collect();
+    let relay_urls: Result<Vec<RelayUrl>, _> =
+        relays.into_iter().map(|r| RelayUrl::parse(&r)).collect();
     let relay_urls = relay_urls.map_err(|e| format!("Invalid relay URL: {}", e))?;
     let nip19_coord = Nip19Coordinate::new(coord, relay_urls);
-    nip19_coord.to_bech32().map_err(|e| format!("Failed to encode naddr: {}", e))
+    nip19_coord
+        .to_bech32()
+        .map_err(|e| format!("Failed to encode naddr: {}", e))
 }
 #[cfg(test)]
 mod tests {

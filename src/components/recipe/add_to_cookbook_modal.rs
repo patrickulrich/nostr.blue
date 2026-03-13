@@ -3,9 +3,7 @@
 use crate::components::MediaUploader;
 use crate::routes::Route;
 use crate::stores::nostr_client::{self, HAS_SIGNER};
-use crate::stores::pin_boards_store::{
-    self, PinInput, PinReference, Pinboard, PinboardInput,
-};
+use crate::stores::pin_boards_store::{self, PinInput, PinReference, Pinboard, PinboardInput};
 use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 use nostr_sdk::{nips::nip01::Coordinate, FromBech32};
@@ -33,80 +31,76 @@ pub fn AddToCookbookModal(
     let mut error = use_signal(|| None::<String>);
     let mut success = use_signal(|| false);
     let mut needs_signin = use_signal(|| false);
-    let mut navigation_task: Signal<Option<dioxus::dioxus_core::Task>> = use_signal(|| {
-        None
-    });
+    let mut navigation_task: Signal<Option<dioxus::dioxus_core::Task>> = use_signal(|| None);
     let mut pending_pin_cookbook: Signal<Option<(String, String)>> = use_signal(|| None);
     let mut has_loaded = use_signal(|| false);
     let mut fetch_generation = use_signal(|| 0u64);
     let client_init = *nostr_client::CLIENT_INITIALIZED.read();
     let has_signer = *HAS_SIGNER.read();
     let loaded = *has_loaded.read();
-    use_effect(
-        use_reactive!(|(client_init, has_signer, loaded)| {
-            // Handle signer changes FIRST - allows transition from signed-in to signed-out
-            if !has_signer {
-                // Invalidate any in-flight fetches
-                let next_gen = *fetch_generation.peek() + 1;
-                fetch_generation.set(next_gen);
-                cookbooks_loading.set(false);
-                needs_signin.set(true);
-                cookbooks.set(Vec::new());
-                has_loaded.set(false);
-                // Reset create-related state when signer is lost
-                create_new.set(false);
-                new_title.set(String::new());
-                new_description.set(String::new());
-                new_image_url.set(None);
-                error.set(None);
-                // Reset submit-related state
-                success.set(false);
-                pending_pin_cookbook.set(None);
-                is_submitting.set(false);
-                fetch_error.set(None);
+    use_effect(use_reactive!(|(client_init, has_signer, loaded)| {
+        // Handle signer changes FIRST - allows transition from signed-in to signed-out
+        if !has_signer {
+            // Invalidate any in-flight fetches
+            let next_gen = *fetch_generation.peek() + 1;
+            fetch_generation.set(next_gen);
+            cookbooks_loading.set(false);
+            needs_signin.set(true);
+            cookbooks.set(Vec::new());
+            has_loaded.set(false);
+            // Reset create-related state when signer is lost
+            create_new.set(false);
+            new_title.set(String::new());
+            new_description.set(String::new());
+            new_image_url.set(None);
+            error.set(None);
+            // Reset submit-related state
+            success.set(false);
+            pending_pin_cookbook.set(None);
+            is_submitting.set(false);
+            fetch_error.set(None);
+            return;
+        }
+
+        // Then handle loading
+        if loaded {
+            return;
+        }
+        if !client_init {
+            cookbooks_loading.set(false);
+            return;
+        }
+
+        // Increment generation token to invalidate any in-flight requests
+        let current_generation = *fetch_generation.peek() + 1;
+        fetch_generation.set(current_generation);
+
+        needs_signin.set(false);
+        has_loaded.set(true);
+        cookbooks_loading.set(true);
+        spawn(async move {
+            let result = pin_boards_store::fetch_user_cookbooks().await;
+
+            // Check staleness before state updates
+            if *fetch_generation.peek() != current_generation {
                 return;
             }
 
-            // Then handle loading
-            if loaded {
-                return;
-            }
-            if !client_init {
-                cookbooks_loading.set(false);
-                return;
-            }
-
-            // Increment generation token to invalidate any in-flight requests
-            let current_generation = *fetch_generation.peek() + 1;
-            fetch_generation.set(current_generation);
-
-            needs_signin.set(false);
-            has_loaded.set(true);
-            cookbooks_loading.set(true);
-            spawn(async move {
-                let result = pin_boards_store::fetch_user_cookbooks().await;
-
-                // Check staleness before state updates
-                if *fetch_generation.peek() != current_generation {
-                    return;
+            match result {
+                Ok(books) => {
+                    cookbooks.set(books);
+                    fetch_error.set(None);
                 }
-
-                match result {
-                    Ok(books) => {
-                        cookbooks.set(books);
-                        fetch_error.set(None);
-                    }
-                    Err(e) => {
-                        log::error!("Failed to fetch user cookbooks: {}", e);
-                        fetch_error.set(Some(
-                            "Failed to load cookbooks. Please try again.".to_string(),
-                        ));
-                    }
+                Err(e) => {
+                    log::error!("Failed to fetch user cookbooks: {}", e);
+                    fetch_error.set(Some(
+                        "Failed to load cookbooks. Please try again.".to_string(),
+                    ));
                 }
-                cookbooks_loading.set(false);
-            });
-        }),
-    );
+            }
+            cookbooks_loading.set(false);
+        });
+    }));
     let recipe_naddr_for_add = recipe_naddr.clone();
     let recipe_naddr_for_create = recipe_naddr.clone();
     let handle_add_to_existing = move |_| {
@@ -151,7 +145,9 @@ pub fn AddToCookbookModal(
             return;
         }
         if title_val.chars().count() > 100 {
-            error.set(Some("Cookbook name must be 100 characters or less".to_string()));
+            error.set(Some(
+                "Cookbook name must be 100 characters or less".to_string(),
+            ));
             return;
         }
         let naddr = recipe_naddr_for_create.clone();
@@ -187,9 +183,7 @@ pub fn AddToCookbookModal(
                             )
                         }
                         Err(e) => {
-                            log::error!(
-                                "Failed to parse cookbook naddr {}: {}", saved_naddr, e
-                            );
+                            log::error!("Failed to parse cookbook naddr {}: {}", saved_naddr, e);
                             error
                                 .set(
                                     Some(
@@ -220,14 +214,13 @@ pub fn AddToCookbookModal(
                         Ok(_) => {
                             success.set(true);
                             pending_pin_cookbook.set(None);
-                            #[cfg(target_arch = "wasm32")]
+                            #[cfg(feature = "web")]
                             {
                                 let task = spawn(async move {
-                                    gloo_timers::future::TimeoutFuture::new(1500).await;
-                                    navigator
-                                        .push(Route::PinBoardDetail {
-                                            naddr: cookbook_naddr,
-                                        });
+                                    crate::platform::timer::sleep_ms(1500).await;
+                                    navigator.push(Route::PinBoardDetail {
+                                        naddr: cookbook_naddr,
+                                    });
                                 });
                                 navigation_task.set(Some(task));
                             }
@@ -235,14 +228,11 @@ pub fn AddToCookbookModal(
                         }
                         Err(e) => {
                             log::error!("Failed to add recipe to new cookbook: {}", e);
-                            error
-                                .set(
-                                    Some(
-                                        format!("Cookbook created but failed to add recipe: {}", e),
-                                    ),
-                                );
-                            pending_pin_cookbook
-                                .set(Some((cookbook_naddr, board_a_tag_for_retry)));
+                            error.set(Some(format!(
+                                "Cookbook created but failed to add recipe: {}",
+                                e
+                            )));
+                            pending_pin_cookbook.set(Some((cookbook_naddr, board_a_tag_for_retry)));
                             is_submitting.set(false);
                         }
                     }
@@ -280,14 +270,13 @@ pub fn AddToCookbookModal(
                 Ok(_) => {
                     success.set(true);
                     pending_pin_cookbook.set(None);
-                    #[cfg(target_arch = "wasm32")]
+                    #[cfg(feature = "web")]
                     {
                         let task = spawn(async move {
-                            gloo_timers::future::TimeoutFuture::new(1500).await;
-                            navigator
-                                .push(Route::PinBoardDetail {
-                                    naddr: cookbook_naddr,
-                                });
+                            crate::platform::timer::sleep_ms(1500).await;
+                            navigator.push(Route::PinBoardDetail {
+                                naddr: cookbook_naddr,
+                            });
                         });
                         navigation_task.set(Some(task));
                     }

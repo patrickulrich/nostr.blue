@@ -37,7 +37,13 @@ pub fn CodeNew() -> Element {
             let slug = name_val
                 .to_lowercase()
                 .chars()
-                .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '-' {
+                        c
+                    } else {
+                        '-'
+                    }
+                })
                 .collect::<String>()
                 .split('-')
                 .filter(|s| !s.is_empty())
@@ -65,7 +71,11 @@ pub fn CodeNew() -> Element {
         let clone_val: Vec<String> = clone_urls.read().iter().map(|(_, s)| s.clone()).collect();
         let web_val: Vec<String> = web_urls.read().iter().map(|(_, s)| s.clone()).collect();
         let relay_val: Vec<String> = relays.read().iter().map(|(_, s)| s.clone()).collect();
-        let maint_val: Vec<String> = maintainer_inputs.read().iter().map(|(_, s)| s.clone()).collect();
+        let maint_val: Vec<String> = maintainer_inputs
+            .read()
+            .iter()
+            .map(|(_, s)| s.clone())
+            .collect();
         let topics_val = topics_input.read().clone();
 
         spawn(async move {
@@ -80,9 +90,14 @@ pub fn CodeNew() -> Element {
                 && !id_val.starts_with('-')
                 && !id_val.ends_with('-')
                 && !id_val.contains("--")
-                && id_val.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+                && id_val
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
             if !is_valid_kebab {
-                error_message.set(Some("Repository ID must be lowercase alphanumeric with hyphens (kebab-case)".to_string()));
+                error_message.set(Some(
+                    "Repository ID must be lowercase alphanumeric with hyphens (kebab-case)"
+                        .to_string(),
+                ));
                 is_publishing.set(false);
                 return;
             }
@@ -109,14 +124,24 @@ pub fn CodeNew() -> Element {
                         if let Some(colon_rel) = url[at_pos + 1..].find(':') {
                             let colon = at_pos + 1 + colon_rel;
                             at_pos > 0 && colon > at_pos + 1 && colon + 1 < url.len()
-                        } else { false }
-                    } else { false }
-                } else { false };
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
                 if !is_scp_ssh {
                     match url::Url::parse(url) {
-                        Ok(parsed) if ["http", "https", "git", "ssh"].contains(&parsed.scheme()) => {}
+                        Ok(parsed)
+                            if ["http", "https", "git", "ssh"].contains(&parsed.scheme()) => {}
                         Ok(_) => {
-                            error_message.set(Some(format!("Unsupported URL scheme in clone URL: '{}'", url)));
+                            error_message.set(Some(format!(
+                                "Unsupported URL scheme in clone URL: '{}'",
+                                url
+                            )));
                             is_publishing.set(false);
                             return;
                         }
@@ -133,7 +158,10 @@ pub fn CodeNew() -> Element {
                 match url::Url::parse(url) {
                     Ok(parsed) if parsed.scheme() == "http" || parsed.scheme() == "https" => {}
                     _ => {
-                        error_message.set(Some(format!("Invalid web URL: '{}' (must be http or https)", url)));
+                        error_message.set(Some(format!(
+                            "Invalid web URL: '{}' (must be http or https)",
+                            url
+                        )));
                         is_publishing.set(false);
                         return;
                     }
@@ -148,7 +176,10 @@ pub fn CodeNew() -> Element {
 
             for relay in &relay_list {
                 if RelayUrl::parse(relay).is_err() {
-                    error_message.set(Some(format!("Invalid relay URL: '{}'. Must start with wss:// or ws://", relay)));
+                    error_message.set(Some(format!(
+                        "Invalid relay URL: '{}'. Must start with wss:// or ws://",
+                        relay
+                    )));
                     is_publishing.set(false);
                     return;
                 }
@@ -171,9 +202,17 @@ pub fn CodeNew() -> Element {
             }
 
             let name_trimmed = name_val.trim();
-            let name_opt = if name_trimmed.is_empty() { None } else { Some(name_trimmed) };
+            let name_opt = if name_trimmed.is_empty() {
+                None
+            } else {
+                Some(name_trimmed)
+            };
             let desc_trimmed = desc_val.trim();
-            let desc_opt = if desc_trimmed.is_empty() { None } else { Some(desc_trimmed) };
+            let desc_opt = if desc_trimmed.is_empty() {
+                None
+            } else {
+                Some(desc_trimmed)
+            };
 
             let topic_list: Vec<&str> = topics_val
                 .split(',')
@@ -209,9 +248,12 @@ pub fn CodeNew() -> Element {
                                 return;
                             }
                         };
-                        let coordinate = Coordinate::new(Kind::GitRepoAnnouncement, pk)
-                            .identifier(&id_val);
-                        let relay_urls: Vec<RelayUrl> = relay_list.iter().filter_map(|r| RelayUrl::parse(r).ok()).collect();
+                        let coordinate =
+                            Coordinate::new(Kind::GitRepoAnnouncement, pk).identifier(&id_val);
+                        let relay_urls: Vec<RelayUrl> = relay_list
+                            .iter()
+                            .filter_map(|r| RelayUrl::parse(r).ok())
+                            .collect();
                         match encode_repo_naddr(&coordinate, &relay_urls) {
                             Ok(naddr) => {
                                 nav.push(Route::CodeRepo { naddr });
@@ -428,9 +470,7 @@ struct DynamicListFieldProps {
 #[component]
 fn DynamicListField(props: DynamicListFieldProps) -> Element {
     let mut values = props.values;
-    let mut next_id = use_signal(|| {
-        values.peek().iter().map(|(id, _)| *id).max().unwrap_or(0) + 1
-    });
+    let mut next_id = use_signal(|| values.peek().iter().map(|(id, _)| *id).max().unwrap_or(0) + 1);
 
     let add_item = move |_| {
         let id = *next_id.peek();

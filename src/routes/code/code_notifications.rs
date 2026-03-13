@@ -6,8 +6,8 @@ use crate::routes::Route;
 use crate::services::git_hosting::notifications::{
     fetch_code_notifications, CodeNotification, CodeNotificationType,
 };
-use crate::stores::{auth_store, nostr_client};
 use crate::stores::profiles::PROFILE_CACHE;
+use crate::stores::{auth_store, nostr_client};
 use crate::utils::format::truncate_pubkey;
 use crate::utils::format_relative_time_or;
 use dioxus::prelude::*;
@@ -38,11 +38,15 @@ pub fn CodeNotifications() -> Element {
         spawn(async move {
             match fetch_code_notifications(50).await {
                 Ok(notifs) => {
-                    if *request_gen.peek() != gen { return; }
+                    if *request_gen.peek() != gen {
+                        return;
+                    }
                     notifications.set(notifs);
                 }
                 Err(e) => {
-                    if *request_gen.peek() != gen { return; }
+                    if *request_gen.peek() != gen {
+                        return;
+                    }
                     error.set(Some(e));
                 }
             }
@@ -170,7 +174,10 @@ fn FilterChip(label: &'static str, active: bool, onclick: EventHandler<MouseEven
 }
 #[component]
 fn NotificationCard(notification: CodeNotification) -> Element {
-    let author_profile = PROFILE_CACHE.read().peek(&notification.author_pubkey).cloned();
+    let author_profile = PROFILE_CACHE
+        .read()
+        .peek(&notification.author_pubkey)
+        .cloned();
     let author_name = author_profile
         .as_ref()
         .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
@@ -191,20 +198,29 @@ fn NotificationCard(notification: CodeNotification) -> Element {
             note_id: notification.event_id.clone(),
         },
         CodeNotificationType::ReviewReceived => Route::CodePullDetail {
-            note_id: notification.parent_event_id.clone()
+            note_id: notification
+                .parent_event_id
+                .clone()
                 .unwrap_or(notification.event_id.clone()),
         },
-        CodeNotificationType::CommentAdded | CodeNotificationType::Mentioned
+        CodeNotificationType::CommentAdded
+        | CodeNotificationType::Mentioned
         | CodeNotificationType::StatusChanged => {
             if let Some(ref parent_id) = notification.parent_event_id {
                 if notification.parent_kind == Some(1617) {
-                    Route::CodePullDetail { note_id: parent_id.clone() }
+                    Route::CodePullDetail {
+                        note_id: parent_id.clone(),
+                    }
                 } else {
-                    Route::CodeIssueDetail { note_id: parent_id.clone() }
+                    Route::CodeIssueDetail {
+                        note_id: parent_id.clone(),
+                    }
                 }
             } else {
                 // Fall back to using the notification's own event_id
-                Route::CodeIssueDetail { note_id: notification.event_id.clone() }
+                Route::CodeIssueDetail {
+                    note_id: notification.event_id.clone(),
+                }
             }
         }
     };

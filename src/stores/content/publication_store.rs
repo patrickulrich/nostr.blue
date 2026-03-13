@@ -15,10 +15,9 @@ use std::time::Duration;
 type StdResult<T, E> = std::result::Result<T, E>;
 use crate::utils::nip54::normalize_wiki_dtag;
 use crate::utils::nkbip06::{
-    build_mime_filter_tag, build_mime_filter_tag_for_kind, extract_mime_from_event,
-    generate_m_tag, generate_mime_tags, generate_nostr_m_tag, NostrMimeType,
-    CATEGORY_ARTICLE, CATEGORY_MEDIA, CATEGORY_METADATA, USE_INDEX,
-    USE_PUBLICATION_CONTENT,
+    build_mime_filter_tag, build_mime_filter_tag_for_kind, extract_mime_from_event, generate_m_tag,
+    generate_mime_tags, generate_nostr_m_tag, NostrMimeType, CATEGORY_ARTICLE, CATEGORY_MEDIA,
+    CATEGORY_METADATA, USE_INDEX, USE_PUBLICATION_CONTENT,
 };
 use crate::utils::nkbip08::extract_book_wikilinks;
 /// Kind 30040 - Publication Index
@@ -169,37 +168,35 @@ impl PartialEq for PublicationTree {
 impl PublicationTree {
     pub fn new(root: PublicationIndex) -> Self {
         let mut nodes = HashMap::new();
-        nodes
-            .insert(
-                root.a_tag.clone(),
+        nodes.insert(
+            root.a_tag.clone(),
+            PublicationNode {
+                address: root.a_tag.clone(),
+                title: root.title.clone(),
+                parent: None,
+                children: root
+                    .section_addresses
+                    .iter()
+                    .map(|s| s.address.clone())
+                    .collect(),
+                is_leaf: root.section_addresses.is_empty(),
+                resolved: true,
+                depth: 0,
+            },
+        );
+        for (idx, section_ref) in root.section_addresses.iter().enumerate() {
+            nodes.insert(
+                section_ref.address.clone(),
                 PublicationNode {
-                    address: root.a_tag.clone(),
-                    title: root.title.clone(),
-                    parent: None,
-                    children: root
-                        .section_addresses
-                        .iter()
-                        .map(|s| s.address.clone())
-                        .collect(),
-                    is_leaf: root.section_addresses.is_empty(),
-                    resolved: true,
-                    depth: 0,
+                    address: section_ref.address.clone(),
+                    title: format!("Section {}", idx + 1),
+                    parent: Some(root.a_tag.clone()),
+                    children: vec![],
+                    is_leaf: true,
+                    resolved: false,
+                    depth: 1,
                 },
             );
-        for (idx, section_ref) in root.section_addresses.iter().enumerate() {
-            nodes
-                .insert(
-                    section_ref.address.clone(),
-                    PublicationNode {
-                        address: section_ref.address.clone(),
-                        title: format!("Section {}", idx + 1),
-                        parent: Some(root.a_tag.clone()),
-                        children: vec![],
-                        is_leaf: true,
-                        resolved: false,
-                        depth: 1,
-                    },
-                );
         }
         Self {
             root,
@@ -210,7 +207,11 @@ impl PublicationTree {
     }
     /// Get ordered list of section addresses for TOC
     pub fn get_toc(&self) -> Vec<String> {
-        self.root.section_addresses.iter().map(|s| s.address.clone()).collect()
+        self.root
+            .section_addresses
+            .iter()
+            .map(|s| s.address.clone())
+            .collect()
     }
     /// Update a section node with resolved data
     pub fn resolve_section(&mut self, section: PublicationSection) {
@@ -222,21 +223,18 @@ impl PublicationTree {
     }
 }
 /// Publication index cache (keyed by a_tag)
-pub static PUBLICATIONS_CACHE: GlobalSignal<LruCache<String, PublicationIndex>> = GlobalSignal::new(||
-LruCache::new(NonZeroUsize::new(PUBLICATION_CACHE_SIZE).unwrap()));
+pub static PUBLICATIONS_CACHE: GlobalSignal<LruCache<String, PublicationIndex>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(PUBLICATION_CACHE_SIZE).unwrap()));
 /// Section cache (keyed by a_tag)
-pub static SECTIONS_CACHE: GlobalSignal<LruCache<String, PublicationSection>> = GlobalSignal::new(||
-LruCache::new(NonZeroUsize::new(SECTION_CACHE_SIZE).unwrap()));
+pub static SECTIONS_CACHE: GlobalSignal<LruCache<String, PublicationSection>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(SECTION_CACHE_SIZE).unwrap()));
 /// Active publication tree (for reader view)
-pub static ACTIVE_PUBLICATION: GlobalSignal<Option<PublicationTree>> = GlobalSignal::new(||
-None);
+pub static ACTIVE_PUBLICATION: GlobalSignal<Option<PublicationTree>> = GlobalSignal::new(|| None);
 /// Loading states
 pub static LOADING_PUBLICATIONS: GlobalSignal<bool> = GlobalSignal::new(|| false);
 pub static LOADING_SECTIONS: GlobalSignal<bool> = GlobalSignal::new(|| false);
 /// Store initialization flag
-pub static PUBLICATION_STORE_INITIALIZED: GlobalSignal<bool> = GlobalSignal::new(|| {
-    false
-});
+pub static PUBLICATION_STORE_INITIALIZED: GlobalSignal<bool> = GlobalSignal::new(|| false);
 /// Get a publication index from cache
 pub fn get_cached_publication(a_tag: &str) -> Option<PublicationIndex> {
     PUBLICATIONS_CACHE.read().peek(a_tag).cloned()
@@ -244,11 +242,16 @@ pub fn get_cached_publication(a_tag: &str) -> Option<PublicationIndex> {
 /// Get a publication by naddr
 pub fn get_cached_publication_by_naddr(naddr: &str) -> Option<PublicationIndex> {
     let cache = PUBLICATIONS_CACHE.read();
-    cache.iter().find(|(_, p)| p.naddr == naddr).map(|(_, p)| p.clone())
+    cache
+        .iter()
+        .find(|(_, p)| p.naddr == naddr)
+        .map(|(_, p)| p.clone())
 }
 /// Cache a publication index
 pub fn cache_publication(publication: PublicationIndex) {
-    PUBLICATIONS_CACHE.write().put(publication.a_tag.clone(), publication);
+    PUBLICATIONS_CACHE
+        .write()
+        .put(publication.a_tag.clone(), publication);
 }
 /// Cache multiple publications
 pub fn cache_publications(publications: &[PublicationIndex]) {
@@ -277,6 +280,43 @@ pub fn get_all_cached_publications() -> Vec<PublicationIndex> {
     let cache = PUBLICATIONS_CACHE.read();
     cache.iter().map(|(_, p)| p.clone()).collect()
 }
+
+/// Check whether the publication cache currently has any entries without subscribing to updates.
+pub fn has_cached_publications_snapshot() -> bool {
+    !PUBLICATIONS_CACHE.peek().is_empty()
+}
+
+fn filter_publications_by_query(
+    publications: Vec<PublicationIndex>,
+    query_lower: &str,
+    limit: usize,
+) -> Vec<PublicationIndex> {
+    publications
+        .into_iter()
+        .filter(|p| {
+            if p.title.to_lowercase().contains(query_lower) {
+                return true;
+            }
+            if let Some(ref summary) = p.summary {
+                if summary.to_lowercase().contains(query_lower) {
+                    return true;
+                }
+            }
+            if let Some(ref author) = p.author {
+                if author.to_lowercase().contains(query_lower) {
+                    return true;
+                }
+            }
+            for topic in &p.topics {
+                if topic.to_lowercase().contains(query_lower) {
+                    return true;
+                }
+            }
+            false
+        })
+        .take(limit)
+        .collect()
+}
 /// Clear all caches
 pub fn clear_cache() {
     PUBLICATIONS_CACHE.write().clear();
@@ -301,9 +341,7 @@ fn format_d_tag_as_title(d_tag: &str) -> String {
                     .map(|s| {
                         let mut chars = s.chars();
                         match chars.next() {
-                            Some(c) => {
-                                c.to_uppercase().collect::<String>() + chars.as_str()
-                            }
+                            Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
                             None => String::new(),
                         }
                     })
@@ -330,17 +368,14 @@ pub fn parse_publication_index(event: &NostrEvent) -> Option<PublicationIndex> {
         return None;
     }
     let d_tag = event.tags.identifier()?;
-    let title = event
-        .tags
-        .iter()
-        .find_map(|tag| {
-            let slice = tag.as_slice();
-            if slice.first().map(|s| s.as_str()) == Some("title") {
-                slice.get(1).map(|s| s.to_string())
-            } else {
-                None
-            }
-        })?;
+    let title = event.tags.iter().find_map(|tag| {
+        let slice = tag.as_slice();
+        if slice.first().map(|s| s.as_str()) == Some("title") {
+            slice.get(1).map(|s| s.to_string())
+        } else {
+            None
+        }
+    })?;
     let a_tag = format!("{}:{}:{}", KIND_INDEX, event.pubkey.to_hex(), d_tag);
     let naddr = Coordinate::new(Kind::Custom(KIND_INDEX), event.pubkey)
         .identifier(d_tag)
@@ -537,11 +572,17 @@ pub fn publications_filter_paginated(limit: usize, until: Option<u64>) -> Filter
 }
 /// Build filter for publications by author
 pub fn publications_by_author_filter(pubkey: PublicKey, limit: usize) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_INDEX)).author(pubkey).limit(limit)
+    Filter::new()
+        .kind(Kind::Custom(KIND_INDEX))
+        .author(pubkey)
+        .limit(limit)
 }
 /// Build filter for a specific publication by coordinate
 pub fn publication_by_coord_filter(pubkey: PublicKey, identifier: &str) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_INDEX)).author(pubkey).identifier(identifier)
+    Filter::new()
+        .kind(Kind::Custom(KIND_INDEX))
+        .author(pubkey)
+        .identifier(identifier)
 }
 /// Build filter for publication sections
 pub fn sections_filter(limit: usize) -> Filter {
@@ -549,11 +590,17 @@ pub fn sections_filter(limit: usize) -> Filter {
 }
 /// Build filter for sections by author
 pub fn sections_by_author_filter(pubkey: PublicKey, limit: usize) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_CONTENT)).author(pubkey).limit(limit)
+    Filter::new()
+        .kind(Kind::Custom(KIND_CONTENT))
+        .author(pubkey)
+        .limit(limit)
 }
 /// Build filter for a specific section by coordinate
 pub fn section_by_coord_filter(pubkey: PublicKey, identifier: &str) -> Filter {
-    Filter::new().kind(Kind::Custom(KIND_CONTENT)).author(pubkey).identifier(identifier)
+    Filter::new()
+        .kind(Kind::Custom(KIND_CONTENT))
+        .author(pubkey)
+        .identifier(identifier)
 }
 /// Build filter for multiple sections by their coordinates
 pub fn sections_by_addresses_filter(addresses: &[SectionReference]) -> Vec<Filter> {
@@ -567,7 +614,12 @@ pub fn sections_by_addresses_filter(addresses: &[SectionReference]) -> Vec<Filte
             let kind = parts[0].parse::<u16>().ok()?;
             let pubkey = PublicKey::from_hex(parts[1]).ok()?;
             let d_tag = parts[2..].join(":");
-            Some(Filter::new().kind(Kind::Custom(kind)).author(pubkey).identifier(d_tag))
+            Some(
+                Filter::new()
+                    .kind(Kind::Custom(kind))
+                    .author(pubkey)
+                    .identifier(d_tag),
+            )
         })
         .collect()
 }
@@ -610,11 +662,7 @@ pub fn publications_by_mime_filter(limit: usize) -> Filter {
 }
 /// Build filter for publication sections by MIME type
 pub fn sections_by_mime_filter(limit: usize) -> Filter {
-    let m_tag_value = build_mime_filter_tag(
-        CATEGORY_ARTICLE,
-        USE_PUBLICATION_CONTENT,
-        true,
-    );
+    let m_tag_value = build_mime_filter_tag(CATEGORY_ARTICLE, USE_PUBLICATION_CONTENT, true);
     Filter::new()
         .kind(Kind::Custom(KIND_CONTENT))
         .custom_tag(SingleLetterTag::uppercase(Alphabet::M), &m_tag_value)
@@ -626,19 +674,20 @@ pub async fn fetch_publications(
     until: Option<u64>,
 ) -> StdResult<Vec<PublicationIndex>, String> {
     *LOADING_PUBLICATIONS.write() = true;
+    struct ResetPublicationsLoading;
+    impl Drop for ResetPublicationsLoading {
+        fn drop(&mut self) {
+            *LOADING_PUBLICATIONS.write() = false;
+        }
+    }
+    let _reset_loading = ResetPublicationsLoading;
     let filter = publications_filter_paginated(limit, until);
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(15),
-        )
-        .await;
-    *LOADING_PUBLICATIONS.write() = false;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
     match result {
         Ok(events) => {
-            let publications: Vec<PublicationIndex> = events
-                .iter()
-                .filter_map(parse_publication_index)
-                .collect();
+            let publications: Vec<PublicationIndex> =
+                events.iter().filter_map(parse_publication_index).collect();
             cache_publications(&publications);
             *PUBLICATION_STORE_INITIALIZED.write() = true;
             log::info!("Fetched {} publications", publications.len());
@@ -657,18 +706,14 @@ pub async fn fetch_publication_by_naddr(
     if let Some(pub_) = get_cached_publication_by_naddr(naddr) {
         return Ok(Some(pub_));
     }
-    let coord = Coordinate::from_bech32(naddr)
-        .map_err(|e| format!("Invalid naddr: {}", e))?;
+    let coord = Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
     let identifier = coord.identifier;
     if identifier.is_empty() {
         return Err("No identifier in naddr".to_string());
     }
     let filter = publication_by_coord_filter(coord.public_key, &identifier);
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await;
     match result {
         Ok(events) => {
             if let Some(event) = events.first() {
@@ -696,11 +741,9 @@ pub async fn fetch_publication_sections(
     let filters = sections_by_addresses_filter(&publication.section_addresses);
     let mut all_sections = Vec::new();
     for filter in filters {
-        let result = crate::stores::nostr_client::fetch_events_aggregated(
-                filter,
-                Duration::from_secs(10),
-            )
-            .await;
+        let result =
+            crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+                .await;
         if let Ok(events) = result {
             for event in events {
                 if let Some(section) = parse_publication_section(&event) {
@@ -732,20 +775,14 @@ pub async fn fetch_publications_by_author(
     pubkey_hex: &str,
     limit: usize,
 ) -> StdResult<Vec<PublicationIndex>, String> {
-    let pubkey = PublicKey::from_hex(pubkey_hex)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::from_hex(pubkey_hex).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = publications_by_author_filter(pubkey, limit);
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await;
     match result {
         Ok(events) => {
-            let publications: Vec<PublicationIndex> = events
-                .iter()
-                .filter_map(parse_publication_index)
-                .collect();
+            let publications: Vec<PublicationIndex> =
+                events.iter().filter_map(parse_publication_index).collect();
             cache_publications(&publications);
             Ok(publications)
         }
@@ -758,18 +795,22 @@ pub async fn search_publications_with_filter(
     limit: usize,
 ) -> StdResult<Vec<PublicationIndex>, String> {
     *LOADING_PUBLICATIONS.write() = true;
+    struct ResetPublicationsLoading;
+    impl Drop for ResetPublicationsLoading {
+        fn drop(&mut self) {
+            *LOADING_PUBLICATIONS.write() = false;
+        }
+    }
+    let _reset_loading = ResetPublicationsLoading;
     let result = crate::stores::nostr_client::fetch_events_aggregated(
-            filter.limit(limit),
-            Duration::from_secs(15),
-        )
-        .await;
-    *LOADING_PUBLICATIONS.write() = false;
+        filter.limit(limit),
+        Duration::from_secs(15),
+    )
+    .await;
     match result {
         Ok(events) => {
-            let publications: Vec<PublicationIndex> = events
-                .iter()
-                .filter_map(parse_publication_index)
-                .collect();
+            let publications: Vec<PublicationIndex> =
+                events.iter().filter_map(parse_publication_index).collect();
             cache_publications(&publications);
             log::info!("Search found {} publications", publications.len());
             Ok(publications)
@@ -786,33 +827,41 @@ pub async fn search_publications(
     limit: usize,
 ) -> StdResult<Vec<PublicationIndex>, String> {
     let query_lower = query.to_lowercase();
-    let publications = fetch_publications(200, None).await?;
-    let matching: Vec<PublicationIndex> = publications
-        .into_iter()
-        .filter(|p| {
-            if p.title.to_lowercase().contains(&query_lower) {
-                return true;
+    if has_cached_publications_snapshot() {
+        return Ok(filter_publications_by_query(
+            get_all_cached_publications(),
+            &query_lower,
+            limit,
+        ));
+    }
+
+    if *LOADING_PUBLICATIONS.peek() {
+        for _ in 0..50 {
+            crate::platform::timer::sleep_ms(50).await;
+            if has_cached_publications_snapshot() {
+                return Ok(filter_publications_by_query(
+                    get_all_cached_publications(),
+                    &query_lower,
+                    limit,
+                ));
             }
-            if let Some(ref summary) = p.summary {
-                if summary.to_lowercase().contains(&query_lower) {
-                    return true;
-                }
+            if !*LOADING_PUBLICATIONS.peek() {
+                break;
             }
-            if let Some(ref author) = p.author {
-                if author.to_lowercase().contains(&query_lower) {
-                    return true;
-                }
-            }
-            for topic in &p.topics {
-                if topic.to_lowercase().contains(&query_lower) {
-                    return true;
-                }
-            }
-            false
-        })
-        .take(limit)
-        .collect();
-    Ok(matching)
+        }
+    }
+
+    let publications = if has_cached_publications_snapshot() {
+        get_all_cached_publications()
+    } else {
+        fetch_publications(200, None).await?
+    };
+
+    Ok(filter_publications_by_query(
+        publications,
+        &query_lower,
+        limit,
+    ))
 }
 /// Get the MIME filter tag value for querying publications by content type
 ///
@@ -832,7 +881,10 @@ pub fn get_publication_mime_tags(kind: u16) -> (Tag, Tag) {
 ///
 /// Uses CATEGORY_MEDIA for content classification
 pub fn is_media_publication(mime_type: &Option<NostrMimeType>) -> bool {
-    mime_type.as_ref().map(|m| m.category == CATEGORY_MEDIA).unwrap_or(false)
+    mime_type
+        .as_ref()
+        .map(|m| m.category == CATEGORY_MEDIA)
+        .unwrap_or(false)
 }
 /// Publish a new publication index
 pub async fn publish_publication_index(
@@ -843,8 +895,7 @@ pub async fn publish_publication_index(
     topics: &[String],
     section_addresses: &[SectionReference],
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -852,14 +903,23 @@ pub async fn publish_publication_index(
     let mut tags: Vec<Tag> = vec![
         Tag::identifier(&d_tag),
         Tag::title(title),
-        Tag::custom(TagKind::Custom("type".into()), vec![pub_type.as_str().to_string()]),
-        Tag::custom(TagKind::Custom("auto-update".into()), vec!["no".to_string()]),
+        Tag::custom(
+            TagKind::Custom("type".into()),
+            vec![pub_type.as_str().to_string()],
+        ),
+        Tag::custom(
+            TagKind::Custom("auto-update".into()),
+            vec!["no".to_string()],
+        ),
     ];
     for mime_tag in generate_mime_tags(KIND_INDEX) {
         tags.push(mime_tag);
     }
     if let Some(s) = summary {
-        tags.push(Tag::custom(TagKind::Custom("summary".into()), vec![s.to_string()]));
+        tags.push(Tag::custom(
+            TagKind::Custom("summary".into()),
+            vec![s.to_string()],
+        ));
     }
     if let Some(img) = cover_image {
         if let Ok(url) = Url::parse(img) {
@@ -896,8 +956,7 @@ pub async fn publish_publication_section(
     content: &str,
     identifier: Option<&str>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -910,9 +969,10 @@ pub async fn publish_publication_section(
     }
     let wikilinks = crate::utils::nip54::extract_wikilinks(content);
     for link in &wikilinks {
-        tags.push(
-            Tag::custom(TagKind::Custom("wikilink".into()), vec![link.target.clone()]),
-        );
+        tags.push(Tag::custom(
+            TagKind::Custom("wikilink".into()),
+            vec![link.target.clone()],
+        ));
     }
     let book_refs = extract_book_wikilinks(content);
     for book_ref in &book_refs {
@@ -933,14 +993,14 @@ pub async fn update_publication_sections(
     new_section_addresses: &[SectionReference],
 ) -> StdResult<String, String> {
     publish_publication_index(
-            &publication.title,
-            publication.summary.as_deref(),
-            publication.cover_image.as_deref(),
-            publication.pub_type.clone(),
-            &publication.topics,
-            new_section_addresses,
-        )
-        .await
+        &publication.title,
+        publication.summary.as_deref(),
+        publication.cover_image.as_deref(),
+        publication.pub_type.clone(),
+        &publication.topics,
+        new_section_addresses,
+    )
+    .await
 }
 #[cfg(test)]
 mod tests {
@@ -956,7 +1016,10 @@ mod tests {
             PublicationType::from_str("documentation"),
             PublicationType::Documentation,
         );
-        assert_eq!(PublicationType::from_str("docs"), PublicationType::Documentation);
+        assert_eq!(
+            PublicationType::from_str("docs"),
+            PublicationType::Documentation
+        );
         assert_eq!(PublicationType::from_str("unknown"), PublicationType::Book);
     }
     #[test]
@@ -975,6 +1038,9 @@ mod tests {
             event_id: Some("event123".to_string()),
         };
         assert_eq!(section_ref.address, addr);
-        assert_eq!(section_ref.relay_hint, Some("wss://relay.example.com".to_string()));
+        assert_eq!(
+            section_ref.relay_hint,
+            Some("wss://relay.example.com".to_string())
+        );
     }
 }

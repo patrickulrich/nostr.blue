@@ -8,10 +8,8 @@ use dioxus::prelude::*;
 #[component]
 pub fn CodeRepoCard(
     repo: Repository,
-    #[props(default = true)]
-    show_description: bool,
-    #[props(default = true)]
-    show_stats: bool,
+    #[props(default = true)] show_description: bool,
+    #[props(default = true)] show_stats: bool,
 ) -> Element {
     let display_name = repo.name.clone().unwrap_or_else(|| repo.id.clone());
     let description = repo.description.clone().unwrap_or_default();

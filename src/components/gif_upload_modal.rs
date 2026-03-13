@@ -1,11 +1,13 @@
 //! GIF Upload Modal Component
 //!
 //! Modal dialog for uploading GIFs to Nostr via NIP-96 or Blossom.
-use dioxus::prelude::*;
-use wasm_bindgen::JsCast;
-use web_sys::HtmlInputElement;
 use crate::stores::{blossom_store, gif_store, nip96_store};
 use crate::utils::format::display_server_url;
+use dioxus::prelude::*;
+#[cfg(feature = "web")]
+use wasm_bindgen::JsCast;
+#[cfg(feature = "web")]
+use web_sys::HtmlInputElement;
 #[derive(Props, Clone, PartialEq)]
 pub struct GifUploadModalProps {
     /// Signal to control modal visibility
@@ -20,12 +22,12 @@ enum UploadServer {
     NostrBuild,
     Blossom,
 }
+
+const MAX_GIF_UPLOAD_BYTES: usize = 21 * 1024 * 1024;
 #[component]
 pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     let mut show = props.show;
-    let mut selected_file = use_signal(|| {
-        None::<(String, Vec<u8>, String, Option<String>)>
-    });
+    let mut selected_file = use_signal(|| None::<(String, Vec<u8>, String, Option<String>)>);
     let mut caption = use_signal(String::new);
     let mut upload_server = use_signal(|| UploadServer::NostrBuild);
     let mut selected_blossom_server = use_signal(blossom_store::get_primary_server);
@@ -33,13 +35,21 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut success = use_signal(|| false);
     let mut current_upload_id = use_signal(|| None::<uuid::Uuid>);
+    let mut upload_session_token = use_signal(|| 0u64);
     let progress = use_memo(move || match *upload_server.read() {
         UploadServer::NostrBuild => *nip96_store::NIP96_UPLOAD_PROGRESS.read(),
         UploadServer::Blossom => *blossom_store::UPLOAD_PROGRESS.read(),
     });
     let input_id = use_signal(|| format!("gif-upload-{}", uuid::Uuid::new_v4()));
     let close_modal = move |_| {
+        if *uploading.peek() {
+            return;
+        }
+        upload_session_token.with_mut(|token| *token = token.wrapping_add(1));
+        uploading.set(false);
+        current_upload_id.set(None);
         show.set(false);
+        #[cfg(feature = "web")]
         if let Some((_, _, _, Some(url))) = selected_file.read().as_ref() {
             let _ = web_sys::Url::revoke_object_url(url);
         }
@@ -51,36 +61,34 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     };
     let handle_file_select = move |_evt: Event<FormData>| {
         let input_id = input_id.read().clone();
+        let session_token = upload_session_token.with_mut(|token| {
+            *token = token.wrapping_add(1);
+            *token
+        });
         spawn(async move {
-            error.set(None);
             match read_file_as_bytes(&input_id).await {
                 Ok((filename, data, mime_type)) => {
-                    if data.len() < 6
-                        || (&data[0..6] != b"GIF87a" && &data[0..6] != b"GIF89a")
-                    {
-                        error
-                            .set(
-                                Some(
-                                    "Invalid GIF file. Please select a valid GIF.".to_string(),
-                                ),
-                            );
+                    if *upload_session_token.read() != session_token {
                         return;
                     }
-                    if !mime_type.contains("gif")
-                        && !filename.to_lowercase().ends_with(".gif")
-                    {
+                    error.set(None);
+                    if data.len() < 6 || (&data[0..6] != b"GIF87a" && &data[0..6] != b"GIF89a") {
+                        error.set(Some(
+                            "Invalid GIF file. Please select a valid GIF.".to_string(),
+                        ));
+                        return;
+                    }
+                    if !mime_type.contains("gif") && !filename.to_lowercase().ends_with(".gif") {
                         error.set(Some("Please select a GIF file".to_string()));
                         return;
                     }
-                    if data.len() > 21 * 1024 * 1024 {
-                        error
-                            .set(
-                                Some("File too large. Maximum size is 21MB".to_string()),
-                            );
+                    if data.len() > MAX_GIF_UPLOAD_BYTES {
+                        error.set(Some("File too large. Maximum size is 21MB".to_string()));
                         return;
                     }
-                    if let Some((_, _, _, Some(old_url))) = selected_file.read().as_ref()
-                    {
+                    let mime_type = "image/gif".to_string();
+                    #[cfg(feature = "web")]
+                    if let Some((_, _, _, Some(old_url))) = selected_file.read().as_ref() {
                         let _ = web_sys::Url::revoke_object_url(old_url);
                     }
                     let preview_url = create_object_url(&data, &mime_type);
@@ -88,6 +96,10 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                     selected_file.set(Some((filename, data, mime_type, preview_url)));
                 }
                 Err(e) => {
+                    if *upload_session_token.read() != session_token {
+                        return;
+                    }
+                    error.set(None);
                     log::error!("Failed to read file: {}", e);
                     error.set(Some(format!("Failed to read file: {}", e)));
                 }
@@ -97,6 +109,9 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     let handle_upload = {
         let on_upload = props.on_upload;
         move |_| {
+            if *uploading.peek() {
+                return;
+            }
             let file_data = selected_file.read().clone();
             let caption_text = caption.read().clone();
             let server = upload_server.read().clone();
@@ -112,6 +127,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
             }
             let (_filename, data, mime_type, _preview_url) = file_data.unwrap();
             let file_size = data.len();
+            let session_token = *upload_session_token.read();
             uploading.set(true);
             error.set(None);
             spawn(async move {
@@ -120,47 +136,49 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                 hasher.update(&data);
                 let file_hash = hex::encode(hasher.finalize());
                 let upload_result = match server {
-                    UploadServer::NostrBuild => {
-                        nip96_store::upload_to_nip96(
-                                data,
-                                mime_type.clone(),
-                                caption_text.clone(),
-                                caption_text.clone(),
-                            )
-                            .await
-                            .map(|metadata| {
-                                (
-                                    metadata.url,
-                                    metadata.original_hash.unwrap_or(file_hash.clone()),
-                                    metadata.dimensions,
-                                )
-                            })
-                    }
-                    UploadServer::Blossom => {
-                        blossom_store::upload_image(
-                                data,
-                                mime_type.clone(),
-                                100,
-                                Some(blossom_server.clone()),
-                            )
-                            .await
-                            .map(|url| (url, file_hash.clone(), None))
-                    }
+                    UploadServer::NostrBuild => nip96_store::upload_to_nip96(
+                        data,
+                        mime_type.clone(),
+                        caption_text.clone(),
+                        caption_text.clone(),
+                    )
+                    .await
+                    .map(|metadata| {
+                        (
+                            metadata.url,
+                            metadata.original_hash.unwrap_or(file_hash.clone()),
+                            metadata.dimensions,
+                        )
+                    }),
+                    UploadServer::Blossom => blossom_store::upload_image(
+                        data,
+                        mime_type.clone(),
+                        100,
+                        Some(blossom_server.clone()),
+                    )
+                    .await
+                    .map(|url| (url, file_hash.clone(), None)),
                 };
                 match upload_result {
                     Ok((url, hash, dimensions)) => {
+                        if *upload_session_token.read() != session_token {
+                            return;
+                        }
                         log::info!("File uploaded successfully: {}", url);
                         match gif_store::publish_gif_event(
-                                url.clone(),
-                                "image/gif".to_string(),
-                                hash,
-                                caption_text.clone(),
-                                Some(file_size),
-                                dimensions,
-                            )
-                            .await
+                            url.clone(),
+                            "image/gif".to_string(),
+                            hash,
+                            caption_text.clone(),
+                            Some(file_size),
+                            dimensions,
+                        )
+                        .await
                         {
                             Ok(event_id) => {
+                                if *upload_session_token.read() != session_token {
+                                    return;
+                                }
                                 log::info!("GIF event published: {}", event_id);
                                 success.set(true);
                                 uploading.set(false);
@@ -182,17 +200,21 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                 let upload_id = uuid::Uuid::new_v4();
                                 current_upload_id.set(Some(upload_id));
                                 spawn(async move {
-                                    gloo_timers::future::TimeoutFuture::new(2000).await;
+                                    crate::platform::timer::sleep_ms(2000).await;
+                                    if *upload_session_token.read() != session_token {
+                                        return;
+                                    }
                                     if current_upload_id.peek().as_ref() != Some(&upload_id) {
                                         return;
                                     }
-                                    if let Some((_, _, _, Some(url))) = selected_file
-                                        .read()
-                                        .as_ref()
+                                    #[cfg(feature = "web")]
+                                    if let Some((_, _, _, Some(url))) =
+                                        selected_file.read().as_ref()
                                     {
                                         let _ = web_sys::Url::revoke_object_url(url);
                                     }
                                     show.set(false);
+                                    uploading.set(false);
                                     selected_file.set(None);
                                     caption.set(String::new());
                                     success.set(false);
@@ -200,18 +222,22 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                 });
                             }
                             Err(e) => {
+                                if *upload_session_token.read() != session_token {
+                                    return;
+                                }
                                 log::error!("Failed to publish GIF event: {}", e);
-                                error
-                                    .set(
-                                        Some(
-                                            format!("Upload succeeded but failed to publish: {}", e),
-                                        ),
-                                    );
+                                error.set(Some(format!(
+                                    "Upload succeeded but failed to publish: {}",
+                                    e
+                                )));
                                 uploading.set(false);
                             }
                         }
                     }
                     Err(e) => {
+                        if *upload_session_token.read() != session_token {
+                            return;
+                        }
                         log::error!("Upload failed: {}", e);
                         error.set(Some(e));
                         uploading.set(false);
@@ -221,6 +247,11 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
         }
     };
     let handle_clear = move |_| {
+        upload_session_token.with_mut(|token| *token = token.wrapping_add(1));
+        uploading.set(false);
+        current_upload_id.set(None);
+        success.set(false);
+        #[cfg(feature = "web")]
         if let Some((_, _, _, Some(url))) = selected_file.read().as_ref() {
             let _ = web_sys::Url::revoke_object_url(url);
         }
@@ -235,7 +266,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     }
     rsx! {
         div {
-            class: "fixed inset-0 z-[70] flex items-center justify-center bg-black/50",
+            class: "fixed inset-0 z-50 backdrop-blur-sm flex items-center justify-center bg-black/50",
             onclick: close_modal,
             div {
                 class: "bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full mx-4",
@@ -264,23 +295,35 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                     if !*success.read() {
                         if selected_file.read().is_none() {
                             div { class: "flex items-center justify-center w-full",
-                                label { class: "flex flex-col items-center justify-center w-full h-40 border-2 border-gray-300 dark:border-gray-600 border-dashed rounded-xl cursor-pointer bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition",
-                                    div { class: "flex flex-col items-center justify-center py-4",
-                                        span { class: "text-5xl mb-3", "🎬" }
-                                        p { class: "mb-2 text-sm text-gray-500 dark:text-gray-400",
-                                            span { class: "font-semibold", "Click to upload" }
-                                            " or drag and drop"
+                                if cfg!(feature = "web") {
+                                    label { class: "flex flex-col items-center justify-center w-full h-40 border-2 border-gray-300 dark:border-gray-600 border-dashed rounded-xl cursor-pointer bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition",
+                                        div { class: "flex flex-col items-center justify-center py-4",
+                                            span { class: "text-5xl mb-3", "🎬" }
+                                            p { class: "mb-2 text-sm text-gray-500 dark:text-gray-400",
+                                                span { class: "font-semibold", "Click to upload" }
+                                                " or drag and drop"
+                                            }
+                                            p { class: "text-xs text-gray-500 dark:text-gray-400",
+                                                "GIF files only (max 21MB)"
+                                            }
                                         }
-                                        p { class: "text-xs text-gray-500 dark:text-gray-400",
-                                            "GIF files only (max 21MB)"
+                                        input {
+                                            id: "{input_id}",
+                                            class: "hidden",
+                                            r#type: "file",
+                                            accept: "image/gif,.gif",
+                                            onchange: handle_file_select,
                                         }
                                     }
-                                    input {
-                                        id: "{input_id}",
-                                        class: "hidden",
-                                        r#type: "file",
-                                        accept: "image/gif,.gif",
-                                        onchange: handle_file_select,
+                                } else {
+                                    div { class: "flex flex-col items-center justify-center w-full h-40 border-2 border-gray-300 dark:border-gray-600 border-dashed rounded-xl bg-gray-50 dark:bg-gray-700/50 text-center px-4",
+                                        span { class: "text-4xl mb-2", "📱" }
+                                        p { class: "text-sm text-gray-600 dark:text-gray-300",
+                                            "GIF upload from this modal is currently web-only."
+                                        }
+                                        p { class: "text-xs text-gray-500 dark:text-gray-400 mt-1",
+                                            "Use a web build to upload GIF files."
+                                        }
                                     }
                                 }
                             }
@@ -323,85 +366,87 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                 }
                             }
                         }
-                        div {
-                            label { class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2",
-                                "Caption / Search Terms"
-                            }
-                            input {
-                                class: "w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent",
-                                r#type: "text",
-                                placeholder: "e.g., funny cat, reaction, celebration...",
-                                value: "{caption}",
-                                disabled: *uploading.read(),
-                                oninput: move |evt| caption.set(evt.value().clone()),
-                            }
-                            p { class: "mt-1 text-xs text-gray-500 dark:text-gray-400",
-                                "This will be used for search and accessibility"
-                            }
-                        }
-                        div {
-                            label { class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2",
-                                "Upload to"
-                            }
-                            select {
-                                class: "w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent",
-                                disabled: *uploading.read(),
-                                onchange: move |evt| {
-                                    match evt.value().as_str() {
-                                        "nostr.build" => upload_server.set(UploadServer::NostrBuild),
-                                        "blossom" => upload_server.set(UploadServer::Blossom),
-                                        _ => {}
-                                    }
-                                },
-                                option {
-                                    value: "nostr.build",
-                                    selected: *upload_server.read() == UploadServer::NostrBuild,
-                                    "nostr.build (Recommended)"
-                                }
-                                option {
-                                    value: "blossom",
-                                    selected: *upload_server.read() == UploadServer::Blossom,
-                                    "Blossom"
-                                }
-                            }
-                        }
-                        if *upload_server.read() == UploadServer::Blossom {
+                        if cfg!(feature = "web") {
                             div {
                                 label { class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2",
-                                    "Blossom Server"
+                                    "Caption / Search Terms"
+                                }
+                                input {
+                                    class: "w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                                    r#type: "text",
+                                    placeholder: "e.g., funny cat, reaction, celebration...",
+                                    value: "{caption}",
+                                    disabled: *uploading.read(),
+                                    oninput: move |evt| caption.set(evt.value().clone()),
+                                }
+                                p { class: "mt-1 text-xs text-gray-500 dark:text-gray-400",
+                                    "This will be used for search and accessibility"
+                                }
+                            }
+                            div {
+                                label { class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2",
+                                    "Upload to"
                                 }
                                 select {
                                     class: "w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent",
                                     disabled: *uploading.read(),
                                     onchange: move |evt| {
-                                        selected_blossom_server.set(evt.value());
+                                        match evt.value().as_str() {
+                                            "nostr.build" => upload_server.set(UploadServer::NostrBuild),
+                                            "blossom" => upload_server.set(UploadServer::Blossom),
+                                            _ => {}
+                                        }
                                     },
-                                    {
-                                        let servers = blossom_store::get_servers();
-                                        let current_server = selected_blossom_server.read().clone();
-                                        rsx! {
-                                            for server in servers.iter() {
-                                                option { value: "{server}", selected: *server == current_server, "{display_server_url(server)}" }
+                                    option {
+                                        value: "nostr.build",
+                                        selected: *upload_server.read() == UploadServer::NostrBuild,
+                                        "nostr.build (Recommended)"
+                                    }
+                                    option {
+                                        value: "blossom",
+                                        selected: *upload_server.read() == UploadServer::Blossom,
+                                        "Blossom"
+                                    }
+                                }
+                            }
+                            if *upload_server.read() == UploadServer::Blossom {
+                                div {
+                                    label { class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2",
+                                        "Blossom Server"
+                                    }
+                                    select {
+                                        class: "w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                                        disabled: *uploading.read(),
+                                        onchange: move |evt| {
+                                            selected_blossom_server.set(evt.value());
+                                        },
+                                        {
+                                            let servers = blossom_store::get_servers();
+                                            let current_server = selected_blossom_server.read().clone();
+                                            rsx! {
+                                                for server in servers.iter() {
+                                                    option { value: "{server}", selected: *server == current_server, "{display_server_url(server)}" }
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
-                        }
-                        if *uploading.read() {
-                            div { class: "space-y-2",
-                                div { class: "w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2",
-                                    div {
-                                        class: "bg-blue-600 h-2 rounded-full transition-all duration-300",
-                                        style: format!("width: {}%", progress.read().unwrap_or(0.0)),
+                            if *uploading.read() {
+                                div { class: "space-y-2",
+                                    div { class: "w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2",
+                                        div {
+                                            class: "bg-blue-600 h-2 rounded-full transition-all duration-300",
+                                            style: format!("width: {}%", progress.read().unwrap_or(0.0)),
+                                        }
                                     }
-                                }
-                                p { class: "text-xs text-gray-500 dark:text-gray-400 text-center",
-                                    {
-                                        if let Some(p) = *progress.read() {
-                                            format!("Uploading... {:.0}%", p)
-                                        } else {
-                                            "Uploading...".to_string()
+                                    p { class: "text-xs text-gray-500 dark:text-gray-400 text-center",
+                                        {
+                                            if let Some(p) = *progress.read() {
+                                                format!("Uploading... {:.0}%", p)
+                                            } else {
+                                                "Uploading...".to_string()
+                                            }
                                         }
                                     }
                                 }
@@ -420,19 +465,21 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                             class: "px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition",
                             disabled: *uploading.read(),
                             onclick: close_modal,
-                            "Cancel"
+                            if cfg!(feature = "web") { "Cancel" } else { "Close" }
                         }
-                        button {
-                            class: "px-6 py-2 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2",
-                            disabled: *uploading.read() || selected_file.read().is_none()
-                                || caption.read().trim().is_empty(),
-                            onclick: handle_upload,
-                            if *uploading.read() {
-                                span { class: "inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" }
-                                "Uploading..."
-                            } else {
-                                span { "⬆️" }
-                                "Upload GIF"
+                        if cfg!(feature = "web") {
+                            button {
+                                class: "px-6 py-2 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2",
+                                disabled: *uploading.read() || selected_file.read().is_none()
+                                    || caption.read().trim().is_empty(),
+                                onclick: handle_upload,
+                                if *uploading.read() {
+                                    span { class: "inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" }
+                                    "Uploading..."
+                                } else {
+                                    span { "⬆️" }
+                                    "Upload GIF"
+                                }
                             }
                         }
                     }
@@ -442,9 +489,8 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     }
 }
 /// Read file as bytes from file input
-async fn read_file_as_bytes(
-    input_id: &str,
-) -> Result<(String, Vec<u8>, String), String> {
+#[cfg(feature = "web")]
+async fn read_file_as_bytes(input_id: &str) -> Result<(String, Vec<u8>, String), String> {
     use js_sys::{ArrayBuffer, Uint8Array};
     use wasm_bindgen_futures::JsFuture;
     use web_sys::window;
@@ -459,16 +505,27 @@ async fn read_file_as_bytes(
     let file = file_list.get(0).ok_or("No file selected")?;
     let filename = file.name();
     let mime_type = file.type_();
+    let file_size = usize::try_from(file.size() as u64).unwrap_or(usize::MAX);
+    if file_size > MAX_GIF_UPLOAD_BYTES {
+        return Err("File too large. Maximum size is 21MB".to_string());
+    }
     let promise = file.array_buffer();
-    let array_buffer = JsFuture::from(promise).await.map_err(|_| "Failed to read file")?;
-    let array_buffer: ArrayBuffer = array_buffer
-        .dyn_into()
-        .map_err(|_| "Not an ArrayBuffer")?;
+    let array_buffer = JsFuture::from(promise)
+        .await
+        .map_err(|_| "Failed to read file")?;
+    let array_buffer: ArrayBuffer = array_buffer.dyn_into().map_err(|_| "Not an ArrayBuffer")?;
     let uint8_array = Uint8Array::new(&array_buffer);
     let bytes = uint8_array.to_vec();
     Ok((filename, bytes, mime_type))
 }
+
+/// Read file as bytes - native stub
+#[cfg(not(feature = "web"))]
+async fn read_file_as_bytes(_input_id: &str) -> Result<(String, Vec<u8>, String), String> {
+    Err("File reading from HTML input not supported on native".to_string())
+}
 /// Clear file input element
+#[cfg(feature = "web")]
 fn clear_file_input(input_id: &str) {
     use web_sys::window;
     if let Some(window) = window() {
@@ -481,6 +538,9 @@ fn clear_file_input(input_id: &str) {
         }
     }
 }
+
+#[cfg(not(feature = "web"))]
+fn clear_file_input(_input_id: &str) {}
 /// Format file size for display
 fn format_file_size(bytes: usize) -> String {
     const KB: usize = 1024;
@@ -494,6 +554,7 @@ fn format_file_size(bytes: usize) -> String {
     }
 }
 /// Create an Object URL from raw bytes (more memory efficient than base64 for large files)
+#[cfg(feature = "web")]
 fn create_object_url(data: &[u8], mime_type: &str) -> Option<String> {
     use web_sys::BlobPropertyBag;
     let uint8_array = js_sys::Uint8Array::from(data);
@@ -501,10 +562,13 @@ fn create_object_url(data: &[u8], mime_type: &str) -> Option<String> {
     blob_parts.push(&uint8_array);
     let blob_options = BlobPropertyBag::new();
     blob_options.set_type(mime_type);
-    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(
-            &blob_parts,
-            &blob_options,
-        )
-        .ok()?;
+    let blob =
+        web_sys::Blob::new_with_u8_array_sequence_and_options(&blob_parts, &blob_options).ok()?;
     web_sys::Url::create_object_url_with_blob(&blob).ok()
+}
+
+/// Create an Object URL - native stub
+#[cfg(not(feature = "web"))]
+fn create_object_url(_data: &[u8], _mime_type: &str) -> Option<String> {
+    None
 }

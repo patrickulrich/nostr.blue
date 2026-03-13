@@ -18,13 +18,13 @@ pub use nkbips::nkbip06;
 pub use nkbips::nkbip08;
 
 pub mod audio;
+pub use audio::ics;
 pub use audio::podcast;
 pub use audio::radio;
-pub use audio::ics;
 
 pub mod parsing;
-pub use parsing::content_parser;
 pub use parsing::asciidoc;
+pub use parsing::content_parser;
 pub use parsing::markdown;
 pub use parsing::mention_extractor;
 pub use parsing::thread_tree;
@@ -33,10 +33,10 @@ pub mod recipes;
 pub use recipes::recipe;
 pub use recipes::recipe_tags;
 
-pub mod permissions;
-pub mod bolt11;
 pub mod article_meta;
+pub mod bolt11;
 pub mod clipboard;
+pub mod custom_emoji;
 pub mod data_state;
 pub mod date_helpers;
 pub mod download;
@@ -48,26 +48,28 @@ pub mod list_encryption;
 pub mod list_kinds;
 pub mod nip19;
 pub mod notification_nip78;
+pub mod path_validation;
+pub mod permissions;
 pub mod pin_metadata;
 pub mod profile_prefetch;
 pub mod repost;
+pub mod text;
 pub mod time;
 pub mod timed_serializer;
 pub mod url_metadata;
-pub mod path_validation;
 pub mod validation;
 pub mod video_kinds;
 pub use data_state::DataState;
+pub use error::log_fetch_error;
 pub use format::{
-    format_relative_time_or, format_sats_compact, format_sats_with_separator,
-    shorten_url, truncate_pubkey,
+    format_relative_time_or, format_sats_compact, format_sats_with_separator, shorten_url,
+    truncate_pubkey,
 };
 pub use list_kinds::{get_item_count, get_list_icon, get_list_type_name};
-pub use thread_tree::{build_thread_tree, ThreadNode};
-pub use error::log_fetch_error;
-pub use repost::{extract_reposted_event, process_events_to_feed_items, FeedItem};
-pub use time::{format_commit_date, format_time_ago, safe_duration_millis};
 pub use path_validation::is_safe_path;
+pub use repost::{extract_reposted_event, process_events_to_feed_items, FeedItem};
+pub use thread_tree::{build_thread_tree, ThreadNode};
+pub use time::{format_commit_date, format_time_ago, safe_duration_millis};
 pub use validation::{css_safe_url, is_valid_http_url};
 /// Generate a random alphanumeric ID (9 characters)
 /// Used for poll options and other unique identifiers
@@ -75,7 +77,9 @@ pub fn generate_option_id() -> String {
     use rand::Rng;
     const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
     let mut rng = rand::thread_rng();
-    (0..9).map(|_| CHARSET[rng.gen_range(0..CHARSET.len())] as char).collect()
+    (0..9)
+        .map(|_| CHARSET[rng.gen_range(0..CHARSET.len())] as char)
+        .collect()
 }
 /// Slugify a string for use as a d-tag or URL-safe identifier
 ///

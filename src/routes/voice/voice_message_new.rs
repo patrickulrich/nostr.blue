@@ -10,28 +10,27 @@ pub fn VoiceMessageNew() -> Element {
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut selected_server = use_signal(blossom_store::get_primary_server);
-    let is_authenticated = use_memo(move || {
-        auth_store::AUTH_STATE.read().is_authenticated
-    });
+    let is_authenticated = use_memo(move || auth_store::AUTH_STATE.read().is_authenticated);
     let can_publish = audio_data.read().is_some() && !*is_publishing.read();
     let handle_close = move |_| {
         navigator.go_back();
     };
-    let handle_recording_complete = move |
-        (bytes, duration, waveform, mime_type): (Vec<u8>, f64, Vec<u8>, String)|
-    {
-        log::info!(
-            "Recording complete: {} bytes, duration: {}s, waveform points: {}, MIME: {}",
-            bytes.len(), duration, waveform.len(), mime_type
-        );
-        audio_data.set(Some((bytes, duration, waveform, mime_type)));
-    };
+    let handle_recording_complete =
+        move |(bytes, duration, waveform, mime_type): (Vec<u8>, f64, Vec<u8>, String)| {
+            log::info!(
+                "Recording complete: {} bytes, duration: {}s, waveform points: {}, MIME: {}",
+                bytes.len(),
+                duration,
+                waveform.len(),
+                mime_type
+            );
+            audio_data.set(Some((bytes, duration, waveform, mime_type)));
+        };
     let handle_publish = move |_| {
         if !can_publish {
             return;
         }
-        let Some((bytes, duration, waveform, mime_type)) = audio_data.read().clone()
-        else {
+        let Some((bytes, duration, waveform, mime_type)) = audio_data.read().clone() else {
             return;
         };
         let hashtags_val = hashtags.read().clone();
@@ -44,28 +43,22 @@ pub fn VoiceMessageNew() -> Element {
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect();
-            match blossom_store::upload_audio(bytes, mime_type.clone(), Some(server_url))
-                .await
-            {
+            match blossom_store::upload_audio(bytes, mime_type.clone(), Some(server_url)).await {
                 Ok(audio_url) => {
                     log::info!("Audio uploaded successfully: {}", audio_url);
                     match crate::stores::nostr_client::publish_voice_message(
-                            audio_url,
-                            duration,
-                            waveform,
-                            tags_vec,
-                            Some(mime_type),
-                        )
-                        .await
+                        audio_url,
+                        duration,
+                        waveform,
+                        tags_vec,
+                        Some(mime_type),
+                    )
+                    .await
                     {
                         Ok(event_id) => {
-                            log::info!(
-                                "Voice message published successfully: {}", event_id
-                            );
+                            log::info!("Voice message published successfully: {}", event_id);
                             is_publishing.set(false);
-                            navigator
-                                .push(crate::routes::Route::VoiceMessages {
-                                });
+                            navigator.push(crate::routes::Route::VoiceMessages {});
                         }
                         Err(e) => {
                             log::error!("Failed to publish voice message: {}", e);
@@ -84,10 +77,9 @@ pub fn VoiceMessageNew() -> Element {
     };
     use_effect(move || {
         if !*is_authenticated.read() {
-            navigator
-                .push(crate::routes::Route::Home {
-                    list: String::new(),
-                });
+            navigator.push(crate::routes::Route::Home {
+                list: String::new(),
+            });
         }
     });
     if !*is_authenticated.read() {

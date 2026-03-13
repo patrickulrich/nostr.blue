@@ -13,10 +13,7 @@ use crate::services::profile_search::{
 };
 
 #[component]
-pub fn MobileSearchSlideout(
-    show: Signal<bool>,
-    on_close: EventHandler<()>,
-) -> Element {
+pub fn MobileSearchSlideout(show: bool, on_close: EventHandler<()>) -> Element {
     let mut query = use_signal(String::new);
     let mut show_dropdown = use_signal(|| false);
     let mut search_results = use_signal(Vec::<ProfileSearchResult>::new);
@@ -35,8 +32,8 @@ pub fn MobileSearchSlideout(
     });
 
     // Reset state when closing
-    use_effect(move || {
-        if !*show.read() {
+    use_effect(use_reactive(&show, move |is_open| {
+        if !is_open {
             query.set(String::new());
             show_dropdown.set(false);
             search_results.set(Vec::new());
@@ -46,7 +43,7 @@ pub fn MobileSearchSlideout(
                 task.cancel();
             }
         }
-    });
+    }));
 
     let handle_input = move |evt: DioxusEvent<FormData>| {
         let new_value = evt.value().clone();
@@ -54,6 +51,11 @@ pub fn MobileSearchSlideout(
 
         if new_value.is_empty() {
             show_dropdown.set(false);
+            // Cancel any pending relay search
+            if let Some(task) = relay_search_task.take() {
+                task.cancel();
+            }
+            is_searching.set(false);
             return;
         }
 
@@ -67,21 +69,13 @@ pub fn MobileSearchSlideout(
         if new_value.len() >= 2 && cached_results.len() < 5 {
             is_searching.set(true);
 
-            if let Some(task) = relay_search_task.read().as_ref() {
+            if let Some(task) = relay_search_task.take() {
                 task.cancel();
             }
 
             let query_snapshot = new_value.clone();
             let new_task = spawn(async move {
-                #[cfg(target_family = "wasm")]
-                {
-                    gloo_timers::future::TimeoutFuture::new(300).await;
-                }
-                #[cfg(not(target_family = "wasm"))]
-                {
-                    use std::time::Duration;
-                    tokio::time::sleep(Duration::from_millis(300)).await;
-                }
+                crate::platform::timer::sleep_ms(300).await;
 
                 let query_relays = query_snapshot.len() >= 3;
                 match search_profiles(&query_snapshot, 10, query_relays).await {
@@ -101,6 +95,10 @@ pub fn MobileSearchSlideout(
             });
             relay_search_task.set(Some(new_task));
         } else {
+            // Cancel any pending relay search before clearing loading state
+            if let Some(task) = relay_search_task.take() {
+                task.cancel();
+            }
             is_searching.set(false);
         }
     };
@@ -162,7 +160,7 @@ pub fn MobileSearchSlideout(
         }
     };
 
-    if !*show.read() {
+    if !show {
         return rsx! {};
     }
 

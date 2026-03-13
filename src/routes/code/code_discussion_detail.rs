@@ -34,7 +34,9 @@ pub fn CodeDiscussionDetail(note_id: String) -> Element {
         spawn(async move {
             loading.set(true);
             let result = fetch_discussion(&note_id).await;
-            if *request_gen.peek() != gen { return; }
+            if *request_gen.peek() != gen {
+                return;
+            }
             discussion_result.set(Some(result));
             loading.set(false);
         });
@@ -118,7 +120,9 @@ fn DiscussionContent(discussion: Discussion, is_authenticated: bool) -> Element 
         }
         spawn(async move {
             if let Ok(repo) = fetch_repository(&naddr).await {
-                if *repo_gen.peek() != gen { return; }
+                if *repo_gen.peek() != gen {
+                    return;
+                }
                 repo_data.set(Some(repo));
             }
         });
@@ -128,8 +132,8 @@ fn DiscussionContent(discussion: Discussion, is_authenticated: bool) -> Element 
     let mut new_comment = use_signal(String::new);
     let mut is_submitting = use_signal(|| false);
     let mut comment_error = use_signal(|| None::<String>);
-    let mut comments = use_resource(use_reactive(&discussion_id, move |id| {
-        async move { fetch_discussion_comments_by_id(&id).await }
+    let mut comments = use_resource(use_reactive(&discussion_id, move |id| async move {
+        fetch_discussion_comments_by_id(&id).await
     }));
     let category_label = discussion.category.as_deref().map(|c| match c {
         "general" => "General",
@@ -142,7 +146,9 @@ fn DiscussionContent(discussion: Discussion, is_authenticated: bool) -> Element 
         let discussion_id = discussion_id.clone();
         let discussion_pubkey = discussion_pubkey.clone();
         move |_| {
-            if *is_submitting.peek() { return; }
+            if *is_submitting.peek() {
+                return;
+            }
             let content = new_comment.read().clone();
             let id = discussion_id.clone();
             let author = discussion_pubkey.clone();

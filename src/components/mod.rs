@@ -1,72 +1,73 @@
 pub mod article_card;
 pub mod article_content;
+pub mod badge_detail_modal;
+pub mod book_picker_modal;
+pub mod cashu;
+pub mod citation;
+pub mod client_initializing;
+pub mod code;
 pub mod comment_composer;
 pub mod confirm_modal;
-pub mod icons;
-pub mod note;
-pub mod note_card;
-pub mod note_composer;
-pub mod photo_card;
-pub mod reply_composer;
-pub mod rich_content;
-pub mod search_input;
-pub mod mobile_search_slideout;
-pub mod threaded_comment;
-pub mod trending_notes;
-pub mod video_card;
-pub mod client_initializing;
 pub mod content_menu;
+pub mod dvm_selector_modal;
+pub mod emoji_pack_manager_modal;
 pub mod emoji_picker;
+pub mod external_content_card;
 pub mod gif_picker;
+pub mod gif_upload_modal;
+pub mod icons;
 pub mod live;
 pub mod markdown_editor;
 pub mod media_uploader;
 pub mod mention_autocomplete;
+pub mod mobile_search_slideout;
+pub mod nip_card;
+pub mod note;
+pub mod note_card;
+pub mod note_composer;
 pub mod note_menu;
+pub mod nwc_setup_modal;
+pub mod password_modal;
+pub mod photo_card;
+pub mod profile_badges;
 pub mod profile_editor_modal;
 pub mod radial_menu;
+pub mod reply_composer;
+pub mod report_modal;
+pub mod rich_content;
+pub mod right_discovery_sidebar;
+pub mod search_input;
 pub mod share_modal;
+pub mod shop;
+pub mod threaded_comment;
 pub mod token_list;
 pub mod transaction_history;
+pub mod trending_notes;
+pub mod video_card;
 pub mod virtual_list;
 pub mod wallet_balance_card;
 pub mod webbookmark_card;
 pub mod webbookmark_modal;
 pub mod zap_modal;
-pub mod cashu;
-pub mod dvm_selector_modal;
-pub mod external_content_card;
-pub mod gif_upload_modal;
-pub mod nip_card;
-pub mod nwc_setup_modal;
-pub mod password_modal;
-pub mod report_modal;
-pub mod badge_detail_modal;
-pub mod profile_badges;
-pub mod code;
-pub mod citation;
-pub mod shop;
-pub mod book_picker_modal;
 pub use article_card::{ArticleCard, ArticleCardSkeleton};
 pub use article_content::ArticleContent;
+pub use client_initializing::ClientInitializing;
 pub use comment_composer::CommentComposer;
 pub use confirm_modal::ConfirmModal;
+#[allow(unused_imports)]
+pub use live::{
+    ChannelChat, LiveChat, LiveStreamPlayer, LiveStreamShareModal, MiniLiveStreamCard, StreamStatus,
+};
+pub use media_uploader::MediaUploader;
+pub use mobile_search_slideout::MobileSearchSlideout;
 pub use note_card::{NoteCard, NoteCardSkeleton};
 pub use note_composer::NoteComposer;
 pub use photo_card::PhotoCard;
 pub use reply_composer::ReplyComposer;
 pub use rich_content::RichContent;
 pub use search_input::SearchInput;
-pub use mobile_search_slideout::MobileSearchSlideout;
 pub use threaded_comment::ThreadedComment;
-pub use trending_notes::TrendingNotes;
 pub use video_card::VideoCard;
-pub use client_initializing::ClientInitializing;
-#[allow(unused_imports)]
-pub use live::{
-    ChannelChat, LiveChat, LiveStreamPlayer, LiveStreamShareModal, MiniLiveStreamCard, StreamStatus,
-};
-pub use media_uploader::MediaUploader;
 pub use webbookmark_card::{WebBookmarkCard, WebBookmarkCardSkeleton};
 pub use webbookmark_modal::{BookmarkModalMode, WebBookmarkModal};
 pub use zap_modal::ZapModal;
@@ -84,6 +85,7 @@ pub mod nostr_mention_dialog;
 #[allow(unused_imports)]
 pub use nostr_mention_dialog::{MentionSelection, MentionType, NostrMentionDialog};
 pub mod image_upload_dialog;
+pub use emoji_pack_manager_modal::EmojiPackManagerModal;
 pub use emoji_picker::EmojiPicker;
 pub use image_upload_dialog::{ImageInsertData, ImageUploadDialog};
 pub use profile_editor_modal::ProfileEditorModal;
@@ -93,37 +95,37 @@ pub use mention_autocomplete::MentionAutocomplete;
 pub use share_modal::ShareModal;
 pub use sidebar_customizer_modal::SidebarCustomizerModal;
 pub mod content_share_modal;
+pub use cashu::{
+    CashuAddMintModal, CashuCreateRequestModal, CashuMintDiscoveryModal, CashuOptimizeModal,
+    CashuPayRequestModal, CashuReceiveLightningModal, CashuReceiveModal, CashuSendLightningModal,
+    CashuSendModal, CashuSetupWizard, CashuTermsModal, CashuTokenCard, CashuTransferModal,
+};
 pub use content_share_modal::{ContentShareModal, ContentType};
+pub use dvm_selector_modal::DvmSelectorModal;
 pub use markdown_editor::MarkdownEditor;
 pub use note_menu::NoteMenu;
+pub use nwc_setup_modal::NwcSetupModal;
 pub use radial_menu::RadialMenu;
+pub use report_modal::ReportModal;
+pub use right_discovery_sidebar::RightDiscoverySidebar;
 pub use token_list::TokenList;
 pub use transaction_history::TransactionHistory;
 pub use wallet_balance_card::WalletBalanceCard;
-pub use cashu::{
-    CashuAddMintModal, CashuCreateRequestModal, CashuMintDiscoveryModal,
-    CashuOptimizeModal, CashuPayRequestModal, CashuReceiveLightningModal,
-    CashuReceiveModal, CashuSendLightningModal, CashuSendModal, CashuSetupWizard,
-    CashuTermsModal, CashuTokenCard, CashuTransferModal,
-};
-pub use nwc_setup_modal::NwcSetupModal;
-pub use report_modal::ReportModal;
-pub use dvm_selector_modal::DvmSelectorModal;
 pub mod dialog;
 pub mod modal;
 #[allow(unused_imports)]
 pub use modal::{Modal, ModalBody, ModalFooter, ModalHeader};
 pub mod toast;
-pub use external_content_card::ExternalContentList;
+pub use book_picker_modal::{BookPickerModal, BookSelection};
+pub use citation::{CitationPickerModal, CitationSelection};
 #[allow(unused_imports)]
 pub use code::{
     BranchSelector, CodeFileTree, CodeFileViewer, CodeFileViewerSkeleton, CodeIssueRow,
-    CodePullRow, CodeReactions, CodeRepoCard, CodeSnippetCard, CodeStatusBadge,
-    FilePathBreadcrumb, FileTreeSkeleton, LabelPicker, PRReviewSection,
+    CodePullRow, CodeReactions, CodeRepoCard, CodeSnippetCard, CodeStatusBadge, FilePathBreadcrumb,
+    FileTreeSkeleton, LabelPicker, PRReviewSection,
 };
+pub use external_content_card::ExternalContentList;
 pub use nip_card::{CustomNipCard, DocSpecCard, NipCardSkeleton, OfficialNipCard};
-pub use citation::{CitationPickerModal, CitationSelection};
-pub use book_picker_modal::{BookPickerModal, BookSelection};
 pub use profile_badges::ProfileBadgesSection;
 pub mod p2p;
 pub use p2p::{
@@ -133,14 +135,13 @@ pub use p2p::{
 pub mod community;
 pub use community::{
     CommunityCard, CommunityCardSkeleton, CommunityCardWithMembership, CommunityPostCard,
-    CommunityPostCardSkeleton, CommunityPostComposer, CommunityPostComposerInline,
-    JoinButton, UserRoleBadge,
+    CommunityPostCardSkeleton, CommunityPostComposer, CommunityPostComposerInline, JoinButton,
+    UserRoleBadge,
 };
 pub mod topic;
 #[allow(unused_imports)]
 pub use topic::{
-    ThreadView, TopicBadge, TopicCard, TopicPostCard, TopicPostComposer, TopicSidebar,
-    VoteColumn,
+    ThreadView, TopicBadge, TopicCard, TopicPostCard, TopicPostComposer, TopicSidebar, VoteColumn,
 };
 pub mod pwa_update_banner;
 pub use pwa_update_banner::PwaUpdateBanner;
@@ -148,8 +149,8 @@ pub use pwa_update_banner::PwaUpdateBanner;
 // Organized subdirectories
 pub mod board;
 pub use board::{
-    BoardSlideover, HashtagBadge, PinBoardMosaicGrid, PinCardMosaicSkeleton, PinMosaicGrid,
-    PinMenu, PinToBoardRequest, PinnedNotesCarousel,
+    BoardSlideover, HashtagBadge, PinBoardMosaicGrid, PinCardMosaicSkeleton, PinMenu,
+    PinMosaicGrid, PinToBoardRequest, PinnedNotesCarousel,
 };
 
 pub mod calendar;
@@ -164,9 +165,7 @@ pub mod highlight;
 pub use highlight::{HighlightCard, HighlightCardSkeleton, HighlightModal};
 
 pub mod list;
-pub use list::{
-    AddToListModal, AddToPeopleListModal, CreateListModal, PeopleListMembersModal,
-};
+pub use list::{AddToListModal, AddToPeopleListModal, CreateListModal, PeopleListMembersModal};
 
 pub mod music;
 pub use music::{
@@ -179,8 +178,8 @@ pub mod podcast;
 pub use podcast::{
     DisplayEpisode, FeaturedSoundbite, InlineCredits, PodcastAddFeedModal, PodcastChapters,
     PodcastEpisodeCard, PodcastEpisodeCardSkeleton, PodcastEpisodeList, PodcastPersons,
-    PodcastShow, PodcastShowCard, PodcastShowCardSkeleton, PodcastSoundbites,
-    PodcastTranscript, V4VBoostButton, V4VInfo,
+    PodcastShow, PodcastShowCard, PodcastShowCardSkeleton, PodcastSoundbites, PodcastTranscript,
+    V4VBoostButton, V4VInfo,
 };
 
 pub mod poll;
@@ -203,16 +202,16 @@ pub mod recipe;
 pub use recipe::{
     AddToCookbookModal, CookbookCard, CookbookCardSkeleton, CreateCookbookModal,
     DiscoverRecipeCard, DiscoverRecipeCardSkeleton, RecipeCard, RecipeCardSkeleton,
-    RecipeDetailView, RecipeDetailViewSkeleton, RecipeForm, RecipeFormData,
-    RecipeTagChipExplore,
+    RecipeDetailView, RecipeDetailViewSkeleton, RecipeForm, RecipeFormData, RecipeTagChipExplore,
 };
 
 pub mod voice;
-pub use voice::{VoiceMessageCard, VoiceRecorder, VoiceReplyComposer};
+pub use voice::VoiceMessageCard;
+pub use voice::VoiceRecorder;
+pub use voice::VoiceReplyComposer;
 
 pub mod wiki;
 pub use wiki::{
     WikiBacklinks, WikiCardSearchResult, WikiCardSkeleton, WikiDownloadMenu, WikiForwardLinks,
-    WikiGrid, WikiMetadataCard, WikiOutline, WikiPageContent, WikiPageNotFound,
-    WikiPageSkeleton,
+    WikiGrid, WikiMetadataCard, WikiOutline, WikiPageContent, WikiPageNotFound, WikiPageSkeleton,
 };

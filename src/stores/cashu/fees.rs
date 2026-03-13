@@ -3,11 +3,11 @@
 //! Comprehensive fee estimation including P2PK witness overhead.
 //! Provides accurate fee quotes for all transaction types.
 #![allow(dead_code)]
-use dioxus::prelude::ReadableExt;
 use super::internal::get_or_create_wallet;
 use super::signals::WALLET_TOKENS;
 use super::types::{ProofData, WalletTokensStoreStoreExt};
 use super::utils::mint_matches;
+use dioxus::prelude::ReadableExt;
 /// Estimated witness overhead for P2PK proofs (bytes)
 /// Includes signature + public key serialization
 pub const P2PK_WITNESS_OVERHEAD: usize = 128;
@@ -34,12 +34,7 @@ pub struct FeeEstimate {
 }
 impl FeeEstimate {
     /// Create from components
-    pub fn new(
-        base_fee: u64,
-        witness_fee: u64,
-        proof_count: usize,
-        fee_ppk: u64,
-    ) -> Self {
+    pub fn new(base_fee: u64, witness_fee: u64, proof_count: usize, fee_ppk: u64) -> Self {
         Self {
             base_fee,
             witness_fee,
@@ -94,10 +89,7 @@ pub fn calculate_proof_fee(proof_count: usize, fee_ppk: u64) -> u64 {
     base.saturating_add(999) / 1000
 }
 /// Estimate fee for a simple send (no P2PK)
-pub async fn estimate_simple_send_fee(
-    mint_url: &str,
-    amount: u64,
-) -> Result<FeeEstimate, String> {
+pub async fn estimate_simple_send_fee(mint_url: &str, amount: u64) -> Result<FeeEstimate, String> {
     let fee_ppk = get_mint_fee_ppk(mint_url).await?;
     let proof_count = (amount as u128).count_ones() as usize;
     let base_fee = calculate_proof_fee(proof_count, fee_ppk);
@@ -119,7 +111,12 @@ pub async fn estimate_p2pk_send_fee(
     } else {
         0
     };
-    Ok(FeeEstimate::new(base_fee, witness_fee, proof_count, fee_ppk))
+    Ok(FeeEstimate::new(
+        base_fee,
+        witness_fee,
+        proof_count,
+        fee_ppk,
+    ))
 }
 /// Estimate fee for multisig P2PK
 pub async fn estimate_multisig_fee(
@@ -135,10 +132,7 @@ pub async fn estimate_multisig_fee(
     estimate_p2pk_send_fee(mint_url, amount, complexity).await
 }
 /// Estimate fee for HTLC send
-pub async fn estimate_htlc_fee(
-    mint_url: &str,
-    amount: u64,
-) -> Result<FeeEstimate, String> {
+pub async fn estimate_htlc_fee(mint_url: &str, amount: u64) -> Result<FeeEstimate, String> {
     estimate_p2pk_send_fee(mint_url, amount, P2pkComplexity::Htlc).await
 }
 /// Estimate fee for receiving P2PK tokens
@@ -159,7 +153,12 @@ pub async fn estimate_p2pk_receive_fee(
     } else {
         0
     };
-    Ok(FeeEstimate::new(base_fee, witness_fee, proof_count, fee_ppk))
+    Ok(FeeEstimate::new(
+        base_fee,
+        witness_fee,
+        proof_count,
+        fee_ppk,
+    ))
 }
 /// Estimate fee for a swap operation
 pub async fn estimate_swap_fee(
@@ -241,13 +240,16 @@ mod tests {
     #[test]
     fn test_p2pk_witness_size() {
         assert_eq!(P2pkComplexity::None.witness_size(), 0);
-        assert_eq!(P2pkComplexity::SingleSig.witness_size(), P2PK_WITNESS_OVERHEAD);
+        assert_eq!(
+            P2pkComplexity::SingleSig.witness_size(),
+            P2PK_WITNESS_OVERHEAD
+        );
         assert_eq!(
             P2pkComplexity::MultiSig {
                 required: 2,
                 total: 3,
             }
-                .witness_size(),
+            .witness_size(),
             P2PK_WITNESS_OVERHEAD + MULTISIG_SIGNATURE_OVERHEAD,
         );
     }

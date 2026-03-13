@@ -79,15 +79,18 @@ pub fn parse_cargo_toml(content: &str) -> Vec<Dependency> {
             let name = name.trim().to_string();
             let rest_trimmed = rest.trim();
             let (version, dep_type) = if rest_trimmed.starts_with('"') {
-                (if let Some(start) = rest_trimmed.find('"') {
-                    if let Some(end) = rest_trimmed[start+1..].find('"') {
-                        rest_trimmed[start+1..start+1+end].to_string()
+                (
+                    if let Some(start) = rest_trimmed.find('"') {
+                        if let Some(end) = rest_trimmed[start + 1..].find('"') {
+                            rest_trimmed[start + 1..start + 1 + end].to_string()
+                        } else {
+                            rest_trimmed.trim_matches('"').to_string()
+                        }
                     } else {
-                        rest_trimmed.trim_matches('"').to_string()
-                    }
-                } else {
-                    rest_trimmed.to_string()
-                }, dep_type)
+                        rest_trimmed.to_string()
+                    },
+                    dep_type,
+                )
             } else if rest_trimmed.contains('{') {
                 // Handle multiline inline tables: if '{' is present but '}' is not,
                 // consume subsequent lines until '}' is found
@@ -131,7 +134,11 @@ pub fn parse_cargo_toml(content: &str) -> Vec<Dependency> {
                     }
                 }
                 let version = ver.unwrap_or_else(|| "*".to_string());
-                let dep_type = if is_optional { DepType::Optional } else { dep_type };
+                let dep_type = if is_optional {
+                    DepType::Optional
+                } else {
+                    dep_type
+                };
                 (version, dep_type)
             } else {
                 ("*".to_string(), dep_type)
@@ -187,7 +194,9 @@ pub fn parse_package_json(content: &str) -> Vec<Dependency> {
                 });
             }
         }
-        let bundle_val = json.get("bundleDependencies").or_else(|| json.get("bundledDependencies"));
+        let bundle_val = json
+            .get("bundleDependencies")
+            .or_else(|| json.get("bundledDependencies"));
         if let Some(val) = bundle_val {
             if let Some(arr) = val.as_array() {
                 for item in arr {
@@ -268,10 +277,16 @@ pub fn parse_dependencies(filename: &str, content: &str) -> Vec<Dependency> {
 
 #[component]
 pub fn DependencyViewer(deps: Vec<Dependency>, filename: String) -> Element {
-    let runtime_count = deps.iter().filter(|d| d.dep_type == DepType::Runtime).count();
+    let runtime_count = deps
+        .iter()
+        .filter(|d| d.dep_type == DepType::Runtime)
+        .count();
     let dev_count = deps.iter().filter(|d| d.dep_type == DepType::Dev).count();
     let build_count = deps.iter().filter(|d| d.dep_type == DepType::Build).count();
-    let optional_count = deps.iter().filter(|d| d.dep_type == DepType::Optional).count();
+    let optional_count = deps
+        .iter()
+        .filter(|d| d.dep_type == DepType::Optional)
+        .count();
 
     rsx! {
         div { class: "space-y-4",

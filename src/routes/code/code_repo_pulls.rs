@@ -1,7 +1,7 @@
 //! Repository Pull Requests Page
 //!
 //! View pull requests for a repository with filtering by status, search, and labels.
-use crate::components::code::{FilterBar, StatusFilter, filter_prs};
+use crate::components::code::{filter_prs, FilterBar, StatusFilter};
 use crate::components::{icons, CodePullRow};
 use crate::routes::Route;
 use crate::services::git_hosting::fetch_repo_prs;
@@ -36,7 +36,9 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
         loading.set(true);
         spawn(async move {
             let result = fetch_repo_prs(&naddr).await;
-            if *request_gen.peek() != gen { return; }
+            if *request_gen.peek() != gen {
+                return;
+            }
             match result {
                 Ok(fetched) => {
                     all_prs.set(fetched);

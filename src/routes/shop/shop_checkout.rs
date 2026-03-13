@@ -6,8 +6,8 @@ use crate::stores::cashu_cdk_bridge::WALLET_BALANCES;
 use crate::stores::nwc_store;
 use crate::stores::profiles;
 use crate::stores::shop_store::{
-    clear_cart, create_shop_order, fetch_shipping_options, get_cart_count,
-    set_cart_item_shipping, CART_ITEMS, CART_TOTAL_SATS,
+    clear_cart, create_shop_order, fetch_shipping_options, get_cart_count, set_cart_item_shipping,
+    CART_ITEMS, CART_TOTAL_SATS,
 };
 use crate::utils::format::{format_sats_with_separator, truncate_pubkey};
 use crate::utils::nip99::{CartItem, ShippingOption};
@@ -53,7 +53,10 @@ fn group_items_by_merchant(items: &[CartItem]) -> Vec<(String, Vec<CartItem>, u6
         entry.0.push(item.clone());
         entry.1 += item_sats;
     }
-    groups.into_iter().map(|(pk, (items, total))| (pk, items, total)).collect()
+    groups
+        .into_iter()
+        .map(|(pk, (items, total))| (pk, items, total))
+        .collect()
 }
 /// Checkout page
 #[component]
@@ -105,25 +108,21 @@ pub fn ShopCheckout() -> Element {
             for (pk, merchant_items, amount) in grouped {
                 let profile_result = profiles::fetch_profile(pk.clone()).await;
                 if let Ok(profile) = profile_result {
-                    let name = profile
-                        .name
-                        .clone()
-                        .unwrap_or_else(|| truncate_pubkey(&pk));
+                    let name = profile.name.clone().unwrap_or_else(|| truncate_pubkey(&pk));
                     if let Some(ref lud16) = profile.lud16 {
                         if first_lud16.is_none() {
                             first_lud16 = Some(lud16.clone());
                         }
-                        payments
-                            .push(MerchantPayment {
-                                pubkey: pk.clone(),
-                                name: name.clone(),
-                                lud16: lud16.clone(),
-                                amount_sats: amount,
-                                items: merchant_items,
-                                invoice: None,
-                                paid: false,
-                                preimage: None,
-                            });
+                        payments.push(MerchantPayment {
+                            pubkey: pk.clone(),
+                            name: name.clone(),
+                            lud16: lud16.clone(),
+                            amount_sats: amount,
+                            items: merchant_items,
+                            invoice: None,
+                            paid: false,
+                            preimage: None,
+                        });
                     } else {
                         all_have_lud16 = false;
                         missing_lightning.push(name);
@@ -1012,9 +1011,7 @@ fn LightningInvoiceDisplay(
 ) -> Element {
     let mut copied = use_signal(|| false);
     let mut waiting_for_payment = use_signal(|| false);
-    let sanitized_invoice = crate::utils::validation::sanitize_lightning_invoice(
-        &invoice,
-    );
+    let sanitized_invoice = crate::utils::validation::sanitize_lightning_invoice(&invoice);
     let qr_data = sanitized_invoice
         .as_ref()
         .map(|inv| format!("lightning:{}", inv))
@@ -1084,7 +1081,7 @@ fn LightningInvoiceDisplay(
                             spawn(async move {
                                 if crate::utils::clipboard::copy_to_clipboard(&inv).await.is_ok() {
                                     copied.set(true);
-                                    gloo_timers::future::TimeoutFuture::new(2000).await;
+                                    crate::platform::timer::sleep_ms(2000).await;
                                     copied.set(false);
                                 }
                             });
@@ -1113,7 +1110,7 @@ fn LightningInvoiceDisplay(
                 onclick: move |_| {
                     waiting_for_payment.set(true);
                     spawn(async move {
-                        gloo_timers::future::TimeoutFuture::new(1500).await;
+                        crate::platform::timer::sleep_ms(1500).await;
                         on_paid.call("manual_payment".to_string());
                     });
                 },
@@ -1263,7 +1260,7 @@ fn MultiMerchantPaymentDisplay(
                                         spawn(async move {
                                             if crate::utils::clipboard::copy_to_clipboard(&inv).await.is_ok() {
                                                 copied.set(true);
-                                                gloo_timers::future::TimeoutFuture::new(2000).await;
+                                                crate::platform::timer::sleep_ms(2000).await;
                                                 copied.set(false);
                                             }
                                         });
@@ -1322,9 +1319,7 @@ fn ShippingStep(
         .filter(|item| item.product.requires_shipping())
         .cloned()
         .collect();
-    let mut shipping_options_map = use_signal(
-        HashMap::<String, Vec<ShippingOption>>::new,
-    );
+    let mut shipping_options_map = use_signal(HashMap::<String, Vec<ShippingOption>>::new);
     let mut shipping_loading = use_signal(|| true);
     let items_for_effect = physical_items.clone();
     use_effect(move || {
@@ -1334,11 +1329,7 @@ fn ShippingStep(
             let mut opts_map = HashMap::new();
             for item in items {
                 if !item.product.shipping_options.is_empty() {
-                    if let Ok(opts) = fetch_shipping_options(
-                            &item.product.shipping_options,
-                        )
-                        .await
-                    {
+                    if let Ok(opts) = fetch_shipping_options(&item.product.shipping_options).await {
                         opts_map.insert(item.product.naddr.clone(), opts);
                     }
                 }
@@ -1350,29 +1341,23 @@ fn ShippingStep(
     let shipping_total: u64 = physical_items
         .iter()
         .filter_map(|item| {
-            item.selected_shipping
-                .as_ref()
-                .and_then(|selected_naddr| {
-                    shipping_options_map
-                        .read()
-                        .get(&item.product.naddr)
-                        .and_then(|opts| {
-                            opts.iter().find(|o| &o.naddr == selected_naddr)
-                        })
-                        .map(|opt| opt.base_price as u64)
-                })
+            item.selected_shipping.as_ref().and_then(|selected_naddr| {
+                shipping_options_map
+                    .read()
+                    .get(&item.product.naddr)
+                    .and_then(|opts| opts.iter().find(|o| &o.naddr == selected_naddr))
+                    .map(|opt| opt.base_price as u64)
+            })
         })
         .sum();
-    let all_shipping_selected = physical_items
-        .iter()
-        .all(|item| {
-            let has_options = shipping_options_map
-                .read()
-                .get(&item.product.naddr)
-                .map(|opts| !opts.is_empty())
-                .unwrap_or(false);
-            !has_options || item.selected_shipping.is_some()
-        });
+    let all_shipping_selected = physical_items.iter().all(|item| {
+        let has_options = shipping_options_map
+            .read()
+            .get(&item.product.naddr)
+            .map(|opts| !opts.is_empty())
+            .unwrap_or(false);
+        !has_options || item.selected_shipping.is_some()
+    });
     let can_continue = !shipping_address.trim().is_empty() && all_shipping_selected;
     rsx! {
         div { class: "space-y-6",

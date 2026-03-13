@@ -40,9 +40,7 @@ struct BountyListing {
 
 /// Fetch all bounties from relays (Kind 9806), then look up associated issue titles.
 async fn fetch_all_bounties() -> Result<Vec<BountyListing>, String> {
-    let filter = Filter::new()
-        .kind(Kind::Custom(Bounty::KIND))
-        .limit(200);
+    let filter = Filter::new().kind(Kind::Custom(Bounty::KIND)).limit(200);
     let events = nostr_client::fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
         .map_err(|e| format!("Failed to fetch bounties: {}", e))?;
@@ -59,9 +57,7 @@ async fn fetch_all_bounties() -> Result<Vec<BountyListing>, String> {
     // Fetch associated issue events in one batch
     let mut issue_map: HashMap<EventId, Issue> = HashMap::new();
     if !issue_ids.is_empty() {
-        let issue_filter = Filter::new()
-            .ids(issue_ids)
-            .kind(Kind::GitIssue);
+        let issue_filter = Filter::new().ids(issue_ids).kind(Kind::GitIssue);
         match nostr_client::fetch_events_aggregated(issue_filter, FETCH_TIMEOUT).await {
             Ok(issue_events) => {
                 for event in &issue_events {
@@ -80,7 +76,9 @@ async fn fetch_all_bounties() -> Result<Vec<BountyListing>, String> {
 
     let mut listings = Vec::new();
     for bounty in bounties {
-        let issue = EventId::from_hex(&bounty.issue_event_id).ok().and_then(|eid| issue_map.get(&eid));
+        let issue = EventId::from_hex(&bounty.issue_event_id)
+            .ok()
+            .and_then(|eid| issue_map.get(&eid));
         let issue_title = issue.and_then(|i| i.subject.clone());
         let repo_name = issue.and_then(|i| {
             if i.repository_naddr.is_empty() {
@@ -125,10 +123,20 @@ pub fn CodeBounties() -> Element {
         loading.set(true);
         spawn(async move {
             match fetch_all_bounties().await {
-                Ok(b) => { if *gen.peek() == current_gen { bounties.set(b); } }
-                Err(e) => { if *gen.peek() == current_gen { error.set(Some(e)); } }
+                Ok(b) => {
+                    if *gen.peek() == current_gen {
+                        bounties.set(b);
+                    }
+                }
+                Err(e) => {
+                    if *gen.peek() == current_gen {
+                        error.set(Some(e));
+                    }
+                }
             }
-            if *gen.peek() == current_gen { loading.set(false); }
+            if *gen.peek() == current_gen {
+                loading.set(false);
+            }
         });
     });
 
@@ -171,9 +179,15 @@ pub fn CodeBounties() -> Element {
         .collect();
 
     match current_sort {
-        BountySort::Newest => sorted_bounties.sort_by(|a, b| b.bounty.created_at.cmp(&a.bounty.created_at)),
-        BountySort::HighestReward => sorted_bounties.sort_by(|a, b| b.bounty.amount_sats.cmp(&a.bounty.amount_sats)),
-        BountySort::LowestReward => sorted_bounties.sort_by(|a, b| a.bounty.amount_sats.cmp(&b.bounty.amount_sats)),
+        BountySort::Newest => {
+            sorted_bounties.sort_by(|a, b| b.bounty.created_at.cmp(&a.bounty.created_at))
+        }
+        BountySort::HighestReward => {
+            sorted_bounties.sort_by(|a, b| b.bounty.amount_sats.cmp(&a.bounty.amount_sats))
+        }
+        BountySort::LowestReward => {
+            sorted_bounties.sort_by(|a, b| a.bounty.amount_sats.cmp(&b.bounty.amount_sats))
+        }
     }
 
     // Stats (single read of bounties signal)

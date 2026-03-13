@@ -30,7 +30,10 @@ pub fn parse_milestones(tags: &[Vec<String>]) -> Vec<Milestone> {
                     (t[3].clone(), None)
                 }
             } else {
-                (t.get(3).cloned().unwrap_or_default(), t.get(4).and_then(|s| s.parse().ok()))
+                (
+                    t.get(3).cloned().unwrap_or_default(),
+                    t.get(4).and_then(|s| s.parse().ok()),
+                )
             };
             Milestone {
                 id: t[1].clone(),

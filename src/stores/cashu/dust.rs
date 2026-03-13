@@ -3,15 +3,15 @@
 //! Automatic consolidation of small proofs ("dust") to reduce wallet overhead.
 //! Small proofs increase storage, fee costs, and transaction complexity.
 #![allow(dead_code)]
-use std::collections::HashMap;
-use dioxus::prelude::ReadableExt;
-use futures::stream::{self, StreamExt};
 use super::internal::get_or_create_wallet;
 use super::proofs::proof_data_to_cdk_proof;
 use super::signals::{try_acquire_mint_lock, WALLET_TOKENS};
 use super::types::{ProofData, WalletTokensStoreStoreExt};
 use super::utils::{mint_matches, normalize_mint_url};
 use crate::stores::cashu_cdk_bridge;
+use dioxus::prelude::ReadableExt;
+use futures::stream::{self, StreamExt};
+use std::collections::HashMap;
 /// Default threshold for considering a proof as "dust" (in sats)
 pub const DEFAULT_DUST_THRESHOLD: u64 = 4;
 /// Minimum number of dust proofs before consolidation is recommended
@@ -62,8 +62,8 @@ pub fn get_dust_stats(mint_url: &str, threshold: u64) -> DustStats {
         .fold(0u64, |acc, amt| acc.saturating_add(amt));
     let avg_value = total_value / count as u64;
     let estimated_fee = count as u64;
-    let should_consolidate = count >= MIN_DUST_COUNT && total_value > estimated_fee
-        && total_value <= MAX_DUST_TOTAL;
+    let should_consolidate =
+        count >= MIN_DUST_COUNT && total_value > estimated_fee && total_value <= MAX_DUST_TOTAL;
     DustStats {
         count,
         total_value,
@@ -127,17 +127,17 @@ pub async fn consolidate_dust(
         .map(|p| p.amount)
         .fold(0u64, |acc, amt| acc.saturating_add(amt));
     log::info!(
-        "Consolidating {} dust proofs ({} sats) for {}", count, input_value, normalized
+        "Consolidating {} dust proofs ({} sats) for {}",
+        count,
+        input_value,
+        normalized
     );
     let estimated_fee = count as u64;
     if input_value <= estimated_fee {
-        return Err(
-            format!(
-                "Dust consolidation not worthwhile: {} sats value, {} sats estimated fee",
-                input_value,
-                estimated_fee,
-            ),
-        );
+        return Err(format!(
+            "Dust consolidation not worthwhile: {} sats value, {} sats estimated fee",
+            input_value, estimated_fee,
+        ));
     }
     let cdk_proofs: Vec<cdk::nuts::Proof> = dust_proofs
         .iter()
@@ -162,11 +162,16 @@ pub async fn consolidate_dust(
         .fold(0u64, |acc, amt| acc.saturating_add(amt));
     let fee_paid = input_value.saturating_sub(output_value);
     log::info!(
-        "Dust consolidation complete: {} proofs -> {} proofs, fee: {} sats", count,
-        output_proofs.len(), fee_paid
+        "Dust consolidation complete: {} proofs -> {} proofs, fee: {} sats",
+        count,
+        output_proofs.len(),
+        fee_paid
     );
     if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
-        log::warn!("Failed to sync wallet state after dust consolidation: {}", e);
+        log::warn!(
+            "Failed to sync wallet state after dust consolidation: {}",
+            e
+        );
     }
     Ok(DustConsolidationResult {
         proofs_consolidated: count,
@@ -193,8 +198,9 @@ pub async fn consolidate_all_dust(
         return HashMap::new();
     }
     log::info!(
-        "Consolidating dust for {} mints (max {} concurrent)", mints_to_consolidate
-        .len(), MAX_CONCURRENT_CONSOLIDATIONS
+        "Consolidating dust for {} mints (max {} concurrent)",
+        mints_to_consolidate.len(),
+        MAX_CONCURRENT_CONSOLIDATIONS
     );
     let results: Vec<_> = stream::iter(mints_to_consolidate)
         .map(|mint_url| async move {

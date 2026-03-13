@@ -2,13 +2,13 @@
 //!
 //! Renders an interactive card for Cashu ecash tokens found in note content.
 //! Supports both V3 (cashuA) and V4 (cashuB) token formats.
+use crate::stores::nostr_client::HAS_SIGNER;
 use cdk::nuts::CurrencyUnit;
 use dioxus::prelude::*;
 use dioxus_core::spawn_forever;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use std::str::FromStr;
 use std::time::Duration;
-use crate::stores::nostr_client::HAS_SIGNER;
 /// State machine for token claim operations
 #[derive(Clone, Debug, PartialEq)]
 enum ClaimState {
@@ -111,7 +111,10 @@ pub fn CashuTokenCard(token: String) -> Element {
             .unwrap_or_else(|| "sats".to_string());
         move |e: MouseEvent| {
             e.stop_propagation();
-            if !matches!(*claim_state.read(), ClaimState::Idle | ClaimState::Failed(_)) {
+            if !matches!(
+                *claim_state.read(),
+                ClaimState::Idle | ClaimState::Failed(_)
+            ) {
                 return;
             }
             let token = token.clone();
@@ -132,12 +135,16 @@ pub fn CashuTokenCard(token: String) -> Element {
         }
     };
     let handle_wallet = {
-        let token = token.clone();
+        #[allow(unused_variables)]
+        let wallet_token = token.clone();
         move |e: MouseEvent| {
             e.stop_propagation();
-            if let Some(window) = web_sys::window() {
-                let url = format!("cashu://{}", token);
-                let _ = window.open_with_url_and_target(&url, "_blank");
+            #[cfg(feature = "web")]
+            {
+                if let Some(window) = web_sys::window() {
+                    let url = format!("cashu://{}", wallet_token);
+                    let _ = window.open_with_url_and_target(&url, "_blank");
+                }
             }
         }
     };
@@ -151,16 +158,15 @@ pub fn CashuTokenCard(token: String) -> Element {
                 match copy_to_clipboard(&token).await {
                     Ok(_) => {
                         copied.set(true);
-                        gloo_timers::future::TimeoutFuture::new(2000).await;
+                        crate::platform::timer::sleep_ms(2000).await;
                         copied.set(false);
                     }
                     Err(e) => {
                         log::warn!("Failed to copy to clipboard: {:?}", e);
-                        toast_api
-                            .error(
-                                "Failed to copy".to_string(),
-                                ToastOptions::new().duration(Duration::from_secs(2)),
-                            );
+                        toast_api.error(
+                            "Failed to copy".to_string(),
+                            ToastOptions::new().duration(Duration::from_secs(2)),
+                        );
                     }
                 }
             });
@@ -239,10 +245,19 @@ pub fn CashuTokenCard(token: String) -> Element {
                             }
                         },
                     }
-                    button {
-                        class: "px-4 py-2 bg-amber-100 dark:bg-amber-800/50 text-amber-800 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-700/50 rounded-full text-sm font-medium transition",
-                        onclick: handle_wallet,
-                        "Wallet"
+                    if cfg!(feature = "web") {
+                        button {
+                            class: "px-4 py-2 bg-amber-100 dark:bg-amber-800/50 text-amber-800 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-700/50 rounded-full text-sm font-medium transition",
+                            onclick: handle_wallet,
+                            "Wallet"
+                        }
+                    } else {
+                        button {
+                            class: "px-4 py-2 bg-amber-100 dark:bg-amber-800/50 text-amber-800 dark:text-amber-200 rounded-full text-sm font-medium opacity-50 cursor-not-allowed",
+                            disabled: true,
+                            title: "Not supported on this platform",
+                            "Wallet"
+                        }
                     }
                     button {
                         class: "px-4 py-2 bg-amber-100 dark:bg-amber-800/50 text-amber-800 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-700/50 rounded-full text-sm font-medium transition",

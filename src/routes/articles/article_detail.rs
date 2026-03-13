@@ -1,13 +1,11 @@
 use crate::components::{
-    icons::*, ArticleContent, ClientInitializing, CommentComposer, ShareModal,
-    ThreadedComment,
+    icons::*, ArticleContent, ClientInitializing, CommentComposer, ShareModal, ThreadedComment,
 };
 use crate::routes::Route;
 use crate::stores::bookmarks;
 use crate::stores::nostr_client;
 use crate::utils::article_meta::{
-    calculate_read_time, get_hashtags, get_image, get_published_at, get_summary,
-    get_title,
+    calculate_read_time, get_hashtags, get_image, get_published_at, get_summary, get_title,
 };
 use crate::utils::{build_thread_tree, format_relative_time_or, truncate_pubkey};
 use dioxus::prelude::*;
@@ -44,11 +42,11 @@ pub fn ArticleDetail(naddr: String) -> Element {
                 Ok((pubkey, identifier)) => {
                     crate::stores::profiles::PROFILE_CACHE.write().pop(&pubkey);
                     match nostr_client::fetch_event_by_coordinate(
-                            nostr_sdk::Kind::LongFormTextNote.as_u16(),
-                            pubkey.clone(),
-                            identifier,
-                        )
-                        .await
+                        nostr_sdk::Kind::LongFormTextNote.as_u16(),
+                        pubkey.clone(),
+                        identifier,
+                    )
+                    .await
                     {
                         Ok(Some(event)) => {
                             article.set(Some(event.clone()));
@@ -56,9 +54,9 @@ pub fn ArticleDetail(naddr: String) -> Element {
                             use crate::utils::profile_prefetch;
                             spawn(async move {
                                 profile_prefetch::prefetch_event_authors(&[event]).await;
-                                if let Some(profile) = crate::stores::profiles::get_cached_profile(
-                                    &pubkey,
-                                ) {
+                                if let Some(profile) =
+                                    crate::stores::profiles::get_cached_profile(&pubkey)
+                                {
                                     let mut metadata = nostr_sdk::Metadata::new();
                                     if let Some(name) = profile.name {
                                         metadata = metadata.name(name);
@@ -101,16 +99,8 @@ pub fn ArticleDetail(naddr: String) -> Element {
             let event_id = event.id;
             spawn(async move {
                 loading_comments.set(true);
-                let filter = Filter::new()
-                    .kind(Kind::Comment)
-                    .event(event_id)
-                    .limit(500);
-                match nostr_client::fetch_events_aggregated(
-                        filter,
-                        Duration::from_secs(10),
-                    )
-                    .await
-                {
+                let filter = Filter::new().kind(Kind::Comment).event(event_id).limit(500);
+                match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
                     Ok(mut comment_events) => {
                         comment_events.sort_by(|a, b| a.created_at.cmp(&b.created_at));
                         log::info!("Loaded {} NIP-22 comments", comment_events.len());
@@ -134,7 +124,10 @@ pub fn ArticleDetail(naddr: String) -> Element {
                         Ok(output) => {
                             let subscription_id = output.val;
                             comment_sub_id.set(Some(subscription_id.clone()));
-                            log::debug!("Subscribed for new comments on article {}", event_id.to_hex());
+                            log::debug!(
+                                "Subscribed for new comments on article {}",
+                                event_id.to_hex()
+                            );
 
                             spawn(async move {
                                 let mut notifications = client.notifications();
@@ -193,12 +186,7 @@ pub fn ArticleDetail(naddr: String) -> Element {
                     .kind(Kind::Reaction)
                     .event(event_id)
                     .limit(500);
-                match nostr_client::fetch_events_aggregated(
-                        filter,
-                        Duration::from_secs(10),
-                    )
-                    .await
-                {
+                match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
                     Ok(reaction_events) => {
                         let mut likes = 0;
                         let mut user_has_liked = false;
@@ -207,9 +195,7 @@ pub fn ArticleDetail(naddr: String) -> Element {
                                 likes += 1;
                             }
                             if let Some(ref user_pk) = current_user_pubkey {
-                                if reaction.pubkey.to_hex() == *user_pk
-                                    && reaction.content != "-"
-                                {
+                                if reaction.pubkey.to_hex() == *user_pk && reaction.content != "-" {
                                     user_has_liked = true;
                                 }
                             }
@@ -217,7 +203,8 @@ pub fn ArticleDetail(naddr: String) -> Element {
                         like_count.set(likes);
                         is_liked.set(user_has_liked);
                         log::info!(
-                            "Loaded {} reactions for article, user has liked: {}", likes,
+                            "Loaded {} reactions for article, user has liked: {}",
+                            likes,
                             user_has_liked
                         );
                     }
@@ -503,7 +490,8 @@ fn decode_naddr(naddr: &str) -> std::result::Result<(String, String), String> {
             let identifier = nip19_coord.identifier.clone();
             if !nip19_coord.relays.is_empty() {
                 log::debug!(
-                    "Article naddr contains {} relay hints", nip19_coord.relays.len()
+                    "Article naddr contains {} relay hints",
+                    nip19_coord.relays.len()
                 );
                 for relay in &nip19_coord.relays {
                     log::debug!("  Relay hint: {}", relay);

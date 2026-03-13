@@ -7,10 +7,10 @@
 //!
 //! NIP-58 defines a standard for badges that can be issued, awarded, and displayed
 //! on user profiles.
+use crate::stores::nostr_client;
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use crate::stores::nostr_client;
 /// Badge definition event kind (addressable)
 pub const KIND_BADGE_DEFINITION: u16 = 30009;
 /// Badge award event kind (regular)
@@ -86,13 +86,11 @@ pub struct ProfileBadgeEntry {
 /// Parse a badge definition from a Kind 30009 event
 pub fn parse_badge_definition(event: &Event) -> Result<BadgeDefinition, String> {
     if event.kind.as_u16() != KIND_BADGE_DEFINITION {
-        return Err(
-            format!(
-                "Expected kind {}, got {}",
-                KIND_BADGE_DEFINITION,
-                event.kind.as_u16(),
-            ),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_BADGE_DEFINITION,
+            event.kind.as_u16(),
+        ));
     }
     let pubkey = event.pubkey.to_hex();
     let id = get_tag_value(event, "d").ok_or("Missing required 'd' tag (badge ID)")?;
@@ -120,16 +118,19 @@ pub fn parse_badge_definition(event: &Event) -> Result<BadgeDefinition, String> 
 /// Parse a badge award from a Kind 8 event
 pub fn parse_badge_award(event: &Event) -> Result<BadgeAward, String> {
     if event.kind.as_u16() != KIND_BADGE_AWARD {
-        return Err(
-            format!("Expected kind {}, got {}", KIND_BADGE_AWARD, event.kind.as_u16()),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_BADGE_AWARD,
+            event.kind.as_u16()
+        ));
     }
-    let definition_coordinate = get_tag_value(event, "a")
-        .ok_or("Missing required 'a' tag (badge definition)")?;
+    let definition_coordinate =
+        get_tag_value(event, "a").ok_or("Missing required 'a' tag (badge definition)")?;
     if !definition_coordinate.starts_with(&format!("{}:", KIND_BADGE_DEFINITION)) {
-        return Err(
-            format!("Invalid badge definition coordinate: {}", definition_coordinate),
-        );
+        return Err(format!(
+            "Invalid badge definition coordinate: {}",
+            definition_coordinate
+        ));
     }
     let awardees = get_all_tag_values(event, "p");
     if awardees.is_empty() {
@@ -147,15 +148,18 @@ pub fn parse_badge_award(event: &Event) -> Result<BadgeAward, String> {
 /// Returns pairs of (definition_coordinate, award_event_id)
 pub fn parse_profile_badges(event: &Event) -> Result<Vec<ProfileBadgeEntry>, String> {
     if event.kind.as_u16() != KIND_PROFILE_BADGES {
-        return Err(
-            format!("Expected kind {}, got {}", KIND_PROFILE_BADGES, event.kind.as_u16()),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_PROFILE_BADGES,
+            event.kind.as_u16()
+        ));
     }
     let d_tag = get_tag_value(event, "d");
     if d_tag.as_deref() != Some(PROFILE_BADGES_D_TAG) {
-        return Err(
-            format!("Expected d-tag '{}', got {:?}", PROFILE_BADGES_D_TAG, d_tag),
-        );
+        return Err(format!(
+            "Expected d-tag '{}', got {:?}",
+            PROFILE_BADGES_D_TAG, d_tag
+        ));
     }
     let mut entries = Vec::new();
     let tags: Vec<_> = event.tags.iter().collect();
@@ -170,11 +174,10 @@ pub fn parse_profile_badges(event: &Event) -> Result<Vec<ProfileBadgeEntry>, Str
                     let next_slice = next_tag.as_slice();
                     if next_slice.first().map(|s| s.as_str()) == Some("e") {
                         if let Some(event_id) = next_slice.get(1) {
-                            entries
-                                .push(ProfileBadgeEntry {
-                                    definition_coordinate: coordinate.to_string(),
-                                    award_event_id: event_id.to_string(),
-                                });
+                            entries.push(ProfileBadgeEntry {
+                                definition_coordinate: coordinate.to_string(),
+                                award_event_id: event_id.to_string(),
+                            });
                             i += 2;
                             continue;
                         }
@@ -189,23 +192,19 @@ pub fn parse_profile_badges(event: &Event) -> Result<Vec<ProfileBadgeEntry>, Str
 /// Build a NIP-19 naddr for a badge definition
 pub fn build_badge_naddr(pubkey: &str, badge_id: &str) -> Option<String> {
     let pk = PublicKey::from_hex(pubkey).ok()?;
-    let coordinate = Coordinate::new(Kind::Custom(KIND_BADGE_DEFINITION), pk)
-        .identifier(badge_id);
+    let coordinate = Coordinate::new(Kind::Custom(KIND_BADGE_DEFINITION), pk).identifier(badge_id);
     let nip19 = Nip19Coordinate::new(coordinate, vec![]);
     nip19.to_bech32().ok()
 }
 /// Parse a badge naddr back to (pubkey, badge_id)
 pub fn parse_badge_naddr(naddr: &str) -> Result<(String, String), String> {
-    let nip19 = Nip19Coordinate::from_bech32(naddr)
-        .map_err(|e| format!("Invalid naddr: {}", e))?;
+    let nip19 = Nip19Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
     if nip19.coordinate.kind.as_u16() != KIND_BADGE_DEFINITION {
-        return Err(
-            format!(
-                "Expected kind {}, got {}",
-                KIND_BADGE_DEFINITION,
-                nip19.coordinate.kind.as_u16(),
-            ),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_BADGE_DEFINITION,
+            nip19.coordinate.kind.as_u16(),
+        ));
     }
     let pubkey = nip19.coordinate.public_key.to_hex();
     let badge_id = nip19.coordinate.identifier.clone();
@@ -220,8 +219,7 @@ pub async fn fetch_badge_definition(naddr: &str) -> Result<BadgeDefinition, Stri
         .author(pk)
         .identifier(&badge_id)
         .limit(1);
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await?;
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
     events
         .into_iter()
         .filter_map(|e| parse_badge_definition(&e).ok())
@@ -229,9 +227,7 @@ pub async fn fetch_badge_definition(naddr: &str) -> Result<BadgeDefinition, Stri
         .ok_or_else(|| "Badge not found".to_string())
 }
 /// Fetch a badge definition by coordinate string ("30009:pubkey:badge_id")
-pub async fn fetch_badge_by_coordinate(
-    coordinate: &str,
-) -> Result<BadgeDefinition, String> {
+pub async fn fetch_badge_by_coordinate(coordinate: &str) -> Result<BadgeDefinition, String> {
     let parts: Vec<&str> = coordinate.splitn(3, ':').collect();
     if parts.len() != 3 {
         return Err(format!("Invalid coordinate format: {}", coordinate));
@@ -240,7 +236,10 @@ pub async fn fetch_badge_by_coordinate(
     let pubkey = parts[1];
     let badge_id = parts[2];
     if kind_str != KIND_BADGE_DEFINITION.to_string() {
-        return Err(format!("Expected kind {}, got {}", KIND_BADGE_DEFINITION, kind_str));
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_BADGE_DEFINITION, kind_str
+        ));
     }
     let pk = PublicKey::from_hex(pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = Filter::new()
@@ -248,8 +247,7 @@ pub async fn fetch_badge_by_coordinate(
         .author(pk)
         .identifier(badge_id)
         .limit(1);
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await?;
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
     events
         .into_iter()
         .filter_map(|e| parse_badge_definition(&e).ok())
@@ -257,9 +255,7 @@ pub async fn fetch_badge_by_coordinate(
         .ok_or_else(|| "Badge not found".to_string())
 }
 /// Fetch profile badges for a user (accepted badges)
-pub async fn fetch_profile_badges(
-    pubkey: &str,
-) -> Result<Vec<ProfileBadgeEntry>, String> {
+pub async fn fetch_profile_badges(pubkey: &str) -> Result<Vec<ProfileBadgeEntry>, String> {
     let pk = PublicKey::from_hex(pubkey)
         .or_else(|_| PublicKey::from_bech32(pubkey))
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
@@ -268,8 +264,7 @@ pub async fn fetch_profile_badges(
         .author(pk)
         .identifier(PROFILE_BADGES_D_TAG)
         .limit(1);
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await?;
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
     if let Some(event) = events.into_iter().max_by_key(|e| e.created_at.as_secs()) {
         parse_profile_badges(&event)
     } else {
@@ -277,9 +272,7 @@ pub async fn fetch_profile_badges(
     }
 }
 /// Fetch badge awards where the user is an awardee
-pub async fn fetch_pending_badge_awards(
-    pubkey: &str,
-) -> Result<Vec<BadgeAward>, String> {
+pub async fn fetch_pending_badge_awards(pubkey: &str) -> Result<Vec<BadgeAward>, String> {
     let pk = PublicKey::from_hex(pubkey)
         .or_else(|_| PublicKey::from_bech32(pubkey))
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
@@ -287,21 +280,25 @@ pub async fn fetch_pending_badge_awards(
         .kind(Kind::Custom(KIND_BADGE_AWARD))
         .pubkey(pk)
         .limit(100);
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await?;
-    Ok(events.into_iter().filter_map(|e| parse_badge_award(&e).ok()).collect())
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+    Ok(events
+        .into_iter()
+        .filter_map(|e| parse_badge_award(&e).ok())
+        .collect())
 }
 /// Fetch all badge definitions (for discovery)
 pub async fn fetch_recent_badges(limit: usize) -> Result<Vec<BadgeDefinition>, String> {
-    let filter = Filter::new().kind(Kind::Custom(KIND_BADGE_DEFINITION)).limit(limit);
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await?;
-    Ok(events.into_iter().filter_map(|e| parse_badge_definition(&e).ok()).collect())
+    let filter = Filter::new()
+        .kind(Kind::Custom(KIND_BADGE_DEFINITION))
+        .limit(limit);
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+    Ok(events
+        .into_iter()
+        .filter_map(|e| parse_badge_definition(&e).ok())
+        .collect())
 }
 /// Fetch badge definitions created by a specific user
-pub async fn fetch_badges_by_issuer(
-    pubkey: &str,
-) -> Result<Vec<BadgeDefinition>, String> {
+pub async fn fetch_badges_by_issuer(pubkey: &str) -> Result<Vec<BadgeDefinition>, String> {
     let pk = PublicKey::from_hex(pubkey)
         .or_else(|_| PublicKey::from_bech32(pubkey))
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
@@ -309,9 +306,11 @@ pub async fn fetch_badges_by_issuer(
         .kind(Kind::Custom(KIND_BADGE_DEFINITION))
         .author(pk)
         .limit(100);
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await?;
-    Ok(events.into_iter().filter_map(|e| parse_badge_definition(&e).ok()).collect())
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+    Ok(events
+        .into_iter()
+        .filter_map(|e| parse_badge_definition(&e).ok())
+        .collect())
 }
 /// Create and publish a badge definition (kind 30009)
 pub async fn create_badge_definition(
@@ -332,12 +331,10 @@ pub async fn create_badge_definition(
         tags.push(Tag::custom(TagKind::Name, vec![name.to_string()]));
     }
     if let Some(description) = description {
-        tags.push(
-            Tag::custom(
-                TagKind::Custom("description".into()),
-                vec![description.to_string()],
-            ),
-        );
+        tags.push(Tag::custom(
+            TagKind::Custom("description".into()),
+            vec![description.to_string()],
+        ));
     }
     if let Some(image) = image_url {
         let mut image_tag = vec![image.to_string()];
@@ -371,11 +368,15 @@ pub async fn award_badge(
         return Err("No signer available".to_string());
     }
     if !definition_coordinate.starts_with(&format!("{}:", KIND_BADGE_DEFINITION)) {
-        return Err(format!("Invalid badge coordinate: {}", definition_coordinate));
+        return Err(format!(
+            "Invalid badge coordinate: {}",
+            definition_coordinate
+        ));
     }
-    let mut tags = vec![
-        Tag::custom(TagKind::Custom("a".into()), vec![definition_coordinate.to_string()]),
-    ];
+    let mut tags = vec![Tag::custom(
+        TagKind::Custom("a".into()),
+        vec![definition_coordinate.to_string()],
+    )];
     for awardee in awardees {
         let pk = PublicKey::from_hex(awardee)
             .or_else(|_| PublicKey::from_bech32(awardee))
@@ -399,28 +400,34 @@ pub async fn accept_badge(
         return Err("No signer available".to_string());
     }
     let pubkey = nostr_client::get_cached_pubkey()?;
-    let existing = fetch_profile_badges(&pubkey.to_hex()).await.unwrap_or_default();
-    if existing.iter().any(|e| e.definition_coordinate == definition_coordinate) {
+    let existing = fetch_profile_badges(&pubkey.to_hex())
+        .await
+        .unwrap_or_default();
+    if existing
+        .iter()
+        .any(|e| e.definition_coordinate == definition_coordinate)
+    {
         return Err("Badge already accepted".to_string());
     }
     let mut tags = vec![Tag::identifier(PROFILE_BADGES_D_TAG)];
     for entry in &existing {
-        tags.push(
-            Tag::custom(
-                TagKind::Custom("a".into()),
-                vec![entry.definition_coordinate.clone()],
-            ),
-        );
-        tags.push(
-            Tag::custom(TagKind::Custom("e".into()), vec![entry.award_event_id.clone()]),
-        );
+        tags.push(Tag::custom(
+            TagKind::Custom("a".into()),
+            vec![entry.definition_coordinate.clone()],
+        ));
+        tags.push(Tag::custom(
+            TagKind::Custom("e".into()),
+            vec![entry.award_event_id.clone()],
+        ));
     }
-    tags.push(
-        Tag::custom(TagKind::Custom("a".into()), vec![definition_coordinate.to_string()]),
-    );
-    tags.push(
-        Tag::custom(TagKind::Custom("e".into()), vec![award_event_id.to_string()]),
-    );
+    tags.push(Tag::custom(
+        TagKind::Custom("a".into()),
+        vec![definition_coordinate.to_string()],
+    ));
+    tags.push(Tag::custom(
+        TagKind::Custom("e".into()),
+        vec![award_event_id.to_string()],
+    ));
     let event = EventBuilder::new(Kind::Custom(KIND_PROFILE_BADGES), "").tags(tags);
     let output = client
         .send_event_builder(event)
@@ -435,22 +442,23 @@ pub async fn reject_badge(definition_coordinate: &str) -> Result<String, String>
         return Err("No signer available".to_string());
     }
     let pubkey = nostr_client::get_cached_pubkey()?;
-    let existing = fetch_profile_badges(&pubkey.to_hex()).await.unwrap_or_default();
+    let existing = fetch_profile_badges(&pubkey.to_hex())
+        .await
+        .unwrap_or_default();
     let remaining: Vec<_> = existing
         .iter()
         .filter(|e| e.definition_coordinate != definition_coordinate)
         .collect();
     let mut tags = vec![Tag::identifier(PROFILE_BADGES_D_TAG)];
     for entry in remaining {
-        tags.push(
-            Tag::custom(
-                TagKind::Custom("a".into()),
-                vec![entry.definition_coordinate.clone()],
-            ),
-        );
-        tags.push(
-            Tag::custom(TagKind::Custom("e".into()), vec![entry.award_event_id.clone()]),
-        );
+        tags.push(Tag::custom(
+            TagKind::Custom("a".into()),
+            vec![entry.definition_coordinate.clone()],
+        ));
+        tags.push(Tag::custom(
+            TagKind::Custom("e".into()),
+            vec![entry.award_event_id.clone()],
+        ));
     }
     let event = EventBuilder::new(Kind::Custom(KIND_PROFILE_BADGES), "").tags(tags);
     let output = client
@@ -477,10 +485,7 @@ fn get_all_tag_values(event: &Event, tag_name: &str) -> Vec<String> {
         .collect()
 }
 /// Get tag value and optional dimensions (for image/thumb tags)
-fn get_tag_with_dimensions(
-    event: &Event,
-    tag_name: &str,
-) -> (Option<String>, Option<String>) {
+fn get_tag_with_dimensions(event: &Event, tag_name: &str) -> (Option<String>, Option<String>) {
     if let Some(tag) = event
         .tags
         .iter()

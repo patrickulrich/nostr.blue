@@ -2,10 +2,10 @@
 //!
 //! A dialog for uploading images with alt text and title fields
 //! for better accessibility and SEO.
-use dioxus::prelude::*;
 use super::media_uploader::MediaUploader;
 use super::modal::{Modal, ModalBody, ModalFooter, ModalHeader};
 use crate::stores::blossom_store;
+use dioxus::prelude::*;
 /// Data returned when inserting an image
 #[derive(Clone, Debug, Default)]
 pub struct ImageInsertData {

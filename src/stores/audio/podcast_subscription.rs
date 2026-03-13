@@ -5,11 +5,11 @@
 //!
 //! Supports both RSS/Podcast 2.0 feeds (via `r` tags) and native Nostr podcasts
 //! (via `a` tags referencing Kind 30078 podcast metadata).
+use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
 use nostr_sdk::{EventBuilder, Filter, FromBech32, Kind, Tag};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use crate::stores::{auth_store, nostr_client};
 /// NIP-51 Kind 30003 - Bookmark Sets
 const LIST_KIND: u16 = 30003;
 /// D tag identifier for podcast subscriptions
@@ -89,9 +89,7 @@ impl PodcastSubscription {
     }
 }
 /// Global subscriptions list
-pub static SUBSCRIPTIONS: GlobalSignal<Vec<PodcastSubscription>> = Signal::global(
-    Vec::new,
-);
+pub static SUBSCRIPTIONS: GlobalSignal<Vec<PodcastSubscription>> = Signal::global(Vec::new);
 /// Loading state
 pub static SUBSCRIPTIONS_LOADING: GlobalSignal<bool> = Signal::global(|| false);
 /// Error state
@@ -177,8 +175,7 @@ pub async fn fetch_subscriptions() -> Result<Vec<PodcastSubscription>, String> {
         .identifier(D_TAG)
         .limit(1);
     nostr_client::ensure_relays_ready(&client).await;
-    let subscriptions = match client.fetch_events(filter, Duration::from_secs(10)).await
-    {
+    let subscriptions = match client.fetch_events(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 log::info!("Found podcast subscriptions event: {}", event.id);
@@ -191,7 +188,9 @@ pub async fn fetch_subscriptions() -> Result<Vec<PodcastSubscription>, String> {
         Err(e) => {
             let error_msg = format!("Fetch error: {}", e);
             log::warn!("Failed to fetch subscriptions: {}", e);
-            SUBSCRIPTIONS_ERROR.write().clone_from(&Some(error_msg.clone()));
+            SUBSCRIPTIONS_ERROR
+                .write()
+                .clone_from(&Some(error_msg.clone()));
             SUBSCRIPTIONS_LOADING.write().clone_from(&false);
             return Err(error_msg);
         }
@@ -209,10 +208,7 @@ fn parse_subscription_event(event: &nostr_sdk::Event) -> Vec<PodcastSubscription
         match tag_vec.as_slice() {
             ["i", identifier] | ["i", identifier, _] => {
                 if let Some(guid) = identifier.strip_prefix("podcast:guid:") {
-                    subscriptions
-                        .push(
-                            PodcastSubscription::from_rss(guid.to_string(), None, None),
-                        );
+                    subscriptions.push(PodcastSubscription::from_rss(guid.to_string(), None, None));
                 }
             }
             ["r", podcast_id_str] => {
@@ -222,17 +218,16 @@ fn parse_subscription_event(event: &nostr_sdk::Event) -> Vec<PodcastSubscription
                 );
             }
             ["a", coordinate] => {
-                subscriptions
-                    .push(PodcastSubscription::from_nostr(coordinate.to_string(), None));
+                subscriptions.push(PodcastSubscription::from_nostr(
+                    coordinate.to_string(),
+                    None,
+                ));
             }
             ["a", coordinate, relay_hint] => {
-                subscriptions
-                    .push(
-                        PodcastSubscription::from_nostr(
-                            coordinate.to_string(),
-                            Some(relay_hint.to_string()),
-                        ),
-                    );
+                subscriptions.push(PodcastSubscription::from_nostr(
+                    coordinate.to_string(),
+                    Some(relay_hint.to_string()),
+                ));
             }
             _ => {}
         }
@@ -248,18 +243,20 @@ pub async fn add_rss_subscription(
     podcast_id: Option<u64>,
     feed_url: Option<&str>,
 ) -> Result<(), String> {
-    log::info!("Adding RSS subscription: guid={}, id={:?}", podcast_guid, podcast_id);
+    log::info!(
+        "Adding RSS subscription: guid={}, id={:?}",
+        podcast_guid,
+        podcast_id
+    );
     if is_subscribed(podcast_guid) {
         return Err("Already subscribed to this podcast".to_string());
     }
     let mut subs = SUBSCRIPTIONS.read().clone();
-    subs.push(
-        PodcastSubscription::from_rss(
-            podcast_guid.to_string(),
-            podcast_id,
-            feed_url.map(String::from),
-        ),
-    );
+    subs.push(PodcastSubscription::from_rss(
+        podcast_guid.to_string(),
+        podcast_id,
+        feed_url.map(String::from),
+    ));
     publish_subscriptions(&subs).await?;
     SUBSCRIPTIONS.write().clone_from(&subs);
     Ok(())
@@ -274,12 +271,10 @@ pub async fn add_nostr_subscription(
         return Err("Already subscribed to this podcast".to_string());
     }
     let mut subs = SUBSCRIPTIONS.read().clone();
-    subs.push(
-        PodcastSubscription::from_nostr(
-            coordinate.to_string(),
-            relay_hint.map(String::from),
-        ),
-    );
+    subs.push(PodcastSubscription::from_nostr(
+        coordinate.to_string(),
+        relay_hint.map(String::from),
+    ));
     publish_subscriptions(&subs).await?;
     SUBSCRIPTIONS.write().clone_from(&subs);
     Ok(())
@@ -294,9 +289,7 @@ pub async fn remove_subscription(id: &str) -> Result<(), String> {
     Ok(())
 }
 /// Publish the subscription list to Nostr
-async fn publish_subscriptions(
-    subscriptions: &[PodcastSubscription],
-) -> Result<(), String> {
+async fn publish_subscriptions(subscriptions: &[PodcastSubscription]) -> Result<(), String> {
     if !auth_store::is_authenticated() {
         return Err("Not authenticated".to_string());
     }
@@ -318,32 +311,26 @@ async fn publish_subscriptions(
     ];
     let has_rss = subscriptions.iter().any(|s| s.podcast_guid.is_some());
     if has_rss {
-        tags.push(
-            Tag::custom(
-                nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("k")),
-                vec!["podcast:guid".to_string()],
-            ),
-        );
+        tags.push(Tag::custom(
+            nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("k")),
+            vec!["podcast:guid".to_string()],
+        ));
     }
     for sub in subscriptions {
         if let Some(ref guid) = sub.podcast_guid {
-            tags.push(
-                Tag::custom(
-                    nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("i")),
-                    vec![format!("podcast:guid:{}", guid)],
-                ),
-            );
+            tags.push(Tag::custom(
+                nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("i")),
+                vec![format!("podcast:guid:{}", guid)],
+            ));
         } else if let Some(ref coordinate) = sub.nostr_coordinate {
             let mut a_values = vec![coordinate.clone()];
             if let Some(ref relay) = sub.relay_hint {
                 a_values.push(relay.clone());
             }
-            tags.push(
-                Tag::custom(
-                    nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("a")),
-                    a_values,
-                ),
-            );
+            tags.push(Tag::custom(
+                nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("a")),
+                a_values,
+            ));
         }
     }
     let builder = EventBuilder::new(Kind::from(LIST_KIND), "").tags(tags);
@@ -360,15 +347,27 @@ pub fn get_subscriptions() -> Vec<PodcastSubscription> {
 }
 /// Get RSS subscriptions (for iterating and handling mixed ID types)
 pub fn get_rss_subscriptions() -> Vec<PodcastSubscription> {
-    SUBSCRIPTIONS.read().iter().filter(|s| s.is_rss()).cloned().collect()
+    SUBSCRIPTIONS
+        .read()
+        .iter()
+        .filter(|s| s.is_rss())
+        .cloned()
+        .collect()
 }
 /// Get only Nostr podcast coordinates
 pub fn get_nostr_podcasts() -> Vec<String> {
-    SUBSCRIPTIONS.read().iter().filter_map(|s| s.nostr_coordinate.clone()).collect()
+    SUBSCRIPTIONS
+        .read()
+        .iter()
+        .filter_map(|s| s.nostr_coordinate.clone())
+        .collect()
 }
 /// Check if subscribed to a feed/podcast
 pub fn is_subscribed(id: &str) -> bool {
-    SUBSCRIPTIONS.read().iter().any(|s| s.id().as_deref() == Some(id))
+    SUBSCRIPTIONS
+        .read()
+        .iter()
+        .any(|s| s.id().as_deref() == Some(id))
 }
 /// Check if currently loading
 pub fn is_loading() -> bool {

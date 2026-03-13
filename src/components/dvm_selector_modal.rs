@@ -2,9 +2,7 @@
 //!
 //! Shared modal component for selecting a DVM (Data Vending Machine) provider
 //! for content discovery. Used by both the DVM page and Explore page.
-use crate::stores::dvm_store::{
-    DVM_PROVIDERS, DVM_PROVIDERS_LOADING, SELECTED_DVM_PROVIDER,
-};
+use crate::stores::dvm_store::{DVM_PROVIDERS, DVM_PROVIDERS_LOADING, SELECTED_DVM_PROVIDER};
 use crate::utils::is_valid_http_url;
 use dioxus::prelude::*;
 use nostr_sdk::PublicKey;

@@ -15,28 +15,29 @@ use mentions::{EventMentionRenderer, MentionRenderer};
 use nostr_blue_renderers::{
     NostrBlueArticleRenderer, NostrBlueBadgeRenderer, NostrBlueCalendarEventRenderer,
     NostrBlueChannelRenderer, NostrBlueCodeRepoRenderer, NostrBlueCommunityRenderer,
-    NostrBlueLiveStreamRenderer,
-    NostrBlueMusicPlaylistRenderer, NostrBlueNoteRenderer, NostrBluePhotoRenderer,
-    NostrBluePinboardRenderer, NostrBluePodcastEpisodeRenderer, NostrBluePodcastShowRenderer,
-    NostrBlueProductRenderer, NostrBlueProfileRenderer, NostrBluePublicationRenderer,
-    NostrBlueRadioStationRenderer, NostrBlueRecipeRenderer, NostrBlueRssPodcastEpisodeRenderer,
-    NostrBlueRssPodcastShowRenderer, NostrBlueVideoRenderer, NostrBlueVoiceRenderer,
-    NostrBlueWikiRenderer,
+    NostrBlueLiveStreamRenderer, NostrBlueMusicPlaylistRenderer, NostrBlueNoteRenderer,
+    NostrBluePhotoRenderer, NostrBluePinboardRenderer, NostrBluePodcastEpisodeRenderer,
+    NostrBluePodcastShowRenderer, NostrBlueProductRenderer, NostrBlueProfileRenderer,
+    NostrBluePublicationRenderer, NostrBlueRadioStationRenderer, NostrBlueRecipeRenderer,
+    NostrBlueRssPodcastEpisodeRenderer, NostrBlueRssPodcastShowRenderer, NostrBlueVideoRenderer,
+    NostrBlueVoiceRenderer, NostrBlueWikiRenderer,
 };
 
 use crate::components::CashuTokenCard;
 use crate::routes::Route;
 use crate::utils::content_parser::{parse_content, ContentToken};
+use crate::utils::custom_emoji::render_custom_emoji_text;
 use dioxus::prelude::*;
 use nostr_sdk::Tag;
+use std::collections::HashMap;
 #[component]
 pub fn RichContent(
     content: String,
     tags: Vec<Tag>,
-    #[props(default = false)]
-    collapsible: bool,
+    #[props(default = false)] collapsible: bool,
 ) -> Element {
     let tokens = parse_content(&content, &tags);
+    let emoji_map = custom_emoji_map(&tags);
     let mut is_expanded = use_signal(|| false);
     let is_long_content = if collapsible {
         let char_count = content.chars().count();
@@ -46,37 +47,37 @@ pub fn RichContent(
                 matches!(
                     t,
                     ContentToken::Image(_)
-                    | ContentToken::Video(_)
-                    | ContentToken::WavlakeTrack(_)
-                    | ContentToken::WavlakeAlbum(_)
-                    | ContentToken::TwitterTweet(_)
-                    | ContentToken::TwitchStream(_)
-                    | ContentToken::TwitchClip(_)
-                    | ContentToken::TwitchVod(_)
-                    | ContentToken::EventMention(_)
-                    | ContentToken::CashuToken(_)
-                    | ContentToken::NostrBlueLiveStream(_)
-                    | ContentToken::NostrBlueVideo(_)
-                    | ContentToken::NostrBluePhoto(_)
-                    | ContentToken::NostrBluePodcastShow(_)
-                    | ContentToken::NostrBluePodcastEpisode(_)
-                    | ContentToken::NostrBlueArticle(_)
-                    | ContentToken::NostrBlueRecipe(_)
-                    | ContentToken::NostrBlueWiki(_)
-                    | ContentToken::NostrBluePublication(_)
-                    | ContentToken::NostrBluePinboard(_)
-                    | ContentToken::NostrBlueProduct(_)
-                    | ContentToken::NostrBlueCodeRepo(_)
-                    | ContentToken::NostrBlueVoice(_)
-                    | ContentToken::NostrBlueMusicPlaylist(_)
-                    | ContentToken::NostrBlueRadioStation(_)
-                    | ContentToken::NostrBlueNote(_)
-                    | ContentToken::NostrBlueProfile(_)
-                    | ContentToken::NostrBlueCalendarEvent(_)
-                    | ContentToken::NostrBlueBadge(_)
-                    | ContentToken::NostrBlueChannel(_)
-                    | ContentToken::NostrBlueRssPodcastEpisode(_, _)
-                    | ContentToken::NostrBlueRssPodcastShow(_)
+                        | ContentToken::Video(_)
+                        | ContentToken::WavlakeTrack(_)
+                        | ContentToken::WavlakeAlbum(_)
+                        | ContentToken::TwitterTweet(_)
+                        | ContentToken::TwitchStream(_)
+                        | ContentToken::TwitchClip(_)
+                        | ContentToken::TwitchVod(_)
+                        | ContentToken::EventMention(_)
+                        | ContentToken::CashuToken(_)
+                        | ContentToken::NostrBlueLiveStream(_)
+                        | ContentToken::NostrBlueVideo(_)
+                        | ContentToken::NostrBluePhoto(_)
+                        | ContentToken::NostrBluePodcastShow(_)
+                        | ContentToken::NostrBluePodcastEpisode(_)
+                        | ContentToken::NostrBlueArticle(_)
+                        | ContentToken::NostrBlueRecipe(_)
+                        | ContentToken::NostrBlueWiki(_)
+                        | ContentToken::NostrBluePublication(_)
+                        | ContentToken::NostrBluePinboard(_)
+                        | ContentToken::NostrBlueProduct(_)
+                        | ContentToken::NostrBlueCodeRepo(_)
+                        | ContentToken::NostrBlueVoice(_)
+                        | ContentToken::NostrBlueMusicPlaylist(_)
+                        | ContentToken::NostrBlueRadioStation(_)
+                        | ContentToken::NostrBlueNote(_)
+                        | ContentToken::NostrBlueProfile(_)
+                        | ContentToken::NostrBlueCalendarEvent(_)
+                        | ContentToken::NostrBlueBadge(_)
+                        | ContentToken::NostrBlueChannel(_)
+                        | ContentToken::NostrBlueRssPodcastEpisode(_, _)
+                        | ContentToken::NostrBlueRssPodcastShow(_)
                 )
             })
             .count();
@@ -94,12 +95,12 @@ pub fn RichContent(
                             TokenGroup::Inline(items) => rsx! {
                                 span { key: "inline-{items[0].0}",
                                     for (_idx , token) in items.iter() {
-                                        {render_token(token)}
+                                        {render_token(token, &emoji_map)}
                                     }
                                 }
                             },
                             TokenGroup::Block(idx, token) => rsx! {
-                                div { key: "{token_key(token, *idx)}", {render_token(token)} }
+                                div { key: "{token_key(token, *idx)}", {render_token(token, &emoji_map)} }
                             },
                         }
                     }
@@ -124,20 +125,29 @@ pub fn RichContent(
                 for group in groups.iter() {
                     match group {
                         TokenGroup::Inline(items) => rsx! {
-                            span { key: "inline-{items[0].0}",
-                                for (_idx , token) in items.iter() {
-                                    {render_token(token)}
+                                span { key: "inline-{items[0].0}",
+                                    for (_idx , token) in items.iter() {
+                                        {render_token(token, &emoji_map)}
+                                    }
                                 }
-                            }
-                        },
-                        TokenGroup::Block(idx, token) => rsx! {
-                            div { key: "{token_key(token, *idx)}", {render_token(token)} }
-                        },
+                            },
+                            TokenGroup::Block(idx, token) => rsx! {
+                                div { key: "{token_key(token, *idx)}", {render_token(token, &emoji_map)} }
+                            },
+                        }
                     }
-                }
             }
         }
     }
+}
+fn custom_emoji_map(tags: &[Tag]) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for tag in tags {
+        if let Some(nostr_sdk::TagStandard::Emoji { shortcode, url }) = tag.as_standardized() {
+            map.insert(shortcode.to_string(), url.to_string());
+        }
+    }
+    map
 }
 /// Simple hash function for generating stable keys (avoids external dependencies)
 fn hash_str(s: &str) -> u64 {
@@ -153,9 +163,9 @@ fn is_inline_token(token: &ContentToken) -> bool {
     matches!(
         token,
         ContentToken::Text(_)
-        | ContentToken::Link(_)
-        | ContentToken::Mention(_)
-        | ContentToken::Hashtag(_)
+            | ContentToken::Link(_)
+            | ContentToken::Mention(_)
+            | ContentToken::Hashtag(_)
     )
 }
 /// Represents a group of tokens for rendering purposes
@@ -312,15 +322,15 @@ fn token_key(token: &ContentToken, idx: usize) -> String {
         }
     }
 }
-fn render_token(token: &ContentToken) -> Element {
+fn render_token(token: &ContentToken, emoji_map: &HashMap<String, String>) -> Element {
     match token {
         ContentToken::Text(text) => {
-            rsx! {
-                span { "{text}" }
-            }
+            rsx! { span { {render_custom_emoji_text(text, emoji_map, "inline-block h-6 w-6 align-text-bottom mx-0.5 object-contain")} } }
         }
         ContentToken::Link(url) => {
-            let is_safe = url.starts_with("http://") || url.starts_with("https://") || url.starts_with("nostr:");
+            let is_safe = url.starts_with("http://")
+                || url.starts_with("https://")
+                || url.starts_with("nostr:");
             if is_safe {
                 rsx! {
                     a {
@@ -718,8 +728,7 @@ mod tests {
             ContentToken::PodcastFeed("guid123".to_string()),
             ContentToken::PodcastEpisode("ep-guid".to_string()),
             ContentToken::BitcoinTx(
-                "a1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d"
-                    .to_string(),
+                "a1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d".to_string(),
             ),
             ContentToken::BitcoinAddress("bc1qtest".to_string()),
             ContentToken::Geohash("u4pruydqqvj".to_string()),
@@ -744,10 +753,7 @@ mod tests {
             ContentToken::NostrBlueCodeRepo("naddr1test".to_string()),
             ContentToken::NostrBlueCommunity("34550:pubkey:community-name".to_string()),
             ContentToken::NostrBlueChannel("channel-id".to_string()),
-            ContentToken::NostrBlueRssPodcastEpisode(
-                "podcast123".to_string(),
-                "ep456".to_string(),
-            ),
+            ContentToken::NostrBlueRssPodcastEpisode("podcast123".to_string(), "ep456".to_string()),
             ContentToken::NostrBlueRssPodcastShow("podcast123".to_string()),
         ];
         assert_eq!(
@@ -773,8 +779,7 @@ mod tests {
         let key1 = token_key(&token1, 0);
         let key2 = token_key(&token2, 1);
         assert_ne!(
-            key1,
-            key2,
+            key1, key2,
             "Same Image URL at different positions should have unique keys",
         );
         let hashtag = "nostr";
@@ -783,8 +788,7 @@ mod tests {
         let key3 = token_key(&token3, 0);
         let key4 = token_key(&token4, 1);
         assert_ne!(
-            key3,
-            key4,
+            key3, key4,
             "Same Hashtag at different positions should have unique keys",
         );
         let youtube_url = "https://youtube.com/watch?v=abc123";
@@ -793,8 +797,7 @@ mod tests {
         let key5 = token_key(&token5, 0);
         let key6 = token_key(&token6, 1);
         assert_ne!(
-            key5,
-            key6,
+            key5, key6,
             "Same YouTube URL at different positions should have unique keys",
         );
         let note_id = "note1abc123def456";
@@ -803,25 +806,19 @@ mod tests {
         let key7 = token_key(&token7, 0);
         let key8 = token_key(&token8, 1);
         assert_ne!(
-            key7,
-            key8,
+            key7, key8,
             "Same NostrBlueNote at different positions should have unique keys",
         );
         let feed_url = "https://example.com/feed.xml";
         let guid = "episode-123";
-        let token9 = ContentToken::NostrBlueRssPodcastEpisode(
-            feed_url.to_string(),
-            guid.to_string(),
-        );
-        let token10 = ContentToken::NostrBlueRssPodcastEpisode(
-            feed_url.to_string(),
-            guid.to_string(),
-        );
+        let token9 =
+            ContentToken::NostrBlueRssPodcastEpisode(feed_url.to_string(), guid.to_string());
+        let token10 =
+            ContentToken::NostrBlueRssPodcastEpisode(feed_url.to_string(), guid.to_string());
         let key9 = token_key(&token9, 0);
         let key10 = token_key(&token10, 1);
         assert_ne!(
-            key9,
-            key10,
+            key9, key10,
             "Same NostrBlueRssPodcastEpisode at different positions should have unique keys",
         );
     }

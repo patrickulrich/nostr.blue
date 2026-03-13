@@ -2,18 +2,16 @@
 //!
 //! Displays the file tree for a repository at a specific path and ref.
 use crate::components::code::FuzzyFinder;
-use crate::components::{
-    BranchSelector, CodeFileTree, FilePathBreadcrumb, FileTreeSkeleton,
-};
+use crate::components::{BranchSelector, CodeFileTree, FilePathBreadcrumb, FileTreeSkeleton};
 use crate::routes::Route;
 use crate::services::git_hosting::{fetch_repository, file_fetcher, git_service};
 use crate::stores::nostr_client;
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 
 #[component]
@@ -29,11 +27,15 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
 
     // Store cleanup function for "t" key listener removal
     #[allow(unused_variables, unused_mut)]
+    #[cfg(feature = "web")]
     let mut t_key_cleanup = use_signal(|| None::<(js_sys::Function, web_sys::Window)>);
+    #[allow(unused_variables, unused_mut)]
+    #[cfg(not(feature = "web"))]
+    let mut t_key_cleanup = use_signal(|| None::<()>);
 
     // Keyboard shortcut: press 't' to open fuzzy finder (one-time registration)
     use_hook(move || {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
             let window = web_sys::window().expect("no global window");
             let closure = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
@@ -49,27 +51,28 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
                         }
                     }
                 }
-                if event.key() == "t"
-                    && !event.ctrl_key()
-                    && !event.meta_key()
-                    && !event.alt_key()
+                if event.key() == "t" && !event.ctrl_key() && !event.meta_key() && !event.alt_key()
                 {
                     event.prevent_default();
                     show_fuzzy_finder.set(true);
                 }
             }) as Box<dyn FnMut(_)>);
 
-            let js_fn: js_sys::Function = closure.as_ref().unchecked_ref::<js_sys::Function>().clone();
-            window.add_event_listener_with_callback("keydown", &js_fn).ok();
+            let js_fn: js_sys::Function =
+                closure.as_ref().unchecked_ref::<js_sys::Function>().clone();
+            window
+                .add_event_listener_with_callback("keydown", &js_fn)
+                .ok();
             t_key_cleanup.set(Some((js_fn, window.clone())));
             closure.forget();
         }
     });
 
     use_drop(move || {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         if let Some((func, win)) = t_key_cleanup.peek().as_ref() {
-            win.remove_event_listener_with_callback("keydown", func).ok();
+            win.remove_event_listener_with_callback("keydown", func)
+                .ok();
         }
     });
 
@@ -103,10 +106,9 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
                             return;
                         }
                         // Fall back to isomorphic-git (works for all sources including GRASP)
-                        if let Ok(paths) =
-                            git_service::git_service()
-                                .list_all_files(&repo, Some(&ref_str))
-                                .await
+                        if let Ok(paths) = git_service::git_service()
+                            .list_all_files(&repo, Some(&ref_str))
+                            .await
                         {
                             if *finder_cache_key.peek() == cache_key {
                                 all_file_paths.set(paths);
@@ -121,57 +123,73 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
     }
 
     let mut gen = use_signal(|| 0u32);
-    use_effect(use_reactive((&naddr, &git_ref, &path), move |(naddr, git_ref, path)| {
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !client_initialized {
-            return;
-        }
-        let current_gen = gen.peek().wrapping_add(1);
-        gen.set(current_gen);
-        spawn(async move {
-            loading.set(true);
-            error.set(None);
-            let repo = match fetch_repository(&naddr).await {
-                Ok(r) => r,
-                Err(e) => {
-                    if *gen.peek() != current_gen { return; }
-                    error.set(Some(format!("Repository not found: {}", e)));
-                    loading.set(false);
+    use_effect(use_reactive(
+        (&naddr, &git_ref, &path),
+        move |(naddr, git_ref, path)| {
+            let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+            if !client_initialized {
+                return;
+            }
+            let current_gen = gen.peek().wrapping_add(1);
+            gen.set(current_gen);
+            spawn(async move {
+                loading.set(true);
+                error.set(None);
+                let repo = match fetch_repository(&naddr).await {
+                    Ok(r) => r,
+                    Err(e) => {
+                        if *gen.peek() != current_gen {
+                            return;
+                        }
+                        error.set(Some(format!("Repository not found: {}", e)));
+                        loading.set(false);
+                        return;
+                    }
+                };
+                if *gen.peek() != current_gen {
                     return;
                 }
-            };
-            if *gen.peek() != current_gen { return; }
-            repo_signal.set(Some(repo.clone()));
-            if !git_service::GitService::is_initialized() {
-                if let Err(e) = git_service::GitService::init().await {
-                    if *gen.peek() != current_gen { return; }
-                    error.set(Some(format!("Failed to initialize git: {}", e)));
-                    loading.set(false);
+                repo_signal.set(Some(repo.clone()));
+                if !git_service::GitService::is_initialized() {
+                    if let Err(e) = git_service::GitService::init().await {
+                        if *gen.peek() != current_gen {
+                            return;
+                        }
+                        error.set(Some(format!("Failed to initialize git: {}", e)));
+                        loading.set(false);
+                        return;
+                    }
+                }
+                if *gen.peek() != current_gen {
                     return;
                 }
-            }
-            if *gen.peek() != current_gen { return; }
-            match git_service()
-                .list_files(&repo, &path, Some(&git_ref))
-                .await
-            {
-                Ok(entries) => {
-                    if *gen.peek() != current_gen { return; }
-                    files.set(entries);
+                match git_service().list_files(&repo, &path, Some(&git_ref)).await {
+                    Ok(entries) => {
+                        if *gen.peek() != current_gen {
+                            return;
+                        }
+                        files.set(entries);
+                    }
+                    Err(e) => {
+                        if *gen.peek() != current_gen {
+                            return;
+                        }
+                        error.set(Some(format!("Failed to load files: {}", e)));
+                    }
                 }
-                Err(e) => {
-                    if *gen.peek() != current_gen { return; }
-                    error.set(Some(format!("Failed to load files: {}", e)));
+                if *gen.peek() != current_gen {
+                    return;
                 }
-            }
-            if *gen.peek() != current_gen { return; }
-            if let Ok(branch_list) = git_service().get_branches(&repo).await {
-                if *gen.peek() != current_gen { return; }
-                branches.set(branch_list);
-            }
-            loading.set(false);
-        });
-    }));
+                if let Ok(branch_list) = git_service().get_branches(&repo).await {
+                    if *gen.peek() != current_gen {
+                        return;
+                    }
+                    branches.set(branch_list);
+                }
+                loading.set(false);
+            });
+        },
+    ));
     let repo_name = repo_signal()
         .map(|r| r.display_name().to_string())
         .unwrap_or_else(|| "Repository".to_string());

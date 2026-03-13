@@ -2,19 +2,13 @@
 //! Discovery card showing topic name, post count, and subscribe button
 use crate::routes::Route;
 use crate::stores::nostr_client::HAS_SIGNER;
-use crate::stores::topic_store::{
-    subscribe_to_topic, unsubscribe_from_topic, TopicInfo,
-};
+use crate::stores::topic_store::{subscribe_to_topic, unsubscribe_from_topic, TopicInfo};
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 
 /// Discovery card for browsing topics
 #[component]
-pub fn TopicCard(
-    topic_info: TopicInfo,
-    #[props(default = false)]
-    is_subscribed: bool,
-) -> Element {
+pub fn TopicCard(topic_info: TopicInfo, #[props(default = false)] is_subscribed: bool) -> Element {
     let has_signer = *HAS_SIGNER.read();
     let toast = consume_toast();
     let mut subscribing = use_signal(|| false);

@@ -28,9 +28,7 @@ static BOOK_WIKILINK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 });
 /// Matches book:: macros in content for extraction
 static BOOK_EXTRACT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-            r"book::(?:[a-z0-9-]+:)?[a-z0-9-]+(?:\s+\d+)?(?::[0-9,-]+)?(?:\s*\|\s*[a-z0-9-]+)?",
-        )
+    Regex::new(r"book::(?:[a-z0-9-]+:)?[a-z0-9-]+(?:\s+\d+)?(?::[0-9,-]+)?(?:\s*\|\s*[a-z0-9-]+)?")
         .unwrap()
 });
 /// Collection tag (uppercase C)
@@ -125,31 +123,33 @@ impl BookReference {
     /// Convert to nostr tags for indexing
     pub fn to_tags(&self) -> Vec<Tag> {
         let mut tags = Vec::new();
-        tags.push(
-            Tag::custom(TagKind::Custom(TAG_TITLE.into()), vec![self.title.clone()]),
-        );
+        tags.push(Tag::custom(
+            TagKind::Custom(TAG_TITLE.into()),
+            vec![self.title.clone()],
+        ));
         if let Some(ref collection) = self.collection {
-            tags.push(
-                Tag::custom(
-                    TagKind::Custom(TAG_COLLECTION.into()),
-                    vec![collection.clone()],
-                ),
-            );
+            tags.push(Tag::custom(
+                TagKind::Custom(TAG_COLLECTION.into()),
+                vec![collection.clone()],
+            ));
         }
         if let Some(ref chapter) = self.chapter {
-            tags.push(
-                Tag::custom(TagKind::Custom(TAG_CHAPTER.into()), vec![chapter.clone()]),
-            );
+            tags.push(Tag::custom(
+                TagKind::Custom(TAG_CHAPTER.into()),
+                vec![chapter.clone()],
+            ));
         }
         for section in &self.sections {
-            tags.push(
-                Tag::custom(TagKind::Custom(TAG_SECTION.into()), vec![section.clone()]),
-            );
+            tags.push(Tag::custom(
+                TagKind::Custom(TAG_SECTION.into()),
+                vec![section.clone()],
+            ));
         }
         if let Some(ref version) = self.version {
-            tags.push(
-                Tag::custom(TagKind::Custom(TAG_VERSION.into()), vec![version.clone()]),
-            );
+            tags.push(Tag::custom(
+                TagKind::Custom(TAG_VERSION.into()),
+                vec![version.clone()],
+            ));
         }
         tags
     }
@@ -159,16 +159,13 @@ impl BookReference {
             .kind(Kind::Custom(30041))
             .custom_tag(SingleLetterTag::uppercase(Alphabet::T), self.title.clone());
         if let Some(ref collection) = self.collection {
-            filter = filter
-                .custom_tag(SingleLetterTag::uppercase(Alphabet::C), collection.clone());
+            filter = filter.custom_tag(SingleLetterTag::uppercase(Alphabet::C), collection.clone());
         }
         if let Some(ref chapter) = self.chapter {
-            filter = filter
-                .custom_tag(SingleLetterTag::lowercase(Alphabet::C), chapter.clone());
+            filter = filter.custom_tag(SingleLetterTag::lowercase(Alphabet::C), chapter.clone());
         }
         if let Some(ref version) = self.version {
-            filter = filter
-                .custom_tag(SingleLetterTag::lowercase(Alphabet::V), version.clone());
+            filter = filter.custom_tag(SingleLetterTag::lowercase(Alphabet::V), version.clone());
         }
         if let Some(pubkey) = author_pubkey {
             if let Ok(pk) = PublicKey::from_hex(pubkey) {
@@ -215,10 +212,9 @@ fn parse_section_range(input: &str) -> Vec<String> {
         if part.contains('-') {
             let range_parts: Vec<&str> = part.split('-').collect();
             if range_parts.len() == 2 {
-                if let (Ok(start), Ok(end)) = (
-                    range_parts[0].parse::<u32>(),
-                    range_parts[1].parse::<u32>(),
-                ) {
+                if let (Ok(start), Ok(end)) =
+                    (range_parts[0].parse::<u32>(), range_parts[1].parse::<u32>())
+                {
                     for i in start..=end {
                         sections.push(i.to_string());
                     }
@@ -311,18 +307,17 @@ pub fn extract_book_reference_from_tags(tags: &[Tag]) -> Option<BookReference> {
             _ => {}
         }
     }
-    title
-        .map(|t| {
-            let raw = build_book_macro(&t, &collection, &chapter, &sections, &version);
-            BookReference {
-                raw,
-                title: t,
-                collection,
-                chapter,
-                sections,
-                version,
-            }
-        })
+    title.map(|t| {
+        let raw = build_book_macro(&t, &collection, &chapter, &sections, &version);
+        BookReference {
+            raw,
+            title: t,
+            collection,
+            chapter,
+            sections,
+            version,
+        }
+    })
 }
 /// Build book:: macro string from components
 fn build_book_macro(
@@ -394,8 +389,7 @@ mod tests {
     }
     #[test]
     fn test_parse_jane_eyre_example() {
-        let reference = parse_book_wikilink("book::jane-eyre 21:8 | penguin-classics")
-            .unwrap();
+        let reference = parse_book_wikilink("book::jane-eyre 21:8 | penguin-classics").unwrap();
         assert_eq!(reference.title, "jane-eyre");
         assert_eq!(reference.chapter, Some("21".to_string()));
         assert_eq!(reference.sections, vec!["8"]);
@@ -403,7 +397,10 @@ mod tests {
     }
     #[test]
     fn test_parse_section_range() {
-        assert_eq!(parse_section_range("4-9"), vec!["4", "5", "6", "7", "8", "9"]);
+        assert_eq!(
+            parse_section_range("4-9"),
+            vec!["4", "5", "6", "7", "8", "9"]
+        );
         assert_eq!(parse_section_range("1,3,5"), vec!["1", "3", "5"]);
         assert_eq!(parse_section_range("1-3,7"), vec!["1", "2", "3", "7"]);
     }
@@ -413,7 +410,10 @@ mod tests {
             .with_chapter("21")
             .with_section("8")
             .with_version("penguin-classics");
-        assert_eq!(reference.display_text(), "Jane Eyre 21:8 (PENGUIN CLASSICS)");
+        assert_eq!(
+            reference.display_text(),
+            "Jane Eyre 21:8 (PENGUIN CLASSICS)"
+        );
     }
     #[test]
     fn test_display_text_genesis() {

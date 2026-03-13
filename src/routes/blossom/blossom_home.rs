@@ -6,8 +6,8 @@ static MODAL_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
 use crate::stores::{
     auth_store,
     blossom_store::{
-        self, BlossomTab, MediaFilter, MediaItem, MEDIA_ERROR, MEDIA_ITEMS,
-        MEDIA_LOADING, UPLOAD_PROGRESS,
+        self, BlossomTab, MediaFilter, MediaItem, MEDIA_ERROR, MEDIA_ITEMS, MEDIA_LOADING,
+        UPLOAD_PROGRESS,
     },
     nostr_client::{self, HAS_SIGNER},
 };
@@ -90,44 +90,32 @@ pub fn BlossomPage() -> Element {
     let error = MEDIA_ERROR.read().clone();
     let servers = blossom_store::get_servers();
     let filtered_items: Vec<MediaItem> = match active_tab() {
-        BlossomTab::Images => {
-            media_items
-                .iter()
-                .filter(|i| MediaFilter::Images.matches(&i.mime_type))
-                .cloned()
-                .collect()
-        }
-        BlossomTab::Videos => {
-            media_items
-                .iter()
-                .filter(|i| MediaFilter::Videos.matches(&i.mime_type))
-                .cloned()
-                .collect()
-        }
-        BlossomTab::Audio => {
-            media_items
-                .iter()
-                .filter(|i| MediaFilter::Audio.matches(&i.mime_type))
-                .cloned()
-                .collect()
-        }
-        BlossomTab::Files => {
-            media_items
-                .iter()
-                .filter(|i| MediaFilter::Files.matches(&i.mime_type))
-                .cloned()
-                .collect()
-        }
+        BlossomTab::Images => media_items
+            .iter()
+            .filter(|i| MediaFilter::Images.matches(&i.mime_type))
+            .cloned()
+            .collect(),
+        BlossomTab::Videos => media_items
+            .iter()
+            .filter(|i| MediaFilter::Videos.matches(&i.mime_type))
+            .cloned()
+            .collect(),
+        BlossomTab::Audio => media_items
+            .iter()
+            .filter(|i| MediaFilter::Audio.matches(&i.mime_type))
+            .cloned()
+            .collect(),
+        BlossomTab::Files => media_items
+            .iter()
+            .filter(|i| MediaFilter::Files.matches(&i.mime_type))
+            .cloned()
+            .collect(),
         BlossomTab::Servers => vec![],
     };
     let selected_count = selected_items.read().len();
     let total_storage = blossom_store::get_total_storage();
     let handle_delete_selected = move |_| {
-        let items_to_delete: Vec<String> = selected_items
-            .read()
-            .iter()
-            .cloned()
-            .collect();
+        let items_to_delete: Vec<String> = selected_items.read().iter().cloned().collect();
         if items_to_delete.is_empty() {
             return;
         }
@@ -140,9 +128,7 @@ pub fn BlossomPage() -> Element {
                 }
                 Err(e) => {
                     log::error!("Failed to delete files: {}", e);
-                    *MEDIA_ERROR.write() = Some(
-                        format!("Failed to delete files: {}", e),
-                    );
+                    *MEDIA_ERROR.write() = Some(format!("Failed to delete files: {}", e));
                 }
             }
             deleting.set(false);
@@ -554,20 +540,17 @@ fn FileDetailModal(
     let handle_copy = {
         let url_for_copy = item.url.clone();
         move |_| {
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "web")]
             {
                 let url = url_for_copy.clone();
                 spawn(async move {
                     if let Some(window) = web_sys::window() {
                         let clipboard = window.navigator().clipboard();
-                        match wasm_bindgen_futures::JsFuture::from(
-                                clipboard.write_text(&url),
-                            )
-                            .await
+                        match wasm_bindgen_futures::JsFuture::from(clipboard.write_text(&url)).await
                         {
                             Ok(_) => {
                                 copied.set(true);
-                                gloo_timers::future::TimeoutFuture::new(2000).await;
+                                crate::platform::timer::sleep_ms(2000).await;
                                 copied.set(false);
                             }
                             Err(e) => {
@@ -749,10 +732,7 @@ fn FileDetailModal(
 }
 /// Upload modal component
 #[component]
-fn UploadModal(
-    on_close: EventHandler<()>,
-    on_upload_complete: EventHandler<()>,
-) -> Element {
+fn UploadModal(on_close: EventHandler<()>, on_upload_complete: EventHandler<()>) -> Element {
     let modal_id = use_signal(|| MODAL_ID_COUNTER.fetch_add(1, Ordering::Relaxed));
     let title_id = format!("upload-modal-title-{}", modal_id());
     let mut file_data = use_signal(|| None::<(String, Vec<u8>, String)>);
@@ -761,7 +741,7 @@ fn UploadModal(
     let mut error = use_signal(|| None::<String>);
     let upload_progress = *UPLOAD_PROGRESS.read();
     let handle_file_select = move |_| {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
             let mut error = error;
             spawn(async move {
@@ -790,29 +770,20 @@ fn UploadModal(
                 input.set_accept("image/*,video/*,audio/*");
                 input.set_attribute("style", "display: none").ok();
                 body.append_child(&input).ok();
-                let (tx, rx) = futures::channel::oneshot::channel::<
-                    Option<web_sys::File>,
-                >();
+                let (tx, rx) = futures::channel::oneshot::channel::<Option<web_sys::File>>();
                 let tx = std::rc::Rc::new(std::cell::RefCell::new(Some(tx)));
                 let input_for_closure = input.clone();
                 let input_for_cleanup = input.clone();
-                let _listener = gloo_events::EventListener::once(
-                    &input,
-                    "change",
-                    move |_| {
-                        if let Some(tx) = tx.borrow_mut().take() {
-                            let file = input_for_closure.files().and_then(|f| f.get(0));
-                            let _ = tx.send(file);
-                        }
-                    },
-                );
+                let _listener = gloo_events::EventListener::once(&input, "change", move |_| {
+                    if let Some(tx) = tx.borrow_mut().take() {
+                        let file = input_for_closure.files().and_then(|f| f.get(0));
+                        let _ = tx.send(file);
+                    }
+                });
                 input.click();
                 use futures::future::{select, Either};
-                use gloo_timers::future::TimeoutFuture;
-                let timeout = TimeoutFuture::new(300_000);
-                let file = match select(std::pin::pin!(rx), std::pin::pin!(timeout))
-                    .await
-                {
+                let timeout = crate::platform::timer::sleep_ms(300_000);
+                let file = match select(std::pin::pin!(rx), std::pin::pin!(timeout)).await {
                     Either::Left((Ok(Some(file)), _)) => file,
                     Either::Left((Ok(None), _)) => {
                         body.remove_child(&input_for_cleanup).ok();
@@ -828,23 +799,15 @@ fn UploadModal(
                 const MAX_FILE_SIZE: f64 = 100.0 * 1024.0 * 1024.0;
                 let file_size = file.size();
                 if file_size > MAX_FILE_SIZE {
-                    error
-                        .set(
-                            Some(
-                                format!(
-                                    "File too large: {} exceeds maximum of {}",
-                                    blossom_store::format_bytes(file_size as u64),
-                                    blossom_store::format_bytes(MAX_FILE_SIZE as u64),
-                                ),
-                            ),
-                        );
+                    error.set(Some(format!(
+                        "File too large: {} exceeds maximum of {}",
+                        blossom_store::format_bytes(file_size as u64),
+                        blossom_store::format_bytes(MAX_FILE_SIZE as u64),
+                    )));
                     body.remove_child(&input_for_cleanup).ok();
                     return;
                 }
-                let array_buffer = wasm_bindgen_futures::JsFuture::from(
-                        file.array_buffer(),
-                    )
-                    .await;
+                let array_buffer = wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await;
                 if let Ok(buffer) = array_buffer {
                     let uint8_array = js_sys::Uint8Array::new(&buffer);
                     let mut data = vec![0u8; uint8_array.length() as usize];
@@ -1058,8 +1021,7 @@ fn validate_and_normalize_server_url(input: &str) -> Result<String, String> {
     if trimmed.is_empty() {
         return Err("URL cannot be empty".to_string());
     }
-    let url_str = if !trimmed.starts_with("http://") && !trimmed.starts_with("https://")
-    {
+    let url_str = if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
         format!("https://{}", trimmed)
     } else {
         trimmed.to_string()
@@ -1096,18 +1058,19 @@ fn ServerList(
     let mut new_server_error = use_signal(|| None::<String>);
     let mut publishing = use_signal(|| false);
     let mut publish_result = use_signal(|| None::<Result<String, String>>);
-    let handle_add = use_callback(move |_: ()| match validate_and_normalize_server_url(
-        &new_server_url(),
-    ) {
-        Ok(normalized) => {
-            on_add_server.call(normalized);
-            new_server_url.set(String::new());
-            new_server_error.set(None);
-        }
-        Err(e) => {
-            new_server_error.set(Some(e));
-        }
-    });
+    let handle_add =
+        use_callback(
+            move |_: ()| match validate_and_normalize_server_url(&new_server_url()) {
+                Ok(normalized) => {
+                    on_add_server.call(normalized);
+                    new_server_url.set(String::new());
+                    new_server_error.set(None);
+                }
+                Err(e) => {
+                    new_server_error.set(Some(e));
+                }
+            },
+        );
     let handle_publish = move |_| {
         publishing.set(true);
         publish_result.set(None);
@@ -1115,8 +1078,7 @@ fn ServerList(
             match blossom_store::publish_user_servers().await {
                 Ok(id) => {
                     let display_id: String = id.chars().take(16).collect();
-                    publish_result
-                        .set(Some(Ok(format!("Published: {}...", display_id))));
+                    publish_result.set(Some(Ok(format!("Published: {}...", display_id))));
                 }
                 Err(e) => {
                     publish_result.set(Some(Err(e)));

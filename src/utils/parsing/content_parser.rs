@@ -8,9 +8,8 @@ const MIN_NPUB_LENGTH: usize = 16;
 const MIN_NADDR_LENGTH: usize = 10;
 /// YouTube video IDs are exactly 11 characters
 const YOUTUBE_VIDEO_ID_LENGTH: usize = 11;
-static URL_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"https?://[^\s]+").expect("Failed to compile URL regex")
-});
+static URL_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"https?://[^\s]+").expect("Failed to compile URL regex"));
 /// Clean trailing punctuation from URLs that may have been captured by regex
 fn clean_url_trailing_punctuation(url: &str) -> &str {
     url.trim_end_matches(['.', ',', ';', ':', '!', '?', ')', ']', '}', '\'', '"', '>'])
@@ -19,42 +18,32 @@ static NOSTR_URI_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)nostr:(npub1|nprofile1|note1|nevent1|naddr1)[a-zA-Z0-9]+")
         .expect("Failed to compile nostr URI regex")
 });
-static HASHTAG_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"#(\w+)").expect("Failed to compile hashtag regex")
-});
-static CASHU_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"cashu[AB][A-Za-z0-9_=-]+").expect("Failed to compile cashu regex")
-});
-static ISBN_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"isbn:[\dXx-]{10,17}").expect("Failed to compile ISBN regex")
-});
-static DOI_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"doi:10\.[^\s]+").expect("Failed to compile DOI regex")
-});
-static ISAN_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"isan:[0-9A-Fa-f-]{16,32}").expect("Failed to compile ISAN regex")
-});
+static HASHTAG_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"#(\w+)").expect("Failed to compile hashtag regex"));
+static CASHU_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"cashu[AB][A-Za-z0-9_=-]+").expect("Failed to compile cashu regex"));
+static ISBN_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"isbn:[\dXx-]{10,17}").expect("Failed to compile ISBN regex"));
+static DOI_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"doi:10\.[^\s]+").expect("Failed to compile DOI regex"));
+static ISAN_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"isan:[0-9A-Fa-f-]{16,32}").expect("Failed to compile ISAN regex"));
 static PODCAST_FEED_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"podcast:guid:[A-Za-z0-9_-]+")
-        .expect("Failed to compile podcast feed regex")
+    Regex::new(r"podcast:guid:[A-Za-z0-9_-]+").expect("Failed to compile podcast feed regex")
 });
 static PODCAST_EPISODE_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"podcast:item:guid:[A-Za-z0-9_-]+")
         .expect("Failed to compile podcast episode regex")
 });
 static BITCOIN_TX_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"bitcoin:tx:[a-fA-F0-9]{64}")
-        .expect("Failed to compile bitcoin tx regex")
+    Regex::new(r"bitcoin:tx:[a-fA-F0-9]{64}").expect("Failed to compile bitcoin tx regex")
 });
 static BITCOIN_ADDRESS_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(
-            r"bitcoin:address:(?:bc1[a-zA-HJ-NP-Z0-9]{39,87}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})",
-        )
+    Regex::new(r"bitcoin:address:(?:bc1[a-zA-HJ-NP-Z0-9]{39,87}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})")
         .expect("Failed to compile bitcoin address regex")
 });
-static GEOHASH_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"geo:[0-9a-z]{1,12}").expect("Failed to compile geohash regex")
-});
+static GEOHASH_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"geo:[0-9a-z]{1,12}").expect("Failed to compile geohash regex"));
 /// Represents different types of content tokens that can appear in a note
 #[derive(Debug, Clone, PartialEq)]
 pub enum ContentToken {
@@ -192,8 +181,7 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
                 }
                 Nip19::Secret(_) | Nip19::EncryptedSecret(_) => None,
             }
-        } else if identifier_lower.starts_with("npub1")
-            || identifier_lower.starts_with("nprofile1")
+        } else if identifier_lower.starts_with("npub1") || identifier_lower.starts_with("nprofile1")
         {
             Some(ContentToken::Mention(uri.to_string()))
         } else if identifier_lower.starts_with("note1")
@@ -225,7 +213,11 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
         matches.push((mat.start(), mat.end(), ContentToken::Isbn(isbn)));
     }
     for mat in DOI_PATTERN.find_iter(content) {
-        let doi = mat.as_str().strip_prefix("doi:").unwrap_or(mat.as_str()).to_string();
+        let doi = mat
+            .as_str()
+            .strip_prefix("doi:")
+            .unwrap_or(mat.as_str())
+            .to_string();
         matches.push((mat.start(), mat.end(), ContentToken::Doi(doi)));
     }
     for mat in ISAN_PATTERN.find_iter(content) {
@@ -266,7 +258,11 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
             .strip_prefix("bitcoin:address:")
             .unwrap_or(mat.as_str())
             .to_string();
-        matches.push((mat.start(), mat.end(), ContentToken::BitcoinAddress(address)));
+        matches.push((
+            mat.start(),
+            mat.end(),
+            ContentToken::BitcoinAddress(address),
+        ));
     }
     for mat in GEOHASH_PATTERN.find_iter(content) {
         let geohash = mat
@@ -305,9 +301,15 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
 fn is_image_url(url: &str) -> bool {
     let lower = url.to_lowercase();
     let path = lower.split('?').next().unwrap_or(&lower);
-    path.ends_with(".jpg") || path.ends_with(".jpeg") || path.ends_with(".png")
-        || path.ends_with(".gif") || path.ends_with(".webp") || path.ends_with(".svg")
-        || path.ends_with(".bmp") || lower.contains("/image/") || lower.contains("image")
+    path.ends_with(".jpg")
+        || path.ends_with(".jpeg")
+        || path.ends_with(".png")
+        || path.ends_with(".gif")
+        || path.ends_with(".webp")
+        || path.ends_with(".svg")
+        || path.ends_with(".bmp")
+        || lower.contains("/image/")
+        || lower.contains("image")
 }
 /// Extract track ID from Wavlake URLs
 /// Supports: https://wavlake.com/track/{id}
@@ -392,9 +394,14 @@ fn is_video_url(url: &str) -> bool {
         return false;
     }
     let path = lower.split('?').next().unwrap_or(&lower);
-    path.ends_with(".mp4") || path.ends_with(".webm") || path.ends_with(".mov")
-        || path.ends_with(".avi") || path.ends_with(".mkv") || path.ends_with(".ogg")
-        || path.ends_with(".3gp") || path.ends_with(".3gpp")
+    path.ends_with(".mp4")
+        || path.ends_with(".webm")
+        || path.ends_with(".mov")
+        || path.ends_with(".avi")
+        || path.ends_with(".mkv")
+        || path.ends_with(".ogg")
+        || path.ends_with(".3gp")
+        || path.ends_with(".3gpp")
 }
 /// Extract profile name from mention string
 #[allow(dead_code)]
@@ -410,9 +417,7 @@ pub fn extract_mention_name(mention: &str, _tags: &[Tag]) -> Option<String> {
 /// Supports: twitter.com/*/status/{id}, x.com/*/status/{id}, mobile.twitter.com/*/status/{id}
 fn extract_twitter_tweet_id(url: &str) -> Option<String> {
     let lower = url.to_lowercase();
-    if (lower.contains("twitter.com/") || lower.contains("x.com/"))
-        && lower.contains("/status/")
-    {
+    if (lower.contains("twitter.com/") || lower.contains("x.com/")) && lower.contains("/status/") {
         if let Some(status_part) = url.split("/status/").nth(1) {
             let tweet_id = status_part
                 .split('?')
@@ -434,8 +439,10 @@ fn extract_twitter_tweet_id(url: &str) -> Option<String> {
 /// Supports: twitch.tv/{channel}
 fn extract_twitch_channel(url: &str) -> Option<String> {
     let lower = url.to_lowercase();
-    if lower.contains("twitch.tv/") && !lower.contains("/videos/")
-        && !lower.contains("/clip/") && !lower.contains("clips.twitch.tv")
+    if lower.contains("twitch.tv/")
+        && !lower.contains("/videos/")
+        && !lower.contains("/clip/")
+        && !lower.contains("clips.twitch.tv")
     {
         if let Some(channel_part) = url.split("twitch.tv/").nth(1) {
             let channel = channel_part
@@ -447,7 +454,9 @@ fn extract_twitch_channel(url: &str) -> Option<String> {
                 .unwrap_or(channel_part)
                 .trim_end_matches('/')
                 .to_string();
-            if !channel.is_empty() && channel.len() >= 4 && channel.len() <= 25
+            if !channel.is_empty()
+                && channel.len() >= 4
+                && channel.len() <= 25
                 && channel.chars().all(|c| c.is_alphanumeric() || c == '_')
             {
                 return Some(channel);
@@ -592,9 +601,7 @@ fn is_spotify_host(url_str: &str) -> bool {
     Url::parse(url_str)
         .ok()
         .and_then(|u| u.host_str().map(|h| h.to_lowercase()))
-        .map(|h| {
-            h == "open.spotify.com" || h == "spotify.com" || h.ends_with(".spotify.com")
-        })
+        .map(|h| h == "open.spotify.com" || h == "spotify.com" || h.ends_with(".spotify.com"))
         .unwrap_or(false)
 }
 /// Check if URL host is a valid Tidal domain
@@ -628,14 +635,24 @@ fn extract_spotify(url: &str) -> Option<ContentToken> {
         }
     } else if lower.contains("/playlist/") {
         if let Some(playlist_part) = url.split("/playlist/").nth(1) {
-            let id = playlist_part.split('?').next()?.split('/').next()?.to_string();
+            let id = playlist_part
+                .split('?')
+                .next()?
+                .split('/')
+                .next()?
+                .to_string();
             if !id.is_empty() {
                 return Some(ContentToken::SpotifyPlaylist(id));
             }
         }
     } else if lower.contains("/episode/") {
         if let Some(episode_part) = url.split("/episode/").nth(1) {
-            let id = episode_part.split('?').next()?.split('/').next()?.to_string();
+            let id = episode_part
+                .split('?')
+                .next()?
+                .split('/')
+                .next()?
+                .to_string();
             if !id.is_empty() {
                 return Some(ContentToken::SpotifyEpisode(id));
             }
@@ -738,7 +755,13 @@ fn extract_zapstream(url: &str) -> Option<String> {
     }
     if let Some(naddr_start) = url.find("naddr1") {
         let naddr = &url[naddr_start..];
-        let naddr = naddr.split('?').next()?.split('#').next()?.split('/').next()?;
+        let naddr = naddr
+            .split('?')
+            .next()?
+            .split('#')
+            .next()?
+            .split('/')
+            .next()?;
         if naddr.starts_with("naddr1") && naddr.len() > MIN_NADDR_LENGTH {
             return Some(naddr.to_string());
         }
@@ -765,7 +788,13 @@ fn extract_zapcooking(url: &str) -> Option<String> {
     }
     if let Some(naddr_start) = url.find("naddr1") {
         let naddr = &url[naddr_start..];
-        let naddr = naddr.split('?').next()?.split('#').next()?.split('/').next()?;
+        let naddr = naddr
+            .split('?')
+            .next()?
+            .split('#')
+            .next()?
+            .split('/')
+            .next()?;
         if naddr.starts_with("naddr1") && naddr.len() > MIN_NADDR_LENGTH {
             return Some(naddr.to_string());
         }
@@ -778,8 +807,7 @@ fn is_nostr_blue_host(url_str: &str) -> bool {
         .ok()
         .and_then(|u| u.host_str().map(|h| h.to_lowercase()))
         .map(|h| {
-            h == "nostr.blue" || h.ends_with(".nostr.blue") || h == "localhost"
-                || h == "127.0.0.1"
+            h == "nostr.blue" || h.ends_with(".nostr.blue") || h == "localhost" || h == "127.0.0.1"
         })
         .unwrap_or(false)
 }
@@ -792,10 +820,10 @@ fn extract_nostr_blue(url: &str) -> Option<ContentToken> {
     let parsed = Url::parse(url).ok()?;
     let path = parsed.path();
     if path.starts_with("/videos/live/") {
-        return extract_id_from_path(path, "/videos/live/")
-            .map(ContentToken::NostrBlueLiveStream);
+        return extract_id_from_path(path, "/videos/live/").map(ContentToken::NostrBlueLiveStream);
     }
-    if path.starts_with("/videos/") && !path.starts_with("/videos/live")
+    if path.starts_with("/videos/")
+        && !path.starts_with("/videos/live")
         && !path.starts_with("/videos/new")
     {
         return extract_id_from_path(path, "/videos/").map(ContentToken::NostrBlueVideo);
@@ -804,8 +832,7 @@ fn extract_nostr_blue(url: &str) -> Option<ContentToken> {
         return extract_id_from_path(path, "/photos/").map(ContentToken::NostrBluePhoto);
     }
     if path.starts_with("/voicemessages/") && !path.starts_with("/voicemessages/new") {
-        return extract_id_from_path(path, "/voicemessages/")
-            .map(ContentToken::NostrBlueVoice);
+        return extract_id_from_path(path, "/voicemessages/").map(ContentToken::NostrBlueVoice);
     }
     if path.starts_with("/podcast/rss/episode/") {
         if let Some(remainder) = path.strip_prefix("/podcast/rss/episode/") {
@@ -817,9 +844,9 @@ fn extract_nostr_blue(url: &str) -> Option<ContentToken> {
                     .next()
                     .unwrap_or(parts[1])
                     .to_string();
-                return Some(
-                    ContentToken::NostrBlueRssPodcastEpisode(podcast_id, episode_id),
-                );
+                return Some(ContentToken::NostrBlueRssPodcastEpisode(
+                    podcast_id, episode_id,
+                ));
             }
         }
     }
@@ -840,50 +867,49 @@ fn extract_nostr_blue(url: &str) -> Option<ContentToken> {
             .map(ContentToken::NostrBlueMusicPlaylist);
     }
     if path.starts_with("/radio/") && !path.starts_with("/radio/new") {
-        return extract_id_from_path(path, "/radio/")
-            .map(ContentToken::NostrBlueRadioStation);
+        return extract_id_from_path(path, "/radio/").map(ContentToken::NostrBlueRadioStation);
     }
     if path.starts_with("/articles/") && !path.starts_with("/articles/new") {
-        return extract_id_from_path(path, "/articles/")
-            .map(ContentToken::NostrBlueArticle);
+        return extract_id_from_path(path, "/articles/").map(ContentToken::NostrBlueArticle);
     }
-    if path.starts_with("/recipes/") && !path.starts_with("/recipes/new")
-        && !path.starts_with("/recipes/fork") && !path.starts_with("/recipes/all")
-        && !path.starts_with("/recipes/tag") && !path.starts_with("/recipes/chef")
+    if path.starts_with("/recipes/")
+        && !path.starts_with("/recipes/new")
+        && !path.starts_with("/recipes/fork")
+        && !path.starts_with("/recipes/all")
+        && !path.starts_with("/recipes/tag")
+        && !path.starts_with("/recipes/chef")
     {
-        return extract_id_from_path(path, "/recipes/")
-            .map(ContentToken::NostrBlueRecipe);
+        return extract_id_from_path(path, "/recipes/").map(ContentToken::NostrBlueRecipe);
     }
     if path.starts_with("/note/") {
         return extract_id_from_path(path, "/note/").map(ContentToken::NostrBlueNote);
     }
     if path.starts_with("/profile/") {
-        return extract_id_from_path(path, "/profile/")
-            .map(ContentToken::NostrBlueProfile);
+        return extract_id_from_path(path, "/profile/").map(ContentToken::NostrBlueProfile);
     }
-    if path.starts_with("/calendar/") && !path.starts_with("/calendar/new")
-        && path != "/calendar"
-    {
-        return extract_id_from_path(path, "/calendar/")
-            .map(ContentToken::NostrBlueCalendarEvent);
+    if path.starts_with("/calendar/") && !path.starts_with("/calendar/new") && path != "/calendar" {
+        return extract_id_from_path(path, "/calendar/").map(ContentToken::NostrBlueCalendarEvent);
     }
-    if path.starts_with("/wiki/") && !path.starts_with("/wiki/new")
+    if path.starts_with("/wiki/")
+        && !path.starts_with("/wiki/new")
         && !path.starts_with("/wiki/author")
     {
         return extract_id_from_path(path, "/wiki/").map(ContentToken::NostrBlueWiki);
     }
-    if path.starts_with("/publications/") && !path.starts_with("/publications/new")
+    if path.starts_with("/publications/")
+        && !path.starts_with("/publications/new")
         && !path.starts_with("/publications/search")
     {
         return extract_id_from_path(path, "/publications/")
             .map(ContentToken::NostrBluePublication);
     }
-    if path.starts_with("/pinboards/") && !path.starts_with("/pinboards/new")
-        && !path.starts_with("/pinboards/pin") && !path.starts_with("/pinboards/pins")
+    if path.starts_with("/pinboards/")
+        && !path.starts_with("/pinboards/new")
+        && !path.starts_with("/pinboards/pin")
+        && !path.starts_with("/pinboards/pins")
         && !path.contains("/edit")
     {
-        return extract_id_from_path(path, "/pinboards/")
-            .map(ContentToken::NostrBluePinboard);
+        return extract_id_from_path(path, "/pinboards/").map(ContentToken::NostrBluePinboard);
     }
     if path.starts_with("/badges/") && !path.starts_with("/badges/new") {
         return extract_id_from_path(path, "/badges/").map(ContentToken::NostrBlueBadge);
@@ -903,12 +929,13 @@ fn extract_nostr_blue(url: &str) -> Option<ContentToken> {
         }
     }
     if path.starts_with("/community/") {
-        return extract_id_from_path(path, "/community/")
-            .map(ContentToken::NostrBlueCommunity);
+        return extract_id_from_path(path, "/community/").map(ContentToken::NostrBlueCommunity);
     }
     if path.starts_with("/chats/") && !path.starts_with("/chats/new") {
         return extract_id_from_path(path, "/chats/").and_then(|id| {
-            EventId::from_hex(&id).ok().map(|_| ContentToken::NostrBlueChannel(id))
+            EventId::from_hex(&id)
+                .ok()
+                .map(|_| ContentToken::NostrBlueChannel(id))
         });
     }
     None
@@ -917,7 +944,11 @@ fn extract_nostr_blue(url: &str) -> Option<ContentToken> {
 fn extract_id_from_path(path: &str, prefix: &str) -> Option<String> {
     let remainder = path.strip_prefix(prefix)?;
     let id = remainder.split(['?', '#', '/']).next()?;
-    if !id.is_empty() { Some(id.to_string()) } else { None }
+    if !id.is_empty() {
+        Some(id.to_string())
+    } else {
+        None
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -971,17 +1002,13 @@ mod tests {
     fn test_parse_cashu_token_v3() {
         let tokens = parse_content("cashuAeyJwYXlsb2FkIjp7fX0=", &[]);
         assert_eq!(tokens.len(), 1);
-        assert!(
-            matches!(&tokens[0], ContentToken::CashuToken(t) if t.starts_with("cashuA")),
-        );
+        assert!(matches!(&tokens[0], ContentToken::CashuToken(t) if t.starts_with("cashuA")),);
     }
     #[test]
     fn test_parse_cashu_token_v4() {
         let tokens = parse_content("cashuBeyJwYXlsb2FkIjp7fX0=", &[]);
         assert_eq!(tokens.len(), 1);
-        assert!(
-            matches!(&tokens[0], ContentToken::CashuToken(t) if t.starts_with("cashuB")),
-        );
+        assert!(matches!(&tokens[0], ContentToken::CashuToken(t) if t.starts_with("cashuB")),);
     }
     #[test]
     fn test_parse_cashu_token_in_content() {
@@ -997,33 +1024,23 @@ mod tests {
     #[test]
     fn test_parse_isbn() {
         let tokens = parse_content("Check out isbn:9780765382030 for details", &[]);
-        assert!(
-            tokens
-                .iter()
-                .any(|t| {
-                    matches!(t, ContentToken::Isbn(isbn) if isbn == "9780765382030")
-                }),
-        );
+        assert!(tokens
+            .iter()
+            .any(|t| { matches!(t, ContentToken::Isbn(isbn) if isbn == "9780765382030") }),);
     }
     #[test]
     fn test_parse_isbn_with_dashes() {
         let tokens = parse_content("isbn:978-0-7653-8203-0", &[]);
-        assert!(
-            tokens
-                .iter()
-                .any(|t| {
-                    matches!(t, ContentToken::Isbn(isbn) if isbn == "978-0-7653-8203-0")
-                }),
-        );
+        assert!(tokens
+            .iter()
+            .any(|t| { matches!(t, ContentToken::Isbn(isbn) if isbn == "978-0-7653-8203-0") }),);
     }
     #[test]
     fn test_parse_doi() {
         let tokens = parse_content("Read the paper at doi:10.1000/182", &[]);
-        assert!(
-            tokens
-                .iter()
-                .any(|t| matches!(t, ContentToken::Doi(doi) if doi == "10.1000/182")),
-        );
+        assert!(tokens
+            .iter()
+            .any(|t| matches!(t, ContentToken::Doi(doi) if doi == "10.1000/182")),);
     }
     #[test]
     fn test_parse_isan() {
@@ -1033,41 +1050,33 @@ mod tests {
     #[test]
     fn test_parse_podcast_feed() {
         let tokens = parse_content("Listen to podcast:guid:abc123-def456", &[]);
-        assert!(
-            tokens
-                .iter()
-                .any(|t| {
-                    matches!(
-                        t,
-                        ContentToken::PodcastFeed(guid)
-                        if guid == "abc123-def456"
-                    )
-                }),
-        );
+        assert!(tokens.iter().any(|t| {
+            matches!(
+                t,
+                ContentToken::PodcastFeed(guid)
+                if guid == "abc123-def456"
+            )
+        }),);
     }
     #[test]
     fn test_parse_podcast_episode() {
         let tokens = parse_content("podcast:item:guid:ep-001-intro", &[]);
-        assert!(
-            tokens
-                .iter()
-                .any(|t| {
-                    matches!(
-                        t,
-                        ContentToken::PodcastEpisode(guid)
-                        if guid == "ep-001-intro"
-                    )
-                }),
-        );
+        assert!(tokens.iter().any(|t| {
+            matches!(
+                t,
+                ContentToken::PodcastEpisode(guid)
+                if guid == "ep-001-intro"
+            )
+        }),);
     }
     #[test]
     fn test_parse_bitcoin_tx() {
         let txid = "a1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d";
         let content = format!("Check tx bitcoin:tx:{}", txid);
         let tokens = parse_content(&content, &[]);
-        assert!(
-            tokens.iter().any(|t| matches!(t, ContentToken::BitcoinTx(id) if id == txid)),
-        );
+        assert!(tokens
+            .iter()
+            .any(|t| matches!(t, ContentToken::BitcoinTx(id) if id == txid)),);
     }
     #[test]
     fn test_parse_bitcoin_address_legacy() {
@@ -1075,7 +1084,9 @@ mod tests {
             "Send to bitcoin:address:1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",
             &[],
         );
-        assert!(tokens.iter().any(|t| matches!(t, ContentToken::BitcoinAddress(_))));
+        assert!(tokens
+            .iter()
+            .any(|t| matches!(t, ContentToken::BitcoinAddress(_))));
     }
     #[test]
     fn test_parse_bitcoin_address_segwit() {
@@ -1083,18 +1094,16 @@ mod tests {
             "bitcoin:address:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
             &[],
         );
-        assert!(tokens.iter().any(|t| matches!(t, ContentToken::BitcoinAddress(_))));
+        assert!(tokens
+            .iter()
+            .any(|t| matches!(t, ContentToken::BitcoinAddress(_))));
     }
     #[test]
     fn test_parse_geohash() {
         let tokens = parse_content("Meet at geo:u4pruydqqvj", &[]);
-        assert!(
-            tokens
-                .iter()
-                .any(|t| {
-                    matches!(t, ContentToken::Geohash(hash) if hash == "u4pruydqqvj")
-                }),
-        );
+        assert!(tokens
+            .iter()
+            .any(|t| { matches!(t, ContentToken::Geohash(hash) if hash == "u4pruydqqvj") }),);
     }
     #[test]
     fn test_parse_multiple_nip73() {

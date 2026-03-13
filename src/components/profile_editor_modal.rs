@@ -24,46 +24,47 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
     let mut saving = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut success = use_signal(|| false);
+    let mut modal_session = use_signal(|| 0u64);
     let mut show_picture_uploader = use_signal(|| false);
     let mut show_banner_uploader = use_signal(|| false);
-    use_effect(
-        use_reactive(
-            &*props.show.read(),
-            move |is_shown| {
-                if is_shown {
-                    spawn(async move {
-                        if let Some(pubkey) = auth_store::get_pubkey() {
-                            match profiles::fetch_profile(pubkey.clone()).await {
-                                Ok(profile) => {
-                                    name.set(profile.name.unwrap_or_default());
-                                    display_name.set(profile.display_name.unwrap_or_default());
-                                    about.set(profile.about.unwrap_or_default());
-                                    picture.set(profile.picture.unwrap_or_default());
-                                    banner.set(profile.banner.unwrap_or_default());
-                                    website.set(profile.website.unwrap_or_default());
-                                    nip05.set(profile.nip05.unwrap_or_default());
-                                    lud16.set(profile.lud16.unwrap_or_default());
-                                    is_bot.set(profile.bot.unwrap_or(false));
-                                    if let Some(bday) = profile.birthday {
-                                        birthday_year.set(bday.year);
-                                        birthday_month.set(bday.month);
-                                        birthday_day.set(bday.day);
-                                    } else {
-                                        birthday_year.set(None);
-                                        birthday_month.set(None);
-                                        birthday_day.set(None);
-                                    }
-                                }
-                                Err(e) => {
-                                    log::error!("Failed to load profile for editing: {}", e);
-                                }
+    use_effect(use_reactive(&*props.show.read(), move |is_shown| {
+        if is_shown {
+            modal_session.with_mut(|s| *s = s.wrapping_add(1));
+            let session = *modal_session.read();
+            spawn(async move {
+                if let Some(pubkey) = auth_store::get_pubkey() {
+                    match profiles::fetch_profile(pubkey.clone()).await {
+                        Ok(profile) => {
+                            if *modal_session.read() != session {
+                                return;
+                            }
+                            name.set(profile.name.unwrap_or_default());
+                            display_name.set(profile.display_name.unwrap_or_default());
+                            about.set(profile.about.unwrap_or_default());
+                            picture.set(profile.picture.unwrap_or_default());
+                            banner.set(profile.banner.unwrap_or_default());
+                            website.set(profile.website.unwrap_or_default());
+                            nip05.set(profile.nip05.unwrap_or_default());
+                            lud16.set(profile.lud16.unwrap_or_default());
+                            is_bot.set(profile.bot.unwrap_or(false));
+                            if let Some(bday) = profile.birthday {
+                                birthday_year.set(bday.year);
+                                birthday_month.set(bday.month);
+                                birthday_day.set(bday.day);
+                            } else {
+                                birthday_year.set(None);
+                                birthday_month.set(None);
+                                birthday_day.set(None);
                             }
                         }
-                    });
+                        Err(e) => {
+                            log::error!("Failed to load profile for editing: {}", e);
+                        }
+                    }
                 }
-            },
-        ),
-    );
+            });
+        }
+    }));
     let handle_save = move |_| {
         saving.set(true);
         error.set(None);
@@ -85,7 +86,9 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
                 metadata = metadata.website(url);
             }
             if *is_bot.read() {
-                metadata.custom.insert("bot".to_string(), serde_json::Value::Bool(true));
+                metadata
+                    .custom
+                    .insert("bot".to_string(), serde_json::Value::Bool(true));
             }
             let year = *birthday_year.read();
             let month = *birthday_month.read();
@@ -93,33 +96,29 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
             if year.is_some() || month.is_some() || day.is_some() {
                 let mut birthday_obj = serde_json::Map::new();
                 if let Some(y) = year {
-                    birthday_obj
-                        .insert("year".to_string(), serde_json::Value::Number(y.into()));
+                    birthday_obj.insert("year".to_string(), serde_json::Value::Number(y.into()));
                 }
                 if let Some(m) = month {
-                    birthday_obj
-                        .insert(
-                            "month".to_string(),
-                            serde_json::Value::Number(m.into()),
-                        );
+                    birthday_obj.insert("month".to_string(), serde_json::Value::Number(m.into()));
                 }
                 if let Some(d) = day {
-                    birthday_obj
-                        .insert("day".to_string(), serde_json::Value::Number(d.into()));
+                    birthday_obj.insert("day".to_string(), serde_json::Value::Number(d.into()));
                 }
-                metadata
-                    .custom
-                    .insert(
-                        "birthday".to_string(),
-                        serde_json::Value::Object(birthday_obj),
-                    );
+                metadata.custom.insert(
+                    "birthday".to_string(),
+                    serde_json::Value::Object(birthday_obj),
+                );
             }
             match nostr_client::publish_metadata(metadata).await {
                 Ok(_) => {
                     log::info!("Profile updated successfully");
                     success.set(true);
+                    let session = *modal_session.read();
                     spawn(async move {
-                        gloo_timers::future::TimeoutFuture::new(1500).await;
+                        crate::platform::timer::sleep_ms(1500).await;
+                        if *modal_session.read() != session || !*props.show.read() {
+                            return;
+                        }
                         props.show.set(false);
                         success.set(false);
                     });

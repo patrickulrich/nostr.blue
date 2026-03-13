@@ -1,7 +1,7 @@
 //! Pin Menu Component
 //! 3-dot menu for pin cards with actions like delete, copy link, pin to board, etc.
-use crate::components::icons::MoreHorizontalIcon;
 use super::item_selector::PinToBoardModal;
+use crate::components::icons::MoreHorizontalIcon;
 use crate::components::ReportModal;
 use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::stores::pin_boards_store::{delete_pin, Pin, PinReference};

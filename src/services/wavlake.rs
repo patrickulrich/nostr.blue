@@ -1,4 +1,4 @@
-use gloo_net::http::Request;
+use crate::platform::http::http_client;
 use serde::{Deserialize, Serialize};
 /// Wavlake API base URL
 const WAVLAKE_API_BASE: &str = "https://wavlake.com/api/v1";
@@ -133,21 +133,20 @@ impl WavlakeAPI {
         }
     }
     /// Search for content on Wavlake
-    pub async fn search_content(
-        &self,
-        term: &str,
-    ) -> Result<Vec<WavlakeSearchResult>, String> {
+    pub async fn search_content(&self, term: &str) -> Result<Vec<WavlakeSearchResult>, String> {
         let url = format!(
             "{}/content/search?term={}",
             self.base_url,
             urlencoding::encode(term),
         );
-        let response = Request::get(&url)
+        let response = http_client()
+            .map_err(|e| format!("HTTP client init failed: {}", e))?
+            .get(&url)
             .send()
             .await
             .map_err(|e| format!("Search request failed: {}", e))?;
-        if !response.ok() {
-            return Err(format!("Search failed: {}", response.status_text()));
+        if !response.status().is_success() {
+            return Err(format!("Search failed: HTTP {}", response.status()));
         }
         response
             .json()
@@ -186,69 +185,91 @@ impl WavlakeAPI {
             .collect::<Vec<_>>()
             .join("&");
         let url = format!("{}/content/rankings?{}", self.base_url, query_string);
-        let response = Request::get(&url)
+        let response = http_client()
+            .map_err(|e| format!("HTTP client init failed: {}", e))?
+            .get(&url)
             .send()
             .await
             .map_err(|e| format!("Rankings request failed: {}", e))?;
-        if !response.ok() {
-            return Err(format!("Rankings failed: {}", response.status_text()));
+        if !response.status().is_success() {
+            return Err(format!("Rankings failed: HTTP {}", response.status()));
         }
-        response.json().await.map_err(|e| format!("Failed to parse rankings: {}", e))
+        response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse rankings: {}", e))
     }
     /// Get a specific track
     pub async fn get_track(&self, track_id: &str) -> Result<WavlakeTrack, String> {
         let url = format!("{}/content/track/{}", self.base_url, track_id);
-        let response = Request::get(&url)
+        let response = http_client()
+            .map_err(|e| format!("HTTP client init failed: {}", e))?
+            .get(&url)
             .send()
             .await
             .map_err(|e| format!("Track request failed: {}", e))?;
-        if !response.ok() {
-            return Err(format!("Track fetch failed: {}", response.status_text()));
+        if !response.status().is_success() {
+            return Err(format!("Track fetch failed: HTTP {}", response.status()));
         }
         let result: Vec<WavlakeTrack> = response
             .json()
             .await
             .map_err(|e| format!("Failed to parse track: {}", e))?;
-        result.into_iter().next().ok_or_else(|| "No track found".to_string())
+        result
+            .into_iter()
+            .next()
+            .ok_or_else(|| "No track found".to_string())
     }
     /// Get an artist's information
     pub async fn get_artist(&self, artist_id: &str) -> Result<WavlakeArtist, String> {
         let url = format!("{}/content/artist/{}", self.base_url, artist_id);
-        let response = Request::get(&url)
+        let response = http_client()
+            .map_err(|e| format!("HTTP client init failed: {}", e))?
+            .get(&url)
             .send()
             .await
             .map_err(|e| format!("Artist request failed: {}", e))?;
-        if !response.ok() {
-            return Err(format!("Artist fetch failed: {}", response.status_text()));
+        if !response.status().is_success() {
+            return Err(format!("Artist fetch failed: HTTP {}", response.status()));
         }
-        response.json().await.map_err(|e| format!("Failed to parse artist: {}", e))
+        response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse artist: {}", e))
     }
     /// Get an album's information
     pub async fn get_album(&self, album_id: &str) -> Result<WavlakeAlbum, String> {
         let url = format!("{}/content/album/{}", self.base_url, album_id);
-        let response = Request::get(&url)
+        let response = http_client()
+            .map_err(|e| format!("HTTP client init failed: {}", e))?
+            .get(&url)
             .send()
             .await
             .map_err(|e| format!("Album request failed: {}", e))?;
-        if !response.ok() {
-            return Err(format!("Album fetch failed: {}", response.status_text()));
+        if !response.status().is_success() {
+            return Err(format!("Album fetch failed: HTTP {}", response.status()));
         }
-        response.json().await.map_err(|e| format!("Failed to parse album: {}", e))
+        response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse album: {}", e))
     }
     /// Get a playlist
-    pub async fn get_playlist(
-        &self,
-        playlist_id: &str,
-    ) -> Result<WavlakePlaylist, String> {
+    pub async fn get_playlist(&self, playlist_id: &str) -> Result<WavlakePlaylist, String> {
         let url = format!("{}/content/playlist/{}", self.base_url, playlist_id);
-        let response = Request::get(&url)
+        let response = http_client()
+            .map_err(|e| format!("HTTP client init failed: {}", e))?
+            .get(&url)
             .send()
             .await
             .map_err(|e| format!("Playlist request failed: {}", e))?;
-        if !response.ok() {
-            return Err(format!("Playlist fetch failed: {}", response.status_text()));
+        if !response.status().is_success() {
+            return Err(format!("Playlist fetch failed: HTTP {}", response.status()));
         }
-        response.json().await.map_err(|e| format!("Failed to parse playlist: {}", e))
+        response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse playlist: {}", e))
     }
     /// Get LNURL for lightning payments
     pub async fn get_lnurl(
@@ -256,29 +277,32 @@ impl WavlakeAPI {
         content_id: &str,
         app_id: Option<&str>,
     ) -> Result<WavlakeLnurlResponse, String> {
+        let encoded_content_id = urlencoding::encode(content_id);
         let url = if let Some(app) = app_id {
-            format!("{}/lnurl?contentId={}&appId={}", self.base_url, content_id, app)
+            let encoded_app_id = urlencoding::encode(app);
+            format!(
+                "{}/lnurl?contentId={}&appId={}",
+                self.base_url, encoded_content_id, encoded_app_id
+            )
         } else {
-            format!("{}/lnurl?contentId={}", self.base_url, content_id)
+            format!("{}/lnurl?contentId={}", self.base_url, encoded_content_id)
         };
-        log::info!("Requesting LNURL from: {}", url);
-        let response = Request::get(&url)
+        log::debug!("Requesting LNURL from: {}", url);
+        let response = http_client()
+            .map_err(|e| format!("HTTP client init failed: {}", e))?
+            .get(&url)
             .send()
             .await
             .map_err(|e| format!("LNURL request failed: {}", e))?;
-        if !response.ok() {
+        if !response.status().is_success() {
             let status = response.status();
-            let status_text = response.status_text();
             let body = response
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unable to read body".to_string());
-            let error_msg = format!(
-                "LNURL fetch failed: {} {}. Body: {}",
-                status,
-                status_text,
-                body,
-            );
+            let body_truncated: String = body.chars().take(200).collect();
+            log::debug!("LNURL error body (status {}): {}", status, body_truncated);
+            let error_msg = format!("LNURL fetch failed with status {}", status);
             log::error!("{}", error_msg);
             return Err(error_msg);
         }

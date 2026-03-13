@@ -45,9 +45,7 @@ pub fn PhotoDetail(photo_id: String) -> Element {
                 let event_id = event.id;
                 let event_id_hex = event_id.to_hex();
                 log::info!("Loading comments for photo {}", event_id_hex);
-                let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(
-                    nostr_sdk::Alphabet::E,
-                );
+                let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
                 let filter_upper = Filter::new()
                     .kind(Kind::Comment)
                     .custom_tag(upper_e_tag, event_id_hex.clone())
@@ -56,31 +54,27 @@ pub fn PhotoDetail(photo_id: String) -> Element {
                     .kinds(vec![Kind::TextNote, Kind::Comment])
                     .event(event_id)
                     .limit(500);
-                log::info!(
-                    "Fetching comments with uppercase E and lowercase e tag filters"
-                );
+                log::info!("Fetching comments with uppercase E and lowercase e tag filters");
                 let mut all_comments = Vec::new();
-                if let Ok(upper_comments) = nostr_client::fetch_events_aggregated(
-                        filter_upper,
-                        Duration::from_secs(10),
-                    )
-                    .await
+                if let Ok(upper_comments) =
+                    nostr_client::fetch_events_aggregated(filter_upper, Duration::from_secs(10))
+                        .await
                 {
                     log::info!(
-                        "Loaded {} comments with uppercase E tags", upper_comments.len()
+                        "Loaded {} comments with uppercase E tags",
+                        upper_comments.len()
                     );
                     all_comments.extend(upper_comments.into_iter());
                 } else {
                     log::warn!("Failed to fetch comments with uppercase E tags");
                 }
-                if let Ok(lower_comments) = nostr_client::fetch_events_aggregated(
-                        filter_lower,
-                        Duration::from_secs(10),
-                    )
-                    .await
+                if let Ok(lower_comments) =
+                    nostr_client::fetch_events_aggregated(filter_lower, Duration::from_secs(10))
+                        .await
                 {
                     log::info!(
-                        "Loaded {} comments with lowercase e tags", lower_comments.len()
+                        "Loaded {} comments with lowercase e tags",
+                        lower_comments.len()
                     );
                     all_comments.extend(lower_comments.into_iter());
                 } else {
@@ -109,7 +103,10 @@ pub fn PhotoDetail(photo_id: String) -> Element {
                         Ok(output) => {
                             let subscription_id = output.val;
                             comment_sub_id.set(Some(subscription_id.clone()));
-                            log::debug!("Subscribed for new comments on photo {}", event_id.to_hex());
+                            log::debug!(
+                                "Subscribed for new comments on photo {}",
+                                event_id.to_hex()
+                            );
 
                             spawn(async move {
                                 let mut notifications = client.notifications();
@@ -291,8 +288,7 @@ pub fn PhotoDetail(photo_id: String) -> Element {
 }
 async fn load_photo_by_id(photo_id: &str) -> std::result::Result<Event, String> {
     log::info!("Loading photo by ID: {}", photo_id);
-    let event_id = EventId::parse(photo_id)
-        .map_err(|e| format!("Invalid photo ID: {}", e))?;
+    let event_id = EventId::parse(photo_id).map_err(|e| format!("Invalid photo ID: {}", e))?;
     let filter = Filter::new().id(event_id).kind(Kind::Custom(20)).limit(1);
     log::info!("Fetching photo event with filter: {:?}", filter);
     match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {

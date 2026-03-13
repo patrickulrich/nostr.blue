@@ -5,8 +5,8 @@ use crate::components::icons::{
     PenSquareIcon, ShareIcon, UserIcon, XIcon,
 };
 use crate::components::{
-    ShareModal, WikiBacklinks, WikiDownloadMenu, WikiForwardLinks, WikiMetadataCard,
-    WikiOutline, WikiPageContent, WikiPageNotFound, WikiPageSkeleton,
+    ShareModal, WikiBacklinks, WikiDownloadMenu, WikiForwardLinks, WikiMetadataCard, WikiOutline,
+    WikiPageContent, WikiPageNotFound, WikiPageSkeleton,
 };
 use crate::routes::Route;
 use crate::stores::wiki_store::{self, CachedWikiPage, WikiMetadata};
@@ -36,9 +36,7 @@ pub fn WikiDetail(identifier: String) -> Element {
             loading.set(true);
             if let Some(target) = wiki_store::get_redirect_target(&id) {
                 log::info!("Wiki redirect: {} -> {}", id, target);
-                nav.push(Route::WikiDetail {
-                    identifier: target,
-                });
+                nav.push(Route::WikiDetail { identifier: target });
                 return;
             }
             match wiki_store::fetch_wiki_page_by_identifier(&id).await {
@@ -350,11 +348,8 @@ fn MergeRequestCard(request: WikiMergeRequest) -> Element {
         .and_then(|p| p.display_name.clone().or(p.name.clone()))
         .unwrap_or_else(|| truncate_pubkey(&request.pubkey));
     let requester_picture = requester_profile.as_ref().and_then(|p| p.picture.clone());
-    let time_ago = format_relative_time_ex(
-        nostr_sdk::Timestamp::from(request.created_at),
-        true,
-        true,
-    );
+    let time_ago =
+        format_relative_time_ex(nostr_sdk::Timestamp::from(request.created_at), true, true);
     let source_id_short = if request.source_event_id.len() > 12 {
         format!("{}...", &request.source_event_id[..12])
     } else {

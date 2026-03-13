@@ -205,11 +205,10 @@ impl CountsCache {
             .map(|c| !c.is_valid(self.ttl))
             .unwrap_or(true);
         if needs_create {
-            self.cache
-                .put(
-                    event_id.to_string(),
-                    CachedCounts::new(InteractionCounts::default()),
-                );
+            self.cache.put(
+                event_id.to_string(),
+                CachedCounts::new(InteractionCounts::default()),
+            );
         }
         &mut self.cache.get_mut(event_id).unwrap().counts
     }
@@ -224,8 +223,7 @@ static COUNTS_CACHE: OnceLock<Mutex<CountsCache>> = OnceLock::new();
 
 /// Get or initialize the counts cache
 pub(crate) fn get_counts_cache() -> &'static Mutex<CountsCache> {
-    COUNTS_CACHE
-        .get_or_init(|| { Mutex::new(CountsCache::new(1000, Duration::from_secs(300))) })
+    COUNTS_CACHE.get_or_init(|| Mutex::new(CountsCache::new(1000, Duration::from_secs(300))))
 }
 
 /// Invalidate cached counts for an event
@@ -242,12 +240,10 @@ pub(crate) fn get_counts_cache() -> &'static Mutex<CountsCache> {
 #[allow(dead_code)]
 pub fn invalidate_interaction_counts(event_id: &str) {
     {
-        let mut cache = get_counts_cache()
-            .lock()
-            .unwrap_or_else(|poisoned| {
-                log::warn!("Counts cache mutex was poisoned, recovering");
-                poisoned.into_inner()
-            });
+        let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+            log::warn!("Counts cache mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
         cache.invalidate(event_id);
     }
     log::debug!("Invalidated interaction counts cache for {}", event_id);
@@ -257,17 +253,18 @@ pub fn invalidate_interaction_counts(event_id: &str) {
 #[allow(dead_code)]
 pub fn invalidate_interaction_counts_batch(event_ids: &[String]) {
     {
-        let mut cache = get_counts_cache()
-            .lock()
-            .unwrap_or_else(|poisoned| {
-                log::warn!("Counts cache mutex was poisoned, recovering");
-                poisoned.into_inner()
-            });
+        let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+            log::warn!("Counts cache mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
         for event_id in event_ids {
             cache.invalidate(event_id);
         }
     }
-    log::debug!("Invalidated interaction counts cache for {} events", event_ids.len());
+    log::debug!(
+        "Invalidated interaction counts cache for {} events",
+        event_ids.len()
+    );
 }
 
 #[cfg(test)]
@@ -348,8 +345,7 @@ mod tests {
         let mut cache = CountsCache::new(10, Duration::from_secs(300));
         cache.insert("key".to_string(), InteractionCounts::default());
         // Set cached_at to the past so the entry is expired
-        cache.cache.get_mut("key").unwrap().cached_at =
-            Instant::now() - Duration::from_secs(600);
+        cache.cache.get_mut("key").unwrap().cached_at = Instant::now() - Duration::from_secs(600);
         assert!(cache.get("key").is_none());
         // Verify the expired entry was removed from the cache
         assert!(cache.cache.peek("key").is_none());

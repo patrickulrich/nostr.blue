@@ -129,8 +129,14 @@ mod tests {
     }
     #[test]
     fn test_strategy_from_str() {
-        assert_eq!(DenominationStrategy::from_str("large"), DenominationStrategy::Large);
-        assert_eq!(DenominationStrategy::from_str("small"), DenominationStrategy::Small);
+        assert_eq!(
+            DenominationStrategy::from_str("large"),
+            DenominationStrategy::Large
+        );
+        assert_eq!(
+            DenominationStrategy::from_str("small"),
+            DenominationStrategy::Small
+        );
         assert_eq!(
             DenominationStrategy::from_str("unknown"),
             DenominationStrategy::PowerOfTwo,

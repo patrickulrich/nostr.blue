@@ -2,9 +2,9 @@
 //!
 //! A specialized component for uploading and managing article cover images.
 //! Shows a URL field with an upload button that fills in the URL when uploaded.
-use dioxus::prelude::*;
 use super::media_uploader::MediaUploader;
 use super::modal::{Modal, ModalBody, ModalFooter, ModalHeader};
+use dioxus::prelude::*;
 #[derive(Props, Clone, PartialEq)]
 pub struct ArticleCoverUploaderProps {
     /// Signal holding the current cover image URL

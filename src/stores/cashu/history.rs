@@ -2,14 +2,14 @@
 //!
 //! Functions for fetching and creating transaction history events (NIP-60 kind 7376).
 //! Supports incremental sync to avoid re-fetching all events.
-use std::collections::HashSet;
-use std::time::Duration;
-use dioxus::prelude::*;
-use nostr_sdk::nips::nip60::TransactionDirection;
-use nostr_sdk::{Filter, Kind, PublicKey, Timestamp};
 use super::signals::{SHARED_LOCALSTORE, SYNC_STATE, WALLET_HISTORY};
 use super::types::{HistoryItem, SyncState, WalletHistoryStoreStoreExt};
 use crate::stores::{auth_store, nostr_client};
+use dioxus::prelude::*;
+use nostr_sdk::nips::nip60::TransactionDirection;
+use nostr_sdk::{Filter, Kind, PublicKey, Timestamp};
+use std::collections::HashSet;
+use std::time::Duration;
 /// Fetch transaction history from relays (NIP-60 kind 7376) with incremental sync
 ///
 /// Uses the sync state to fetch only new events since the last sync.
@@ -22,8 +22,7 @@ pub async fn fetch_history() -> Result<(), String> {
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-    let pubkey = PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let sync_state = if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
         match localstore.load_sync_state().await {
             Ok(Some(state)) => {
@@ -39,11 +38,17 @@ pub async fn fetch_history() -> Result<(), String> {
     } else {
         SYNC_STATE.read().clone()
     };
-    let last_sync_ts = sync_state.as_ref().map(|s| s.last_history_sync).unwrap_or(0);
+    let last_sync_ts = sync_state
+        .as_ref()
+        .map(|s| s.last_history_sync)
+        .unwrap_or(0);
     let history_is_empty = WALLET_HISTORY.read().data().read().is_empty();
     let is_incremental = last_sync_ts > 0 && !history_is_empty;
     if is_incremental {
-        log::info!("Fetching transaction history (incremental since {})", last_sync_ts);
+        log::info!(
+            "Fetching transaction history (incremental since {})",
+            last_sync_ts
+        );
     } else {
         log::info!("Fetching transaction history (full sync)");
     }
@@ -64,100 +69,94 @@ pub async fn fetch_history() -> Result<(), String> {
             let mut history = Vec::new();
             for event in events {
                 match signer.nip44_decrypt(&event.pubkey, &event.content).await {
-                    Ok(decrypted) => {
-                        match serde_json::from_str::<Vec<Vec<String>>>(&decrypted) {
-                            Ok(pairs) => {
-                                let mut direction = TransactionDirection::In;
-                                let mut amount: Option<u64> = None;
-                                let mut created_tokens = Vec::new();
-                                let mut destroyed_tokens = Vec::new();
-                                for pair in pairs {
-                                    let key = match pair.first() {
-                                        Some(k) => k.as_str(),
-                                        None => continue,
-                                    };
-                                    match key {
-                                        "direction" => {
-                                            if let Some(val) = pair.get(1) {
-                                                direction = if val == "in" {
-                                                    TransactionDirection::In
-                                                } else {
-                                                    TransactionDirection::Out
-                                                };
-                                            }
+                    Ok(decrypted) => match serde_json::from_str::<Vec<Vec<String>>>(&decrypted) {
+                        Ok(pairs) => {
+                            let mut direction = TransactionDirection::In;
+                            let mut amount: Option<u64> = None;
+                            let mut created_tokens = Vec::new();
+                            let mut destroyed_tokens = Vec::new();
+                            for pair in pairs {
+                                let key = match pair.first() {
+                                    Some(k) => k.as_str(),
+                                    None => continue,
+                                };
+                                match key {
+                                    "direction" => {
+                                        if let Some(val) = pair.get(1) {
+                                            direction = if val == "in" {
+                                                TransactionDirection::In
+                                            } else {
+                                                TransactionDirection::Out
+                                            };
                                         }
-                                        "amount" => {
-                                            if let Some(val) = pair.get(1) {
-                                                match val.parse::<u64>() {
-                                                    Ok(parsed_amount) => {
-                                                        amount = Some(parsed_amount);
-                                                    }
-                                                    Err(e) => {
-                                                        log::error!(
+                                    }
+                                    "amount" => {
+                                        if let Some(val) = pair.get(1) {
+                                            match val.parse::<u64>() {
+                                                Ok(parsed_amount) => {
+                                                    amount = Some(parsed_amount);
+                                                }
+                                                Err(e) => {
+                                                    log::error!(
                                                             "Failed to parse amount in history event {}: '{}' - {}",
                                                             event.id.to_hex(), val, e
                                                         );
-                                                    }
                                                 }
                                             }
                                         }
-                                        "e" => {
-                                            if let (Some(event_id), Some(marker)) = (
-                                                pair.get(1),
-                                                pair.get(3),
-                                            ) {
-                                                match marker.as_str() {
-                                                    "created" => created_tokens.push(event_id.clone()),
-                                                    "destroyed" => destroyed_tokens.push(event_id.clone()),
-                                                    _ => {}
-                                                }
-                                            }
-                                        }
-                                        _ => {}
                                     }
-                                }
-                                let redeemed_events: Vec<String> = event
-                                    .tags
-                                    .iter()
-                                    .filter_map(|tag| {
-                                        let vec = tag.clone().to_vec();
-                                        if vec.len() > 3 && vec[0] == "e" && vec[3] == "redeemed" {
-                                            Some(vec[1].clone())
-                                        } else {
-                                            None
+                                    "e" => {
+                                        if let (Some(event_id), Some(marker)) =
+                                            (pair.get(1), pair.get(3))
+                                        {
+                                            match marker.as_str() {
+                                                "created" => created_tokens.push(event_id.clone()),
+                                                "destroyed" => {
+                                                    destroyed_tokens.push(event_id.clone())
+                                                }
+                                                _ => {}
+                                            }
                                         }
-                                    })
-                                    .collect();
-                                if let Some(parsed_amount) = amount {
-                                    history
-                                        .push(HistoryItem {
-                                            event_id: event.id.to_hex(),
-                                            direction,
-                                            amount: parsed_amount,
-                                            unit: "sat".to_string(),
-                                            created_at: event.created_at.as_secs(),
-                                            created_tokens,
-                                            destroyed_tokens,
-                                            redeemed_events,
-                                        });
-                                } else {
-                                    log::warn!(
-                                        "Skipping history event {} due to missing or invalid amount",
-                                        event.id.to_hex()
-                                    );
+                                    }
+                                    _ => {}
                                 }
                             }
-                            Err(e) => {
-                                log::error!(
-                                    "Failed to parse history event {}: {}", event.id, e
+                            let redeemed_events: Vec<String> = event
+                                .tags
+                                .iter()
+                                .filter_map(|tag| {
+                                    let vec = tag.clone().to_vec();
+                                    if vec.len() > 3 && vec[0] == "e" && vec[3] == "redeemed" {
+                                        Some(vec[1].clone())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
+                            if let Some(parsed_amount) = amount {
+                                history.push(HistoryItem {
+                                    event_id: event.id.to_hex(),
+                                    direction,
+                                    amount: parsed_amount,
+                                    unit: "sat".to_string(),
+                                    created_at: event.created_at.as_secs(),
+                                    created_tokens,
+                                    destroyed_tokens,
+                                    redeemed_events,
+                                });
+                            } else {
+                                log::warn!(
+                                    "Skipping history event {} due to missing or invalid amount",
+                                    event.id.to_hex()
                                 );
                             }
                         }
-                    }
+                        Err(e) => {
+                            log::error!("Failed to parse history event {}: {}", event.id, e);
+                        }
+                    },
                     Err(e) => {
-                        log::error!(
-                            "Failed to decrypt history event {}: {}", event.id, e
-                        );
+                        log::error!("Failed to decrypt history event {}: {}", event.id, e);
                     }
                 }
             }
@@ -177,7 +176,8 @@ pub async fn fetch_history() -> Result<(), String> {
                 merged_history.sort_by(|a, b| b.created_at.cmp(&a.created_at));
                 log::info!(
                     "Incremental history sync: {} total items (fetched {} new events)",
-                    merged_history.len(), new_history_count
+                    merged_history.len(),
+                    new_history_count
                 );
                 *WALLET_HISTORY.read().data().write() = merged_history;
             } else {
@@ -187,10 +187,7 @@ pub async fn fetch_history() -> Result<(), String> {
             }
             let new_sync_ts = Timestamp::now().as_secs();
             let new_sync_state = SyncState {
-                last_token_sync: sync_state
-                    .as_ref()
-                    .map(|s| s.last_token_sync)
-                    .unwrap_or(0),
+                last_token_sync: sync_state.as_ref().map(|s| s.last_token_sync).unwrap_or(0),
                 last_history_sync: new_sync_ts,
                 last_deletion_sync: sync_state
                     .as_ref()

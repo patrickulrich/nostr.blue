@@ -7,10 +7,7 @@ use dioxus::prelude::ReadableExt;
 use futures::join;
 use instant::{Duration, Instant};
 use nostr_relay_pool::{SyncDirection, SyncOptions};
-use nostr_sdk::{
-    Event, EventId, Filter, Kind, TagStandard,
-    Timestamp,
-};
+use nostr_sdk::{Event, EventId, Filter, Kind, TagStandard, Timestamp};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
@@ -69,23 +66,17 @@ fn get_nip45_cache() -> &'static Mutex<HashMap<String, Nip45SupportStatus>> {
 /// * `Some(count)` - COUNT succeeded on at least one relay
 /// * `None` - COUNT not supported or failed on all relays
 #[allow(dead_code)]
-async fn try_count_from_relays(
-    event_id: &EventId,
-    kind: Kind,
-    timeout: Duration,
-) -> Option<usize> {
+async fn try_count_from_relays(event_id: &EventId, kind: Kind, timeout: Duration) -> Option<usize> {
     let client = get_client()?;
     let filter = Filter::new().kind(kind).event(*event_id);
     let relays = client.relays().await;
     for (url, relay) in relays.iter() {
         let url_str = url.to_string();
         let should_try = {
-            let cache = get_nip45_cache()
-                .lock()
-                .unwrap_or_else(|poisoned| {
-                    log::warn!("NIP-45 cache mutex was poisoned, recovering");
-                    poisoned.into_inner()
-                });
+            let cache = get_nip45_cache().lock().unwrap_or_else(|poisoned| {
+                log::warn!("NIP-45 cache mutex was poisoned, recovering");
+                poisoned.into_inner()
+            });
             match cache.get(&url_str) {
                 Some(status) if status.is_valid() => status.supported,
                 Some(_) => true,
@@ -99,12 +90,10 @@ async fn try_count_from_relays(
         match relay.count_events(filter.clone(), count_timeout).await {
             Ok(count) => {
                 {
-                    let mut cache = get_nip45_cache()
-                        .lock()
-                        .unwrap_or_else(|poisoned| {
-                            log::warn!("NIP-45 cache mutex was poisoned, recovering");
-                            poisoned.into_inner()
-                        });
+                    let mut cache = get_nip45_cache().lock().unwrap_or_else(|poisoned| {
+                        log::warn!("NIP-45 cache mutex was poisoned, recovering");
+                        poisoned.into_inner()
+                    });
                     cache.insert(url_str, Nip45SupportStatus::new(true));
                 }
                 log::debug!("COUNT from {}: {} events", url, count);
@@ -112,12 +101,10 @@ async fn try_count_from_relays(
             }
             Err(e) => {
                 {
-                    let mut cache = get_nip45_cache()
-                        .lock()
-                        .unwrap_or_else(|poisoned| {
-                            log::warn!("NIP-45 cache mutex was poisoned, recovering");
-                            poisoned.into_inner()
-                        });
+                    let mut cache = get_nip45_cache().lock().unwrap_or_else(|poisoned| {
+                        log::warn!("NIP-45 cache mutex was poisoned, recovering");
+                        poisoned.into_inner()
+                    });
                     cache.insert(url_str, Nip45SupportStatus::new(false));
                 }
                 log::debug!("COUNT failed on {}: {}", url, e);
@@ -167,13 +154,11 @@ pub async fn get_counts_with_count_fallback(
         counts.zaps = count;
     }
     if needs_fallback {
-        log::debug!("COUNT incomplete for {}, using full fetch", event_id.to_hex());
-        if let Ok(batch_counts) = fetch_interaction_counts_batch(
-                vec![*event_id],
-                timeout,
-            )
-            .await
-        {
+        log::debug!(
+            "COUNT incomplete for {}, using full fetch",
+            event_id.to_hex()
+        );
+        if let Ok(batch_counts) = fetch_interaction_counts_batch(vec![*event_id], timeout).await {
             if let Some(fetched) = batch_counts.get(&event_id.to_hex()) {
                 return fetched.clone();
             }
@@ -207,12 +192,10 @@ pub async fn fetch_interaction_counts_batch(
         return Ok(HashMap::new());
     }
     let (cached_counts, cache_hits, uncached_ids) = {
-        let mut cache = get_counts_cache()
-            .lock()
-            .unwrap_or_else(|poisoned| {
-                log::warn!("Counts cache mutex was poisoned, recovering");
-                poisoned.into_inner()
-            });
+        let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+            log::warn!("Counts cache mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
         let cached_counts = cache.get_batch(&event_ids);
         let cache_hits = cached_counts.len();
         let uncached_ids: Vec<EventId> = event_ids
@@ -224,7 +207,9 @@ pub async fn fetch_interaction_counts_batch(
     };
     log::info!(
         "Batch fetching interaction counts for {} events ({} cache hits, {} cache misses)",
-        event_ids.len(), cache_hits, uncached_ids.len()
+        event_ids.len(),
+        cache_hits,
+        uncached_ids.len()
     );
     if uncached_ids.is_empty() {
         log::info!("All counts served from cache!");
@@ -235,7 +220,12 @@ pub async fn fetch_interaction_counts_batch(
     let requested_limit = uncached_ids.len() * 100;
     let capped_limit = requested_limit.min(MAX_RELAY_LIMIT);
     let filter = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::Reaction, Kind::Repost, Kind::ZapReceipt])
+        .kinds(vec![
+            Kind::TextNote,
+            Kind::Reaction,
+            Kind::Repost,
+            Kind::ZapReceipt,
+        ])
         .events(uncached_ids.clone())
         .limit(capped_limit);
     let db_events: Vec<Event> = match client.database().query(filter.clone()).await {
@@ -259,7 +249,8 @@ pub async fn fetch_interaction_counts_batch(
         Err(e) => {
             if !db_events.is_empty() {
                 log::warn!(
-                    "Relay fetch failed but using {} cached events: {}", db_events.len(),
+                    "Relay fetch failed but using {} cached events: {}",
+                    db_events.len(),
                     e
                 );
                 Vec::new()
@@ -277,13 +268,12 @@ pub async fn fetch_interaction_counts_batch(
     }
     let events: Vec<Event> = event_map.into_values().collect();
     log::info!(
-        "Processing {} total interaction events (DB + relay, deduplicated)", events.len()
+        "Processing {} total interaction events (DB + relay, deduplicated)",
+        events.len()
     );
     let mut freshly_fetched: HashMap<String, InteractionCounts> = HashMap::new();
-    let requested_ids: std::collections::HashSet<String> = uncached_ids
-        .iter()
-        .map(|id| id.to_hex())
-        .collect();
+    let requested_ids: std::collections::HashSet<String> =
+        uncached_ids.iter().map(|id| id.to_hex()).collect();
     for event_id in &uncached_ids {
         freshly_fetched.insert(event_id.to_hex(), InteractionCounts::default());
     }
@@ -291,12 +281,10 @@ pub async fn fetch_interaction_counts_batch(
         .read()
         .as_ref()
         .and_then(|info| nostr_sdk::PublicKey::from_hex(&info.public_key).ok());
-    let mut user_reactions_seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut user_reactions_seen: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
     for event in events {
-        let referenced_event_id = match extract_referenced_event(
-            &event,
-            &requested_ids,
-        ) {
+        let referenced_event_id = match extract_referenced_event(&event, &requested_ids) {
             Some(id) => id,
             None => continue,
         };
@@ -321,24 +309,19 @@ pub async fn fetch_interaction_counts_batch(
                     } else {
                         counts.user_liked = Some(true);
                         counts.user_reaction = Some(content.to_string());
-                        if content.starts_with(':') && content.ends_with(':')
-                            && content.len() > 2
-                        {
+                        if content.starts_with(':') && content.ends_with(':') && content.len() > 2 {
                             let shortcode = &content[1..content.len() - 1];
-                            let emoji_url = event
-                                .tags
-                                .iter()
-                                .find_map(|tag| {
-                                    let tag_slice = tag.as_slice();
-                                    if tag_slice.len() >= 3
-                                        && tag_slice.first().map(|s| s.as_str()) == Some("emoji")
-                                        && tag_slice.get(1).map(|s| s.as_str()) == Some(shortcode)
-                                    {
-                                        tag_slice.get(2).map(|s| s.to_string())
-                                    } else {
-                                        None
-                                    }
-                                });
+                            let emoji_url = event.tags.iter().find_map(|tag| {
+                                let tag_slice = tag.as_slice();
+                                if tag_slice.len() >= 3
+                                    && tag_slice.first().map(|s| s.as_str()) == Some("emoji")
+                                    && tag_slice.get(1).map(|s| s.as_str()) == Some(shortcode)
+                                {
+                                    tag_slice.get(2).map(|s| s.to_string())
+                                } else {
+                                    None
+                                }
+                            });
                             counts.user_reaction_url = emoji_url;
                         } else {
                             counts.user_reaction_url = None;
@@ -359,7 +342,10 @@ pub async fn fetch_interaction_counts_batch(
                     counts.zap_amount_sats += amount;
                 }
                 if let Some(sender) = extract_zap_sender(&event) {
-                    if current_user_pk.map(|pk| sender == pk.to_hex()).unwrap_or(false) {
+                    if current_user_pk
+                        .map(|pk| sender == pk.to_hex())
+                        .unwrap_or(false)
+                    {
                         counts.user_zapped = Some(true);
                     }
                 }
@@ -368,19 +354,19 @@ pub async fn fetch_interaction_counts_batch(
         }
     }
     {
-        let mut cache = get_counts_cache()
-            .lock()
-            .unwrap_or_else(|poisoned| {
-                log::warn!("Counts cache mutex was poisoned, recovering");
-                poisoned.into_inner()
-            });
+        let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+            log::warn!("Counts cache mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
         cache.insert_batch(freshly_fetched.clone());
     }
     let mut final_counts = cached_counts;
     final_counts.extend(freshly_fetched);
     log::info!(
         "Returning {} interaction counts ({} from cache, {} freshly fetched)",
-        final_counts.len(), cache_hits, uncached_ids.len()
+        final_counts.len(),
+        cache_hits,
+        uncached_ids.len()
     );
     Ok(final_counts)
 }
@@ -407,7 +393,12 @@ pub async fn sync_interaction_counts(
     }
     let client = get_client().ok_or("Client not initialized")?;
     let filter = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::Reaction, Kind::Repost, Kind::ZapReceipt])
+        .kinds(vec![
+            Kind::TextNote,
+            Kind::Reaction,
+            Kind::Repost,
+            Kind::ZapReceipt,
+        ])
         .events(event_ids.clone());
     let sync_opts = SyncOptions::default()
         .direction(SyncDirection::Down)
@@ -419,16 +410,15 @@ pub async fn sync_interaction_counts(
             let new_event_count = reconciliation.received.len();
             if new_event_count == 0 {
                 log::info!("Negentropy sync: no new interaction events found");
-                let mut cache = get_counts_cache()
-                    .lock()
-                    .unwrap_or_else(|poisoned| {
-                        log::warn!("Counts cache mutex was poisoned, recovering");
-                        poisoned.into_inner()
-                    });
+                let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+                    log::warn!("Counts cache mutex was poisoned, recovering");
+                    poisoned.into_inner()
+                });
                 return Ok(cache.get_batch(&event_ids));
             }
             log::info!(
-                "Negentropy sync: {} new interaction events to process", new_event_count
+                "Negentropy sync: {} new interaction events to process",
+                new_event_count
             );
             let mut new_events = Vec::new();
             for event_id in &reconciliation.received {
@@ -437,12 +427,10 @@ pub async fn sync_interaction_counts(
                 }
             }
             let mut result = {
-                let mut cache = get_counts_cache()
-                    .lock()
-                    .unwrap_or_else(|poisoned| {
-                        log::warn!("Counts cache mutex was poisoned, recovering");
-                        poisoned.into_inner()
-                    });
+                let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+                    log::warn!("Counts cache mutex was poisoned, recovering");
+                    poisoned.into_inner()
+                });
                 cache.get_batch(&event_ids)
             };
             for event_id in &event_ids {
@@ -453,16 +441,12 @@ pub async fn sync_interaction_counts(
                 .read()
                 .as_ref()
                 .and_then(|info| nostr_sdk::PublicKey::from_hex(&info.public_key).ok());
-            let requested_ids: std::collections::HashSet<String> = event_ids
-                .iter()
-                .map(|id| id.to_hex())
-                .collect();
-            let mut user_reactions_seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let requested_ids: std::collections::HashSet<String> =
+                event_ids.iter().map(|id| id.to_hex()).collect();
+            let mut user_reactions_seen: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
             for event in new_events {
-                let referenced_event_id = match extract_referenced_event(
-                    &event,
-                    &requested_ids,
-                ) {
+                let referenced_event_id = match extract_referenced_event(&event, &requested_ids) {
                     Some(id) => id,
                     None => continue,
                 };
@@ -487,24 +471,24 @@ pub async fn sync_interaction_counts(
                             } else {
                                 counts.user_liked = Some(true);
                                 counts.user_reaction = Some(content.to_string());
-                                if content.starts_with(':') && content.ends_with(':')
+                                if content.starts_with(':')
+                                    && content.ends_with(':')
                                     && content.len() > 2
                                 {
                                     let shortcode = &content[1..content.len() - 1];
-                                    let emoji_url = event
-                                        .tags
-                                        .iter()
-                                        .find_map(|tag| {
-                                            let tag_slice = tag.as_slice();
-                                            if tag_slice.len() >= 3
-                                                && tag_slice.first().map(|s| s.as_str()) == Some("emoji")
-                                                && tag_slice.get(1).map(|s| s.as_str()) == Some(shortcode)
-                                            {
-                                                tag_slice.get(2).map(|s| s.to_string())
-                                            } else {
-                                                None
-                                            }
-                                        });
+                                    let emoji_url = event.tags.iter().find_map(|tag| {
+                                        let tag_slice = tag.as_slice();
+                                        if tag_slice.len() >= 3
+                                            && tag_slice.first().map(|s| s.as_str())
+                                                == Some("emoji")
+                                            && tag_slice.get(1).map(|s| s.as_str())
+                                                == Some(shortcode)
+                                        {
+                                            tag_slice.get(2).map(|s| s.to_string())
+                                        } else {
+                                            None
+                                        }
+                                    });
                                     counts.user_reaction_url = emoji_url;
                                 } else {
                                     counts.user_reaction_url = None;
@@ -525,7 +509,10 @@ pub async fn sync_interaction_counts(
                             counts.zap_amount_sats += amount;
                         }
                         if let Some(sender) = extract_zap_sender(&event) {
-                            if current_user_pk.map(|pk| sender == pk.to_hex()).unwrap_or(false) {
+                            if current_user_pk
+                                .map(|pk| sender == pk.to_hex())
+                                .unwrap_or(false)
+                            {
                                 counts.user_zapped = Some(true);
                             }
                         }
@@ -534,16 +521,15 @@ pub async fn sync_interaction_counts(
                 }
             }
             {
-                let mut cache = get_counts_cache()
-                    .lock()
-                    .unwrap_or_else(|poisoned| {
-                        log::warn!("Counts cache mutex was poisoned, recovering");
-                        poisoned.into_inner()
-                    });
+                let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+                    log::warn!("Counts cache mutex was poisoned, recovering");
+                    poisoned.into_inner()
+                });
                 cache.insert_batch(result.clone());
             }
             log::info!(
-                "Negentropy sync complete: updated {} interaction counts", result.len()
+                "Negentropy sync complete: updated {} interaction counts",
+                result.len()
             );
             Ok(result)
         }
@@ -608,26 +594,24 @@ pub(super) fn extract_zap_sender(event: &Event) -> Option<String> {
 
 /// Extract zap amount in satoshis from a zap event (kind 9735)
 pub(super) fn extract_zap_amount(event: &Event) -> Option<u64> {
-    if let Some(bolt11_tag) = event
-        .tags
-        .iter()
-        .find(|tag| {
-            tag.as_slice().first().map(|k| k.as_str() == "bolt11").unwrap_or(false)
-        })
-    {
+    if let Some(bolt11_tag) = event.tags.iter().find(|tag| {
+        tag.as_slice()
+            .first()
+            .map(|k| k.as_str() == "bolt11")
+            .unwrap_or(false)
+    }) {
         if let Some(bolt11) = bolt11_tag.as_slice().get(1) {
             if let Some(amount) = parse_bolt11_amount(bolt11.as_str()) {
                 return Some(amount);
             }
         }
     }
-    if let Some(description_tag) = event
-        .tags
-        .iter()
-        .find(|tag| {
-            tag.as_slice().first().map(|k| k.as_str() == "description").unwrap_or(false)
-        })
-    {
+    if let Some(description_tag) = event.tags.iter().find(|tag| {
+        tag.as_slice()
+            .first()
+            .map(|k| k.as_str() == "description")
+            .unwrap_or(false)
+    }) {
         if let Some(desc) = description_tag.as_slice().get(1) {
             return parse_amount_from_description(desc.as_str());
         }
@@ -642,10 +626,7 @@ pub(super) fn parse_amount_from_description(description: &str) -> Option<u64> {
             for tag in tags {
                 if let Some(tag_vals) = tag.as_array() {
                     if tag_vals.first().and_then(|v| v.as_str()) == Some("amount") {
-                        if let Some(amount_str) = tag_vals
-                            .get(1)
-                            .and_then(|v| v.as_str())
-                        {
+                        if let Some(amount_str) = tag_vals.get(1).and_then(|v| v.as_str()) {
                             if let Ok(millisats) = amount_str.parse::<u64>() {
                                 return Some(millisats / 1000);
                             }
@@ -679,7 +660,12 @@ pub async fn fetch_trending_interactions(
     let client = get_client().ok_or("Client not initialized")?;
     log::info!("Fetching trending interactions since {}", since);
     let filter = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::Reaction, Kind::Repost, Kind::ZapReceipt])
+        .kinds(vec![
+            Kind::TextNote,
+            Kind::Reaction,
+            Kind::Repost,
+            Kind::ZapReceipt,
+        ])
         .since(since)
         .limit(limit);
     let events = client

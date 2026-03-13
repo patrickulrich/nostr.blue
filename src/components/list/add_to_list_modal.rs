@@ -3,7 +3,6 @@ use crate::stores::nostr_client;
 use crate::utils::list_encryption::add_person_to_list;
 use crate::utils::list_kinds::{get_item_count, NAMED_CURATIONS, NAMED_PEOPLE};
 use dioxus::prelude::*;
-use gloo_timers::future::TimeoutFuture;
 use nostr_sdk::{EventBuilder, EventId, Kind, Tag};
 use uuid::Uuid;
 /// Mode for the add to list modal
@@ -27,10 +26,12 @@ pub struct AddToListModalProps {
 #[component]
 pub fn AddToListModal(props: AddToListModalProps) -> Element {
     let (lists_signal, lists_loading, lists_error, mut refresh_trigger) = use_user_lists();
+    let existing_lists_supported = cfg!(feature = "native");
+    let create_new_default = !existing_lists_supported;
     let mut selected_list_id = use_signal(|| None::<String>);
     let mut selected_people_list = use_signal(|| None::<UserList>);
     let mut new_list_name = use_signal(String::new);
-    let mut create_new = use_signal(|| false);
+    let mut create_new = use_signal(move || create_new_default);
     let mut loading = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
     let mut success = use_signal(|| false);
@@ -58,6 +59,19 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
             .cloned()
             .collect::<Vec<_>>()
     });
+    use_effect(use_reactive(&*add_mode.read(), move |mode| {
+        let should_create_new = match mode {
+            AddMode::SelectMode => create_new_default,
+            AddMode::AddPost => !existing_lists_supported || curation_lists.peek().is_empty(),
+            AddMode::AddPerson => people_lists.peek().is_empty(),
+        };
+        create_new.set(should_create_new);
+        selected_list_id.set(None);
+        selected_people_list.set(None);
+        new_list_name.set(String::new());
+        add_as_private.set(false);
+        error_msg.set(None);
+    }));
     let event_id = props.event_id.clone();
     let author_pubkey = props.author_pubkey.clone();
     let on_close = props.on_close;
@@ -94,8 +108,7 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                         loading.set(false);
                         refresh_trigger.with_mut(|val| *val = val.wrapping_add(1));
                         spawn(async move {
-                            gloo_timers::future::sleep(std::time::Duration::from_secs(2))
-                                .await;
+                            crate::platform::timer::sleep(std::time::Duration::from_secs(2)).await;
                             on_close.call(());
                         });
                     }
@@ -124,21 +137,19 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                     }
                     let is_private = *add_as_private.read();
                     match crate::utils::list_encryption::create_people_list(
-                            list_name.clone(),
-                            None,
-                            is_private,
-                        )
-                        .await
+                        list_name,
+                        None,
+                        is_private,
+                    )
+                    .await
                     {
-                        Ok(event) => {
-                            match add_person_to_list(&event, &pubkey, is_private).await {
-                                Ok(_) => Ok(()),
-                                Err(e) => {
-                                    refresh_trigger.with_mut(|val| *val = val.wrapping_add(1));
-                                    Err(format!("List created but adding person failed: {}", e))
-                                }
+                        Ok(event) => match add_person_to_list(&event, &pubkey, is_private).await {
+                            Ok(_) => Ok(()),
+                            Err(e) => {
+                                refresh_trigger.with_mut(|val| *val = val.wrapping_add(1));
+                                Err(format!("List created but adding person failed: {}", e))
                             }
-                        }
+                        },
                         Err(e) => Err(e),
                     }
                 } else {
@@ -162,8 +173,7 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                         loading.set(false);
                         refresh_trigger.with_mut(|val| *val = val.wrapping_add(1));
                         spawn(async move {
-                            gloo_timers::future::sleep(std::time::Duration::from_secs(2))
-                                .await;
+                            crate::platform::timer::sleep(std::time::Duration::from_secs(2)).await;
                             on_close.call(());
                         });
                     }
@@ -236,17 +246,17 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                                 class: "text-sm text-muted-foreground hover:text-foreground flex items-center gap-1 mb-2",
                                 onclick: move |_| {
                                     add_mode.set(AddMode::SelectMode);
-                                    create_new.set(false);
-                                    error_msg.set(None);
                                 },
                                 "← Back"
                             }
                         }
                         div { class: "flex gap-2 border-b border-border pb-2",
-                            button {
-                                class: if !*create_new.read() { "px-3 py-1 text-sm font-medium border-b-2 border-primary" } else { "px-3 py-1 text-sm font-medium text-muted-foreground hover:text-foreground" },
-                                onclick: move |_| create_new.set(false),
-                                "Existing List"
+                            if existing_lists_supported {
+                                button {
+                                    class: if !*create_new.read() { "px-3 py-1 text-sm font-medium border-b-2 border-primary" } else { "px-3 py-1 text-sm font-medium text-muted-foreground hover:text-foreground" },
+                                    onclick: move |_| create_new.set(false),
+                                    "Existing List"
+                                }
                             }
                             button {
                                 class: if *create_new.read() { "px-3 py-1 text-sm font-medium border-b-2 border-primary" } else { "px-3 py-1 text-sm font-medium text-muted-foreground hover:text-foreground" },
@@ -254,7 +264,12 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                                 "Create New"
                             }
                         }
-                        if !*create_new.read() {
+                        if !existing_lists_supported {
+                            div { class: "text-sm text-muted-foreground",
+                                "Existing curation lists can only be updated on native builds right now. Create a new list instead."
+                            }
+                        }
+                        if existing_lists_supported && !*create_new.read() {
                             div {
                                 label { class: "block text-sm font-medium mb-2", "Select a curation list" }
                                 if *lists_loading.read() {
@@ -334,8 +349,6 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                             class: "text-sm text-muted-foreground hover:text-foreground flex items-center gap-1 mb-2",
                             onclick: move |_| {
                                 add_mode.set(AddMode::SelectMode);
-                                create_new.set(false);
-                                error_msg.set(None);
                             },
                             "← Back"
                         }
@@ -479,12 +492,13 @@ async fn create_new_curation_list(name: String, event_id: String) -> Result<(), 
         return Err("List name cannot be empty".to_string());
     }
     if name.len() > MAX_LIST_NAME_LENGTH {
-        return Err(
-            format!("List name cannot exceed {} characters", MAX_LIST_NAME_LENGTH),
-        );
+        return Err(format!(
+            "List name cannot exceed {} characters",
+            MAX_LIST_NAME_LENGTH
+        ));
     }
-    let target_event_id = EventId::from_hex(&event_id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
+    let target_event_id =
+        EventId::from_hex(&event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
     let unique_id = Uuid::new_v4().to_string();
     let tags = vec![
         Tag::identifier(&unique_id),
@@ -499,38 +513,34 @@ async fn create_new_curation_list(name: String, event_id: String) -> Result<(), 
     log::info!("Created new curation list: {}", name);
     Ok(())
 }
-async fn add_to_existing_list(
-    list_event_id: String,
-    event_id: String,
-) -> Result<(), String> {
+#[cfg(feature = "native")]
+async fn add_to_existing_list(list_event_id: String, event_id: String) -> Result<(), String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
-    let target_event_id = EventId::from_hex(&event_id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
-    let list_id = EventId::from_hex(&list_event_id)
-        .map_err(|e| format!("Invalid list ID: {}", e))?;
+    let target_event_id =
+        EventId::from_hex(&event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
+    let list_id =
+        EventId::from_hex(&list_event_id).map_err(|e| format!("Invalid list ID: {}", e))?;
     let list_event = {
         tokio::select! {
             result = client.database().event_by_id(& list_id) => { result.map_err(| e |
             format!("Failed to fetch list: {}", e)) ? .ok_or("List not found") ? } _ =
-            TimeoutFuture::new(5_000) => { return Err("Database fetch timeout (5s)"
+            crate::platform::timer::sleep_ms(5_000) => { return Err("Database fetch timeout (5s)"
             .to_string()); }
         }
     };
     let existing_content = list_event.content.clone();
     let mut tags: Vec<Tag> = list_event.tags.into_iter().collect();
     let normalized_event_id = target_event_id.to_hex();
-    let already_exists = tags
-        .iter()
-        .any(|tag| {
-            tag.kind() == nostr_sdk::TagKind::e()
-                && tag
-                    .content()
-                    .map(|c| c.eq_ignore_ascii_case(&normalized_event_id))
-                    .unwrap_or(false)
-        });
+    let already_exists = tags.iter().any(|tag| {
+        tag.kind() == nostr_sdk::TagKind::e()
+            && tag
+                .content()
+                .map(|c| c.eq_ignore_ascii_case(&normalized_event_id))
+                .unwrap_or(false)
+    });
     if already_exists {
         return Err("Event is already in this list".to_string());
     }
@@ -542,4 +552,9 @@ async fn add_to_existing_list(
         .map_err(|e| format!("Failed to update list: {}", e))?;
     log::info!("Added event to existing list");
     Ok(())
+}
+
+#[cfg(not(feature = "native"))]
+async fn add_to_existing_list(_list_event_id: String, _event_id: String) -> Result<(), String> {
+    Err("Adding to existing lists is not supported on web".to_string())
 }

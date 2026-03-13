@@ -28,6 +28,7 @@ pub fn add_grasp_server(domain: &str) {
     }
 }
 /// Get all known GRASP servers as a vector
+#[allow(dead_code)]
 pub fn get_grasp_servers() -> Vec<String> {
     GRASP_SERVERS.read().iter().cloned().collect()
 }

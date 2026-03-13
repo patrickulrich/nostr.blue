@@ -1,12 +1,12 @@
 //! Badge Creation Page
 //!
 //! Form for creating new badge definitions (kind 30009).
-use dioxus::prelude::*;
 use crate::components::ClientInitializing;
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip58;
 use crate::utils::slugify;
+use dioxus::prelude::*;
 /// Badge creation page component
 #[component]
 pub fn BadgeNew() -> Element {

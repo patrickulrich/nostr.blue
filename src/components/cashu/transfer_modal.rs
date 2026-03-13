@@ -2,17 +2,14 @@ use crate::stores::cashu::{self, TransferProgress, TRANSFER_PROGRESS};
 use crate::utils::shorten_url;
 use dioxus::prelude::*;
 /// Select a valid mint from the list, optionally excluding one mint
-fn select_valid_mint(
-    current: &str,
-    mints: &[String],
-    exclude: Option<&str>,
-) -> Option<String> {
-    if !current.is_empty() && mints.iter().any(|m| m == current)
-        && (exclude != Some(current))
-    {
+fn select_valid_mint(current: &str, mints: &[String], exclude: Option<&str>) -> Option<String> {
+    if !current.is_empty() && mints.iter().any(|m| m == current) && (exclude != Some(current)) {
         return Some(current.to_string());
     }
-    mints.iter().find(|m| exclude.is_none_or(|ex| *m != ex)).cloned()
+    mints
+        .iter()
+        .find(|m| exclude.is_none_or(|ex| *m != ex))
+        .cloned()
 }
 #[component]
 pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
@@ -36,8 +33,7 @@ pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
             if new_source != source {
                 source_mint.set(new_source.clone());
             }
-            if let Some(new_target) =
-                select_valid_mint(&target, &current_mints, Some(&new_source))
+            if let Some(new_target) = select_valid_mint(&target, &current_mints, Some(&new_source))
             {
                 if new_target != target {
                     target_mint.set(new_target);
@@ -103,25 +99,19 @@ pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
             return;
         }
         if source == target {
-            error_message
-                .set(Some("Source and target mints must be different".to_string()));
+            error_message.set(Some(
+                "Source and target mints must be different".to_string(),
+            ));
             return;
         }
         let balance = cashu::get_mint_balance(&source);
         let fee = fee_estimate.read().unwrap_or(0);
         let required = amount_sats.saturating_add(fee);
         if balance < required {
-            error_message
-                .set(
-                    Some(
-                        format!(
-                            "Insufficient balance. Have: {} sats, need: {} sats (incl. ~{} fee)",
-                            balance,
-                            required,
-                            fee,
-                        ),
-                    ),
-                );
+            error_message.set(Some(format!(
+                "Insufficient balance. Have: {} sats, need: {} sats (incl. ~{} fee)",
+                balance, required, fee,
+            )));
             return;
         }
         is_transferring.set(true);

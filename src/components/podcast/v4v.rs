@@ -5,10 +5,12 @@
 //! - Split payments to multiple recipients
 //! - Support for both node pubkeys and Lightning Addresses
 use crate::components::icons;
+use crate::platform::http::http_client;
 use crate::services::lnurl;
 use crate::stores::nwc_store;
 use crate::utils::podcast::{ValueBlock, ValueRecipient};
 use dioxus::prelude::*;
+use url::Url;
 #[derive(Props, Clone, PartialEq)]
 pub struct V4VInfoProps {
     /// The V4V value block
@@ -68,7 +70,11 @@ pub fn V4VRecipientList(props: V4VRecipientListProps) -> Element {
     if props.recipients.is_empty() {
         return rsx! {};
     }
-    let total_split: u32 = props.recipients.iter().map(|r| r.split).sum();
+    let total_split: u64 = props
+        .recipients
+        .iter()
+        .try_fold(0u64, |acc, r| acc.checked_add(r.split as u64))
+        .unwrap_or(0);
     rsx! {
         div { class: "space-y-2",
             div { class: "text-xs font-medium text-muted-foreground uppercase tracking-wide",
@@ -89,7 +95,7 @@ pub fn V4VRecipientList(props: V4VRecipientListProps) -> Element {
 #[derive(Props, Clone, PartialEq)]
 struct RecipientRowProps {
     recipient: ValueRecipient,
-    total_split: u32,
+    total_split: u64,
 }
 #[component]
 fn RecipientRow(props: RecipientRowProps) -> Element {
@@ -99,17 +105,24 @@ fn RecipientRow(props: RecipientRowProps) -> Element {
     } else {
         0
     };
-    let name = recipient
-        .name
-        .clone()
-        .unwrap_or_else(|| {
-            let addr = &recipient.address;
-            if addr.len() > 20 {
-                format!("{}...{}", &addr[..8], &addr[addr.len() - 8..])
-            } else {
-                addr.clone()
-            }
-        });
+    let name = recipient.name.clone().unwrap_or_else(|| {
+        let addr = &recipient.address;
+        let char_count = addr.chars().count();
+        if char_count > 20 {
+            let first_8: String = addr.chars().take(8).collect();
+            let last_8: String = addr
+                .chars()
+                .rev()
+                .take(8)
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect();
+            format!("{}...{}", first_8, last_8)
+        } else {
+            addr.clone()
+        }
+    });
     let type_icon = if recipient.recipient_type == "lnaddress" {
         icons::AT_SIGN
     } else {
@@ -204,12 +217,28 @@ pub fn V4VBoostButton(props: V4VBoostButtonProps) -> Element {
                                             show_menu.set(false);
                                             is_sending.set(true);
                                             spawn(async move {
+                                                error.set(None);
                                                 match send_v4v_payment(&vb, amt).await {
-                                                    Ok(_) => {
+                                                    Ok(PaymentOutcome::FullSuccess) => {
                                                         if let Some(handler) = on_boost {
                                                             handler.call(amt);
                                                         }
                                                         log::info!("Boost sent: {} sats", amt);
+                                                    }
+                                                    Ok(PaymentOutcome::NoAttempts) => {
+                                                        error.set(Some("No payment attempts: all computed amounts were zero".to_string()));
+                                                    }
+                                                    Ok(PaymentOutcome::PartialSuccess {
+                                                        success_count,
+                                                        attempted_count,
+                                                        failed_recipients,
+                                                    }) => {
+                                                        error.set(Some(format!(
+                                                            "Sent {}/{} payments. Failed: {}",
+                                                            success_count,
+                                                            attempted_count,
+                                                            failed_recipients.join(", ")
+                                                        )));
                                                     }
                                                     Err(e) => {
                                                         error.set(Some(e));
@@ -254,6 +283,7 @@ struct CustomBoostInputProps {
 fn CustomBoostInput(props: CustomBoostInputProps) -> Element {
     let mut amount = use_signal(String::new);
     let mut is_sending = use_signal(|| false);
+    let mut error = use_signal(|| None::<String>);
     let handle_send = {
         let vb = props.value_block.clone();
         let on_send = props.on_send;
@@ -262,10 +292,34 @@ fn CustomBoostInput(props: CustomBoostInputProps) -> Element {
                 if amt > 0 {
                     let vb = vb.clone();
                     let on_send = on_send;
+                    error.set(None);
                     is_sending.set(true);
                     spawn(async move {
-                        if send_v4v_payment(&vb, amt).await.is_ok() {
-                            on_send.call(amt);
+                        match send_v4v_payment(&vb, amt).await {
+                            Ok(PaymentOutcome::FullSuccess) => {
+                                on_send.call(amt);
+                            }
+                            Ok(PaymentOutcome::NoAttempts) => {
+                                error.set(Some(
+                                    "No payment attempts: all computed amounts were zero"
+                                        .to_string(),
+                                ));
+                            }
+                            Ok(PaymentOutcome::PartialSuccess {
+                                success_count,
+                                attempted_count,
+                                failed_recipients,
+                            }) => {
+                                error.set(Some(format!(
+                                    "Sent {}/{} payments. Failed: {}",
+                                    success_count,
+                                    attempted_count,
+                                    failed_recipients.join(", ")
+                                )));
+                            }
+                            Err(e) => {
+                                error.set(Some(e));
+                            }
                         }
                         is_sending.set(false);
                     });
@@ -274,7 +328,7 @@ fn CustomBoostInput(props: CustomBoostInputProps) -> Element {
         }
     };
     rsx! {
-        div { class: "flex gap-2",
+        div { class: "flex gap-2 relative",
             input {
                 r#type: "number",
                 placeholder: "Custom sats",
@@ -293,6 +347,11 @@ fn CustomBoostInput(props: CustomBoostInputProps) -> Element {
                     }
                 } else {
                     "Send"
+                }
+            }
+            if let Some(ref err) = *error.read() {
+                div { class: "absolute top-full left-0 mt-2 p-2 rounded-lg bg-destructive/10 text-destructive text-xs max-w-[200px]",
+                    "{err}"
                 }
             }
         }
@@ -319,94 +378,208 @@ pub fn V4VBadge(props: V4VBadgeProps) -> Element {
         }
     }
 }
+
+enum PaymentOutcome {
+    FullSuccess,
+    PartialSuccess {
+        success_count: usize,
+        attempted_count: usize,
+        failed_recipients: Vec<String>,
+    },
+    NoAttempts,
+}
 /// Send V4V payment split across recipients
 async fn send_v4v_payment(
     value_block: &ValueBlock,
     total_sats: u64,
-) -> Result<(), String> {
+) -> Result<PaymentOutcome, String> {
     if value_block.recipients.is_empty() {
         return Err("No recipients configured".to_string());
     }
-    let total_split: u32 = value_block.recipients.iter().map(|r| r.split).sum();
+    let total_split: u64 = value_block
+        .recipients
+        .iter()
+        .try_fold(0u64, |acc, r| acc.checked_add(r.split as u64))
+        .ok_or_else(|| "Overflow in split total".to_string())?;
     if total_split == 0 {
-        return Err("Invalid split configuration".to_string());
+        return Err("Zero total_split: invalid V4V configuration".to_string());
     }
-    let nwc_connected = nwc_store::is_connected();
-    if !nwc_connected {
-        return Err(
-            "No wallet connected. Please connect a wallet in settings.".to_string(),
-        );
-    }
-    for recipient in &value_block.recipients {
-        let amount = (total_sats as f64 * recipient.split as f64 / total_split as f64)
-            .round() as u64;
+    let mut success_count = 0;
+    let mut attempted_count = 0;
+    let mut failed_recipients = Vec::new();
+    let mut remaining_sats = total_sats;
+    let mut remaining_split = total_split;
+    let recipients_len = value_block.recipients.len();
+    for (idx, recipient) in value_block.recipients.iter().enumerate() {
+        let amount = if idx == recipients_len - 1 {
+            remaining_sats
+        } else {
+            let rem_sats = remaining_sats as f64;
+            let rem_split = remaining_split as f64;
+            let recipient_split = recipient.split as f64;
+            (rem_sats * recipient_split / rem_split).round() as u64
+        };
+        remaining_sats = remaining_sats.saturating_sub(amount);
+        remaining_split = remaining_split.saturating_sub(recipient.split as u64);
         if amount == 0 {
             continue;
         }
+        attempted_count += 1;
         match recipient.recipient_type.as_str() {
-            "lnaddress" => {
-                match lnurl::get_lnurl_pay_info(Some(&recipient.address), None).await {
-                    Ok(info) => {
-                        let amount_msats = amount * 1000;
-                        if amount_msats < info.min_sendable
-                            || amount_msats > info.max_sendable
-                        {
-                            log::warn!(
-                                "Amount {} out of range for {}", amount, recipient.address
+            "lnaddress" => match lnurl::get_lnurl_pay_info(Some(&recipient.address), None).await {
+                Ok(info) => {
+                    let amount_msats = amount * 1000;
+                    if amount_msats < info.min_sendable || amount_msats > info.max_sendable {
+                        log::warn!("Amount {} out of range for {}", amount, recipient.address);
+                        failed_recipients.push(recipient.address.clone());
+                        continue;
+                    }
+                    let callback_url = match Url::parse(&info.callback) {
+                        Ok(mut url) => {
+                            url.query_pairs_mut()
+                                .append_pair("amount", &amount_msats.to_string());
+                            url.to_string()
+                        }
+                        Err(e) => {
+                            log::error!(
+                                "Failed to parse callback URL for {}: {}",
+                                recipient.address,
+                                e
                             );
+                            failed_recipients.push(recipient.address.clone());
                             continue;
                         }
-                        let callback_url = format!(
-                            "{}?amount={}",
-                            info.callback,
-                            amount_msats,
-                        );
-                        match reqwest::get(&callback_url).await {
-                            Ok(response) => {
-                                if let Ok(invoice_response) = response
-                                    .json::<serde_json::Value>()
-                                    .await
-                                {
-                                    if let Some(pr) = invoice_response
-                                        .get("pr")
-                                        .and_then(|v| v.as_str())
+                    };
+                    let client = match http_client() {
+                        Ok(client) => client,
+                        Err(e) => {
+                            log::error!(
+                                "Failed to initialize HTTP client for {}: {}",
+                                recipient.address,
+                                e
+                            );
+                            failed_recipients.push(recipient.address.clone());
+                            continue;
+                        }
+                    };
+                    match client.get(&callback_url).send().await {
+                        Ok(response) => {
+                            let raw_response = match response.text().await {
+                                Ok(body) => body,
+                                Err(e) => {
+                                    log::error!(
+                                        "Failed to read invoice response body for {}: {}",
+                                        recipient.address,
+                                        e
+                                    );
+                                    failed_recipients.push(recipient.address.clone());
+                                    continue;
+                                }
+                            };
+                            let parse_result =
+                                serde_json::from_str::<serde_json::Value>(&raw_response);
+                            match parse_result {
+                                Ok(invoice_response) => {
+                                    if let Some(pr) =
+                                        invoice_response.get("pr").and_then(|v| v.as_str())
                                     {
-                                        if let Err(e) = nwc_store::pay_invoice(pr.to_string()).await
-                                        {
-                                            log::error!(
-                                                "Payment failed for {}: {}", recipient.address, e
-                                            );
-                                        } else {
-                                            log::info!(
-                                                "V4V payment sent: {} sats to {}", amount, recipient.address
-                                            );
+                                        let expected_amount_msats = amount * 1000;
+                                        match crate::utils::bolt11::parse_bolt11_amount(pr) {
+                                            Some(parsed_amount) => {
+                                                if parsed_amount != expected_amount_msats {
+                                                    log::error!(
+                                                        "Bolt11 amount mismatch for {}: expected {} msats, got {} msats",
+                                                        recipient.address,
+                                                        expected_amount_msats,
+                                                        parsed_amount
+                                                    );
+                                                    failed_recipients
+                                                        .push(recipient.address.clone());
+                                                    continue;
+                                                }
+                                            }
+                                            None => {
+                                                log::error!(
+                                                    "Could not parse bolt11 amount for {}, rejecting payment",
+                                                    recipient.address
+                                                );
+                                                failed_recipients.push(recipient.address.clone());
+                                                continue;
+                                            }
                                         }
+                                        match nwc_store::pay_invoice(pr.to_string()).await {
+                                            Ok(_) => {
+                                                log::info!(
+                                                    "V4V payment sent: {} sats to {}",
+                                                    amount,
+                                                    recipient.address
+                                                );
+                                                success_count += 1;
+                                            }
+                                            Err(e) => {
+                                                log::error!(
+                                                    "Payment failed for {}: {}",
+                                                    recipient.address,
+                                                    e
+                                                );
+                                                failed_recipients.push(recipient.address.clone());
+                                            }
+                                        }
+                                    } else {
+                                        log::error!(
+                                            "Invoice response missing pr for {}: {}",
+                                            recipient.address,
+                                            raw_response
+                                        );
+                                        failed_recipients.push(recipient.address.clone());
                                     }
                                 }
-                            }
-                            Err(e) => {
-                                log::error!(
-                                    "Failed to get invoice from {}: {}", recipient.address, e
-                                );
+                                Err(parse_error) => {
+                                    log::error!(
+                                        "Failed to parse invoice response for {}: {}. Raw response: {}",
+                                        recipient.address,
+                                        parse_error,
+                                        raw_response
+                                    );
+                                    failed_recipients.push(recipient.address.clone());
+                                }
                             }
                         }
-                    }
-                    Err(e) => {
-                        log::error!(
-                            "Failed to fetch LNURL for {}: {:?}", recipient.address, e
-                        );
+                        Err(e) => {
+                            log::error!("Failed to get invoice from {}: {}", recipient.address, e);
+                            failed_recipients.push(recipient.address.clone());
+                        }
                     }
                 }
-            }
+                Err(e) => {
+                    log::error!("Failed to fetch LNURL for {}: {:?}", recipient.address, e);
+                    failed_recipients.push(recipient.address.clone());
+                }
+            },
             "node" => {
                 log::warn!(
-                    "Keysend payments not yet supported for node: {}", recipient.address
+                    "Keysend payments not yet supported for node: {}",
+                    recipient.address
                 );
+                failed_recipients.push(recipient.address.clone());
             }
             _ => {
                 log::warn!("Unknown recipient type: {}", recipient.recipient_type);
+                failed_recipients.push(recipient.address.clone());
             }
         }
     }
-    Ok(())
+    if attempted_count == 0 {
+        Ok(PaymentOutcome::NoAttempts)
+    } else if success_count == 0 {
+        Err("All payment attempts failed".to_string())
+    } else if success_count < attempted_count {
+        Ok(PaymentOutcome::PartialSuccess {
+            success_count,
+            attempted_count,
+            failed_recipients,
+        })
+    } else {
+        Ok(PaymentOutcome::FullSuccess)
+    }
 }

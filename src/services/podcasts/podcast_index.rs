@@ -3,33 +3,32 @@
 //! Client for the Podcast Index proxy at podnostrblue.ulrich-patrickr.workers.dev
 //! Provides podcast search, trending, categories, and episode discovery.
 //! Uses NIP-98 HTTP Authentication for API access.
-use gloo_net::http::Request;
-use gloo_timers::callback::Timeout;
-use nostr_sdk::nips::nip98;
-use serde::{Deserialize, Serialize};
+use crate::platform::http::http_client;
 use crate::utils::nip98 as nip98_utils;
 use crate::utils::validation::parse_http_url;
-/// Timeout for proxy fetch requests (30 seconds)
-const PROXY_TIMEOUT_MS: u32 = 30_000;
+use nostr_sdk::nips::nip98;
+use serde::{Deserialize, Serialize};
 /// Base URL for the Podcast Index proxy
 const API_BASE: &str = "https://podnostrblue.ulrich-patrickr.workers.dev";
 /// Make an authenticated GET request to the Podcast Index proxy
-async fn authenticated_get<T: for<'de> Deserialize<'de>>(
-    url: &str,
-) -> Result<T, String> {
-    let auth_result = nip98_utils::create_auth_header(url, nip98::HttpMethod::GET)
-        .await?;
-    let response = Request::get(&auth_result.signed_url)
+async fn authenticated_get<T: for<'de> Deserialize<'de>>(url: &str) -> Result<T, String> {
+    let auth_result = nip98_utils::create_auth_header(url, nip98::HttpMethod::GET).await?;
+    let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(&auth_result.signed_url)
         .header("Authorization", &auth_result.header)
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
         return Err(format!("API error {}: {}", status, body));
     }
-    response.json().await.map_err(|e| format!("Parse error: {}", e))
+    response
+        .json()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))
 }
 /// Generic API response wrapper
 #[derive(Debug, Clone, Deserialize)]
@@ -218,10 +217,7 @@ pub struct SoundbiteInfo {
     pub duration: Option<f64>,
 }
 /// Search podcasts by term
-pub async fn search_podcasts(
-    query: &str,
-    max: Option<u32>,
-) -> Result<Vec<PodcastFeed>, String> {
+pub async fn search_podcasts(query: &str, max: Option<u32>) -> Result<Vec<PodcastFeed>, String> {
     let max = max.unwrap_or(20);
     let url = format!(
         "{}/search/byterm?q={}&max={}",
@@ -277,7 +273,11 @@ pub async fn get_podcast_by_id(feed_id: u64) -> Result<PodcastFeed, String> {
 }
 /// Get podcast by podcast GUID (NIP-73 podcast:guid: format)
 pub async fn get_podcast_by_guid(guid: &str) -> Result<PodcastFeed, String> {
-    let url = format!("{}/podcasts/byguid?guid={}", API_BASE, urlencoding::encode(guid));
+    let url = format!(
+        "{}/podcasts/byguid?guid={}",
+        API_BASE,
+        urlencoding::encode(guid)
+    );
     #[derive(Deserialize)]
     struct SingleFeedResponse {
         feed: PodcastFeed,
@@ -348,7 +348,10 @@ pub async fn get_episodes_by_feed_id(
     let skip_count = skip.unwrap_or(0);
     // Request enough episodes to cover skip + max
     let fetch_count = max.unwrap_or(20) as usize + skip_count;
-    let url = format!("{}/episodes/byfeedid?id={}&max={}", API_BASE, feed_id, fetch_count);
+    let url = format!(
+        "{}/episodes/byfeedid?id={}&max={}",
+        API_BASE, feed_id, fetch_count
+    );
     let data: ApiResponse<EpisodesData> = authenticated_get(&url).await?;
 
     // Skip the first N episodes (already loaded) and take the rest
@@ -400,10 +403,7 @@ pub async fn get_music_albums(max: Option<u32>) -> Result<Vec<PodcastFeed>, Stri
     get_podcasts_by_medium("music", max).await
 }
 /// Search for music feeds specifically using the dedicated /search/music/byterm endpoint
-pub async fn search_music(
-    query: &str,
-    max: Option<u32>,
-) -> Result<Vec<PodcastFeed>, String> {
+pub async fn search_music(query: &str, max: Option<u32>) -> Result<Vec<PodcastFeed>, String> {
     let max = max.unwrap_or(20);
     let url = format!(
         "{}/search/music/byterm?q={}&max={}",
@@ -414,88 +414,103 @@ pub async fn search_music(
     let data: ApiResponse<SearchData> = authenticated_get(&url).await?;
     Ok(data.data.feeds)
 }
-/// Generic helper to fetch JSON content through the proxy with timeout and proper cancellation.
+/// Generic helper to fetch JSON content through the proxy.
 ///
 /// Validates the input URL, builds the proxy URL, handles NIP-98 authentication,
-/// sets up request cancellation via AbortController, and parses the JSON response.
+/// and parses the JSON response. Timeout is handled by the shared HTTP client.
 async fn fetch_via_proxy<T: for<'de> Deserialize<'de>>(
     url: &str,
     resource_type: &str,
 ) -> Result<T, String> {
     if parse_http_url(url).is_none() {
-        return Err(format!("Invalid {} URL - must be http or https", resource_type));
+        return Err(format!(
+            "Invalid {} URL - must be http or https",
+            resource_type
+        ));
     }
     let proxy_url = format!("{}/proxy/fetch?url={}", API_BASE, urlencoding::encode(url));
     log::debug!("[podcast_index] fetching {} via proxy", resource_type);
-    let auth_result = nip98_utils::create_auth_header(&proxy_url, nip98::HttpMethod::GET)
-        .await?;
-    let controller = web_sys::AbortController::new()
-        .map_err(|_| "Failed to create AbortController")?;
-    let signal = controller.signal();
-    let controller_for_timeout = controller.clone();
-    let _timeout = Timeout::new(
-        PROXY_TIMEOUT_MS,
-        move || {
-            controller_for_timeout.abort();
-        },
-    );
-    let response = Request::get(&auth_result.signed_url)
+    let auth_result = nip98_utils::create_auth_header(&proxy_url, nip98::HttpMethod::GET).await?;
+    let client = http_client().map_err(|e| format!("HTTP client init failed: {}", e))?;
+    #[cfg(feature = "web")]
+    let response = {
+        use futures::FutureExt;
+        let req_fut = client
+            .get(&auth_result.signed_url)
+            .header("Authorization", &auth_result.header)
+            .send()
+            .fuse();
+        let timeout = gloo_timers::future::TimeoutFuture::new(15_000).fuse();
+        futures::pin_mut!(req_fut, timeout);
+        futures::select! {
+            resp = req_fut => resp,
+            _ = timeout => return Err(format!("{} fetch timed out", resource_type)),
+        }
+    };
+    #[cfg(feature = "native")]
+    let response = client
+        .get(&auth_result.signed_url)
         .header("Authorization", &auth_result.header)
-        .abort_signal(Some(&signal))
         .send()
-        .await
-        .map_err(|e| {
-            if signal.aborted() {
-                format!("{} fetch timed out", resource_type)
-            } else {
-                format!("Failed to fetch {}: {}", resource_type, e)
-            }
-        })?;
-    if !response.ok() {
+        .await;
+    let response = response.map_err(|e| format!("Failed to fetch {}: {}", resource_type, e))?;
+    if !response.status().is_success() {
         let status = response.status();
-        return Err(format!("{} fetch failed with status {}", resource_type, status));
+        return Err(format!(
+            "{} fetch failed with status {}",
+            resource_type, status
+        ));
     }
     response
         .json()
         .await
         .map_err(|e| format!("Failed to parse {} JSON: {}", resource_type, e))
 }
-/// Helper to fetch text content through the proxy with timeout and proper cancellation.
+/// Helper to fetch text content through the proxy.
 async fn fetch_text_via_proxy(url: &str, resource_type: &str) -> Result<String, String> {
     if parse_http_url(url).is_none() {
-        return Err(format!("Invalid {} URL - must be http or https", resource_type));
+        return Err(format!(
+            "Invalid {} URL - must be http or https",
+            resource_type
+        ));
     }
     let proxy_url = format!("{}/proxy/fetch?url={}", API_BASE, urlencoding::encode(url));
     log::debug!("[podcast_index] fetching {} via proxy", resource_type);
-    let auth_result = nip98_utils::create_auth_header(&proxy_url, nip98::HttpMethod::GET)
-        .await?;
-    let controller = web_sys::AbortController::new()
-        .map_err(|_| "Failed to create AbortController")?;
-    let signal = controller.signal();
-    let controller_for_timeout = controller.clone();
-    let _timeout = Timeout::new(
-        PROXY_TIMEOUT_MS,
-        move || {
-            controller_for_timeout.abort();
-        },
-    );
-    let response = Request::get(&auth_result.signed_url)
+    let auth_result = nip98_utils::create_auth_header(&proxy_url, nip98::HttpMethod::GET).await?;
+    let client = http_client().map_err(|e| format!("HTTP client init failed: {}", e))?;
+    #[cfg(feature = "web")]
+    let response = {
+        use futures::FutureExt;
+        let req_fut = client
+            .get(&auth_result.signed_url)
+            .header("Authorization", &auth_result.header)
+            .send()
+            .fuse();
+        let timeout = gloo_timers::future::TimeoutFuture::new(15_000).fuse();
+        futures::pin_mut!(req_fut, timeout);
+        futures::select! {
+            resp = req_fut => resp,
+            _ = timeout => return Err(format!("{} fetch timed out", resource_type)),
+        }
+    };
+    #[cfg(feature = "native")]
+    let response = client
+        .get(&auth_result.signed_url)
         .header("Authorization", &auth_result.header)
-        .abort_signal(Some(&signal))
         .send()
-        .await
-        .map_err(|e| {
-            if signal.aborted() {
-                format!("{} fetch timed out", resource_type)
-            } else {
-                format!("Failed to fetch {}: {}", resource_type, e)
-            }
-        })?;
-    if !response.ok() {
+        .await;
+    let response = response.map_err(|e| format!("Failed to fetch {}: {}", resource_type, e))?;
+    if !response.status().is_success() {
         let status = response.status();
-        return Err(format!("{} fetch failed with status {}", resource_type, status));
+        return Err(format!(
+            "{} fetch failed with status {}",
+            resource_type, status
+        ));
     }
-    response.text().await.map_err(|e| format!("Failed to read {}: {}", resource_type, e))
+    response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read {}: {}", resource_type, e))
 }
 /// Fetch podcast chapters through the proxy to avoid CORS issues
 ///

@@ -3,6 +3,7 @@ use crate::routes::Route;
 use crate::stores::nostr_client::CLIENT_INITIALIZED;
 use crate::stores::profiles;
 use crate::utils::nip53::{extract_live_event_host, parse_nip53_live_event};
+use crate::utils::time::format_time_ago;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::{Coordinate, ToBech32};
@@ -55,47 +56,44 @@ pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
         .host_pubkey
         .clone()
         .unwrap_or_else(|| event.pubkey.to_string());
-    let author_pubkey_for_fetch = author_pubkey.clone();
     let host_verified = stream_meta.host_verified;
-    let coord = Coordinate::new(Kind::from(30311), event.pubkey)
-        .identifier(&stream_meta.d_tag);
+    let coord = Coordinate::new(Kind::from(30311), event.pubkey).identifier(&stream_meta.d_tag);
     let naddr = coord
         .to_bech32()
         .unwrap_or_else(|_| format!("30311:{}:{}", event.pubkey, stream_meta.d_tag));
-    let mut author_metadata = use_signal(move || profiles::get_profile(
-        &author_pubkey_for_fetch,
-    ));
-    use_effect(
-        use_reactive(
-            (&author_pubkey, &*CLIENT_INITIALIZED.read()),
-            move |(pk, client_initialized)| {
-                if !client_initialized {
-                    return;
+    let author_metadata = {
+        let cache = profiles::PROFILE_CACHE.read();
+        cache.peek(&author_pubkey).map(|profile| {
+            let mut metadata = nostr_sdk::Metadata::new();
+            if let Some(name) = &profile.name {
+                metadata = metadata.name(name);
+            }
+            if let Some(display_name) = &profile.display_name {
+                metadata = metadata.display_name(display_name);
+            }
+            if let Some(picture) = &profile.picture {
+                if let Ok(url) = nostr_sdk::Url::parse(picture) {
+                    metadata = metadata.picture(url);
                 }
-                spawn(async move {
-                    if profiles::fetch_profile(pk.clone()).await.is_ok() {
-                        author_metadata.set(profiles::get_profile(&pk));
-                    }
-                });
-            },
-        ),
-    );
+            }
+            metadata
+        })
+    };
+    use_effect(use_reactive(
+        (&author_pubkey, &*CLIENT_INITIALIZED.read()),
+        move |(pk, client_initialized)| {
+            if !client_initialized {
+                return;
+            }
+            spawn(async move {
+                let _ = profiles::fetch_profile(pk.clone()).await;
+            });
+        },
+    ));
     let display_name = author_metadata
-        .read()
         .as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
-    let format_time_ago = |timestamp: u64| -> String {
-        let now = (js_sys::Date::now() / 1000.0) as u64;
-        let diff = now.saturating_sub(timestamp);
-        match diff {
-            0..=59 => "just now".to_string(),
-            60..=3599 => format!("{}m ago", diff / 60),
-            3600..=86399 => format!("{}h ago", diff / 3600),
-            86400..=604799 => format!("{}d ago", diff / 86400),
-            _ => format!("{}w ago", diff / 604800),
-        }
-    };
     rsx! {
         div { class: "group cursor-pointer",
             Link {

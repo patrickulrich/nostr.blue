@@ -1,23 +1,16 @@
 use super::*;
 
 /// Fetch all communities
-pub async fn fetch_communities(
-    limit: usize,
-) -> std::result::Result<Vec<Community>, String> {
+pub async fn fetch_communities(limit: usize) -> std::result::Result<Vec<Community>, String> {
     *LOADING_COMMUNITIES.write() = true;
     let filter = communities_filter(limit);
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(15),
-        )
-        .await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
     *LOADING_COMMUNITIES.write() = false;
     match result {
         Ok(events) => {
-            let communities: Vec<Community> = events
-                .iter()
-                .filter_map(parse_community_event)
-                .collect();
+            let communities: Vec<Community> =
+                events.iter().filter_map(parse_community_event).collect();
             cache_communities(&communities);
             *COMMUNITY_INITIALIZED.write() = true;
             log::info!("Fetched {} communities", communities.len());
@@ -37,14 +30,11 @@ pub async fn fetch_community_by_naddr(
     if let Some(cached) = get_cached_community_by_naddr(naddr) {
         return Ok(Some(cached));
     }
-    let coord = Coordinate::from_bech32(naddr)
-        .map_err(|e| format!("Invalid naddr: {}", e))?;
+    let coord = Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
     let filter = community_by_coord_filter(coord.public_key, &coord.identifier);
-    let events = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
     if let Some(event) = events.first() {
         if let Some(community) = parse_community_event(event) {
             cache_community(community.clone());
@@ -65,15 +55,13 @@ pub async fn fetch_community_by_a_tag(
     if parts.len() != 3 {
         return Err("Invalid a_tag format".to_string());
     }
-    let pubkey = PublicKey::from_hex(parts[1])
-        .map_err(|e| format!("Invalid pubkey in a_tag: {}", e))?;
+    let pubkey =
+        PublicKey::from_hex(parts[1]).map_err(|e| format!("Invalid pubkey in a_tag: {}", e))?;
     let identifier = parts[2];
     let filter = community_by_coord_filter(pubkey, identifier);
-    let events = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
     if let Some(event) = events.first() {
         if let Some(community) = parse_community_event(event) {
             cache_community(community.clone());
@@ -95,12 +83,15 @@ pub async fn fetch_community_posts(
     let approvals_filter = approvals_filter_by_community(&community.a_tag, 500);
     let removals_filter = removals_filter_by_community(&community.a_tag);
     let (posts_result, approvals_result, removals_result) = futures::join!(
-        crate ::stores::nostr_client::fetch_events_aggregated(posts_filter,
-        Duration::from_secs(15)), crate
-        ::stores::nostr_client::fetch_events_aggregated(approvals_filter,
-        Duration::from_secs(10)), crate
-        ::stores::nostr_client::fetch_events_aggregated(removals_filter,
-        Duration::from_secs(5)),
+        crate::stores::nostr_client::fetch_events_aggregated(posts_filter, Duration::from_secs(15)),
+        crate::stores::nostr_client::fetch_events_aggregated(
+            approvals_filter,
+            Duration::from_secs(10)
+        ),
+        crate::stores::nostr_client::fetch_events_aggregated(
+            removals_filter,
+            Duration::from_secs(5)
+        ),
     );
     *LOADING_POSTS.write() = false;
     if let Ok(approval_events) = approvals_result {
@@ -129,17 +120,20 @@ pub async fn fetch_community_posts(
         })
         .collect();
     if !include_pending {
-        posts
-            .retain(|p| {
-                !matches!(
-                    p.approval_status,
-                    ApprovalStatus::Pending | ApprovalStatus::Removed(_)
-                )
-            });
+        posts.retain(|p| {
+            !matches!(
+                p.approval_status,
+                ApprovalStatus::Pending | ApprovalStatus::Removed(_)
+            )
+        });
     }
     posts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     cache_posts(&posts);
-    log::info!("Fetched {} posts for community {}", posts.len(), community.a_tag);
+    log::info!(
+        "Fetched {} posts for community {}",
+        posts.len(),
+        community.a_tag
+    );
     Ok(posts)
 }
 
@@ -148,12 +142,10 @@ pub async fn fetch_pending_posts(
     community: &Community,
 ) -> std::result::Result<Vec<CommunityPost>, String> {
     let all_posts = fetch_community_posts(community, 200, true, None).await?;
-    Ok(
-        all_posts
-            .into_iter()
-            .filter(|p| matches!(p.approval_status, ApprovalStatus::Pending))
-            .collect(),
-    )
+    Ok(all_posts
+        .into_iter()
+        .filter(|p| matches!(p.approval_status, ApprovalStatus::Pending))
+        .collect())
 }
 
 /// Fetch communities where user is owner, moderator, or approved member
@@ -161,11 +153,9 @@ pub async fn fetch_pending_posts(
 pub async fn fetch_user_communities(
     user_pubkey: &str,
 ) -> std::result::Result<Vec<Community>, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     crate::stores::nostr_client::ensure_relays_ready(&client).await;
-    let pubkey = PublicKey::from_hex(user_pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::from_hex(user_pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let owned_filter = Filter::new()
         .kind(Kind::Custom(KIND_COMMUNITY_DEFINITION))
         .author(pubkey);
@@ -179,19 +169,21 @@ pub async fn fetch_user_communities(
         .kind(Kind::Custom(KIND_COMMUNITY_DEFINITION))
         .limit(200);
     let (owned_result, mod_result, member_result, recent_result) = futures::join!(
-        client.fetch_events(owned_filter, Duration::from_secs(5)), client
-        .fetch_events(mod_filter, Duration::from_secs(5)), client
-        .fetch_events(member_filter, Duration::from_secs(5)), client
-        .fetch_events(recent_filter, Duration::from_secs(5)),
+        client.fetch_events(owned_filter, Duration::from_secs(5)),
+        client.fetch_events(mod_filter, Duration::from_secs(5)),
+        client.fetch_events(member_filter, Duration::from_secs(5)),
+        client.fetch_events(recent_filter, Duration::from_secs(5)),
     );
-    let owned_events = owned_result
-        .map_err(|e| format!("Failed to fetch owned: {}", e))?;
+    let owned_events = owned_result.map_err(|e| format!("Failed to fetch owned: {}", e))?;
     let mod_events = mod_result.unwrap_or_default();
     let member_events = member_result.unwrap_or_default();
     let recent_events = recent_result.unwrap_or_default();
     log::info!(
         "User communities query: owned={}, mod_filter={}, member_lists={}, recent={}",
-        owned_events.len(), mod_events.len(), member_events.len(), recent_events.len()
+        owned_events.len(),
+        mod_events.len(),
+        member_events.len(),
+        recent_events.len()
     );
     let mut seen = HashSet::new();
     let mut communities = Vec::new();
@@ -205,7 +197,10 @@ pub async fn fetch_user_communities(
     }
     for event in mod_events.into_iter() {
         if let Some(community) = parse_community_event(&event) {
-            if community.moderators.iter().any(|m| m.to_lowercase() == user_pk_str)
+            if community
+                .moderators
+                .iter()
+                .any(|m| m.to_lowercase() == user_pk_str)
                 && seen.insert(community.a_tag.clone())
             {
                 communities.push(community);
@@ -215,8 +210,9 @@ pub async fn fetch_user_communities(
     let mut member_community_a_tags: HashSet<String> = HashSet::new();
     for event in member_events.into_iter() {
         log::info!(
-            "Processing member list event {} (kind {})", event.id.to_hex(), event.kind
-            .as_u16()
+            "Processing member list event {} (kind {})",
+            event.id.to_hex(),
+            event.kind.as_u16()
         );
         let tag_summary: Vec<String> = event
             .tags
@@ -231,7 +227,10 @@ pub async fn fetch_user_communities(
             .and_then(|t| t.content())
         {
             let a_tag_str = a_tag.to_string();
-            log::info!("Found community a_tag in approved member list: {}", a_tag_str);
+            log::info!(
+                "Found community a_tag in approved member list: {}",
+                a_tag_str
+            );
             if a_tag_str.starts_with(&format!("{}:", KIND_COMMUNITY_DEFINITION)) {
                 member_community_a_tags.insert(a_tag_str.clone());
                 let members: HashSet<String> = event
@@ -241,13 +240,15 @@ pub async fn fetch_user_communities(
                     .filter_map(|t| t.content().map(|s| s.to_lowercase()))
                     .collect();
                 log::info!(
-                    "Caching {} approved members for community {}", members.len(), &
-                    a_tag_str
+                    "Caching {} approved members for community {}",
+                    members.len(),
+                    &a_tag_str
                 );
                 APPROVED_MEMBERS_CACHE.write().insert(a_tag_str, members);
             } else {
                 log::warn!(
-                    "Approved member list has non-community a_tag: {}", a_tag_str
+                    "Approved member list has non-community a_tag: {}",
+                    a_tag_str
                 );
             }
         } else if let Some(d_tag) = event
@@ -257,14 +258,10 @@ pub async fn fetch_user_communities(
             .and_then(|t| t.content())
         {
             log::info!("  No 'a' tag, but found 'd' tag: {}", d_tag);
-            let potential_a_tag = if d_tag
-                .starts_with(&format!("{}:", KIND_COMMUNITY_DEFINITION))
-            {
+            let potential_a_tag = if d_tag.starts_with(&format!("{}:", KIND_COMMUNITY_DEFINITION)) {
                 d_tag.to_string()
             } else {
-                log::warn!(
-                    "  d_tag '{}' doesn't look like a community a_tag", d_tag
-                );
+                log::warn!("  d_tag '{}' doesn't look like a community a_tag", d_tag);
                 continue;
             };
             member_community_a_tags.insert(potential_a_tag.clone());
@@ -275,14 +272,17 @@ pub async fn fetch_user_communities(
                 .filter_map(|t| t.content().map(|s| s.to_lowercase()))
                 .collect();
             log::info!(
-                "Caching {} approved members from d_tag for {}", members.len(), &
-                potential_a_tag
+                "Caching {} approved members from d_tag for {}",
+                members.len(),
+                &potential_a_tag
             );
-            APPROVED_MEMBERS_CACHE.write().insert(potential_a_tag, members);
+            APPROVED_MEMBERS_CACHE
+                .write()
+                .insert(potential_a_tag, members);
         } else {
             log::warn!(
-                "Approved member list event {} has no 'a' or 'd' tag", event.id
-                .to_hex()
+                "Approved member list event {} has no 'a' or 'd' tag",
+                event.id.to_hex()
             );
         }
     }
@@ -290,8 +290,8 @@ pub async fn fetch_user_communities(
     if !member_community_a_tags.is_empty() {
         log::info!(
             "Fetching {} communities where user is approved member: {:?}",
-            member_community_count, member_community_a_tags.iter().take(5).collect::< Vec
-            < _ >> ()
+            member_community_count,
+            member_community_a_tags.iter().take(5).collect::<Vec<_>>()
         );
         for a_tag in member_community_a_tags {
             if seen.contains(&a_tag) {
@@ -308,9 +308,7 @@ pub async fn fetch_user_communities(
                 log::info!("Fetching member community from network: {}", a_tag);
                 match fetch_community_by_a_tag(&a_tag).await {
                     Ok(Some(community)) => {
-                        log::info!(
-                            "Successfully fetched member community: {}", community.a_tag
-                        );
+                        log::info!("Successfully fetched member community: {}", community.a_tag);
                         if seen.insert(community.a_tag.clone()) {
                             communities.push(community);
                         }
@@ -337,13 +335,13 @@ pub async fn fetch_user_communities(
                 .get(&community.a_tag)
                 .map(|members| members.contains(&user_pk_str))
                 .unwrap_or(false);
-            if (is_owner || is_moderator || is_member)
-                && seen.insert(community.a_tag.clone())
-            {
+            if (is_owner || is_moderator || is_member) && seen.insert(community.a_tag.clone()) {
                 log::info!(
                     "Found user community from recent: {} (owner={}, mod={}, member={})",
-                    community.name.as_ref().unwrap_or(& community.d_tag), is_owner,
-                    is_moderator, is_member
+                    community.name.as_ref().unwrap_or(&community.d_tag),
+                    is_owner,
+                    is_moderator,
+                    is_member
                 );
                 communities.push(community);
             }
@@ -353,7 +351,9 @@ pub async fn fetch_user_communities(
     cache_communities(&communities);
     log::info!(
         "Fetched {} user communities for {} ({} member communities attempted)",
-        communities.len(), truncate_pubkey(user_pubkey), member_community_count
+        communities.len(),
+        truncate_pubkey(user_pubkey),
+        member_community_count
     );
     Ok(communities)
 }
@@ -364,14 +364,15 @@ pub async fn search_communities(
     query: &str,
     limit: usize,
 ) -> std::result::Result<Vec<Community>, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     let query_lower = query.to_lowercase();
     let search_filter = Filter::new()
         .kind(Kind::Custom(KIND_COMMUNITY_DEFINITION))
         .search(query)
         .limit(limit);
-    let search_result = client.fetch_events(search_filter, Duration::from_secs(5)).await;
+    let search_result = client
+        .fetch_events(search_filter, Duration::from_secs(5))
+        .await;
     if let Ok(events) = search_result {
         if !events.is_empty() {
             let communities: Vec<Community> = events
@@ -380,7 +381,8 @@ pub async fn search_communities(
                 .collect();
             cache_communities(&communities);
             log::info!(
-                "NIP-50 search returned {} communities for '{}'", communities.len(),
+                "NIP-50 search returned {} communities for '{}'",
+                communities.len(),
                 query
             );
             return Ok(communities);
@@ -397,36 +399,36 @@ pub async fn search_communities(
         .into_iter()
         .filter_map(|e| parse_community_event(&e))
         .filter(|c| {
-            c
-                .name
+            c.name
                 .as_ref()
                 .map(|n| n.to_lowercase().contains(&query_lower))
                 .unwrap_or(false)
-                || c
-                    .description
+                || c.description
                     .as_ref()
                     .map(|d| d.to_lowercase().contains(&query_lower))
-                    .unwrap_or(false) || c.d_tag.to_lowercase().contains(&query_lower)
+                    .unwrap_or(false)
+                || c.d_tag.to_lowercase().contains(&query_lower)
         })
         .take(limit)
         .collect();
-    communities
-        .sort_by(|a, b| {
-            let a_name_match = a
-                .name
-                .as_ref()
-                .map(|n| n.to_lowercase().contains(&query_lower))
-                .unwrap_or(false);
-            let b_name_match = b
-                .name
-                .as_ref()
-                .map(|n| n.to_lowercase().contains(&query_lower))
-                .unwrap_or(false);
-            b_name_match.cmp(&a_name_match)
-        });
+    communities.sort_by(|a, b| {
+        let a_name_match = a
+            .name
+            .as_ref()
+            .map(|n| n.to_lowercase().contains(&query_lower))
+            .unwrap_or(false);
+        let b_name_match = b
+            .name
+            .as_ref()
+            .map(|n| n.to_lowercase().contains(&query_lower))
+            .unwrap_or(false);
+        b_name_match.cmp(&a_name_match)
+    });
     cache_communities(&communities);
     log::info!(
-        "Client-side search returned {} communities for '{}'", communities.len(), query
+        "Client-side search returned {} communities for '{}'",
+        communities.len(),
+        query
     );
     Ok(communities)
 }
@@ -437,8 +439,7 @@ pub async fn fetch_communities_page(
     limit: usize,
     until: Option<u64>,
 ) -> std::result::Result<Vec<Community>, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     crate::stores::nostr_client::ensure_relays_ready(&client).await;
     let mut filter = Filter::new()
         .kind(Kind::Custom(KIND_COMMUNITY_DEFINITION))
@@ -458,8 +459,10 @@ pub async fn fetch_communities_page(
     communities.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     cache_communities(&communities);
     log::info!(
-        "fetch_communities_page: events={}, parsed={}, until={:?}", events_count,
-        communities.len(), until
+        "fetch_communities_page: events={}, parsed={}, until={:?}",
+        events_count,
+        communities.len(),
+        until
     );
     Ok(communities)
 }
@@ -468,8 +471,7 @@ pub async fn fetch_communities_page(
 pub async fn fetch_approved_members(
     community: &Community,
 ) -> std::result::Result<HashSet<String>, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     let owner_pubkey = PublicKey::from_hex(&community.pubkey)
         .map_err(|e| format!("Invalid community pubkey: {}", e))?;
     let filter = Filter::new()
@@ -491,8 +493,14 @@ pub async fn fetch_approved_members(
             }
         }
     }
-    APPROVED_MEMBERS_CACHE.write().insert(community.a_tag.clone(), members.clone());
-    log::info!("Fetched {} approved members for {}", members.len(), community.a_tag);
+    APPROVED_MEMBERS_CACHE
+        .write()
+        .insert(community.a_tag.clone(), members.clone());
+    log::info!(
+        "Fetched {} approved members for {}",
+        members.len(),
+        community.a_tag
+    );
     Ok(members)
 }
 
@@ -500,10 +508,8 @@ pub async fn fetch_approved_members(
 pub async fn fetch_user_join_requests(
     user_pubkey: &str,
 ) -> std::result::Result<Vec<JoinRequest>, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
-    let pubkey = PublicKey::from_hex(user_pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let pubkey = PublicKey::from_hex(user_pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = Filter::new()
         .kind(Kind::Custom(KIND_JOIN_REQUEST))
         .author(pubkey)
@@ -528,8 +534,7 @@ pub async fn fetch_user_join_requests(
 pub async fn fetch_community_join_requests(
     community: &Community,
 ) -> std::result::Result<Vec<JoinRequest>, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     let filter = Filter::new()
         .kind(Kind::Custom(KIND_JOIN_REQUEST))
         .custom_tag(SingleLetterTag::lowercase(Alphabet::A), &community.a_tag)
@@ -567,8 +572,9 @@ pub async fn fetch_community_join_requests(
         .write()
         .insert(community.a_tag.clone(), pending_requests.clone());
     log::info!(
-        "Fetched {} pending join requests for {}", pending_requests.len(), community
-        .a_tag
+        "Fetched {} pending join requests for {}",
+        pending_requests.len(),
+        community.a_tag
     );
     Ok(pending_requests)
 }
@@ -577,8 +583,7 @@ pub async fn fetch_community_join_requests(
 pub async fn fetch_declined_members(
     community: &Community,
 ) -> std::result::Result<HashSet<String>, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     let owner_pubkey = PublicKey::from_hex(&community.pubkey)
         .map_err(|e| format!("Invalid community pubkey: {}", e))?;
     let filter = Filter::new()
@@ -600,8 +605,14 @@ pub async fn fetch_declined_members(
             }
         }
     }
-    DECLINED_MEMBERS_CACHE.write().insert(community.a_tag.clone(), members.clone());
-    log::info!("Fetched {} declined members for {}", members.len(), community.a_tag);
+    DECLINED_MEMBERS_CACHE
+        .write()
+        .insert(community.a_tag.clone(), members.clone());
+    log::info!(
+        "Fetched {} declined members for {}",
+        members.len(),
+        community.a_tag
+    );
     Ok(members)
 }
 
@@ -609,8 +620,7 @@ pub async fn fetch_declined_members(
 pub async fn fetch_banned_members(
     community: &Community,
 ) -> std::result::Result<HashSet<String>, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     let owner_pubkey = PublicKey::from_hex(&community.pubkey)
         .map_err(|e| format!("Invalid community pubkey: {}", e))?;
     let filter = Filter::new()
@@ -632,7 +642,13 @@ pub async fn fetch_banned_members(
             }
         }
     }
-    BANNED_MEMBERS_CACHE.write().insert(community.a_tag.clone(), members.clone());
-    log::info!("Fetched {} banned members for {}", members.len(), community.a_tag);
+    BANNED_MEMBERS_CACHE
+        .write()
+        .insert(community.a_tag.clone(), members.clone());
+    log::info!(
+        "Fetched {} banned members for {}",
+        members.len(),
+        community.a_tag
+    );
     Ok(members)
 }

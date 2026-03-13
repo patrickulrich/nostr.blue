@@ -84,10 +84,7 @@ pub fn ChapterList(props: ChapterListProps) -> Element {
         .iter()
         .filter(|ch| ch.toc.unwrap_or(true))
         .collect();
-    let current_chapter_idx = find_current_chapter(
-        &visible_chapters,
-        props.current_time,
-    );
+    let current_chapter_idx = find_current_chapter(&visible_chapters, props.current_time);
     rsx! {
         div { class: "space-y-1",
             for (idx , chapter) in visible_chapters.iter().enumerate() {

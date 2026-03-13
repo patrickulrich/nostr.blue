@@ -25,13 +25,13 @@ pub fn RecipeNew() -> Element {
                 Some(form_data.summary.as_str())
             };
             match recipe_store::publish_recipe(
-                    &form_data.title,
-                    summary,
-                    &form_data.image_urls,
-                    &content,
-                    form_data.tags.clone(),
-                )
-                .await
+                &form_data.title,
+                summary,
+                &form_data.image_urls,
+                &content,
+                form_data.tags.clone(),
+            )
+            .await
             {
                 Ok(naddr) => {
                     navigator.push(Route::RecipeDetail { naddr });

@@ -100,9 +100,7 @@ pub fn SettingsRelays() -> Element {
         if lower.starts_with("ws://") || lower.starts_with("wss://") {
             return Ok(trimmed.to_string());
         }
-        if lower.starts_with("http://") || lower.starts_with("https://")
-            || lower.contains("://")
-        {
+        if lower.starts_with("http://") || lower.starts_with("https://") || lower.contains("://") {
             return Err("Unsupported URL scheme (use ws:// or wss://)".to_string());
         }
         fn is_private_172(host: &str) -> bool {
@@ -115,11 +113,16 @@ pub fn SettingsRelays() -> Element {
             }
             false
         }
-        let is_local = lower.contains("127.0.0.1") || lower.contains("localhost")
-            || lower.contains("192.168.") || lower.starts_with("10.")
-            || is_private_172(&lower) || lower.contains("[::1]")
-            || lower.contains("::1:") || lower.ends_with(".local")
-            || lower.contains(".local:") || lower.contains(".local/")
+        let is_local = lower.contains("127.0.0.1")
+            || lower.contains("localhost")
+            || lower.contains("192.168.")
+            || lower.starts_with("10.")
+            || is_private_172(&lower)
+            || lower.contains("[::1]")
+            || lower.contains("::1:")
+            || lower.ends_with(".local")
+            || lower.contains(".local:")
+            || lower.contains(".local/")
             || lower.contains("umbrel:");
         let scheme = if is_local { "ws://" } else { "wss://" };
         Ok(format!("{}{}", scheme, trimmed))
@@ -131,9 +134,7 @@ pub fn SettingsRelays() -> Element {
                 Some(port) => format!("{}:{}", host, port),
                 None => host.to_string(),
             };
-            if (parsed.scheme() == "wss" || parsed.scheme() == "ws")
-                && parsed.path() == "/"
-            {
+            if (parsed.scheme() == "wss" || parsed.scheme() == "ws") && parsed.path() == "/" {
                 host_with_port
             } else {
                 format!("{}{}", host_with_port, parsed.path())
@@ -161,13 +162,11 @@ pub fn SettingsRelays() -> Element {
                     general_error.set(Some("Relay already exists".to_string()));
                     return;
                 }
-                general_relays
-                    .write()
-                    .push(relay::RelayConfig {
-                        url: normalized,
-                        read: true,
-                        write: true,
-                    });
+                general_relays.write().push(relay::RelayConfig {
+                    url: normalized,
+                    read: true,
+                    write: true,
+                });
                 new_general_relay.set(String::new());
                 general_error.set(None);
             }
@@ -302,50 +301,28 @@ pub fn SettingsRelays() -> Element {
                     return;
                 }
             };
-            if let Err(e) = relay::publish_relay_list(general.clone(), client.clone())
-                .await
-            {
-                save_status
-                    .set(Some(format!("Failed to publish general relays: {}", e)));
+            if let Err(e) = relay::publish_relay_list(general.clone(), client.clone()).await {
+                save_status.set(Some(format!("Failed to publish general relays: {}", e)));
                 publishing.set(false);
                 return;
             }
-            if let Err(e) = relay::publish_dm_relay_list(dm.clone(), client.clone())
-                .await
-            {
+            if let Err(e) = relay::publish_dm_relay_list(dm.clone(), client.clone()).await {
                 save_status.set(Some(format!("Failed to publish DM relays: {}", e)));
                 publishing.set(false);
                 return;
             }
-            if let Err(e) = relay::publish_search_relays(search.clone(), client.clone())
-                .await
-            {
+            if let Err(e) = relay::publish_search_relays(search.clone(), client.clone()).await {
                 save_status.set(Some(format!("Failed to publish search relays: {}", e)));
                 publishing.set(false);
                 return;
             }
-            if let Err(e) = relay::publish_blocked_relays(
-                    blocked.clone(),
-                    client.clone(),
-                )
-                .await
-            {
-                save_status
-                    .set(Some(format!("Failed to publish blocked relays: {}", e)));
+            if let Err(e) = relay::publish_blocked_relays(blocked.clone(), client.clone()).await {
+                save_status.set(Some(format!("Failed to publish blocked relays: {}", e)));
                 publishing.set(false);
                 return;
             }
             let mut metadata = relay::USER_RELAY_METADATA.write();
-            #[cfg(target_arch = "wasm32")]
-            let now_secs = (js_sys::Date::now() / 1000.0) as u64;
-            #[cfg(not(target_arch = "wasm32"))]
-            let now_secs = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or_else(|e| {
-                    log::warn!("System time before UNIX_EPOCH: {}", e);
-                    0
-                });
+            let now_secs = crate::platform::timestamp::now_secs();
             *metadata = Some(relay::RelayListMetadata {
                 relays: general,
                 dm_relays: dm,
@@ -355,7 +332,7 @@ pub fn SettingsRelays() -> Element {
             *relay::BLOCKED_RELAYS.write() = blocked;
             crate::services::search_relays::invalidate_search_relay_cache().await;
             save_status.set(Some("Relay lists published successfully!".to_string()));
-            gloo_timers::future::TimeoutFuture::new(3000).await;
+            crate::platform::timer::sleep_ms(3000).await;
             save_status.set(None);
             publishing.set(false);
         });

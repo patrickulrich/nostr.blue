@@ -1,10 +1,16 @@
+#[cfg(feature = "web")]
 use crate::stores::nostr_client::get_client;
 use crate::utils::truncate_pubkey;
+#[cfg(feature = "web")]
 use nostr_sdk::{EventId, Filter, Kind};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
+#[cfg(feature = "web")]
 use wasm_bindgen_futures::JsFuture;
+#[cfg(feature = "web")]
 use web_sys::{Request, RequestInit, RequestMode, Response};
+#[cfg(feature = "web")]
 const NOSTR_WINE_API: &str = "https://api.nostr.wine";
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrendingNote {
@@ -43,6 +49,7 @@ pub struct TrendingStats {
     pub zaps: Option<u32>,
 }
 /// Response item from nostr.wine trending API
+#[cfg(feature = "web")]
 #[derive(Debug, Clone, Deserialize)]
 struct NostrWineTrendingItem {
     event_id: String,
@@ -60,14 +67,12 @@ struct NostrWineTrendingItem {
 /// - limit: Number of events to return (1-200, default 10)
 ///
 /// Note: Hours is fixed at 24 and order is fixed to "reactions" for best engagement signal.
-pub async fn get_trending_notes(
-    limit: Option<usize>,
-) -> Result<Vec<TrendingNote>, String> {
+#[cfg(feature = "web")]
+pub async fn get_trending_notes(limit: Option<usize>) -> Result<Vec<TrendingNote>, String> {
     let limit = limit.unwrap_or(10).clamp(1, 200);
     let url = format!(
         "{}/trending?limit={}&hours=24&order=reactions",
-        NOSTR_WINE_API,
-        limit,
+        NOSTR_WINE_API, limit,
     );
     log::info!("Fetching trending from nostr.wine: {}", url);
     let opts = RequestInit::new();
@@ -90,13 +95,17 @@ pub async fn get_trending_notes(
         return Err(format!("API returned status: {}", resp.status()));
     }
     let json = JsFuture::from(
-            resp.json().map_err(|e| format!("Failed to get JSON: {:?}", e))?,
-        )
-        .await
-        .map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
+        resp.json()
+            .map_err(|e| format!("Failed to get JSON: {:?}", e))?,
+    )
+    .await
+    .map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
     let trending_items: Vec<NostrWineTrendingItem> = serde_wasm_bindgen::from_value(json)
         .map_err(|e| format!("Failed to deserialize trending items: {:?}", e))?;
-    log::info!("Got {} trending event IDs from nostr.wine", trending_items.len());
+    log::info!(
+        "Got {} trending event IDs from nostr.wine",
+        trending_items.len()
+    );
     if trending_items.is_empty() {
         return Ok(Vec::new());
     }
@@ -126,10 +135,8 @@ pub async fn get_trending_notes(
         .map_err(|e| format!("Failed to fetch events: {}", e))?;
     log::info!("Fetched {} events from relays", events.len());
     let mut trending_notes: Vec<TrendingNote> = Vec::new();
-    let events_map: std::collections::HashMap<String, _> = events
-        .into_iter()
-        .map(|e| (e.id.to_hex(), e))
-        .collect();
+    let events_map: std::collections::HashMap<String, _> =
+        events.into_iter().map(|e| (e.id.to_hex(), e)).collect();
     for item in &trending_items {
         if let Some(event) = events_map.get(&item.event_id) {
             let stats = stats_map.get(&item.event_id).cloned();
@@ -150,25 +157,35 @@ pub async fn get_trending_notes(
             let author = TrendingAuthor {
                 pubkey: event.pubkey.to_hex(),
             };
-            trending_notes
-                .push(TrendingNote {
-                    event: trending_event,
-                    author,
-                    profile: None,
-                    stats,
-                });
+            trending_notes.push(TrendingNote {
+                event: trending_event,
+                author,
+                profile: None,
+                stats,
+            });
         }
     }
     if trending_notes.len() < trending_items.len() {
         log::warn!(
             "Trending: only fetched {} of {} items from relays (missing {})",
-            trending_notes.len(), trending_items.len(), trending_items.len() -
-            trending_notes.len()
+            trending_notes.len(),
+            trending_items.len(),
+            trending_items.len() - trending_notes.len()
         );
     }
-    log::info!("Built {} trending notes from nostr.wine", trending_notes.len());
+    log::info!(
+        "Built {} trending notes from nostr.wine",
+        trending_notes.len()
+    );
     Ok(trending_notes)
 }
+
+/// Fetch trending notes (native stub)
+#[cfg(not(feature = "web"))]
+pub async fn get_trending_notes(_limit: Option<usize>) -> Result<Vec<TrendingNote>, String> {
+    Err("Trending notes not yet supported on native".to_string())
+}
+
 /// Get display name for a trending note author
 #[allow(dead_code)]
 pub fn get_display_name(note: &TrendingNote) -> String {

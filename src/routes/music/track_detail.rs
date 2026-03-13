@@ -92,9 +92,7 @@ fn TrackDetailContent(props: TrackDetailContentProps) -> Element {
         .album_art_url
         .clone()
         .or(track.artist_art_url.clone())
-        .unwrap_or_else(|| {
-            format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", track.id)
-        });
+        .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", track.id));
 
     let duration_str = track
         .duration
@@ -399,7 +397,9 @@ async fn fetch_track(id: &str) -> Result<music_player::MusicTrack, String> {
 
         // Fetch artist profile for name
         let mut track: music_player::MusicTrack = nostr_track.into();
-        if let Ok(profile) = profiles::fetch_profile(track.artist_npub.clone().unwrap_or_default()).await {
+        if let Ok(profile) =
+            profiles::fetch_profile(track.artist_npub.clone().unwrap_or_default()).await
+        {
             track.artist = profile
                 .display_name
                 .or(profile.name)
@@ -412,12 +412,8 @@ async fn fetch_track(id: &str) -> Result<music_player::MusicTrack, String> {
         if parts.len() < 2 {
             return Err("Invalid RSS track ID format".to_string());
         }
-        let feed_id: u64 = parts[0]
-            .parse()
-            .map_err(|_| "Invalid feed ID")?;
-        let episode_id: u64 = parts[1]
-            .parse()
-            .map_err(|_| "Invalid episode ID")?;
+        let feed_id: u64 = parts[0].parse().map_err(|_| "Invalid feed ID")?;
+        let episode_id: u64 = parts[1].parse().map_err(|_| "Invalid episode ID")?;
 
         let feed = podcast_index::get_podcast_by_id(feed_id).await?;
         let episodes = podcast_index::get_episodes_by_feed_id(feed_id, Some(100), None).await?;
@@ -426,7 +422,9 @@ async fn fetch_track(id: &str) -> Result<music_player::MusicTrack, String> {
             .find(|e| e.id == episode_id)
             .ok_or("Track not found")?;
 
-        Ok(music_player::MusicTrack::from_rss_music_track(episode, &feed))
+        Ok(music_player::MusicTrack::from_rss_music_track(
+            episode, &feed,
+        ))
     } else {
         // Wavlake track (UUID)
         let api = WavlakeAPI::new();
@@ -439,8 +437,7 @@ async fn fetch_track(id: &str) -> Result<music_player::MusicTrack, String> {
 fn parse_naddr(naddr: &str) -> Result<(String, String), String> {
     use nostr::prelude::*;
 
-    let nip19 = Nip19::from_bech32(naddr)
-        .map_err(|e| format!("Invalid naddr: {}", e))?;
+    let nip19 = Nip19::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
 
     match nip19 {
         Nip19::Coordinate(coord) => {
@@ -455,12 +452,12 @@ fn parse_naddr(naddr: &str) -> Result<(String, String), String> {
 /// Get route to artist page based on track source
 fn get_artist_route(track: &music_player::MusicTrack) -> Option<Route> {
     match &track.source {
-        nostr_music::TrackSource::Wavlake { artist_id, .. } => {
-            Some(Route::MusicArtist { artist_id: artist_id.clone() })
-        }
-        nostr_music::TrackSource::Nostr { pubkey, .. } => {
-            Some(Route::Profile { pubkey: pubkey.clone() })
-        }
+        nostr_music::TrackSource::Wavlake { artist_id, .. } => Some(Route::MusicArtist {
+            artist_id: artist_id.clone(),
+        }),
+        nostr_music::TrackSource::Nostr { pubkey, .. } => Some(Route::Profile {
+            pubkey: pubkey.clone(),
+        }),
         nostr_music::TrackSource::RssMusic { .. } => None,
         _ => None,
     }
@@ -469,9 +466,9 @@ fn get_artist_route(track: &music_player::MusicTrack) -> Option<Route> {
 /// Get route to album page based on track source
 fn get_album_route(track: &music_player::MusicTrack) -> Option<Route> {
     match &track.source {
-        nostr_music::TrackSource::Wavlake { album_id, .. } => {
-            Some(Route::MusicAlbum { album_id: album_id.clone() })
-        }
+        nostr_music::TrackSource::Wavlake { album_id, .. } => Some(Route::MusicAlbum {
+            album_id: album_id.clone(),
+        }),
         nostr_music::TrackSource::RssMusic { feed_id, .. } => {
             Some(Route::MusicRssAlbum { feed_id: *feed_id })
         }
@@ -501,8 +498,15 @@ fn get_share_url(track: &music_player::MusicTrack) -> String {
             }
             format!("https://nostr.blue/music/track/{}", track.id)
         }
-        nostr_music::TrackSource::RssMusic { feed_id, episode_id, .. } => {
-            format!("https://nostr.blue/music/track/rss:{}:{}", feed_id, episode_id)
+        nostr_music::TrackSource::RssMusic {
+            feed_id,
+            episode_id,
+            ..
+        } => {
+            format!(
+                "https://nostr.blue/music/track/rss:{}:{}",
+                feed_id, episode_id
+            )
         }
         _ => format!("https://nostr.blue/music/track/{}", track.id),
     }
