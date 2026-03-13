@@ -431,6 +431,8 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                                     cleanup_guard.set(Some(CleanupGuard {
                                         video_id: video_id.clone(),
                                     }));
+                                } else {
+                                    destroy_video_js_player(&video_id);
                                 }
                             }
                             Err(e) => {
@@ -527,6 +529,8 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                             cleanup_guard.set(Some(CleanupGuard {
                                 video_id: video_id.clone(),
                             }));
+                        } else {
+                            destroy_video_js_player(&video_id);
                         }
                     }
                     Err(e) => {

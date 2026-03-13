@@ -97,7 +97,8 @@ pub fn BadgeDetailModal(
                 match client.database().metadata(pubkey).await {
                     Ok(Some(metadata)) => {
                         // Use peek() to avoid subscription in async context
-                        if *target_pubkey.peek() == pubkey_str && *gen_counter.peek() == current_gen {
+                        if *target_pubkey.peek() == pubkey_str && *gen_counter.peek() == current_gen
+                        {
                             issuer_profile.set(Some(metadata));
                         }
                         return;
@@ -115,7 +116,8 @@ pub fn BadgeDetailModal(
                 match client.fetch_metadata(pubkey, Duration::from_secs(5)).await {
                     Ok(Some(metadata)) => {
                         // Use peek() to avoid subscription in async context
-                        if *target_pubkey.peek() == pubkey_str && *gen_counter.peek() == current_gen {
+                        if *target_pubkey.peek() == pubkey_str && *gen_counter.peek() == current_gen
+                        {
                             issuer_profile.set(Some(metadata));
                         }
                     }

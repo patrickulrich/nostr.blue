@@ -59,6 +59,20 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
             .cloned()
             .collect::<Vec<_>>()
     });
+    use_effect(move || {
+        let mode = add_mode.read().clone();
+        let should_create_new = match mode {
+            AddMode::SelectMode => create_new_default,
+            AddMode::AddPost => !existing_lists_supported || curation_lists.read().is_empty(),
+            AddMode::AddPerson => people_lists.read().is_empty(),
+        };
+        create_new.set(should_create_new);
+        selected_list_id.set(None);
+        selected_people_list.set(None);
+        new_list_name.set(String::new());
+        add_as_private.set(false);
+        error_msg.set(None);
+    });
     let event_id = props.event_id.clone();
     let author_pubkey = props.author_pubkey.clone();
     let on_close = props.on_close;
@@ -233,8 +247,6 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                                 class: "text-sm text-muted-foreground hover:text-foreground flex items-center gap-1 mb-2",
                                 onclick: move |_| {
                                     add_mode.set(AddMode::SelectMode);
-                                    create_new.set(create_new_default);
-                                    error_msg.set(None);
                                 },
                                 "← Back"
                             }
@@ -338,8 +350,6 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                             class: "text-sm text-muted-foreground hover:text-foreground flex items-center gap-1 mb-2",
                             onclick: move |_| {
                                 add_mode.set(AddMode::SelectMode);
-                                create_new.set(false);
-                                error_msg.set(None);
                             },
                             "← Back"
                         }

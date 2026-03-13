@@ -22,6 +22,9 @@ enum UploadServer {
     NostrBuild,
     Blossom,
 }
+
+#[cfg(feature = "web")]
+const MAX_GIF_UPLOAD_BYTES: usize = 21 * 1024 * 1024;
 #[component]
 pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     let mut show = props.show;
@@ -494,6 +497,10 @@ async fn read_file_as_bytes(input_id: &str) -> Result<(String, Vec<u8>, String),
     let file = file_list.get(0).ok_or("No file selected")?;
     let filename = file.name();
     let mime_type = file.type_();
+    let file_size = usize::try_from(file.size() as u64).unwrap_or(usize::MAX);
+    if file_size > MAX_GIF_UPLOAD_BYTES {
+        return Err("File too large. Maximum size is 21MB".to_string());
+    }
     let promise = file.array_buffer();
     let array_buffer = JsFuture::from(promise)
         .await

@@ -50,6 +50,7 @@ yarn-error.log*
 
 # Screenshots
 *.png
+!android/res/mipmap-*/ic_launcher_foreground.png
 
 # Android build output
 *.apk

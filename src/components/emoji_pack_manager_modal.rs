@@ -25,10 +25,7 @@ pub fn EmojiPackManagerModal(props: EmojiPackManagerModalProps) -> Element {
     let is_authenticated = auth_store::is_authenticated();
 
     use_effect(move || {
-        if !(props.show)()
-            || discoverable_loading
-            || !should_refresh_discoverable_emoji_packs()
-        {
+        if !(props.show)() || discoverable_loading || !should_refresh_discoverable_emoji_packs() {
             return;
         }
 

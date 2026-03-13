@@ -7,7 +7,7 @@ use crate::stores::calendar_store::UnifiedEvent;
 #[cfg(not(feature = "web"))]
 use crate::utils::date_helpers::{civil_from_days, days_from_civil};
 use crate::utils::date_helpers::{
-    get_day_number, get_event_date, get_month_dates, get_month_from_date, get_today,
+    get_day_number, get_event_date, get_month_dates, get_month_from_date, get_today_utc,
 };
 use dioxus::prelude::*;
 #[cfg(feature = "web")]
@@ -151,7 +151,7 @@ fn WeekView(props: WeekViewProps) -> Element {
         let date = get_event_date(event);
         events_by_date.entry(date).or_default().push(event.clone());
     }
-    let today = get_today();
+    let today = get_today_utc();
     rsx! {
         div { class: "calendar-week-view h-full flex flex-col",
             div { class: "flex border-b border-border",
@@ -264,7 +264,7 @@ fn MonthView(props: MonthViewProps) -> Element {
         let date = get_event_date(event);
         events_by_date.entry(date).or_default().push(event.clone());
     }
-    let today = get_today();
+    let today = get_today_utc();
     let current_month = get_month_from_date(&props.selected_date);
     rsx! {
         div { class: "calendar-month-view",
@@ -645,9 +645,12 @@ fn position_day_events(events: &[UnifiedEvent], _date: &str) -> Vec<PositionedEv
 }
 /// Get event duration in minutes
 fn get_event_duration(event: &UnifiedEvent) -> f32 {
+    const MAX_SAFE_TIMESTAMP: u64 = 253_402_300_799;
     match event {
         UnifiedEvent::Calendar(e) => {
             if let (Some(end), start) = (e.end_timestamp(), e.start_timestamp()) {
+                let end = end.min(MAX_SAFE_TIMESTAMP);
+                let start = start.min(MAX_SAFE_TIMESTAMP);
                 if end > start {
                     return (end - start) as f32 / 60.0;
                 }

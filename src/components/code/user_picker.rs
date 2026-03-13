@@ -385,7 +385,11 @@ pub fn NostrUserPicker(
 
 /// Chip displaying a selected user with remove button
 #[component]
-fn SelectedUserChip(pubkey: String, disabled: bool, on_remove: EventHandler<MouseEvent>) -> Element {
+fn SelectedUserChip(
+    pubkey: String,
+    disabled: bool,
+    on_remove: EventHandler<MouseEvent>,
+) -> Element {
     let profile = PROFILE_CACHE.read().peek(&pubkey).cloned();
     let display = profile
         .as_ref()

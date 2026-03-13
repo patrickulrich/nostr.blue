@@ -57,8 +57,10 @@ pub fn MarkdownEditor(mut props: MarkdownEditorProps) -> Element {
         move |format: MarkdownFormat| {
             let current_content = content.read().clone();
             let id_str = (*textarea_id.read()).clone();
-            let (cursor_start, cursor_end) = get_textarea_cursor(&id_str, &current_content)
-                .unwrap_or((current_content.len(), current_content.len()));
+            let Some((cursor_start, cursor_end)) = get_textarea_cursor(&id_str, &current_content)
+            else {
+                return;
+            };
             let (new_content, cursor_after_format) =
                 apply_markdown_format(&current_content, cursor_start, cursor_end, format);
             content.set(new_content.clone());

@@ -122,16 +122,20 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     let mut fetch_error = use_signal(|| None::<String>);
     let mut publications_version = use_signal(|| 0usize);
     let mut fetch_generation = use_signal(|| 0u64);
+    let mut fetch_task: Signal<Option<Task>> = use_signal(|| None);
     use_effect(use_reactive(&*props.show.read(), move |is_shown| {
         if is_shown {
             let has_cached_publications = !get_all_cached_publications().is_empty();
             // Increment generation token to invalidate any in-flight requests
             let current_generation = fetch_generation.peek().wrapping_add(1);
             fetch_generation.set(current_generation);
+            if let Some(task) = fetch_task.take() {
+                task.cancel();
+            }
 
             loading.set(!has_cached_publications);
             fetch_error.set(None);
-            spawn(async move {
+            let task = spawn(async move {
                 let result = fetch_publications(100, None).await;
 
                 // Check staleness before state updates
@@ -153,6 +157,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                 }
                 loading.set(false);
             });
+            fetch_task.set(Some(task));
             selected_publication.set(None);
             selected_chapter.set(None);
             selected_sections.set(String::new());
@@ -167,12 +172,14 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                 task.cancel();
             }
             debounce_counter.set(0);
+        } else if let Some(task) = fetch_task.take() {
+            task.cancel();
         }
     }));
     let mut handle_search = move |query: String| {
         search_query.set(query.clone());
         if query.is_empty() {
-            debounce_counter.set(debounce_counter() + 1);
+            debounce_counter.set(debounce_counter().wrapping_add(1));
             search_results.set(Vec::new());
             is_searching.set(false);
             let should_clear = fetch_error
@@ -185,7 +192,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
             }
             return;
         }
-        debounce_counter.set(debounce_counter() + 1);
+        debounce_counter.set(debounce_counter().wrapping_add(1));
         let current_counter = debounce_counter();
         is_searching.set(true);
         if let Some(task) = search_task.take() {

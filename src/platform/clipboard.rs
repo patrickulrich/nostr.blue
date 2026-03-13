@@ -60,9 +60,8 @@ pub async fn read_text_from_clipboard() -> Result<String, String> {
     }
     #[cfg(feature = "mobile")]
     {
-        let eval = dioxus::prelude::document::eval(
-            "(async () => await navigator.clipboard.readText())()",
-        );
+        let eval =
+            dioxus::prelude::document::eval("(async () => await navigator.clipboard.readText())()");
         let value = eval.await.map_err(|e| format!("{e:?}"))?;
         value
             .as_str()

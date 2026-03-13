@@ -37,6 +37,8 @@ version_field() {
 
 version_code_from_semver() {
     local version="$1"
+    version="${version%%+*}"
+    version="${version%%-*}"
     IFS=. read -r major minor patch <<EOF
 $version
 EOF
@@ -295,8 +297,8 @@ if [ -d "$OPENSSL_SEARCH" ]; then
             else
                 mtime=0
             fi
-            echo "$mtime $m"
-        done | sort -rn | cut -d' ' -f2-)
+            printf '%s\t%s\n' "$mtime" "$m"
+        done | sort -rnk1,1 | cut -f2-)
         OPENSSL_PREBUILT="${sorted[0]}"
     fi
 fi

@@ -335,7 +335,8 @@ pub fn CodeFileViewerCompact(content: String, #[props(default = 10)] max_lines: 
 #[component]
 pub fn RawFileButton(content: String, filename: String) -> Element {
     let mut save_error = use_signal(|| false);
-    let base_class = "flex items-center gap-1 px-3 py-1.5 text-sm p-2 hover:bg-accent rounded-lg transition";
+    let base_class =
+        "flex items-center gap-1 px-3 py-1.5 text-sm hover:bg-accent rounded-lg transition";
     rsx! {
         button {
             class: if save_error() {
@@ -357,7 +358,7 @@ pub fn RawFileButton(content: String, filename: String) -> Element {
                             &content,
                             "text/plain;charset=utf-8",
                         ) {
-                            Ok(()) => save_error.set(false),
+                            Ok(()) => {}
                             Err(e) if e.contains("Save cancelled") => {
                                 save_error.set(false);
                             }

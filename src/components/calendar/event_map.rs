@@ -577,6 +577,26 @@ pub fn EventMap(props: EventMapProps) -> Element {
     });
     let safe_height = validate_css_dimension(&props.height).unwrap_or("400px");
     let container_style = format!("height: {}; width: 100%;", safe_height);
+    let show_full_overlay = leaflet_error.read().is_some()
+        || !*leaflet_loaded.read()
+        || *loading_geo.read()
+        || (*map_initialized.read()
+            && !*loading_geo.read()
+            && events_count > 0
+            && geocoded_events.read().is_empty()
+            && !unresolved_locations.read().is_empty())
+        || (*map_initialized.read()
+            && !*loading_geo.read()
+            && events_count > 0
+            && geocoded_events.read().is_empty()
+            && unresolved_locations.read().is_empty()
+            && geocode_error_message.read().is_some())
+        || (*map_initialized.read()
+            && !*loading_geo.read()
+            && events_count > 0
+            && geocoded_events.read().is_empty()
+            && unresolved_locations.read().is_empty()
+            && geocode_error_message.read().is_none());
     rsx! {
         div { class: "event-map-container relative rounded-lg overflow-hidden border border-border",
             div {
@@ -718,8 +738,10 @@ pub fn EventMap(props: EventMapProps) -> Element {
                     }
                 }
             }
-            div { class: "absolute bottom-2 left-2 bg-background/90 rounded px-2 py-1 text-xs text-muted-foreground",
-                "{geocoded_events.read().len()} events on map"
+            if !show_full_overlay {
+                div { class: "absolute bottom-2 left-2 bg-background/90 rounded px-2 py-1 text-xs text-muted-foreground",
+                    "{geocoded_events.read().len()} events on map"
+                }
             }
         }
     }

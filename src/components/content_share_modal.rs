@@ -222,7 +222,7 @@ pub fn ContentShareModal(
                     }
                     Err(e) => {
                         copy_error.set(Some(format!("Clipboard unavailable: {}", e)));
-                        copy_disabled.set(true);
+                        copy_disabled.set(false);
                         copied.set(false);
                         log::error!("Failed to copy to clipboard: {:?}", e);
                     }

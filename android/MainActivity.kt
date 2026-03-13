@@ -17,6 +17,7 @@ import androidx.core.content.ContextCompat
 import java.io.File
 import java.io.ByteArrayInputStream
 import java.io.IOException
+import java.util.Locale
 import java.util.UUID
 
 typealias BuildConfig = com.nostr.blue.BuildConfig
@@ -554,16 +555,12 @@ class MainActivity : WryActivity() {
                 }
 
                 cursor.use {
-                    if (it.getColumnIndex("rejected") > -1) {
+                    if (it.moveToFirst() && isRejectedResponse(it)) {
                         Log.d(TAG, "getPublicKeyViaContentResolver: rejected by $signerPackage")
                         return null
                     }
-                    if (it.moveToFirst()) {
-                        val resultIndex = it.getColumnIndex("result")
-                        if (resultIndex > -1) it.getString(resultIndex) else null
-                    } else {
-                        null
-                    }
+                    val resultIndex = it.getColumnIndex("result")
+                    if (resultIndex > -1) it.getString(resultIndex) else null
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "getPublicKeyViaContentResolver failed for $signerPackage", e)
@@ -604,16 +601,12 @@ class MainActivity : WryActivity() {
                 }
 
                 cursor.use {
-                    if (it.getColumnIndex("rejected") > -1) {
+                    if (it.moveToFirst() && isRejectedResponse(it)) {
                         Log.d(TAG, "signEventViaContentResolver: rejected by $signerPackage")
                         return null
                     }
-                    if (it.moveToFirst()) {
-                        val eventIndex = it.getColumnIndex("event")
-                        if (eventIndex > -1) it.getString(eventIndex) else null
-                    } else {
-                        null
-                    }
+                    val eventIndex = it.getColumnIndex("event")
+                    if (eventIndex > -1) it.getString(eventIndex) else null
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "signEventViaContentResolver failed for $signerPackage", e)
@@ -719,7 +712,9 @@ class MainActivity : WryActivity() {
                 }
 
                 Log.d(TAG, "Launching get_public_key Intent")
-                activity.signerLauncher.launch(intent)
+                activity.runOnUiThread {
+                    activity.signerLauncher.launch(intent)
+                }
                 "launched"
             } catch (e: Exception) {
                 Log.e(TAG, "launchGetPublicKey failed", e)
@@ -770,7 +765,9 @@ class MainActivity : WryActivity() {
                 }
 
                 Log.d(TAG, "Launching package-scoped get_public_key Intent for $signerPackage")
-                activity.signerLauncher.launch(intent)
+                activity.runOnUiThread {
+                    activity.signerLauncher.launch(intent)
+                }
                 "launched"
             } catch (e: Exception) {
                 Log.e(TAG, "launchGetPublicKeyForPackage failed for $signerPackage", e)
@@ -815,14 +812,19 @@ class MainActivity : WryActivity() {
                     launchedSignerPackage = signerPackage
                 }
 
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("nostrsigner:$uriPayload")).apply {
+                val intent = Intent(
+                    Intent.ACTION_VIEW,
+                    Uri.fromParts("nostrsigner", uriPayload, null)
+                ).apply {
                     `package` = signerPackage
                     putExtra("type", requestType)
                     extras.forEach { (key, value) -> putExtra(key, value) }
                 }
 
                 Log.d(TAG, "Launching signer operation request=$requestType for $signerPackage")
-                activity.signerLauncher.launch(intent)
+                activity.runOnUiThread {
+                    activity.signerLauncher.launch(intent)
+                }
                 "launched"
             } catch (e: Exception) {
                 Log.e(TAG, "launchSignerOperationIntent failed for $requestType/$signerPackage", e)
@@ -1090,20 +1092,36 @@ class MainActivity : WryActivity() {
                 }
 
                 cursor.use {
-                    if (it.getColumnIndex("rejected") > -1) {
+                    if (it.moveToFirst() && isRejectedResponse(it)) {
                         Log.d(TAG, "$method: rejected by $signerPackage")
                         return null
                     }
-                    if (it.moveToFirst()) {
-                        val resultIndex = it.getColumnIndex("result")
-                        if (resultIndex > -1) it.getString(resultIndex) else null
-                    } else {
-                        null
-                    }
+                    val resultIndex = it.getColumnIndex("result")
+                    if (resultIndex > -1) it.getString(resultIndex) else null
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "$method failed for $signerPackage", e)
                 null
+            }
+        }
+
+        private fun isRejectedResponse(cursor: android.database.Cursor): Boolean {
+            val rejectedIndex = cursor.getColumnIndex("rejected")
+            if (rejectedIndex < 0) {
+                return false
+            }
+            return try {
+                when (cursor.getType(rejectedIndex)) {
+                    android.database.Cursor.FIELD_TYPE_INTEGER -> cursor.getInt(rejectedIndex) != 0
+                    android.database.Cursor.FIELD_TYPE_STRING -> {
+                        val value = cursor.getString(rejectedIndex)?.trim()?.lowercase(Locale.ROOT)
+                        value == "1" || value == "true" || value == "yes"
+                    }
+                    else -> false
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to read rejected column", e)
+                false
             }
         }
 
@@ -1133,7 +1151,9 @@ class MainActivity : WryActivity() {
                 }
 
                 // Launch file picker with common file types
-                activity.filePickerLauncher.launch(arrayOf("*/*"))
+                activity.runOnUiThread {
+                    activity.filePickerLauncher.launch(arrayOf("*/*"))
+                }
                 "picking"
             } catch (e: Exception) {
                 Log.e(TAG, "pickFile failed", e)
@@ -1168,7 +1188,9 @@ class MainActivity : WryActivity() {
                     filePickError = null
                 }
 
-                activity.imagePickerLauncher.launch("image/*")
+                activity.runOnUiThread {
+                    activity.imagePickerLauncher.launch("image/*")
+                }
                 "picking"
             } catch (e: Exception) {
                 Log.e(TAG, "pickImage failed", e)

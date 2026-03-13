@@ -6,6 +6,7 @@ use crate::stores::calendar_store::{get_rsvp_count, UnifiedEvent};
 use crate::utils::nip52::is_online_location;
 use crate::utils::time::format_relative_time;
 use crate::utils::validation::is_valid_http_url;
+use chrono::{TimeZone, Utc};
 use dioxus::prelude::*;
 use nostr::Timestamp;
 #[cfg(feature = "web")]
@@ -441,7 +442,7 @@ fn get_event_status(event: &UnifiedEvent) -> EventStatus {
     if event.is_calendar_event() {
         let end_ts = event.end_timestamp().unwrap_or_else(|| {
             if event.is_all_day() {
-                start_ts.saturating_add(86400)
+                next_all_day_timestamp(start_ts)
             } else {
                 start_ts
             }
@@ -456,4 +457,19 @@ fn get_event_status(event: &UnifiedEvent) -> EventStatus {
     } else {
         EventStatus::None
     }
+}
+
+fn next_all_day_timestamp(start_ts: u64) -> u64 {
+    const MAX_SAFE_TIMESTAMP: i64 = 253_402_300_799;
+    let ts_i64 = i64::try_from(start_ts)
+        .unwrap_or(MAX_SAFE_TIMESTAMP)
+        .min(MAX_SAFE_TIMESTAMP);
+    let Some(dt) = Utc.timestamp_opt(ts_i64, 0).single() else {
+        return start_ts.saturating_add(86_400);
+    };
+    dt.date_naive()
+        .succ_opt()
+        .and_then(|next_day| next_day.and_hms_opt(0, 0, 0))
+        .map(|next_midnight| next_midnight.and_utc().timestamp() as u64)
+        .unwrap_or_else(|| start_ts.saturating_add(86_400))
 }

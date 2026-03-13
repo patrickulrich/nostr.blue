@@ -33,9 +33,13 @@ pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
         .streaming
         .as_ref()
         .and_then(|url| {
-            url::Url::parse(url.as_ref())
-                .ok()
-                .map(|parsed| format!("{}://{}", parsed.scheme(), parsed.host_str().unwrap_or("<redacted>")))
+            url::Url::parse(url.as_ref()).ok().map(|parsed| {
+                format!(
+                    "{}://{}",
+                    parsed.scheme(),
+                    parsed.host_str().unwrap_or("<redacted>")
+                )
+            })
         })
         .unwrap_or_else(|| "<redacted>".to_string());
     log::debug!(

@@ -136,7 +136,9 @@ pub fn SshKeyManager() -> Element {
         spawn(async move {
             match ssh_keys::publish_ssh_key(title.trim(), &trimmed).await {
                 Ok(_) => {
-                    if auth_store::get_pubkey() != captured_pubkey || *fetch_gen.peek() != current_gen {
+                    if auth_store::get_pubkey() != captured_pubkey
+                        || *fetch_gen.peek() != current_gen
+                    {
                         adding.set(false);
                         return;
                     }
@@ -145,7 +147,9 @@ pub fn SshKeyManager() -> Element {
                         if let Ok(pk) = PublicKey::from_hex(&pubkey_hex) {
                             match ssh_keys::fetch_ssh_keys(&pk).await {
                                 Ok(k) => {
-                                    if auth_store::get_pubkey() != captured_pubkey || *fetch_gen.peek() != current_gen {
+                                    if auth_store::get_pubkey() != captured_pubkey
+                                        || *fetch_gen.peek() != current_gen
+                                    {
                                         adding.set(false);
                                         return;
                                     }
@@ -160,7 +164,9 @@ pub fn SshKeyManager() -> Element {
                     show_add_form.set(false);
                 }
                 Err(e) => {
-                    if auth_store::get_pubkey() != captured_pubkey || *fetch_gen.peek() != current_gen {
+                    if auth_store::get_pubkey() != captured_pubkey
+                        || *fetch_gen.peek() != current_gen
+                    {
                         adding.set(false);
                         return;
                     }
@@ -188,7 +194,9 @@ pub fn SshKeyManager() -> Element {
             match EventId::from_hex(&eid_hex) {
                 Ok(eid) => match ssh_keys::delete_ssh_key(eid).await {
                     Ok(()) => {
-                        if auth_store::get_pubkey() != captured_pubkey || *fetch_gen.peek() != current_gen {
+                        if auth_store::get_pubkey() != captured_pubkey
+                            || *fetch_gen.peek() != current_gen
+                        {
                             deleting_id.set(None);
                             return;
                         }
@@ -196,7 +204,9 @@ pub fn SshKeyManager() -> Element {
                         confirm_delete.set(None);
                     }
                     Err(e) => {
-                        if auth_store::get_pubkey() != captured_pubkey || *fetch_gen.peek() != current_gen {
+                        if auth_store::get_pubkey() != captured_pubkey
+                            || *fetch_gen.peek() != current_gen
+                        {
                             deleting_id.set(None);
                             return;
                         }

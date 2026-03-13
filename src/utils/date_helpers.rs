@@ -48,6 +48,11 @@ pub fn get_event_date(event: &UnifiedEvent) -> String {
 pub fn get_today() -> String {
     Local::now().format("%Y-%m-%d").to_string()
 }
+
+/// Get today's UTC date as YYYY-MM-DD string.
+pub fn get_today_utc() -> String {
+    Utc::now().format("%Y-%m-%d").to_string()
+}
 /// Get month number (1-12) from a date string in YYYY-MM-DD format
 pub fn get_month_from_date(date: &str) -> u32 {
     date.split('-')

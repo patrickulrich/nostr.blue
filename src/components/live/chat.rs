@@ -153,7 +153,9 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
                                                 let mut msgs = messages.write();
                                                 let insert_at = msgs
                                                     .iter()
-                                                    .position(|msg| msg.created_at > event.created_at)
+                                                    .position(|msg| {
+                                                        msg.created_at > event.created_at
+                                                    })
                                                     .unwrap_or(msgs.len());
                                                 msgs.insert(insert_at, (*event).clone());
                                                 // Enforce 200 message limit
@@ -197,8 +199,8 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
             #[cfg(feature = "web")]
             {
                 let mut did_scroll = false;
-                let should_scroll =
-                    msg_count > 0 && (*is_first_load.peek() || isScrolledNearBottom(&container_id, 100.0));
+                let should_scroll = msg_count > 0
+                    && (*is_first_load.peek() || isScrolledNearBottom(&container_id, 100.0));
                 if should_scroll {
                     scrollChatToBottom(&container_id);
                     did_scroll = true;

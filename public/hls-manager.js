@@ -52,6 +52,7 @@ window.hlsManager = window.hlsManager || {
 
             script.onerror = () => {
                 cleanup();
+                script.remove();
                 this.hlsLoading = null;
                 this.hlsLoaded = false;
                 reject(new Error('Failed to load hls.js'));
@@ -193,12 +194,12 @@ window.hlsManager = window.hlsManager || {
             await this.loadHls();
         } catch (e) {
             if (this.activeAttachMap.get(elementId) !== attachId) {
-                this.cleanupInstance(elementId);
+                this.cleanupInstance(elementId, attachId);
                 this.settlePendingAttach(elementId, { type: 'cancelled', url: streamUrl }, attachId);
                 return;
             }
             // Remove only our own token to avoid clobbering a newer attach
-            this.cleanupInstance(elementId);
+            this.cleanupInstance(elementId, attachId);
             this.activeAttachMap.delete(elementId);
             console.error('[HLS Manager] Failed to load HLS:', e);
             this.settlePendingAttach(elementId, {
@@ -211,13 +212,13 @@ window.hlsManager = window.hlsManager || {
 
         // Check if this attach is still valid after await
         if (this.activeAttachMap.get(elementId) !== attachId) {
-            this.cleanupInstance(elementId);
+            this.cleanupInstance(elementId, attachId);
             this.settlePendingAttach(elementId, { type: 'cancelled', url: streamUrl }, attachId);
             return;
         }
 
         if (!Hls.isSupported()) {
-            this.cleanupInstance(elementId);
+            this.cleanupInstance(elementId, attachId);
             this.activeAttachMap.delete(elementId);
             this.settlePendingAttach(elementId, {
                 type: 'error',
@@ -291,6 +292,7 @@ window.hlsManager = window.hlsManager || {
             // Check if this attach is still valid
             if (this.activeAttachMap.get(elementId) !== attachId) {
                 clearTimeout(timeout);
+                this.instances.delete(elementId);
                 hls.destroy();
                 return;
             }
@@ -383,7 +385,7 @@ window.hlsManager = window.hlsManager || {
      * Internal cleanup method that removes resources without settling promises
      * Used during attach flow to avoid prematurely settling the public attach Promise
      */
-    cleanupInstance(elementId) {
+    cleanupInstance(elementId, expectedAttachId = null) {
         // Clear timeouts but DON'T settle pending promises
         const pendingTimeout = this.pendingTimeouts.get(elementId);
         if (pendingTimeout) {
@@ -392,7 +394,9 @@ window.hlsManager = window.hlsManager || {
         }
 
         // Clear active attach token
-        this.activeAttachMap.delete(elementId);
+        if (expectedAttachId === null || this.activeAttachMap.get(elementId) === expectedAttachId) {
+            this.activeAttachMap.delete(elementId);
+        }
 
         // Destroy HLS instance if exists
         const hls = this.instances.get(elementId);

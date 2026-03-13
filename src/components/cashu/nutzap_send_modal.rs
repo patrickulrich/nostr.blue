@@ -37,7 +37,7 @@ pub fn NutzapSendModal(
     )| {
         let recipient = recipient_pubkey_for_effect.clone();
         // Use peek() to read without creating dependency, then increment
-        let version = *request_version.peek() + 1;
+        let version = request_version.peek().wrapping_add(1);
         request_version.set(version);
 
         // Reset synchronously - UI updates immediately

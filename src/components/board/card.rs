@@ -155,6 +155,7 @@ pub fn PinBoardCardMosaic(
     let board_for_zap = board.clone();
     let board_for_react = board.clone();
     let author_metadata = use_author_metadata(author_pubkey.clone());
+    let can_react = *HAS_SIGNER.read() && auth_store::get_pubkey().is_some();
     let mut has_reacted = use_signal(|| false);
     let mut reaction_count = use_signal(|| 0usize);
     let mut reaction_loading = use_signal(|| false);
@@ -261,10 +262,10 @@ pub fn PinBoardCardMosaic(
                 button {
                     class: "rounded-full p-2 bg-white/90 hover:bg-white shadow-md backdrop-blur-sm
                             {heart_button_class} transition-colors disabled:opacity-50",
-                    disabled: *reaction_loading.read() || !*HAS_SIGNER.read(),
+                    disabled: *reaction_loading.read() || !can_react,
                     onclick: move |e| {
                         e.stop_propagation();
-                        if *reaction_loading.read() || !*HAS_SIGNER.read() {
+                        if *reaction_loading.read() || !can_react {
                             return;
                         }
                         // If not bootstrapped, retry the bootstrap fetch first

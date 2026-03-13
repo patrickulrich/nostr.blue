@@ -102,7 +102,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
         let input_id = input_id_for_mobile_handler.clone();
         spawn(async move {
             error.set(None);
-                match read_file_as_bytes(&input_id, MEDIA_ACCEPT).await {
+            match read_file_as_bytes(&input_id, MEDIA_ACCEPT).await {
                 Ok((file_name, data, mime_type)) => {
                     log::info!("File selected: {} ({} bytes)", file_name, data.len());
                     selected_file.set(Some((file_name, data, mime_type)));
@@ -376,7 +376,8 @@ async fn read_file_as_bytes(
         return Err("Selected file type is not allowed".to_string());
     }
     let file_path = file_handle.as_path().to_path_buf();
-    let metadata = std::fs::metadata(&file_path).map_err(|e| format!("Failed to inspect selected file: {}", e))?;
+    let metadata = std::fs::metadata(&file_path)
+        .map_err(|e| format!("Failed to inspect selected file: {}", e))?;
     ensure_within_upload_limit(metadata.len() as usize)?;
     let data = tokio::task::spawn_blocking(move || std::fs::read(file_path))
         .await

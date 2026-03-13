@@ -7,7 +7,7 @@ use dioxus::prelude::Event as DioxusEvent;
 use dioxus::prelude::*;
 use dioxus_core::Task;
 use nostr_sdk::prelude::*;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
@@ -281,25 +281,40 @@ fn detect_mention(
                 match search_profiles(&query_snapshot, 10, query_relays).await {
                     Ok(results) => {
                         if query_signal.read().as_str() == query_snapshot.as_str() {
+                            let cached_by_pubkey: HashMap<_, _> = cached_results
+                                .iter()
+                                .map(|cached| (cached.pubkey, cached.clone()))
+                                .collect();
                             let mut merged: Vec<_> = results
                                 .into_iter()
-                                .map(|mut r| {
-                                    // Check cached results for thread participant flag
-                                    if cached_results
-                                        .iter()
-                                        .any(|c| c.pubkey == r.pubkey && c.is_thread_participant)
+                                .map(|mut relay_result| {
+                                    if let Some(cached) = cached_by_pubkey.get(&relay_result.pubkey)
                                     {
-                                        r.is_thread_participant = true;
-                                        r.relevance += 2000;
+                                        if relay_result.picture.is_none() {
+                                            relay_result.picture = cached.picture.clone();
+                                        }
+                                        if relay_result.display_name.is_none() {
+                                            relay_result.display_name = cached.display_name.clone();
+                                        }
+                                        if relay_result.name.is_none() {
+                                            relay_result.name = cached.name.clone();
+                                        }
+                                        if relay_result.nip05.is_none() {
+                                            relay_result.nip05 = cached.nip05.clone();
+                                        }
+                                        relay_result.is_contact |= cached.is_contact;
+                                        relay_result.is_thread_participant |=
+                                            cached.is_thread_participant;
+                                        relay_result.relevance =
+                                            relay_result.relevance.max(cached.relevance);
                                     }
-                                    // Also check thread_pubkeys directly
-                                    if thread_pubkeys_for_relay.contains(&r.pubkey)
-                                        && !r.is_thread_participant
+                                    if thread_pubkeys_for_relay.contains(&relay_result.pubkey)
+                                        && !relay_result.is_thread_participant
                                     {
-                                        r.is_thread_participant = true;
-                                        r.relevance += 2000;
+                                        relay_result.is_thread_participant = true;
+                                        relay_result.relevance += 2000;
                                     }
-                                    r
+                                    relay_result
                                 })
                                 .collect();
                             let mut present =

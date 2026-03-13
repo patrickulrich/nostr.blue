@@ -98,37 +98,40 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
     let clean_naddr_copy = clean_naddr.clone();
     let has_copyable_link = !clean_naddr.is_empty() || !event_id_hex.is_empty();
     let event_id_hex_copy = event_id_hex.clone();
-    use_effect(use_reactive((&author_pubkey_follow_check, &*HAS_SIGNER.read()), move |(pubkey, has_signer)| {
-        if !has_signer {
-            is_following.set(false);
-            is_loading_follow_state.set(false);
-            return;
-        }
-        is_loading_follow_state.set(true);
-        let gen = follow_check_gen.with_mut(|current| {
-            *current = current.wrapping_add(1);
-            *current
-        });
-        spawn(async move {
-            match nostr_client::is_following(pubkey).await {
-                Ok(following) => {
-                    if *follow_check_gen.peek() != gen {
-                        return;
-                    }
-                    is_following.set(following);
-                    is_loading_follow_state.set(false);
-                }
-                Err(e) => {
-                    if *follow_check_gen.peek() != gen {
-                        return;
-                    }
-                    log::warn!("Failed to check follow status: {}", e);
-                    is_following.set(false);
-                    is_loading_follow_state.set(false);
-                }
+    use_effect(use_reactive(
+        (&author_pubkey_follow_check, &*HAS_SIGNER.read()),
+        move |(pubkey, has_signer)| {
+            if !has_signer {
+                is_following.set(false);
+                is_loading_follow_state.set(false);
+                return;
             }
-        });
-    }));
+            is_loading_follow_state.set(true);
+            let gen = follow_check_gen.with_mut(|current| {
+                *current = current.wrapping_add(1);
+                *current
+            });
+            spawn(async move {
+                match nostr_client::is_following(pubkey).await {
+                    Ok(following) => {
+                        if *follow_check_gen.peek() != gen {
+                            return;
+                        }
+                        is_following.set(following);
+                        is_loading_follow_state.set(false);
+                    }
+                    Err(e) => {
+                        if *follow_check_gen.peek() != gen {
+                            return;
+                        }
+                        log::warn!("Failed to check follow status: {}", e);
+                        is_following.set(false);
+                        is_loading_follow_state.set(false);
+                    }
+                }
+            });
+        },
+    ));
     let content_name = content_type.display_name();
     let pin_title = props
         .title
