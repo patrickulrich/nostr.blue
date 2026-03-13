@@ -110,6 +110,10 @@ cleanup() {
 
 configure_release_signing() {
     require_env ANDROID_KEYSTORE_FILE
+    if [ ! -f "$ANDROID_KEYSTORE_FILE" ] || [ ! -r "$ANDROID_KEYSTORE_FILE" ]; then
+        echo "ERROR: ANDROID_KEYSTORE_FILE is not a readable regular file: $ANDROID_KEYSTORE_FILE" >&2
+        exit 1
+    fi
     require_env ANDROID_KEYSTORE_PASSWORD
     require_env ANDROID_KEY_ALIAS
     require_env ANDROID_KEY_PASSWORD
