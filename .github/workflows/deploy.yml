@@ -180,6 +180,15 @@ jobs:
           ls -l ~/.cache/tauri/linuxdeploy-plugin-gtk.sh ~/.cache/tauri/linuxdeploy-plugin-gstreamer.sh || true
           head -n 5 ~/.cache/tauri/linuxdeploy-plugin-gtk.sh || true
           APPIMAGE_EXTRACT_AND_RUN=1 ~/.cache/tauri/linuxdeploy-x86_64.AppImage --list-plugins || true
+          APPDIR="$(find target/dx -type d -name '*.AppDir' | head -n1)"
+          echo "APPDIR=$APPDIR"
+          if [ -n "$APPDIR" ]; then
+            APPIMAGE_EXTRACT_AND_RUN=1 ~/.cache/tauri/linuxdeploy-x86_64.AppImage \
+              --verbosity 1 \
+              --appdir "$APPDIR" \
+              --plugin gtk \
+              --output appimage || true
+          fi
 
       - name: Fail if AppImage bundle failed
         if: steps.build_appimage.outcome != 'success'
