@@ -97,7 +97,7 @@ jobs:
 
   linux-build:
     name: Build Linux AppImage
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: metadata
     steps:
       - name: Checkout
@@ -164,6 +164,17 @@ jobs:
 
       - name: Install Dioxus CLI
         run: cargo install dioxus-cli --version "$DX_VERSION" --locked --force
+
+      - name: Inspect linuxdeploy plugins
+        run: |
+          ls -l ~/.cache/tauri || true
+          APPIMAGE_EXTRACT_AND_RUN=1 ~/.cache/tauri/linuxdeploy-x86_64.AppImage --list-plugins || true
+
+      - name: Ensure linuxdeploy tools are executable
+        run: |
+          chmod +x ~/.cache/tauri/linuxdeploy-x86_64.AppImage || true
+          chmod +x ~/.cache/tauri/linuxdeploy-plugin-gtk.sh || true
+          chmod +x ~/.cache/tauri/linuxdeploy-plugin-gstreamer.sh || true
 
       - name: Build AppImage bundle
         env:
