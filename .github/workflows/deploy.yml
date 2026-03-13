@@ -165,21 +165,25 @@ jobs:
       - name: Install Dioxus CLI
         run: cargo install dioxus-cli --version "$DX_VERSION" --locked --force
 
-      - name: Inspect linuxdeploy plugins
-        run: |
-          ls -l ~/.cache/tauri || true
-          APPIMAGE_EXTRACT_AND_RUN=1 ~/.cache/tauri/linuxdeploy-x86_64.AppImage --list-plugins || true
-
-      - name: Ensure linuxdeploy tools are executable
-        run: |
-          chmod +x ~/.cache/tauri/linuxdeploy-x86_64.AppImage || true
-          chmod +x ~/.cache/tauri/linuxdeploy-plugin-gtk.sh || true
-          chmod +x ~/.cache/tauri/linuxdeploy-plugin-gstreamer.sh || true
-
       - name: Build AppImage bundle
+        id: build_appimage
+        continue-on-error: true
         env:
           APPIMAGE_EXTRACT_AND_RUN: 1
         run: dx bundle --platform desktop --package-types appimage --out-dir dist/linux-release --release --no-default-features --features desktop
+
+      - name: Inspect linuxdeploy cache after bundle
+        if: always()
+        run: |
+          ls -l ~/.cache/tauri || true
+          file ~/.cache/tauri/linuxdeploy-x86_64.AppImage || true
+          ls -l ~/.cache/tauri/linuxdeploy-plugin-gtk.sh ~/.cache/tauri/linuxdeploy-plugin-gstreamer.sh || true
+          head -n 5 ~/.cache/tauri/linuxdeploy-plugin-gtk.sh || true
+          APPIMAGE_EXTRACT_AND_RUN=1 ~/.cache/tauri/linuxdeploy-x86_64.AppImage --list-plugins || true
+
+      - name: Fail if AppImage bundle failed
+        if: steps.build_appimage.outcome != 'success'
+        run: exit 1
 
       - name: Stage release asset
         run: |
