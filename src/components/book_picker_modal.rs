@@ -126,7 +126,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
         if is_shown {
             let has_cached_publications = !get_all_cached_publications().is_empty();
             // Increment generation token to invalidate any in-flight requests
-            let current_generation = *fetch_generation.peek() + 1;
+            let current_generation = fetch_generation.peek().wrapping_add(1);
             fetch_generation.set(current_generation);
 
             loading.set(!has_cached_publications);

@@ -525,7 +525,8 @@ fn position_day_events(events: &[UnifiedEvent], _date: &str) -> Vec<PositionedEv
         let start_minutes = {
             #[cfg(feature = "web")]
             {
-                let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
+                let ts_clamped = ts.min(253_402_300_799);
+                let date = js_sys::Date::new(&(ts_clamped as f64 * 1000.0).into());
                 let offset_minutes = date.get_timezone_offset() as i32;
                 let local_hours = date.get_hours() as i32;
                 let local_minutes = date.get_minutes() as i32;
@@ -773,7 +774,8 @@ fn format_event_time(event: &UnifiedEvent) -> String {
     }
     #[cfg(feature = "web")]
     {
-        let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
+        let ts_clamped = ts.min(253_402_300_799);
+        let date = js_sys::Date::new(&(ts_clamped as f64 * 1000.0).into());
         let offset_minutes = date.get_timezone_offset() as i32;
         let local_hours = date.get_hours() as i32;
         let local_minutes = date.get_minutes() as i32;

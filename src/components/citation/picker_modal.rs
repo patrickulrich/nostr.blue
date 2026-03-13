@@ -135,10 +135,21 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
         search_task.set(Some(new_task));
     };
     let citations_to_display = use_memo(move || {
-        if *active_tab.read() == PickerTab::Search && !search_query.read().is_empty() {
-            search_results.read().clone()
+        let current_citations = citations.read().clone();
+        let query = search_query.read().trim().to_lowercase();
+        if *active_tab.read() == PickerTab::Search && !query.is_empty() {
+            current_citations
+                .into_iter()
+                .filter(|citation| {
+                    let base = citation.citation.base();
+                    base.title.to_lowercase().contains(&query)
+                        || base.author.to_lowercase().contains(&query)
+                        || base.content.to_lowercase().contains(&query)
+                })
+                .take(50)
+                .collect()
         } else {
-            citations.read().clone()
+            current_citations
         }
     });
     let markup_preview = use_memo(move || {

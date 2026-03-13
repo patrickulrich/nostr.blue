@@ -107,23 +107,33 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
         }
     });
     use_effect(move || {
+        let pubkey = repo_pubkey_signal.read().clone();
+        let id = repo_id_signal.read().clone();
+        let coord_str = format!("{}:{}", pubkey, id);
         #[cfg(feature = "web")]
         {
-            let pubkey = repo_pubkey_signal.read().clone();
-            let id = repo_id_signal.read().clone();
             if let Some(window) = web_sys::window() {
                 if let Ok(Some(storage)) = window.local_storage() {
                     if let Ok(Some(watched_json)) = storage.get_item("nostr_blue_watched_repos") {
                         if let Ok(watched) = serde_json::from_str::<Vec<String>>(&watched_json) {
-                            let coord_str = format!("{}:{}", pubkey, id);
                             is_watching.set(watched.contains(&coord_str));
                             return;
                         }
                     }
                 }
             }
-            is_watching.set(false);
         }
+        #[cfg(not(feature = "web"))]
+        {
+            match crate::platform::storage::get::<Vec<String>>("nostr_blue_watched_repos") {
+                Ok(watched) => {
+                    is_watching.set(watched.contains(&coord_str));
+                    return;
+                }
+                Err(e) => log::debug!("Failed to restore watched repos: {}", e),
+            }
+        }
+        is_watching.set(false);
     });
     let handle_star = {
         move |_| {

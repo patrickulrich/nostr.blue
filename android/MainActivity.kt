@@ -9,11 +9,13 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.util.Base64InputStream
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import java.io.File
+import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.util.UUID
 
@@ -69,6 +71,12 @@ class MainActivity : WryActivity() {
                                             TAG,
                                             "Signer approval package validation failed for package=$pkg: $validationError"
                                         )
+                                    } else if (launchedSignerPackage != null && launchedSignerPackage != pkg) {
+                                        intentError = "Signer approval returned mismatched package"
+                                        Log.e(
+                                            TAG,
+                                            "Signer approval package mismatch: launched=$launchedSignerPackage returned=$pkg"
+                                        )
                                     } else {
                                         pendingPubkey = pubkey
                                         pendingPackage = pkg
@@ -87,19 +95,32 @@ class MainActivity : WryActivity() {
                             }
                         }
                     } else {
-                        pendingOperationResult = result.data?.getStringExtra("result")
-                        pendingOperationEvent = result.data?.getStringExtra("event")
-                        pendingOperationPackage = result.data?.getStringExtra("package")
-                        pendingOperationRejected = if (result.data?.extras?.containsKey("rejected") == true) {
-                            result.data?.getBooleanExtra("rejected", false)
+                        val returnedPackage = result.data?.getStringExtra("package")
+                        if (launchedSignerPackage != null && launchedSignerPackage != returnedPackage) {
+                            pendingOperationResult = null
+                            pendingOperationEvent = null
+                            pendingOperationPackage = null
+                            pendingOperationRejected = null
+                            intentError = "Signer operation returned mismatched package"
+                            Log.e(
+                                TAG,
+                                "Signer operation package mismatch: launched=$launchedSignerPackage returned=$returnedPackage"
+                            )
                         } else {
-                            null
+                            pendingOperationResult = result.data?.getStringExtra("result")
+                            pendingOperationEvent = result.data?.getStringExtra("event")
+                            pendingOperationPackage = returnedPackage
+                            pendingOperationRejected = if (result.data?.extras?.containsKey("rejected") == true) {
+                                result.data?.getBooleanExtra("rejected", false)
+                            } else {
+                                null
+                            }
+                            intentError = null
+                            Log.d(
+                                TAG,
+                                "Signer operation completed: request=$requestType package=${pendingOperationPackage} hasEvent=${pendingOperationEvent != null} hasResult=${pendingOperationResult != null} rejected=$pendingOperationRejected"
+                            )
                         }
-                        intentError = null
-                        Log.d(
-                            TAG,
-                            "Signer operation completed: request=$requestType package=${pendingOperationPackage} hasEvent=${pendingOperationEvent != null} hasResult=${pendingOperationResult != null} rejected=$pendingOperationRejected"
-                        )
                     }
                 } else {
                     val errorMsg = "User rejected or cancelled (resultCode=${result.resultCode})"
@@ -237,6 +258,9 @@ class MainActivity : WryActivity() {
 
         @Volatile
         private var activeSignerRequest: String? = null
+
+        @Volatile
+        private var launchedSignerPackage: String? = null
 
         // Storage for file picker results
         @Volatile
@@ -686,6 +710,7 @@ class MainActivity : WryActivity() {
                     pendingOperationPackage = null
                     pendingOperationRejected = null
                     intentError = null
+                    launchedSignerPackage = null
                 }
 
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse("nostrsigner:")).apply {
@@ -735,6 +760,7 @@ class MainActivity : WryActivity() {
                     pendingOperationPackage = null
                     pendingOperationRejected = null
                     intentError = null
+                    launchedSignerPackage = signerPackage
                 }
 
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse("nostrsigner:")).apply {
@@ -786,6 +812,7 @@ class MainActivity : WryActivity() {
                     pendingOperationPackage = null
                     pendingOperationRejected = null
                     intentError = null
+                    launchedSignerPackage = signerPackage
                 }
 
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse("nostrsigner:$uriPayload")).apply {
@@ -957,6 +984,7 @@ class MainActivity : WryActivity() {
                 intentError = null
                 intentInFlight = false
                 activeSignerRequest = null
+                launchedSignerPackage = null
             }
             Log.d(TAG, "Cleared pending Intent state")
         }
@@ -976,9 +1004,6 @@ class MainActivity : WryActivity() {
         @JvmStatic
         fun downloadFile(context: Context, filename: String, contentBase64: String, mimeType: String): String {
             return try {
-                // Decode base64 content
-                val contentBytes = android.util.Base64.decode(contentBase64, android.util.Base64.NO_WRAP)
-
                 // Sanitize filename to prevent path traversal:
                 // - Strip any path separators (both / and \)
                 // - Get only the basename (last segment after any separator)
@@ -999,7 +1024,13 @@ class MainActivity : WryActivity() {
                     return "error:Invalid file path"
                 }
 
-                file.writeBytes(contentBytes)
+                ByteArrayInputStream(contentBase64.toByteArray(Charsets.US_ASCII)).use { encoded ->
+                    Base64InputStream(encoded, android.util.Base64.NO_WRAP).use { decoded ->
+                        file.outputStream().use { output ->
+                            decoded.copyTo(output)
+                        }
+                    }
+                }
 
                 // Create URI for the file
                 val uri = androidx.core.content.FileProvider.getUriForFile(

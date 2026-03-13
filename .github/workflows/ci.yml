@@ -91,10 +91,10 @@ jobs:
         run: npm run build:all
 
       - name: Install Dioxus CLI
-        run: cargo install dioxus-cli --version 0.7.2 --locked --force
+        run: cargo install dioxus-cli --version 0.7.3 --locked --force
 
       - name: Dioxus check
-        run: dx check --no-default-features --features desktop
+        run: dx check --platform linux --no-default-features --features desktop
 
       - name: Cargo check
         run: cargo check --no-default-features --features desktop
@@ -103,7 +103,7 @@ jobs:
         run: cargo clippy --no-default-features --features desktop -- -D warnings
 
       - name: Clippy wasm
-        run: cargo clippy --target wasm32-unknown-unknown -- -D warnings
+        run: cargo clippy --target wasm32-unknown-unknown --no-default-features --features web -- -D warnings
 
       - name: Cargo test
         run: cargo test --no-default-features --features desktop
@@ -171,7 +171,7 @@ jobs:
         run: npm run build:all
 
       - name: Install Dioxus CLI
-        run: cargo install dioxus-cli --version 0.7.2 --locked --force
+        run: cargo install dioxus-cli --version 0.7.3 --locked --force
 
       - name: Build Android APK
         run: |

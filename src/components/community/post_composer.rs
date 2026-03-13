@@ -76,7 +76,11 @@ pub fn CommunityPostComposer(
                 #[cfg(not(feature = "web"))]
                 {
                     if !has_signer {
-                        true
+                        error.set(Some(
+                            "You have unsaved content. Confirm discard before closing."
+                                .to_string(),
+                        ));
+                        false
                     } else {
                         error.set(Some(
                             "Discard not supported on this platform — please delete content manually"

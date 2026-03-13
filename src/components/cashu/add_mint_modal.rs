@@ -26,6 +26,12 @@ pub fn CashuAddMintModal(
                 return;
             }
         };
+        if !parsed_url.username().is_empty() || parsed_url.password().is_some() {
+            error_message.set(Some(
+                "Mint URL must not include embedded credentials".to_string(),
+            ));
+            return;
+        }
         let is_loopback_http = parsed_url.scheme() == "http"
             && matches!(
                 parsed_url.host_str(),
@@ -33,7 +39,8 @@ pub fn CashuAddMintModal(
             );
         if parsed_url.scheme() != "https" && !is_loopback_http {
             error_message.set(Some(
-                "URL must start with https:// (or http:// for localhost)".to_string(),
+                "URL must start with https:// (or http:// for localhost, 127.0.0.1, or ::1)"
+                    .to_string(),
             ));
             return;
         }

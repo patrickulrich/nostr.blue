@@ -21,6 +21,18 @@ use wasm_bindgen::JsCast;
 use web_sys::HtmlInputElement;
 
 const MEDIA_ACCEPT: &str = "image/*,video/*";
+const MAX_UPLOAD_BYTES: usize = 10 * 1024 * 1024;
+
+fn ensure_within_upload_limit(size: usize) -> Result<(), String> {
+    if size > MAX_UPLOAD_BYTES {
+        Err(format!(
+            "Selected file exceeds the {} MB upload limit",
+            MAX_UPLOAD_BYTES / (1024 * 1024)
+        ))
+    } else {
+        Ok(())
+    }
+}
 #[derive(Props, Clone, PartialEq)]
 pub struct MediaUploaderProps {
     /// Callback when upload completes successfully
@@ -90,7 +102,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
         let input_id = input_id_for_mobile_handler.clone();
         spawn(async move {
             error.set(None);
-            match read_file_as_bytes(&input_id, MEDIA_ACCEPT).await {
+                match read_file_as_bytes(&input_id, MEDIA_ACCEPT).await {
                 Ok((file_name, data, mime_type)) => {
                     log::info!("File selected: {} ({} bytes)", file_name, data.len());
                     selected_file.set(Some((file_name, data, mime_type)));
@@ -124,8 +136,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
     #[cfg(not(feature = "desktop"))]
     let handle_desktop_pick = move |_| {};
     let handle_upload = move |_| {
-        let selected = selected_file.with_mut(|selected| selected.take());
-        if let Some((_filename, data, mime_type)) = selected {
+        if let Some((_filename, data, mime_type)) = selected_file.read().clone() {
             let quality_val = *quality.read();
             let on_upload = props.on_upload;
             let input_id_for_clear = input_id_for_upload.clone();
@@ -334,6 +345,8 @@ async fn read_file_as_bytes(
         return Err("Selected file type is not allowed".to_string());
     }
     let promise = file.array_buffer();
+    let file_size = file.size() as usize;
+    ensure_within_upload_limit(file_size)?;
     let array_buffer = JsFuture::from(promise)
         .await
         .map_err(|_| "Failed to read file")?;
@@ -363,6 +376,8 @@ async fn read_file_as_bytes(
         return Err("Selected file type is not allowed".to_string());
     }
     let file_path = file_handle.as_path().to_path_buf();
+    let metadata = std::fs::metadata(&file_path).map_err(|e| format!("Failed to inspect selected file: {}", e))?;
+    ensure_within_upload_limit(metadata.len() as usize)?;
     let data = tokio::task::spawn_blocking(move || std::fs::read(file_path))
         .await
         .map_err(|e| format!("Failed to read selected file: {}", e))?
@@ -377,6 +392,7 @@ async fn read_file_as_bytes(
     accept: &str,
 ) -> Result<(String, Vec<u8>, String), String> {
     let (bytes, mime_type) = crate::platform::mobile::pick_file().await?;
+    ensure_within_upload_limit(bytes.len())?;
     let extension = mime_type
         .split('/')
         .nth(1)

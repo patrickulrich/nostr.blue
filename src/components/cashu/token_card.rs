@@ -135,27 +135,16 @@ pub fn CashuTokenCard(token: String) -> Element {
         }
     };
     let handle_wallet = {
-        let token = token.clone();
         #[allow(unused_variables)]
-        let toast_api = toast;
+        let wallet_token = token.clone();
         move |e: MouseEvent| {
             e.stop_propagation();
             #[cfg(feature = "web")]
             {
                 if let Some(window) = web_sys::window() {
-                    let url = format!("cashu://{}", token);
+                    let url = format!("cashu://{}", wallet_token);
                     let _ = window.open_with_url_and_target(&url, "_blank");
                 }
-            }
-            #[cfg(not(feature = "web"))]
-            {
-                let _ = &token;
-                toast_api.error(
-                    "Open wallet not supported on this platform".to_string(),
-                    ToastOptions::new()
-                        .duration(Duration::from_secs(3))
-                        .permanent(false),
-                );
             }
         }
     };
@@ -256,11 +245,19 @@ pub fn CashuTokenCard(token: String) -> Element {
                             }
                         },
                     }
-                    button {
-                        class: "px-4 py-2 bg-amber-100 dark:bg-amber-800/50 text-amber-800 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-700/50 rounded-full text-sm font-medium transition",
-                        onclick: handle_wallet,
-                        title: if cfg!(feature = "web") { "" } else { "Not supported on this platform" },
-                        "Wallet"
+                    if cfg!(feature = "web") {
+                        button {
+                            class: "px-4 py-2 bg-amber-100 dark:bg-amber-800/50 text-amber-800 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-700/50 rounded-full text-sm font-medium transition",
+                            onclick: handle_wallet,
+                            "Wallet"
+                        }
+                    } else {
+                        button {
+                            class: "px-4 py-2 bg-amber-100 dark:bg-amber-800/50 text-amber-800 dark:text-amber-200 rounded-full text-sm font-medium opacity-50 cursor-not-allowed",
+                            disabled: true,
+                            title: "Not supported on this platform",
+                            "Wallet"
+                        }
                     }
                     button {
                         class: "px-4 py-2 bg-amber-100 dark:bg-amber-800/50 text-amber-800 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-700/50 rounded-full text-sm font-medium transition",

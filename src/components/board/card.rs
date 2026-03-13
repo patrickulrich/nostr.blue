@@ -169,18 +169,10 @@ pub fn PinBoardCardMosaic(
         ),
         move |(a_tag, _pubkey)| {
             let a_tag = a_tag.clone();
-            let has_signer = *HAS_SIGNER.read();
             let current_gen = reaction_request_gen.peek().wrapping_add(1);
             reaction_request_gen.set(current_gen);
             reaction_loading.set(true);
             reaction_error.set(None);
-            if !has_signer {
-                reaction_bootstrapped.set(false);
-                reaction_count.set(0);
-                has_reacted.set(false);
-                reaction_loading.set(false);
-                return;
-            }
             reaction_bootstrapped.set(false);
             spawn(async move {
                 match fetch_pinboard_reaction_state(&a_tag).await {

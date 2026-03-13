@@ -209,6 +209,9 @@ pub fn EmojiPackManagerModal(props: EmojiPackManagerModalProps) -> Element {
                                                             onclick: {
                                                                 let coordinate = coordinate.clone();
                                                                 move |_| {
+                                                                    if *pending_any_toggle.peek() {
+                                                                        return;
+                                                                    }
                                                                     let pack_coordinate = coordinate.clone();
                                                                     pending_any_toggle.set(true);
                                                                     pending_coordinate.set(Some(pack_coordinate.clone()));
@@ -309,6 +312,9 @@ pub fn EmojiPackManagerModal(props: EmojiPackManagerModalProps) -> Element {
                                                             onclick: {
                                                                 let coordinate = coordinate.clone();
                                                                 move |_| {
+                                                                    if *pending_any_toggle.peek() {
+                                                                        return;
+                                                                    }
                                                                     let pack_coordinate = coordinate.clone();
                                                                     pending_any_toggle.set(true);
                                                                     pending_coordinate.set(Some(pack_coordinate.clone()));

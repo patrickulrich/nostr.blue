@@ -151,24 +151,20 @@ pub fn ReadmeViewer(
     // Initialize mermaid.js after the README HTML is rendered into the DOM.
     // Call initMermaidDiagrams whenever content is present; the JS function
     // already no-ops if there are no .mermaid nodes in the DOM.
+    #[allow(unused_variables)]
+    let viewer_id_for_effect = viewer_id.clone();
     use_effect(use_reactive((&content, &loading, &error), {
-        let viewer_id = viewer_id.clone();
         move |(content, loading, error)| {
             if content.is_some() && !loading && error.is_none() {
-                let viewer_id = viewer_id.clone();
-                spawn(async move {
-                    // Allow DOM to settle before mermaid scans for nodes (initMermaidDiagrams/injectCodeBlockCopyButtons)
-                    crate::platform::timer::sleep_ms(100).await;
-                    #[cfg(feature = "web")]
-                    {
+                #[cfg(feature = "web")]
+                {
+                    let viewer_id = viewer_id_for_effect.clone();
+                    spawn(async move {
+                        crate::platform::timer::sleep_ms(100).await;
                         initMermaidDiagrams(&viewer_id);
                         injectCodeBlockCopyButtons(&viewer_id);
-                    }
-                    #[cfg(not(feature = "web"))]
-                    {
-                        let _ = viewer_id;
-                    }
-                });
+                    });
+                }
             }
         }
     }));

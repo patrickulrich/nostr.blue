@@ -10,6 +10,26 @@ require_file() {
     fi
 }
 
+require_files() {
+    local missing=()
+    while [ "$#" -gt 1 ]; do
+        local path="$1"
+        local label="$2"
+        shift 2
+        if [ ! -f "$path" ]; then
+            missing+=("$label: $path")
+        fi
+    done
+
+    if [ "${#missing[@]}" -gt 0 ]; then
+        echo "ERROR: Missing required Android launcher assets:" >&2
+        for entry in "${missing[@]}"; do
+            echo "  - $entry" >&2
+        done
+        exit 1
+    fi
+}
+
 version_field() {
     local field="$1"
     sed -n "s/^$field = \"\\([^\"]*\\)\"$/\\1/p" "$PROJECT_ROOT/Cargo.toml" | head -n1
@@ -122,10 +142,15 @@ GRADLE_USER_HOME="${GRADLE_USER_HOME:-$PROJECT_ROOT/.gradle-home}"
 mkdir -p "$GRADLE_USER_HOME"
 export GRADLE_USER_HOME
 
-require_file "$ANDROID_RES_SRC/mipmap-anydpi-v26/ic_launcher.xml" "Adaptive launcher XML not found"
-require_file "$ANDROID_RES_SRC/mipmap-xxxhdpi/ic_launcher.webp" "Launcher icon asset not found"
-require_file "$ANDROID_RES_SRC/mipmap-xxxhdpi/ic_launcher_foreground.png" "Launcher foreground asset not found"
-require_file "$ANDROID_RES_SRC/drawable/ic_launcher_background.xml" "Launcher background asset not found"
+require_files \
+    "$ANDROID_RES_SRC/mipmap-anydpi-v26/ic_launcher.xml" "adaptive launcher XML" \
+    "$ANDROID_RES_SRC/mipmap-xxxhdpi/ic_launcher.webp" "launcher icon asset" \
+    "$ANDROID_RES_SRC/mipmap-hdpi/ic_launcher_foreground.png" "launcher foreground asset (hdpi)" \
+    "$ANDROID_RES_SRC/mipmap-mdpi/ic_launcher_foreground.png" "launcher foreground asset (mdpi)" \
+    "$ANDROID_RES_SRC/mipmap-xhdpi/ic_launcher_foreground.png" "launcher foreground asset (xhdpi)" \
+    "$ANDROID_RES_SRC/mipmap-xxhdpi/ic_launcher_foreground.png" "launcher foreground asset (xxhdpi)" \
+    "$ANDROID_RES_SRC/mipmap-xxxhdpi/ic_launcher_foreground.png" "launcher foreground asset (xxxhdpi)" \
+    "$ANDROID_RES_SRC/drawable/ic_launcher_background.xml" "launcher background asset"
 require_file "$ANDROID_KOTLIN_SRC/dev/dioxus/main/MediaPlaybackService.kt" "Native playback service source not found"
 require_file "$ANDROID_KOTLIN_SRC/dev/dioxus/main/NativeAudioBridge.kt" "Native audio bridge source not found"
 
@@ -339,11 +364,16 @@ echo "Copied native Android Kotlin sources"
 # 4d. Verify critical resource overrides
 echo ""
 echo "--- Step 4d: Verify Android resource overrides ---"
-require_file "$DX_ANDROID/app/src/main/res/values/strings.xml" "Missing app strings.xml in generated project"
-require_file "$DX_ANDROID/app/src/main/res/xml/file_paths.xml" "Missing file_paths.xml in generated project"
-require_file "$DX_ANDROID/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml" "Missing adaptive launcher icon"
-require_file "$DX_ANDROID/app/src/main/res/mipmap-xxxhdpi/ic_launcher.webp" "Missing launcher icon density asset"
-require_file "$DX_ANDROID/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png" "Missing launcher foreground density asset"
+require_files \
+    "$DX_ANDROID/app/src/main/res/values/strings.xml" "generated app strings.xml" \
+    "$DX_ANDROID/app/src/main/res/xml/file_paths.xml" "generated file_paths.xml" \
+    "$DX_ANDROID/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml" "generated adaptive launcher icon" \
+    "$DX_ANDROID/app/src/main/res/mipmap-xxxhdpi/ic_launcher.webp" "generated launcher icon density asset" \
+    "$DX_ANDROID/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png" "generated launcher foreground asset (hdpi)" \
+    "$DX_ANDROID/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png" "generated launcher foreground asset (mdpi)" \
+    "$DX_ANDROID/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png" "generated launcher foreground asset (xhdpi)" \
+    "$DX_ANDROID/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png" "generated launcher foreground asset (xxhdpi)" \
+    "$DX_ANDROID/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png" "generated launcher foreground asset (xxxhdpi)"
 
 # 5. Re-run Gradle to pick up icon/name/proguard changes
 echo ""

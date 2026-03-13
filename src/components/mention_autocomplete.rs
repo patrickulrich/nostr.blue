@@ -312,7 +312,6 @@ fn detect_mention(
                                 }
                                 let mut extra = cached.clone();
                                 extra.is_thread_participant = true;
-                                extra.relevance += 2000;
                                 present.insert(extra.pubkey);
                                 merged.push(extra);
                             }
@@ -465,7 +464,7 @@ fn get_cursor_position(textarea_id: &str, current_text: &str) -> Option<usize> {
             }
         }
     }
-    Some(current_text.len())
+    None
 }
 /// Update dropdown position based on cursor
 #[allow(unused_variables)]

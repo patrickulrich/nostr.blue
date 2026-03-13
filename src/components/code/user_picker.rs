@@ -40,6 +40,21 @@ pub fn NostrUserPicker(
     let mut search_task = use_signal(|| None::<Task>);
     let mut blur_hide_task = use_signal(|| None::<Task>);
 
+    use_effect(use_reactive(&disabled, move |is_disabled| {
+        if !is_disabled {
+            return;
+        }
+        if let Some(task) = search_task.take() {
+            task.cancel();
+        }
+        if let Some(task) = blur_hide_task.take() {
+            task.cancel();
+        }
+        results.set(Vec::new());
+        is_searching.set(false);
+        show_dropdown.set(false);
+    }));
+
     let at_max = max_selections > 0 && selected.read().len() >= max_selections;
 
     let mut do_select = move |pubkey: String| {
@@ -237,6 +252,7 @@ pub fn NostrUserPicker(
                         SelectedUserChip {
                             key: "{pubkey}",
                             pubkey: pubkey.clone(),
+                            disabled: disabled,
                             on_remove: {
                                 let pubkey = pubkey.clone();
                                 move |_| {
@@ -369,7 +385,7 @@ pub fn NostrUserPicker(
 
 /// Chip displaying a selected user with remove button
 #[component]
-fn SelectedUserChip(pubkey: String, on_remove: EventHandler<MouseEvent>) -> Element {
+fn SelectedUserChip(pubkey: String, disabled: bool, on_remove: EventHandler<MouseEvent>) -> Element {
     let profile = PROFILE_CACHE.read().peek(&pubkey).cloned();
     let display = profile
         .as_ref()
@@ -390,8 +406,13 @@ fn SelectedUserChip(pubkey: String, on_remove: EventHandler<MouseEvent>) -> Elem
             span { "{display}" }
             button {
                 r#type: "button",
-                class: "ml-0.5 p-0.5 hover:bg-accent rounded-full transition text-muted-foreground hover:text-foreground",
+                class: if disabled {
+                    "ml-0.5 p-0.5 rounded-full transition text-muted-foreground opacity-50 cursor-not-allowed"
+                } else {
+                    "ml-0.5 p-0.5 hover:bg-accent rounded-full transition text-muted-foreground hover:text-foreground"
+                },
                 aria_label: "Remove {display}",
+                disabled: disabled,
                 onclick: move |evt| on_remove.call(evt),
                 svg {
                     class: "w-3 h-3",

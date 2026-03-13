@@ -120,9 +120,9 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
             }
             let (_filename, data, mime_type, _preview_url) = file_data.unwrap();
             let file_size = data.len();
+            let session_token = *upload_session_token.read();
             uploading.set(true);
             error.set(None);
-            let session_token = *upload_session_token.read();
             spawn(async move {
                 use sha2::{Digest, Sha256};
                 let mut hasher = Sha256::new();
@@ -259,7 +259,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     }
     rsx! {
         div {
-            class: "fixed inset-0 z-[70] flex items-center justify-center bg-black/50",
+            class: "fixed inset-0 z-50 backdrop-blur-sm flex items-center justify-center bg-black/50",
             onclick: close_modal,
             div {
                 class: "bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full mx-4",
@@ -510,21 +510,22 @@ async fn read_file_as_bytes(_input_id: &str) -> Result<(String, Vec<u8>, String)
     Err("File reading from HTML input not supported on native".to_string())
 }
 /// Clear file input element
-fn clear_file_input(_input_id: &str) {
-    #[cfg(feature = "web")]
-    {
-        use web_sys::window;
-        if let Some(window) = window() {
-            if let Some(document) = window.document() {
-                if let Some(element) = document.get_element_by_id(_input_id) {
-                    if let Ok(input) = element.dyn_into::<HtmlInputElement>() {
-                        input.set_value("");
-                    }
+#[cfg(feature = "web")]
+fn clear_file_input(input_id: &str) {
+    use web_sys::window;
+    if let Some(window) = window() {
+        if let Some(document) = window.document() {
+            if let Some(element) = document.get_element_by_id(input_id) {
+                if let Ok(input) = element.dyn_into::<HtmlInputElement>() {
+                    input.set_value("");
                 }
             }
         }
     }
 }
+
+#[cfg(not(feature = "web"))]
+fn clear_file_input(_input_id: &str) {}
 /// Format file size for display
 fn format_file_size(bytes: usize) -> String {
     const KB: usize = 1024;

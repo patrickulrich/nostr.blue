@@ -64,10 +64,13 @@ pub fn BadgeDetailModal(
     let badge_pubkey = badge.pubkey.clone();
     let mut fetch_task: Signal<Option<Task>> = use_signal(|| None);
     let mut target_pubkey: Signal<String> = use_signal(|| badge_pubkey.clone());
+    let mut gen_counter = use_signal(|| 0u32);
     use_effect(use_reactive!(|badge_pubkey| {
         if let Some(existing_task) = fetch_task.write().take() {
             existing_task.cancel();
         }
+        let current_gen = gen_counter.peek().wrapping_add(1);
+        gen_counter.set(current_gen);
         target_pubkey.set(badge_pubkey.clone());
         issuer_profile.set(None);
         if let Some(profile) = profiles::get_profile(&badge_pubkey) {
@@ -94,7 +97,7 @@ pub fn BadgeDetailModal(
                 match client.database().metadata(pubkey).await {
                     Ok(Some(metadata)) => {
                         // Use peek() to avoid subscription in async context
-                        if *target_pubkey.peek() == pubkey_str {
+                        if *target_pubkey.peek() == pubkey_str && *gen_counter.peek() == current_gen {
                             issuer_profile.set(Some(metadata));
                         }
                         return;
@@ -112,7 +115,7 @@ pub fn BadgeDetailModal(
                 match client.fetch_metadata(pubkey, Duration::from_secs(5)).await {
                     Ok(Some(metadata)) => {
                         // Use peek() to avoid subscription in async context
-                        if *target_pubkey.peek() == pubkey_str {
+                        if *target_pubkey.peek() == pubkey_str && *gen_counter.peek() == current_gen {
                             issuer_profile.set(Some(metadata));
                         }
                     }

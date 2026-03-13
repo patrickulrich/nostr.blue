@@ -11,7 +11,7 @@ use crate::utils::custom_emoji::EmojiSelection;
 use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Props, Clone, PartialEq)]
 pub struct EmojiPickerProps {
@@ -81,21 +81,22 @@ fn installed_custom_search_items() -> Vec<(String, String, Option<String>)> {
     items
 }
 
-fn resolve_recent_selection(entry: &str) -> Option<EmojiSelection> {
+fn resolve_recent_selection(
+    entry: &str,
+    installed_custom_map: &HashMap<String, (String, Option<String>)>,
+) -> Option<EmojiSelection> {
     if !is_valid_http_url(entry) {
         return Some(EmojiSelection::Native {
             emoji: entry.to_string(),
         });
     }
 
-    for (shortcode, url, pack_coordinate) in installed_custom_search_items() {
-        if url == entry {
-            return Some(EmojiSelection::Custom {
-                shortcode,
-                url,
-                pack_coordinate,
-            });
-        }
+    if let Some((shortcode, pack_coordinate)) = installed_custom_map.get(entry) {
+        return Some(EmojiSelection::Custom {
+            shortcode: shortcode.clone(),
+            url: entry.to_string(),
+            pack_coordinate: pack_coordinate.clone(),
+        });
     }
 
     None
@@ -144,6 +145,15 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
     let recent_emojis = RECENT_EMOJIS.read();
 
     let installed_custom_items = use_memo(installed_custom_search_items);
+    let installed_custom_map = use_memo(move || {
+        installed_custom_items
+            .read()
+            .iter()
+            .map(|(shortcode, url, pack_coordinate)| {
+                (url.clone(), (shortcode.clone(), pack_coordinate.clone()))
+            })
+            .collect::<HashMap<_, _>>()
+    });
     let search_lower = use_memo(move || search_query.read().trim().to_lowercase());
     let is_searching = !search_lower.read().is_empty();
 
@@ -420,7 +430,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                         div { class: "grid grid-cols-5 sm:grid-cols-6 gap-2",
                                             for (emoji_idx, (entry, selection)) in recent_emojis
                                                 .iter()
-                                                .filter_map(|emoji| resolve_recent_selection(emoji).map(|selection| (emoji.clone(), selection)))
+                                                .filter_map(|emoji| resolve_recent_selection(emoji, &installed_custom_map.read()).map(|selection| (emoji.clone(), selection)))
                                                 .enumerate()
                                             {
                                                 {
@@ -460,7 +470,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                             }
                                             if recent_emojis
                                                 .iter()
-                                                .all(|emoji| resolve_recent_selection(emoji).is_none())
+                                                .all(|emoji| resolve_recent_selection(emoji, &installed_custom_map.read()).is_none())
                                             {
                                                 p { class: "col-span-full text-center text-muted-foreground text-sm py-4",
                                                     "No recent emojis yet. Select some emojis to see them here!"
@@ -593,7 +603,10 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                         }
                                     },
                                     EmojiCategory::Standard(idx) => {
-                                        let items = &NATIVE_EMOJI_CATEGORIES[idx].1;
+                                        let items = NATIVE_EMOJI_CATEGORIES
+                                            .get(idx)
+                                            .map(|(_, items)| items.as_slice())
+                                            .unwrap_or(&[]);
                                         rsx! {
                                             div { class: "grid grid-cols-5 sm:grid-cols-6 gap-2",
                                                 for (emoji_idx, emoji) in items.iter().enumerate() {

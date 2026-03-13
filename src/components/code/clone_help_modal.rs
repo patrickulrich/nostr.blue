@@ -6,7 +6,24 @@ use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 
 fn is_ssh_clone_url(url: &str) -> bool {
-    url.starts_with("ssh://") || (url.contains('@') && url.contains(':') && !url.contains("://"))
+    if url.starts_with("ssh://") {
+        return true;
+    }
+    if url.contains("://") || url.contains(' ') {
+        return false;
+    }
+    let Some(colon_idx) = url.find(':') else {
+        return false;
+    };
+    let Some(at_idx) = url.find('@') else {
+        return false;
+    };
+    if at_idx == 0 || at_idx > colon_idx {
+        return false;
+    }
+    let host_part = &url[..colon_idx];
+    let path_part = &url[(colon_idx + 1)..];
+    !path_part.is_empty() && !host_part.contains('/') && !host_part.contains(' ')
 }
 
 /// Clone help modal with tabbed URL display

@@ -348,12 +348,28 @@ pub fn EventMap(props: EventMapProps) -> Element {
             #[cfg(not(feature = "web"))]
             {
                 let key = events_key.read().clone();
+                if !*map_initialized.read() {
+                    return;
+                }
+                if leaflet_error.read().is_some() {
+                    loading_geo.set(false);
+                    processed_event_ids.set(key);
+                    return;
+                }
                 _geocode_gen.with_mut(|g| *g = g.wrapping_add(1));
                 processed_event_ids.set(key);
             }
             #[cfg(feature = "web")]
             {
                 let key = events_key.read().clone();
+                if !*map_initialized.read() {
+                    return;
+                }
+                if leaflet_error.read().is_some() {
+                    loading_geo.set(false);
+                    processed_event_ids.set(key);
+                    return;
+                }
                 if key == *processed_event_ids.read() {
                     return;
                 }

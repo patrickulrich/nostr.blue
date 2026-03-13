@@ -112,6 +112,11 @@ pub fn ZapDistribution(
     // Manage selected pubkeys for the user picker
     let mut selected_pubkeys = use_signal(|| initial_defaults.clone());
     let mut last_auto_synced_defaults = use_signal(|| initial_defaults.clone());
+    // Merge auto-synced defaults into `selected_pubkeys` while preserving user edits.
+    // If `selected_pubkeys` still matches `last_auto_synced_defaults`, replace it with
+    // `deduped_splits`. Otherwise preserve user removals and additions, then merge in any
+    // new defaults. The early return when `is_sending` is true avoids races with send-time
+    // state updates.
     use_effect(move || {
         if *is_sending.read() {
             return;
@@ -299,9 +304,12 @@ pub fn ZapDistribution(
                 {
                     Either::Left((Ok(inv), _)) => Ok(inv),
                     Either::Left((Err(e), _)) => Err(PaymentStatus::Failed(format!("{}", e))),
-                    Either::Right(_) => Err(PaymentStatus::Failed(
-                        "Invoice request timed out after 30s".to_string(),
-                    )),
+                    Either::Right(_) => {
+                        timed_out_pubkeys.write().insert(recip.pubkey.clone());
+                        Err(PaymentStatus::Timeout(
+                            "Invoice request timed out after 30s".to_string(),
+                        ))
+                    }
                 };
                 match invoice_result {
                     Ok(invoice) => {

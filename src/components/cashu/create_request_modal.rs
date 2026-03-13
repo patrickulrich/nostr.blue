@@ -14,6 +14,7 @@ pub fn CashuCreateRequestModal(on_close: EventHandler<()>) -> Element {
     #[allow(unused_mut)]
     let mut copied = use_signal(|| false);
     let mut copy_error = use_signal(|| Option::<String>::None);
+    let mut copy_token = use_signal(|| 0u64);
 
     // Memoize payment_received for reactivity
     let payment_received = use_memo(move || {
@@ -105,19 +106,27 @@ pub fn CashuCreateRequestModal(on_close: EventHandler<()>) -> Element {
     let handle_copy = move |_| {
         if let Some(req) = request_string.read().as_ref() {
             let req_clone = req.clone();
+            let current_token = copy_token.with_mut(|token| {
+                *token = token.wrapping_add(1);
+                *token
+            });
             copy_error.set(None);
             spawn(async move {
                 match crate::platform::clipboard::copy_to_clipboard(&req_clone).await {
                     Ok(_) => {
                         copied.set(true);
                         crate::platform::timer::sleep_ms(2000).await;
-                        copied.set(false);
+                        if *copy_token.peek() == current_token {
+                            copied.set(false);
+                        }
                     }
                     Err(e) => {
                         log::error!("Failed to copy to clipboard: {}", e);
                         copy_error.set(Some("Copy failed".to_string()));
                         crate::platform::timer::sleep_ms(3000).await;
-                        copy_error.set(None);
+                        if *copy_token.peek() == current_token {
+                            copy_error.set(None);
+                        }
                     }
                 }
             });

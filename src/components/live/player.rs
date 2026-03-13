@@ -1,4 +1,6 @@
 use dioxus::prelude::*;
+#[cfg(feature = "native")]
+use dioxus_core::spawn_forever;
 #[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
 
@@ -89,6 +91,16 @@ struct NativeSetupState {
 }
 
 #[cfg(feature = "native")]
+async fn detach_native_stream(video_id: &str) {
+    let video_id_json = serde_json::to_string(video_id).unwrap_or_default();
+    let _ = document::eval(&format!(
+        "if (window.hlsManager) {{ window.hlsManager.detach({}); }}",
+        video_id_json
+    ))
+    .await;
+}
+
+#[cfg(feature = "native")]
 async fn run_native_setup(
     video_id: &str,
     stream_url: &str,
@@ -119,6 +131,7 @@ async fn run_native_setup(
     match document::eval(&setup_script).await {
         Ok(val) => {
             if !*state.mounted.peek() || *state.init_gen.peek() != gen {
+                detach_native_stream(video_id).await;
                 return;
             }
             let result = parse_native_setup_result(val);
@@ -141,6 +154,7 @@ async fn run_native_setup(
         }
         Err(e) => {
             if !*state.mounted.peek() || *state.init_gen.peek() != gen {
+                detach_native_stream(video_id).await;
                 return;
             }
             state
@@ -457,14 +471,12 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                 #[cfg(feature = "native")]
                 {
                     let video_id_clone = video_id.clone();
+                    let task_gen = gen;
                     spawn(async move {
-                        let video_id_json =
-                            serde_json::to_string(&video_id_clone).unwrap_or_default();
-                        let _ = document::eval(&format!(
-                            "if (window.hlsManager) {{ window.hlsManager.detach({}); }}",
-                            video_id_json
-                        ))
-                        .await;
+                        if *init_gen.peek() != task_gen {
+                            return;
+                        }
+                        detach_native_stream(&video_id_clone).await;
                     });
                 }
                 error.set(Some("Invalid stream URL".to_string()));
@@ -479,13 +491,8 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
     {
         let video_id_for_cleanup = video_id.clone();
         use_drop(move || {
-            let video_id_json = serde_json::to_string(&video_id_for_cleanup).unwrap_or_default();
-            spawn(async move {
-                let _ = document::eval(&format!(
-                    "if (window.hlsManager) {{ window.hlsManager.detach({}); }}",
-                    video_id_json
-                ))
-                .await;
+            spawn_forever(async move {
+                detach_native_stream(&video_id_for_cleanup).await;
             });
         });
     }

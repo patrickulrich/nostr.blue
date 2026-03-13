@@ -150,12 +150,12 @@ window.hlsManager = window.hlsManager || {
             const existing = this.pendingResolves.get(elementId);
             if (existing && existing.attachId !== attachId) {
                 // Cancel the old pending promise by resolving it as cancelled
-                existing.resolve({ type: 'cancelled', url: streamUrl });
+                existing.resolve({ type: 'cancelled', url: existing.streamUrl });
                 this.pendingResolves.delete(elementId);
             }
 
             // Store the resolve/reject with attachId (it will be called by settlePendingAttach)
-            this.pendingResolves.set(elementId, { attachId, resolve, reject });
+            this.pendingResolves.set(elementId, { attachId, resolve, reject, streamUrl });
 
             // Start async work only after the real resolver is registered
             this._doAttach(elementId, streamUrl, attachId).catch((e) => {
@@ -193,10 +193,12 @@ window.hlsManager = window.hlsManager || {
             await this.loadHls();
         } catch (e) {
             if (this.activeAttachMap.get(elementId) !== attachId) {
+                this.cleanupInstance(elementId);
                 this.settlePendingAttach(elementId, { type: 'cancelled', url: streamUrl }, attachId);
                 return;
             }
             // Remove only our own token to avoid clobbering a newer attach
+            this.cleanupInstance(elementId);
             this.activeAttachMap.delete(elementId);
             console.error('[HLS Manager] Failed to load HLS:', e);
             this.settlePendingAttach(elementId, {
@@ -209,11 +211,13 @@ window.hlsManager = window.hlsManager || {
 
         // Check if this attach is still valid after await
         if (this.activeAttachMap.get(elementId) !== attachId) {
+            this.cleanupInstance(elementId);
             this.settlePendingAttach(elementId, { type: 'cancelled', url: streamUrl }, attachId);
             return;
         }
 
         if (!Hls.isSupported()) {
+            this.cleanupInstance(elementId);
             this.activeAttachMap.delete(elementId);
             this.settlePendingAttach(elementId, {
                 type: 'error',
@@ -419,7 +423,7 @@ window.hlsManager = window.hlsManager || {
 
         // Resolve any in-flight attach Promise as cancelled
         if (pendingAttachId) {
-            this.settlePendingAttach(elementId, { type: 'cancelled' }, pendingAttachId);
+            this.settlePendingAttach(elementId, { type: 'cancelled', url: pending ? pending.streamUrl : undefined }, pendingAttachId);
         } else {
             // No pending attach, clean up the entry
             this.pendingResolves.delete(elementId);

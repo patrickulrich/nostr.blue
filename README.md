@@ -10,23 +10,26 @@ A multi-platform Nostr client built using **Rust + Dioxus + rust-nostr** with in
 
 ## 🌟 Overview
 
-nostr.blue is a modern Nostr client built entirely in Rust. It runs as a WebAssembly app in browsers, as a native Android app via WebView, and as a Linux desktop application. It provides a comprehensive social networking experience on the Nostr protocol with advanced features like communities, Lightning zaps, encrypted messaging, NIP-55 Android signer integration, and Data Vending Machines.
+nostr.blue is a modern Nostr client built entirely in Rust. It runs as a WebAssembly app in browsers, as a native Android app via WebView, and as a Linux desktop application. It provides a broad Nostr experience across social feeds, code collaboration, marketplaces, publishing, media, and payments, with a shared cross-platform application layer for web, Android, and desktop.
 
 ## ⚡ Nostr Features
 
 - **Real-time Social Feeds** - Smart relay routing using the outbox model (NIP-65) for reliable content discovery
 - **Encrypted Messaging** - Full DM support with NIP-04 (legacy), NIP-17 (private), and NIP-44 (versioned encryption)
 - **Lightning Zaps** - Send and receive Bitcoin micropayments (NIP-57) with NWC integration (NIP-47)
+- **AI Chat** - Provider-aware AI chat with authenticated and custom-provider flows
 - **Rich Media** - Polls (NIP-88), Livestreaming (NIP-53), Voice Messages (NIP-A0), Podcasts
 - **Blossom Media Management** - Upload, delete, and mirror media across Blossom servers (BUD-01/02/04)
 - **Long-form Content** - Articles (NIP-23) with encrypted drafts (NIP-37), Photos (NIP-68), Videos (NIP-71)
 - **Wiki & Publications** - NIP-54 wiki pages with wikilinks, NKBIP-01 curated publications with AsciiDoc
+- **Custom Emoji Packs** - Discover, install, manage, and search custom emoji packs and recents
 - **External Content** - NIP-73 support for books (ISBN), papers (DOI), Bitcoin transactions/addresses
 - **P2P Trading** - View NIP-69 peer-to-peer Bitcoin orders with depth charts and market data
 - **Marketplace** - NIP-99 classified listings with product browse, cart, and Cashu/Lightning checkout
 - **Code Collaboration** - Git repositories (NIP-34), code snippets (NIP-C0), issues, and pull requests
 - **Social Organization** - Communities (NIP-72), Lists (NIP-51), Data Vending Machines (NIP-90)
 - **Secure Authentication** - Browser extension (NIP-07), remote signer (NIP-46), and Android signer (NIP-55) with Amber/nsecBunker
+- **Platform Integration** - Shared platform abstractions plus native Android signer, storage, clipboard, download, and media integration
 - **Cross-device Sync** - Settings synchronized across devices via Nostr (NIP-78)
 
 ## 💰 Cashu Features
@@ -43,7 +46,7 @@ nostr.blue is a modern Nostr client built entirely in Rust. It runs as a WebAsse
 ## 🛠 Technology Stack
 
 ### Core Framework
-- **[Dioxus 0.7.2](https://dioxuslabs.com/)** - Multi-platform reactive UI framework for Rust
+- **[Dioxus 0.7.3](https://dioxuslabs.com/)** - Multi-platform reactive UI framework for Rust
 - **dioxus-stores** - Advanced state management library for reactive global state
 - **[Dioxus CLI](https://dioxuslabs.com/learn/0.7/CLI)** - Development server, WASM bundler, and native build tooling
 
@@ -88,212 +91,16 @@ nostr.blue is a modern Nostr client built entirely in Rust. It runs as a WebAsse
 - **jni** / **ndk-context** - Android JNI bridge (mobile)
 - **git2** - Native git operations (native platforms)
 
-## 📦 Project Structure
+## 📦 Architecture
 
-```
-nostr.blue/
-├── android/                 # Android platform files
-│   ├── AndroidManifest.xml  # App manifest (permissions, NIP-55 queries)
-│   ├── MainActivity.kt      # NIP-55 signer JNI bridge
-│   ├── proguard-rules.pro   # R8 keep rules for JNI methods
-│   └── res/                 # App resources (strings, icons)
-├── scripts/
-│   └── build-android.sh     # Android APK build script
-├── src/
-│   ├── platform/            # Platform abstraction layer
-│   │   ├── mod.rs           # Conditional module exports
-│   │   ├── android_signer.rs # NIP-55 Nip55Signer + JNI calls (mobile)
-│   │   ├── storage.rs       # Storage (localStorage / JSON file)
-│   │   ├── clipboard.rs     # Clipboard access
-│   │   └── ...
-│   ├── components/          # Reusable UI components
-│   │   ├── note.rs         # Note/event display
-│   │   ├── note_card.rs    # Compact note card
-│   │   ├── note_composer.rs # Post creation
-│   │   ├── reply_composer.rs # Reply creation (NIP-10)
-│   │   ├── comment_composer.rs # Comment composer (NIP-22)
-│   │   ├── media_uploader.rs # Blossom media upload
-│   │   ├── emoji_picker.rs # Enhanced emoji picker with custom emojis
-│   │   ├── profile_card.rs # User profile display
-│   │   ├── photo_card.rs   # Photo grid item (NIP-68)
-│   │   ├── article_card.rs # Long-form article card
-│   │   ├── voice_message_card.rs # Voice message card (NIP-A0)
-│   │   ├── poll_card.rs    # Poll display with voting (NIP-88)
-│   │   ├── poll_timer.rs   # Poll countdown timer (NIP-88)
-│   │   ├── poll_option_list.rs # Poll option editor (NIP-88)
-│   │   ├── webbookmark_card.rs # Web bookmark card (NIP-B0)
-│   │   ├── webbookmark_modal.rs # Add/edit bookmark modal (NIP-B0)
-│   │   ├── zap_modal.rs    # Lightning zap interface
-│   │   ├── share_modal.rs  # Video sharing modal
-│   │   ├── live_stream_card.rs # Livestream card (NIP-53)
-│   │   ├── mini_live_stream_card.rs # Compact livestream card (NIP-53)
-│   │   ├── live_stream_player.rs # HLS video player for livestreams
-│   │   ├── live_chat.rs    # Livestream chat component (NIP-53)
-│   │   ├── rich_content.rs # Content rendering (Wavlake embeds)
-│   │   ├── threaded_comment.rs # Comment threads
-│   │   ├── music_player.rs # Unified audio player (music + podcasts)
-│   │   ├── track_card.rs   # Music track display
-│   │   ├── wavlake_zap_dialog.rs # Music artist zaps
-│   │   ├── podcast_show_card.rs # Podcast show card
-│   │   ├── podcast_episode_card.rs # Podcast episode display
-│   │   ├── podcast_chapters.rs # JSON chapters with seek-on-click
-│   │   ├── external_content_card.rs # NIP-73 external content display
-│   │   ├── p2p_order_card.rs # P2P order list card (NIP-69)
-│   │   ├── p2p_order_filters.rs # P2P order filter panel
-│   │   ├── p2p_depth_chart.rs # P2P market depth visualization
-│   │   ├── code_repo_card.rs # Git repository card (NIP-34)
-│   │   ├── code_snippet_card.rs # Code snippet card (NIP-C0)
-│   │   ├── wiki_card.rs    # Wiki page card (NIP-54)
-│   │   ├── wiki_content.rs # Wiki content renderer (NIP-54)
-│   │   ├── wiki_backlinks.rs # Wiki backlinks (NIP-54)
-│   │   ├── publication_card.rs # Publication card (NKBIP-01)
-│   │   ├── publication_toc.rs # Publication table of contents (NKBIP-01)
-│   │   ├── publication_section.rs # Publication section renderer (NKBIP-01)
-│   │   ├── asciidoc_content.rs # AsciiDoc content renderer
-│   │   ├── wallet_balance_card.rs # Cashu wallet balance display
-│   │   ├── token_list.rs   # Cashu token list by mint
-│   │   ├── transaction_history.rs # Cashu transaction history
-│   │   ├── cashu_setup_wizard.rs # Cashu wallet setup flow
-│   │   ├── cashu_send_modal.rs # Send ecash modal
-│   │   ├── cashu_receive_modal.rs # Receive ecash modal
-│   │   ├── cashu_receive_lightning_modal.rs # Lightning deposit modal
-│   │   ├── cashu_send_lightning_modal.rs # Lightning withdrawal modal
-│   │   ├── nwc_setup_modal.rs # Nostr Wallet Connect setup (NIP-47)
-│   │   ├── sidebar.rs      # Navigation sidebar
-│   │   ├── layout.rs       # App shell layout
-│   │   ├── client_initializing.rs # Loading animation
-│   │   └── icons.rs        # SVG icon components
-│   ├── routes/             # Page routes
-│   │   ├── home.rs         # Home feed
-│   │   ├── profile.rs      # User profiles
-│   │   ├── note.rs         # Single note view with threading
-│   │   ├── article_detail.rs # Article view with NIP-22 comments
-│   │   ├── video_detail.rs # Video view with NIP-22 comments
-│   │   ├── photo_detail.rs # Photo detail view with NIP-22 comments
-│   │   ├── photos.rs       # Photo feed (NIP-68)
-│   │   ├── videos.rs       # Video feed (NIP-71)
-│   │   ├── videos_live.rs  # Livestream feed (NIP-53)
-│   │   ├── videos_live_tag.rs # Tagged livestream feed (NIP-53)
-│   │   ├── live_stream_detail.rs # Livestream detail page (NIP-53)
-│   │   ├── live_stream_new.rs # Create new livestream (NIP-53)
-│   │   ├── voicemessages.rs # Voice messages feed (NIP-A0)
-│   │   ├── polls.rs        # Polls feed (NIP-88)
-│   │   ├── poll_view.rs    # Individual poll view (NIP-88)
-│   │   ├── poll_new.rs     # Poll creation form (NIP-88)
-│   │   ├── webbookmarks.rs # Web bookmarks manager (NIP-B0)
-│   │   ├── blossom/        # Blossom media management
-│   │   │   └── blossom_home.rs # Media library with upload, delete, mirror (BUD-01/02/04)
-│   │   ├── cashu_wallet.rs # Cashu ecash wallet (NIP-60)
-│   │   ├── communities.rs  # Communities (NIP-72)
-│   │   ├── lists.rs        # User lists (NIP-51)
-│   │   ├── dms.rs          # Direct messages (NIP-04/17/44)
-│   │   ├── notifications.rs # Notifications
-│   │   ├── settings.rs     # User settings (NIP-78 sync)
-│   │   ├── trending.rs     # Trending content
-│   │   ├── explore.rs      # Discover feed
-│   │   ├── dvm.rs          # Data Vending Machines (NIP-90)
-│   │   ├── search.rs       # Search interface
-│   │   ├── hashtag.rs      # Hashtag feed
-│   │   ├── music/          # Music routes
-│   │   │   ├── music_home.rs # Music discovery
-│   │   │   ├── artist.rs   # Artist pages
-│   │   │   ├── album.rs    # Album pages
-│   │   │   ├── radio.rs    # Wavlake radio
-│   │   │   └── leaderboard.rs # Music leaderboard
-│   │   ├── podcast.rs      # Podcast home (discovery, search)
-│   │   ├── podcast_nostr_detail.rs # Nostr podcast show page
-│   │   ├── podcast_rss_detail.rs # RSS podcast show page
-│   │   ├── podcast_episode_detail.rs # Podcast episode detail
-│   │   ├── p2p.rs          # P2P trading order book (NIP-69)
-│   │   ├── p2p_order_detail.rs # P2P order detail view
-│   │   ├── code.rs         # Code collaboration home (NIP-34)
-│   │   ├── code_repo.rs    # Repository detail page
-│   │   ├── code_snippets.rs # Code snippets list (NIP-C0)
-│   │   ├── wiki.rs         # Wiki home (NIP-54)
-│   │   ├── wiki_detail.rs  # Wiki page detail (NIP-54)
-│   │   ├── wiki_new.rs     # Create/edit wiki page (NIP-54)
-│   │   ├── publications.rs # Publications home (NKBIP-01)
-│   │   ├── publication_detail.rs # Publication viewer (NKBIP-01)
-│   │   ├── publication_new.rs # Create publication (NKBIP-01)
-│   │   ├── terms.rs        # Terms of Service
-│   │   ├── privacy.rs      # Privacy Policy
-│   │   ├── cookies.rs      # Cookie Policy
-│   │   └── about.rs        # About page
-│   ├── hooks/              # Custom reactive hooks
-│   │   ├── use_auth.rs     # Authentication state
-│   │   ├── use_profile.rs  # Profile data fetching
-│   │   ├── use_feed.rs     # Feed management
-│   │   ├── use_lists.rs    # List management
-│   │   └── use_infinite_scroll.rs # Pagination
-│   ├── stores/             # Global state management
-│   │   ├── nostr_client.rs # Nostr SDK client with IndexedDB
-│   │   ├── auth_store.rs   # Authentication state (NIP-07)
-│   │   ├── profiles.rs     # Profile cache with batch fetching
-│   │   ├── bookmarks.rs    # Bookmarked content (NIP-51)
-│   │   ├── dms.rs          # DM conversations with NIP-17 compliance
-│   │   ├── notifications.rs # Notification state with real-time
-│   │   ├── music_player.rs # Music player state with NIP-38 status
-│   │   ├── settings_store.rs # NIP-78 synced settings
-│   │   ├── theme_store.rs  # Theme preferences
-│   │   ├── blossom_store.rs # Blossom media storage (BUD-01)
-│   │   ├── voice_messages_store.rs # Voice message playback state
-│   │   ├── webbookmarks.rs # Web bookmarks store (NIP-B0)
-│   │   ├── emoji_store.rs  # Custom emoji management (NIP-30/NIP-51)
-│   │   ├── cashu_wallet.rs # Cashu wallet state and operations (NIP-60)
-│   │   ├── indexeddb_database.rs # IndexedDB persistent storage for CDK wallet
-│   │   ├── nwc_store.rs    # Nostr Wallet Connect state and operations (NIP-47)
-│   │   ├── p2p_store.rs    # P2P order cache and filtering (NIP-69)
-│   │   ├── shop_store.rs   # Marketplace state (NIP-99)
-│   │   ├── code_store.rs   # Git repository state (NIP-34)
-│   │   ├── wiki_store.rs   # Wiki state (NIP-54)
-│   │   ├── publication_store.rs # Publication state (NKBIP-01)
-│   │   ├── embedding_store.rs # Embedding state (NKBIP-02)
-│   │   ├── citation_store.rs # Citation state (NKBIP-03)
-│   │   ├── directory_store.rs # Directory state (NKBIP-04)
-│   │   └── signer.rs       # Event signing
-│   ├── utils/              # Utility functions
-│   │   ├── nip19.rs        # NIP-19 identifier parsing
-│   │   ├── content_parser.rs # Content extraction
-│   │   ├── markdown.rs     # Markdown rendering
-│   │   ├── time.rs         # Time formatting
-│   │   ├── validation.rs   # Input validation
-│   │   ├── list_kinds.rs   # NIP-51 list types
-│   │   ├── thread_tree.rs  # Reply threading
-│   │   ├── article_meta.rs # Article metadata
-│   │   ├── url_metadata.rs # URL metadata fetching (Open Graph, Twitter Cards)
-│   │   ├── repost.rs       # Repost handling and FeedItem enum
-│   │   ├── profile_prefetch.rs # Batch profile metadata prefetching
-│   │   ├── podcast.rs      # Podcast event parsing (Kind 30054/30055)
-│   │   ├── nip69.rs        # NIP-69 P2P order parsing
-│   │   ├── nip99.rs        # NIP-99 marketplace parsing
-│   │   ├── nip34.rs        # NIP-34 Git repository helpers
-│   │   ├── nip73.rs        # NIP-73 external content helpers
-│   │   ├── nip54.rs        # NIP-54 wiki d-tag normalization and wikilinks
-│   │   ├── asciidoc.rs     # AsciiDoc to HTML rendering
-│   │   ├── nkbip03.rs      # NKBIP-03 citation parsing
-│   │   ├── nkbip06.rs      # NKBIP-06 MIME type tags
-│   │   └── nkbip08.rs      # NKBIP-08 book wikilinks
-│   ├── services/           # External services
-│   │   ├── lnurl.rs        # Lightning URL handling
-│   │   ├── wavlake.rs      # Wavlake API integration
-│   │   ├── trending.rs     # Trending algorithm
-│   │   ├── podcast_rss.rs  # Podcasting 2.0 RSS parsing
-│   │   ├── podcast_index.rs # Podcast Index API client
-│   │   ├── mempool.rs      # Mempool.space Bitcoin API
-│   │   ├── openlibrary.rs  # OpenLibrary book covers
-│   │   ├── btc_price.rs    # Binance BTC price API for P2P sats calculations
-│   │   └── git_hosting/    # NIP-34 Git hosting services
-│   └── main.rs             # Application entry point
-├── public/                 # Static assets and build output
-│   ├── favicon.svg         # SVG favicon
-│   ├── favicon.ico         # ICO favicon
-│   └── ...                 # Other static files (manifest, icons, etc.)
-├── dist/                   # Production build
-├── Cargo.toml              # Rust dependencies
-├── Dioxus.toml             # Dioxus configuration
-├── package.json            # Node.js dependencies
-└── index.html              # HTML template
-```
+- `android/` - Android shell, JNI bridge, resources, and mobile-specific integration
+- `scripts/` - Developer and release tooling, including Android packaging
+- `src/platform/` - Cross-platform abstraction layer for storage, clipboard, downloads, timers, spawning, timestamps, Android signer, and mobile helpers
+- `src/components/` - Reusable UI building blocks for feeds, chat, code, media, emoji, wallet, and commerce flows
+- `src/routes/` - Page-level route modules; larger product areas are grouped in submodules such as `code/`, `music/`, `wiki/`, `shop/`, and `settings/`
+- `src/stores/` - Global reactive state for auth, Nostr client access, wallet state, media, relays, social features, and UI settings
+- `src/services/` - External-service integrations and domain logic such as AI chat, payments, search, git hosting, and podcast APIs
+- `src/utils/` - Parsing, protocol helpers, formatting, validation, and shared utility code
 
 ## 🚦 Getting Started
 
@@ -325,8 +132,8 @@ npm install
 # Initialize protocol documentation submodules
 git submodule update --init --recursive
 
-# Build TailwindCSS
-npm run tailwind:build
+# Build frontend assets
+npm run build:assets
 ```
 
 Run `git submodule update --init --recursive` again when new submodules are added. See `.gitmodules` for the list of submodules.
@@ -334,28 +141,22 @@ Run `git submodule update --init --recursive` again when new submodules are adde
 ### Web Development
 
 ```bash
-# Terminal 1: Watch and rebuild CSS
-npm run tailwind:watch
-
-# Terminal 2: Run development server
-dx serve
+# Build assets and run the Dioxus dev server
+npm run dev
 
 # Visit http://localhost:8080
 ```
 
 The development server includes:
 - Hot reload on Rust code changes
-- Auto-rebuild on file modifications
+- Automatic asset generation for Tailwind and the git worker bundle
 - Source maps for debugging
 
 ### Web Production Build
 
 ```bash
-# Build optimized CSS
-npm run tailwind:build
-
-# Build optimized WASM bundle
-dx build --release
+# Build frontend assets and optimized WASM bundle
+npm run build
 
 # Output files in dist/
 ```
@@ -373,7 +174,7 @@ Production builds are optimized with:
 - **Android SDK** with platform tools and build tools
 - **Android NDK 27** (27.0.12077973 or compatible)
 - **aarch64-linux-android** Rust target
-- **ImageMagick** or **ffmpeg** (for app icon generation)
+- Committed launcher assets under `android/res`
 
 ```bash
 # Install Android Rust target
@@ -401,7 +202,7 @@ The build script handles everything: Rust cross-compilation, Gradle build, OpenS
 2. Runs `dx build --platform android --release --target aarch64-linux-android --no-default-features --features mobile`
 3. Ensures OpenSSL shared libraries (`libssl.so`, `libcrypto.so`) are in `jniLibs/arm64-v8a`
 4. Copies ProGuard rules to keep JNI bridge methods from R8 stripping
-5. Applies app name ("nostr.blue") and generates app icons at all density sizes
+5. Overlays the repo-owned Android resources from `android/res`, including launcher assets
 6. Re-runs Gradle (`assembleDebug`) to package everything into the final APK
 7. Copies the APK to project root as `nostrblue-release.apk`
 
@@ -464,11 +265,11 @@ dx serve --platform desktop --no-default-features --features desktop
 | [NIP-37](https://github.com/nostr-protocol/nips/blob/master/37.md) | Draft Events | ✅ |
 | [NIP-38](https://github.com/nostr-protocol/nips/blob/master/38.md) | User Statuses | ✅ |
 | [NIP-39](https://github.com/nostr-protocol/nips/blob/master/39.md) | External Identities | ❌ |
-| [NIP-40](https://github.com/nostr-protocol/nips/blob/master/40.md) | Expiration Timestamp | ❌ |
+| [NIP-40](https://github.com/nostr-protocol/nips/blob/master/40.md) | Expiration Timestamp | ✅ |
 | [NIP-42](https://github.com/nostr-protocol/nips/blob/master/42.md) | Client Auth to Relays | ✅ |
 | [NIP-43](https://github.com/nostr-protocol/nips/blob/master/43.md) | Relay Access Metadata | ❌ |
 | [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) | Encrypted Payloads | ✅ |
-| [NIP-45](https://github.com/nostr-protocol/nips/blob/master/45.md) | Counting results | ❌ |
+| [NIP-45](https://github.com/nostr-protocol/nips/blob/master/45.md) | Counting results | ✅ |
 | [NIP-46](https://github.com/nostr-protocol/nips/blob/master/46.md) | Remote Signing | ✅ |
 | [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md) | Wallet Connect | ✅ |
 | [NIP-48](https://github.com/nostr-protocol/nips/blob/master/48.md) | Proxy Tags | ✅ |
@@ -606,11 +407,15 @@ Contributions are welcome! Please follow these guidelines:
 Run these checks before submitting PRs:
 
 ```bash
-cargo check                                                  # Type checking
-dx check                                                     # Dioxus RSX validation
-cargo clippy -- -D warnings                                  # Native lints
-cargo clippy --target wasm32-unknown-unknown -- -D warnings  # WASM lints (CI enforced)
-cargo test                                                   # Unit tests
+dx check
+cargo check
+cargo check --target wasm32-unknown-unknown
+cargo clippy --target wasm32-unknown-unknown -- -D warnings
+cargo check --no-default-features --features desktop
+cargo clippy --no-default-features --features desktop -- -D warnings
+cargo check --no-default-features --features mobile
+cargo clippy --no-default-features --features mobile -- -D warnings
+cargo test
 ```
 
 ### Pull Request Process

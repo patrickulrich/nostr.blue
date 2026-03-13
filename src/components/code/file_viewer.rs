@@ -335,12 +335,13 @@ pub fn CodeFileViewerCompact(content: String, #[props(default = 10)] max_lines: 
 #[component]
 pub fn RawFileButton(content: String, filename: String) -> Element {
     let mut save_error = use_signal(|| false);
+    let base_class = "flex items-center gap-1 px-3 py-1.5 text-sm p-2 hover:bg-accent rounded-lg transition";
     rsx! {
         button {
             class: if save_error() {
-                "flex items-center gap-1 px-3 py-1.5 text-sm bg-red-500/20 text-red-500 rounded transition"
+                format!("{base_class} bg-red-500/20 text-red-500")
             } else {
-                "flex items-center gap-1 px-3 py-1.5 text-sm bg-muted hover:bg-accent rounded transition"
+                format!("{base_class} bg-muted")
             },
             title: "Download raw file",
             onclick: {

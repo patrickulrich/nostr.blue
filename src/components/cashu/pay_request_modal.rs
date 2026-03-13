@@ -32,29 +32,14 @@ pub fn CashuPayRequestModal(on_close: EventHandler<()>) -> Element {
     let balance = use_memo(move || WALLET_BALANCES.read().available);
     let handle_paste = move |_| {
         spawn(async move {
-            #[cfg(feature = "web")]
-            {
-                let Some(window) = web_sys::window() else {
-                    pay_state.set(PayState::Error {
-                        message: "No window available".to_string(),
-                    });
-                    return;
-                };
-                let clipboard = window.navigator().clipboard();
-                let promise = clipboard.read_text();
-                let Ok(text) = wasm_bindgen_futures::JsFuture::from(promise).await else {
-                    pay_state.set(PayState::Error {
-                        message: "Failed to read clipboard".to_string(),
-                    });
-                    return;
-                };
-                let Some(s) = text.as_string() else {
-                    pay_state.set(PayState::Error {
-                        message: "No text in clipboard".to_string(),
-                    });
-                    return;
-                };
-                request_input.set(s);
+            match crate::platform::clipboard::read_text_from_clipboard().await {
+                Ok(text) => {
+                    request_input.set(text);
+                    pay_state.set(PayState::Input);
+                }
+                Err(message) => {
+                    pay_state.set(PayState::Error { message });
+                }
             }
         });
     };

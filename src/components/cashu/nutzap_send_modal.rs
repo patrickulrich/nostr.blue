@@ -47,7 +47,8 @@ pub fn NutzapSendModal(
         compatible_mint.set(None);
 
         if !client_initialized {
-            // Early return without spawning - state already reset above
+            load_error.set(Some("Client not initialized".to_string()));
+            is_loading_info.set(false);
             return;
         }
 

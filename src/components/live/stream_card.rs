@@ -29,11 +29,20 @@ pub struct LiveStreamMeta {
 /// Parse NIP-53 Kind 30311 live streaming event into LiveStreamCard's meta format
 pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
     let live_event = parse_nip53_live_event(event)?;
+    let streaming_log = live_event
+        .streaming
+        .as_ref()
+        .and_then(|url| {
+            url::Url::parse(url.as_ref())
+                .ok()
+                .map(|parsed| format!("{}://{}", parsed.scheme(), parsed.host_str().unwrap_or("<redacted>")))
+        })
+        .unwrap_or_else(|| "<redacted>".to_string());
     log::debug!(
-        "Parsed LiveEvent: d_tag={}, title={:?}, streaming={:?}, status={:?}",
+        "Parsed LiveEvent: d_tag={}, title={:?}, streaming={}, status={:?}",
         live_event.id,
         live_event.title,
-        live_event.streaming,
+        streaming_log,
         live_event.status
     );
     let host = extract_live_event_host(event, &live_event);

@@ -34,6 +34,7 @@ pub fn LiveStreamShareModal(
     let modal_id = use_signal(|| LIVE_SHARE_MODAL_ID_COUNTER.fetch_add(1, Ordering::Relaxed));
     let mut share_mode = use_signal(|| ShareMode::Main);
     let mut copied = use_signal(|| false);
+    let mut clipboard_error = use_signal(|| None::<String>);
     let mut nostr_text = use_signal(String::new);
     let mut dm_recipient = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
@@ -191,6 +192,7 @@ pub fn LiveStreamShareModal(
             spawn(async move {
                 match copy_to_clipboard(&url).await {
                     Ok(_) => {
+                        clipboard_error.set(None);
                         copied.set(true);
                         log::info!("Link copied to clipboard");
                         spawn(async move {
@@ -200,6 +202,7 @@ pub fn LiveStreamShareModal(
                     }
                     Err(e) => {
                         log::error!("Failed to copy to clipboard: {:?}", e);
+                        clipboard_error.set(Some(e));
                     }
                 }
             });
@@ -370,6 +373,9 @@ pub fn LiveStreamShareModal(
                                         "Copy link to share anywhere"
                                     }
                                 }
+                            }
+                            if let Some(err) = clipboard_error.read().as_ref() {
+                                p { class: "text-xs text-red-500", "{err}" }
                             }
                             button {
                                 class: "w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent transition",

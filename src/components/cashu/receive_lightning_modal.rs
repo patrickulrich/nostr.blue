@@ -144,6 +144,7 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
     let mut is_polling = use_signal(|| false);
     let mut success_message = use_signal(|| Option::<String>::None);
     let mut mint_status = use_signal(|| Option::<String>::None);
+    let mut copy_error = use_signal(|| Option::<String>::None);
     use_effect(move || {
         let current_mints = cashu::get_mints();
         let current_selection = selected_mint.read().clone();
@@ -469,19 +470,21 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
                                     button {
                                         class: "px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white text-xs rounded transition",
                                         onclick: move |_| {
-                                            #[cfg(feature = "web")]
-                                            {
-                                                if let Some(invoice_to_copy) = quote_info.read().as_ref() {
-                                                    if let Some(window) = web_sys::window() {
-                                                        let navigator = window.navigator();
-                                                        let clipboard = navigator.clipboard();
-                                                        let _ = clipboard.write_text(&invoice_to_copy.invoice);
+                                            if let Some(invoice_to_copy) = quote_info.read().as_ref() {
+                                                let invoice = invoice_to_copy.invoice.clone();
+                                                spawn(async move {
+                                                    match crate::platform::clipboard::copy_to_clipboard(&invoice).await {
+                                                        Ok(()) => copy_error.set(None),
+                                                        Err(e) => copy_error.set(Some(e)),
                                                     }
-                                                }
+                                                });
                                             }
                                         },
                                         "Copy"
                                     }
+                                }
+                                if let Some(copy_err) = copy_error.read().as_ref() {
+                                    p { class: "text-xs text-red-500", "{copy_err}" }
                                 }
                             }
                             if *is_polling.read() {

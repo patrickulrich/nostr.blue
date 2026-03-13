@@ -188,6 +188,7 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
             .as_ref()
             .and_then(|c| c.event.tags.identifier().map(|s| s.to_string()));
         let my_token = *session_token.read();
+        let captured_pubkey = auth_store::get_pubkey();
         spawn(async move {
             let result = match current_tab {
                 CitationEditorTab::Internal => {
@@ -288,21 +289,17 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
             match result {
                 Ok(event_id) => {
                     log::info!("Citation published: {}", event_id);
-                    if let Some(pk) = auth_store::get_pubkey() {
-                        if let Err(e) = fetch_citations_by_author(&pk, 200).await {
-                            crate::utils::log_fetch_error("citations refresh", e);
-                        }
-                    }
-                    if *session_token.read() != my_token {
-                        if *save_request_id.peek() == save_request {
-                            saving.set(false);
-                        }
-                        return;
-                    }
                     if let Some(ref handler) = on_save {
                         handler.call(event_id);
                     }
                     show.set(false);
+                    if let Some(pk) = captured_pubkey {
+                        spawn(async move {
+                            if let Err(e) = fetch_citations_by_author(&pk, 200).await {
+                                crate::utils::log_fetch_error("citations refresh", e);
+                            }
+                        });
+                    }
                 }
                 Err(e) => {
                     log::error!("Failed to publish citation: {}", e);

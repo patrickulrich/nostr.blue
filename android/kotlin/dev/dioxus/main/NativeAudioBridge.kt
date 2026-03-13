@@ -356,8 +356,17 @@ object NativeAudioBridge {
                         updateNotification()
                         return@synchronized
                     }
-                    currentIndex = (currentIndex + 1).mod(queue.size)
-                    prepareCurrent(true)
+                    if (currentIndex + 1 < queue.size) {
+                        currentIndex += 1
+                        prepareCurrent(true)
+                    } else {
+                        playWhenReady = false
+                        releasePlayer()
+                        updatePlaybackState(false, PlaybackState.STATE_STOPPED)
+                        stopForegroundPlayback()
+                        serviceRef = null
+                        updateNotification()
+                    }
                 }
             }
             setOnErrorListener { _, _, _ ->
