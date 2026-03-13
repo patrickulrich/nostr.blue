@@ -115,7 +115,25 @@ fn stream_requires_hls(stream_url: &str) -> bool {
 async fn detach_native_stream(video_id: &str) {
     let video_id_json = serde_json::to_string(video_id).unwrap_or_default();
     let _ = document::eval(&format!(
-        "if (window.hlsManager) {{ window.hlsManager.detach({}); }}",
+        r#"
+        (() => {{
+            const video = document.getElementById({});
+            if (window.hlsManager) {{
+                window.hlsManager.detach({});
+            }}
+            if (video) {{
+                try {{
+                    video.pause();
+                }} catch (_e) {{}}
+                video.removeAttribute('src');
+                delete video.dataset.nativeStreamToken;
+                delete video.dataset.nativeStreamUrl;
+                video.load();
+            }}
+            return true;
+        }})()
+        "#,
+        video_id_json,
         video_id_json
     ))
     .await;
@@ -160,6 +178,7 @@ async fn run_native_setup(
         if let Err(e) = ensure_hls_manager().await {
             log::error!("[Live] {}", e);
             if *state.init_gen.peek() == gen && *state.mounted.peek() {
+                detach_native_stream(video_id).await;
                 state
                     .error
                     .set(Some(format!("Failed to load HLS support: {}", e)));

@@ -83,6 +83,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                         error.set(Some("File too large. Maximum size is 21MB".to_string()));
                         return;
                     }
+                    let mime_type = "image/gif".to_string();
                     #[cfg(feature = "web")]
                     if let Some((_, _, _, Some(old_url))) = selected_file.read().as_ref() {
                         let _ = web_sys::Url::revoke_object_url(old_url);

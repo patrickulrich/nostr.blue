@@ -137,7 +137,7 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                     }
                     let is_private = *add_as_private.read();
                     match crate::utils::list_encryption::create_people_list(
-                        list_name.clone(),
+                        list_name,
                         None,
                         is_private,
                     )

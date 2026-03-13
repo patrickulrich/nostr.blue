@@ -151,7 +151,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                     }
                     Err(e) => {
                         crate::utils::log_fetch_error("publications", e.clone());
-                        if !has_cached_publications {
+                        if !has_cached_publications_snapshot() {
                             fetch_error.set(Some(format!("Failed to load publications: {}", e)));
                         }
                     }
@@ -175,12 +175,18 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
             debounce_counter.set(0);
         } else if let Some(task) = fetch_task.take() {
             task.cancel();
+            if let Some(search_task) = search_task.take() {
+                search_task.cancel();
+            }
         }
     }));
     let mut handle_search = move |query: String| {
         search_query.set(query.clone());
         if query.is_empty() {
             debounce_counter.set(debounce_counter().wrapping_add(1));
+            if let Some(search_task) = search_task.take() {
+                search_task.cancel();
+            }
             search_results.set(Vec::new());
             is_searching.set(false);
             let should_clear = fetch_error
@@ -391,6 +397,9 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                             onclick: move |_| {
                                 active_tab.set(BookPickerTab::Browse);
                                 debounce_counter.set(debounce_counter() + 1);
+                                if let Some(search_task) = search_task.take() {
+                                    search_task.cancel();
+                                }
                                 search_query.set(String::new());
                                 search_results.set(Vec::new());
                                 is_searching.set(false);

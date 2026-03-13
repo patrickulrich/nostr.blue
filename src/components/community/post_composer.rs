@@ -61,6 +61,9 @@ pub fn CommunityPostComposer(
     };
     let on_close_backdrop = on_close;
     let mut request_close = move |handler: EventHandler<()>| {
+        if *posting.read() {
+            return;
+        }
         if !content.read().trim().is_empty() {
             show_discard_confirm.set(true);
         } else {
@@ -87,6 +90,9 @@ pub fn CommunityPostComposer(
                     }
                     button {
                         class: "p-2 hover:bg-accent rounded-full transition",
+                        disabled: *posting.read(),
+                        aria_label: "Close composer",
+                        title: "Close composer",
                         onclick: move |_| request_close(on_close_for_button),
                         svg {
                             class: "w-5 h-5",
@@ -210,6 +216,7 @@ pub fn CommunityPostComposer(
                 div { class: "mt-4 flex justify-end gap-2",
                     button {
                         class: "px-4 py-2 border border-border rounded-lg hover:bg-accent transition",
+                        disabled: *posting.read(),
                         onclick: move |_| request_close(on_close_for_cancel),
                         "Cancel"
                     }
