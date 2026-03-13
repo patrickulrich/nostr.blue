@@ -150,6 +150,14 @@ async fn detach_native_stream_if_current(video_id: &str, expected_token: &str) {
             if (!video || video.dataset.nativeStreamToken !== {}) {{
                 return false;
             }}
+            try {{
+                video.pause();
+            }} catch (_e) {{}}
+            video.src = '';
+            video.removeAttribute('src');
+            delete video.dataset.nativeStreamToken;
+            delete video.dataset.nativeStreamUrl;
+            video.load();
             if (window.hlsManager) {{
                 window.hlsManager.detach({});
             }}

@@ -42,6 +42,9 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     });
     let input_id = use_signal(|| format!("gif-upload-{}", uuid::Uuid::new_v4()));
     let close_modal = move |_| {
+        if *uploading.peek() {
+            return;
+        }
         upload_session_token.with_mut(|token| *token = token.wrapping_add(1));
         uploading.set(false);
         current_upload_id.set(None);
@@ -63,12 +66,12 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
             *token
         });
         spawn(async move {
-            error.set(None);
             match read_file_as_bytes(&input_id).await {
                 Ok((filename, data, mime_type)) => {
                     if *upload_session_token.read() != session_token {
                         return;
                     }
+                    error.set(None);
                     if data.len() < 6 || (&data[0..6] != b"GIF87a" && &data[0..6] != b"GIF89a") {
                         error.set(Some(
                             "Invalid GIF file. Please select a valid GIF.".to_string(),
@@ -96,6 +99,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                     if *upload_session_token.read() != session_token {
                         return;
                     }
+                    error.set(None);
                     log::error!("Failed to read file: {}", e);
                     error.set(Some(format!("Failed to read file: {}", e)));
                 }

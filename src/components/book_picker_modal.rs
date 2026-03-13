@@ -116,8 +116,6 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     let mut selected_chapter = use_signal(|| None::<String>);
     let mut selected_sections = use_signal(String::new);
     let mut selected_version = use_signal(String::new);
-    let mut version_error = use_signal(|| false);
-    let mut sections_error = use_signal(|| false);
     let mut book_id_error = use_signal(|| false);
     let mut loading = use_signal(|| false);
     let mut fetch_error = use_signal(|| None::<String>);
@@ -163,8 +161,6 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
             selected_chapter.set(None);
             selected_sections.set(String::new());
             selected_version.set(String::new());
-            version_error.set(false);
-            sections_error.set(false);
             book_id_error.set(false);
             search_query.set(String::new());
             search_results.set(Vec::new());
@@ -238,12 +234,6 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
             get_all_cached_publications()
         }
     });
-    use_effect(use_reactive!(|(selected_version, selected_sections)| {
-        let version = selected_version.read();
-        let sections = selected_sections.read();
-        version_error.set(!version.is_empty() && !is_valid_book_version(&version));
-        sections_error.set(!sections.is_empty() && !is_valid_book_sections(&sections));
-    }));
     // Validate selected_publication d_tag in an effect (side effects don't belong in memos)
     // Track selected_chapter to re-validate when "Entire book" is selected
     use_effect(move || {
@@ -251,6 +241,14 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
         if let Some(pub_) = selected_publication.read().as_ref() {
             book_id_error.set(!is_valid_book_id(&pub_.d_tag));
         }
+    });
+    let version_has_error = use_memo(move || {
+        let version = selected_version.read();
+        !version.is_empty() && !is_valid_book_version(&version)
+    });
+    let sections_has_error = use_memo(move || {
+        let sections = selected_sections.read();
+        !sections.is_empty() && !is_valid_book_sections(&sections)
     });
     let book_reference = use_memo(move || {
         selected_publication.read().as_ref().and_then(|pub_| {
@@ -281,8 +279,9 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
             Some(reference)
         })
     });
-    let has_validation_error =
-        use_memo(move || *version_error.read() || *sections_error.read() || *book_id_error.read());
+    let has_validation_error = use_memo(move || {
+        *version_has_error.read() || *sections_has_error.read() || *book_id_error.read()
+    });
     let markup_preview = use_memo(move || {
         book_reference
             .read()
@@ -396,7 +395,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                             class: if *active_tab.read() == BookPickerTab::Browse { "px-3 py-1.5 text-sm font-medium rounded-lg bg-primary text-primary-foreground" } else { "px-3 py-1.5 text-sm font-medium rounded-lg text-muted-foreground hover:bg-accent transition-colors" },
                             onclick: move |_| {
                                 active_tab.set(BookPickerTab::Browse);
-                                debounce_counter.set(debounce_counter() + 1);
+                                debounce_counter.set(debounce_counter().wrapping_add(1));
                                 if let Some(search_task) = search_task.take() {
                                     search_task.cancel();
                                 }
@@ -554,12 +553,12 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                     }
                                     input {
                                         r#type: "text",
-                                        class: if *sections_error.read() { "w-full px-3 py-2 bg-background border-2 border-red-500 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-red-500/50" } else { "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50" },
+                                        class: if *sections_has_error.read() { "w-full px-3 py-2 bg-background border-2 border-red-500 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-red-500/50" } else { "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50" },
                                         placeholder: "e.g., 4-9 or 1,3,5",
                                         value: "{selected_sections}",
                                         oninput: move |e| selected_sections.set(e.value()),
                                     }
-                                    if *sections_error.read() {
+                                    if *sections_has_error.read() {
                                         p { class: "text-xs text-red-600 dark:text-red-400 mt-1",
                                             "Only digits, commas, and hyphens allowed (no spaces)"
                                         }
@@ -575,12 +574,12 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                     }
                                     input {
                                         r#type: "text",
-                                        class: if *version_error.read() { "w-full px-3 py-2 bg-background border-2 border-red-500 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-red-500/50" } else { "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50" },
+                                        class: if *version_has_error.read() { "w-full px-3 py-2 bg-background border-2 border-red-500 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-red-500/50" } else { "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50" },
                                         placeholder: "e.g., kjv, 1st-edition",
                                         value: "{selected_version}",
                                         oninput: move |e| selected_version.set(e.value()),
                                     }
-                                    if *version_error.read() {
+                                    if *version_has_error.read() {
                                         p { class: "text-xs text-red-600 dark:text-red-400 mt-1",
                                             "Only lowercase letters, numbers, and hyphens allowed"
                                         }

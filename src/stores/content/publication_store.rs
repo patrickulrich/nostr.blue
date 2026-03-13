@@ -285,6 +285,38 @@ pub fn get_all_cached_publications() -> Vec<PublicationIndex> {
 pub fn has_cached_publications_snapshot() -> bool {
     !PUBLICATIONS_CACHE.peek().is_empty()
 }
+
+fn filter_publications_by_query(
+    publications: Vec<PublicationIndex>,
+    query_lower: &str,
+    limit: usize,
+) -> Vec<PublicationIndex> {
+    publications
+        .into_iter()
+        .filter(|p| {
+            if p.title.to_lowercase().contains(query_lower) {
+                return true;
+            }
+            if let Some(ref summary) = p.summary {
+                if summary.to_lowercase().contains(query_lower) {
+                    return true;
+                }
+            }
+            if let Some(ref author) = p.author {
+                if author.to_lowercase().contains(query_lower) {
+                    return true;
+                }
+            }
+            for topic in &p.topics {
+                if topic.to_lowercase().contains(query_lower) {
+                    return true;
+                }
+            }
+            false
+        })
+        .take(limit)
+        .collect()
+}
 /// Clear all caches
 pub fn clear_cache() {
     PUBLICATIONS_CACHE.write().clear();
@@ -795,33 +827,41 @@ pub async fn search_publications(
     limit: usize,
 ) -> StdResult<Vec<PublicationIndex>, String> {
     let query_lower = query.to_lowercase();
-    let publications = fetch_publications(200, None).await?;
-    let matching: Vec<PublicationIndex> = publications
-        .into_iter()
-        .filter(|p| {
-            if p.title.to_lowercase().contains(&query_lower) {
-                return true;
+    if has_cached_publications_snapshot() {
+        return Ok(filter_publications_by_query(
+            get_all_cached_publications(),
+            &query_lower,
+            limit,
+        ));
+    }
+
+    if *LOADING_PUBLICATIONS.peek() {
+        for _ in 0..50 {
+            crate::platform::timer::sleep_ms(50).await;
+            if has_cached_publications_snapshot() {
+                return Ok(filter_publications_by_query(
+                    get_all_cached_publications(),
+                    &query_lower,
+                    limit,
+                ));
             }
-            if let Some(ref summary) = p.summary {
-                if summary.to_lowercase().contains(&query_lower) {
-                    return true;
-                }
+            if !*LOADING_PUBLICATIONS.peek() {
+                break;
             }
-            if let Some(ref author) = p.author {
-                if author.to_lowercase().contains(&query_lower) {
-                    return true;
-                }
-            }
-            for topic in &p.topics {
-                if topic.to_lowercase().contains(&query_lower) {
-                    return true;
-                }
-            }
-            false
-        })
-        .take(limit)
-        .collect();
-    Ok(matching)
+        }
+    }
+
+    let publications = if has_cached_publications_snapshot() {
+        get_all_cached_publications()
+    } else {
+        fetch_publications(200, None).await?
+    };
+
+    Ok(filter_publications_by_query(
+        publications,
+        &query_lower,
+        limit,
+    ))
 }
 /// Get the MIME filter tag value for querying publications by content type
 ///
