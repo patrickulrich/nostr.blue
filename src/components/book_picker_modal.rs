@@ -2,7 +2,8 @@
 //! Select publications and book references to insert into wiki pages and publications
 use crate::components::icons::{BookOpenIcon, ChevronDownIcon, SearchIcon, XIcon};
 use crate::stores::publication_store::{
-    fetch_publications, get_all_cached_publications, search_publications, PublicationIndex,
+    fetch_publications, get_all_cached_publications, has_cached_publications_snapshot,
+    search_publications, PublicationIndex,
 };
 use crate::utils::nkbip08::BookReference;
 use dioxus::prelude::*;
@@ -125,7 +126,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     let mut fetch_task: Signal<Option<Task>> = use_signal(|| None);
     use_effect(use_reactive(&*props.show.read(), move |is_shown| {
         if is_shown {
-            let has_cached_publications = !get_all_cached_publications().is_empty();
+            let has_cached_publications = has_cached_publications_snapshot();
             // Increment generation token to invalidate any in-flight requests
             let current_generation = fetch_generation.peek().wrapping_add(1);
             fetch_generation.set(current_generation);
@@ -146,7 +147,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                 match result {
                     Ok(_) => {
                         fetch_error.set(None);
-                        publications_version.set(publications_version() + 1);
+                        publications_version.set(publications_version().wrapping_add(1));
                     }
                     Err(e) => {
                         crate::utils::log_fetch_error("publications", e.clone());

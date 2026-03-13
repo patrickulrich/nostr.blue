@@ -11,6 +11,8 @@ use dioxus_core::use_drop;
 #[cfg(feature = "web")]
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
+#[cfg(feature = "web")]
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(feature = "web")]
@@ -402,6 +404,8 @@ pub fn EventMap(props: EventMapProps) -> Element {
                 spawn(async move {
                     let mut results = Vec::new();
                     let mut unresolved = Vec::new();
+                    let mut geocode_cache =
+                        HashMap::<String, Result<Option<GeoLocation>, String>>::new();
                     let mut geocode_error_count = 0usize;
                     let mut last_geocode_error = None::<String>;
                     const BATCH_SIZE: usize = 5;
@@ -447,7 +451,14 @@ pub fn EventMap(props: EventMapProps) -> Element {
                             if crate::utils::nip52::is_online_location(location_str) {
                                 continue;
                             }
-                            match geocode(location_str).await {
+                            let lookup = if let Some(cached) = geocode_cache.get(location_str) {
+                                cached.clone()
+                            } else {
+                                let result = geocode(location_str).await.map_err(|e| e.to_string());
+                                geocode_cache.insert(location_str.to_string(), result.clone());
+                                result
+                            };
+                            match lookup {
                                 Ok(Some(loc)) => {
                                     results.push(GeocodedEvent {
                                         event: event.clone(),
@@ -579,6 +590,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
     let container_style = format!("height: {}; width: 100%;", safe_height);
     let show_full_overlay = leaflet_error.read().is_some()
         || !*leaflet_loaded.read()
+        || !*map_initialized.read()
         || *loading_geo.read()
         || (*map_initialized.read()
             && !*loading_geo.read()
@@ -623,13 +635,15 @@ pub fn EventMap(props: EventMapProps) -> Element {
                         p { class: "text-red-600 dark:text-red-400", "{err}" }
                     }
                 }
-            } else if !*leaflet_loaded.read() || *loading_geo.read() {
+            } else if !*leaflet_loaded.read() || !*map_initialized.read() || *loading_geo.read() {
                 div { class: "absolute inset-0 flex items-center justify-center bg-background/80",
                     div { class: "flex flex-col items-center gap-2",
                         div { class: "w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" }
                         span { class: "text-sm text-muted-foreground",
                             if !*leaflet_loaded.read() {
                                 "Loading map..."
+                            } else if !*map_initialized.read() {
+                                "Initializing map..."
                             } else {
                                 "Geocoding events..."
                             }

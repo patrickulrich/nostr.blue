@@ -268,16 +268,19 @@ pub fn CommunityPostComposer(
                 }
             }
             if *show_discard_confirm.read() {
-                ConfirmModal {
-                    title: "Discard draft?".to_string(),
-                    message: "You have unsaved content. Discard it and close this composer?".to_string(),
-                    confirm_text: Some("Discard".to_string()),
-                    cancel_text: Some("Keep editing".to_string()),
-                    on_confirm: move |_| {
-                        show_discard_confirm.set(false);
-                        on_close.call(());
-                    },
-                    on_cancel: move |_| show_discard_confirm.set(false),
+                div {
+                    onclick: move |e| e.stop_propagation(),
+                    ConfirmModal {
+                        title: "Discard draft?".to_string(),
+                        message: "You have unsaved content. Discard it and close this composer?".to_string(),
+                        confirm_text: Some("Discard".to_string()),
+                        cancel_text: Some("Keep editing".to_string()),
+                        on_confirm: move |_| {
+                            show_discard_confirm.set(false);
+                            on_close.call(());
+                        },
+                        on_cancel: move |_| show_discard_confirm.set(false),
+                    }
                 }
             }
         }

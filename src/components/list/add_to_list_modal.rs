@@ -59,12 +59,11 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
             .cloned()
             .collect::<Vec<_>>()
     });
-    use_effect(move || {
-        let mode = add_mode.read().clone();
+    use_effect(use_reactive(&*add_mode.read(), move |mode| {
         let should_create_new = match mode {
             AddMode::SelectMode => create_new_default,
-            AddMode::AddPost => !existing_lists_supported || curation_lists.read().is_empty(),
-            AddMode::AddPerson => people_lists.read().is_empty(),
+            AddMode::AddPost => !existing_lists_supported || curation_lists.peek().is_empty(),
+            AddMode::AddPerson => people_lists.peek().is_empty(),
         };
         create_new.set(should_create_new);
         selected_list_id.set(None);
@@ -72,7 +71,7 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
         new_list_name.set(String::new());
         add_as_private.set(false);
         error_msg.set(None);
-    });
+    }));
     let event_id = props.event_id.clone();
     let author_pubkey = props.author_pubkey.clone();
     let on_close = props.on_close;

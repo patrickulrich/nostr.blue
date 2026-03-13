@@ -23,7 +23,6 @@ enum UploadServer {
     Blossom,
 }
 
-#[cfg(feature = "web")]
 const MAX_GIF_UPLOAD_BYTES: usize = 21 * 1024 * 1024;
 #[component]
 pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
@@ -80,7 +79,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                         error.set(Some("Please select a GIF file".to_string()));
                         return;
                     }
-                    if data.len() > 21 * 1024 * 1024 {
+                    if data.len() > MAX_GIF_UPLOAD_BYTES {
                         error.set(Some("File too large. Maximum size is 21MB".to_string()));
                         return;
                     }
@@ -362,85 +361,87 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                 }
                             }
                         }
-                        div {
-                            label { class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2",
-                                "Caption / Search Terms"
-                            }
-                            input {
-                                class: "w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent",
-                                r#type: "text",
-                                placeholder: "e.g., funny cat, reaction, celebration...",
-                                value: "{caption}",
-                                disabled: *uploading.read(),
-                                oninput: move |evt| caption.set(evt.value().clone()),
-                            }
-                            p { class: "mt-1 text-xs text-gray-500 dark:text-gray-400",
-                                "This will be used for search and accessibility"
-                            }
-                        }
-                        div {
-                            label { class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2",
-                                "Upload to"
-                            }
-                            select {
-                                class: "w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent",
-                                disabled: *uploading.read(),
-                                onchange: move |evt| {
-                                    match evt.value().as_str() {
-                                        "nostr.build" => upload_server.set(UploadServer::NostrBuild),
-                                        "blossom" => upload_server.set(UploadServer::Blossom),
-                                        _ => {}
-                                    }
-                                },
-                                option {
-                                    value: "nostr.build",
-                                    selected: *upload_server.read() == UploadServer::NostrBuild,
-                                    "nostr.build (Recommended)"
-                                }
-                                option {
-                                    value: "blossom",
-                                    selected: *upload_server.read() == UploadServer::Blossom,
-                                    "Blossom"
-                                }
-                            }
-                        }
-                        if *upload_server.read() == UploadServer::Blossom {
+                        if cfg!(feature = "web") {
                             div {
                                 label { class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2",
-                                    "Blossom Server"
+                                    "Caption / Search Terms"
+                                }
+                                input {
+                                    class: "w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                                    r#type: "text",
+                                    placeholder: "e.g., funny cat, reaction, celebration...",
+                                    value: "{caption}",
+                                    disabled: *uploading.read(),
+                                    oninput: move |evt| caption.set(evt.value().clone()),
+                                }
+                                p { class: "mt-1 text-xs text-gray-500 dark:text-gray-400",
+                                    "This will be used for search and accessibility"
+                                }
+                            }
+                            div {
+                                label { class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2",
+                                    "Upload to"
                                 }
                                 select {
                                     class: "w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent",
                                     disabled: *uploading.read(),
                                     onchange: move |evt| {
-                                        selected_blossom_server.set(evt.value());
+                                        match evt.value().as_str() {
+                                            "nostr.build" => upload_server.set(UploadServer::NostrBuild),
+                                            "blossom" => upload_server.set(UploadServer::Blossom),
+                                            _ => {}
+                                        }
                                     },
-                                    {
-                                        let servers = blossom_store::get_servers();
-                                        let current_server = selected_blossom_server.read().clone();
-                                        rsx! {
-                                            for server in servers.iter() {
-                                                option { value: "{server}", selected: *server == current_server, "{display_server_url(server)}" }
+                                    option {
+                                        value: "nostr.build",
+                                        selected: *upload_server.read() == UploadServer::NostrBuild,
+                                        "nostr.build (Recommended)"
+                                    }
+                                    option {
+                                        value: "blossom",
+                                        selected: *upload_server.read() == UploadServer::Blossom,
+                                        "Blossom"
+                                    }
+                                }
+                            }
+                            if *upload_server.read() == UploadServer::Blossom {
+                                div {
+                                    label { class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2",
+                                        "Blossom Server"
+                                    }
+                                    select {
+                                        class: "w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                                        disabled: *uploading.read(),
+                                        onchange: move |evt| {
+                                            selected_blossom_server.set(evt.value());
+                                        },
+                                        {
+                                            let servers = blossom_store::get_servers();
+                                            let current_server = selected_blossom_server.read().clone();
+                                            rsx! {
+                                                for server in servers.iter() {
+                                                    option { value: "{server}", selected: *server == current_server, "{display_server_url(server)}" }
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
-                        }
-                        if *uploading.read() {
-                            div { class: "space-y-2",
-                                div { class: "w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2",
-                                    div {
-                                        class: "bg-blue-600 h-2 rounded-full transition-all duration-300",
-                                        style: format!("width: {}%", progress.read().unwrap_or(0.0)),
+                            if *uploading.read() {
+                                div { class: "space-y-2",
+                                    div { class: "w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2",
+                                        div {
+                                            class: "bg-blue-600 h-2 rounded-full transition-all duration-300",
+                                            style: format!("width: {}%", progress.read().unwrap_or(0.0)),
+                                        }
                                     }
-                                }
-                                p { class: "text-xs text-gray-500 dark:text-gray-400 text-center",
-                                    {
-                                        if let Some(p) = *progress.read() {
-                                            format!("Uploading... {:.0}%", p)
-                                        } else {
-                                            "Uploading...".to_string()
+                                    p { class: "text-xs text-gray-500 dark:text-gray-400 text-center",
+                                        {
+                                            if let Some(p) = *progress.read() {
+                                                format!("Uploading... {:.0}%", p)
+                                            } else {
+                                                "Uploading...".to_string()
+                                            }
                                         }
                                     }
                                 }
@@ -459,19 +460,21 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                             class: "px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition",
                             disabled: *uploading.read(),
                             onclick: close_modal,
-                            "Cancel"
+                            if cfg!(feature = "web") { "Cancel" } else { "Close" }
                         }
-                        button {
-                            class: "px-6 py-2 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2",
-                            disabled: *uploading.read() || selected_file.read().is_none()
-                                || caption.read().trim().is_empty(),
-                            onclick: handle_upload,
-                            if *uploading.read() {
-                                span { class: "inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" }
-                                "Uploading..."
-                            } else {
-                                span { "⬆️" }
-                                "Upload GIF"
+                        if cfg!(feature = "web") {
+                            button {
+                                class: "px-6 py-2 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2",
+                                disabled: *uploading.read() || selected_file.read().is_none()
+                                    || caption.read().trim().is_empty(),
+                                onclick: handle_upload,
+                                if *uploading.read() {
+                                    span { class: "inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" }
+                                    "Uploading..."
+                                } else {
+                                    span { "⬆️" }
+                                    "Upload GIF"
+                                }
                             }
                         }
                     }

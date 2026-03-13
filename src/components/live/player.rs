@@ -5,9 +5,15 @@ use dioxus_core::spawn_forever;
 use wasm_bindgen::prelude::*;
 
 #[cfg(feature = "native")]
-fn build_native_setup_script(video_id: &str, stream_url: &str, autoplay: bool) -> String {
+fn build_native_setup_script(
+    video_id: &str,
+    stream_url: &str,
+    autoplay: bool,
+    init_token: &str,
+) -> String {
     let video_id_json = serde_json::to_string(video_id).unwrap_or_default();
     let stream_url_json = serde_json::to_string(stream_url).unwrap_or_default();
+    let init_token_json = serde_json::to_string(init_token).unwrap_or_default();
     let autoplay_str = if autoplay { "true" } else { "false" };
     format!(
         r#"
@@ -17,7 +23,10 @@ fn build_native_setup_script(video_id: &str, stream_url: &str, autoplay: bool) -
                             if (!video) return "error:Video element not found";
 
                             let url = {stream_url};
+                            let initToken = {init_token};
                             let isHls = url.toLowerCase().includes('.m3u8');
+                            video.dataset.nativeStreamToken = initToken;
+                            video.dataset.nativeStreamUrl = url;
 
                             // Always detach any existing stream first
                             if (window.hlsManager) {{
@@ -25,11 +34,17 @@ fn build_native_setup_script(video_id: &str, stream_url: &str, autoplay: bool) -
                             }}
 
                             if (!isHls) {{
+                                if (video.dataset.nativeStreamToken !== initToken) {{
+                                    return "cancelled";
+                                }}
                                 video.removeAttribute('src');
                                 video.load();
                                 video.src = url;
                             }} else if (window.hlsManager) {{
                                 let result = await window.hlsManager.attachToMedia({video_id}, url);
+                                if (video.dataset.nativeStreamToken !== initToken) {{
+                                    return "cancelled";
+                                }}
                                 console.log('[Live] HLS stream attached:', result);
                                 if (result && result.type === 'error') {{
                                     return "error:" + (result.error || "Failed to attach HLS stream");
@@ -61,6 +76,7 @@ fn build_native_setup_script(video_id: &str, stream_url: &str, autoplay: bool) -
                 "#,
         video_id = video_id_json,
         stream_url = stream_url_json,
+        init_token = init_token_json,
         autoplay = autoplay_str
     )
 }
@@ -91,6 +107,11 @@ struct NativeSetupState {
 }
 
 #[cfg(feature = "native")]
+fn stream_requires_hls(stream_url: &str) -> bool {
+    stream_url.to_ascii_lowercase().contains(".m3u8")
+}
+
+#[cfg(feature = "native")]
 async fn detach_native_stream(video_id: &str) {
     let video_id_json = serde_json::to_string(video_id).unwrap_or_default();
     let _ = document::eval(&format!(
@@ -101,37 +122,62 @@ async fn detach_native_stream(video_id: &str) {
 }
 
 #[cfg(feature = "native")]
+async fn detach_native_stream_if_current(video_id: &str, expected_token: &str) {
+    let video_id_json = serde_json::to_string(video_id).unwrap_or_default();
+    let expected_token_json = serde_json::to_string(expected_token).unwrap_or_default();
+    let _ = document::eval(&format!(
+        r#"
+        (() => {{
+            const video = document.getElementById({});
+            if (!video || video.dataset.nativeStreamToken !== {}) {{
+                return false;
+            }}
+            if (window.hlsManager) {{
+                window.hlsManager.detach({});
+            }}
+            return true;
+        }})()
+        "#,
+        video_id_json, expected_token_json, video_id_json
+    ))
+    .await;
+}
+
+#[cfg(feature = "native")]
 async fn run_native_setup(
     video_id: &str,
     stream_url: &str,
     autoplay: bool,
     gen: u32,
+    init_token: &str,
     mut state: NativeSetupState,
 ) {
     if !*state.mounted.peek() || *state.init_gen.peek() != gen {
         return;
     }
 
-    if let Err(e) = ensure_hls_manager().await {
-        log::error!("[Live] {}", e);
-        if *state.init_gen.peek() == gen && *state.mounted.peek() {
-            state
-                .error
-                .set(Some(format!("Failed to load HLS support: {}", e)));
-            state.loading.set(false);
+    if stream_requires_hls(stream_url) {
+        if let Err(e) = ensure_hls_manager().await {
+            log::error!("[Live] {}", e);
+            if *state.init_gen.peek() == gen && *state.mounted.peek() {
+                state
+                    .error
+                    .set(Some(format!("Failed to load HLS support: {}", e)));
+                state.loading.set(false);
+            }
+            return;
         }
-        return;
     }
 
     if !*state.mounted.peek() || *state.init_gen.peek() != gen {
         return;
     }
 
-    let setup_script = build_native_setup_script(video_id, stream_url, autoplay);
+    let setup_script = build_native_setup_script(video_id, stream_url, autoplay, init_token);
     match document::eval(&setup_script).await {
         Ok(val) => {
             if !*state.mounted.peek() || *state.init_gen.peek() != gen {
-                detach_native_stream(video_id).await;
+                detach_native_stream_if_current(video_id, init_token).await;
                 return;
             }
             let result = parse_native_setup_result(val);
@@ -154,7 +200,7 @@ async fn run_native_setup(
         }
         Err(e) => {
             if !*state.mounted.peek() || *state.init_gen.peek() != gen {
-                detach_native_stream(video_id).await;
+                detach_native_stream_if_current(video_id, init_token).await;
                 return;
             }
             state
@@ -284,17 +330,23 @@ function detectSourceType(url) {
 }
 
 // Initialize Video.js player
-export async function initVideoJsPlayer(videoId, url, autoplay) {
+export async function initVideoJsPlayer(videoId, url, autoplay, initToken) {
     const videoElement = document.getElementById(videoId);
     if (!videoElement) {
         throw new Error('Video element not found: ' + videoId);
     }
+
+    videoElement.dataset.liveInitToken = initToken;
 
     // Clean up any existing player
     destroyVideoJsPlayer(videoId);
 
     // Load Video.js library
     await loadVideoJs();
+
+    if (videoElement.dataset.liveInitToken !== initToken) {
+        return null;
+    }
 
     if (!window.videojs) {
         throw new Error('Video.js failed to load');
@@ -323,6 +375,10 @@ export async function initVideoJsPlayer(videoId, url, autoplay) {
     });
 
     // Set source
+    if (videoElement.dataset.liveInitToken !== initToken) {
+        player.dispose();
+        return null;
+    }
     player.src({
         src: url,
         type: detectSourceType(url),
@@ -340,6 +396,10 @@ export async function initVideoJsPlayer(videoId, url, autoplay) {
     });
 
     // Store player instance
+    if (videoElement.dataset.liveInitToken !== initToken) {
+        player.dispose();
+        return null;
+    }
     window.videojsPlayers.set(videoId, player);
 
     return player;
@@ -359,6 +419,14 @@ export function destroyVideoJsPlayer(videoId) {
         window.videojsPlayers.delete(videoId);
     }
 }
+
+export function destroyVideoJsPlayerIfToken(videoId, expectedToken) {
+    const videoElement = document.getElementById(videoId);
+    if (!videoElement || videoElement.dataset.liveInitToken !== expectedToken) {
+        return;
+    }
+    destroyVideoJsPlayer(videoId);
+}
 "#)]
 extern "C" {
     #[wasm_bindgen(catch, js_name = "initVideoJsPlayer")]
@@ -366,9 +434,12 @@ extern "C" {
         video_id: &str,
         url: &str,
         autoplay: bool,
+        init_token: &str,
     ) -> Result<JsValue, JsValue>;
     #[wasm_bindgen(js_name = "destroyVideoJsPlayer")]
     fn destroy_video_js_player(video_id: &str);
+    #[wasm_bindgen(js_name = "destroyVideoJsPlayerIfToken")]
+    fn destroy_video_js_player_if_token(video_id: &str, expected_token: &str);
 }
 /// LiveStreamPlayer component - Universal video player using Video.js
 ///
@@ -417,13 +488,21 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                     let stream_url = _stream_url;
                     spawn(async move {
                         crate::platform::timer::sleep_ms(300).await;
+                        let init_token = format!("{}-{}", video_id, gen);
                         if !*mounted.peek() {
                             return;
                         }
                         if *init_gen.peek() != gen {
                             return;
                         }
-                        match init_video_js_player(&video_id, &stream_url, autoplay_prop).await {
+                        match init_video_js_player(
+                            &video_id,
+                            &stream_url,
+                            autoplay_prop,
+                            &init_token,
+                        )
+                        .await
+                        {
                             Ok(_) => {
                                 if *init_gen.peek() == gen {
                                     loading.set(false);
@@ -432,7 +511,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                                         video_id: video_id.clone(),
                                     }));
                                 } else {
-                                    destroy_video_js_player(&video_id);
+                                    destroy_video_js_player_if_token(&video_id, &init_token);
                                 }
                             }
                             Err(e) => {
@@ -451,11 +530,13 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                     let stream_url = _stream_url;
                     spawn(async move {
                         crate::platform::timer::sleep_ms(300).await;
+                        let init_token = format!("{}-{}", video_id, gen);
                         run_native_setup(
                             &video_id,
                             &stream_url,
                             autoplay_prop,
                             gen,
+                            &init_token,
                             NativeSetupState {
                                 init_gen,
                                 mounted,
@@ -518,10 +599,11 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
             let stream_url = _stream_url;
             spawn(async move {
                 crate::platform::timer::sleep_ms(100).await;
+                let init_token = format!("{}-{}", video_id, gen);
                 if *init_gen.peek() != gen {
                     return;
                 }
-                match init_video_js_player(&video_id, &stream_url, autoplay).await {
+                match init_video_js_player(&video_id, &stream_url, autoplay, &init_token).await {
                     Ok(_) => {
                         if *init_gen.peek() == gen {
                             loading.set(false);
@@ -530,7 +612,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                                 video_id: video_id.clone(),
                             }));
                         } else {
-                            destroy_video_js_player(&video_id);
+                            destroy_video_js_player_if_token(&video_id, &init_token);
                         }
                     }
                     Err(e) => {
@@ -551,11 +633,13 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
             let init_gen = init_gen;
             spawn(async move {
                 crate::platform::timer::sleep_ms(100).await;
+                let init_token = format!("{}-{}", video_id, gen);
                 run_native_setup(
                     &video_id,
                     &stream_url,
                     autoplay,
                     gen,
+                    &init_token,
                     NativeSetupState {
                         init_gen,
                         mounted,
@@ -585,6 +669,8 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                 poster: poster.as_deref().unwrap_or(""),
                 playsinline: true,
                 controls: cfg!(feature = "native"),
+                onplay: move |_| playback_blocked.set(false),
+                onplaying: move |_| playback_blocked.set(false),
                 p { class: "vjs-no-js",
                     "To view this video please enable JavaScript, and consider upgrading to a web browser that supports HTML5 video"
                 }

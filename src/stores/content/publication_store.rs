@@ -280,6 +280,11 @@ pub fn get_all_cached_publications() -> Vec<PublicationIndex> {
     let cache = PUBLICATIONS_CACHE.read();
     cache.iter().map(|(_, p)| p.clone()).collect()
 }
+
+/// Check whether the publication cache currently has any entries without subscribing to updates.
+pub fn has_cached_publications_snapshot() -> bool {
+    !PUBLICATIONS_CACHE.peek().is_empty()
+}
 /// Clear all caches
 pub fn clear_cache() {
     PUBLICATIONS_CACHE.write().clear();
@@ -637,10 +642,16 @@ pub async fn fetch_publications(
     until: Option<u64>,
 ) -> StdResult<Vec<PublicationIndex>, String> {
     *LOADING_PUBLICATIONS.write() = true;
+    struct ResetPublicationsLoading;
+    impl Drop for ResetPublicationsLoading {
+        fn drop(&mut self) {
+            *LOADING_PUBLICATIONS.write() = false;
+        }
+    }
+    let _reset_loading = ResetPublicationsLoading;
     let filter = publications_filter_paginated(limit, until);
     let result =
         crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
-    *LOADING_PUBLICATIONS.write() = false;
     match result {
         Ok(events) => {
             let publications: Vec<PublicationIndex> =
@@ -752,12 +763,18 @@ pub async fn search_publications_with_filter(
     limit: usize,
 ) -> StdResult<Vec<PublicationIndex>, String> {
     *LOADING_PUBLICATIONS.write() = true;
+    struct ResetPublicationsLoading;
+    impl Drop for ResetPublicationsLoading {
+        fn drop(&mut self) {
+            *LOADING_PUBLICATIONS.write() = false;
+        }
+    }
+    let _reset_loading = ResetPublicationsLoading;
     let result = crate::stores::nostr_client::fetch_events_aggregated(
         filter.limit(limit),
         Duration::from_secs(15),
     )
     .await;
-    *LOADING_PUBLICATIONS.write() = false;
     match result {
         Ok(events) => {
             let publications: Vec<PublicationIndex> =
