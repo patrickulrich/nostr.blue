@@ -567,7 +567,10 @@ pub fn ZapDistribution(
                                     .as_ref()
                                     .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
                                     .unwrap_or_else(|| truncate_pubkey(&recip.pubkey));
-                                let has_lud16 = profile.as_ref().and_then(|p| p.lud16.clone()).is_some();
+                                let has_lightning = profile
+                                    .as_ref()
+                                    .map(|p| p.lud16.is_some() || p.lud06.is_some())
+                                    .unwrap_or(false);
                                 let pic = profile.as_ref().and_then(|p| p.picture.clone());
                                 rsx! {
                                     div {
@@ -590,7 +593,7 @@ pub fn ZapDistribution(
                                         div { class: "flex-1 min-w-0",
                                             div { class: "text-sm font-medium truncate", "{display_name}" }
                                             div { class: "text-xs text-muted-foreground",
-                                                if has_lud16 {
+                                                if has_lightning {
                                                     "Weight: {recip.weight} · {recip.amount} sats"
                                                 } else {
                                                     "No Lightning address"

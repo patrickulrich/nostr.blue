@@ -298,11 +298,22 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
                     nostr_music::TrackSource::NostrPodcast { coordinate, .. } => {
                         format!("https://nostr.blue/podcast/episode/{}", coordinate)
                     }
-                    nostr_music::TrackSource::RssPodcast { podcast_id, episode_guid, .. } => {
+                    nostr_music::TrackSource::RssPodcast {
+                        podcast_id,
+                        feed_url,
+                        episode_guid,
+                        ..
+                    } => {
                         if let Some(id) = podcast_id {
                             format!(
                                 "https://nostr.blue/podcast/rss/episode/{}/{}",
                                 id,
+                                urlencoding::encode(episode_guid),
+                            )
+                        } else if !feed_url.is_empty() {
+                            format!(
+                                "https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
+                                urlencoding::encode(feed_url),
                                 urlencoding::encode(episode_guid),
                             )
                         } else {

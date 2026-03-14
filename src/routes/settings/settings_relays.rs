@@ -297,24 +297,33 @@ pub fn SettingsRelays() -> Element {
                     broadcast_error.set(Some("Relay already exists".to_string()));
                     return;
                 }
-                let mut relays = broadcast_relays.write();
+                let mut relays = broadcast_relays.read().clone();
                 relays.push(normalized);
-                relay::save_broadcast_relays(&relays);
-                let relays_clone = relays.clone();
-                drop(relays);
-                *relay::BROADCAST_RELAYS.write() = relays_clone;
-                new_broadcast_relay.set(String::new());
-                broadcast_error.set(None);
+                match relay::save_broadcast_relays(&relays) {
+                    Ok(()) => {
+                        broadcast_relays.set(relays.clone());
+                        *relay::BROADCAST_RELAYS.write() = relays;
+                        new_broadcast_relay.set(String::new());
+                        broadcast_error.set(None);
+                    }
+                    Err(e) => broadcast_error.set(Some(e)),
+                }
             }
             Err(e) => broadcast_error.set(Some(e)),
         }
     };
     let mut remove_broadcast_relay = move |index: usize| {
-        let mut relays = broadcast_relays.write();
+        let mut relays = broadcast_relays.read().clone();
         if index < relays.len() {
             relays.remove(index);
-            relay::save_broadcast_relays(&relays);
-            *relay::BROADCAST_RELAYS.write() = relays.clone();
+            match relay::save_broadcast_relays(&relays) {
+                Ok(()) => {
+                    broadcast_relays.set(relays.clone());
+                    *relay::BROADCAST_RELAYS.write() = relays;
+                    broadcast_error.set(None);
+                }
+                Err(e) => broadcast_error.set(Some(e)),
+            }
         }
     };
     let publish_relay_lists = move |_| {
@@ -957,7 +966,7 @@ pub fn SettingsRelays() -> Element {
                         }
                     }
                     p { class: "text-xs text-gray-500 dark:text-gray-400 mt-3 text-center",
-                        "This publishes your General, DM, Search, and Blocked relay lists to Nostr. Local and Broadcast relays are stored only in your browser."
+                        "This publishes your General, DM, Search, and Blocked relay lists to Nostr. Local and Broadcast relays are stored locally on this device."
                     }
                 }
             }

@@ -110,6 +110,7 @@ fn ImageTile(props: ImageTileProps) -> Element {
 
     rsx! {
         button {
+            r#type: "button",
             class: format!(
                 "group relative overflow-hidden rounded-lg border border-border bg-muted {}",
                 props.class

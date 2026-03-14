@@ -586,10 +586,9 @@ pub fn save_local_relays(relays: &[String]) {
 }
 /// Save broadcast relays to browser LocalStorage (web-only)
 #[cfg(feature = "web")]
-pub fn save_broadcast_relays(relays: &[String]) {
-    if let Err(e) = storage::set(BROADCAST_RELAYS_KEY, &relays) {
-        log::error!("Failed to save broadcast relays: {}", e);
-    }
+pub fn save_broadcast_relays(relays: &[String]) -> Result<(), String> {
+    storage::set(BROADCAST_RELAYS_KEY, &relays)
+        .map_err(|e| format!("Failed to save broadcast relays: {}", e))
 }
 #[cfg(feature = "native")]
 pub fn save_local_relays(relays: &[String]) {
@@ -630,45 +629,37 @@ pub fn save_local_relays(relays: &[String]) {
     }
 }
 #[cfg(feature = "native")]
-pub fn save_broadcast_relays(relays: &[String]) {
+pub fn save_broadcast_relays(relays: &[String]) -> Result<(), String> {
     let Some(config_dir) = dirs::config_dir().map(|p| p.join("nostr_blue")) else {
-        log::error!("Could not determine config directory for broadcast relays");
-        return;
+        return Err("Could not determine config directory for broadcast relays".to_string());
     };
     if let Err(e) = fs::create_dir_all(&config_dir) {
-        log::error!(
+        return Err(format!(
             "Failed to create config directory {:?} for broadcast relays: {}",
-            config_dir,
-            e
-        );
-        return;
+            config_dir, e
+        ));
     }
     let path = config_dir.join(format!("{}.json", BROADCAST_RELAYS_KEY));
     let temp_path = config_dir.join(format!("{}.json.tmp", BROADCAST_RELAYS_KEY));
     match serde_json::to_string(relays) {
         Ok(json) => {
             if let Err(e) = fs::write(&temp_path, &json) {
-                log::error!(
-                    "Failed to write broadcast relays temp file {:?}: {}",
-                    temp_path,
-                    e
-                );
                 let _ = fs::remove_file(&temp_path);
-                return;
+                return Err(format!(
+                    "Failed to write broadcast relays temp file {:?}: {}",
+                    temp_path, e
+                ));
             }
             if let Err(e) = fs::rename(&temp_path, &path) {
-                log::error!(
-                    "Failed to atomically replace broadcast relays {:?} with {:?}: {}",
-                    path,
-                    temp_path,
-                    e
-                );
                 let _ = fs::remove_file(&temp_path);
+                return Err(format!(
+                    "Failed to atomically replace broadcast relays {:?} with {:?}: {}",
+                    path, temp_path, e
+                ));
             }
+            Ok(())
         }
-        Err(e) => {
-            log::error!("Failed to serialize broadcast relays: {}", e);
-        }
+        Err(e) => Err(format!("Failed to serialize broadcast relays: {}", e)),
     }
 }
 /// Initialize local relays from cache

@@ -131,12 +131,12 @@ pub async fn send_presigned_event_to_relays(
     relay_urls: Vec<String>,
 ) -> std::result::Result<PublishResult, String> {
     let client = get_client().ok_or("Client not initialized")?;
-    for relay_url in &relay_urls {
-        if !relay::ensure_connected(&client, relay_url).await {
+    let urls = parse_relay_urls(&relay_urls)?;
+    for relay_url in &urls {
+        if !relay::ensure_connected(&client, relay_url.as_str()).await {
             log::warn!("Broadcast relay unavailable: {}", relay_url);
         }
     }
-    let urls = parse_relay_urls(&relay_urls)?;
     let output = client
         .send_event_to(urls, &event)
         .await

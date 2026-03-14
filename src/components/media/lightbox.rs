@@ -16,10 +16,28 @@ fn clamp_pan_component(value: f64, zoom: f64, container_extent: f64) -> f64 {
     }
 }
 
-fn clamp_pan(x: f64, y: f64, zoom: f64, viewport: (f64, f64)) -> (f64, f64) {
+fn contain_fit_extent(intrinsic: (f64, f64), viewport: (f64, f64)) -> (f64, f64) {
+    let (intrinsic_w, intrinsic_h) = intrinsic;
+    let (viewport_w, viewport_h) = viewport;
+    if intrinsic_w <= 0.0 || intrinsic_h <= 0.0 || viewport_w <= 0.0 || viewport_h <= 0.0 {
+        return viewport;
+    }
+
+    let scale = (viewport_w / intrinsic_w).min(viewport_h / intrinsic_h);
+    (intrinsic_w * scale, intrinsic_h * scale)
+}
+
+fn clamp_pan(
+    x: f64,
+    y: f64,
+    zoom: f64,
+    intrinsic: (f64, f64),
+    viewport: (f64, f64),
+) -> (f64, f64) {
+    let displayed = contain_fit_extent(intrinsic, viewport);
     (
-        clamp_pan_component(x, zoom, viewport.0),
-        clamp_pan_component(y, zoom, viewport.1),
+        clamp_pan_component(x, zoom, displayed.0),
+        clamp_pan_component(y, zoom, displayed.1),
     )
 }
 
@@ -39,6 +57,7 @@ pub fn MediaLightbox() -> Element {
     let mut swipe_start = use_signal(|| None::<(f64, f64)>);
     let mut pinch_start_distance = use_signal(|| None::<f64>);
     let mut pinch_start_zoom = use_signal(|| 1.0f64);
+    let mut image_intrinsic_size = use_signal(|| (1200.0f64, 800.0f64));
     #[cfg(feature = "web")]
     let mut viewport_size = use_signal(|| (1200.0f64, 800.0f64));
     #[cfg(feature = "native")]
@@ -52,6 +71,7 @@ pub fn MediaLightbox() -> Element {
             is_dragging.set(false);
             swipe_start.set(None);
             pinch_start_distance.set(None);
+            image_intrinsic_size.set((1200.0, 800.0));
         },
     ));
 
@@ -179,6 +199,7 @@ pub fn MediaLightbox() -> Element {
                             pan_offset.read().0,
                             pan_offset.read().1,
                             next_zoom,
+                            *image_intrinsic_size.read(),
                             *viewport_size.read(),
                         );
                         pan_offset.set((pan_x, pan_y));
@@ -187,7 +208,13 @@ pub fn MediaLightbox() -> Element {
                         evt.stop_propagation();
                         let next_zoom = if *zoom_level.read() > 1.0 { 1.0 } else { 2.0 };
                         zoom_level.set(next_zoom);
-                        let (pan_x, pan_y) = clamp_pan(0.0, 0.0, next_zoom, *viewport_size.read());
+                        let (pan_x, pan_y) = clamp_pan(
+                            0.0,
+                            0.0,
+                            next_zoom,
+                            *image_intrinsic_size.read(),
+                            *viewport_size.read(),
+                        );
                         pan_offset.set((pan_x, pan_y));
                     },
                     onpointerdown: move |evt: PointerEvent| {
@@ -216,6 +243,7 @@ pub fn MediaLightbox() -> Element {
                             next_pan.0,
                             next_pan.1,
                             *zoom_level.read(),
+                            *image_intrinsic_size.read(),
                             *viewport_size.read(),
                         ));
                     },
@@ -259,9 +287,41 @@ pub fn MediaLightbox() -> Element {
                                     let current_pan = *pan_offset.read();
                                     let viewport = *viewport_size.read();
                                     zoom_level.set(next_zoom);
-                                    pan_offset.set(clamp_pan(current_pan.0, current_pan.1, next_zoom, viewport));
+                                    pan_offset.set(clamp_pan(
+                                        current_pan.0,
+                                        current_pan.1,
+                                        next_zoom,
+                                        *image_intrinsic_size.read(),
+                                        viewport,
+                                    ));
                                 }
                             }
+                        } else if touches.len() == 1 && *zoom_level.read() > 1.0 {
+                            evt.stop_propagation();
+                            evt.prevent_default();
+                            let coords = touches[0].client_coordinates();
+                            let swipe_origin = {
+                                let swipe_origin = swipe_start.read();
+                                *swipe_origin
+                            };
+                            let (start_x, start_y) = if let Some((start_x, start_y)) = swipe_origin {
+                                (start_x, start_y)
+                            } else {
+                                swipe_start.set(Some((coords.x, coords.y)));
+                                (coords.x, coords.y)
+                            };
+                            let delta_x = coords.x - start_x;
+                            let delta_y = coords.y - start_y;
+                            let current_pan = *pan_offset.read();
+                            let new_pan = (current_pan.0 + delta_x, current_pan.1 + delta_y);
+                            pan_offset.set(clamp_pan(
+                                new_pan.0,
+                                new_pan.1,
+                                *zoom_level.read(),
+                                *image_intrinsic_size.read(),
+                                *viewport_size.read(),
+                            ));
+                            swipe_start.set(Some((coords.x, coords.y)));
                         } else if touches.len() == 1 && *zoom_level.read() <= 1.0 {
                             let swipe_origin = *swipe_start.read();
                             if let Some((start_x, start_y)) = swipe_origin {
@@ -291,6 +351,17 @@ pub fn MediaLightbox() -> Element {
                         class: "max-h-full max-w-full select-none object-contain transition-transform duration-100 ease-out",
                         draggable: "false",
                         style: "{transform}",
+                        onmounted: move |_evt| async move {
+                            #[cfg(feature = "web")]
+                            {
+                                if let Some(element) = _evt.data().downcast::<web_sys::HtmlElement>() {
+                                    let rect = element.get_bounding_client_rect();
+                                    if rect.width() > 0.0 && rect.height() > 0.0 {
+                                        image_intrinsic_size.set((rect.width(), rect.height()));
+                                    }
+                                }
+                            }
+                        },
                     }
                 }
                 div { class: "mt-4 flex flex-col items-center gap-3 text-white",

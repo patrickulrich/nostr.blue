@@ -55,7 +55,9 @@ pub use nip65::{
     BROADCAST_RELAYS, DEFAULT_DM_RELAYS, DEFAULT_NIP65_RELAYS, DEFAULT_SEARCH_RELAYS,
     LOCAL_RELAYS, SEARCH_RELAYS, USER_RELAY_METADATA,
 };
-pub use pool::{add_relay, apply_relay_lists_to_client, remove_relay, DEFAULT_RELAYS};
+pub use pool::{
+    add_relay, apply_relay_lists_to_client, is_relay_blocked, remove_relay, DEFAULT_RELAYS,
+};
 pub use signals::{
     RelayInfo, RelayPoolStore, RelayPoolStoreStoreExt, RelaySource, RelayStatus, RELAY_CONNECTED,
     RELAY_POOL, USER_RELAYS_APPLIED,

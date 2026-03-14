@@ -1,3 +1,4 @@
+pub mod ai_chat_store;
 pub mod ai_provider_store;
 pub mod back_navigation;
 pub mod emoji_store;

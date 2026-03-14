@@ -301,6 +301,7 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                                 let toast_api = toast;
                                 let mut relay_urls = relay::get_write_relays();
                                 relay_urls.extend(relay::BROADCAST_RELAYS.read().clone());
+                                relay_urls.retain(|url| !relay::is_relay_blocked(url));
                                 let mut seen = std::collections::HashSet::new();
                                 relay_urls.retain(|url| seen.insert(url.trim_end_matches('/').to_string()));
                                 if relay_urls.is_empty() {

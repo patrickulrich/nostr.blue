@@ -25,12 +25,12 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
     let gif_results = GIF_RESULTS.read();
     let gif_loading = GIF_LOADING.read();
     let recent_gifs = RECENT_GIFS.read();
-    let handle_search = move |_| {
+    let handle_search = use_callback(move |_: ()| {
         let query = search_query.read().clone();
         spawn(async move {
             search_gifs(query).await;
         });
-    };
+    });
     rsx! {
         div { class: "relative",
             button {
@@ -99,10 +99,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                         onkeydown: move |evt: KeyboardEvent| {
                                             if evt.key() == Key::Enter {
                                                 evt.prevent_default();
-                                                let query = search_query.read().clone();
-                                                spawn(async move {
-                                                    search_gifs(query).await;
-                                                });
+                                                handle_search(());
                                             }
                                         },
                                     }
@@ -113,7 +110,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                 button {
                                     class: "px-4 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-lg text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xs hover:shadow-md",
                                     disabled: *gif_loading,
-                                    onclick: handle_search,
+                                    onclick: move |_| handle_search(()),
                                     if *gif_loading {
                                         "Searching..."
                                     } else {

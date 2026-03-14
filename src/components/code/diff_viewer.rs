@@ -592,6 +592,7 @@ pub fn DiffViewer(
                                                                     })
                                                                     .unwrap_or(false);
                                                                 let file_for_click = cached_file_path.clone();
+                                                                let file_for_click_keydown = file_for_click.clone();
                                                                 rsx! {
                                                                     tr {
                                                                         key: "sbs-{hunk_idx}-{row_idx}",
@@ -620,24 +621,53 @@ pub fn DiffViewer(
                                                                         }
                                                                         td {
                                                                             class: match (row.right_kind, has_commenting, row.right_num.is_some(), is_active) {
-                                                                                (SideKind::Add, true, true, true) => "w-1/2 px-2 whitespace-pre bg-green-500/10 ring-1 ring-inset ring-primary cursor-pointer",
-                                                                                (SideKind::Add, true, true, false) => "w-1/2 px-2 whitespace-pre bg-green-500/10 cursor-pointer hover:bg-green-500/15",
+                                                                                (SideKind::Add, true, true, _) => "w-1/2 p-0 whitespace-pre bg-green-500/10",
                                                                                 (SideKind::Add, _, _, _) => "w-1/2 px-2 whitespace-pre bg-green-500/10",
                                                                                 (SideKind::Empty, _, _, _) => "w-1/2 px-2 whitespace-pre bg-muted/30",
-                                                                                (_, true, true, true) => "w-1/2 px-2 whitespace-pre bg-accent/10 ring-1 ring-inset ring-primary cursor-pointer",
-                                                                                (_, true, true, false) => "w-1/2 px-2 whitespace-pre cursor-pointer hover:bg-accent/10",
+                                                                                (_, true, true, _) => "w-1/2 p-0 whitespace-pre",
                                                                                 _ => "w-1/2 px-2 whitespace-pre",
                                                                             },
-                                                                            onclick: move |_| {
-                                                                                if has_commenting {
-                                                                                    if let Some(line_num) = row.right_num {
-                                                                                        active_comment_line.set(Some((file_for_click.clone(), line_num)));
-                                                                                        comment_text.set(String::new());
+                                                                            if has_commenting && row.right_num.is_some() {
+                                                                                button {
+                                                                                    r#type: "button",
+                                                                                    tabindex: "0",
+                                                                                    class: match (row.right_kind, is_active) {
+                                                                                        (SideKind::Add, true) => "w-full px-2 py-0 text-left bg-green-500/10 ring-1 ring-inset ring-primary hover:bg-green-500/15 focus:outline-none focus-visible:ring-1 focus-visible:ring-primary cursor-pointer",
+                                                                                        (SideKind::Add, false) => "w-full px-2 py-0 text-left bg-green-500/10 hover:bg-green-500/15 focus:outline-none focus-visible:ring-1 focus-visible:ring-primary cursor-pointer",
+                                                                                        (_, true) => "w-full px-2 py-0 text-left bg-accent/10 ring-1 ring-inset ring-primary hover:bg-accent/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-primary cursor-pointer",
+                                                                                        (_, false) => "w-full px-2 py-0 text-left hover:bg-accent/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-primary cursor-pointer",
+                                                                                    },
+                                                                                    onclick: move |_| {
+                                                                                        if has_commenting {
+                                                                                            if let Some(line_num) = row.right_num {
+                                                                                                active_comment_line.set(Some((file_for_click.clone(), line_num)));
+                                                                                                comment_text.set(String::new());
+                                                                                            }
+                                                                                        }
+                                                                                    },
+                                                                                    onkeydown: move |e: KeyboardEvent| {
+                                                                                        if matches!(e.key(), Key::Enter)
+                                                                                            || matches!(e.key(), Key::Character(ref c) if c == " ")
+                                                                                        {
+                                                                                            e.prevent_default();
+                                                                                            if has_commenting {
+                                                                                                if let Some(line_num) = row.right_num {
+                                                                                                    active_comment_line.set(Some((file_for_click_keydown.clone(), line_num)));
+                                                                                                    comment_text.set(String::new());
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                    },
+                                                                                    aria_label: "Add line comment",
+                                                                                    title: "Add line comment",
+                                                                                    if let Some(ref text) = row.right_content {
+                                                                                        span {
+                                                                                            class: if row.right_kind == SideKind::Add { "text-green-400" } else { "" },
+                                                                                            "{text}"
+                                                                                        }
                                                                                     }
                                                                                 }
-                                                                            },
-                                                                            title: if has_commenting && row.right_num.is_some() { "Add line comment" } else { "" },
-                                                                            if let Some(ref text) = row.right_content {
+                                                                            } else if let Some(ref text) = row.right_content {
                                                                                 span {
                                                                                     class: if row.right_kind == SideKind::Add { "text-green-400" } else { "" },
                                                                                     "{text}"
