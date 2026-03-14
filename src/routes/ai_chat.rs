@@ -58,7 +58,20 @@ pub fn AIChat() -> Element {
     let mut providers = use_signal(|| vec![shakespeare_provider()]);
     let mut provider_state_loaded = use_signal(|| false);
     let mut chat_history_loaded = use_signal(|| false);
+    let mut chat_history_generation = use_signal(|| 0u64);
     let messages_container_id = use_signal(|| "ai-chat-messages".to_string());
+    let account_key = ai_chat_store::current_account_key();
+    let provider_state_ready = *provider_state_loaded.read();
+    let chat_history_ready = *chat_history_loaded.read();
+    let chat_history_generation_value = *chat_history_generation.read();
+    let has_signer = *nostr_client::HAS_SIGNER.read();
+    let selected_provider_id_for_models = provider_state.read().selected_provider_id.clone();
+    let persisted_messages: Vec<PersistedChatMessage> = messages
+        .read()
+        .iter()
+        .cloned()
+        .map(persisted_message_from_display)
+        .collect();
 
     use_effect(move || {
         if *provider_state_loaded.read() {
@@ -100,131 +113,159 @@ pub fn AIChat() -> Element {
         });
     });
 
-    use_effect(move || {
-        if !*provider_state_loaded.read() || *chat_history_loaded.read() {
-            return;
-        }
+    use_effect(use_reactive(&account_key, move |_| {
+        messages.set(Vec::new());
+        chat_history_loaded.set(false);
+        let next_generation = chat_history_generation.read().wrapping_add(1);
+        chat_history_generation.set(next_generation);
+    }));
 
-        let account_key = ai_chat_store::current_account_key();
-        spawn(async move {
-            match ai_chat_store::load_chat_history(&account_key).await {
-                Ok(history) => {
-                    messages.set(
-                        history
-                            .into_iter()
-                            .map(display_message_from_persisted)
-                            .collect(),
-                    );
-                }
-                Err(e) => error.set(Some(e)),
-            }
-            chat_history_loaded.set(true);
-        });
-    });
-
-    use_effect(move || {
-        if !*chat_history_loaded.read() {
-            return;
-        }
-
-        let persisted_messages: Vec<PersistedChatMessage> = messages
-            .read()
-            .iter()
-            .cloned()
-            .map(persisted_message_from_display)
-            .collect();
-        let account_key = ai_chat_store::current_account_key();
-        spawn(async move {
-            let result = if persisted_messages.is_empty() {
-                ai_chat_store::clear_chat_history(&account_key).await
-            } else {
-                ai_chat_store::save_chat_history(&account_key, &persisted_messages).await
-            };
-            if let Err(e) = result {
-                error.set(Some(e));
-            }
-        });
-    });
-
-    use_effect(move || {
-        if !*provider_state_loaded.read() {
-            return;
-        }
-
-        let selected_provider_id = provider_state.read().selected_provider_id.clone();
-        let available_providers = providers.read().clone();
-        let has_signer = *nostr_client::HAS_SIGNER.read();
-
-        spawn(async move {
-            let Some(provider) = available_providers
-                .into_iter()
-                .find(|provider| provider.id == selected_provider_id)
-            else {
-                return;
-            };
-
-            if provider.requires_signer() && !has_signer {
-                models.set(Vec::new());
-                selected_model.set(String::new());
-                error.set(None);
+    use_effect(use_reactive(
+        (
+            &provider_state_ready,
+            &chat_history_ready,
+            &account_key,
+            &chat_history_generation_value,
+        ),
+        move |(provider_state_ready, chat_history_ready, account_key, generation)| {
+            if !provider_state_ready || chat_history_ready {
                 return;
             }
 
-            match get_available_models(&provider).await {
-                Ok(available_models) => {
-                    if provider_state.read().selected_provider_id != provider.id {
-                        return;
-                    }
-                    let saved_model = provider_state
-                        .read()
-                        .selected_model_by_provider
-                        .get(&provider.id)
-                        .cloned();
-                    let selected_is_valid = available_models
-                        .iter()
-                        .any(|model| model.id == *selected_model.read());
-                    let saved_is_valid = saved_model
-                        .as_ref()
-                        .map(|saved| available_models.iter().any(|model| model.id == *saved))
-                        .unwrap_or(false);
-                    let next_model = if selected_is_valid {
-                        selected_model.read().clone()
-                    } else if saved_is_valid {
-                        saved_model.clone().unwrap_or_default()
-                    } else {
-                        available_models
-                            .first()
-                            .map(|model| model.id.clone())
-                            .unwrap_or_default()
-                    };
-
-                    if !next_model.is_empty() {
-                        selected_model.set(next_model.clone());
-                        if saved_model.as_deref() != Some(next_model.as_str()) {
-                            persist_selected_model(
-                                provider.id.clone(),
-                                next_model,
-                                provider_state,
-                                error,
-                            );
+            let account_key = account_key.clone();
+            spawn(async move {
+                match ai_chat_store::load_chat_history(&account_key).await {
+                    Ok(history) => {
+                        if *chat_history_generation.read() != generation {
+                            return;
                         }
-                    } else {
-                        selected_model.set(String::new());
+                        messages.set(
+                            history
+                                .into_iter()
+                                .map(display_message_from_persisted)
+                                .collect(),
+                        );
                     }
-                    models.set(available_models);
-                    error.set(None);
+                    Err(e) => {
+                        if *chat_history_generation.read() != generation {
+                            return;
+                        }
+                        error.set(Some(e));
+                    }
                 }
-                Err(e) => {
-                    if provider_state.read().selected_provider_id != provider.id {
-                        return;
-                    }
-                    models.set(Vec::new());
-                    selected_model.set(String::new());
+                if *chat_history_generation.read() == generation {
+                    chat_history_loaded.set(true);
+                }
+            });
+        },
+    ));
+
+    use_effect(use_reactive(
+        (&account_key, &chat_history_ready, &persisted_messages),
+        move |(account_key, chat_history_ready, persisted_messages)| {
+            if !chat_history_ready {
+                return;
+            }
+
+            let account_key = account_key.clone();
+            let persisted_messages = persisted_messages.clone();
+            spawn(async move {
+                let result = if persisted_messages.is_empty() {
+                    ai_chat_store::clear_chat_history(&account_key).await
+                } else {
+                    ai_chat_store::save_chat_history(&account_key, &persisted_messages).await
+                };
+                if let Err(e) = result {
                     error.set(Some(e));
                 }
+            });
+        },
+    ));
+
+    use_effect(use_reactive(
+        (
+            &provider_state_ready,
+            &selected_provider_id_for_models,
+            &has_signer,
+        ),
+        move |(provider_state_ready, selected_provider_id, has_signer)| {
+            if !provider_state_ready {
+                return;
             }
-        });
-    });
+
+            let selected_provider_id = selected_provider_id.clone();
+            let available_providers = providers.read().clone();
+            spawn(async move {
+                let Some(provider) = available_providers
+                    .into_iter()
+                    .find(|provider| provider.id == selected_provider_id)
+                else {
+                    return;
+                };
+
+                if provider.requires_signer() && !has_signer {
+                    models.set(Vec::new());
+                    selected_model.set(String::new());
+                    error.set(None);
+                    return;
+                }
+
+                match get_available_models(&provider).await {
+                    Ok(available_models) => {
+                        if provider_state.read().selected_provider_id != provider.id {
+                            return;
+                        }
+                        let saved_model = provider_state
+                            .read()
+                            .selected_model_by_provider
+                            .get(&provider.id)
+                            .cloned();
+                        let selected_is_valid = available_models
+                            .iter()
+                            .any(|model| model.id == *selected_model.read());
+                        let saved_is_valid = saved_model
+                            .as_ref()
+                            .map(|saved| available_models.iter().any(|model| model.id == *saved))
+                            .unwrap_or(false);
+                        let next_model = if selected_is_valid {
+                            selected_model.read().clone()
+                        } else if saved_is_valid {
+                            saved_model.clone().unwrap_or_default()
+                        } else {
+                            available_models
+                                .first()
+                                .map(|model| model.id.clone())
+                                .unwrap_or_default()
+                        };
+
+                        if !next_model.is_empty() {
+                            selected_model.set(next_model.clone());
+                            if saved_model.as_deref() != Some(next_model.as_str()) {
+                                persist_selected_model(
+                                    provider.id.clone(),
+                                    next_model,
+                                    provider_state,
+                                    error,
+                                );
+                            }
+                        } else {
+                            selected_model.set(String::new());
+                        }
+                        models.set(available_models);
+                        error.set(None);
+                    }
+                    Err(e) => {
+                        if provider_state.read().selected_provider_id != provider.id {
+                            return;
+                        }
+                        models.set(Vec::new());
+                        selected_model.set(String::new());
+                        error.set(Some(e));
+                    }
+                }
+            });
+        },
+    ));
 
     if !*nostr_client::CLIENT_INITIALIZED.read() || !*provider_state_loaded.read() {
         return rsx! { ClientInitializing {} };

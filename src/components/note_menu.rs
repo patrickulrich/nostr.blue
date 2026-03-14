@@ -1,10 +1,10 @@
 use crate::components::board::item_selector::PinToBoardModal;
 use crate::components::icons::MoreHorizontalIcon;
 use crate::components::{AddToListModal, ReportModal};
-use crate::stores::{auth_store, nostr_client, relay};
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::pin_boards_store::{PinContentType, PinReference};
 use crate::stores::pinned_notes;
+use crate::stores::{auth_store, nostr_client, relay};
 use crate::utils::clipboard::copy_to_clipboard;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};

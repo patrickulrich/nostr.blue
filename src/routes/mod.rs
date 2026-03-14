@@ -559,7 +559,6 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::Highlights {}
         | Route::AIChat {}
         | Route::Settings {}
-        | Route::SettingsAi {}
         | Route::WebBookmarks {} => None,
         Route::Search { .. }
         | Route::Hashtag { .. }
@@ -683,9 +682,10 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         Route::Note { .. } => note_back_target(current_route),
         Route::ListDetail { .. } => Some(Route::Lists {}),
         Route::BibleChapter { .. } | Route::BibleSearch {} => Some(Route::BibleHome {}),
-        Route::SettingsBlocklist {} | Route::SettingsMuted {} | Route::SettingsRelays {} => {
-            Some(Route::Settings {})
-        }
+        Route::SettingsAi {}
+        | Route::SettingsBlocklist {}
+        | Route::SettingsMuted {}
+        | Route::SettingsRelays {} => Some(Route::Settings {}),
     }
 }
 

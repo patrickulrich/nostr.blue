@@ -6,11 +6,11 @@ use dioxus::prelude::*;
 use url::Url;
 
 #[component]
-pub fn AiSettingsPanel() -> Element {
+pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
     let mut state = use_signal(AiProviderState::default);
     let mut loaded = use_signal(|| false);
     let mut save_error = use_signal(|| None::<String>);
-    let is_saving = use_signal(|| false);
+    let mut is_saving = use_signal(|| false);
     let mut editing_provider_id = use_signal(|| None::<String>);
     let mut name = use_signal(String::new);
     let mut provider_id = use_signal(String::new);
@@ -54,10 +54,12 @@ pub fn AiSettingsPanel() -> Element {
 
     rsx! {
         div { class: "space-y-6",
-            div { class: "rounded-xl border border-border bg-card p-6",
-                h2 { class: "text-xl font-semibold text-foreground", "AI Settings" }
-                p { class: "mt-2 text-sm text-muted-foreground",
-                    "Manage AI providers and local model preferences for this device."
+            if !headerless {
+                div { class: "rounded-xl border border-border bg-card p-6",
+                    h2 { class: "text-xl font-semibold text-foreground", "AI Settings" }
+                    p { class: "mt-2 text-sm text-muted-foreground",
+                        "Manage AI providers and local model preferences for this device."
+                    }
                 }
             }
 
@@ -221,6 +223,7 @@ pub fn AiSettingsPanel() -> Element {
                             ) {
                                 Ok(provider) => {
                                     let mut next_state = current_state;
+                                    let current_selected = next_state.selected_provider_id.clone();
                                     if let Some(original_id) = editing.as_deref() {
                                         if let Some(existing) = next_state
                                             .custom_providers
@@ -234,16 +237,29 @@ pub fn AiSettingsPanel() -> Element {
                                                 next_state.selected_model_by_provider.insert(provider.id.clone(), saved_model);
                                             }
                                         }
+                                        if Some(current_selected.as_str()) == editing.as_deref() {
+                                            next_state.selected_provider_id = provider.id.clone();
+                                        }
                                     } else {
                                         next_state.custom_providers.push(provider.clone());
+                                        next_state.selected_provider_id = provider.id.clone();
                                     }
-                                    next_state.selected_provider_id = provider.id.clone();
-                                    editing_provider_id.set(None);
-                                    name.set(String::new());
-                                    provider_id.set(String::new());
-                                    base_url.set(String::new());
-                                    api_key.set(String::new());
-                                    persist_provider_state(next_state, state, is_saving, save_error);
+                                    is_saving.set(true);
+                                    save_error.set(None);
+                                    spawn(async move {
+                                        match ai_provider_store::save_provider_state(&next_state).await {
+                                            Ok(()) => {
+                                                state.set(next_state);
+                                                editing_provider_id.set(None);
+                                                name.set(String::new());
+                                                provider_id.set(String::new());
+                                                base_url.set(String::new());
+                                                api_key.set(String::new());
+                                            }
+                                            Err(e) => save_error.set(Some(e)),
+                                        }
+                                        is_saving.set(false);
+                                    });
                                 }
                                 Err(err) => save_error.set(Some(err)),
                             }

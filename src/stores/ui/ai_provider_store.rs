@@ -115,16 +115,12 @@ pub fn normalize_base_url(input: &str) -> String {
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 mod web_db {
     use super::AiProviderState;
+    use crate::stores::ui::ai_web_db::{open_ai_db_with_schema, STORE_SETTINGS};
     use indexed_db_futures::prelude::*;
-    use std::future::IntoFuture;
     use std::rc::Rc;
     use wasm_bindgen::JsValue;
     use web_sys::IdbTransactionMode;
 
-    const DB_NAME: &str = "nostr_blue_ai_providers";
-    const DB_VERSION: u32 = 2;
-    const STORE_SETTINGS: &str = "settings";
-    const STORE_CHAT_HISTORY: &str = "chat_history";
     const STATE_KEY: &str = "state";
 
     #[derive(Clone, Debug)]
@@ -137,22 +133,9 @@ mod web_db {
 
     impl AiProviderDb {
         pub async fn new() -> Result<Self, String> {
-            let mut db_req: OpenDbRequest = IdbDatabase::open_u32(DB_NAME, DB_VERSION)
-                .map_err(|e| format!("Failed to open AI provider database: {:?}", e))?;
-            db_req.set_on_upgrade_needed(Some(|evt: &IdbVersionChangeEvent| {
-                let db = evt.db();
-                if !db.object_store_names().any(|n| n == STORE_SETTINGS) {
-                    db.create_object_store(STORE_SETTINGS)?;
-                }
-                if !db.object_store_names().any(|n| n == STORE_CHAT_HISTORY) {
-                    db.create_object_store(STORE_CHAT_HISTORY)?;
-                }
-                Ok(())
-            }));
-            let db: IdbDatabase = db_req
-                .into_future()
+            let db = open_ai_db_with_schema("AI provider")
                 .await
-                .map_err(|e| format!("Failed to open AI provider database: {:?}", e))?;
+                .map_err(|e| format!("Failed to open AI provider database: {}", e))?;
             Ok(Self { db: Rc::new(db) })
         }
 

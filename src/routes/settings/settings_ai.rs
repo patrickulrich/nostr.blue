@@ -23,7 +23,7 @@ pub fn SettingsAi() -> Element {
                     }
                 }
             }
-            AiSettingsPanel {}
+            AiSettingsPanel { headerless: true }
         }
     }
 }

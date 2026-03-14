@@ -1,5 +1,16 @@
 use crate::stores::media::LightboxImage;
 use dioxus::prelude::*;
+use url::Url;
+
+fn redact_url_for_logging(input: &str) -> String {
+    if let Ok(mut url) = Url::parse(input) {
+        url.set_query(None);
+        url.set_fragment(None);
+        return url.to_string();
+    }
+
+    input.split(['?', '#']).next().unwrap_or(input).to_string()
+}
 
 #[derive(Props, Clone, PartialEq)]
 pub struct ImageGridProps {
@@ -106,7 +117,7 @@ fn ImageTile(props: ImageTileProps) -> Element {
         .alt
         .clone()
         .unwrap_or_else(|| format!("Image {}", props.index + 1));
-    let url_for_error = props.image.url.clone();
+    let url_for_error = redact_url_for_logging(&props.image.url);
 
     rsx! {
         button {

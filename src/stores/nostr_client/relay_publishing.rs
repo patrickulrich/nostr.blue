@@ -131,7 +131,13 @@ pub async fn send_presigned_event_to_relays(
     relay_urls: Vec<String>,
 ) -> std::result::Result<PublishResult, String> {
     let client = get_client().ok_or("Client not initialized")?;
-    let urls = parse_relay_urls(&relay_urls)?;
+    let urls = parse_relay_urls(&relay_urls)?
+        .into_iter()
+        .filter(|relay_url| !relay::is_relay_blocked(relay_url.as_str()))
+        .collect::<Vec<_>>();
+    if urls.is_empty() {
+        return Err("No unblocked relay URLs provided".to_string());
+    }
     for relay_url in &urls {
         if !relay::ensure_connected(&client, relay_url.as_str()).await {
             log::warn!("Broadcast relay unavailable: {}", relay_url);

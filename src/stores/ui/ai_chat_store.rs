@@ -5,14 +5,6 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))))]
 use crate::platform::storage;
 
-#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
-const DB_NAME: &str = "nostr_blue_ai_providers";
-#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
-const DB_VERSION: u32 = 2;
-#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
-const STORE_SETTINGS: &str = "settings";
-#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
-const STORE_CHAT_HISTORY: &str = "chat_history";
 #[cfg(not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))))]
 const STORAGE_KEY_PREFIX: &str = "nostr_blue_ai_chat_history";
 const ANONYMOUS_ACCOUNT_KEY: &str = "anonymous";
@@ -57,9 +49,9 @@ fn storage_key(account_key: &str) -> String {
 
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 mod web_db {
-    use super::{PersistedChatMessage, DB_NAME, DB_VERSION, STORE_CHAT_HISTORY, STORE_SETTINGS};
+    use super::PersistedChatMessage;
+    use crate::stores::ui::ai_web_db::{open_ai_db_with_schema, STORE_CHAT_HISTORY};
     use indexed_db_futures::prelude::*;
-    use std::future::IntoFuture;
     use std::rc::Rc;
     use wasm_bindgen::JsValue;
     use web_sys::IdbTransactionMode;
@@ -69,27 +61,18 @@ mod web_db {
         db: Rc<IdbDatabase>,
     }
 
+    // SAFETY: this wrapper is only used in the WASM web build, where the app runs on the
+    // browser main thread. We never move the underlying `Rc<IdbDatabase>` to worker threads,
+    // and the handle has no unsynchronized shared mutation beyond IndexedDB's own API.
+    // These impls rely on that single-threaded platform constraint.
     unsafe impl Send for AiChatDb {}
     unsafe impl Sync for AiChatDb {}
 
     impl AiChatDb {
         pub async fn new() -> Result<Self, String> {
-            let mut db_req: OpenDbRequest = IdbDatabase::open_u32(DB_NAME, DB_VERSION)
-                .map_err(|e| format!("Failed to open AI chat database: {:?}", e))?;
-            db_req.set_on_upgrade_needed(Some(|evt: &IdbVersionChangeEvent| {
-                let db = evt.db();
-                if !db.object_store_names().any(|n| n == STORE_SETTINGS) {
-                    db.create_object_store(STORE_SETTINGS)?;
-                }
-                if !db.object_store_names().any(|n| n == STORE_CHAT_HISTORY) {
-                    db.create_object_store(STORE_CHAT_HISTORY)?;
-                }
-                Ok(())
-            }));
-            let db: IdbDatabase = db_req
-                .into_future()
+            let db = open_ai_db_with_schema("AI chat")
                 .await
-                .map_err(|e| format!("Failed to open AI chat database: {:?}", e))?;
+                .map_err(|e| format!("Failed to open AI chat database: {}", e))?;
             Ok(Self { db: Rc::new(db) })
         }
 

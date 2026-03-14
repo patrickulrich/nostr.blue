@@ -61,7 +61,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
             }
             if *show_picker.read() {
                 div {
-                    class: "fixed inset-0 bg-black/50 z-[59]",
+                    class: "fixed inset-0 z-50 bg-black/50 backdrop-blur-sm",
                     onclick: move |_| {
                         show_picker.set(false);
                         show_upload_modal.set(false);

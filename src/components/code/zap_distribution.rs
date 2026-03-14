@@ -43,6 +43,36 @@ fn default_relay_urls() -> Vec<RelayUrl> {
         .collect()
 }
 
+fn is_public_relay_url(url: &str) -> bool {
+    let url_lower = url.to_lowercase();
+    if url_lower.contains("localhost") || url_lower.contains("127.0.0.1") {
+        return false;
+    }
+    if url_lower.contains("[::1]") {
+        return false;
+    }
+    if let Some(host_start) = url_lower.find("://") {
+        let after_scheme = &url_lower[host_start + 3..];
+        let host = after_scheme.split(&['/', ':'][..]).next().unwrap_or("");
+        if host.starts_with("10.") || host.starts_with("192.168.") {
+            return false;
+        }
+        if host.starts_with("172.") {
+            if let Some(second) = host.split('.').nth(1) {
+                if let Ok(value) = second.parse::<u8>() {
+                    if (16..=31).contains(&value) {
+                        return false;
+                    }
+                }
+            }
+        }
+        if host.starts_with("fc") || host.starts_with("fd") {
+            return false;
+        }
+    }
+    true
+}
+
 async fn create_repo_zap_invoice(
     recipient_pubkey: &str,
     lud16: Option<&str>,
@@ -62,7 +92,11 @@ async fn create_repo_zap_invoice(
     let client = nostr_client::get_client().ok_or("Nostr client not available".to_string())?;
     let relays = {
         let client_relays = client.relays().await;
-        let mut urls: Vec<RelayUrl> = client_relays.keys().cloned().collect();
+        let mut urls: Vec<RelayUrl> = client_relays
+            .iter()
+            .filter(|(url, relay)| relay.flags().has_write() && is_public_relay_url(url.as_str()))
+            .map(|(url, _)| url.clone())
+            .collect();
         if urls.is_empty() {
             default_relay_urls()
         } else {
@@ -293,14 +327,24 @@ pub fn ZapDistribution(
             let lud06 = profile.as_ref().and_then(|p| p.lud06.clone());
 
             if lud16.is_none() && lud06.is_none() {
-                toast.error(
-                    "One or more selected recipients do not have a Lightning address".to_string(),
+                toast.warning(
+                    format!(
+                        "Skipping {}: no Lightning address",
+                        truncate_pubkey(&recip.pubkey)
+                    ),
                     ToastOptions::new(),
                 );
-                return;
+                continue;
             }
 
             eligible_with_lightning.push((recip, lud16, lud06));
+        }
+        if eligible_with_lightning.is_empty() {
+            toast.warning(
+                "No recipients with Lightning addresses were eligible for sending".to_string(),
+                ToastOptions::new(),
+            );
+            return;
         }
         let eligible_pubkeys = eligible_with_lightning
             .iter()

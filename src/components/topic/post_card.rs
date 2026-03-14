@@ -14,7 +14,7 @@ use wasm_bindgen::JsCast;
 
 #[cfg(feature = "web")]
 const INTERACTIVE_ELEMENT_SELECTOR: &str =
-    "a, button, input, textarea, select, summary, audio, [role=\"button\"], [role=\"link\"], [contenteditable=\"true\"]";
+    "a, button, input, textarea, select, summary, audio, [role=\"button\"], [role=\"link\"]:not([data-post-card-root]), [contenteditable=\"true\"]";
 
 /// Reddit-style topic post card
 #[component]
@@ -75,6 +75,7 @@ pub fn TopicPostCard(
                 // Post content — use div+onclick instead of Link to avoid nested <a> when content contains links
                 div {
                     class: "block cursor-pointer",
+                    "data-post-card-root": "true",
                     role: "link",
                     tabindex: "0",
                     onkeydown: move |evt: KeyboardEvent| {

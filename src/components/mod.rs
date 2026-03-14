@@ -1,6 +1,6 @@
+pub mod ai_settings_panel;
 pub mod article_card;
 pub mod article_content;
-pub mod ai_settings_panel;
 pub mod badge_detail_modal;
 pub mod book_picker_modal;
 pub mod cashu;
@@ -51,9 +51,9 @@ pub mod wallet_balance_card;
 pub mod webbookmark_card;
 pub mod webbookmark_modal;
 pub mod zap_modal;
+pub use ai_settings_panel::AiSettingsPanel;
 pub use article_card::{ArticleCard, ArticleCardSkeleton};
 pub use article_content::ArticleContent;
-pub use ai_settings_panel::AiSettingsPanel;
 pub use client_initializing::ClientInitializing;
 pub use comment_composer::CommentComposer;
 pub use confirm_modal::ConfirmModal;

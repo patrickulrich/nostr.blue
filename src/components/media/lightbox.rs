@@ -27,13 +27,7 @@ fn contain_fit_extent(intrinsic: (f64, f64), viewport: (f64, f64)) -> (f64, f64)
     (intrinsic_w * scale, intrinsic_h * scale)
 }
 
-fn clamp_pan(
-    x: f64,
-    y: f64,
-    zoom: f64,
-    intrinsic: (f64, f64),
-    viewport: (f64, f64),
-) -> (f64, f64) {
+fn clamp_pan(x: f64, y: f64, zoom: f64, intrinsic: (f64, f64), viewport: (f64, f64)) -> (f64, f64) {
     let displayed = contain_fit_extent(intrinsic, viewport);
     (
         clamp_pan_component(x, zoom, displayed.0),
@@ -79,7 +73,9 @@ pub fn MediaLightbox() -> Element {
         return rsx! {};
     }
 
-    let current_index = state.current_index.min(state.images.len().saturating_sub(1));
+    let current_index = state
+        .current_index
+        .min(state.images.len().saturating_sub(1));
     let current_image = state.images[current_index].clone();
     let current_alt = current_image
         .alt
@@ -336,7 +332,7 @@ pub fn MediaLightbox() -> Element {
                                     } else {
                                         media::next_image();
                                     }
-                                    swipe_start.set(Some((coords.x, coords.y)));
+                                    swipe_start.set(None);
                                 }
                             }
                         }
@@ -357,7 +353,24 @@ pub fn MediaLightbox() -> Element {
                                 if let Some(element) = _evt.data().downcast::<web_sys::HtmlElement>() {
                                     let rect = element.get_bounding_client_rect();
                                     if rect.width() > 0.0 && rect.height() > 0.0 {
-                                        image_intrinsic_size.set((rect.width(), rect.height()));
+                                        viewport_size.set((rect.width(), rect.height()));
+                                    }
+                                    let natural_width = js_sys::Reflect::get(
+                                        element.as_ref(),
+                                        &wasm_bindgen::JsValue::from_str("naturalWidth"),
+                                    )
+                                    .ok()
+                                    .and_then(|value| value.as_f64())
+                                    .unwrap_or(0.0);
+                                    let natural_height = js_sys::Reflect::get(
+                                        element.as_ref(),
+                                        &wasm_bindgen::JsValue::from_str("naturalHeight"),
+                                    )
+                                    .ok()
+                                    .and_then(|value| value.as_f64())
+                                    .unwrap_or(0.0);
+                                    if natural_width > 0.0 && natural_height > 0.0 {
+                                        image_intrinsic_size.set((natural_width, natural_height));
                                     }
                                 }
                             }
