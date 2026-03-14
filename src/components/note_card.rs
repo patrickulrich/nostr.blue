@@ -592,6 +592,7 @@ pub fn NoteCard(
                             NoteMenu {
                                 author_pubkey: author_pubkey.clone(),
                                 event_id: event_id.clone(),
+                                event: event.clone(),
                             }
                         }
                         // Topic badge for kind 1111 posts with NIP-73 hashtag
@@ -615,6 +616,7 @@ pub fn NoteCard(
                                 content: content.clone(),
                                 tags: event.tags.iter().cloned().collect(),
                                 collapsible,
+                                interactive_media: true,
                             }
                         }
                         {

@@ -121,13 +121,22 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
         TrackSource::RssPodcast {
             feed_url,
             episode_guid,
+            podcast_id,
             ..
         } => (
-            format!(
-                "https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
-                urlencoding::encode(feed_url),
-                urlencoding::encode(episode_guid),
-            ),
+            if let Some(id) = podcast_id {
+                format!(
+                    "https://nostr.blue/podcast/rss/episode/{}/{}",
+                    id,
+                    urlencoding::encode(episode_guid),
+                )
+            } else {
+                format!(
+                    "https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
+                    urlencoding::encode(feed_url),
+                    urlencoding::encode(episode_guid),
+                )
+            },
             ContentType::PodcastEpisode,
         ),
         TrackSource::RssMusic {

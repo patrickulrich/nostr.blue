@@ -70,6 +70,8 @@ pub static SEARCH_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
 pub static BLOCKED_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
 /// Local relays (stored in browser, not published to Nostr)
 pub static LOCAL_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
+/// Broadcast relays (stored locally, used for manual re-broadcasting only)
+pub static BROADCAST_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
 /// Default search relay URLs (NIP-50 compatible)
 pub const DEFAULT_SEARCH_RELAYS: &[&str] = &["wss://relay.nostr.band", "wss://search.nos.today"];
 /// Default search relays to use when no kind 10007 is found
@@ -488,6 +490,7 @@ pub async fn fetch_blocked_relays(
     Ok(relays)
 }
 const LOCAL_RELAYS_KEY: &str = "nostr_blue_local_relays";
+const BROADCAST_RELAYS_KEY: &str = "nostr_blue_broadcast_relays";
 /// Load local relays from storage (web uses LocalStorage, native uses filesystem)
 #[cfg(feature = "web")]
 pub fn load_local_relays() -> Vec<String> {
@@ -503,6 +506,26 @@ pub fn load_local_relays() -> Vec<String> {
                 "Failed to load local relays from storage: {}, key: {}",
                 e,
                 LOCAL_RELAYS_KEY
+            );
+            Vec::new()
+        }
+    }
+}
+/// Load broadcast relays from storage (web uses LocalStorage, native uses filesystem)
+#[cfg(feature = "web")]
+pub fn load_broadcast_relays() -> Vec<String> {
+    match storage::get::<Vec<String>>(BROADCAST_RELAYS_KEY) {
+        Ok(relays) => relays,
+        Err(e) => {
+            let lower = e.to_lowercase();
+            if lower.contains("not found") || lower.contains("missing") || lower.contains("no key")
+            {
+                return Vec::new();
+            }
+            log::error!(
+                "Failed to load broadcast relays from storage: {}, key: {}",
+                e,
+                BROADCAST_RELAYS_KEY
             );
             Vec::new()
         }
@@ -531,11 +554,41 @@ pub fn load_local_relays() -> Vec<String> {
         _ => Vec::new(),
     }
 }
+#[cfg(feature = "native")]
+pub fn load_broadcast_relays() -> Vec<String> {
+    let path = dirs::config_dir().map(|p| {
+        p.join("nostr_blue")
+            .join(format!("{}.json", BROADCAST_RELAYS_KEY))
+    });
+    match path {
+        Some(p) if p.exists() => match fs::read_to_string(&p) {
+            Ok(json) => match serde_json::from_str(&json) {
+                Ok(relays) => relays,
+                Err(e) => {
+                    log::error!("Failed to parse broadcast relays JSON from {:?}: {}", p, e);
+                    Vec::new()
+                }
+            },
+            Err(e) => {
+                log::error!("Failed to read broadcast relays file {:?}: {}", p, e);
+                Vec::new()
+            }
+        },
+        _ => Vec::new(),
+    }
+}
 /// Save local relays to browser LocalStorage (web-only)
 #[cfg(feature = "web")]
 pub fn save_local_relays(relays: &[String]) {
     if let Err(e) = storage::set(LOCAL_RELAYS_KEY, &relays) {
         log::error!("Failed to save local relays: {}", e);
+    }
+}
+/// Save broadcast relays to browser LocalStorage (web-only)
+#[cfg(feature = "web")]
+pub fn save_broadcast_relays(relays: &[String]) {
+    if let Err(e) = storage::set(BROADCAST_RELAYS_KEY, &relays) {
+        log::error!("Failed to save broadcast relays: {}", e);
     }
 }
 #[cfg(feature = "native")]
@@ -576,6 +629,48 @@ pub fn save_local_relays(relays: &[String]) {
         }
     }
 }
+#[cfg(feature = "native")]
+pub fn save_broadcast_relays(relays: &[String]) {
+    let Some(config_dir) = dirs::config_dir().map(|p| p.join("nostr_blue")) else {
+        log::error!("Could not determine config directory for broadcast relays");
+        return;
+    };
+    if let Err(e) = fs::create_dir_all(&config_dir) {
+        log::error!(
+            "Failed to create config directory {:?} for broadcast relays: {}",
+            config_dir,
+            e
+        );
+        return;
+    }
+    let path = config_dir.join(format!("{}.json", BROADCAST_RELAYS_KEY));
+    let temp_path = config_dir.join(format!("{}.json.tmp", BROADCAST_RELAYS_KEY));
+    match serde_json::to_string(relays) {
+        Ok(json) => {
+            if let Err(e) = fs::write(&temp_path, &json) {
+                log::error!(
+                    "Failed to write broadcast relays temp file {:?}: {}",
+                    temp_path,
+                    e
+                );
+                let _ = fs::remove_file(&temp_path);
+                return;
+            }
+            if let Err(e) = fs::rename(&temp_path, &path) {
+                log::error!(
+                    "Failed to atomically replace broadcast relays {:?} with {:?}: {}",
+                    path,
+                    temp_path,
+                    e
+                );
+                let _ = fs::remove_file(&temp_path);
+            }
+        }
+        Err(e) => {
+            log::error!("Failed to serialize broadcast relays: {}", e);
+        }
+    }
+}
 /// Initialize local relays from cache
 /// Call during app init BEFORE async client init
 pub fn init_local_relays_from_cache() {
@@ -583,6 +678,14 @@ pub fn init_local_relays_from_cache() {
     if !relays.is_empty() {
         log::info!("Loaded {} local relays from cache", relays.len());
         *LOCAL_RELAYS.write() = relays;
+    }
+    let broadcast_relays = load_broadcast_relays();
+    if !broadcast_relays.is_empty() {
+        log::info!(
+            "Loaded {} broadcast relays from cache",
+            broadcast_relays.len()
+        );
+        *BROADCAST_RELAYS.write() = broadcast_relays;
     }
 }
 /// Add local relays to the client connection pool

@@ -170,6 +170,7 @@ pub fn CommunityPostCard(
                 RichContent {
                     content: post.content.clone(),
                     tags: post.event.tags.iter().cloned().collect(),
+                    interactive_media: true,
                 }
             }
             if show_actions {

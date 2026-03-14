@@ -18,6 +18,7 @@ pub mod gif_upload_modal;
 pub mod icons;
 pub mod live;
 pub mod markdown_editor;
+pub mod media;
 pub mod media_uploader;
 pub mod mention_autocomplete;
 pub mod mobile_search_slideout;
@@ -58,6 +59,7 @@ pub use confirm_modal::ConfirmModal;
 pub use live::{
     ChannelChat, LiveChat, LiveStreamPlayer, LiveStreamShareModal, MiniLiveStreamCard, StreamStatus,
 };
+pub use media::MediaLightbox;
 pub use media_uploader::MediaUploader;
 pub use mobile_search_slideout::MobileSearchSlideout;
 pub use note_card::{NoteCard, NoteCardSkeleton};

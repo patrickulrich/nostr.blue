@@ -6,6 +6,7 @@
 use super::fetching::get_client;
 use super::signals::HAS_SIGNER;
 use super::types::PublishResult;
+use crate::stores::relay;
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
 /// Parse relay URLs with validation logging and deduplication
@@ -130,6 +131,11 @@ pub async fn send_presigned_event_to_relays(
     relay_urls: Vec<String>,
 ) -> std::result::Result<PublishResult, String> {
     let client = get_client().ok_or("Client not initialized")?;
+    for relay_url in &relay_urls {
+        if !relay::ensure_connected(&client, relay_url).await {
+            log::warn!("Broadcast relay unavailable: {}", relay_url);
+        }
+    }
     let urls = parse_relay_urls(&relay_urls)?;
     let output = client
         .send_event_to(urls, &event)
@@ -148,4 +154,12 @@ pub async fn send_presigned_event_to_relays(
         }
     }
     Ok(result)
+}
+
+/// Broadcast an existing signed event to additional relays.
+pub async fn broadcast_presigned_event(
+    event: nostr::Event,
+    relay_urls: Vec<String>,
+) -> std::result::Result<PublishResult, String> {
+    send_presigned_event_to_relays(event, relay_urls).await
 }

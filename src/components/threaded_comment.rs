@@ -427,6 +427,7 @@ pub fn ThreadedComment(
                                 RichContent {
                                     content: event.content.clone(),
                                     tags: event.tags.clone().to_vec(),
+                                    interactive_media: true,
                                 }
                             }
                         }

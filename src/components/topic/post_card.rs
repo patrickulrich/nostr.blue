@@ -119,6 +119,7 @@ pub fn TopicPostCard(
                         RichContent {
                             content: post.content.clone(),
                             tags: post.event.tags.to_vec(),
+                            interactive_media: true,
                         }
                     }
                 }
