@@ -14,6 +14,7 @@ use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use futures::future::{select, Either};
 use nostr_sdk::{EventId, PublicKey, RelayUrl};
+use url::{Host, Url};
 use std::collections::HashSet;
 
 /// A single recipient in the zap distribution
@@ -44,33 +45,41 @@ fn default_relay_urls() -> Vec<RelayUrl> {
 }
 
 fn is_public_relay_url(url: &str) -> bool {
-    let url_lower = url.to_lowercase();
-    if url_lower.contains("localhost") || url_lower.contains("127.0.0.1") {
+    let Ok(parsed) = Url::parse(url) else {
         return false;
-    }
-    if url_lower.contains("[::1]") {
-        return false;
-    }
-    if let Some(host_start) = url_lower.find("://") {
-        let after_scheme = &url_lower[host_start + 3..];
-        let host = after_scheme.split(&['/', ':'][..]).next().unwrap_or("");
-        if host.starts_with("10.") || host.starts_with("192.168.") {
-            return false;
-        }
-        if host.starts_with("172.") {
-            if let Some(second) = host.split('.').nth(1) {
-                if let Ok(value) = second.parse::<u8>() {
-                    if (16..=31).contains(&value) {
-                        return false;
-                    }
-                }
+    };
+
+    match parsed.host() {
+        Some(Host::Ipv4(ip)) => {
+            let octets = ip.octets();
+            if octets[0] == 127 || octets[0] == 10 {
+                return false;
             }
+            if octets[0] == 172 && (16..=31).contains(&octets[1]) {
+                return false;
+            }
+            if octets[0] == 192 && octets[1] == 168 {
+                return false;
+            }
+            if octets[0] == 169 && octets[1] == 254 {
+                return false;
+            }
+            true
         }
-        if host.starts_with("fc") || host.starts_with("fd") {
-            return false;
+        Some(Host::Ipv6(ip)) => {
+            if ip.is_loopback() {
+                return false;
+            }
+            let segments = ip.segments();
+            let first = segments[0];
+            (first & 0xfe00) != 0xfc00 && (first & 0xffc0) != 0xfe80
         }
+        Some(Host::Domain(domain)) => {
+            let domain = domain.to_ascii_lowercase();
+            domain != "localhost" && !domain.ends_with(".local")
+        }
+        None => false,
     }
-    true
 }
 
 async fn create_repo_zap_invoice(

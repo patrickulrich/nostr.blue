@@ -2,6 +2,10 @@ use super::GalleryIndicator;
 use crate::stores::media;
 use dioxus::html::input_data::keyboard_types::Key;
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
+use dioxus_core::use_drop;
+#[cfg(feature = "web")]
+use gloo_events::EventListener;
 
 fn clamp_zoom(zoom: f64) -> f64 {
     zoom.clamp(0.5, 5.0)
@@ -41,6 +45,21 @@ fn distance_between(a: (f64, f64), b: (f64, f64)) -> f64 {
     (dx * dx + dy * dy).sqrt()
 }
 
+fn normalized_alt_text(alt: Option<&str>, index: usize) -> String {
+    alt.map(str::trim)
+        .filter(|alt| !alt.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| format!("Image {}", index + 1))
+}
+
+#[cfg(feature = "web")]
+fn read_window_viewport_size() -> Option<(f64, f64)> {
+    let window = web_sys::window()?;
+    let width = window.inner_width().ok()?.as_f64()?;
+    let height = window.inner_height().ok()?.as_f64()?;
+    Some((width, height))
+}
+
 #[component]
 pub fn MediaLightbox() -> Element {
     let state = media::LIGHTBOX_STATE.read().clone();
@@ -56,6 +75,9 @@ pub fn MediaLightbox() -> Element {
     let mut viewport_size = use_signal(|| (1200.0f64, 800.0f64));
     #[cfg(feature = "native")]
     let viewport_size = use_signal(|| (1200.0f64, 800.0f64));
+    #[cfg(feature = "web")]
+    let mut viewport_resize_listeners =
+        use_signal(|| None::<(EventListener, EventListener)>);
 
     use_effect(use_reactive(
         &(state.is_open, state.current_index),
@@ -69,6 +91,51 @@ pub fn MediaLightbox() -> Element {
         },
     ));
 
+    #[cfg(feature = "web")]
+    use_effect(move || {
+        if viewport_resize_listeners.read().is_some() {
+            return;
+        }
+
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+
+        if let Some(size) = read_window_viewport_size() {
+            viewport_size.set(size);
+        }
+
+        let resize_listener = EventListener::new(&window, "resize", move |_| {
+            if let Some(size) = read_window_viewport_size() {
+                viewport_size.set(size);
+            }
+        });
+
+        let orientation_listener = EventListener::new(&window, "orientationchange", move |_| {
+            if let Some(size) = read_window_viewport_size() {
+                viewport_size.set(size);
+            }
+        });
+
+        viewport_resize_listeners.set(Some((resize_listener, orientation_listener)));
+    });
+
+    #[cfg(feature = "web")]
+    use_drop(move || {
+        viewport_resize_listeners.set(None);
+    });
+
+    use_effect(move || {
+        let zoom = *zoom_level.read();
+        let intrinsic = *image_intrinsic_size.read();
+        let viewport = *viewport_size.read();
+        let current_pan = *pan_offset.read();
+        let clamped_pan = clamp_pan(current_pan.0, current_pan.1, zoom, intrinsic, viewport);
+        if clamped_pan != current_pan {
+            pan_offset.set(clamped_pan);
+        }
+    });
+
     if !state.is_open || state.images.is_empty() {
         return rsx! {};
     }
@@ -77,10 +144,7 @@ pub fn MediaLightbox() -> Element {
         .current_index
         .min(state.images.len().saturating_sub(1));
     let current_image = state.images[current_index].clone();
-    let current_alt = current_image
-        .alt
-        .clone()
-        .unwrap_or_else(|| format!("Image {}", current_index + 1));
+    let current_alt = normalized_alt_text(current_image.alt.as_deref(), current_index);
 
     let previous_url = current_index
         .checked_sub(1)
@@ -215,6 +279,9 @@ pub fn MediaLightbox() -> Element {
                     },
                     onpointerdown: move |evt: PointerEvent| {
                         evt.stop_propagation();
+                        if evt.pointer_type() == "touch" {
+                            return;
+                        }
                         if *zoom_level.read() <= 1.0 {
                             return;
                         }
@@ -226,6 +293,9 @@ pub fn MediaLightbox() -> Element {
                         ));
                     },
                     onpointermove: move |evt: PointerEvent| {
+                        if evt.pointer_type() == "touch" {
+                            return;
+                        }
                         if !*is_dragging.read() {
                             return;
                         }
@@ -243,10 +313,16 @@ pub fn MediaLightbox() -> Element {
                             *viewport_size.read(),
                         ));
                     },
-                    onpointerup: move |_| {
+                    onpointerup: move |evt: PointerEvent| {
+                        if evt.pointer_type() == "touch" {
+                            return;
+                        }
                         is_dragging.set(false);
                     },
-                    onpointercancel: move |_| {
+                    onpointercancel: move |evt: PointerEvent| {
+                        if evt.pointer_type() == "touch" {
+                            return;
+                        }
                         is_dragging.set(false);
                     },
                     ontouchstart: move |evt| {

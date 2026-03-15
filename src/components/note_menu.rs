@@ -320,35 +320,37 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                                 is_open.set(false);
                                 spawn(async move {
                                     match nostr_client::broadcast_presigned_event(event, relay_urls).await {
-                                        Ok(result) if result.is_success() => {
-                                            let title = if result.has_failures() {
-                                                "Broadcast partially succeeded"
-                                            } else {
-                                                "Broadcast complete"
-                                            };
-                                            toast_api.success(
-                                                title.to_string(),
-                                                ToastOptions::new()
-                                                    .description(format!(
-                                                        "Delivered to {}/{} relays",
-                                                        result.success_count(),
-                                                        result.total_attempted()
-                                                    ))
-                                                    .duration(Duration::from_secs(3))
-                                                    .permanent(false),
-                                            );
-                                        }
                                         Ok(result) => {
-                                            toast_api.error(
-                                                "Broadcast failed".to_string(),
-                                                ToastOptions::new()
-                                                    .description(format!(
-                                                        "0/{} relays accepted the event",
-                                                        result.total_attempted()
-                                                    ))
-                                                    .duration(Duration::from_secs(3))
-                                                    .permanent(false),
-                                            );
+                                            let result = result.ignoring_duplicate_event_failures();
+                                            if result.is_success() {
+                                                let title = if result.has_failures() {
+                                                    "Broadcast partially succeeded"
+                                                } else {
+                                                    "Broadcast complete"
+                                                };
+                                                toast_api.success(
+                                                    title.to_string(),
+                                                    ToastOptions::new()
+                                                        .description(format!(
+                                                            "Delivered to {}/{} relays",
+                                                            result.success_count(),
+                                                            result.total_attempted()
+                                                        ))
+                                                        .duration(Duration::from_secs(3))
+                                                        .permanent(false),
+                                                );
+                                            } else {
+                                                toast_api.error(
+                                                    "Broadcast failed".to_string(),
+                                                    ToastOptions::new()
+                                                        .description(format!(
+                                                            "0/{} relays accepted the event",
+                                                            result.total_attempted()
+                                                        ))
+                                                        .duration(Duration::from_secs(3))
+                                                        .permanent(false),
+                                                );
+                                            }
                                         }
                                         Err(e) => {
                                             toast_api.error(

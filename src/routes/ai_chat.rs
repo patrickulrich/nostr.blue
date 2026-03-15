@@ -59,11 +59,15 @@ pub fn AIChat() -> Element {
     let mut provider_state_loaded = use_signal(|| false);
     let mut chat_history_loaded = use_signal(|| false);
     let mut chat_history_generation = use_signal(|| 0u64);
+    let mut persisted_messages_dirty = use_signal(|| false);
+    let mut initial_loaded_messages = use_signal(Vec::<PersistedChatMessage>::new);
     let messages_container_id = use_signal(|| "ai-chat-messages".to_string());
     let account_key = ai_chat_store::current_account_key();
     let provider_state_ready = *provider_state_loaded.read();
     let chat_history_ready = *chat_history_loaded.read();
     let chat_history_generation_value = *chat_history_generation.read();
+    let persisted_messages_dirty_value = *persisted_messages_dirty.read();
+    let initial_loaded_messages_value = initial_loaded_messages.read().clone();
     let has_signer = *nostr_client::HAS_SIGNER.read();
     let selected_provider_id_for_models = provider_state.read().selected_provider_id.clone();
     let persisted_messages: Vec<PersistedChatMessage> = messages
@@ -116,6 +120,8 @@ pub fn AIChat() -> Element {
     use_effect(use_reactive(&account_key, move |_| {
         messages.set(Vec::new());
         chat_history_loaded.set(false);
+        persisted_messages_dirty.set(false);
+        initial_loaded_messages.set(Vec::new());
         let next_generation = chat_history_generation.read().wrapping_add(1);
         chat_history_generation.set(next_generation);
     }));
@@ -139,6 +145,8 @@ pub fn AIChat() -> Element {
                         if *chat_history_generation.read() != generation {
                             return;
                         }
+                        initial_loaded_messages.set(history.clone());
+                        persisted_messages_dirty.set(false);
                         messages.set(
                             history
                                 .into_iter()
@@ -161,22 +169,45 @@ pub fn AIChat() -> Element {
     ));
 
     use_effect(use_reactive(
-        (&account_key, &chat_history_ready, &persisted_messages),
-        move |(account_key, chat_history_ready, persisted_messages)| {
-            if !chat_history_ready {
+        (
+            &account_key,
+            &chat_history_ready,
+            &persisted_messages,
+            &persisted_messages_dirty_value,
+            &initial_loaded_messages_value,
+        ),
+        move |(
+            account_key,
+            chat_history_ready,
+            persisted_messages,
+            persisted_messages_dirty_value,
+            initial_loaded_messages_snapshot,
+        )| {
+            if !chat_history_ready
+                || !persisted_messages_dirty_value
+                || persisted_messages == initial_loaded_messages_snapshot
+            {
                 return;
             }
 
             let account_key = account_key.clone();
             let persisted_messages = persisted_messages.clone();
+            let mut persisted_messages_dirty_signal = persisted_messages_dirty;
+            let mut initial_loaded_messages_signal = initial_loaded_messages;
             spawn(async move {
                 let result = if persisted_messages.is_empty() {
                     ai_chat_store::clear_chat_history(&account_key).await
                 } else {
                     ai_chat_store::save_chat_history(&account_key, &persisted_messages).await
                 };
-                if let Err(e) = result {
-                    error.set(Some(e));
+                match result {
+                    Ok(()) => {
+                        persisted_messages_dirty_signal.set(false);
+                        initial_loaded_messages_signal.set(persisted_messages);
+                    }
+                    Err(e) => {
+                        error.set(Some(e));
+                    }
                 }
             });
         },
@@ -335,6 +366,7 @@ pub fn AIChat() -> Element {
                             title: "Clear conversation",
                             onclick: move |_| {
                                 messages.set(Vec::new());
+                                persisted_messages_dirty.set(true);
                                 error.set(None);
                             },
                             TrashIcon { class: "w-4 h-4".to_string() }
@@ -398,7 +430,15 @@ pub fn AIChat() -> Element {
                             onkeydown: move |evt| {
                                 if evt.key() == Key::Enter && !evt.modifiers().shift() {
                                     evt.prevent_default();
-                                    submit_message(input, selected_model, loading, error, messages, provider_for_keydown.clone());
+                                    submit_message(
+                                        input,
+                                        selected_model,
+                                        loading,
+                                        error,
+                                        messages,
+                                        persisted_messages_dirty,
+                                        provider_for_keydown.clone(),
+                                    );
                                 }
                             },
                         }
@@ -411,7 +451,17 @@ pub fn AIChat() -> Element {
                                     "inline-flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-primary-foreground transition hover:bg-primary/90"
                                 },
                                 disabled: input.read().trim().is_empty() || selected_model.read().is_empty() || *loading.read() || shakespeare_blocked,
-                                onclick: move |_| submit_message(input, selected_model, loading, error, messages, provider_for_click.clone()),
+                                onclick: move |_| {
+                                    submit_message(
+                                        input,
+                                        selected_model,
+                                        loading,
+                                        error,
+                                        messages,
+                                        persisted_messages_dirty,
+                                        provider_for_click.clone(),
+                                    )
+                                },
                                 SendIcon { class: "w-4 h-4".to_string() }
                             }
                         }
@@ -526,6 +576,7 @@ fn submit_message(
     mut loading: Signal<bool>,
     mut error: Signal<Option<String>>,
     mut messages: Signal<Vec<DisplayMessage>>,
+    mut persisted_messages_dirty: Signal<bool>,
     provider: AiProviderConfig,
 ) {
     if *loading.read() {
@@ -546,6 +597,7 @@ fn submit_message(
     let mut next_messages = messages.read().clone();
     next_messages.push(user_message);
     messages.set(next_messages.clone());
+    persisted_messages_dirty.set(true);
     input.set(String::new());
     error.set(None);
     loading.set(true);
@@ -559,8 +611,16 @@ fn submit_message(
 
         match send_chat_message(&provider, &base_request).await {
             Ok(response) => {
-                apply_chat_response(response, next_messages, model, provider, messages, error)
-                    .await;
+                apply_chat_response(
+                    response,
+                    next_messages,
+                    model,
+                    provider,
+                    messages,
+                    error,
+                    persisted_messages_dirty,
+                )
+                .await;
             }
             Err(e) => {
                 error.set(Some(e));
@@ -599,6 +659,7 @@ async fn apply_chat_response(
     provider: AiProviderConfig,
     mut messages: Signal<Vec<DisplayMessage>>,
     mut error: Signal<Option<String>>,
+    mut persisted_messages_dirty: Signal<bool>,
 ) {
     let Some(choice) = response.choices.into_iter().next() else {
         error.set(Some(
@@ -617,6 +678,7 @@ async fn apply_chat_response(
             tool_calls: Vec::new(),
         });
         messages.set(next_messages);
+        persisted_messages_dirty.set(true);
         return;
     }
 
@@ -629,6 +691,7 @@ async fn apply_chat_response(
             tool_calls: Vec::new(),
         });
         messages.set(next_messages);
+        persisted_messages_dirty.set(true);
         return;
     }
 
@@ -644,6 +707,7 @@ async fn apply_chat_response(
         tool_calls: executed.clone(),
     });
     messages.set(intermediate_messages.clone());
+    persisted_messages_dirty.set(true);
 
     let mut follow_up_messages = build_api_messages(&prior_messages);
     follow_up_messages.push(ChatMessage {
@@ -677,6 +741,7 @@ async fn apply_chat_response(
                     tool_calls: Vec::new(),
                 });
                 messages.set(final_messages);
+                persisted_messages_dirty.set(true);
             } else {
                 error.set(Some(
                     "Follow-up response did not include any choices".to_string(),

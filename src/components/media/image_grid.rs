@@ -4,6 +4,8 @@ use url::Url;
 
 fn redact_url_for_logging(input: &str) -> String {
     if let Ok(mut url) = Url::parse(input) {
+        let _ = url.set_username("");
+        let _ = url.set_password(None);
         url.set_query(None);
         url.set_fragment(None);
         return url.to_string();
@@ -116,6 +118,8 @@ fn ImageTile(props: ImageTileProps) -> Element {
         .image
         .alt
         .clone()
+        .map(|alt| alt.trim().to_string())
+        .filter(|alt| !alt.is_empty())
         .unwrap_or_else(|| format!("Image {}", props.index + 1));
     let url_for_error = redact_url_for_logging(&props.image.url);
 

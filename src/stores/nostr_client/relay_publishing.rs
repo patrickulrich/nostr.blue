@@ -8,6 +8,7 @@ use super::signals::HAS_SIGNER;
 use super::types::PublishResult;
 use crate::stores::relay;
 use dioxus::prelude::ReadableExt;
+use futures::future::join_all;
 use nostr_sdk::prelude::*;
 /// Parse relay URLs with validation logging and deduplication
 ///
@@ -138,8 +139,18 @@ pub async fn send_presigned_event_to_relays(
     if urls.is_empty() {
         return Err("No unblocked relay URLs provided".to_string());
     }
-    for relay_url in &urls {
-        if !relay::ensure_connected(&client, relay_url.as_str()).await {
+    for (relay_url, connected) in join_all(
+        urls.iter().map(|relay_url| {
+            let client = client.clone();
+            async move {
+                let connected = relay::ensure_connected(&client, relay_url.as_str()).await;
+                (relay_url, connected)
+            }
+        }),
+    )
+    .await
+    {
+        if !connected {
             log::warn!("Broadcast relay unavailable: {}", relay_url);
         }
     }

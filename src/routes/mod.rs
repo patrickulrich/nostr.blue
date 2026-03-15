@@ -1483,6 +1483,10 @@ mod tests {
             Some(Route::Articles {})
         );
         assert_eq!(
+            fallback_route_for(&Route::SettingsAi {}),
+            Some(Route::Settings {})
+        );
+        assert_eq!(
             fallback_route_for(&Route::SettingsRelays {}),
             Some(Route::Settings {})
         );
