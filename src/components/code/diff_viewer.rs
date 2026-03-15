@@ -620,11 +620,9 @@ pub fn DiffViewer(
                                                                             }
                                                                         }
                                                                         td {
-                                                                            class: match (row.right_kind, has_commenting, row.right_num.is_some(), is_active) {
-                                                                                (SideKind::Add, true, true, _) => "w-1/2 px-2 whitespace-pre bg-green-500/10",
-                                                                                (SideKind::Add, _, _, _) => "w-1/2 px-2 whitespace-pre bg-green-500/10",
-                                                                                (SideKind::Empty, _, _, _) => "w-1/2 px-2 whitespace-pre bg-muted/30",
-                                                                                (_, true, true, _) => "w-1/2 px-2 whitespace-pre",
+                                                                            class: match row.right_kind {
+                                                                                SideKind::Add => "w-1/2 px-2 whitespace-pre bg-green-500/10",
+                                                                                SideKind::Empty => "w-1/2 px-2 whitespace-pre bg-muted/30",
                                                                                 _ => "w-1/2 px-2 whitespace-pre",
                                                                             },
                                                                             if has_commenting && row.right_num.is_some() {

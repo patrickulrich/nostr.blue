@@ -34,17 +34,33 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
     let mut is_broadcasting = use_signal(|| false);
     let toast = consume_toast();
     let event = props.event.clone();
-    let author_pubkey = event.pubkey.to_hex();
-    let event_id = event.id.to_hex();
-    if props.author_pubkey != author_pubkey || props.event_id != event_id {
+    let parsed_author = PublicKey::parse(&props.author_pubkey).ok();
+    let parsed_event_id = EventId::from_hex(&props.event_id)
+        .ok()
+        .or_else(|| EventId::from_bech32(&props.event_id).ok());
+    let identities_match =
+        parsed_author == Some(event.pubkey) && parsed_event_id == Some(event.id);
+    if !identities_match {
         log::error!(
             "NoteMenu identity mismatch: props=({}, {}), event=({}, {})",
             props.author_pubkey,
             props.event_id,
-            author_pubkey,
-            event_id
+            event.pubkey,
+            event.id
         );
+        return rsx! {
+            div { class: "relative",
+                button {
+                    class: "p-2 rounded-full text-muted-foreground/50 cursor-not-allowed",
+                    disabled: true,
+                    title: "Note actions unavailable due to mismatched event identity",
+                    MoreHorizontalIcon { class: "h-5 w-5".to_string(), filled: false }
+                }
+            }
+        };
     }
+    let author_pubkey = props.author_pubkey.clone();
+    let event_id = props.event_id.clone();
     let author_pubkey_follow_check = author_pubkey.clone();
     let author_pubkey_follow_action = author_pubkey.clone();
     let author_pubkey_block = author_pubkey.clone();

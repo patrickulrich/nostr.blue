@@ -297,7 +297,20 @@ pub fn ZapDistribution(
             && *persisted_send_total.read() == amount
             && persisted_send_pubkeys.read().as_slice() == pubkeys.as_slice();
         let persisted_amounts = if should_use_persisted_amounts {
-            persisted_sendable_amounts.read().clone()
+            let persisted_snapshot = persisted_sendable_amounts.read().clone();
+            let persisted_amounts = pubkeys
+                .iter()
+                .map(|pubkey| {
+                    (
+                        pubkey.clone(),
+                        persisted_snapshot.get(pubkey).copied().unwrap_or(0),
+                    )
+                })
+                .collect::<std::collections::HashMap<_, _>>();
+            persisted_send_pubkeys.set(pubkeys.clone());
+            persisted_send_total.set(amount);
+            persisted_sendable_amounts.set(persisted_amounts.clone());
+            persisted_amounts
         } else {
             persisted_send_pubkeys.set(Vec::new());
             persisted_send_total.set(0);
@@ -411,12 +424,16 @@ pub fn ZapDistribution(
             })
             .collect();
         {
+            let full_amount_map = modal_pubkeys
+                .iter()
+                .map(|pubkey| (pubkey.clone(), amount_map.get(pubkey).copied().unwrap_or(0)))
+                .collect::<std::collections::HashMap<_, _>>();
             persisted_send_pubkeys.set(modal_pubkeys);
             persisted_send_total.set(*total_amount.read());
-            persisted_sendable_amounts.set(amount_map.clone());
+            persisted_sendable_amounts.set(full_amount_map.clone());
             let mut current = recipients.write();
             for recip in current.iter_mut() {
-                if let Some(amount) = amount_map.get(&recip.pubkey).copied() {
+                if let Some(amount) = full_amount_map.get(&recip.pubkey).copied() {
                     recip.amount = amount;
                 } else {
                     recip.amount = 0;

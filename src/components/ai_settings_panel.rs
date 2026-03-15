@@ -3,6 +3,7 @@ use crate::stores::ai_provider_store::{
     AiProviderKind, AiProviderState, CustomAiProvider, ProviderAuth,
 };
 use dioxus::prelude::*;
+use std::net::IpAddr;
 use url::Url;
 
 #[component]
@@ -16,9 +17,10 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
     let mut provider_id = use_signal(String::new);
     let mut base_url = use_signal(String::new);
     let mut api_key = use_signal(String::new);
+    let provider_state_ready = matches!(provider_state_load.read().as_ref(), Some(Ok(_)));
 
     use_effect(move || {
-        if provider_state_load.read().is_some() {
+        if matches!(provider_state_load.read().as_ref(), Some(Ok(_))) {
             return;
         }
 
@@ -107,7 +109,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                                             button {
                                                 r#type: "button",
                                                 class: "rounded-lg border border-border px-3 py-2 text-sm transition hover:bg-accent",
-                                                disabled: *is_saving.read(),
+                                                disabled: !provider_state_ready || *is_saving.read(),
                                                 onclick: move |_| {
                                                     let mut next_state = state.read().clone();
                                                     next_state.selected_provider_id = provider_id_for_use.clone();
@@ -126,7 +128,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                                             button {
                                                 r#type: "button",
                                                 class: "rounded-lg border border-border px-3 py-2 text-sm transition hover:bg-accent",
-                                                disabled: *is_saving.read(),
+                                                disabled: !provider_state_ready || *is_saving.read(),
                                                 onclick: move |_| {
                                                     editing_provider_id.set(Some(provider_id_for_edit.clone()));
                                                     name.set(provider_clone.name.clone());
@@ -143,7 +145,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                                             button {
                                                 r#type: "button",
                                                 class: "rounded-lg border border-red-500/20 px-3 py-2 text-sm text-red-600 transition hover:bg-red-500/10 dark:text-red-400",
-                                                disabled: *is_saving.read(),
+                                                disabled: !provider_state_ready || *is_saving.read(),
                                                 onclick: move |_| {
                                                     let mut next_state = state.read().clone();
                                                     next_state.custom_providers.retain(|item| item.id != provider_id_for_delete);
@@ -195,7 +197,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                             class: "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                             placeholder: "e.g., My Custom API",
                             value: "{name}",
-                            disabled: *is_saving.read(),
+                            disabled: !provider_state_ready || *is_saving.read(),
                             oninput: move |evt| name.set(evt.value()),
                         }
                     }
@@ -205,7 +207,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                             class: "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                             placeholder: "e.g., my-custom-api",
                             value: "{provider_id}",
-                            disabled: *is_saving.read(),
+                            disabled: !provider_state_ready || *is_saving.read(),
                             oninput: move |evt| provider_id.set(evt.value()),
                         }
                     }
@@ -215,7 +217,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                             class: "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                             placeholder: "https://api.example.com/v1",
                             value: "{base_url}",
-                            disabled: *is_saving.read(),
+                            disabled: !provider_state_ready || *is_saving.read(),
                             oninput: move |evt| base_url.set(evt.value()),
                         }
                     }
@@ -230,7 +232,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                             autocomplete: "new-password",
                             class: "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                             value: "{api_key}",
-                            disabled: *is_saving.read(),
+                            disabled: !provider_state_ready || *is_saving.read(),
                             oninput: move |evt| api_key.set(evt.value()),
                         }
                     }
@@ -244,7 +246,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                     button {
                         r#type: "button",
                         class: "rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60",
-                        disabled: *is_saving.read(),
+                        disabled: !provider_state_ready || *is_saving.read(),
                         onclick: move |_| {
                             let editing = editing_provider_id.read().clone();
                             let current_name = name.read().clone();
@@ -315,7 +317,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                         button {
                             r#type: "button",
                             class: "rounded-lg border border-border px-4 py-2 text-sm transition hover:bg-accent",
-                            disabled: *is_saving.read(),
+                            disabled: !provider_state_ready || *is_saving.read(),
                             onclick: move |_| {
                                 editing_provider_id.set(None);
                                 name.set(String::new());
@@ -379,11 +381,7 @@ fn build_custom_provider(
     if base_url.is_empty() {
         return Err("Base URL is required".to_string());
     }
-    let parsed =
-        Url::parse(&base_url).map_err(|_| "Base URL must be an absolute URL".to_string())?;
-    if parsed.scheme() != "http" && parsed.scheme() != "https" {
-        return Err("Base URL must be an absolute HTTP/HTTPS URL".to_string());
-    }
+    validate_provider_base_url(&base_url)?;
     if api_key.is_empty() {
         return Err("API key is required".to_string());
     }
@@ -407,6 +405,42 @@ fn build_custom_provider(
     })
 }
 
+fn validate_provider_base_url(base_url: &str) -> Result<(), String> {
+    let parsed =
+        Url::parse(base_url).map_err(|_| "Base URL must be an absolute URL".to_string())?;
+    match parsed.scheme() {
+        "https" => Ok(()),
+        "http" => {
+            let host = parsed
+                .host_str()
+                .ok_or_else(|| "Base URL must include a host".to_string())?;
+            if is_private_development_host(host) {
+                Ok(())
+            } else {
+                Err("Base URL must use https unless it targets localhost or a private development host".to_string())
+            }
+        }
+        _ => Err("Base URL must be an absolute HTTP/HTTPS URL".to_string()),
+    }
+}
+
+fn is_private_development_host(host: &str) -> bool {
+    if matches!(host, "localhost" | "127.0.0.1" | "::1") {
+        return true;
+    }
+
+    match host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(ip)) => {
+            let octets = ip.octets();
+            octets[0] == 10
+                || (octets[0] == 192 && octets[1] == 168)
+                || (octets[0] == 172 && (16..=31).contains(&octets[1]))
+        }
+        Ok(IpAddr::V6(ip)) => ip.is_loopback(),
+        Err(_) => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -428,5 +462,17 @@ mod tests {
         assert_eq!(provider.id, "custom");
         assert_eq!(provider.base_url, "https://api.example.com/v1");
         assert_eq!(provider.api_key, "secret");
+    }
+
+    #[test]
+    fn rejects_insecure_public_base_url() {
+        let err = validate_provider_base_url("http://api.example.com/v1").unwrap_err();
+        assert!(err.contains("https"));
+    }
+
+    #[test]
+    fn allows_insecure_private_development_base_url() {
+        assert!(validate_provider_base_url("http://127.0.0.1:11434/v1").is_ok());
+        assert!(validate_provider_base_url("http://192.168.1.15:8080/v1").is_ok());
     }
 }

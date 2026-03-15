@@ -78,12 +78,12 @@ impl Debouncer {
     /// Cancel any pending debounced call
     #[cfg(feature = "web")]
     pub fn cancel(&self) {
-        *self.timeout.borrow_mut() = None;
+        self.invalidate();
     }
     /// Cancel any pending debounced call
     #[cfg(feature = "native")]
     pub fn cancel(&self) {
-        self.generation.set(self.generation.get().wrapping_add(1));
+        self.invalidate();
     }
     /// Invalidate any pending debounced call without executing it.
     #[cfg(feature = "web")]

@@ -63,6 +63,7 @@ pub fn AIChat() -> Element {
     let persisted_messages_save_generation = use_signal(|| 0u32);
     let provider_state_save_generation = use_signal(|| 0u32);
     let mut provider_state_save_in_flight = use_signal(|| false);
+    let mut provider_models_generation = use_signal(|| 0u32);
     let mut initial_loaded_messages = use_signal(Vec::<PersistedChatMessage>::new);
     let messages_container_id = use_signal(|| "ai-chat-messages".to_string());
     let account_key = ai_chat_store::current_account_key();
@@ -288,6 +289,10 @@ pub fn AIChat() -> Element {
 
             let selected_provider_id = selected_provider_id.clone();
             let available_providers = providers.read().clone();
+            let local_generation = provider_models_generation.with_mut(|generation| {
+                *generation = generation.wrapping_add(1);
+                *generation
+            });
             spawn(async move {
                 let Some(provider) = available_providers
                     .into_iter()
@@ -305,7 +310,9 @@ pub fn AIChat() -> Element {
 
                 match get_available_models(&provider).await {
                     Ok(available_models) => {
-                        if provider_state.read().selected_provider_id != provider.id {
+                        if *provider_models_generation.peek() != local_generation
+                            || provider_state.read().selected_provider_id != provider.id
+                        {
                             return;
                         }
                         let saved_model = provider_state
@@ -331,6 +338,12 @@ pub fn AIChat() -> Element {
                                 .unwrap_or_default()
                         };
 
+                        if *provider_models_generation.peek() != local_generation
+                            || provider_state.read().selected_provider_id != provider.id
+                        {
+                            return;
+                        }
+
                         if !next_model.is_empty() {
                             selected_model.set(next_model.clone());
                             if saved_model.as_deref() != Some(next_model.as_str()) {
@@ -349,7 +362,9 @@ pub fn AIChat() -> Element {
                         error.set(None);
                     }
                     Err(e) => {
-                        if provider_state.read().selected_provider_id != provider.id {
+                        if *provider_models_generation.peek() != local_generation
+                            || provider_state.read().selected_provider_id != provider.id
+                        {
                             return;
                         }
                         models.set(Vec::new());

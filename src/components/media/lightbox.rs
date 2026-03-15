@@ -11,11 +11,11 @@ fn clamp_zoom(zoom: f64) -> f64 {
     zoom.clamp(0.5, 5.0)
 }
 
-fn clamp_pan_component(value: f64, zoom: f64, container_extent: f64) -> f64 {
+fn clamp_pan_component(value: f64, zoom: f64, displayed_extent: f64, viewport_extent: f64) -> f64 {
     if zoom <= 1.0 {
         0.0
     } else {
-        let max_offset = ((zoom - 1.0) * container_extent * 0.5).max(0.0);
+        let max_offset = ((displayed_extent * zoom - viewport_extent) * 0.5).max(0.0);
         value.clamp(-max_offset, max_offset)
     }
 }
@@ -34,8 +34,8 @@ fn contain_fit_extent(intrinsic: (f64, f64), viewport: (f64, f64)) -> (f64, f64)
 fn clamp_pan(x: f64, y: f64, zoom: f64, intrinsic: (f64, f64), viewport: (f64, f64)) -> (f64, f64) {
     let displayed = contain_fit_extent(intrinsic, viewport);
     (
-        clamp_pan_component(x, zoom, displayed.0),
-        clamp_pan_component(y, zoom, displayed.1),
+        clamp_pan_component(x, zoom, displayed.0, viewport.0),
+        clamp_pan_component(y, zoom, displayed.1, viewport.1),
     )
 }
 

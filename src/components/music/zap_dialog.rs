@@ -75,12 +75,9 @@ fn configured_write_relay_urls() -> Vec<RelayUrl> {
 
     let relay_urls = filter_relay_urls(relay::get_write_relays());
     if relay_urls.is_empty() {
-        return filter_relay_urls(
-            default_relay_urls()
-                .into_iter()
-                .map(|url| url.to_string())
-                .collect(),
-        );
+        let mut relay_urls = default_relay_urls();
+        relay_urls.truncate(5);
+        return relay_urls;
     }
 
     relay_urls
