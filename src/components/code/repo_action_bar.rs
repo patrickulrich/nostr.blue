@@ -17,6 +17,23 @@ use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use nostr_sdk::prelude::*;
+
+fn fork_error_message(error: &str) -> String {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("no signer attached") || lower.contains("signer") {
+        "Connect your signer before forking this repository".to_string()
+    } else if lower.contains("client not initialized") {
+        "Nostr client is still starting up. Try forking again in a moment".to_string()
+    } else if lower.contains("invalid original event id") {
+        "This repository is missing a valid source reference, so it cannot be forked".to_string()
+    } else if lower.contains("failed to build event") {
+        "Could not prepare the fork announcement".to_string()
+    } else if lower.contains("failed to publish fork") || lower.contains("failed to publish") {
+        "Could not publish the fork announcement to relays".to_string()
+    } else {
+        "Fork failed. Please try again".to_string()
+    }
+}
 /// Generate a kebab-case d-tag identifier from the fork name
 fn generate_fork_id(name: &str, fallback_id: &str) -> String {
     let slug: String = name
@@ -381,13 +398,37 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                                 if let Ok(naddr) = coordinate.to_bech32() {
                                     let nav = navigator();
                                     nav.push(crate::routes::Route::CodeRepo { naddr });
+                                } else {
+                                    toast.warning(
+                                        "Fork created, but the app could not build the redirect URL"
+                                            .to_string(),
+                                        ToastOptions::new(),
+                                    );
                                 }
+                            } else {
+                                toast.warning(
+                                    "Fork created, but the app could not read your signer public key for redirect"
+                                        .to_string(),
+                                    ToastOptions::new(),
+                                );
                             }
+                        } else {
+                            toast.warning(
+                                "Fork created, but the app could not access your signer for redirect"
+                                    .to_string(),
+                                ToastOptions::new(),
+                            );
                         }
+                    } else {
+                        toast.warning(
+                            "Fork created, but the app could not redirect because the Nostr client is unavailable"
+                                .to_string(),
+                            ToastOptions::new(),
+                        );
                     }
                 }
                 Err(e) => {
-                    toast.error(format!("Fork failed: {}", e), ToastOptions::new());
+                    toast.error(fork_error_message(&e), ToastOptions::new());
                 }
             }
             fork_loading.set(false);

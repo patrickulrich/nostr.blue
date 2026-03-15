@@ -1,3 +1,4 @@
+pub mod ai_settings_panel;
 pub mod article_card;
 pub mod article_content;
 pub mod badge_detail_modal;
@@ -18,6 +19,7 @@ pub mod gif_upload_modal;
 pub mod icons;
 pub mod live;
 pub mod markdown_editor;
+pub mod media;
 pub mod media_uploader;
 pub mod mention_autocomplete;
 pub mod mobile_search_slideout;
@@ -49,6 +51,7 @@ pub mod wallet_balance_card;
 pub mod webbookmark_card;
 pub mod webbookmark_modal;
 pub mod zap_modal;
+pub use ai_settings_panel::AiSettingsPanel;
 pub use article_card::{ArticleCard, ArticleCardSkeleton};
 pub use article_content::ArticleContent;
 pub use client_initializing::ClientInitializing;
@@ -58,6 +61,7 @@ pub use confirm_modal::ConfirmModal;
 pub use live::{
     ChannelChat, LiveChat, LiveStreamPlayer, LiveStreamShareModal, MiniLiveStreamCard, StreamStatus,
 };
+pub use media::MediaLightbox;
 pub use media_uploader::MediaUploader;
 pub use mobile_search_slideout::MobileSearchSlideout;
 pub use note_card::{NoteCard, NoteCardSkeleton};

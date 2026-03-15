@@ -47,14 +47,16 @@ pub use nip65::{
     apply_local_relays_to_client, default_dm_relays, default_relays, default_search_relays,
     fetch_blocked_relays, fetch_relay_list, fetch_search_relays, get_dm_relays, get_read_relays,
     get_write_relays, init_local_relays_from_cache, init_nip51_relay_lists, init_user_relay_lists,
-    load_local_relays, parse_dm_relay_list, parse_relay_list_event, publish_blocked_relays,
-    publish_dm_relay_list, publish_relay_list, publish_search_relays, reset_dm_relays_to_default,
-    reset_general_relays_to_default, save_local_relays, start_relay_list_subscription,
-    stop_relay_list_subscription, RelayConfig, RelayListMetadata, BLOCKED_RELAYS,
-    DEFAULT_DM_RELAYS, DEFAULT_NIP65_RELAYS, DEFAULT_SEARCH_RELAYS, LOCAL_RELAYS, SEARCH_RELAYS,
-    USER_RELAY_METADATA,
+    load_broadcast_relays, load_local_relays, parse_dm_relay_list, parse_relay_list_event,
+    publish_blocked_relays, publish_dm_relay_list, publish_relay_list, publish_search_relays,
+    reset_dm_relays_to_default, reset_general_relays_to_default, save_broadcast_relays,
+    save_local_relays, start_relay_list_subscription, stop_relay_list_subscription, RelayConfig,
+    RelayListMetadata, BLOCKED_RELAYS, BROADCAST_RELAYS, DEFAULT_DM_RELAYS, DEFAULT_NIP65_RELAYS,
+    DEFAULT_SEARCH_RELAYS, LOCAL_RELAYS, SEARCH_RELAYS, USER_RELAY_METADATA,
 };
-pub use pool::{add_relay, apply_relay_lists_to_client, remove_relay, DEFAULT_RELAYS};
+pub use pool::{
+    add_relay, apply_relay_lists_to_client, is_relay_blocked, remove_relay, DEFAULT_RELAYS,
+};
 pub use signals::{
     RelayInfo, RelayPoolStore, RelayPoolStoreStoreExt, RelaySource, RelayStatus, RELAY_CONNECTED,
     RELAY_POOL, USER_RELAYS_APPLIED,

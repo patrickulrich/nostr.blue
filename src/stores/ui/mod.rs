@@ -1,4 +1,6 @@
+pub mod ai_chat_store;
 pub mod ai_provider_store;
+pub(crate) mod ai_web_db;
 pub mod back_navigation;
 pub mod emoji_store;
 pub mod notifications;

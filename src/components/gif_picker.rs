@@ -22,24 +22,14 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
     let mut show_upload_modal = use_signal(|| false);
     let mut initialized = use_signal(|| false);
     let mut search_query = use_signal(String::new);
-    let mut search_gen = use_signal(|| 0u32);
     let gif_results = GIF_RESULTS.read();
     let gif_loading = GIF_LOADING.read();
     let recent_gifs = RECENT_GIFS.read();
-    use_effect(move || {
+    let handle_search = use_callback(move |_: ()| {
         let query = search_query.read().clone();
-        if *initialized.read() {
-            // Increment generation to invalidate any pending searches
-            search_gen.with_mut(|g| *g = g.wrapping_add(1));
-            let this_gen = *search_gen.peek();
-            spawn(async move {
-                crate::platform::timer::sleep_ms(300).await;
-                if *search_gen.peek() != this_gen {
-                    return;
-                }
-                search_gifs(query).await;
-            });
-        }
+        spawn(async move {
+            search_gifs(query).await;
+        });
     });
     rsx! {
         div { class: "relative",
@@ -71,7 +61,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
             }
             if *show_picker.read() {
                 div {
-                    class: "fixed inset-0 bg-black/50 z-[59]",
+                    class: "fixed inset-0 z-50 bg-black/50 backdrop-blur-sm",
                     onclick: move |_| {
                         show_picker.set(false);
                         show_upload_modal.set(false);
@@ -80,7 +70,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                 div { class: "fixed inset-0 z-[60] flex items-start sm:items-center justify-center p-4 pointer-events-none",
                     div {
                         class: "bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl pointer-events-auto flex flex-col",
-                        class: "w-full sm:w-[500px] md:w-[700px] max-w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] mt-4 sm:mt-0",
+                        class: "w-full sm:w-[500px] md:w-[700px] max-w-[calc(100vw-2rem)] max-h-[80vh] mt-4 sm:mt-0",
                         onclick: move |e| e.stop_propagation(),
                         div { class: "shrink-0 flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750 rounded-t-xl",
                             h3 { class: "text-base font-bold text-gray-900 dark:text-gray-100",
@@ -96,18 +86,36 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                             }
                         }
                         div { class: "shrink-0 p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750",
-                            div { class: "relative",
-                                input {
-                                    r#type: "text",
-                                    class: "w-full px-4 py-2.5 pl-10 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm shadow-xs",
-                                    placeholder: "Search GIFs (powered by NIP-50)...",
-                                    value: "{search_query}",
-                                    oninput: move |evt| {
-                                        search_query.set(evt.value().clone());
-                                    },
+                            div { class: "flex gap-2",
+                                div { class: "relative flex-1",
+                                    input {
+                                        r#type: "text",
+                                        class: "w-full px-4 py-2.5 pl-10 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm shadow-xs",
+                                        placeholder: "Search GIFs (powered by NIP-50)...",
+                                        value: "{search_query}",
+                                        oninput: move |evt| {
+                                            search_query.set(evt.value().clone());
+                                        },
+                                        onkeydown: move |evt: KeyboardEvent| {
+                                            if evt.key() == Key::Enter {
+                                                evt.prevent_default();
+                                                handle_search(());
+                                            }
+                                        },
+                                    }
+                                    span { class: "absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400",
+                                        "🔍"
+                                    }
                                 }
-                                span { class: "absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400",
-                                    "🔍"
+                                button {
+                                    class: "px-4 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-lg text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xs hover:shadow-md",
+                                    disabled: *gif_loading,
+                                    onclick: move |_| handle_search(()),
+                                    if *gif_loading {
+                                        "Searching..."
+                                    } else {
+                                        "Search"
+                                    }
                                 }
                             }
                         }

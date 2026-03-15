@@ -4,12 +4,13 @@ use crate::stores::music_player::{self, MUSIC_PLAYER};
 use crate::stores::nostr_client;
 use crate::stores::nostr_music::TrackSource;
 use crate::stores::profiles;
-use crate::stores::relay::DEFAULT_RELAYS;
+use crate::stores::relay::{self, DEFAULT_RELAYS};
 use crate::utils::podcast::ValueBlock;
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::{PublicKey, RelayUrl};
 use serde::{Deserialize, Serialize};
+use url::{Host, Url};
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 /// Convert DEFAULT_RELAYS to parsed RelayUrls
@@ -18,6 +19,64 @@ fn default_relay_urls() -> Vec<RelayUrl> {
         .iter()
         .filter_map(|s| RelayUrl::parse(s).ok())
         .collect()
+}
+
+fn is_public_relay_url(url: &str) -> bool {
+    let Ok(parsed) = Url::parse(url) else {
+        return false;
+    };
+
+    match parsed.host() {
+        Some(Host::Ipv4(ip)) => {
+            let octets = ip.octets();
+            if octets[0] == 127 || octets[0] == 10 {
+                return false;
+            }
+            if octets[0] == 172 && (16..=31).contains(&octets[1]) {
+                return false;
+            }
+            if octets[0] == 192 && octets[1] == 168 {
+                return false;
+            }
+            if octets[0] == 169 && octets[1] == 254 {
+                return false;
+            }
+            true
+        }
+        Some(Host::Ipv6(ip)) => {
+            if ip.is_loopback() {
+                return false;
+            }
+            let segments = ip.segments();
+            let first = segments[0];
+            (first & 0xfe00) != 0xfc00 && (first & 0xffc0) != 0xfe80
+        }
+        Some(Host::Domain(domain)) => {
+            let domain = domain.to_ascii_lowercase();
+            domain != "localhost" && !domain.ends_with(".local")
+        }
+        None => false,
+    }
+}
+
+fn configured_write_relay_urls() -> Vec<RelayUrl> {
+    let relay_urls = relay::get_write_relays();
+    let relay_urls = if relay_urls.is_empty() {
+        default_relay_urls()
+            .into_iter()
+            .map(|url| url.to_string())
+            .collect()
+    } else {
+        relay_urls
+    };
+
+    let mut relay_urls: Vec<RelayUrl> = relay_urls
+        .into_iter()
+        .filter(|url| is_public_relay_url(url) && !relay::is_relay_blocked(url))
+        .filter_map(|url| RelayUrl::parse(&url).ok())
+        .collect();
+    relay_urls.truncate(5);
+    relay_urls
 }
 
 fn redact_url(url: &str) -> String {
@@ -662,20 +721,7 @@ async fn generate_nostr_zap_invoice(
     );
     let recipient_pubkey =
         PublicKey::parse(artist_pubkey).map_err(|e| format!("Invalid artist pubkey: {}", e))?;
-    let relays: Vec<RelayUrl> = {
-        if let Some(client) = nostr_client::get_client() {
-            let client_relays = client.relays().await;
-            let mut urls: Vec<RelayUrl> = client_relays.keys().cloned().collect();
-            if urls.is_empty() {
-                default_relay_urls()
-            } else {
-                urls.truncate(5);
-                urls
-            }
-        } else {
-            default_relay_urls()
-        }
-    };
+    let relays: Vec<RelayUrl> = configured_write_relay_urls();
     let message = if comment.is_empty() {
         None
     } else {
