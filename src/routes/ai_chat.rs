@@ -58,7 +58,7 @@ pub fn AIChat() -> Element {
     let mut providers = use_signal(|| vec![shakespeare_provider()]);
     let mut provider_state_loaded = use_signal(|| false);
     let mut chat_history_loaded = use_signal(|| false);
-    let mut chat_history_generation = use_signal(|| 0u64);
+    let mut chat_history_generation = use_signal(|| 0u32);
     let mut persisted_messages_dirty = use_signal(|| false);
     let persisted_messages_save_generation = use_signal(|| 0u32);
     let mut initial_loaded_messages = use_signal(Vec::<PersistedChatMessage>::new);
@@ -195,10 +195,12 @@ pub fn AIChat() -> Element {
             let persisted_messages = persisted_messages.clone();
             let mut persisted_messages_dirty_signal = persisted_messages_dirty;
             let mut persisted_messages_save_generation_signal = persisted_messages_save_generation;
+            let chat_history_generation_signal = chat_history_generation;
             let mut initial_loaded_messages_signal = initial_loaded_messages;
             let generation = persisted_messages_save_generation_signal
                 .read()
                 .wrapping_add(1);
+            let chat_generation = *chat_history_generation_signal.read();
             persisted_messages_save_generation_signal.set(generation);
             spawn(async move {
                 let result = if persisted_messages.is_empty() {
@@ -208,7 +210,9 @@ pub fn AIChat() -> Element {
                 };
                 match result {
                     Ok(()) => {
-                        if *persisted_messages_save_generation_signal.read() == generation {
+                        if *persisted_messages_save_generation_signal.read() == generation
+                            && *chat_history_generation_signal.read() == chat_generation
+                        {
                             persisted_messages_dirty_signal.set(false);
                             initial_loaded_messages_signal.set(persisted_messages);
                         }

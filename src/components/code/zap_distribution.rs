@@ -45,19 +45,23 @@ fn default_relay_urls() -> Vec<RelayUrl> {
 }
 
 fn configured_write_relay_urls() -> Vec<RelayUrl> {
-    let mut relay_urls: Vec<RelayUrl> = relay::get_write_relays()
+    let relay_urls = relay::get_write_relays();
+    let relay_urls = if relay_urls.is_empty() {
+        default_relay_urls()
+            .into_iter()
+            .map(|url| url.to_string())
+            .collect()
+    } else {
+        relay_urls
+    };
+
+    let mut relay_urls: Vec<RelayUrl> = relay_urls
         .into_iter()
         .filter(|url| is_public_relay_url(url) && !relay::is_relay_blocked(url))
         .filter_map(|url| RelayUrl::parse(&url).ok())
         .collect();
-
     relay_urls.truncate(5);
-
-    if relay_urls.is_empty() {
-        default_relay_urls()
-    } else {
-        relay_urls
-    }
+    relay_urls
 }
 
 fn is_public_relay_url(url: &str) -> bool {
@@ -331,6 +335,7 @@ pub fn ZapDistribution(
             );
             return;
         }
+        let send_amount = eligible_base.iter().map(|recip| recip.amount).sum::<u64>();
         let mut eligible_with_lightning =
             Vec::<(ZapRecipient, Option<String>, Option<String>)>::new();
         for recip in eligible_base {
@@ -362,10 +367,6 @@ pub fn ZapDistribution(
             .iter()
             .map(|(recip, _, _)| recip.pubkey.clone())
             .collect::<Vec<_>>();
-        let send_amount = eligible_with_lightning
-            .iter()
-            .map(|(recip, _, _)| recip.amount)
-            .sum::<u64>();
         let weight_map: std::collections::HashMap<String, u64> =
             deduped_splits.read().iter().cloned().collect();
         let reallocated = compute_allocations(&weight_map, &eligible_pubkeys, send_amount);
@@ -393,6 +394,8 @@ pub fn ZapDistribution(
             for recip in current.iter_mut() {
                 if let Some(amount) = sendable_amounts.get(&recip.pubkey).copied() {
                     recip.amount = amount;
+                } else {
+                    recip.amount = 0;
                 }
             }
         }

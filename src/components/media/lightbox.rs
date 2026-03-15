@@ -531,10 +531,6 @@ pub fn MediaLightbox() -> Element {
                             #[cfg(feature = "web")]
                             {
                                 if let Some(element) = _evt.data().downcast::<web_sys::HtmlElement>() {
-                                    let rect = element.get_bounding_client_rect();
-                                    if rect.width() > 0.0 && rect.height() > 0.0 {
-                                        viewport_size.set((rect.width(), rect.height()));
-                                    }
                                     update_image_intrinsic_size(element, image_intrinsic_size);
                                 }
                             }

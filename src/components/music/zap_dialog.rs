@@ -60,19 +60,23 @@ fn is_public_relay_url(url: &str) -> bool {
 }
 
 fn configured_write_relay_urls() -> Vec<RelayUrl> {
-    let mut relay_urls: Vec<RelayUrl> = relay::get_write_relays()
+    let relay_urls = relay::get_write_relays();
+    let relay_urls = if relay_urls.is_empty() {
+        default_relay_urls()
+            .into_iter()
+            .map(|url| url.to_string())
+            .collect()
+    } else {
+        relay_urls
+    };
+
+    let mut relay_urls: Vec<RelayUrl> = relay_urls
         .into_iter()
         .filter(|url| is_public_relay_url(url) && !relay::is_relay_blocked(url))
         .filter_map(|url| RelayUrl::parse(&url).ok())
         .collect();
-
     relay_urls.truncate(5);
-
-    if relay_urls.is_empty() {
-        default_relay_urls()
-    } else {
-        relay_urls
-    }
+    relay_urls
 }
 
 fn redact_url(url: &str) -> String {
