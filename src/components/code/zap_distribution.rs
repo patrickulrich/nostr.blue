@@ -7,15 +7,15 @@ use crate::services::payments::lnurl;
 use crate::stores::nostr_client;
 use crate::stores::nwc_store;
 use crate::stores::profiles::PROFILE_CACHE;
-use crate::stores::relay::DEFAULT_RELAYS;
+use crate::stores::relay::{self, DEFAULT_RELAYS};
 use crate::utils::truncate_pubkey;
 use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use futures::future::{select, Either};
 use nostr_sdk::{EventId, PublicKey, RelayUrl};
-use url::{Host, Url};
 use std::collections::HashSet;
+use url::{Host, Url};
 
 /// A single recipient in the zap distribution
 #[derive(Clone, Debug)]
@@ -42,6 +42,22 @@ fn default_relay_urls() -> Vec<RelayUrl> {
         .iter()
         .filter_map(|url| RelayUrl::parse(url).ok())
         .collect()
+}
+
+fn configured_write_relay_urls() -> Vec<RelayUrl> {
+    let mut relay_urls: Vec<RelayUrl> = relay::get_write_relays()
+        .into_iter()
+        .filter(|url| is_public_relay_url(url) && !relay::is_relay_blocked(url))
+        .filter_map(|url| RelayUrl::parse(&url).ok())
+        .collect();
+
+    relay_urls.truncate(5);
+
+    if relay_urls.is_empty() {
+        default_relay_urls()
+    } else {
+        relay_urls
+    }
 }
 
 fn is_public_relay_url(url: &str) -> bool {
@@ -99,20 +115,7 @@ async fn create_repo_zap_invoice(
         .map_err(|e| format!("Failed to prepare zap: {}", e))?;
 
     let client = nostr_client::get_client().ok_or("Nostr client not available".to_string())?;
-    let relays = {
-        let client_relays = client.relays().await;
-        let mut urls: Vec<RelayUrl> = client_relays
-            .iter()
-            .filter(|(url, relay)| relay.flags().has_write() && is_public_relay_url(url.as_str()))
-            .map(|(url, _)| url.clone())
-            .collect();
-        if urls.is_empty() {
-            default_relay_urls()
-        } else {
-            urls.truncate(5);
-            urls
-        }
-    };
+    let relays = configured_write_relay_urls();
     if relays.is_empty() {
         return Err("No relays available".to_string());
     }

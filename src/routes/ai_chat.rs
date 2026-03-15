@@ -60,6 +60,7 @@ pub fn AIChat() -> Element {
     let mut chat_history_loaded = use_signal(|| false);
     let mut chat_history_generation = use_signal(|| 0u64);
     let mut persisted_messages_dirty = use_signal(|| false);
+    let persisted_messages_save_generation = use_signal(|| 0u32);
     let mut initial_loaded_messages = use_signal(Vec::<PersistedChatMessage>::new);
     let messages_container_id = use_signal(|| "ai-chat-messages".to_string());
     let account_key = ai_chat_store::current_account_key();
@@ -193,7 +194,12 @@ pub fn AIChat() -> Element {
             let account_key = account_key.clone();
             let persisted_messages = persisted_messages.clone();
             let mut persisted_messages_dirty_signal = persisted_messages_dirty;
+            let mut persisted_messages_save_generation_signal = persisted_messages_save_generation;
             let mut initial_loaded_messages_signal = initial_loaded_messages;
+            let generation = persisted_messages_save_generation_signal
+                .read()
+                .wrapping_add(1);
+            persisted_messages_save_generation_signal.set(generation);
             spawn(async move {
                 let result = if persisted_messages.is_empty() {
                     ai_chat_store::clear_chat_history(&account_key).await
@@ -202,8 +208,10 @@ pub fn AIChat() -> Element {
                 };
                 match result {
                     Ok(()) => {
-                        persisted_messages_dirty_signal.set(false);
-                        initial_loaded_messages_signal.set(persisted_messages);
+                        if *persisted_messages_save_generation_signal.read() == generation {
+                            persisted_messages_dirty_signal.set(false);
+                            initial_loaded_messages_signal.set(persisted_messages);
+                        }
                     }
                     Err(e) => {
                         error.set(Some(e));

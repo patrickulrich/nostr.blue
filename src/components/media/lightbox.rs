@@ -6,6 +6,8 @@ use dioxus::prelude::*;
 use dioxus_core::use_drop;
 #[cfg(feature = "web")]
 use gloo_events::EventListener;
+#[cfg(feature = "web")]
+use wasm_bindgen::closure::Closure;
 
 fn clamp_zoom(zoom: f64) -> f64 {
     zoom.clamp(0.5, 5.0)
@@ -50,6 +52,31 @@ fn normalized_alt_text(alt: Option<&str>, index: usize) -> String {
         .filter(|alt| !alt.is_empty())
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| format!("Image {}", index + 1))
+}
+
+#[cfg(feature = "web")]
+fn update_image_intrinsic_size(
+    element: &web_sys::HtmlElement,
+    mut image_intrinsic_size: Signal<(f64, f64)>,
+) {
+    let natural_width = js_sys::Reflect::get(
+        element.as_ref(),
+        &wasm_bindgen::JsValue::from_str("naturalWidth"),
+    )
+    .ok()
+    .and_then(|value| value.as_f64())
+    .unwrap_or(0.0);
+    let natural_height = js_sys::Reflect::get(
+        element.as_ref(),
+        &wasm_bindgen::JsValue::from_str("naturalHeight"),
+    )
+    .ok()
+    .and_then(|value| value.as_f64())
+    .unwrap_or(0.0);
+
+    if natural_width > 0.0 && natural_height > 0.0 {
+        image_intrinsic_size.set((natural_width, natural_height));
+    }
 }
 
 #[cfg(feature = "web")]
@@ -145,6 +172,82 @@ pub fn MediaLightbox() -> Element {
         .min(state.images.len().saturating_sub(1));
     let current_image = state.images[current_index].clone();
     let current_alt = normalized_alt_text(current_image.alt.as_deref(), current_index);
+
+    #[cfg(feature = "web")]
+    {
+        let current_image_url = current_image.url.clone();
+        use_effect(use_reactive(
+            &(state.is_open, current_image_url),
+            move |(is_open, current_image_url)| {
+                if !is_open {
+                    return;
+                }
+
+                let Ok(image): Result<wasm_bindgen::JsValue, _> = js_sys::eval("new Image()") else {
+                    return;
+                };
+                let image_for_load = image.clone();
+                let onload = Closure::wrap(Box::new(move || {
+                    let natural_width = js_sys::Reflect::get(
+                        &image_for_load,
+                        &wasm_bindgen::JsValue::from_str("naturalWidth"),
+                    )
+                    .ok()
+                    .and_then(|value| value.as_f64())
+                    .unwrap_or(0.0);
+                    let natural_height = js_sys::Reflect::get(
+                        &image_for_load,
+                        &wasm_bindgen::JsValue::from_str("naturalHeight"),
+                    )
+                    .ok()
+                    .and_then(|value| value.as_f64())
+                    .unwrap_or(0.0);
+                    if natural_width > 0.0 && natural_height > 0.0 {
+                        image_intrinsic_size.set((natural_width, natural_height));
+                    }
+                }) as Box<dyn FnMut()>);
+                let _ = js_sys::Reflect::set(
+                    &image,
+                    &wasm_bindgen::JsValue::from_str("onload"),
+                    onload.as_ref(),
+                );
+                let _ = js_sys::Reflect::set(
+                    &image,
+                    &wasm_bindgen::JsValue::from_str("src"),
+                    &wasm_bindgen::JsValue::from_str(&current_image_url),
+                );
+
+                let is_complete = js_sys::Reflect::get(
+                    &image,
+                    &wasm_bindgen::JsValue::from_str("complete"),
+                )
+                .ok()
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+                if is_complete {
+                    let natural_width = js_sys::Reflect::get(
+                        &image,
+                        &wasm_bindgen::JsValue::from_str("naturalWidth"),
+                    )
+                    .ok()
+                    .and_then(|value| value.as_f64())
+                    .unwrap_or(0.0);
+                    let natural_height = js_sys::Reflect::get(
+                        &image,
+                        &wasm_bindgen::JsValue::from_str("naturalHeight"),
+                    )
+                    .ok()
+                    .and_then(|value| value.as_f64())
+                    .unwrap_or(0.0);
+                    if natural_width > 0.0 && natural_height > 0.0 {
+                        image_intrinsic_size.set((natural_width, natural_height));
+                    }
+                }
+
+                onload.forget();
+            },
+        ));
+    }
 
     let previous_url = current_index
         .checked_sub(1)
@@ -418,6 +521,7 @@ pub fn MediaLightbox() -> Element {
                         pinch_start_distance.set(None);
                     },
                     img {
+                        key: "lightbox-image-{current_image.url}",
                         src: "{current_image.url}",
                         alt: "{current_alt}",
                         class: "max-h-full max-w-full select-none object-contain transition-transform duration-100 ease-out",
@@ -431,23 +535,7 @@ pub fn MediaLightbox() -> Element {
                                     if rect.width() > 0.0 && rect.height() > 0.0 {
                                         viewport_size.set((rect.width(), rect.height()));
                                     }
-                                    let natural_width = js_sys::Reflect::get(
-                                        element.as_ref(),
-                                        &wasm_bindgen::JsValue::from_str("naturalWidth"),
-                                    )
-                                    .ok()
-                                    .and_then(|value| value.as_f64())
-                                    .unwrap_or(0.0);
-                                    let natural_height = js_sys::Reflect::get(
-                                        element.as_ref(),
-                                        &wasm_bindgen::JsValue::from_str("naturalHeight"),
-                                    )
-                                    .ok()
-                                    .and_then(|value| value.as_f64())
-                                    .unwrap_or(0.0);
-                                    if natural_width > 0.0 && natural_height > 0.0 {
-                                        image_intrinsic_size.set((natural_width, natural_height));
-                                    }
+                                    update_image_intrinsic_size(element, image_intrinsic_size);
                                 }
                             }
                         },

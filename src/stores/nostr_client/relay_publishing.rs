@@ -178,5 +178,7 @@ pub async fn broadcast_presigned_event(
     event: nostr::Event,
     relay_urls: Vec<String>,
 ) -> std::result::Result<PublishResult, String> {
-    send_presigned_event_to_relays(event, relay_urls).await
+    send_presigned_event_to_relays(event, relay_urls)
+        .await
+        .map(PublishResult::ignoring_duplicate_event_failures)
 }
