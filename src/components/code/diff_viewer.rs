@@ -283,6 +283,7 @@ pub fn DiffViewer(
     // With commenting: comment-gutter + old-num + new-num + +/- indicator + content = 5
     // Without commenting: old-num + new-num + +/- indicator + content = 4
     let unified_colspan = if has_commenting { "5" } else { "4" };
+    let side_by_side_colspan = "4";
 
     rsx! {
         div { class: "space-y-4",
@@ -577,67 +578,168 @@ pub fn DiffViewer(
                                                         }
                                                     }
                                                 }},
-                                                // TODO: Side-by-side view currently only renders existing comments from comment_map.
-                                                // Add interactive '+' gutter button and inline comment form for parity with unified view.
                                                 DiffViewMode::SideBySide => {
+                                                    let cached_file_path = section.file_path.clone();
                                                     let rows = build_side_by_side_rows(&hunk.lines);
                                                     rsx! {
-                                                        for (row_idx, row) in rows.iter().enumerate() {
-                                                            tr {
-                                                                key: "sbs-{hunk_idx}-{row_idx}",
-                                                                // Left side: old line number
-                                                                td { class: "w-10 px-2 text-right text-muted-foreground select-none border-r border-border/50",
-                                                                    if let Some(n) = row.left_num {
-                                                                        "{n}"
-                                                                    }
-                                                                }
-                                                                // Left side: old content
-                                                                td {
-                                                                    class: match row.left_kind {
-                                                                        SideKind::Remove => "w-1/2 px-2 whitespace-pre bg-red-500/10 border-r border-border/50",
-                                                                        SideKind::Empty => "w-1/2 px-2 whitespace-pre bg-muted/30 border-r border-border/50",
-                                                                        _ => "w-1/2 px-2 whitespace-pre border-r border-border/50",
-                                                                    },
-                                                                    if let Some(ref text) = row.left_content {
-                                                                        span {
-                                                                            class: if row.left_kind == SideKind::Remove { "text-red-400" } else { "" },
-                                                                            "{text}"
+                                                        for (row_idx, row) in rows.into_iter().enumerate() {
+                                                            {
+                                                                let is_active = row.right_num
+                                                                    .and_then(|line_num| {
+                                                                        active_comment_line.read().as_ref().map(|(f, l)| {
+                                                                            f == &cached_file_path && *l == line_num
+                                                                        })
+                                                                    })
+                                                                    .unwrap_or(false);
+                                                                let file_for_click = cached_file_path.clone();
+                                                                let file_for_click_keydown = file_for_click.clone();
+                                                                rsx! {
+                                                                    tr {
+                                                                        key: "sbs-{hunk_idx}-{row_idx}",
+                                                                        td { class: "w-10 px-2 text-right text-muted-foreground select-none border-r border-border/50",
+                                                                            if let Some(n) = row.left_num {
+                                                                                "{n}"
+                                                                            }
+                                                                        }
+                                                                        td {
+                                                                            class: match row.left_kind {
+                                                                                SideKind::Remove => "w-1/2 px-2 whitespace-pre bg-red-500/10 border-r border-border/50",
+                                                                                SideKind::Empty => "w-1/2 px-2 whitespace-pre bg-muted/30 border-r border-border/50",
+                                                                                _ => "w-1/2 px-2 whitespace-pre border-r border-border/50",
+                                                                            },
+                                                                            if let Some(ref text) = row.left_content {
+                                                                                span {
+                                                                                    class: if row.left_kind == SideKind::Remove { "text-red-400" } else { "" },
+                                                                                    "{text}"
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                        td { class: "w-10 px-2 text-right text-muted-foreground select-none border-r border-border/50",
+                                                                            if let Some(n) = row.right_num {
+                                                                                "{n}"
+                                                                            }
+                                                                        }
+                                                                        td {
+                                                                            class: match (row.right_kind, has_commenting, row.right_num.is_some(), is_active) {
+                                                                                (SideKind::Add, true, true, _) => "w-1/2 p-0 whitespace-pre bg-green-500/10",
+                                                                                (SideKind::Add, _, _, _) => "w-1/2 px-2 whitespace-pre bg-green-500/10",
+                                                                                (SideKind::Empty, _, _, _) => "w-1/2 px-2 whitespace-pre bg-muted/30",
+                                                                                (_, true, true, _) => "w-1/2 p-0 whitespace-pre",
+                                                                                _ => "w-1/2 px-2 whitespace-pre",
+                                                                            },
+                                                                            if has_commenting && row.right_num.is_some() {
+                                                                                button {
+                                                                                    r#type: "button",
+                                                                                    tabindex: "0",
+                                                                                    aria_pressed: is_active.to_string(),
+                                                                                    class: match (row.right_kind, is_active) {
+                                                                                        (SideKind::Add, true) => "w-full px-2 py-0 text-left bg-green-500/10 ring-1 ring-inset ring-primary hover:bg-green-500/15 focus:outline-none focus-visible:ring-1 focus-visible:ring-primary cursor-pointer",
+                                                                                        (SideKind::Add, false) => "w-full px-2 py-0 text-left bg-green-500/10 hover:bg-green-500/15 focus:outline-none focus-visible:ring-1 focus-visible:ring-primary cursor-pointer",
+                                                                                        (_, true) => "w-full px-2 py-0 text-left bg-accent/10 ring-1 ring-inset ring-primary hover:bg-accent/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-primary cursor-pointer",
+                                                                                        (_, false) => "w-full px-2 py-0 text-left hover:bg-accent/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-primary cursor-pointer",
+                                                                                    },
+                                                                                    onclick: move |_| {
+                                                                                        active_comment_line.set(Some((file_for_click.clone(), row.right_num.unwrap())));
+                                                                                        comment_text.set(String::new());
+                                                                                    },
+                                                                                    onkeydown: move |e: KeyboardEvent| {
+                                                                                        if matches!(e.key(), Key::Enter)
+                                                                                            || matches!(e.key(), Key::Character(ref c) if c == " ")
+                                                                                        {
+                                                                                            e.prevent_default();
+                                                                                            active_comment_line.set(Some((file_for_click_keydown.clone(), row.right_num.unwrap())));
+                                                                                            comment_text.set(String::new());
+                                                                                        }
+                                                                                    },
+                                                                                    aria_label: "Add line comment",
+                                                                                    title: "Add line comment",
+                                                                                    if let Some(ref text) = row.right_content {
+                                                                                        span {
+                                                                                            class: if row.right_kind == SideKind::Add { "text-green-400" } else { "" },
+                                                                                            "{text}"
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                            } else if let Some(ref text) = row.right_content {
+                                                                                span {
+                                                                                    class: if row.right_kind == SideKind::Add { "text-green-400" } else { "" },
+                                                                                    "{text}"
+                                                                                }
+                                                                            }
                                                                         }
                                                                     }
-                                                                }
-                                                                // Right side: new line number
-                                                                td { class: "w-10 px-2 text-right text-muted-foreground select-none border-r border-border/50",
-                                                                    if let Some(n) = row.right_num {
-                                                                        "{n}"
-                                                                    }
-                                                                }
-                                                                // Right side: new content
-                                                                td {
-                                                                    class: match row.right_kind {
-                                                                        SideKind::Add => "w-1/2 px-2 whitespace-pre bg-green-500/10",
-                                                                        SideKind::Empty => "w-1/2 px-2 whitespace-pre bg-muted/30",
-                                                                        _ => "w-1/2 px-2 whitespace-pre",
-                                                                    },
-                                                                    if let Some(ref text) = row.right_content {
-                                                                        span {
-                                                                            class: if row.right_kind == SideKind::Add { "text-green-400" } else { "" },
-                                                                            "{text}"
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
 
-                                                            // Display existing line comments for the right (new) side line
-                                                            if let Some(line_num) = row.right_num {
-                                                                if let Some(comments) = file_comments.get(&line_num) {
-                                                                    for lc in comments.iter() {
-                                                                        tr {
-                                                                            key: "lc-sbs-{lc.event_id}",
-                                                                            class: "bg-accent/30",
-                                                                            td {
-                                                                                colspan: "4",
-                                                                                class: "px-4 py-2",
-                                                                                InlineLineComment { comment: lc.clone() }
+                                                                    if let Some(line_num) = row.right_num {
+                                                                        if let Some(comments) = file_comments.get(&line_num) {
+                                                                            for lc in comments.iter() {
+                                                                                tr {
+                                                                                    key: "lc-sbs-{lc.event_id}",
+                                                                                    class: "bg-accent/30",
+                                                                                    td {
+                                                                                        colspan: side_by_side_colspan,
+                                                                                        class: "px-4 py-2",
+                                                                                        InlineLineComment { comment: lc.clone() }
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+
+                                                                    if has_commenting {
+                                                                        if let Some(line_num) = row.right_num {
+                                                                            if is_active {
+                                                                                {
+                                                                                    let file_for_submit = cached_file_path.clone();
+                                                                                    rsx! {
+                                                                                        tr {
+                                                                                            key: "comment-form-sbs-{line_num}",
+                                                                                            class: "bg-accent/20",
+                                                                                            td {
+                                                                                                colspan: side_by_side_colspan,
+                                                                                                class: "p-3",
+                                                                                                div { class: "space-y-2",
+                                                                                                    textarea {
+                                                                                                        class: "w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary resize-y font-sans",
+                                                                                                        placeholder: "Write a line comment...",
+                                                                                                        rows: 3,
+                                                                                                        value: "{comment_text}",
+                                                                                                        oninput: move |e| comment_text.set(e.value()),
+                                                                                                    }
+                                                                                                    div { class: "flex justify-end gap-2",
+                                                                                                        button {
+                                                                                                            r#type: "button",
+                                                                                                            class: "px-3 py-1 text-xs text-muted-foreground hover:text-foreground transition",
+                                                                                                            onclick: move |_| {
+                                                                                                                active_comment_line.set(None);
+                                                                                                                comment_text.set(String::new());
+                                                                                                            },
+                                                                                                            "Cancel"
+                                                                                                        }
+                                                                                                        button {
+                                                                                                            r#type: "button",
+                                                                                                            class: "px-3 py-1 text-xs bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition disabled:opacity-50",
+                                                                                                            disabled: comment_text.read().trim().is_empty(),
+                                                                                                            onclick: {
+                                                                                                                let file_path = file_for_submit.clone();
+                                                                                                                move |_| {
+                                                                                                                    let text = comment_text.read().clone();
+                                                                                                                    if !text.trim().is_empty() {
+                                                                                                                        if let Some(ref handler) = on_line_comment {
+                                                                                                                            handler.call((file_path.clone(), line_num, text));
+                                                                                                                        }
+                                                                                                                        active_comment_line.set(None);
+                                                                                                                        comment_text.set(String::new());
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            },
+                                                                                                            "Comment"
+                                                                                                        }
+                                                                                                    }
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                }
                                                                             }
                                                                         }
                                                                     }

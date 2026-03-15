@@ -43,6 +43,20 @@ impl PublishResult {
     pub fn has_failures(&self) -> bool {
         !self.failed_relays.is_empty()
     }
+
+    pub fn ignoring_duplicate_event_failures(mut self) -> Self {
+        let mut duplicate_relays = Vec::new();
+        self.failed_relays.retain(|(relay, error)| {
+            if relay_error_is_duplicate_event(error) {
+                duplicate_relays.push(relay.clone());
+                false
+            } else {
+                true
+            }
+        });
+        self.successful_relays.extend(duplicate_relays);
+        self
+    }
     /// Get success rate as percentage (0.0 - 100.0)
     pub fn success_rate(&self) -> f32 {
         let total = self.total_attempted();
@@ -52,6 +66,15 @@ impl PublishResult {
             (self.successful_relays.len() as f32 / total as f32) * 100.0
         }
     }
+}
+
+fn relay_error_is_duplicate_event(error: &str) -> bool {
+    let error = error.trim().to_lowercase();
+    error.contains("duplicate")
+        || error.contains("already exists")
+        || error.contains("already have")
+        || error.contains("already stored")
+        || error.contains("already present")
 }
 /// Extracted tag categories from a mute list event (kind 10000)
 /// Used to reduce code duplication in mute/unmute/block/unblock operations

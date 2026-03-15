@@ -133,8 +133,7 @@ async fn detach_native_stream(video_id: &str) {
             return true;
         }})()
         "#,
-        video_id_json,
-        video_id_json
+        video_id_json, video_id_json
     ))
     .await;
 }

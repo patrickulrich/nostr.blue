@@ -446,7 +446,7 @@ async fn publish_music_status(track: &MusicTrack) {
                 urlencoding::encode(episode_guid),
             ),
             None => format!(
-                "https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
+                "https://nostr.blue/podcast/rss/episode/{}/{}",
                 urlencoding::encode(feed_url),
                 urlencoding::encode(episode_guid),
             ),

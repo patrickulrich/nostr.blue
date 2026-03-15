@@ -112,7 +112,7 @@ use recipes::{
     RecipeChef, RecipeDetail, RecipeFork, RecipeNew, RecipesAll, RecipesByTag, RecipesHome,
 };
 use search::Search;
-use settings::{Settings, SettingsBlocklist, SettingsMuted, SettingsRelays};
+use settings::{Settings, SettingsAi, SettingsBlocklist, SettingsMuted, SettingsRelays};
 use shop::{
     ShopCart, ShopCheckout, ShopCollection, ShopCollectionNew, ShopHome, ShopMerchant,
     ShopMerchantOrders, ShopOrders, ShopProductDetail, ShopProductEdit, ShopProductNew, ShopSearch,
@@ -464,6 +464,8 @@ pub enum Route {
     AIChat {},
     #[route("/settings")]
     Settings {},
+    #[route("/settings/ai")]
+    SettingsAi {},
     #[route("/settings/blocklist")]
     SettingsBlocklist {},
     #[route("/settings/muted")]
@@ -680,9 +682,10 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         Route::Note { .. } => note_back_target(current_route),
         Route::ListDetail { .. } => Some(Route::Lists {}),
         Route::BibleChapter { .. } | Route::BibleSearch {} => Some(Route::BibleHome {}),
-        Route::SettingsBlocklist {} | Route::SettingsMuted {} | Route::SettingsRelays {} => {
-            Some(Route::Settings {})
-        }
+        Route::SettingsAi {}
+        | Route::SettingsBlocklist {}
+        | Route::SettingsMuted {}
+        | Route::SettingsRelays {} => Some(Route::Settings {}),
     }
 }
 
@@ -945,6 +948,7 @@ fn Layout() -> Element {
     let is_settings_page = matches!(
         current_route,
         Route::Settings {}
+            | Route::SettingsAi {}
             | Route::SettingsBlocklist {}
             | Route::SettingsMuted {}
             | Route::SettingsRelays {}
@@ -1477,6 +1481,10 @@ mod tests {
                 naddr: "article".to_string(),
             }),
             Some(Route::Articles {})
+        );
+        assert_eq!(
+            fallback_route_for(&Route::SettingsAi {}),
+            Some(Route::Settings {})
         );
         assert_eq!(
             fallback_route_for(&Route::SettingsRelays {}),
