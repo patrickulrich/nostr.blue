@@ -138,6 +138,33 @@ pub fn Settings() -> Element {
             div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
                 div { class: "flex items-center justify-between mb-4",
                     h3 { class: "text-xl font-semibold text-gray-900 dark:text-white",
+                        "✨ AI"
+                    }
+                    span { class: "text-xs text-gray-500 dark:text-gray-400", "Local" }
+                }
+                p { class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
+                    "Manage AI providers, local model preferences, and chat persistence settings for this device."
+                }
+                Link {
+                    to: Route::SettingsAi {},
+                    class: "flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition",
+                    div { class: "flex items-center gap-3",
+                        span { class: "text-2xl", "🤖" }
+                        div {
+                            span { class: "block font-medium text-gray-900 dark:text-white",
+                                "Manage AI Settings"
+                            }
+                            span { class: "block text-xs text-gray-500 dark:text-gray-400",
+                                "Providers, API keys, and model defaults"
+                            }
+                        }
+                    }
+                    span { class: "text-gray-400", "→" }
+                }
+            }
+            div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                div { class: "flex items-center justify-between mb-4",
+                    h3 { class: "text-xl font-semibold text-gray-900 dark:text-white",
                         "😊 Default Reactions"
                     }
                     span { class: "text-xs text-gray-500 dark:text-gray-400", "NIP-78" }
@@ -740,6 +767,7 @@ fn render_account_info() -> Element {
     let _show_npub_export = use_signal(|| false);
     #[cfg_attr(not(feature = "web"), allow(unused_mut))]
     let mut copy_status = use_signal(|| None::<String>);
+    let mut logout_error = use_signal(|| None::<String>);
     let copy_to_clipboard = move |_text: String, _label: &str| {
         #[cfg(feature = "web")]
         {
@@ -924,11 +952,24 @@ fn render_account_info() -> Element {
                 onclick: move |_| {
                     let nav = navigator();
                     spawn(async move {
-                        auth_store::logout().await;
-                        nav.push(Route::Home { list: String::new() });
+                        match auth_store::logout().await {
+                            Ok(()) => {
+                                logout_error.set(None);
+                                nav.push(Route::Home { list: String::new() });
+                            }
+                            Err(e) => {
+                                log::error!("{}", e);
+                                logout_error.set(Some(e));
+                            }
+                        }
                     });
                 },
                 "🚪 Logout"
+            }
+            if let Some(error) = logout_error.read().as_ref() {
+                div { class: "rounded-lg bg-red-100 p-3 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-300",
+                    "{error}"
+                }
             }
         }
     }

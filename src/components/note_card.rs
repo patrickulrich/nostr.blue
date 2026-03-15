@@ -23,6 +23,15 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::Duration;
 
+#[cfg(feature = "web")]
+use dioxus::web::WebEventExt;
+#[cfg(feature = "web")]
+use wasm_bindgen::JsCast;
+
+#[cfg(feature = "web")]
+const INTERACTIVE_ELEMENT_SELECTOR: &str =
+    "a, button, input, textarea, select, summary, [role='button'], [role='link'], [contenteditable='true'], video, audio, iframe, [data-interactive]";
+
 trait ProfileMetadataView {
     fn name(&self) -> Option<&str>;
     fn display_name(&self) -> Option<&str>;
@@ -501,7 +510,18 @@ pub fn NoteCard(
     rsx! {
         article {
             class: "border-b border-border p-4 hover:bg-accent/50 transition-colors cursor-pointer",
-            onclick: move |_| {
+            onclick: move |_evt: MouseEvent| {
+                #[cfg(feature = "web")]
+                {
+                    if let Some(target) = _evt.data.as_web_event().target() {
+                        if let Some(element) = target.dyn_ref::<web_sys::Element>() {
+                            if element.closest(INTERACTIVE_ELEMENT_SELECTOR).ok().flatten().is_some()
+                            {
+                                return;
+                            }
+                        }
+                    }
+                }
                 if !is_hidden {
                     nav.push(Route::Note {
                         note_id: event_id_nav.clone(),
@@ -592,6 +612,7 @@ pub fn NoteCard(
                             NoteMenu {
                                 author_pubkey: author_pubkey.clone(),
                                 event_id: event_id.clone(),
+                                event: event.clone(),
                             }
                         }
                         // Topic badge for kind 1111 posts with NIP-73 hashtag
@@ -615,6 +636,7 @@ pub fn NoteCard(
                                 content: content.clone(),
                                 tags: event.tags.iter().cloned().collect(),
                                 collapsible,
+                                interactive_media: true,
                             }
                         }
                         {

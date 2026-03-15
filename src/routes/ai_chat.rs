@@ -1,22 +1,27 @@
 use crate::components::icons::{SendIcon, SettingsIcon, SparklesIcon, TrashIcon};
 use crate::components::ClientInitializing;
+use crate::routes::Route;
 use crate::services::ai_chat::{
     get_available_models, send_chat_message, ChatCompletionRequest, ChatCompletionResponse,
     ChatMessage, ChatModel, ChatRole, ToolCall, ToolDefinition, ToolFunction,
 };
+use crate::stores::ai_chat_store::{
+    self, PersistedChatMessage, PersistedChatRole, PersistedToolCall,
+};
 use crate::stores::ai_provider_store::{
-    self, normalize_base_url, resolve_providers, sanitize_provider_input, shakespeare_provider,
-    AiProviderConfig, AiProviderKind, AiProviderState, CustomAiProvider,
+    self, resolve_providers, shakespeare_provider, AiProviderConfig, AiProviderState,
 };
 use crate::stores::{nostr_client, theme_store};
 use crate::utils::markdown::render_markdown;
 use dioxus::document;
 use dioxus::prelude::*;
 use serde_json::json;
-use url::Url;
 
 const SYSTEM_PROMPT: &str = "You are Nostrich, an AI assistant inside nostr.blue. Be concise and helpful for the user. Your personality is a fun ostrich that represents the nostr community.";
 const THEME_TOOL_NAME: &str = "set_theme";
+const AI_CHAT_PROVIDER_PERSISTENCE_ENABLED: bool = true;
+const AI_CHAT_HISTORY_LOAD_ENABLED: bool = true;
+const AI_CHAT_HISTORY_SAVE_ENABLED: bool = true;
 
 #[derive(Clone, Debug, PartialEq)]
 struct DisplayMessage {
@@ -44,13 +49,6 @@ struct ThemeToolArgs {
     theme: String,
 }
 
-#[derive(Clone, PartialEq, Props)]
-struct AISettingsModalProps {
-    state: AiProviderState,
-    on_close: EventHandler<MouseEvent>,
-    on_saved: EventHandler<AiProviderState>,
-}
-
 #[component]
 pub fn AIChat() -> Element {
     let mut messages = use_signal(Vec::<DisplayMessage>::new);
@@ -62,13 +60,37 @@ pub fn AIChat() -> Element {
     let mut provider_state = use_signal(AiProviderState::default);
     let mut providers = use_signal(|| vec![shakespeare_provider()]);
     let mut provider_state_loaded = use_signal(|| false);
-    let mut show_settings = use_signal(|| false);
+    let mut provider_state_loading = use_signal(|| false);
+    let mut chat_history_loaded = use_signal(|| false);
+    let mut chat_history_loading = use_signal(|| false);
+    let mut chat_history_generation = use_signal(|| 0u32);
+    let mut persisted_messages_dirty = use_signal(|| false);
+    let persisted_messages_save_generation = use_signal(|| 0u32);
+    let persisted_messages_save_in_flight = use_signal(|| false);
+    let provider_state_save_generation = use_signal(|| 0u32);
+    let mut provider_state_save_in_flight = use_signal(|| false);
+    let mut provider_models_generation = use_signal(|| 0u32);
+    let mut initial_loaded_messages = use_signal(Vec::<PersistedChatMessage>::new);
     let messages_container_id = use_signal(|| "ai-chat-messages".to_string());
+    let mut last_account_key = use_signal(|| None::<String>);
+    let persisted_messages = use_memo(move || {
+        messages
+            .read()
+            .iter()
+            .cloned()
+            .map(persisted_message_from_display)
+            .collect::<Vec<PersistedChatMessage>>()
+    });
 
     use_effect(move || {
-        if *provider_state_loaded.read() {
+        if !AI_CHAT_PROVIDER_PERSISTENCE_ENABLED {
+            provider_state_loaded.set(true);
             return;
         }
+        if *provider_state_loaded.read() || *provider_state_loading.peek() {
+            return;
+        }
+        provider_state_loading.set(true);
         spawn(async move {
             match ai_provider_store::load_provider_state().await {
                 Ok(mut loaded_state) => {
@@ -89,6 +111,7 @@ pub fn AIChat() -> Element {
                     provider_state.set(default_state);
                 }
             }
+            provider_state_loading.set(false);
             provider_state_loaded.set(true);
         });
     });
@@ -106,14 +129,209 @@ pub fn AIChat() -> Element {
     });
 
     use_effect(move || {
-        if !*provider_state_loaded.read() {
+        let account_key = ai_chat_store::current_account_key();
+        if last_account_key.read().as_deref() == Some(account_key.as_str()) {
+            return;
+        }
+        last_account_key.set(Some(account_key));
+        messages.set(Vec::new());
+        chat_history_loaded.set(false);
+        chat_history_loading.set(false);
+        persisted_messages_dirty.set(false);
+        initial_loaded_messages.set(Vec::new());
+        if !AI_CHAT_HISTORY_LOAD_ENABLED && !AI_CHAT_HISTORY_SAVE_ENABLED {
+            return;
+        }
+        let next_generation = chat_history_generation.read().wrapping_add(1);
+        chat_history_generation.set(next_generation);
+    });
+
+    use_effect(move || {
+        if !AI_CHAT_HISTORY_LOAD_ENABLED {
+            chat_history_loaded.set(true);
+            return;
+        }
+        let provider_state_ready = *provider_state_loaded.read();
+        let chat_history_ready = *chat_history_loaded.read();
+        let generation = *chat_history_generation.read();
+        let account_key = ai_chat_store::current_account_key();
+
+        if !provider_state_ready || chat_history_ready || *chat_history_loading.peek() {
             return;
         }
 
+        chat_history_loading.set(true);
+        spawn(async move {
+            match ai_chat_store::load_chat_history(&account_key).await {
+                Ok(history) => {
+                    if *chat_history_generation.read() != generation
+                        || ai_chat_store::current_account_key() != account_key
+                    {
+                        return;
+                    }
+                    if *persisted_messages_dirty.read() || !messages.read().is_empty() {
+                        return;
+                    }
+                    initial_loaded_messages.set(history.clone());
+                    persisted_messages_dirty.set(false);
+                    messages.set(
+                        history
+                            .into_iter()
+                            .map(display_message_from_persisted)
+                            .collect(),
+                    );
+                }
+                Err(e) => {
+                    if *chat_history_generation.read() != generation
+                        || ai_chat_store::current_account_key() != account_key
+                    {
+                        return;
+                    }
+                    error.set(Some(e));
+                }
+            }
+            if *chat_history_generation.read() == generation
+                && ai_chat_store::current_account_key() == account_key
+            {
+                chat_history_loaded.set(true);
+            }
+            chat_history_loading.set(false);
+        });
+    });
+
+    use_effect(move || {
+        if !AI_CHAT_HISTORY_SAVE_ENABLED {
+            return;
+        }
+        if *persisted_messages_save_in_flight.read() {
+            return;
+        }
+        let account_key = ai_chat_store::current_account_key();
+        let chat_history_ready = *chat_history_loaded.read();
+        let persisted_messages_dirty_value = *persisted_messages_dirty.read();
+        let initial_loaded_messages_snapshot = initial_loaded_messages.read().clone();
+        let persisted_messages_snapshot = persisted_messages.read().clone();
+
+        if !chat_history_ready
+            || !persisted_messages_dirty_value
+            || persisted_messages_snapshot == initial_loaded_messages_snapshot
+            || ai_chat_store::current_account_key() != account_key
+        {
+            return;
+        }
+
+        let mut persisted_messages_dirty_signal = persisted_messages_dirty;
+        let mut persisted_messages_save_generation_signal = persisted_messages_save_generation;
+        let mut persisted_messages_save_in_flight_signal = persisted_messages_save_in_flight;
+        let persisted_messages_signal = persisted_messages;
+        let chat_history_generation_signal = chat_history_generation;
+        let mut initial_loaded_messages_signal = initial_loaded_messages;
+        let generation = persisted_messages_save_generation_signal
+            .read()
+            .wrapping_add(1);
+            let chat_generation = *chat_history_generation_signal.read();
+            persisted_messages_save_in_flight_signal.set(true);
+            persisted_messages_save_generation_signal.set(generation);
+            spawn(async move {
+                const MAX_SAVE_ATTEMPTS: u32 = 4;
+
+                for attempt in 0..MAX_SAVE_ATTEMPTS {
+                    if *persisted_messages_save_generation_signal.read() != generation
+                        || *chat_history_generation_signal.read() != chat_generation
+                        || ai_chat_store::current_account_key() != account_key
+                    {
+                        persisted_messages_save_in_flight_signal.set(false);
+                        return;
+                    }
+
+                let result = if persisted_messages_snapshot.is_empty() {
+                    ai_chat_store::clear_chat_history(&account_key).await
+                } else {
+                    ai_chat_store::save_chat_history(&account_key, &persisted_messages_snapshot).await
+                };
+
+                match result {
+                    Ok(()) => {
+                        if *persisted_messages_save_generation_signal.read() == generation
+                            && *chat_history_generation_signal.read() == chat_generation
+                            && ai_chat_store::current_account_key() == account_key
+                        {
+                            let latest_persisted_messages = persisted_messages_signal.read().clone();
+                            if latest_persisted_messages == persisted_messages_snapshot {
+                                persisted_messages_dirty_signal.set(false);
+                                initial_loaded_messages_signal
+                                    .set(persisted_messages_snapshot.clone());
+                            }
+                        }
+                        persisted_messages_save_in_flight_signal.set(false);
+                        return;
+                    }
+                        Err(e) => {
+                            if attempt + 1 == MAX_SAVE_ATTEMPTS {
+                                if *persisted_messages_save_generation_signal.read() == generation
+                                && *chat_history_generation_signal.read() == chat_generation
+                                && ai_chat_store::current_account_key() == account_key
+                                {
+                                    error.set(Some(e));
+                                }
+                                persisted_messages_save_in_flight_signal.set(false);
+                                return;
+                            }
+
+                        crate::platform::timer::sleep_ms((attempt + 1) * 100).await;
+                    }
+                }
+            }
+        });
+    });
+
+    use_effect(move || {
+        if !AI_CHAT_PROVIDER_PERSISTENCE_ENABLED {
+            return;
+        }
+        let save_generation = *provider_state_save_generation.read();
+        if save_generation == 0 || *provider_state_save_in_flight.peek() {
+            return;
+        }
+
+        provider_state_save_in_flight.set(true);
+        spawn(async move {
+            loop {
+                let generation = *provider_state_save_generation.peek();
+                let snapshot = provider_state.read().clone();
+                match ai_provider_store::save_provider_state(&snapshot).await {
+                    Ok(()) => {
+                        if *provider_state_save_generation.peek() == generation {
+                            provider_state_save_in_flight.set(false);
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        error.set(Some(e));
+                        if *provider_state_save_generation.peek() == generation {
+                            provider_state_save_in_flight.set(false);
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+    use_effect(move || {
+        let provider_state_ready = *provider_state_loaded.read();
         let selected_provider_id = provider_state.read().selected_provider_id.clone();
-        let available_providers = providers.read().clone();
         let has_signer = *nostr_client::HAS_SIGNER.read();
 
+        if !provider_state_ready {
+            return;
+        }
+
+        let available_providers = providers.read().clone();
+        let local_generation = provider_models_generation.with_mut(|generation| {
+            *generation = generation.wrapping_add(1);
+            *generation
+        });
         spawn(async move {
             let Some(provider) = available_providers
                 .into_iter()
@@ -131,25 +349,61 @@ pub fn AIChat() -> Element {
 
             match get_available_models(&provider).await {
                 Ok(available_models) => {
-                    if provider_state.read().selected_provider_id != provider.id {
+                    if *provider_models_generation.peek() != local_generation
+                        || provider_state.read().selected_provider_id != provider.id
+                    {
                         return;
                     }
+                    let saved_model = provider_state
+                        .read()
+                        .selected_model_by_provider
+                        .get(&provider.id)
+                        .cloned();
                     let selected_is_valid = available_models
                         .iter()
                         .any(|model| model.id == *selected_model.read());
-                    if !selected_is_valid {
-                        selected_model.set(
-                            available_models
-                                .first()
-                                .map(|model| model.id.clone())
-                                .unwrap_or_default(),
-                        );
+                    let saved_is_valid = saved_model
+                        .as_ref()
+                        .map(|saved| available_models.iter().any(|model| model.id == *saved))
+                        .unwrap_or(false);
+                    let next_model = if selected_is_valid {
+                        selected_model.read().clone()
+                    } else if saved_is_valid {
+                        saved_model.clone().unwrap_or_default()
+                    } else {
+                        available_models
+                            .first()
+                            .map(|model| model.id.clone())
+                            .unwrap_or_default()
+                    };
+
+                    if *provider_models_generation.peek() != local_generation
+                        || provider_state.read().selected_provider_id != provider.id
+                    {
+                        return;
+                    }
+
+                    if !next_model.is_empty() {
+                        selected_model.set(next_model.clone());
+                        if saved_model.as_deref() != Some(next_model.as_str()) {
+                            persist_selected_model(
+                                provider.id.clone(),
+                                next_model,
+                                provider_state,
+                                provider_state_save_generation,
+                                error,
+                            );
+                        }
+                    } else {
+                        selected_model.set(String::new());
                     }
                     models.set(available_models);
                     error.set(None);
                 }
                 Err(e) => {
-                    if provider_state.read().selected_provider_id != provider.id {
+                    if *provider_models_generation.peek() != local_generation
+                        || provider_state.read().selected_provider_id != provider.id
+                    {
                         return;
                     }
                     models.set(Vec::new());
@@ -191,7 +445,17 @@ pub fn AIChat() -> Element {
                             class: "h-10 rounded-lg border border-border bg-card px-3 text-sm text-foreground focus:outline-hidden",
                             value: "{selected_model}",
                             disabled: models.read().is_empty() || *loading.read() || shakespeare_blocked,
-                            onchange: move |evt| selected_model.set(evt.value()),
+                            onchange: move |evt| {
+                                let value = evt.value();
+                                selected_model.set(value.clone());
+                                persist_selected_model(
+                                    active_provider.id.clone(),
+                                    value,
+                                    provider_state,
+                                    provider_state_save_generation,
+                                    error,
+                                );
+                            },
                             if models.read().is_empty() {
                                 option { value: "", if shakespeare_blocked { "Sign in for Shakespeare models" } else { "Loading models..." } }
                             } else {
@@ -219,6 +483,7 @@ pub fn AIChat() -> Element {
                             title: "Clear conversation",
                             onclick: move |_| {
                                 messages.set(Vec::new());
+                                persisted_messages_dirty.set(true);
                                 error.set(None);
                             },
                             TrashIcon { class: "w-4 h-4".to_string() }
@@ -227,7 +492,9 @@ pub fn AIChat() -> Element {
                             class: "flex h-10 w-10 items-center justify-center rounded-lg border border-border text-muted-foreground transition hover:bg-accent",
                             disabled: *loading.read(),
                             title: "AI settings",
-                            onclick: move |_| show_settings.set(true),
+                            onclick: move |_| {
+                                navigator().push(Route::SettingsAi {});
+                            },
                             SettingsIcon { class: "w-4 h-4".to_string() }
                         }
                     }
@@ -280,7 +547,15 @@ pub fn AIChat() -> Element {
                             onkeydown: move |evt| {
                                 if evt.key() == Key::Enter && !evt.modifiers().shift() {
                                     evt.prevent_default();
-                                    submit_message(input, selected_model, loading, error, messages, provider_for_keydown.clone());
+                                    submit_message(
+                                        input,
+                                        selected_model,
+                                        loading,
+                                        error,
+                                        messages,
+                                        persisted_messages_dirty,
+                                        provider_for_keydown.clone(),
+                                    );
                                 }
                             },
                         }
@@ -293,26 +568,21 @@ pub fn AIChat() -> Element {
                                     "inline-flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-primary-foreground transition hover:bg-primary/90"
                                 },
                                 disabled: input.read().trim().is_empty() || selected_model.read().is_empty() || *loading.read() || shakespeare_blocked,
-                                onclick: move |_| submit_message(input, selected_model, loading, error, messages, provider_for_click.clone()),
+                                onclick: move |_| {
+                                    submit_message(
+                                        input,
+                                        selected_model,
+                                        loading,
+                                        error,
+                                        messages,
+                                        persisted_messages_dirty,
+                                        provider_for_click.clone(),
+                                    )
+                                },
                                 SendIcon { class: "w-4 h-4".to_string() }
                             }
                         }
                     }
-                }
-            }
-
-            if *show_settings.read() {
-                AISettingsModal {
-                    state: provider_state.read().clone(),
-                    on_close: move |_| show_settings.set(false),
-                    on_saved: move |new_state: AiProviderState| {
-                        providers.set(resolve_providers(&new_state));
-                        provider_state.set(new_state);
-                        show_settings.set(false);
-                        models.set(Vec::new());
-                        selected_model.set(String::new());
-                        error.set(None);
-                    },
                 }
             }
         }
@@ -392,271 +662,6 @@ fn MessageBubble(message: DisplayMessage) -> Element {
     }
 }
 
-#[component]
-fn AISettingsModal(props: AISettingsModalProps) -> Element {
-    let state = use_signal(|| props.state.clone());
-    let mut save_error = use_signal(|| None::<String>);
-    let is_saving = use_signal(|| false);
-    let mut editing_provider_id = use_signal(|| None::<String>);
-    let mut name = use_signal(String::new);
-    let mut provider_id = use_signal(String::new);
-    let mut base_url = use_signal(String::new);
-    let mut api_key = use_signal(String::new);
-    let on_close = props.on_close;
-    let on_saved = props.on_saved;
-
-    let providers = resolve_providers(&state.read());
-    let selected_provider_id = state.read().selected_provider_id.clone();
-
-    rsx! {
-        div {
-            class: "fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm",
-            onclick: move |evt| on_close.call(evt),
-            div {
-                class: "max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-border bg-background shadow-xl",
-                onclick: move |evt| evt.stop_propagation(),
-                div { class: "flex items-center justify-between border-b border-border px-6 py-4",
-                    div {
-                        h2 { class: "text-xl font-semibold", "AI Settings" }
-                        p { class: "text-sm text-muted-foreground", "Manage local AI providers for this device." }
-                    }
-                    button {
-                        class: "rounded-lg p-2 text-muted-foreground transition hover:bg-accent",
-                        onclick: move |evt| on_close.call(evt),
-                        "Close"
-                    }
-                }
-
-                div { class: "space-y-6 px-6 py-5",
-                    div { class: "rounded-xl border border-border bg-card p-4",
-                        h3 { class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground", "Providers" }
-                        div { class: "mt-4 space-y-3",
-                            for provider in providers.iter() {
-                                {
-                                    let provider_clone = provider.clone();
-                                    let provider_id_for_use = provider.id.clone();
-                                    let provider_id_for_edit = provider.id.clone();
-                                    let provider_id_for_delete = provider.id.clone();
-                                    let is_selected = provider.id == selected_provider_id;
-                                    let is_custom = !provider.is_builtin;
-                                    let display_base_url = provider.base_url.clone();
-                                    rsx! {
-                                        div { key: "{provider.id}", class: "flex flex-col gap-3 rounded-xl border border-border p-4 md:flex-row md:items-center md:justify-between",
-                                            div {
-                                                div { class: "flex items-center gap-2",
-                                                    p { class: "font-medium", "{provider.name}" }
-                                                    if is_selected {
-                                                        span { class: "rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary", "Active" }
-                                                    }
-                                                }
-                                                p { class: "text-sm text-muted-foreground", "{display_base_url}" }
-                                                p { class: "text-xs text-muted-foreground", "Authentication: {provider.authentication_label()}" }
-                                            }
-                                            div { class: "flex flex-wrap items-center gap-2",
-                                                if !is_selected {
-                                                    button {
-                                                        class: "rounded-lg border border-border px-3 py-2 text-sm transition hover:bg-accent",
-                                                        disabled: *is_saving.read(),
-                                                        onclick: move |_| {
-                                                            let mut next_state = state.read().clone();
-                                                            next_state.selected_provider_id = provider_id_for_use.clone();
-                                                            persist_provider_state(next_state, state, is_saving, save_error, on_saved);
-                                                        },
-                                                        "Use"
-                                                    }
-                                                }
-                                                if is_custom {
-                                                    button {
-                                                        class: "rounded-lg border border-border px-3 py-2 text-sm transition hover:bg-accent",
-                                                        disabled: *is_saving.read(),
-                                                        onclick: move |_| {
-                                                            editing_provider_id.set(Some(provider_id_for_edit.clone()));
-                                                            name.set(provider_clone.name.clone());
-                                                            provider_id.set(provider_clone.id.clone());
-                                                            base_url.set(provider_clone.base_url.clone());
-                                                            api_key.set(match &provider_clone.auth {
-                                                                ai_provider_store::ProviderAuth::BearerToken(value) => value.clone(),
-                                                                ai_provider_store::ProviderAuth::Nip98 => String::new(),
-                                                            });
-                                                            save_error.set(None);
-                                                        },
-                                                        "Edit"
-                                                    }
-                                                    button {
-                                                        class: "rounded-lg border border-red-500/20 px-3 py-2 text-sm text-red-600 transition hover:bg-red-500/10 dark:text-red-400",
-                                                        disabled: *is_saving.read(),
-                                                        onclick: move |_| {
-                                                            let mut next_state = state.read().clone();
-                                                            next_state.custom_providers.retain(|item| item.id != provider_id_for_delete);
-                                                            if next_state.selected_provider_id == provider_id_for_delete {
-                                                                next_state.selected_provider_id = shakespeare_provider().id;
-                                                            }
-                                                            persist_provider_state(next_state, state, is_saving, save_error, on_saved);
-                                                        },
-                                                        "Delete"
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    div { class: "rounded-xl border border-border bg-card p-4",
-                        h3 { class: "text-base font-semibold",
-                            if editing_provider_id.read().is_some() { "Edit Custom Provider" } else { "Add Custom Provider" }
-                        }
-                        p { class: "mt-1 text-sm text-muted-foreground",
-                            "Configure a custom OpenAI-compatible provider with local-only credentials."
-                        }
-                        div { class: "mt-4 grid gap-4 md:grid-cols-2",
-                            label { class: "block space-y-2",
-                                span { class: "text-sm font-medium", "Name *" }
-                                input {
-                                    class: "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-hidden",
-                                    placeholder: "e.g., My Custom API",
-                                    value: "{name}",
-                                    disabled: *is_saving.read(),
-                                    oninput: move |evt| name.set(evt.value()),
-                                }
-                            }
-                            label { class: "block space-y-2",
-                                span { class: "text-sm font-medium", "ID *" }
-                                input {
-                                    class: "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-hidden",
-                                    placeholder: "e.g., my-custom-api",
-                                    value: "{provider_id}",
-                                    disabled: *is_saving.read(),
-                                    oninput: move |evt| provider_id.set(evt.value()),
-                                }
-                            }
-                            label { class: "block space-y-2 md:col-span-2",
-                                span { class: "text-sm font-medium", "Base URL *" }
-                                input {
-                                    class: "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-hidden",
-                                    placeholder: "https://api.example.com/v1",
-                                    value: "{base_url}",
-                                    disabled: *is_saving.read(),
-                                    oninput: move |evt| base_url.set(evt.value()),
-                                }
-                            }
-                            div { class: "space-y-2 md:col-span-2",
-                                span { class: "text-sm font-medium", "Authentication" }
-                                p { class: "text-sm text-muted-foreground", "API Key" }
-                            }
-                            label { class: "block space-y-2 md:col-span-2",
-                                span { class: "text-sm font-medium", "API Key *" }
-                                input {
-                                    r#type: "password",
-                                    class: "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-hidden",
-                                    value: "{api_key}",
-                                    disabled: *is_saving.read(),
-                                    oninput: move |evt| api_key.set(evt.value()),
-                                }
-                            }
-                        }
-
-                        if let Some(err) = save_error.read().as_ref() {
-                            p { class: "mt-4 text-sm text-red-600 dark:text-red-400", "{err}" }
-                        }
-
-                        div { class: "mt-5 flex flex-wrap items-center gap-3",
-                            button {
-                                class: "rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60",
-                                disabled: *is_saving.read(),
-                                onclick: move |_| {
-                                    let editing = editing_provider_id.read().clone();
-                                    let current_name = name.read().clone();
-                                    let current_provider_id = provider_id.read().clone();
-                                    let current_base_url = base_url.read().clone();
-                                    let current_api_key = api_key.read().clone();
-                                    let current_state = state.read().clone();
-                                    match build_custom_provider(
-                                        &current_name,
-                                        &current_provider_id,
-                                        &current_base_url,
-                                        &current_api_key,
-                                        &current_state,
-                                        editing.as_deref(),
-                                    ) {
-                                        Ok(provider) => {
-                                            let mut next_state = current_state;
-                                            if let Some(original_id) = editing.as_deref() {
-                                                if let Some(existing) = next_state
-                                                    .custom_providers
-                                                    .iter_mut()
-                                                    .find(|item| item.id == original_id)
-                                                {
-                                                    *existing = provider.clone();
-                                                }
-                                            } else {
-                                                next_state.custom_providers.push(provider.clone());
-                                            }
-                                            next_state.selected_provider_id = provider.id.clone();
-                                            editing_provider_id.set(None);
-                                            name.set(String::new());
-                                            provider_id.set(String::new());
-                                            base_url.set(String::new());
-                                            api_key.set(String::new());
-                                            persist_provider_state(next_state, state, is_saving, save_error, on_saved);
-                                        }
-                                        Err(err) => save_error.set(Some(err)),
-                                    }
-                                },
-                                if *is_saving.read() {
-                                    "Saving..."
-                                } else if editing_provider_id.read().is_some() {
-                                    "Save Provider"
-                                } else {
-                                    "Add Provider"
-                                }
-                            }
-                            if editing_provider_id.read().is_some() {
-                                button {
-                                    class: "rounded-lg border border-border px-4 py-2 text-sm transition hover:bg-accent",
-                                    disabled: *is_saving.read(),
-                                    onclick: move |_| {
-                                        editing_provider_id.set(None);
-                                        name.set(String::new());
-                                        provider_id.set(String::new());
-                                        base_url.set(String::new());
-                                        api_key.set(String::new());
-                                        save_error.set(None);
-                                    },
-                                    "Cancel"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn persist_provider_state(
-    next_state: AiProviderState,
-    mut state: Signal<AiProviderState>,
-    mut is_saving: Signal<bool>,
-    mut save_error: Signal<Option<String>>,
-    on_saved: EventHandler<AiProviderState>,
-) {
-    is_saving.set(true);
-    save_error.set(None);
-    spawn(async move {
-        match ai_provider_store::save_provider_state(&next_state).await {
-            Ok(()) => {
-                state.set(next_state.clone());
-                on_saved.call(next_state);
-            }
-            Err(e) => save_error.set(Some(e)),
-        }
-        is_saving.set(false);
-    });
-}
-
 fn current_provider(providers: &[AiProviderConfig], state: &AiProviderState) -> AiProviderConfig {
     providers
         .iter()
@@ -688,6 +693,7 @@ fn submit_message(
     mut loading: Signal<bool>,
     mut error: Signal<Option<String>>,
     mut messages: Signal<Vec<DisplayMessage>>,
+    mut persisted_messages_dirty: Signal<bool>,
     provider: AiProviderConfig,
 ) {
     if *loading.read() {
@@ -708,6 +714,7 @@ fn submit_message(
     let mut next_messages = messages.read().clone();
     next_messages.push(user_message);
     messages.set(next_messages.clone());
+    persisted_messages_dirty.set(true);
     input.set(String::new());
     error.set(None);
     loading.set(true);
@@ -721,8 +728,16 @@ fn submit_message(
 
         match send_chat_message(&provider, &base_request).await {
             Ok(response) => {
-                apply_chat_response(response, next_messages, model, provider, messages, error)
-                    .await;
+                apply_chat_response(
+                    response,
+                    next_messages,
+                    model,
+                    provider,
+                    messages,
+                    error,
+                    persisted_messages_dirty,
+                )
+                .await;
             }
             Err(e) => {
                 error.set(Some(e));
@@ -761,6 +776,7 @@ async fn apply_chat_response(
     provider: AiProviderConfig,
     mut messages: Signal<Vec<DisplayMessage>>,
     mut error: Signal<Option<String>>,
+    mut persisted_messages_dirty: Signal<bool>,
 ) {
     let Some(choice) = response.choices.into_iter().next() else {
         error.set(Some(
@@ -779,6 +795,7 @@ async fn apply_chat_response(
             tool_calls: Vec::new(),
         });
         messages.set(next_messages);
+        persisted_messages_dirty.set(true);
         return;
     }
 
@@ -791,6 +808,7 @@ async fn apply_chat_response(
             tool_calls: Vec::new(),
         });
         messages.set(next_messages);
+        persisted_messages_dirty.set(true);
         return;
     }
 
@@ -806,6 +824,7 @@ async fn apply_chat_response(
         tool_calls: executed.clone(),
     });
     messages.set(intermediate_messages.clone());
+    persisted_messages_dirty.set(true);
 
     let mut follow_up_messages = build_api_messages(&prior_messages);
     follow_up_messages.push(ChatMessage {
@@ -839,6 +858,7 @@ async fn apply_chat_response(
                     tool_calls: Vec::new(),
                 });
                 messages.set(final_messages);
+                persisted_messages_dirty.set(true);
             } else {
                 error.set(Some(
                     "Follow-up response did not include any choices".to_string(),
@@ -886,96 +906,59 @@ fn execute_tool_call(name: &str, arguments: &str) -> String {
     }
 }
 
-fn build_custom_provider(
-    name: &str,
-    provider_id: &str,
-    base_url: &str,
-    api_key: &str,
-    state: &AiProviderState,
-    editing_provider_id: Option<&str>,
-) -> Result<CustomAiProvider, String> {
-    let name = sanitize_provider_input(name);
-    let provider_id = sanitize_provider_input(provider_id);
-    let base_url = normalize_base_url(base_url);
-    let api_key = sanitize_provider_input(api_key);
-
-    if name.is_empty() {
-        return Err("Name is required".to_string());
+fn persisted_message_from_display(message: DisplayMessage) -> PersistedChatMessage {
+    PersistedChatMessage {
+        id: message.id,
+        role: match message.role {
+            DisplayRole::User => PersistedChatRole::User,
+            DisplayRole::Assistant => PersistedChatRole::Assistant,
+        },
+        content: message.content,
+        tool_calls: message
+            .tool_calls
+            .into_iter()
+            .map(|call| PersistedToolCall {
+                id: call.id,
+                name: call.name,
+                result: call.result,
+            })
+            .collect(),
     }
-    if provider_id.is_empty() {
-        return Err("ID is required".to_string());
-    }
-    if provider_id == shakespeare_provider().id {
-        return Err("ID is reserved for the built-in Shakespeare provider".to_string());
-    }
-    if base_url.is_empty() {
-        return Err("Base URL is required".to_string());
-    }
-    Url::parse(&base_url).map_err(|_| "Base URL must be an absolute URL".to_string())?;
-    if api_key.is_empty() {
-        return Err("API key is required".to_string());
-    }
-
-    let duplicate = state.custom_providers.iter().any(|provider| {
-        provider.id == provider_id
-            && editing_provider_id
-                .map(|original| original != provider.id)
-                .unwrap_or(true)
-    });
-    if duplicate {
-        return Err("ID must be unique across custom providers".to_string());
-    }
-
-    Ok(CustomAiProvider {
-        id: provider_id,
-        name,
-        base_url,
-        api_key,
-        provider_kind: AiProviderKind::OpenAiCompatible,
-    })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn validates_custom_provider_input() {
-        let state = AiProviderState::default();
-        let provider = build_custom_provider(
-            "My API",
-            "my-api",
-            "https://api.example.com/v1/",
-            "secret",
-            &state,
-            None,
-        )
-        .unwrap();
-        assert_eq!(provider.base_url, "https://api.example.com/v1");
+fn display_message_from_persisted(message: PersistedChatMessage) -> DisplayMessage {
+    DisplayMessage {
+        id: message.id,
+        role: match message.role {
+            PersistedChatRole::User => DisplayRole::User,
+            PersistedChatRole::Assistant => DisplayRole::Assistant,
+        },
+        content: message.content,
+        tool_calls: message
+            .tool_calls
+            .into_iter()
+            .map(|call| ExecutedToolCall {
+                id: call.id,
+                name: call.name,
+                result: call.result,
+            })
+            .collect(),
     }
+}
 
-    #[test]
-    fn rejects_duplicate_provider_ids() {
-        let state = AiProviderState {
-            selected_provider_id: "existing".to_string(),
-            custom_providers: vec![CustomAiProvider {
-                id: "existing".to_string(),
-                name: "Existing".to_string(),
-                base_url: "https://api.example.com/v1".to_string(),
-                api_key: "secret".to_string(),
-                provider_kind: AiProviderKind::OpenAiCompatible,
-            }],
-        };
-
-        let error = build_custom_provider(
-            "Other",
-            "existing",
-            "https://api.other.com/v1",
-            "secret",
-            &state,
-            None,
-        )
-        .unwrap_err();
-        assert!(error.contains("unique"));
-    }
+fn persist_selected_model(
+    provider_id: String,
+    model_id: String,
+    mut provider_state: Signal<AiProviderState>,
+    mut provider_state_save_generation: Signal<u32>,
+    mut error: Signal<Option<String>>,
+) {
+    let mut next_state = provider_state.read().clone();
+    next_state
+        .selected_model_by_provider
+        .insert(provider_id, model_id);
+    provider_state.set(next_state.clone());
+    let next_generation = provider_state_save_generation.read().wrapping_add(1);
+    provider_state_save_generation.set(next_generation);
+    error.set(None);
 }

@@ -13,7 +13,7 @@ use crate::components::{
 };
 use crate::routes::Route;
 use crate::services::podcast_rss::{self, format_duration};
-use crate::stores::{auth_store, music_player, nostr_client, nostr_music};
+use crate::stores::{music_player, nostr_client, nostr_music};
 use crate::utils::podcast::{self, PodcastMetadata};
 use dioxus::prelude::*;
 use nostr_sdk::prelude::{Filter, Kind, PublicKey, SingleLetterTag};
@@ -29,15 +29,23 @@ pub fn PodcastNostrEpisodeDetail(props: PodcastNostrEpisodeDetailProps) -> Eleme
     let naddr = props.naddr.clone();
     let mut episode_data = use_signal(|| None::<Result<(DisplayEpisode, PodcastMetadata), String>>);
     let mut loading = use_signal(|| true);
+    let mut load_generation = use_signal(|| 0u32);
     use_effect(move || {
         let naddr = naddr.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let generation = load_generation.with_mut(|current| {
+            *current = current.wrapping_add(1);
+            *current
+        });
         loading.set(true);
         spawn(async move {
             let result = fetch_nostr_episode(&naddr).await;
+            if *load_generation.read() != generation {
+                return;
+            }
             episode_data.set(Some(result));
             loading.set(false);
         });
@@ -139,7 +147,6 @@ struct EpisodeDetailContentProps {
 #[component]
 fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
     let episode = props.episode.clone();
-    let _auth = auth_store::AUTH_STATE.read();
     let player_state = music_player::MUSIC_PLAYER.read();
     let mut show_chapters = use_signal(|| true);
     let mut show_share_modal = use_signal(|| false);
@@ -298,15 +305,24 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
                     nostr_music::TrackSource::NostrPodcast { coordinate, .. } => {
                         format!("https://nostr.blue/podcast/episode/{}", coordinate)
                     }
-                    nostr_music::TrackSource::RssPodcast { podcast_id, episode_guid, .. } => {
+                    nostr_music::TrackSource::RssPodcast {
+                        feed_url,
+                        podcast_id,
+                        episode_guid,
+                        ..
+                    } => {
                         if let Some(id) = podcast_id {
                             format!(
-                                "https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
-                                id,
+                                "https://nostr.blue/podcast/rss/episode/{}/{}",
+                                urlencoding::encode(&id.to_string()),
                                 urlencoding::encode(episode_guid),
                             )
                         } else {
-                            episode.audio_url.clone()
+                            format!(
+                                "https://nostr.blue/podcast/rss/episode/{}/{}",
+                                urlencoding::encode(feed_url),
+                                urlencoding::encode(episode_guid),
+                            )
                         }
                     }
                     _ => episode.audio_url.clone(),

@@ -10,7 +10,7 @@ use dioxus::signals::ReadableExt;
 use nostr_sdk::prelude::*;
 use std::sync::Arc;
 /// Check if a relay URL is in the blocked list
-fn is_relay_blocked(url: &str) -> bool {
+pub fn is_relay_blocked(url: &str) -> bool {
     let blocked = super::nip65::BLOCKED_RELAYS.peek();
     let normalized = url.trim_end_matches('/');
     blocked

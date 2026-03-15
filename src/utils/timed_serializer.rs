@@ -27,7 +27,7 @@ use std::rc::Rc;
 pub struct Debouncer {
     #[cfg(feature = "web")]
     timeout: Rc<RefCell<Option<Timeout>>>,
-    #[cfg(not(feature = "web"))]
+    #[cfg(feature = "native")]
     generation: Rc<std::cell::Cell<u32>>,
     delay_ms: u32,
 }
@@ -38,7 +38,7 @@ impl Debouncer {
         Self {
             #[cfg(feature = "web")]
             timeout: Rc::new(RefCell::new(None)),
-            #[cfg(not(feature = "web"))]
+            #[cfg(feature = "native")]
             generation: Rc::new(std::cell::Cell::new(0)),
             delay_ms,
         }
@@ -55,9 +55,10 @@ impl Debouncer {
         *self.timeout.borrow_mut() = Some(timeout);
     }
 
-    /// Schedule a callback to run after the delay period (native: Dioxus spawn + sleep)
-    /// If called again before the delay expires, the previous call is cancelled
-    #[cfg(not(feature = "web"))]
+    /// Schedule a callback to run after the delay period (native: Dioxus spawn + sleep).
+    /// Requires an active Dioxus runtime; calling this outside a UI/runtime context can panic.
+    /// If called again before the delay expires, the previous call is cancelled.
+    #[cfg(feature = "native")]
     pub fn debounce<F>(&self, callback: F)
     where
         F: FnOnce() + 'static,
@@ -77,21 +78,21 @@ impl Debouncer {
     /// Cancel any pending debounced call
     #[cfg(feature = "web")]
     pub fn cancel(&self) {
-        *self.timeout.borrow_mut() = None;
+        self.invalidate();
     }
     /// Cancel any pending debounced call
-    #[cfg(not(feature = "web"))]
+    #[cfg(feature = "native")]
     pub fn cancel(&self) {
-        self.generation.set(self.generation.get().wrapping_add(1));
+        self.invalidate();
     }
-    /// Cancel any pending debounced call (web: clears timeout, native: bumps generation)
+    /// Invalidate any pending debounced call without executing it.
     #[cfg(feature = "web")]
-    pub fn flush(&self) {
+    pub fn invalidate(&self) {
         *self.timeout.borrow_mut() = None;
     }
-    /// Cancel any pending debounced call (web: clears timeout, native: bumps generation)
-    #[cfg(not(feature = "web"))]
-    pub fn flush(&self) {
+    /// Invalidate any pending debounced call without executing it.
+    #[cfg(feature = "native")]
+    pub fn invalidate(&self) {
         self.generation.set(self.generation.get().wrapping_add(1));
     }
 }
@@ -100,15 +101,17 @@ impl Clone for Debouncer {
         Self {
             #[cfg(feature = "web")]
             timeout: Rc::clone(&self.timeout),
-            #[cfg(not(feature = "web"))]
+            #[cfg(feature = "native")]
             generation: Rc::clone(&self.generation),
             delay_ms: self.delay_ms,
         }
     }
 }
-/// Timed serializer that debounces save operations
+/// Timed serializer that debounces save operations.
 ///
-/// Generic over the data type T which must be serializable
+/// `Clone` shares `pending_data` and the underlying `debouncer`, so cloned values
+/// coordinate pending saves and cancellation. Use [`TimedSerializer::fork`] when
+/// you need an independent pending buffer and timer.
 #[allow(dead_code)]
 pub struct TimedSerializer<T: Clone + 'static> {
     debouncer: Debouncer,
@@ -134,7 +137,7 @@ impl<T: Clone + 'static> TimedSerializer<T> {
     where
         F: FnOnce(T) + 'static,
     {
-        *self.pending_data.borrow_mut() = Some(data.clone());
+        *self.pending_data.borrow_mut() = Some(data);
         let pending_data = Rc::clone(&self.pending_data);
         self.debouncer.debounce(move || {
             if let Some(data) = pending_data.borrow_mut().take() {
@@ -142,12 +145,19 @@ impl<T: Clone + 'static> TimedSerializer<T> {
             }
         });
     }
+    /// Create a serializer with the same debounce delay but independent state.
+    pub fn fork(&self) -> Self {
+        Self {
+            debouncer: Debouncer::new(self.debouncer.delay_ms),
+            pending_data: Rc::new(RefCell::new(None)),
+        }
+    }
     /// Immediately flush any pending save
     pub fn flush<F>(&self, save_fn: F)
     where
         F: FnOnce(T),
     {
-        self.debouncer.flush();
+        self.debouncer.invalidate();
         if let Some(data) = self.pending_data.borrow_mut().take() {
             save_fn(data);
         }
@@ -164,6 +174,7 @@ impl<T: Clone + 'static> Default for TimedSerializer<T> {
     }
 }
 impl<T: Clone + 'static> Clone for TimedSerializer<T> {
+    /// Clone with shared pending data and shared debounce state.
     fn clone(&self) -> Self {
         Self {
             debouncer: self.debouncer.clone(),
@@ -215,8 +226,8 @@ mod tests {
         let serializer = TimedSerializer::<String>::with_delay(500);
         assert_eq!(serializer.debouncer.delay_ms, 500);
     }
-    #[cfg(all(feature = "web", target_arch = "wasm32"))]
-    #[wasm_bindgen_test]
+    #[cfg(feature = "web")]
+    #[ignore = "requires wasm test runtime"]
     #[test]
     fn test_pending_data_storage() {
         use std::sync::{Arc, Mutex};
@@ -228,8 +239,8 @@ mod tests {
         });
         assert!(serializer.pending_data.borrow().is_some());
     }
-    #[cfg(all(feature = "web", target_arch = "wasm32"))]
-    #[wasm_bindgen_test]
+    #[cfg(feature = "web")]
+    #[ignore = "requires wasm test runtime"]
     #[test]
     fn test_cancel() {
         let serializer = TimedSerializer::<String>::new();
@@ -237,7 +248,7 @@ mod tests {
         serializer.cancel();
         assert!(serializer.pending_data.borrow().is_none());
     }
-    #[cfg(not(feature = "web"))]
+    #[cfg(feature = "native")]
     #[test]
     fn test_native_cancel_uses_generation() {
         let debouncer = Debouncer::new(100);
@@ -246,13 +257,13 @@ mod tests {
         let after_cancel_gen = debouncer.generation.get();
         assert_ne!(initial_gen, after_cancel_gen);
     }
-    #[cfg(not(feature = "web"))]
+    #[cfg(feature = "native")]
     #[test]
-    fn test_native_flush_uses_generation() {
+    fn test_native_invalidate_uses_generation() {
         let debouncer = Debouncer::new(100);
         let initial_gen = debouncer.generation.get();
-        debouncer.flush();
-        let after_flush_gen = debouncer.generation.get();
-        assert_ne!(initial_gen, after_flush_gen);
+        debouncer.invalidate();
+        let after_invalidate_gen = debouncer.generation.get();
+        assert_ne!(initial_gen, after_invalidate_gen);
     }
 }

@@ -526,9 +526,16 @@ pub fn is_authenticated() -> bool {
 pub fn get_login_method() -> Option<LoginMethod> {
     AUTH_STATE.read().login_method.clone()
 }
-/// Logout and clear credentials
-pub async fn logout() {
+/// Logout and clear credentials.
+///
+/// Returns an error if local AI chat history could not be cleared so the caller can
+/// keep the user signed in and surface the failure.
+pub async fn logout() -> Result<(), String> {
     log::info!("Logging out...");
+    let ai_chat_account_key = crate::stores::ai_chat_store::current_account_key();
+    crate::stores::ai_chat_store::clear_chat_history(&ai_chat_account_key)
+        .await
+        .map_err(|e| format!("Failed to clear AI chat history during logout: {}", e))?;
     crate::stores::notifications::stop_realtime_subscription().await;
     crate::stores::relay::stop_relay_list_subscription().await;
     crate::stores::cashu_cdk_bridge::clear_multi_wallet();
@@ -538,30 +545,24 @@ pub async fn logout() {
     spawn(async move {
         crate::services::search_relays::invalidate_search_relay_cache().await;
     });
-    let _ = nostr_client::set_read_only().await;
+    nostr_client::set_read_only()
+        .await
+        .map_err(|e| format!("Failed to set client to read-only during logout: {}", e))?;
+    for (storage_key, label) in [
+        (STORAGE_KEY_NSEC, "nsec"),
+        (STORAGE_KEY_NCRYPTSEC, "ncryptsec"),
+        (STORAGE_KEY_NPUB, "npub"),
+        (STORAGE_KEY_METHOD, "method"),
+        (STORAGE_KEY_BUNKER_URI, "bunker URI"),
+        (STORAGE_KEY_APP_KEYS, "app keys"),
+        (STORAGE_KEY_SIGNER_PACKAGE, "signer package"),
+    ] {
+        crate::platform::storage::delete(storage_key)
+            .map_err(|e| format!("Failed to delete {} during logout: {}", label, e))?;
+    }
     clear_auth();
-    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_NSEC) {
-        log::error!("Failed to delete nsec: {}", e);
-    }
-    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_NCRYPTSEC) {
-        log::error!("Failed to delete ncryptsec: {}", e);
-    }
-    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_NPUB) {
-        log::error!("Failed to delete npub: {}", e);
-    }
-    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_METHOD) {
-        log::error!("Failed to delete method: {}", e);
-    }
-    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_BUNKER_URI) {
-        log::error!("Failed to delete bunker URI: {}", e);
-    }
-    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_APP_KEYS) {
-        log::error!("Failed to delete app keys: {}", e);
-    }
-    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_SIGNER_PACKAGE) {
-        log::error!("Failed to delete signer package: {}", e);
-    }
     *PASSWORD_PROMPT.write() = PasswordPromptState::default();
+    Ok(())
 }
 /// Clear authentication state
 fn clear_auth() {
