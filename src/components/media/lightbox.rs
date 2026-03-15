@@ -96,14 +96,8 @@ pub fn MediaLightbox() -> Element {
     let mut pinch_start_distance = use_signal(|| None::<f64>);
     let mut pinch_start_zoom = use_signal(|| 1.0f64);
     let mut image_intrinsic_size = use_signal(|| (1200.0f64, 800.0f64));
-    #[cfg(feature = "web")]
     let mut viewport_size = use_signal(|| (1200.0f64, 800.0f64));
-    #[cfg(feature = "native")]
-    let viewport_size = use_signal(|| (1200.0f64, 800.0f64));
-    #[cfg(feature = "web")]
     let mut viewport_known = use_signal(|| false);
-    #[cfg(feature = "native")]
-    let viewport_known = use_signal(|| false);
     #[cfg(feature = "web")]
     let mut viewport_resize_listeners =
         use_signal(|| None::<(EventListener, EventListener)>);
@@ -229,15 +223,11 @@ pub fn MediaLightbox() -> Element {
                 onclick: move |evt| evt.stop_propagation(),
                 onmounted: move |evt| async move {
                     let _ = evt.set_focus(true).await;
-                        #[cfg(feature = "web")]
-                        {
-                            if let Some(element) = evt.data().downcast::<web_sys::HtmlElement>() {
-                                let rect = element.get_bounding_client_rect();
-                                viewport_size.set((rect.width(), rect.height()));
-                                viewport_known.set(true);
-                            }
-                        }
-                    },
+                    if let Ok(rect) = evt.data().get_client_rect().await {
+                        viewport_size.set((rect.width(), rect.height()));
+                        viewport_known.set(true);
+                    }
+                },
                 onkeydown: move |evt: KeyboardEvent| {
                     match evt.key() {
                         Key::Escape => {
@@ -495,10 +485,15 @@ pub fn MediaLightbox() -> Element {
                         class: "max-h-full max-w-full select-none object-contain transition-transform duration-100 ease-out",
                         draggable: "false",
                         style: "{transform}",
-                        onmounted: move |_evt| async move {
+                        onmounted: move |evt| async move {
+                            if let Ok(rect) = evt.data().get_client_rect().await {
+                                if rect.width() > 0.0 && rect.height() > 0.0 {
+                                    image_intrinsic_size.set((rect.width(), rect.height()));
+                                }
+                            }
                             #[cfg(feature = "web")]
                             {
-                                if let Some(element) = _evt.data().downcast::<web_sys::HtmlElement>() {
+                                if let Some(element) = evt.data().downcast::<web_sys::HtmlElement>() {
                                     update_image_intrinsic_size(element, image_intrinsic_size);
                                     let element_for_load = element.clone();
                                     image_load_listener.set(Some(EventListener::new(

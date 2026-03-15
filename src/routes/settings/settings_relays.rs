@@ -291,7 +291,7 @@ pub fn SettingsRelays() -> Element {
     };
     let add_broadcast_relay = move |_| {
         let url = new_broadcast_relay.read().clone();
-        match normalize_relay_url(&url) {
+        match normalize_local_relay_url(&url) {
             Ok(normalized) => {
                 if broadcast_relays.read().contains(&normalized) {
                     broadcast_error.set(Some("Relay already exists".to_string()));

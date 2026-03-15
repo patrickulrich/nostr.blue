@@ -526,8 +526,11 @@ pub fn is_authenticated() -> bool {
 pub fn get_login_method() -> Option<LoginMethod> {
     AUTH_STATE.read().login_method.clone()
 }
-/// Logout and clear credentials
-pub async fn logout() {
+/// Logout and clear credentials.
+///
+/// Returns an error if local AI chat history could not be cleared so the caller can
+/// keep the user signed in and surface the failure.
+pub async fn logout() -> Result<(), String> {
     log::info!("Logging out...");
     let ai_chat_account_key = crate::stores::ai_chat_store::current_account_key();
     crate::stores::notifications::stop_realtime_subscription().await;
@@ -540,9 +543,9 @@ pub async fn logout() {
         crate::services::search_relays::invalidate_search_relay_cache().await;
     });
     let _ = nostr_client::set_read_only().await;
-    if let Err(e) = crate::stores::ai_chat_store::clear_chat_history(&ai_chat_account_key).await {
-        log::warn!("Failed to clear AI chat history: {}", e);
-    }
+    crate::stores::ai_chat_store::clear_chat_history(&ai_chat_account_key)
+        .await
+        .map_err(|e| format!("Failed to clear AI chat history during logout: {}", e))?;
     clear_auth();
     if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_NSEC) {
         log::error!("Failed to delete nsec: {}", e);
@@ -566,6 +569,7 @@ pub async fn logout() {
         log::error!("Failed to delete signer package: {}", e);
     }
     *PASSWORD_PROMPT.write() = PasswordPromptState::default();
+    Ok(())
 }
 /// Clear authentication state
 fn clear_auth() {

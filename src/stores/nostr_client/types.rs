@@ -70,11 +70,18 @@ impl PublishResult {
 
 fn relay_error_is_duplicate_event(error: &str) -> bool {
     let error = error.trim().to_lowercase();
-    error.contains("duplicate")
-        || error.contains("already exists")
-        || error.contains("already have")
-        || error.contains("already stored")
-        || error.contains("already present")
+    [
+        "duplicate event",
+        "event already exists",
+        "event already seen",
+        "duplicate:",
+        "duplicate event:",
+        "duplicate event ",
+        "event already exists:",
+        "event already seen:",
+    ]
+    .iter()
+    .any(|pattern| error.starts_with(pattern))
 }
 /// Extracted tag categories from a mute list event (kind 10000)
 /// Used to reduce code duplication in mute/unmute/block/unblock operations

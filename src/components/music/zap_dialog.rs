@@ -29,6 +29,9 @@ fn is_public_relay_url(url: &str) -> bool {
     match parsed.host() {
         Some(Host::Ipv4(ip)) => {
             let octets = ip.octets();
+            if octets == [0, 0, 0, 0] {
+                return false;
+            }
             if octets[0] == 127 || octets[0] == 10 {
                 return false;
             }
@@ -44,7 +47,7 @@ fn is_public_relay_url(url: &str) -> bool {
             true
         }
         Some(Host::Ipv6(ip)) => {
-            if ip.is_loopback() {
+            if ip.is_loopback() || ip.is_unspecified() {
                 return false;
             }
             let segments = ip.segments();

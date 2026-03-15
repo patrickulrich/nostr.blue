@@ -154,6 +154,9 @@ pub fn AIChat() -> Element {
                         {
                             return;
                         }
+                        if *persisted_messages_dirty.read() || !messages.read().is_empty() {
+                            return;
+                        }
                         initial_loaded_messages.set(history.clone());
                         persisted_messages_dirty.set(false);
                         messages.set(
@@ -245,18 +248,18 @@ pub fn AIChat() -> Element {
     use_effect(use_reactive(
         &provider_state_save_generation_value,
         move |save_generation| {
-            if save_generation == 0 || *provider_state_save_in_flight.read() {
+            if save_generation == 0 || *provider_state_save_in_flight.peek() {
                 return;
             }
 
             provider_state_save_in_flight.set(true);
             spawn(async move {
                 loop {
-                    let generation = *provider_state_save_generation.read();
+                    let generation = *provider_state_save_generation.peek();
                     let snapshot = provider_state.read().clone();
                     match ai_provider_store::save_provider_state(&snapshot).await {
                         Ok(()) => {
-                            if *provider_state_save_generation.read() == generation {
+                            if *provider_state_save_generation.peek() == generation {
                                 provider_state_save_in_flight.set(false);
                                 break;
                             }

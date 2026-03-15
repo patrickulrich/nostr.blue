@@ -428,6 +428,7 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                     }
                 }
                 Err(e) => {
+                    log::error!("fork failed: {}", e);
                     toast.error(fork_error_message(&e), ToastOptions::new());
                 }
             }

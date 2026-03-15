@@ -387,6 +387,7 @@ pub fn ZapDistribution(
             );
             return;
         }
+        let modal_pubkeys = selected_pubkeys.read().clone();
         let eligible_pubkeys = eligible_with_lightning
             .iter()
             .map(|(recip, _, _)| recip.pubkey.clone())
@@ -410,16 +411,12 @@ pub fn ZapDistribution(
             })
             .collect();
         {
-            let sendable_amounts = sendable
-                .iter()
-                .map(|(recip, _, _)| (recip.pubkey.clone(), recip.amount))
-                .collect::<std::collections::HashMap<_, _>>();
-            persisted_send_pubkeys.set(eligible_pubkeys);
-            persisted_send_total.set(send_amount);
-            persisted_sendable_amounts.set(sendable_amounts.clone());
+            persisted_send_pubkeys.set(modal_pubkeys);
+            persisted_send_total.set(*total_amount.read());
+            persisted_sendable_amounts.set(amount_map.clone());
             let mut current = recipients.write();
             for recip in current.iter_mut() {
-                if let Some(amount) = sendable_amounts.get(&recip.pubkey).copied() {
+                if let Some(amount) = amount_map.get(&recip.pubkey).copied() {
                     recip.amount = amount;
                 } else {
                     recip.amount = 0;

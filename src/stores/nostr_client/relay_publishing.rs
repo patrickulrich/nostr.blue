@@ -158,7 +158,7 @@ pub async fn send_presigned_event_to_relays(
         .send_event_to(urls, &event)
         .await
         .map_err(|e| format!("Failed to send event: {}", e))?;
-    let result = PublishResult::from_output(output);
+    let result = PublishResult::from_output(output).ignoring_duplicate_event_failures();
     log::info!(
         "Pre-signed event sent to specific relays: {} ({}/{} relays succeeded)",
         result.event_id,
@@ -178,7 +178,5 @@ pub async fn broadcast_presigned_event(
     event: nostr::Event,
     relay_urls: Vec<String>,
 ) -> std::result::Result<PublishResult, String> {
-    send_presigned_event_to_relays(event, relay_urls)
-        .await
-        .map(PublishResult::ignoring_duplicate_event_failures)
+    send_presigned_event_to_relays(event, relay_urls).await
 }

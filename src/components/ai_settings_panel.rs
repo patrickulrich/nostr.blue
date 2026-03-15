@@ -8,7 +8,7 @@ use url::Url;
 #[component]
 pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
     let mut state = use_signal(AiProviderState::default);
-    let mut loaded = use_signal(|| false);
+    let mut provider_state_load = use_signal(|| None::<Result<AiProviderState, String>>);
     let mut save_error = use_signal(|| None::<String>);
     let mut is_saving = use_signal(|| false);
     let mut editing_provider_id = use_signal(|| None::<String>);
@@ -18,10 +18,9 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
     let mut api_key = use_signal(String::new);
 
     use_effect(move || {
-        if *loaded.read() {
+        if provider_state_load.read().is_some() {
             return;
         }
-        loaded.set(true);
 
         spawn(async move {
             match ai_provider_store::load_provider_state().await {
@@ -33,18 +32,31 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                     {
                         loaded_state.selected_provider_id = shakespeare_provider().id;
                     }
-                    state.set(loaded_state);
-                    save_error.set(None);
+                    provider_state_load.set(Some(Ok(loaded_state)));
                 }
                 Err(e) => {
-                    save_error.set(Some(e));
-                    loaded.set(false);
+                    provider_state_load.set(Some(Err(e)));
                 }
             }
         });
     });
 
-    if !*loaded.read() {
+    use_effect(move || {
+        let Some(load_result) = provider_state_load.read().clone() else {
+            return;
+        };
+        match load_result {
+            Ok(loaded_state) => {
+                state.set(loaded_state);
+                save_error.set(None);
+            }
+            Err(e) => {
+                save_error.set(Some(e));
+            }
+        }
+    });
+
+    if provider_state_load.read().is_none() {
         return rsx! {
             div { class: "rounded-xl border border-border bg-card p-6",
                 p { class: "text-sm text-muted-foreground", "Loading AI settings..." }

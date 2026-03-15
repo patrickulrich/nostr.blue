@@ -12,12 +12,6 @@
 //! **IMPORTANT**: All functions take `client: &Client` as a parameter
 //! rather than calling `nostr_client::get_client()` internally. This avoids
 //! circular dependencies and follows the relay module design principle.
-#[cfg(all(feature = "web", feature = "native"))]
-compile_error!("Cannot enable both 'web' and 'native' features simultaneously");
-
-#[cfg(not(any(feature = "web", feature = "native")))]
-compile_error!("Must enable either 'web' or 'native' feature");
-
 #[cfg(feature = "web")]
 use crate::platform::storage;
 use nostr_sdk::prelude::*;

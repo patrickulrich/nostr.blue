@@ -33,14 +33,23 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
     let mut is_updating_pin = use_signal(|| false);
     let mut is_broadcasting = use_signal(|| false);
     let toast = consume_toast();
-    let author_pubkey = props.author_pubkey.clone();
     let event = props.event.clone();
+    let author_pubkey = event.pubkey.to_hex();
+    let event_id = event.id.to_hex();
+    if props.author_pubkey != author_pubkey || props.event_id != event_id {
+        log::error!(
+            "NoteMenu identity mismatch: props=({}, {}), event=({}, {})",
+            props.author_pubkey,
+            props.event_id,
+            author_pubkey,
+            event_id
+        );
+    }
     let author_pubkey_follow_check = author_pubkey.clone();
     let author_pubkey_follow_action = author_pubkey.clone();
     let author_pubkey_block = author_pubkey.clone();
     let author_pubkey_modal = author_pubkey.clone();
     let author_pubkey_modal_list = author_pubkey.clone();
-    let event_id = props.event_id.clone();
     let event_id_list = event_id.clone();
     let event_id_mute = event_id.clone();
     let event_id_report = event_id.clone();

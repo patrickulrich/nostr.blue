@@ -1901,6 +1901,7 @@ fn LoginSection() -> Element {
 #[component]
 fn ProfileSection() -> Element {
     let auth = auth_store::AUTH_STATE.read();
+    let mut logout_error = use_signal(|| None::<String>);
     rsx! {
         div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
             div { class: "flex justify-between items-start mb-4",
@@ -1912,11 +1913,24 @@ fn ProfileSection() -> Element {
                     onclick: move |_| {
                         let nav = navigator();
                         spawn(async move {
-                            auth_store::logout().await;
-                            nav.push(Route::Home { list: String::new() });
+                            match auth_store::logout().await {
+                                Ok(()) => {
+                                    logout_error.set(None);
+                                    nav.push(Route::Home { list: String::new() });
+                                }
+                                Err(e) => {
+                                    log::error!("{}", e);
+                                    logout_error.set(Some(e));
+                                }
+                            }
                         });
                     },
                     "Logout"
+                }
+            }
+            if let Some(error) = logout_error.read().as_ref() {
+                p { class: "mb-4 rounded-lg bg-red-100 p-3 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-300",
+                    "{error}"
                 }
             }
             div { class: "space-y-3",

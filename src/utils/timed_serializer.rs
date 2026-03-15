@@ -85,14 +85,14 @@ impl Debouncer {
     pub fn cancel(&self) {
         self.generation.set(self.generation.get().wrapping_add(1));
     }
-    /// Cancel any pending debounced call (web: clears timeout, native: bumps generation)
+    /// Invalidate any pending debounced call without executing it.
     #[cfg(feature = "web")]
-    pub fn flush(&self) {
+    pub fn invalidate(&self) {
         *self.timeout.borrow_mut() = None;
     }
-    /// Cancel any pending debounced call (web: clears timeout, native: bumps generation)
+    /// Invalidate any pending debounced call without executing it.
     #[cfg(feature = "native")]
-    pub fn flush(&self) {
+    pub fn invalidate(&self) {
         self.generation.set(self.generation.get().wrapping_add(1));
     }
 }
@@ -107,9 +107,11 @@ impl Clone for Debouncer {
         }
     }
 }
-/// Timed serializer that debounces save operations
+/// Timed serializer that debounces save operations.
 ///
-/// Generic over the data type T which must be serializable
+/// `Clone` shares `pending_data` and the underlying `debouncer`, so cloned values
+/// coordinate pending saves and cancellation. Use [`TimedSerializer::fork`] when
+/// you need an independent pending buffer and timer.
 #[allow(dead_code)]
 pub struct TimedSerializer<T: Clone + 'static> {
     debouncer: Debouncer,
@@ -135,7 +137,7 @@ impl<T: Clone + 'static> TimedSerializer<T> {
     where
         F: FnOnce(T) + 'static,
     {
-        *self.pending_data.borrow_mut() = Some(data.clone());
+        *self.pending_data.borrow_mut() = Some(data);
         let pending_data = Rc::clone(&self.pending_data);
         self.debouncer.debounce(move || {
             if let Some(data) = pending_data.borrow_mut().take() {
@@ -143,12 +145,19 @@ impl<T: Clone + 'static> TimedSerializer<T> {
             }
         });
     }
+    /// Create a serializer with the same debounce delay but independent state.
+    pub fn fork(&self) -> Self {
+        Self {
+            debouncer: Debouncer::new(self.debouncer.delay_ms),
+            pending_data: Rc::new(RefCell::new(None)),
+        }
+    }
     /// Immediately flush any pending save
     pub fn flush<F>(&self, save_fn: F)
     where
         F: FnOnce(T),
     {
-        self.debouncer.flush();
+        self.debouncer.invalidate();
         if let Some(data) = self.pending_data.borrow_mut().take() {
             save_fn(data);
         }
@@ -165,6 +174,7 @@ impl<T: Clone + 'static> Default for TimedSerializer<T> {
     }
 }
 impl<T: Clone + 'static> Clone for TimedSerializer<T> {
+    /// Clone with shared pending data and shared debounce state.
     fn clone(&self) -> Self {
         Self {
             debouncer: self.debouncer.clone(),
@@ -249,11 +259,11 @@ mod tests {
     }
     #[cfg(feature = "native")]
     #[test]
-    fn test_native_flush_uses_generation() {
+    fn test_native_invalidate_uses_generation() {
         let debouncer = Debouncer::new(100);
         let initial_gen = debouncer.generation.get();
-        debouncer.flush();
-        let after_flush_gen = debouncer.generation.get();
-        assert_ne!(initial_gen, after_flush_gen);
+        debouncer.invalidate();
+        let after_invalidate_gen = debouncer.generation.get();
+        assert_ne!(initial_gen, after_invalidate_gen);
     }
 }

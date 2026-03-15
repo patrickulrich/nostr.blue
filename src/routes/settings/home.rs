@@ -767,6 +767,7 @@ fn render_account_info() -> Element {
     let _show_npub_export = use_signal(|| false);
     #[cfg_attr(not(feature = "web"), allow(unused_mut))]
     let mut copy_status = use_signal(|| None::<String>);
+    let mut logout_error = use_signal(|| None::<String>);
     let copy_to_clipboard = move |_text: String, _label: &str| {
         #[cfg(feature = "web")]
         {
@@ -951,11 +952,24 @@ fn render_account_info() -> Element {
                 onclick: move |_| {
                     let nav = navigator();
                     spawn(async move {
-                        auth_store::logout().await;
-                        nav.push(Route::Home { list: String::new() });
+                        match auth_store::logout().await {
+                            Ok(()) => {
+                                logout_error.set(None);
+                                nav.push(Route::Home { list: String::new() });
+                            }
+                            Err(e) => {
+                                log::error!("{}", e);
+                                logout_error.set(Some(e));
+                            }
+                        }
                     });
                 },
                 "🚪 Logout"
+            }
+            if let Some(error) = logout_error.read().as_ref() {
+                div { class: "rounded-lg bg-red-100 p-3 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-300",
+                    "{error}"
+                }
             }
         }
     }
