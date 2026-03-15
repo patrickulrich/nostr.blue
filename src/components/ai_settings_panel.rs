@@ -21,6 +21,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
         if *loaded.read() {
             return;
         }
+        loaded.set(true);
 
         spawn(async move {
             match ai_provider_store::load_provider_state().await {
@@ -35,9 +36,11 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                     state.set(loaded_state);
                     save_error.set(None);
                 }
-                Err(e) => save_error.set(Some(e)),
+                Err(e) => {
+                    save_error.set(Some(e));
+                    loaded.set(false);
+                }
             }
-            loaded.set(true);
         });
     });
 
@@ -212,6 +215,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                         span { class: "text-sm font-medium text-foreground", "API Key *" }
                         input {
                             r#type: "password",
+                            autocomplete: "new-password",
                             class: "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                             value: "{api_key}",
                             disabled: *is_saving.read(),
@@ -363,7 +367,11 @@ fn build_custom_provider(
     if base_url.is_empty() {
         return Err("Base URL is required".to_string());
     }
-    Url::parse(&base_url).map_err(|_| "Base URL must be an absolute URL".to_string())?;
+    let parsed =
+        Url::parse(&base_url).map_err(|_| "Base URL must be an absolute URL".to_string())?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return Err("Base URL must be an absolute HTTP/HTTPS URL".to_string());
+    }
     if api_key.is_empty() {
         return Err("API key is required".to_string());
     }

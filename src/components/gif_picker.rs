@@ -26,6 +26,9 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
     let gif_loading = GIF_LOADING.read();
     let recent_gifs = RECENT_GIFS.read();
     let handle_search = use_callback(move |_: ()| {
+        if *GIF_LOADING.read() {
+            return;
+        }
         let query = search_query.read().clone();
         spawn(async move {
             search_gifs(query).await;
