@@ -55,8 +55,9 @@ impl Debouncer {
         *self.timeout.borrow_mut() = Some(timeout);
     }
 
-    /// Schedule a callback to run after the delay period (native: Dioxus spawn + sleep)
-    /// If called again before the delay expires, the previous call is cancelled
+    /// Schedule a callback to run after the delay period (native: Dioxus spawn + sleep).
+    /// Requires an active Dioxus runtime; calling this outside a UI/runtime context can panic.
+    /// If called again before the delay expires, the previous call is cancelled.
     #[cfg(feature = "native")]
     pub fn debounce<F>(&self, callback: F)
     where

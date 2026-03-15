@@ -14,7 +14,7 @@ use wasm_bindgen::JsCast;
 
 #[cfg(feature = "web")]
 const INTERACTIVE_ELEMENT_SELECTOR: &str =
-    "a, button, input, textarea, select, summary, audio, [role=\"button\"], [role=\"link\"]:not([data-post-card-root]), [contenteditable=\"true\"]";
+    "a, button, input, textarea, select, summary, video, audio, [role=\"button\"], [role=\"link\"]:not([data-post-card-root]), [contenteditable=\"true\"]";
 
 /// Reddit-style topic post card
 #[component]

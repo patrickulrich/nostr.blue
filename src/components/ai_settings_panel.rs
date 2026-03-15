@@ -130,6 +130,16 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                                                     if next_state.selected_provider_id == provider_id_for_delete {
                                                         next_state.selected_provider_id = shakespeare_provider().id;
                                                     }
+                                                    if editing_provider_id.read().as_deref()
+                                                        == Some(provider_id_for_delete.as_str())
+                                                    {
+                                                        editing_provider_id.set(None);
+                                                        name.set(String::new());
+                                                        provider_id.set(String::new());
+                                                        base_url.set(String::new());
+                                                        api_key.set(String::new());
+                                                        save_error.set(None);
+                                                    }
                                                     persist_provider_state(next_state, state, is_saving, save_error);
                                                 },
                                                 "Delete"
@@ -154,7 +164,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                     label { class: "block space-y-2",
                         span { class: "text-sm font-medium text-foreground", "Name *" }
                         input {
-                            class: "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-hidden",
+                            class: "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                             placeholder: "e.g., My Custom API",
                             value: "{name}",
                             disabled: *is_saving.read(),
@@ -164,7 +174,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                     label { class: "block space-y-2",
                         span { class: "text-sm font-medium text-foreground", "ID *" }
                         input {
-                            class: "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-hidden",
+                            class: "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                             placeholder: "e.g., my-custom-api",
                             value: "{provider_id}",
                             disabled: *is_saving.read(),
@@ -174,7 +184,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                     label { class: "block space-y-2 md:col-span-2",
                         span { class: "text-sm font-medium text-foreground", "Base URL *" }
                         input {
-                            class: "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-hidden",
+                            class: "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                             placeholder: "https://api.example.com/v1",
                             value: "{base_url}",
                             disabled: *is_saving.read(),
@@ -189,7 +199,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                         span { class: "text-sm font-medium text-foreground", "API Key *" }
                         input {
                             r#type: "password",
-                            class: "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-hidden",
+                            class: "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                             value: "{api_key}",
                             disabled: *is_saving.read(),
                             oninput: move |evt| api_key.set(evt.value()),

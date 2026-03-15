@@ -19,6 +19,9 @@ use std::time::Duration;
 use wasm_bindgen::JsCast;
 
 const MAX_DEPTH: usize = 8;
+#[cfg(feature = "web")]
+const INTERACTIVE_ELEMENT_SELECTOR: &str =
+    "a, button, input, textarea, select, summary, [role='button'], [role='link'], [contenteditable='true'], video, audio, iframe, [data-interactive], [data-interactive-media]";
 
 #[component]
 pub fn ThreadedComment(
@@ -295,7 +298,17 @@ pub fn ThreadedComment(
                 onclick: {
                     let event_id_click = event_id_nav.clone();
                     let navigator = nav;
-                    move |_| {
+                    move |_evt: MouseEvent| {
+                        #[cfg(feature = "web")]
+                        {
+                            if let Some(target) = _evt.data.as_web_event().target() {
+                                if let Some(element) = target.dyn_ref::<web_sys::Element>() {
+                                    if element.closest(INTERACTIVE_ELEMENT_SELECTOR).ok().flatten().is_some() {
+                                        return;
+                                    }
+                                }
+                            }
+                        }
                         navigator.push(Route::Note {
                             note_id: event_id_click.clone(),
                             from_voice: None,

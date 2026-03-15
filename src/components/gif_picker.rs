@@ -34,6 +34,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
     rsx! {
         div { class: "relative",
             button {
+                r#type: "button",
                 class: if props.disabled {
                     if props.icon_only { "p-2 rounded-full text-sm font-bold opacity-50 cursor-not-allowed" } else { "p-2 hover:bg-accent rounded-lg text-sm font-medium opacity-50 cursor-not-allowed" }
                 } else {
@@ -77,6 +78,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                 "🎬 Select GIF"
                             }
                             button {
+                                r#type: "button",
                                 class: "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-full p-1 transition",
                                 onclick: move |_| {
                                     show_picker.set(false);
@@ -108,6 +110,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                     }
                                 }
                                 button {
+                                    r#type: "button",
                                     class: "px-4 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-lg text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xs hover:shadow-md",
                                     disabled: *gif_loading,
                                     onclick: move |_| handle_search(()),
@@ -136,6 +139,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                                 let gif_clone = gif.clone();
                                                 rsx! {
                                                     button {
+                                                        r#type: "button",
                                                         key: "recent-{idx}",
                                                         class: "shrink-0 relative group",
                                                         title: "{gif_url}",
@@ -193,6 +197,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                                 let gif_clone = gif.clone();
                                                 rsx! {
                                                     button {
+                                                        r#type: "button",
                                                         key: "gif-{idx}",
                                                         class: "relative group aspect-square overflow-hidden rounded-lg bg-muted",
                                                         title: "{title_text}",
@@ -221,6 +226,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                             div { class: "shrink-0 p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750 rounded-b-xl",
                                 div { class: "flex gap-2",
                                     button {
+                                        r#type: "button",
                                         class: "flex-1 px-4 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-lg text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xs hover:shadow-md flex items-center justify-center gap-2",
                                         disabled: *gif_loading,
                                         onclick: move |_| {
@@ -237,6 +243,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                         }
                                     }
                                     button {
+                                        r#type: "button",
                                         class: "flex-1 px-4 py-3 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg text-sm font-semibold transition-all shadow-xs hover:shadow-md flex items-center justify-center gap-2",
                                         onclick: move |_| {
                                             show_upload_modal.set(true);

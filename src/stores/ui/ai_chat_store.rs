@@ -52,6 +52,7 @@ mod web_db {
     use super::PersistedChatMessage;
     use crate::stores::ui::ai_web_db::{open_ai_db_with_schema, STORE_CHAT_HISTORY};
     use indexed_db_futures::prelude::*;
+    use std::cell::RefCell;
     use std::rc::Rc;
     use wasm_bindgen::JsValue;
     use web_sys::IdbTransactionMode;
@@ -67,6 +68,10 @@ mod web_db {
     // These impls rely on that single-threaded platform constraint.
     unsafe impl Send for AiChatDb {}
     unsafe impl Sync for AiChatDb {}
+
+    thread_local! {
+        static AI_CHAT_DB: RefCell<Option<AiChatDb>> = const { RefCell::new(None) };
+    }
 
     impl AiChatDb {
         pub async fn new() -> Result<Self, String> {
@@ -142,12 +147,24 @@ mod web_db {
             Ok(())
         }
     }
+
+    pub async fn get_cached_db() -> Result<AiChatDb, String> {
+        if let Some(db) = AI_CHAT_DB.with(|cached| cached.borrow().clone()) {
+            return Ok(db);
+        }
+
+        let db = AiChatDb::new().await?;
+        AI_CHAT_DB.with(|cached| {
+            *cached.borrow_mut() = Some(db.clone());
+        });
+        Ok(db)
+    }
 }
 
 pub async fn load_chat_history(account_key: &str) -> Result<Vec<PersistedChatMessage>, String> {
     #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
     {
-        return web_db::AiChatDb::new()
+        return web_db::get_cached_db()
             .await?
             .load_chat_history(account_key)
             .await;
@@ -165,7 +182,7 @@ pub async fn save_chat_history(
 ) -> Result<(), String> {
     #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
     {
-        return web_db::AiChatDb::new()
+        return web_db::get_cached_db()
             .await?
             .save_chat_history(account_key, messages)
             .await;
@@ -180,7 +197,7 @@ pub async fn save_chat_history(
 pub async fn clear_chat_history(account_key: &str) -> Result<(), String> {
     #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
     {
-        return web_db::AiChatDb::new()
+        return web_db::get_cached_db()
             .await?
             .clear_chat_history(account_key)
             .await;
@@ -205,5 +222,15 @@ mod tests {
             key,
             "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245"
         );
+    }
+
+    #[test]
+    fn falls_back_to_anonymous_for_missing_pubkey() {
+        assert_eq!(account_key_for_pubkey(None), "anonymous");
+    }
+
+    #[test]
+    fn falls_back_to_anonymous_for_invalid_pubkey() {
+        assert_eq!(account_key_for_pubkey(Some("invalid")), "anonymous");
     }
 }

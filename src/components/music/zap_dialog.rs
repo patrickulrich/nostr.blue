@@ -60,22 +60,26 @@ fn is_public_relay_url(url: &str) -> bool {
 }
 
 fn configured_write_relay_urls() -> Vec<RelayUrl> {
-    let relay_urls = relay::get_write_relays();
-    let relay_urls = if relay_urls.is_empty() {
-        default_relay_urls()
+    let filter_relay_urls = |relay_urls: Vec<String>| -> Vec<RelayUrl> {
+        let mut relay_urls: Vec<RelayUrl> = relay_urls
             .into_iter()
-            .map(|url| url.to_string())
-            .collect()
-    } else {
+            .filter(|url| is_public_relay_url(url) && !relay::is_relay_blocked(url))
+            .filter_map(|url| RelayUrl::parse(&url).ok())
+            .collect();
+        relay_urls.truncate(5);
         relay_urls
     };
 
-    let mut relay_urls: Vec<RelayUrl> = relay_urls
-        .into_iter()
-        .filter(|url| is_public_relay_url(url) && !relay::is_relay_blocked(url))
-        .filter_map(|url| RelayUrl::parse(&url).ok())
-        .collect();
-    relay_urls.truncate(5);
+    let relay_urls = filter_relay_urls(relay::get_write_relays());
+    if relay_urls.is_empty() {
+        return filter_relay_urls(
+            default_relay_urls()
+                .into_iter()
+                .map(|url| url.to_string())
+                .collect(),
+        );
+    }
+
     relay_urls
 }
 

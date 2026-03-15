@@ -5,8 +5,8 @@
 //! 2. DM Inbox Relays (NIP-17 kind 10050)
 //! 3. Search Relays (NIP-51 kind 10007)
 //! 4. Blocked Relays (NIP-51 kind 10006)
-//! 5. Local Relays (browser storage only)
-//! 6. Broadcast Relays (browser storage only)
+//! 5. Local Relays (web: browser storage; native: config directory)
+//! 6. Broadcast Relays (web: browser storage; native: config directory)
 //! 7. Connected Relays (read-only live stats)
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, relay};

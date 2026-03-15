@@ -20,9 +20,7 @@ use nostr_sdk::prelude::*;
 
 fn fork_error_message(error: &str) -> String {
     let lower = error.to_ascii_lowercase();
-    if lower.contains("no signer attached") || lower.contains("signer") {
-        "Connect your signer before forking this repository".to_string()
-    } else if lower.contains("client not initialized") {
+    if lower.contains("client not initialized") {
         "Nostr client is still starting up. Try forking again in a moment".to_string()
     } else if lower.contains("invalid original event id") {
         "This repository is missing a valid source reference, so it cannot be forked".to_string()
@@ -30,6 +28,8 @@ fn fork_error_message(error: &str) -> String {
         "Could not prepare the fork announcement".to_string()
     } else if lower.contains("failed to publish fork") || lower.contains("failed to publish") {
         "Could not publish the fork announcement to relays".to_string()
+    } else if lower.contains("no signer attached") {
+        "Connect your signer before forking this repository".to_string()
     } else {
         "Fork failed. Please try again".to_string()
     }

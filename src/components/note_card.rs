@@ -30,7 +30,7 @@ use wasm_bindgen::JsCast;
 
 #[cfg(feature = "web")]
 const INTERACTIVE_ELEMENT_SELECTOR: &str =
-    "a, button, [role='link'], video, audio, iframe, [data-interactive]";
+    "a, button, input, textarea, select, summary, [role='button'], [role='link'], [contenteditable='true'], video, audio, iframe, [data-interactive]";
 
 trait ProfileMetadataView {
     fn name(&self) -> Option<&str>;

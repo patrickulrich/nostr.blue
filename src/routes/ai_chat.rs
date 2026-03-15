@@ -61,6 +61,8 @@ pub fn AIChat() -> Element {
     let mut chat_history_generation = use_signal(|| 0u32);
     let mut persisted_messages_dirty = use_signal(|| false);
     let persisted_messages_save_generation = use_signal(|| 0u32);
+    let provider_state_save_generation = use_signal(|| 0u32);
+    let mut provider_state_save_in_flight = use_signal(|| false);
     let mut initial_loaded_messages = use_signal(Vec::<PersistedChatMessage>::new);
     let messages_container_id = use_signal(|| "ai-chat-messages".to_string());
     let account_key = ai_chat_store::current_account_key();
@@ -68,6 +70,7 @@ pub fn AIChat() -> Element {
     let chat_history_ready = *chat_history_loaded.read();
     let chat_history_generation_value = *chat_history_generation.read();
     let persisted_messages_dirty_value = *persisted_messages_dirty.read();
+    let provider_state_save_generation_value = *provider_state_save_generation.read();
     let initial_loaded_messages_value = initial_loaded_messages.read().clone();
     let has_signer = *nostr_client::HAS_SIGNER.read();
     let selected_provider_id_for_models = provider_state.read().selected_provider_id.clone();
@@ -143,7 +146,9 @@ pub fn AIChat() -> Element {
             spawn(async move {
                 match ai_chat_store::load_chat_history(&account_key).await {
                     Ok(history) => {
-                        if *chat_history_generation.read() != generation {
+                        if *chat_history_generation.read() != generation
+                            || ai_chat_store::current_account_key() != account_key
+                        {
                             return;
                         }
                         initial_loaded_messages.set(history.clone());
@@ -156,13 +161,17 @@ pub fn AIChat() -> Element {
                         );
                     }
                     Err(e) => {
-                        if *chat_history_generation.read() != generation {
+                        if *chat_history_generation.read() != generation
+                            || ai_chat_store::current_account_key() != account_key
+                        {
                             return;
                         }
                         error.set(Some(e));
                     }
                 }
-                if *chat_history_generation.read() == generation {
+                if *chat_history_generation.read() == generation
+                    && ai_chat_store::current_account_key() == account_key
+                {
                     chat_history_loaded.set(true);
                 }
             });
@@ -187,6 +196,7 @@ pub fn AIChat() -> Element {
             if !chat_history_ready
                 || !persisted_messages_dirty_value
                 || persisted_messages == initial_loaded_messages_snapshot
+                || ai_chat_store::current_account_key() != *account_key
             {
                 return;
             }
@@ -203,6 +213,9 @@ pub fn AIChat() -> Element {
             let chat_generation = *chat_history_generation_signal.read();
             persisted_messages_save_generation_signal.set(generation);
             spawn(async move {
+                if ai_chat_store::current_account_key() != account_key {
+                    return;
+                }
                 let result = if persisted_messages.is_empty() {
                     ai_chat_store::clear_chat_history(&account_key).await
                 } else {
@@ -212,6 +225,7 @@ pub fn AIChat() -> Element {
                     Ok(()) => {
                         if *persisted_messages_save_generation_signal.read() == generation
                             && *chat_history_generation_signal.read() == chat_generation
+                            && ai_chat_store::current_account_key() == account_key
                         {
                             persisted_messages_dirty_signal.set(false);
                             initial_loaded_messages_signal.set(persisted_messages);
@@ -219,6 +233,36 @@ pub fn AIChat() -> Element {
                     }
                     Err(e) => {
                         error.set(Some(e));
+                    }
+                }
+            });
+        },
+    ));
+
+    use_effect(use_reactive(
+        &provider_state_save_generation_value,
+        move |save_generation| {
+            if save_generation == 0 || *provider_state_save_in_flight.read() {
+                return;
+            }
+
+            provider_state_save_in_flight.set(true);
+            spawn(async move {
+                loop {
+                    let generation = *provider_state_save_generation.read();
+                    let snapshot = provider_state.read().clone();
+                    match ai_provider_store::save_provider_state(&snapshot).await {
+                        Ok(()) => {
+                            if *provider_state_save_generation.read() == generation {
+                                provider_state_save_in_flight.set(false);
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            error.set(Some(e));
+                            provider_state_save_in_flight.set(false);
+                            break;
+                        }
                     }
                 }
             });
@@ -288,6 +332,7 @@ pub fn AIChat() -> Element {
                                     provider.id.clone(),
                                     next_model,
                                     provider_state,
+                                    provider_state_save_generation,
                                     error,
                                 );
                             }
@@ -348,6 +393,7 @@ pub fn AIChat() -> Element {
                                     active_provider.id.clone(),
                                     value,
                                     provider_state,
+                                    provider_state_save_generation,
                                     error,
                                 );
                             },
@@ -845,6 +891,7 @@ fn persist_selected_model(
     provider_id: String,
     model_id: String,
     mut provider_state: Signal<AiProviderState>,
+    mut provider_state_save_generation: Signal<u32>,
     mut error: Signal<Option<String>>,
 ) {
     let mut next_state = provider_state.read().clone();
@@ -852,9 +899,7 @@ fn persist_selected_model(
         .selected_model_by_provider
         .insert(provider_id, model_id);
     provider_state.set(next_state.clone());
-    spawn(async move {
-        if let Err(e) = ai_provider_store::save_provider_state(&next_state).await {
-            error.set(Some(e));
-        }
-    });
+    let next_generation = provider_state_save_generation.read().wrapping_add(1);
+    provider_state_save_generation.set(next_generation);
+    error.set(None);
 }

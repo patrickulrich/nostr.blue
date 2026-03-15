@@ -631,6 +631,7 @@ pub fn DiffViewer(
                                                                                 button {
                                                                                     r#type: "button",
                                                                                     tabindex: "0",
+                                                                                    aria_pressed: is_active.to_string(),
                                                                                     class: match (row.right_kind, is_active) {
                                                                                         (SideKind::Add, true) => "w-full px-2 py-0 text-left bg-green-500/10 ring-1 ring-inset ring-primary hover:bg-green-500/15 focus:outline-none focus-visible:ring-1 focus-visible:ring-primary cursor-pointer",
                                                                                         (SideKind::Add, false) => "w-full px-2 py-0 text-left bg-green-500/10 hover:bg-green-500/15 focus:outline-none focus-visible:ring-1 focus-visible:ring-primary cursor-pointer",
@@ -638,24 +639,16 @@ pub fn DiffViewer(
                                                                                         (_, false) => "w-full px-2 py-0 text-left hover:bg-accent/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-primary cursor-pointer",
                                                                                     },
                                                                                     onclick: move |_| {
-                                                                                        if has_commenting {
-                                                                                            if let Some(line_num) = row.right_num {
-                                                                                                active_comment_line.set(Some((file_for_click.clone(), line_num)));
-                                                                                                comment_text.set(String::new());
-                                                                                            }
-                                                                                        }
+                                                                                        active_comment_line.set(Some((file_for_click.clone(), row.right_num.unwrap())));
+                                                                                        comment_text.set(String::new());
                                                                                     },
                                                                                     onkeydown: move |e: KeyboardEvent| {
                                                                                         if matches!(e.key(), Key::Enter)
                                                                                             || matches!(e.key(), Key::Character(ref c) if c == " ")
                                                                                         {
                                                                                             e.prevent_default();
-                                                                                            if has_commenting {
-                                                                                                if let Some(line_num) = row.right_num {
-                                                                                                    active_comment_line.set(Some((file_for_click_keydown.clone(), line_num)));
-                                                                                                    comment_text.set(String::new());
-                                                                                                }
-                                                                                            }
+                                                                                            active_comment_line.set(Some((file_for_click_keydown.clone(), row.right_num.unwrap())));
+                                                                                            comment_text.set(String::new());
                                                                                         }
                                                                                     },
                                                                                     aria_label: "Add line comment",

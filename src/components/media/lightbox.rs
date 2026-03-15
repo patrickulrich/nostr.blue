@@ -6,8 +6,6 @@ use dioxus::prelude::*;
 use dioxus_core::use_drop;
 #[cfg(feature = "web")]
 use gloo_events::EventListener;
-#[cfg(feature = "web")]
-use wasm_bindgen::closure::Closure;
 
 fn clamp_zoom(zoom: f64) -> f64 {
     zoom.clamp(0.5, 5.0)
@@ -105,6 +103,8 @@ pub fn MediaLightbox() -> Element {
     #[cfg(feature = "web")]
     let mut viewport_resize_listeners =
         use_signal(|| None::<(EventListener, EventListener)>);
+    #[cfg(feature = "web")]
+    let mut image_load_listener = use_signal(|| None::<EventListener>);
 
     use_effect(use_reactive(
         &(state.is_open, state.current_index),
@@ -163,6 +163,22 @@ pub fn MediaLightbox() -> Element {
         }
     });
 
+    #[cfg(feature = "web")]
+    {
+        let current_image_url = state
+            .images
+            .get(state.current_index.min(state.images.len().saturating_sub(1)))
+            .map(|image| image.url.clone())
+            .unwrap_or_default();
+        use_effect(use_reactive(
+            &(state.is_open, state.current_index, current_image_url),
+            move |(is_open, _, _)| {
+                image_load_listener.set(None);
+                if !is_open {}
+            },
+        ));
+    }
+
     if !state.is_open || state.images.is_empty() {
         return rsx! {};
     }
@@ -172,82 +188,6 @@ pub fn MediaLightbox() -> Element {
         .min(state.images.len().saturating_sub(1));
     let current_image = state.images[current_index].clone();
     let current_alt = normalized_alt_text(current_image.alt.as_deref(), current_index);
-
-    #[cfg(feature = "web")]
-    {
-        let current_image_url = current_image.url.clone();
-        use_effect(use_reactive(
-            &(state.is_open, current_image_url),
-            move |(is_open, current_image_url)| {
-                if !is_open {
-                    return;
-                }
-
-                let Ok(image): Result<wasm_bindgen::JsValue, _> = js_sys::eval("new Image()") else {
-                    return;
-                };
-                let image_for_load = image.clone();
-                let onload = Closure::wrap(Box::new(move || {
-                    let natural_width = js_sys::Reflect::get(
-                        &image_for_load,
-                        &wasm_bindgen::JsValue::from_str("naturalWidth"),
-                    )
-                    .ok()
-                    .and_then(|value| value.as_f64())
-                    .unwrap_or(0.0);
-                    let natural_height = js_sys::Reflect::get(
-                        &image_for_load,
-                        &wasm_bindgen::JsValue::from_str("naturalHeight"),
-                    )
-                    .ok()
-                    .and_then(|value| value.as_f64())
-                    .unwrap_or(0.0);
-                    if natural_width > 0.0 && natural_height > 0.0 {
-                        image_intrinsic_size.set((natural_width, natural_height));
-                    }
-                }) as Box<dyn FnMut()>);
-                let _ = js_sys::Reflect::set(
-                    &image,
-                    &wasm_bindgen::JsValue::from_str("onload"),
-                    onload.as_ref(),
-                );
-                let _ = js_sys::Reflect::set(
-                    &image,
-                    &wasm_bindgen::JsValue::from_str("src"),
-                    &wasm_bindgen::JsValue::from_str(&current_image_url),
-                );
-
-                let is_complete = js_sys::Reflect::get(
-                    &image,
-                    &wasm_bindgen::JsValue::from_str("complete"),
-                )
-                .ok()
-                .and_then(|value| value.as_bool())
-                .unwrap_or(false);
-                if is_complete {
-                    let natural_width = js_sys::Reflect::get(
-                        &image,
-                        &wasm_bindgen::JsValue::from_str("naturalWidth"),
-                    )
-                    .ok()
-                    .and_then(|value| value.as_f64())
-                    .unwrap_or(0.0);
-                    let natural_height = js_sys::Reflect::get(
-                        &image,
-                        &wasm_bindgen::JsValue::from_str("naturalHeight"),
-                    )
-                    .ok()
-                    .and_then(|value| value.as_f64())
-                    .unwrap_or(0.0);
-                    if natural_width > 0.0 && natural_height > 0.0 {
-                        image_intrinsic_size.set((natural_width, natural_height));
-                    }
-                }
-
-                onload.forget();
-            },
-        ));
-    }
 
     let previous_url = current_index
         .checked_sub(1)
@@ -532,6 +472,17 @@ pub fn MediaLightbox() -> Element {
                             {
                                 if let Some(element) = _evt.data().downcast::<web_sys::HtmlElement>() {
                                     update_image_intrinsic_size(element, image_intrinsic_size);
+                                    let element_for_load = element.clone();
+                                    image_load_listener.set(Some(EventListener::new(
+                                        element,
+                                        "load",
+                                        move |_| {
+                                            update_image_intrinsic_size(
+                                                &element_for_load,
+                                                image_intrinsic_size,
+                                            );
+                                        },
+                                    )));
                                 }
                             }
                         },

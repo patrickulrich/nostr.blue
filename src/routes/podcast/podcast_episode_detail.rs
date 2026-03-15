@@ -299,6 +299,7 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
                         format!("https://nostr.blue/podcast/episode/{}", coordinate)
                     }
                     nostr_music::TrackSource::RssPodcast {
+                        feed_url,
                         podcast_id,
                         episode_guid,
                         ..
@@ -310,7 +311,11 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
                                 urlencoding::encode(episode_guid),
                             )
                         } else {
-                            episode.audio_url.clone()
+                            format!(
+                                "/podcast/rss/episode?feed={}&ep={}",
+                                urlencoding::encode(feed_url),
+                                urlencoding::encode(episode_guid),
+                            )
                         }
                     }
                     _ => episode.audio_url.clone(),
