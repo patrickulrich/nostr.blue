@@ -32,6 +32,27 @@ pub fn is_public_relay_url(url: &str) -> bool {
             if octets[0] == 169 && octets[1] == 254 {
                 return false;
             }
+            if octets[0] == 100 && (64..=127).contains(&octets[1]) {
+                return false;
+            }
+            if octets[0] == 198 && (octets[1] == 18 || octets[1] == 19) {
+                return false;
+            }
+            if octets[0] == 192 && octets[1] == 0 && octets[2] == 2 {
+                return false;
+            }
+            if octets[0] == 198 && octets[1] == 51 && octets[2] == 100 {
+                return false;
+            }
+            if octets[0] == 203 && octets[1] == 0 && octets[2] == 113 {
+                return false;
+            }
+            if octets[0] >= 224 {
+                return false;
+            }
+            if octets == [255, 255, 255, 255] {
+                return false;
+            }
             true
         }
         Some(Host::Ipv6(ip)) => {
@@ -40,13 +61,11 @@ pub fn is_public_relay_url(url: &str) -> bool {
             }
             let segments = ip.segments();
             let first = segments[0];
-            (first & 0xfe00) != 0xfc00 && (first & 0xffc0) != 0xfe80
+            (first & 0xfe00) != 0xfc00 && (first & 0xffc0) != 0xfe80 && (first & 0xff00) != 0xff00
         }
         Some(Host::Domain(domain)) => {
             let domain = domain.to_ascii_lowercase();
-            domain != "localhost"
-                && !domain.ends_with(".localhost")
-                && !domain.ends_with(".local")
+            domain != "localhost" && !domain.ends_with(".localhost") && !domain.ends_with(".local")
         }
         None => false,
     }

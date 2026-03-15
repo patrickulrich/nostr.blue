@@ -533,6 +533,9 @@ pub fn get_login_method() -> Option<LoginMethod> {
 pub async fn logout() -> Result<(), String> {
     log::info!("Logging out...");
     let ai_chat_account_key = crate::stores::ai_chat_store::current_account_key();
+    crate::stores::ai_chat_store::clear_chat_history(&ai_chat_account_key)
+        .await
+        .map_err(|e| format!("Failed to clear AI chat history during logout: {}", e))?;
     crate::stores::notifications::stop_realtime_subscription().await;
     crate::stores::relay::stop_relay_list_subscription().await;
     crate::stores::cashu_cdk_bridge::clear_multi_wallet();
@@ -543,9 +546,6 @@ pub async fn logout() -> Result<(), String> {
         crate::services::search_relays::invalidate_search_relay_cache().await;
     });
     let _ = nostr_client::set_read_only().await;
-    crate::stores::ai_chat_store::clear_chat_history(&ai_chat_account_key)
-        .await
-        .map_err(|e| format!("Failed to clear AI chat history during logout: {}", e))?;
     clear_auth();
     if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_NSEC) {
         log::error!("Failed to delete nsec: {}", e);

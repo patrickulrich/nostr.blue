@@ -4,6 +4,9 @@ use url::Url;
 
 fn redact_url_for_logging(input: &str) -> String {
     if let Ok(mut url) = Url::parse(input) {
+        if !matches!(url.scheme(), "http" | "https") {
+            return "[redacted]".to_string();
+        }
         let _ = url.set_username("");
         let _ = url.set_password(None);
         url.set_query(None);
@@ -11,7 +14,17 @@ fn redact_url_for_logging(input: &str) -> String {
         return url.to_string();
     }
 
-    input.split(['?', '#']).next().unwrap_or(input).to_string()
+    let sanitized = input.split(['?', '#']).next().unwrap_or(input);
+    const MAX_FALLBACK_LEN: usize = 120;
+    let mut truncated = sanitized
+        .chars()
+        .take(MAX_FALLBACK_LEN + 1)
+        .collect::<String>();
+    if truncated.chars().count() > MAX_FALLBACK_LEN {
+        truncated = truncated.chars().take(MAX_FALLBACK_LEN).collect::<String>();
+        truncated.push('…');
+    }
+    truncated
 }
 
 #[derive(Props, Clone, PartialEq)]

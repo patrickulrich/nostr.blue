@@ -3,8 +3,13 @@ use crate::stores::ai_provider_store::{
     AiProviderKind, AiProviderState, CustomAiProvider, ProviderAuth,
 };
 use dioxus::prelude::*;
+use regex::Regex;
 use std::net::IpAddr;
+use std::sync::LazyLock;
 use url::Url;
+
+static LEADING_CREDENTIALS_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[^/@]+@").expect("valid credential-stripping regex"));
 
 #[component]
 pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
@@ -20,7 +25,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
     let provider_state_ready = matches!(provider_state_load.read().as_ref(), Some(Ok(_)));
 
     use_effect(move || {
-        if provider_state_ready && provider_state_load.read().is_some() {
+        if provider_state_load.read().is_some() {
             return;
         }
 
@@ -433,11 +438,16 @@ fn validate_provider_base_url(base_url: &str) -> Result<(), String> {
 fn sanitize_display_base_url(base_url: &str) -> String {
     match Url::parse(base_url) {
         Ok(mut parsed) => {
+            let _ = parsed.set_username("");
+            let _ = parsed.set_password(None);
             parsed.set_query(None);
             parsed.set_fragment(None);
             parsed.to_string().trim_end_matches('/').to_string()
         }
-        Err(_) => base_url.to_string(),
+        Err(_) => LEADING_CREDENTIALS_REGEX
+            .replace(base_url, "")
+            .trim_end_matches('/')
+            .to_string(),
     }
 }
 

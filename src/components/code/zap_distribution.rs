@@ -48,13 +48,24 @@ struct PersistedSendState {
 fn selected_pubkeys_with_lightning(
     pubkeys: &[String],
 ) -> Vec<(String, Option<String>, Option<String>)> {
+    fn clean_lightning_value(value: Option<String>) -> Option<String> {
+        value.and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+    }
+
     let profiles = PROFILE_CACHE.read();
     pubkeys
         .iter()
         .filter_map(|pubkey| {
             let profile = profiles.peek(pubkey).cloned();
-            let lud16 = profile.as_ref().and_then(|p| p.lud16.clone());
-            let lud06 = profile.as_ref().and_then(|p| p.lud06.clone());
+            let lud16 = clean_lightning_value(profile.as_ref().and_then(|p| p.lud16.clone()));
+            let lud06 = clean_lightning_value(profile.as_ref().and_then(|p| p.lud06.clone()));
             if lud16.is_none() && lud06.is_none() {
                 None
             } else {
@@ -204,8 +215,7 @@ pub fn ZapDistribution(
     let mut timed_out_pubkeys = use_signal(HashSet::<String>::new);
     let mut persisted_send_pubkeys = use_signal(Vec::<String>::new);
     let mut persisted_send_total = use_signal(|| 0u64);
-    let mut persisted_sendable_amounts =
-        use_signal(std::collections::HashMap::<String, u64>::new);
+    let mut persisted_sendable_amounts = use_signal(std::collections::HashMap::<String, u64>::new);
     let mut persisted_send_split_signature = use_signal(Vec::<(String, u64)>::new);
 
     // Deduplicate zap_splits by pubkey, summing weights for duplicates
@@ -286,11 +296,7 @@ pub fn ZapDistribution(
             return;
         }
         let amount = *total_amount.read();
-        let eligible_with_lightning = selected_pubkeys_with_lightning(&selected_pubkeys.read());
-        let pubkeys = eligible_with_lightning
-            .iter()
-            .map(|(pubkey, _, _)| pubkey.clone())
-            .collect::<Vec<_>>();
+        let pubkeys = selected_pubkeys.read().clone();
         let split_signature = deduped_splits.read().clone();
         let weight_map: std::collections::HashMap<String, u64> =
             split_signature.iter().cloned().collect();
@@ -404,6 +410,14 @@ pub fn ZapDistribution(
         .into_iter()
         .map(|(pubkey, lud16, lud06)| (pubkey, (lud16, lud06)))
         .collect::<std::collections::HashMap<_, _>>();
+        let modal_pubkeys = eligible_base
+            .iter()
+            .map(|recip| recip.pubkey.clone())
+            .collect::<Vec<_>>();
+        let amount_map = eligible_base
+            .iter()
+            .map(|recip| (recip.pubkey.clone(), recip.amount))
+            .collect::<std::collections::HashMap<_, _>>();
         let eligible_with_lightning = eligible_base
             .into_iter()
             .filter_map(|recip| {
@@ -420,14 +434,10 @@ pub fn ZapDistribution(
             );
             return;
         }
-        let modal_pubkeys = eligible_with_lightning
+        let sendable_pubkeys = eligible_with_lightning
             .iter()
             .map(|(recip, _, _)| recip.pubkey.clone())
             .collect::<Vec<_>>();
-        let amount_map = eligible_with_lightning
-            .iter()
-            .map(|(recip, _, _)| (recip.pubkey.clone(), recip.amount))
-            .collect::<std::collections::HashMap<_, _>>();
         let sendable: Vec<(ZapRecipient, Option<String>, Option<String>)> = eligible_with_lightning
             .into_iter()
             .filter_map(|(mut recip, lud16, lud06)| {
@@ -440,7 +450,7 @@ pub fn ZapDistribution(
             })
             .collect();
         {
-            let full_amount_map = modal_pubkeys
+            let full_amount_map = sendable_pubkeys
                 .iter()
                 .map(|pubkey| (pubkey.clone(), amount_map.get(pubkey).copied().unwrap_or(0)))
                 .collect::<std::collections::HashMap<_, _>>();
@@ -700,10 +710,12 @@ pub fn ZapDistribution(
                                     .as_ref()
                                     .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
                                     .unwrap_or_else(|| truncate_pubkey(&recip.pubkey));
-                                let has_lightning = profile
-                                    .as_ref()
-                                    .map(|p| p.lud16.is_some() || p.lud06.is_some())
-                                    .unwrap_or(false);
+                                let has_lightning = selected_pubkeys_with_lightning(
+                                        std::slice::from_ref(&recip.pubkey),
+                                    )
+                                    .into_iter()
+                                    .next()
+                                    .is_some();
                                 let pic = profile.as_ref().and_then(|p| p.picture.clone());
                                 rsx! {
                                     div {

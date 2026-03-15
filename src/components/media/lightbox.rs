@@ -27,7 +27,9 @@ fn contain_fit_extent(intrinsic: (f64, f64), viewport: (f64, f64)) -> (f64, f64)
         return viewport;
     }
 
-    let scale = (viewport_w / intrinsic_w).min(viewport_h / intrinsic_h).min(1.0);
+    let scale = (viewport_w / intrinsic_w)
+        .min(viewport_h / intrinsic_h)
+        .min(1.0);
     (intrinsic_w * scale, intrinsic_h * scale)
 }
 
@@ -99,8 +101,7 @@ pub fn MediaLightbox() -> Element {
     let mut viewport_size = use_signal(|| (1200.0f64, 800.0f64));
     let mut viewport_known = use_signal(|| false);
     #[cfg(feature = "web")]
-    let mut viewport_resize_listeners =
-        use_signal(|| None::<(EventListener, EventListener)>);
+    let mut viewport_resize_listeners = use_signal(|| None::<(EventListener, EventListener)>);
     #[cfg(feature = "web")]
     let mut image_load_listener = use_signal(|| None::<EventListener>);
 
@@ -171,7 +172,11 @@ pub fn MediaLightbox() -> Element {
     {
         let current_image_url = state
             .images
-            .get(state.current_index.min(state.images.len().saturating_sub(1)))
+            .get(
+                state
+                    .current_index
+                    .min(state.images.len().saturating_sub(1)),
+            )
             .map(|image| image.url.clone())
             .unwrap_or_default();
         use_effect(use_reactive(
@@ -456,14 +461,14 @@ pub fn MediaLightbox() -> Element {
                             });
                             swipe_start.set(Some((coords.x, coords.y)));
                         } else if touches.len() == 1 && *zoom_level.read() <= 1.0 {
+                            evt.stop_propagation();
+                            evt.prevent_default();
                             let swipe_origin = *swipe_start.read();
                             if let Some((start_x, start_y)) = swipe_origin {
                                 let coords = touches[0].client_coordinates();
                                 let delta_x = coords.x - start_x;
                                 let delta_y = coords.y - start_y;
                                 if delta_x.abs() > 60.0 && delta_y.abs() < 80.0 {
-                                    evt.stop_propagation();
-                                    evt.prevent_default();
                                     if delta_x > 0.0 {
                                         media::prev_image();
                                     } else {

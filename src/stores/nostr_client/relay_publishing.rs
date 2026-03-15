@@ -139,15 +139,13 @@ pub async fn send_presigned_event_to_relays(
     if urls.is_empty() {
         return Err("No unblocked relay URLs provided".to_string());
     }
-    for (relay_url, connected) in join_all(
-        urls.iter().map(|relay_url| {
-            let client = client.clone();
-            async move {
-                let connected = relay::ensure_connected(&client, relay_url.as_str()).await;
-                (relay_url, connected)
-            }
-        }),
-    )
+    for (relay_url, connected) in join_all(urls.iter().map(|relay_url| {
+        let client = client.clone();
+        async move {
+            let connected = relay::ensure_connected(&client, relay_url.as_str()).await;
+            (relay_url, connected)
+        }
+    }))
     .await
     {
         if !connected {

@@ -307,7 +307,7 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
                         if let Some(id) = podcast_id {
                             format!(
                                 "https://nostr.blue/podcast/rss/episode/{}/{}",
-                                id,
+                                urlencoding::encode(&id.to_string()),
                                 urlencoding::encode(episode_guid),
                             )
                         } else {

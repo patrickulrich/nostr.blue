@@ -38,8 +38,7 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
     let parsed_event_id = EventId::from_hex(&props.event_id)
         .ok()
         .or_else(|| EventId::from_bech32(&props.event_id).ok());
-    let identities_match =
-        parsed_author == Some(event.pubkey) && parsed_event_id == Some(event.id);
+    let identities_match = parsed_author == Some(event.pubkey) && parsed_event_id == Some(event.id);
     if !identities_match {
         log::error!(
             "NoteMenu identity mismatch: props=({}, {}), event=({}, {})",
@@ -346,7 +345,6 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                                 spawn(async move {
                                     match nostr_client::broadcast_presigned_event(event, relay_urls).await {
                                         Ok(result) => {
-                                            let result = result.ignoring_duplicate_event_failures();
                                             if result.is_success() {
                                                 let title = if result.has_failures() {
                                                     "Broadcast partially succeeded"

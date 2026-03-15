@@ -12,6 +12,7 @@ use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, relay};
 use dioxus::prelude::*;
 use std::collections::HashMap;
+use url::Url;
 #[component]
 pub fn SettingsRelays() -> Element {
     let auth = auth_store::AUTH_STATE.read();
@@ -290,9 +291,18 @@ pub fn SettingsRelays() -> Element {
         }
     };
     let add_broadcast_relay = move |_| {
-        let url = new_broadcast_relay.read().clone();
+        let url = new_broadcast_relay.read().trim().to_string();
         match normalize_local_relay_url(&url) {
             Ok(normalized) => {
+                match Url::parse(&normalized) {
+                    Ok(parsed)
+                        if matches!(parsed.scheme(), "ws" | "wss")
+                            && parsed.host_str().is_some() => {}
+                    _ => {
+                        broadcast_error.set(Some("Invalid relay URL".to_string()));
+                        return;
+                    }
+                }
                 if broadcast_relays.read().contains(&normalized) {
                     broadcast_error.set(Some("Relay already exists".to_string()));
                     return;
