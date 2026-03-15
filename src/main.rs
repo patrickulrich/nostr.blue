@@ -125,5 +125,6 @@ fn App() -> Element {
         document::Stylesheet { href: asset!("/public/tailwind.css") }
         ToastProvider { Router::<routes::Route> {} }
         components::password_modal::PasswordModal {}
+        components::MediaLightbox {}
     }
 }

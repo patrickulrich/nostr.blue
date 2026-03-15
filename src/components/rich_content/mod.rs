@@ -3,6 +3,7 @@ mod mentions;
 mod minicards;
 mod nostr_blue_renderers;
 
+use crate::components::media::ImageGrid;
 use embeds::{
     AppleMusicRenderer, BitcoinAddressRenderer, BitcoinTxRenderer, DoiRenderer, GeohashRenderer,
     IsanRenderer, IsbnRenderer, MixCloudRenderer, PodcastEpisodeRenderer, PodcastFeedRenderer,
@@ -25,6 +26,7 @@ use nostr_blue_renderers::{
 
 use crate::components::CashuTokenCard;
 use crate::routes::Route;
+use crate::stores::media::{self, LightboxImage};
 use crate::utils::content_parser::{parse_content, ContentToken};
 use crate::utils::custom_emoji::render_custom_emoji_text;
 use dioxus::prelude::*;
@@ -35,6 +37,7 @@ pub fn RichContent(
     content: String,
     tags: Vec<Tag>,
     #[props(default = false)] collapsible: bool,
+    #[props(default = false)] interactive_media: bool,
 ) -> Element {
     let tokens = parse_content(&content, &tags);
     let emoji_map = custom_emoji_map(&tags);
@@ -85,7 +88,7 @@ pub fn RichContent(
     } else {
         false
     };
-    let groups = group_tokens(&tokens);
+    let groups = group_tokens(&tokens, interactive_media);
     if collapsible && is_long_content {
         rsx! {
             div { class: "relative",
@@ -101,6 +104,11 @@ pub fn RichContent(
                             },
                             TokenGroup::Block(idx, token) => rsx! {
                                 div { key: "{token_key(token, *idx)}", {render_token(token, &emoji_map)} }
+                            },
+                            TokenGroup::ImageGallery(items) => rsx! {
+                                div { key: "{image_gallery_key(items)}",
+                                    {render_image_gallery(items)}
+                                }
                             },
                         }
                     }
@@ -133,6 +141,11 @@ pub fn RichContent(
                             },
                             TokenGroup::Block(idx, token) => rsx! {
                                 div { key: "{token_key(token, *idx)}", {render_token(token, &emoji_map)} }
+                            },
+                            TokenGroup::ImageGallery(items) => rsx! {
+                                div { key: "{image_gallery_key(items)}",
+                                    {render_image_gallery(items)}
+                                }
                             },
                         }
                     }
@@ -174,25 +187,83 @@ enum TokenGroup<'a> {
     Inline(Vec<(usize, &'a ContentToken)>),
     /// A single block-level token that needs its own line
     Block(usize, &'a ContentToken),
+    /// Consecutive image tokens grouped into a gallery
+    ImageGallery(Vec<(usize, &'a ContentToken)>),
 }
 /// Group consecutive inline tokens together for proper text flow
-fn group_tokens(tokens: &[ContentToken]) -> Vec<TokenGroup<'_>> {
+fn group_tokens(tokens: &[ContentToken], interactive_media: bool) -> Vec<TokenGroup<'_>> {
     let mut groups = Vec::new();
     let mut inline_group: Vec<(usize, &ContentToken)> = Vec::new();
-    for (idx, token) in tokens.iter().enumerate() {
+    let mut idx = 0usize;
+    while idx < tokens.len() {
+        let token = &tokens[idx];
         if is_inline_token(token) {
             inline_group.push((idx, token));
-        } else {
-            if !inline_group.is_empty() {
-                groups.push(TokenGroup::Inline(std::mem::take(&mut inline_group)));
+            idx += 1;
+            continue;
+        }
+
+        if !inline_group.is_empty() {
+            groups.push(TokenGroup::Inline(std::mem::take(&mut inline_group)));
+        }
+
+        if interactive_media && matches!(token, ContentToken::Image(_)) {
+            let mut gallery = vec![(idx, token)];
+            idx += 1;
+            while idx < tokens.len() {
+                if matches!(&tokens[idx], ContentToken::Image(_)) {
+                    gallery.push((idx, &tokens[idx]));
+                    idx += 1;
+                } else {
+                    break;
+                }
             }
+            groups.push(TokenGroup::ImageGallery(gallery));
+        } else {
             groups.push(TokenGroup::Block(idx, token));
+            idx += 1;
         }
     }
     if !inline_group.is_empty() {
         groups.push(TokenGroup::Inline(inline_group));
     }
     groups
+}
+
+fn image_gallery_key(items: &[(usize, &ContentToken)]) -> String {
+    let first_idx = items.first().map(|(idx, _)| *idx).unwrap_or_default();
+    let urls = items
+        .iter()
+        .filter_map(|(_, token)| match token {
+            ContentToken::Image(url) => Some(url.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    format!("gallery-{}-{:x}", first_idx, hash_str(&urls))
+}
+
+fn render_image_gallery(items: &[(usize, &ContentToken)]) -> Element {
+    let images: Vec<LightboxImage> = items
+        .iter()
+        .filter_map(|(_, token)| match token {
+            ContentToken::Image(url) => Some(LightboxImage {
+                url: url.clone(),
+                alt: None,
+            }),
+            _ => None,
+        })
+        .collect();
+
+    let images_for_open = images.clone();
+    rsx! {
+        ImageGrid {
+            images,
+            on_open: move |index| {
+                media::open_lightbox(images_for_open.clone(), index);
+            },
+        }
+    }
 }
 /// Generate a stable key for a ContentToken to avoid DOM reuse bugs from index-based keys.
 /// Combines variant name with content identifiers for uniqueness.
@@ -821,5 +892,26 @@ mod tests {
             key9, key10,
             "Same NostrBlueRssPodcastEpisode at different positions should have unique keys",
         );
+    }
+
+    #[test]
+    fn test_group_tokens_merges_consecutive_images_only_when_interactive() {
+        let tokens = vec![
+            ContentToken::Text("hello".to_string()),
+            ContentToken::Image("https://example.com/1.jpg".to_string()),
+            ContentToken::Image("https://example.com/2.jpg".to_string()),
+            ContentToken::Text("world".to_string()),
+            ContentToken::Image("https://example.com/3.jpg".to_string()),
+        ];
+
+        let groups = group_tokens(&tokens, true);
+        assert!(matches!(groups[0], TokenGroup::Inline(_)));
+        assert!(matches!(groups[1], TokenGroup::ImageGallery(_)));
+        assert!(matches!(groups[2], TokenGroup::Inline(_)));
+        assert!(matches!(groups[3], TokenGroup::ImageGallery(_)));
+
+        let groups_without_media = group_tokens(&tokens, false);
+        assert!(matches!(groups_without_media[1], TokenGroup::Block(_, _)));
+        assert!(matches!(groups_without_media[2], TokenGroup::Block(_, _)));
     }
 }

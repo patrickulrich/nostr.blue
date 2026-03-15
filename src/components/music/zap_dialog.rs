@@ -4,7 +4,7 @@ use crate::stores::music_player::{self, MUSIC_PLAYER};
 use crate::stores::nostr_client;
 use crate::stores::nostr_music::TrackSource;
 use crate::stores::profiles;
-use crate::stores::relay::DEFAULT_RELAYS;
+use crate::utils::relay::configured_write_relay_urls;
 use crate::utils::podcast::ValueBlock;
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip01::Coordinate;
@@ -12,13 +12,6 @@ use nostr_sdk::{PublicKey, RelayUrl};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
-/// Convert DEFAULT_RELAYS to parsed RelayUrls
-fn default_relay_urls() -> Vec<RelayUrl> {
-    DEFAULT_RELAYS
-        .iter()
-        .filter_map(|s| RelayUrl::parse(s).ok())
-        .collect()
-}
 
 fn redact_url(url: &str) -> String {
     match reqwest::Url::parse(url) {
@@ -662,20 +655,7 @@ async fn generate_nostr_zap_invoice(
     );
     let recipient_pubkey =
         PublicKey::parse(artist_pubkey).map_err(|e| format!("Invalid artist pubkey: {}", e))?;
-    let relays: Vec<RelayUrl> = {
-        if let Some(client) = nostr_client::get_client() {
-            let client_relays = client.relays().await;
-            let mut urls: Vec<RelayUrl> = client_relays.keys().cloned().collect();
-            if urls.is_empty() {
-                default_relay_urls()
-            } else {
-                urls.truncate(5);
-                urls
-            }
-        } else {
-            default_relay_urls()
-        }
-    };
+    let relays: Vec<RelayUrl> = configured_write_relay_urls();
     let message = if comment.is_empty() {
         None
     } else {

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[cfg(not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))))]
 use crate::platform::storage;
@@ -26,6 +27,8 @@ pub struct CustomAiProvider {
 pub struct AiProviderState {
     pub selected_provider_id: String,
     #[serde(default)]
+    pub selected_model_by_provider: HashMap<String, String>,
+    #[serde(default)]
     pub custom_providers: Vec<CustomAiProvider>,
 }
 
@@ -33,6 +36,7 @@ impl Default for AiProviderState {
     fn default() -> Self {
         Self {
             selected_provider_id: SHAKESPEARE_PROVIDER_ID.to_string(),
+            selected_model_by_provider: HashMap::new(),
             custom_providers: Vec::new(),
         }
     }
@@ -111,15 +115,12 @@ pub fn normalize_base_url(input: &str) -> String {
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 mod web_db {
     use super::AiProviderState;
+    use crate::stores::ui::ai_web_db::{open_ai_db_with_schema, STORE_SETTINGS};
     use indexed_db_futures::prelude::*;
-    use std::future::IntoFuture;
     use std::rc::Rc;
     use wasm_bindgen::JsValue;
     use web_sys::IdbTransactionMode;
 
-    const DB_NAME: &str = "nostr_blue_ai_providers";
-    const DB_VERSION: u32 = 1;
-    const STORE_SETTINGS: &str = "settings";
     const STATE_KEY: &str = "state";
 
     #[derive(Clone, Debug)]
@@ -132,19 +133,9 @@ mod web_db {
 
     impl AiProviderDb {
         pub async fn new() -> Result<Self, String> {
-            let mut db_req: OpenDbRequest = IdbDatabase::open_u32(DB_NAME, DB_VERSION)
-                .map_err(|e| format!("Failed to open AI provider database: {:?}", e))?;
-            db_req.set_on_upgrade_needed(Some(|evt: &IdbVersionChangeEvent| {
-                let db = evt.db();
-                if !db.object_store_names().any(|n| n == STORE_SETTINGS) {
-                    db.create_object_store(STORE_SETTINGS)?;
-                }
-                Ok(())
-            }));
-            let db: IdbDatabase = db_req
-                .into_future()
+            let db = open_ai_db_with_schema("AI provider")
                 .await
-                .map_err(|e| format!("Failed to open AI provider database: {:?}", e))?;
+                .map_err(|e| format!("Failed to open AI provider database: {}", e))?;
             Ok(Self { db: Rc::new(db) })
         }
 
@@ -232,6 +223,7 @@ mod tests {
     fn resolves_builtin_and_custom_providers() {
         let state = AiProviderState {
             selected_provider_id: "custom".to_string(),
+            selected_model_by_provider: HashMap::new(),
             custom_providers: vec![CustomAiProvider {
                 id: "custom".to_string(),
                 name: "Custom".to_string(),
@@ -252,6 +244,7 @@ mod tests {
     fn only_shakespeare_supports_tools() {
         let providers = resolve_providers(&AiProviderState {
             selected_provider_id: "custom".to_string(),
+            selected_model_by_provider: HashMap::new(),
             custom_providers: vec![CustomAiProvider {
                 id: "custom".to_string(),
                 name: "Custom".to_string(),
@@ -263,5 +256,12 @@ mod tests {
 
         assert!(providers[0].supports_tools());
         assert!(!providers[1].supports_tools());
+    }
+
+    #[test]
+    fn deserializes_legacy_state_without_model_map() {
+        let json = r#"{"selected_provider_id":"shakespeare","custom_providers":[]}"#;
+        let state: AiProviderState = serde_json::from_str(json).unwrap();
+        assert!(state.selected_model_by_provider.is_empty());
     }
 }

@@ -1,9 +1,10 @@
 use crate::components::board::item_selector::PinToBoardModal;
 use crate::components::icons::MoreHorizontalIcon;
 use crate::components::{AddToListModal, ReportModal};
-use crate::stores::nostr_client::{self, HAS_SIGNER};
+use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::pin_boards_store::{PinContentType, PinReference};
 use crate::stores::pinned_notes;
+use crate::stores::{auth_store, nostr_client, relay};
 use crate::utils::clipboard::copy_to_clipboard;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
@@ -16,6 +17,8 @@ pub struct NoteMenuProps {
     pub author_pubkey: String,
     /// Event ID of the note
     pub event_id: String,
+    /// Full signed event for manual rebroadcasting
+    pub event: nostr_sdk::Event,
 }
 #[component]
 pub fn NoteMenu(props: NoteMenuProps) -> Element {
@@ -28,14 +31,41 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
     let mut show_pin_to_board_modal = use_signal(|| false);
     let mut is_pinned = use_signal(|| false);
     let mut is_updating_pin = use_signal(|| false);
+    let mut is_broadcasting = use_signal(|| false);
     let toast = consume_toast();
+    let event = props.event.clone();
+    let parsed_author = PublicKey::parse(&props.author_pubkey).ok();
+    let parsed_event_id = EventId::from_hex(&props.event_id)
+        .ok()
+        .or_else(|| EventId::from_bech32(&props.event_id).ok());
+    let identities_match =
+        parsed_author == Some(event.pubkey) && parsed_event_id == Some(event.id);
+    if !identities_match {
+        log::error!(
+            "NoteMenu identity mismatch: props=({}, {}), event=({}, {})",
+            props.author_pubkey,
+            props.event_id,
+            event.pubkey,
+            event.id
+        );
+        return rsx! {
+            div { class: "relative",
+                button {
+                    class: "p-2 rounded-full text-muted-foreground/50 cursor-not-allowed",
+                    disabled: true,
+                    title: "Note actions unavailable due to mismatched event identity",
+                    MoreHorizontalIcon { class: "h-5 w-5".to_string(), filled: false }
+                }
+            }
+        };
+    }
     let author_pubkey = props.author_pubkey.clone();
+    let event_id = props.event_id.clone();
     let author_pubkey_follow_check = author_pubkey.clone();
     let author_pubkey_follow_action = author_pubkey.clone();
     let author_pubkey_block = author_pubkey.clone();
     let author_pubkey_modal = author_pubkey.clone();
     let author_pubkey_modal_list = author_pubkey.clone();
-    let event_id = props.event_id.clone();
     let event_id_list = event_id.clone();
     let event_id_mute = event_id.clone();
     let event_id_report = event_id.clone();
@@ -45,7 +75,12 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
     let event_id_pin = event_id.clone();
     let event_id_pin_check = event_id.clone();
     let event_id_pin_board = event_id.clone();
+    let event_broadcast = event.clone();
     let mut follow_state_gen = use_signal(|| 0u32);
+    let is_own_note = auth_store::get_pubkey()
+        .and_then(|pubkey| PublicKey::parse(&pubkey).ok())
+        .map(|pubkey| pubkey == event.pubkey)
+        .unwrap_or(false);
     use_effect(use_reactive(
         (&author_pubkey_follow_check, &*HAS_SIGNER.read()),
         move |(pubkey, signer)| {
@@ -278,6 +313,91 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                             }
                         },
                         span { class: "text-sm", "Copy Note ID" }
+                    }
+                    if is_own_note {
+                        button {
+                            class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
+                            disabled: *is_broadcasting.read(),
+                            onclick: move |e: MouseEvent| {
+                                e.stop_propagation();
+                                if *is_broadcasting.read() {
+                                    return;
+                                }
+                                let toast_api = toast;
+                                let mut relay_urls = relay::get_write_relays();
+                                relay_urls.extend(relay::BROADCAST_RELAYS.read().clone());
+                                relay_urls.retain(|url| !relay::is_relay_blocked(url));
+                                let mut seen = std::collections::HashSet::new();
+                                relay_urls.retain(|url| seen.insert(url.trim_end_matches('/').to_string()));
+                                if relay_urls.is_empty() {
+                                    is_open.set(false);
+                                    toast_api.warning(
+                                        "No relays configured".to_string(),
+                                        ToastOptions::new()
+                                            .description("Add write relays or broadcast relays in Settings")
+                                            .duration(Duration::from_secs(3))
+                                            .permanent(false),
+                                    );
+                                    return;
+                                }
+                                let event = event_broadcast.clone();
+                                is_broadcasting.set(true);
+                                is_open.set(false);
+                                spawn(async move {
+                                    match nostr_client::broadcast_presigned_event(event, relay_urls).await {
+                                        Ok(result) => {
+                                            let result = result.ignoring_duplicate_event_failures();
+                                            if result.is_success() {
+                                                let title = if result.has_failures() {
+                                                    "Broadcast partially succeeded"
+                                                } else {
+                                                    "Broadcast complete"
+                                                };
+                                                toast_api.success(
+                                                    title.to_string(),
+                                                    ToastOptions::new()
+                                                        .description(format!(
+                                                            "Delivered to {}/{} relays",
+                                                            result.success_count(),
+                                                            result.total_attempted()
+                                                        ))
+                                                        .duration(Duration::from_secs(3))
+                                                        .permanent(false),
+                                                );
+                                            } else {
+                                                toast_api.error(
+                                                    "Broadcast failed".to_string(),
+                                                    ToastOptions::new()
+                                                        .description(format!(
+                                                            "0/{} relays accepted the event",
+                                                            result.total_attempted()
+                                                        ))
+                                                        .duration(Duration::from_secs(3))
+                                                        .permanent(false),
+                                                );
+                                            }
+                                        }
+                                        Err(e) => {
+                                            toast_api.error(
+                                                "Broadcast failed".to_string(),
+                                                ToastOptions::new()
+                                                    .description(e)
+                                                    .duration(Duration::from_secs(3))
+                                                    .permanent(false),
+                                            );
+                                        }
+                                    }
+                                    is_broadcasting.set(false);
+                                });
+                            },
+                            span { class: "text-sm",
+                                if *is_broadcasting.read() {
+                                    "Broadcasting..."
+                                } else {
+                                    "Broadcast"
+                                }
+                            }
+                        }
                     }
                     div { class: "h-px bg-border my-1" }
                     button {

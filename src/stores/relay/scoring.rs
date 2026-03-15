@@ -76,7 +76,7 @@ fn get_persisted_score(url: &str) -> Option<f64> {
     snapshots.get(url).map(|s| s.lifetime_success_rate)
 }
 /// Get persisted score - returns None on non-WASM platforms
-#[cfg(not(feature = "web"))]
+#[cfg(feature = "native")]
 fn get_persisted_score(_url: &str) -> Option<f64> {
     None
 }
@@ -161,7 +161,7 @@ pub async fn persist_relay_stats(client: &Client) {
     }
 }
 /// Snapshot current SDK stats - no-op on non-WASM platforms
-#[cfg(not(feature = "web"))]
+#[cfg(feature = "native")]
 #[allow(dead_code)]
 pub async fn persist_relay_stats(_client: &Client) {}
 /// Get statistics about stored relay scores (WASM only)
@@ -180,7 +180,7 @@ pub fn get_score_stats() -> Option<(usize, f64)> {
     Some((snapshots.len(), avg_score))
 }
 /// Get statistics about stored relay scores - returns None on non-WASM platforms
-#[cfg(not(feature = "web"))]
+#[cfg(feature = "native")]
 #[allow(dead_code)]
 pub fn get_score_stats() -> Option<(usize, f64)> {
     None
@@ -193,6 +193,6 @@ pub fn clear_relay_scores() {
     log::info!("Cleared stored relay scores");
 }
 /// Clear all stored relay scores - no-op on non-WASM platforms
-#[cfg(not(feature = "web"))]
+#[cfg(feature = "native")]
 #[allow(dead_code)]
 pub fn clear_relay_scores() {}

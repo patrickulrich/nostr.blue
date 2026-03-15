@@ -266,7 +266,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     }
     rsx! {
         div {
-            class: "fixed inset-0 z-50 backdrop-blur-sm flex items-center justify-center bg-black/50",
+            class: "fixed inset-0 z-[70] backdrop-blur-sm flex items-center justify-center bg-black/50",
             onclick: close_modal,
             div {
                 class: "bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full mx-4",

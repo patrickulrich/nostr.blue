@@ -137,6 +137,7 @@ fn ThreadNode(
                         RichContent {
                             content: thread.post.content.clone(),
                             tags: thread.post.event.tags.clone().to_vec(),
+                            interactive_media: true,
                         }
                     }
                 }
