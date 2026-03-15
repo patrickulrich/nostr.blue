@@ -4,84 +4,14 @@ use crate::stores::music_player::{self, MUSIC_PLAYER};
 use crate::stores::nostr_client;
 use crate::stores::nostr_music::TrackSource;
 use crate::stores::profiles;
-use crate::stores::relay::{self, DEFAULT_RELAYS};
+use crate::utils::relay::configured_write_relay_urls;
 use crate::utils::podcast::ValueBlock;
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::{PublicKey, RelayUrl};
 use serde::{Deserialize, Serialize};
-use url::{Host, Url};
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
-/// Convert DEFAULT_RELAYS to parsed RelayUrls
-fn default_relay_urls() -> Vec<RelayUrl> {
-    DEFAULT_RELAYS
-        .iter()
-        .filter_map(|s| RelayUrl::parse(s).ok())
-        .collect()
-}
-
-fn is_public_relay_url(url: &str) -> bool {
-    let Ok(parsed) = Url::parse(url) else {
-        return false;
-    };
-
-    match parsed.host() {
-        Some(Host::Ipv4(ip)) => {
-            let octets = ip.octets();
-            if octets == [0, 0, 0, 0] {
-                return false;
-            }
-            if octets[0] == 127 || octets[0] == 10 {
-                return false;
-            }
-            if octets[0] == 172 && (16..=31).contains(&octets[1]) {
-                return false;
-            }
-            if octets[0] == 192 && octets[1] == 168 {
-                return false;
-            }
-            if octets[0] == 169 && octets[1] == 254 {
-                return false;
-            }
-            true
-        }
-        Some(Host::Ipv6(ip)) => {
-            if ip.is_loopback() || ip.is_unspecified() {
-                return false;
-            }
-            let segments = ip.segments();
-            let first = segments[0];
-            (first & 0xfe00) != 0xfc00 && (first & 0xffc0) != 0xfe80
-        }
-        Some(Host::Domain(domain)) => {
-            let domain = domain.to_ascii_lowercase();
-            domain != "localhost" && !domain.ends_with(".local")
-        }
-        None => false,
-    }
-}
-
-fn configured_write_relay_urls() -> Vec<RelayUrl> {
-    let filter_relay_urls = |relay_urls: Vec<String>| -> Vec<RelayUrl> {
-        let mut relay_urls: Vec<RelayUrl> = relay_urls
-            .into_iter()
-            .filter(|url| is_public_relay_url(url) && !relay::is_relay_blocked(url))
-            .filter_map(|url| RelayUrl::parse(&url).ok())
-            .collect();
-        relay_urls.truncate(5);
-        relay_urls
-    };
-
-    let relay_urls = filter_relay_urls(relay::get_write_relays());
-    if relay_urls.is_empty() {
-        let mut relay_urls = default_relay_urls();
-        relay_urls.truncate(5);
-        return relay_urls;
-    }
-
-    relay_urls
-}
 
 fn redact_url(url: &str) -> String {
     match reqwest::Url::parse(url) {

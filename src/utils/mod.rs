@@ -52,6 +52,7 @@ pub mod path_validation;
 pub mod permissions;
 pub mod pin_metadata;
 pub mod profile_prefetch;
+pub mod relay;
 pub mod repost;
 pub mod text;
 pub mod time;

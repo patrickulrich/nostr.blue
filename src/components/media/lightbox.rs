@@ -27,7 +27,7 @@ fn contain_fit_extent(intrinsic: (f64, f64), viewport: (f64, f64)) -> (f64, f64)
         return viewport;
     }
 
-    let scale = (viewport_w / intrinsic_w).min(viewport_h / intrinsic_h);
+    let scale = (viewport_w / intrinsic_w).min(viewport_h / intrinsic_h).min(1.0);
     (intrinsic_w * scale, intrinsic_h * scale)
 }
 

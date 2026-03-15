@@ -7,7 +7,8 @@ use crate::services::payments::lnurl;
 use crate::stores::nostr_client;
 use crate::stores::nwc_store;
 use crate::stores::profiles::PROFILE_CACHE;
-use crate::stores::relay::{self, DEFAULT_RELAYS};
+use crate::stores::relay;
+use crate::utils::relay::configured_write_relay_urls;
 use crate::utils::truncate_pubkey;
 use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
@@ -15,7 +16,6 @@ use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use futures::future::{select, Either};
 use nostr_sdk::{EventId, PublicKey, RelayUrl};
 use std::collections::HashSet;
-use url::{Host, Url};
 
 /// A single recipient in the zap distribution
 #[derive(Clone, Debug)]
@@ -37,75 +37,57 @@ enum PaymentStatus {
     Timeout(String),
 }
 
-fn default_relay_urls() -> Vec<RelayUrl> {
-    DEFAULT_RELAYS
+fn selected_pubkeys_with_lightning(
+    pubkeys: &[String],
+) -> Vec<(String, Option<String>, Option<String>)> {
+    let profiles = PROFILE_CACHE.read();
+    pubkeys
         .iter()
-        .filter_map(|url| RelayUrl::parse(url).ok())
+        .filter_map(|pubkey| {
+            let profile = profiles.peek(pubkey).cloned();
+            let lud16 = profile.as_ref().and_then(|p| p.lud16.clone());
+            let lud06 = profile.as_ref().and_then(|p| p.lud06.clone());
+            if lud16.is_none() && lud06.is_none() {
+                None
+            } else {
+                Some((pubkey.clone(), lud16, lud06))
+            }
+        })
         .collect()
 }
 
-fn configured_write_relay_urls() -> Vec<RelayUrl> {
-    let filter_relay_urls = |relay_urls: Vec<String>| -> Vec<RelayUrl> {
-        let mut relay_urls: Vec<RelayUrl> = relay_urls
-            .into_iter()
-            .filter(|url| is_public_relay_url(url) && !relay::is_relay_blocked(url))
-            .filter_map(|url| RelayUrl::parse(&url).ok())
-            .collect();
-        relay_urls.truncate(5);
-        relay_urls
-    };
-
-    let relay_urls = filter_relay_urls(relay::get_write_relays());
-    if relay_urls.is_empty() {
-        return filter_relay_urls(
-            default_relay_urls()
-                .into_iter()
-                .map(|url| url.to_string())
-                .collect(),
-        );
+fn set_persisted_send_state_if_changed(
+    mut persisted_send_pubkeys: Signal<Vec<String>>,
+    mut persisted_send_total: Signal<u64>,
+    mut persisted_sendable_amounts: Signal<std::collections::HashMap<String, u64>>,
+    pubkeys: Vec<String>,
+    total: u64,
+    amounts: std::collections::HashMap<String, u64>,
+) {
+    if *persisted_send_total.peek() != total {
+        persisted_send_total.set(total);
     }
-
-    relay_urls
+    if persisted_send_pubkeys.peek().as_slice() != pubkeys.as_slice() {
+        persisted_send_pubkeys.set(pubkeys);
+    }
+    if *persisted_sendable_amounts.peek() != amounts {
+        persisted_sendable_amounts.set(amounts);
+    }
 }
 
-fn is_public_relay_url(url: &str) -> bool {
-    let Ok(parsed) = Url::parse(url) else {
-        return false;
-    };
-
-    match parsed.host() {
-        Some(Host::Ipv4(ip)) => {
-            if ip.is_unspecified() {
-                return false;
-            }
-            let octets = ip.octets();
-            if octets[0] == 127 || octets[0] == 10 {
-                return false;
-            }
-            if octets[0] == 172 && (16..=31).contains(&octets[1]) {
-                return false;
-            }
-            if octets[0] == 192 && octets[1] == 168 {
-                return false;
-            }
-            if octets[0] == 169 && octets[1] == 254 {
-                return false;
-            }
-            true
-        }
-        Some(Host::Ipv6(ip)) => {
-            if ip.is_loopback() || ip.is_unspecified() {
-                return false;
-            }
-            let segments = ip.segments();
-            let first = segments[0];
-            (first & 0xfe00) != 0xfc00 && (first & 0xffc0) != 0xfe80
-        }
-        Some(Host::Domain(domain)) => {
-            let domain = domain.to_ascii_lowercase();
-            domain != "localhost" && !domain.ends_with(".local")
-        }
-        None => false,
+fn clear_persisted_send_state_if_needed(
+    mut persisted_send_pubkeys: Signal<Vec<String>>,
+    mut persisted_send_total: Signal<u64>,
+    mut persisted_sendable_amounts: Signal<std::collections::HashMap<String, u64>>,
+) {
+    if !persisted_send_pubkeys.peek().is_empty() {
+        persisted_send_pubkeys.set(Vec::new());
+    }
+    if *persisted_send_total.peek() != 0 {
+        persisted_send_total.set(0);
+    }
+    if !persisted_sendable_amounts.peek().is_empty() {
+        persisted_sendable_amounts.set(std::collections::HashMap::new());
     }
 }
 
@@ -289,15 +271,19 @@ pub fn ZapDistribution(
             return;
         }
         let amount = *total_amount.read();
-        let pubkeys = selected_pubkeys.read().clone();
+        let eligible_with_lightning = selected_pubkeys_with_lightning(&selected_pubkeys.read());
+        let pubkeys = eligible_with_lightning
+            .iter()
+            .map(|(pubkey, _, _)| pubkey.clone())
+            .collect::<Vec<_>>();
         let weight_map: std::collections::HashMap<String, u64> =
             deduped_splits.read().iter().cloned().collect();
         let allocations = compute_allocations(&weight_map, &pubkeys, amount);
-        let should_use_persisted_amounts = !persisted_sendable_amounts.read().is_empty()
-            && *persisted_send_total.read() == amount
-            && persisted_send_pubkeys.read().as_slice() == pubkeys.as_slice();
+        let should_use_persisted_amounts = !persisted_sendable_amounts.peek().is_empty()
+            && *persisted_send_total.peek() == amount
+            && persisted_send_pubkeys.peek().as_slice() == pubkeys.as_slice();
         let persisted_amounts = if should_use_persisted_amounts {
-            let persisted_snapshot = persisted_sendable_amounts.read().clone();
+            let persisted_snapshot = persisted_sendable_amounts.peek().clone();
             let persisted_amounts = pubkeys
                 .iter()
                 .map(|pubkey| {
@@ -307,14 +293,21 @@ pub fn ZapDistribution(
                     )
                 })
                 .collect::<std::collections::HashMap<_, _>>();
-            persisted_send_pubkeys.set(pubkeys.clone());
-            persisted_send_total.set(amount);
-            persisted_sendable_amounts.set(persisted_amounts.clone());
+            set_persisted_send_state_if_changed(
+                persisted_send_pubkeys,
+                persisted_send_total,
+                persisted_sendable_amounts,
+                pubkeys.clone(),
+                amount,
+                persisted_amounts.clone(),
+            );
             persisted_amounts
         } else {
-            persisted_send_pubkeys.set(Vec::new());
-            persisted_send_total.set(0);
-            persisted_sendable_amounts.set(std::collections::HashMap::new());
+            clear_persisted_send_state_if_needed(
+                persisted_send_pubkeys,
+                persisted_send_total,
+                persisted_sendable_amounts,
+            );
             std::collections::HashMap::new()
         };
         let current = recipients.peek().clone();
@@ -373,26 +366,24 @@ pub fn ZapDistribution(
             return;
         }
         let send_amount = eligible_base.iter().map(|recip| recip.amount).sum::<u64>();
-        let mut eligible_with_lightning =
-            Vec::<(ZapRecipient, Option<String>, Option<String>)>::new();
-        for recip in eligible_base {
-            let profile = PROFILE_CACHE.read().peek(&recip.pubkey).cloned();
-            let lud16 = profile.as_ref().and_then(|p| p.lud16.clone());
-            let lud06 = profile.as_ref().and_then(|p| p.lud06.clone());
-
-            if lud16.is_none() && lud06.is_none() {
-                toast.warning(
-                    format!(
-                        "Skipping {}: no Lightning address",
-                        truncate_pubkey(&recip.pubkey)
-                    ),
-                    ToastOptions::new(),
-                );
-                continue;
-            }
-
-            eligible_with_lightning.push((recip, lud16, lud06));
-        }
+        let eligible_lightning_map = selected_pubkeys_with_lightning(
+            &eligible_base
+                .iter()
+                .map(|recip| recip.pubkey.clone())
+                .collect::<Vec<_>>(),
+        )
+        .into_iter()
+        .map(|(pubkey, lud16, lud06)| (pubkey, (lud16, lud06)))
+        .collect::<std::collections::HashMap<_, _>>();
+        let eligible_with_lightning = eligible_base
+            .into_iter()
+            .filter_map(|recip| {
+                eligible_lightning_map
+                    .get(&recip.pubkey)
+                    .cloned()
+                    .map(|(lud16, lud06)| (recip, lud16, lud06))
+            })
+            .collect::<Vec<_>>();
         if eligible_with_lightning.is_empty() {
             toast.warning(
                 "No recipients with Lightning addresses were eligible for sending".to_string(),
@@ -400,7 +391,10 @@ pub fn ZapDistribution(
             );
             return;
         }
-        let modal_pubkeys = selected_pubkeys.read().clone();
+        let modal_pubkeys = eligible_with_lightning
+            .iter()
+            .map(|(recip, _, _)| recip.pubkey.clone())
+            .collect::<Vec<_>>();
         let eligible_pubkeys = eligible_with_lightning
             .iter()
             .map(|(recip, _, _)| recip.pubkey.clone())
@@ -428,9 +422,14 @@ pub fn ZapDistribution(
                 .iter()
                 .map(|pubkey| (pubkey.clone(), amount_map.get(pubkey).copied().unwrap_or(0)))
                 .collect::<std::collections::HashMap<_, _>>();
-            persisted_send_pubkeys.set(modal_pubkeys);
-            persisted_send_total.set(*total_amount.read());
-            persisted_sendable_amounts.set(full_amount_map.clone());
+            set_persisted_send_state_if_changed(
+                persisted_send_pubkeys,
+                persisted_send_total,
+                persisted_sendable_amounts,
+                modal_pubkeys,
+                *total_amount.read(),
+                full_amount_map.clone(),
+            );
             let mut current = recipients.write();
             for recip in current.iter_mut() {
                 if let Some(amount) = full_amount_map.get(&recip.pubkey).copied() {
@@ -769,6 +768,11 @@ pub fn ZapDistribution(
                         } else {
                             "Zap {total_amount} sats"
                         }
+                    }
+                }
+                if !selected_pubkeys.read().is_empty() && recipients.read().is_empty() {
+                    p { class: "text-xs text-muted-foreground",
+                        "No selected recipients have Lightning addresses."
                     }
                 }
             }

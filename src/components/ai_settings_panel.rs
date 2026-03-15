@@ -20,7 +20,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
     let provider_state_ready = matches!(provider_state_load.read().as_ref(), Some(Ok(_)));
 
     use_effect(move || {
-        if matches!(provider_state_load.read().as_ref(), Some(Ok(_))) {
+        if provider_state_load.read().is_some() {
             return;
         }
 
@@ -408,6 +408,9 @@ fn build_custom_provider(
 fn validate_provider_base_url(base_url: &str) -> Result<(), String> {
     let parsed =
         Url::parse(base_url).map_err(|_| "Base URL must be an absolute URL".to_string())?;
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("Base URL must not include embedded credentials".to_string());
+    }
     match parsed.scheme() {
         "https" => Ok(()),
         "http" => {
@@ -474,5 +477,11 @@ mod tests {
     fn allows_insecure_private_development_base_url() {
         assert!(validate_provider_base_url("http://127.0.0.1:11434/v1").is_ok());
         assert!(validate_provider_base_url("http://192.168.1.15:8080/v1").is_ok());
+    }
+
+    #[test]
+    fn rejects_base_url_with_embedded_credentials() {
+        let err = validate_provider_base_url("https://user:pass@example.com/v1").unwrap_err();
+        assert!(err.contains("credentials"));
     }
 }
