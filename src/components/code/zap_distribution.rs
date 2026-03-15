@@ -37,6 +37,14 @@ enum PaymentStatus {
     Timeout(String),
 }
 
+#[derive(Clone)]
+struct PersistedSendState {
+    split_signature: Vec<(String, u64)>,
+    pubkeys: Vec<String>,
+    total: u64,
+    amounts: std::collections::HashMap<String, u64>,
+}
+
 fn selected_pubkeys_with_lightning(
     pubkeys: &[String],
 ) -> Vec<(String, Option<String>, Option<String>)> {
@@ -60,18 +68,20 @@ fn set_persisted_send_state_if_changed(
     mut persisted_send_pubkeys: Signal<Vec<String>>,
     mut persisted_send_total: Signal<u64>,
     mut persisted_sendable_amounts: Signal<std::collections::HashMap<String, u64>>,
-    pubkeys: Vec<String>,
-    total: u64,
-    amounts: std::collections::HashMap<String, u64>,
+    mut persisted_send_split_signature: Signal<Vec<(String, u64)>>,
+    next_state: PersistedSendState,
 ) {
-    if *persisted_send_total.peek() != total {
-        persisted_send_total.set(total);
+    if *persisted_send_split_signature.peek() != next_state.split_signature {
+        persisted_send_split_signature.set(next_state.split_signature);
     }
-    if persisted_send_pubkeys.peek().as_slice() != pubkeys.as_slice() {
-        persisted_send_pubkeys.set(pubkeys);
+    if *persisted_send_total.peek() != next_state.total {
+        persisted_send_total.set(next_state.total);
     }
-    if *persisted_sendable_amounts.peek() != amounts {
-        persisted_sendable_amounts.set(amounts);
+    if persisted_send_pubkeys.peek().as_slice() != next_state.pubkeys.as_slice() {
+        persisted_send_pubkeys.set(next_state.pubkeys);
+    }
+    if *persisted_sendable_amounts.peek() != next_state.amounts {
+        persisted_sendable_amounts.set(next_state.amounts);
     }
 }
 
@@ -79,7 +89,11 @@ fn clear_persisted_send_state_if_needed(
     mut persisted_send_pubkeys: Signal<Vec<String>>,
     mut persisted_send_total: Signal<u64>,
     mut persisted_sendable_amounts: Signal<std::collections::HashMap<String, u64>>,
+    mut persisted_send_split_signature: Signal<Vec<(String, u64)>>,
 ) {
+    if !persisted_send_split_signature.peek().is_empty() {
+        persisted_send_split_signature.set(Vec::new());
+    }
     if !persisted_send_pubkeys.peek().is_empty() {
         persisted_send_pubkeys.set(Vec::new());
     }
@@ -192,6 +206,7 @@ pub fn ZapDistribution(
     let mut persisted_send_total = use_signal(|| 0u64);
     let mut persisted_sendable_amounts =
         use_signal(std::collections::HashMap::<String, u64>::new);
+    let mut persisted_send_split_signature = use_signal(Vec::<(String, u64)>::new);
 
     // Deduplicate zap_splits by pubkey, summing weights for duplicates
     let deduped_splits = use_memo(use_reactive((&zap_splits,), |(splits,)| {
@@ -276,11 +291,21 @@ pub fn ZapDistribution(
             .iter()
             .map(|(pubkey, _, _)| pubkey.clone())
             .collect::<Vec<_>>();
+        let split_signature = deduped_splits.read().clone();
         let weight_map: std::collections::HashMap<String, u64> =
-            deduped_splits.read().iter().cloned().collect();
+            split_signature.iter().cloned().collect();
         let allocations = compute_allocations(&weight_map, &pubkeys, amount);
+        if *persisted_send_split_signature.peek() != split_signature {
+            clear_persisted_send_state_if_needed(
+                persisted_send_pubkeys,
+                persisted_send_total,
+                persisted_sendable_amounts,
+                persisted_send_split_signature,
+            );
+        }
         let should_use_persisted_amounts = !persisted_sendable_amounts.peek().is_empty()
             && *persisted_send_total.peek() == amount
+            && *persisted_send_split_signature.peek() == split_signature
             && persisted_send_pubkeys.peek().as_slice() == pubkeys.as_slice();
         let persisted_amounts = if should_use_persisted_amounts {
             let persisted_snapshot = persisted_sendable_amounts.peek().clone();
@@ -297,9 +322,13 @@ pub fn ZapDistribution(
                 persisted_send_pubkeys,
                 persisted_send_total,
                 persisted_sendable_amounts,
-                pubkeys.clone(),
-                amount,
-                persisted_amounts.clone(),
+                persisted_send_split_signature,
+                PersistedSendState {
+                    split_signature: split_signature.clone(),
+                    pubkeys: pubkeys.clone(),
+                    total: amount,
+                    amounts: persisted_amounts.clone(),
+                },
             );
             persisted_amounts
         } else {
@@ -307,6 +336,7 @@ pub fn ZapDistribution(
                 persisted_send_pubkeys,
                 persisted_send_total,
                 persisted_sendable_amounts,
+                persisted_send_split_signature,
             );
             std::collections::HashMap::new()
         };
@@ -365,7 +395,6 @@ pub fn ZapDistribution(
             );
             return;
         }
-        let send_amount = eligible_base.iter().map(|recip| recip.amount).sum::<u64>();
         let eligible_lightning_map = selected_pubkeys_with_lightning(
             &eligible_base
                 .iter()
@@ -395,16 +424,9 @@ pub fn ZapDistribution(
             .iter()
             .map(|(recip, _, _)| recip.pubkey.clone())
             .collect::<Vec<_>>();
-        let eligible_pubkeys = eligible_with_lightning
+        let amount_map = eligible_with_lightning
             .iter()
-            .map(|(recip, _, _)| recip.pubkey.clone())
-            .collect::<Vec<_>>();
-        let weight_map: std::collections::HashMap<String, u64> =
-            deduped_splits.read().iter().cloned().collect();
-        let reallocated = compute_allocations(&weight_map, &eligible_pubkeys, send_amount);
-        let amount_map = reallocated
-            .into_iter()
-            .map(|(pubkey, _, amount)| (pubkey, amount))
+            .map(|(recip, _, _)| (recip.pubkey.clone(), recip.amount))
             .collect::<std::collections::HashMap<_, _>>();
         let sendable: Vec<(ZapRecipient, Option<String>, Option<String>)> = eligible_with_lightning
             .into_iter()
@@ -426,9 +448,13 @@ pub fn ZapDistribution(
                 persisted_send_pubkeys,
                 persisted_send_total,
                 persisted_sendable_amounts,
-                modal_pubkeys,
-                *total_amount.read(),
-                full_amount_map.clone(),
+                persisted_send_split_signature,
+                PersistedSendState {
+                    split_signature: deduped_splits.read().clone(),
+                    pubkeys: modal_pubkeys,
+                    total: *total_amount.read(),
+                    amounts: full_amount_map.clone(),
+                },
             );
             let mut current = recipients.write();
             for recip in current.iter_mut() {
@@ -554,6 +580,7 @@ pub fn ZapDistribution(
                     persisted_send_pubkeys.set(Vec::new());
                     persisted_send_total.set(0);
                     persisted_sendable_amounts.set(std::collections::HashMap::new());
+                    persisted_send_split_signature.set(Vec::new());
                     on_close.call(());
                 }
             },
@@ -579,6 +606,7 @@ pub fn ZapDistribution(
                             persisted_send_pubkeys.set(Vec::new());
                             persisted_send_total.set(0);
                             persisted_sendable_amounts.set(std::collections::HashMap::new());
+                            persisted_send_split_signature.set(Vec::new());
                             on_close.call(());
                         }
                     },

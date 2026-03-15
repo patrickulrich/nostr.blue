@@ -20,7 +20,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
     let provider_state_ready = matches!(provider_state_load.read().as_ref(), Some(Ok(_)));
 
     use_effect(move || {
-        if provider_state_load.read().is_some() {
+        if provider_state_ready && provider_state_load.read().is_some() {
             return;
         }
 
@@ -91,7 +91,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                             let provider_id_for_delete = provider.id.clone();
                             let is_selected = provider.id == selected_provider_id;
                             let is_custom = !provider.is_builtin;
-                            let display_base_url = provider.base_url.clone();
+                            let display_base_url = sanitize_display_base_url(&provider.base_url);
                             rsx! {
                                 div { key: "{provider.id}", class: "flex flex-col gap-3 rounded-xl border border-border p-4 md:flex-row md:items-center md:justify-between",
                                     div {
@@ -411,6 +411,9 @@ fn validate_provider_base_url(base_url: &str) -> Result<(), String> {
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err("Base URL must not include embedded credentials".to_string());
     }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err("Base URL must not include a query string or fragment".to_string());
+    }
     match parsed.scheme() {
         "https" => Ok(()),
         "http" => {
@@ -424,6 +427,17 @@ fn validate_provider_base_url(base_url: &str) -> Result<(), String> {
             }
         }
         _ => Err("Base URL must be an absolute HTTP/HTTPS URL".to_string()),
+    }
+}
+
+fn sanitize_display_base_url(base_url: &str) -> String {
+    match Url::parse(base_url) {
+        Ok(mut parsed) => {
+            parsed.set_query(None);
+            parsed.set_fragment(None);
+            parsed.to_string().trim_end_matches('/').to_string()
+        }
+        Err(_) => base_url.to_string(),
     }
 }
 
@@ -483,5 +497,11 @@ mod tests {
     fn rejects_base_url_with_embedded_credentials() {
         let err = validate_provider_base_url("https://user:pass@example.com/v1").unwrap_err();
         assert!(err.contains("credentials"));
+    }
+
+    #[test]
+    fn rejects_base_url_with_query_or_fragment() {
+        assert!(validate_provider_base_url("https://api.example.com/v1?token=secret").is_err());
+        assert!(validate_provider_base_url("https://api.example.com/v1#fragment").is_err());
     }
 }

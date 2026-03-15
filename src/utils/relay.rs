@@ -44,7 +44,9 @@ pub fn is_public_relay_url(url: &str) -> bool {
         }
         Some(Host::Domain(domain)) => {
             let domain = domain.to_ascii_lowercase();
-            domain != "localhost" && !domain.ends_with(".local")
+            domain != "localhost"
+                && !domain.ends_with(".localhost")
+                && !domain.ends_with(".local")
         }
         None => false,
     }
@@ -63,7 +65,10 @@ pub fn configured_write_relay_urls() -> Vec<RelayUrl> {
 
     let relay_urls = filter_relay_urls(relay::get_write_relays());
     if relay_urls.is_empty() {
-        let mut relay_urls = default_relay_urls();
+        let mut relay_urls = default_relay_urls()
+            .into_iter()
+            .filter(|relay_url| !relay::is_relay_blocked(relay_url.as_str()))
+            .collect::<Vec<_>>();
         relay_urls.truncate(5);
         return relay_urls;
     }
