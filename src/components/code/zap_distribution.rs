@@ -470,8 +470,6 @@ pub fn ZapDistribution(
             for recip in current.iter_mut() {
                 if let Some(amount) = full_amount_map.get(&recip.pubkey).copied() {
                     recip.amount = amount;
-                } else {
-                    recip.amount = 0;
                 }
             }
         }
@@ -810,7 +808,9 @@ pub fn ZapDistribution(
                         }
                     }
                 }
-                if !selected_pubkeys.read().is_empty() && recipients.read().is_empty() {
+                if !selected_pubkeys.read().is_empty()
+                    && selected_pubkeys_with_lightning(&selected_pubkeys.read()).is_empty()
+                {
                     p { class: "text-xs text-muted-foreground",
                         "No selected recipients have Lightning addresses."
                     }

@@ -266,16 +266,24 @@ pub fn SettingsRelays() -> Element {
         let url = new_local_relay.read().clone();
         match normalize_local_relay_url(&url) {
             Ok(normalized) => {
+                match Url::parse(&normalized) {
+                    Ok(parsed)
+                        if matches!(parsed.scheme(), "ws" | "wss")
+                            && parsed.host_str().is_some() => {}
+                    _ => {
+                        local_error.set(Some("Invalid relay URL".to_string()));
+                        return;
+                    }
+                }
                 if local_relays.read().contains(&normalized) {
                     local_error.set(Some("Relay already exists".to_string()));
                     return;
                 }
-                let mut relays = local_relays.write();
+                let mut relays = local_relays.read().clone();
                 relays.push(normalized);
                 relay::save_local_relays(&relays);
-                let relays_clone = relays.clone();
-                drop(relays);
-                *relay::LOCAL_RELAYS.write() = relays_clone;
+                local_relays.set(relays.clone());
+                *relay::LOCAL_RELAYS.write() = relays;
                 new_local_relay.set(String::new());
                 local_error.set(None);
             }

@@ -391,11 +391,12 @@ fn build_custom_provider(
         return Err("API key is required".to_string());
     }
 
+    let is_different_original = match editing_provider_id {
+        Some(original) => original != provider_id,
+        None => true,
+    };
     let duplicate = state.custom_providers.iter().any(|provider| {
-        provider.id == provider_id
-            && editing_provider_id
-                .map(|original| original != provider.id)
-                .unwrap_or(true)
+        provider.id == provider_id && is_different_original
     });
     if duplicate {
         return Err("ID must be unique across custom providers".to_string());

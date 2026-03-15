@@ -244,7 +244,7 @@ pub fn AIChat() -> Element {
                         return;
                     }
 
-                let result = if persisted_messages.is_empty() {
+                let result = if persisted_messages_snapshot.is_empty() {
                     ai_chat_store::clear_chat_history(&account_key).await
                 } else {
                     ai_chat_store::save_chat_history(&account_key, &persisted_messages_snapshot).await

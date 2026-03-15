@@ -16,12 +16,15 @@ fn redact_url_for_logging(input: &str) -> String {
 
     let sanitized = input.split(['?', '#']).next().unwrap_or(input);
     const MAX_FALLBACK_LEN: usize = 120;
-    let mut truncated = sanitized
+    let truncated_chars = sanitized
         .chars()
         .take(MAX_FALLBACK_LEN + 1)
+        .collect::<Vec<_>>();
+    let mut truncated = truncated_chars
+        .iter()
+        .take(MAX_FALLBACK_LEN)
         .collect::<String>();
-    if truncated.chars().count() > MAX_FALLBACK_LEN {
-        truncated = truncated.chars().take(MAX_FALLBACK_LEN).collect::<String>();
+    if truncated_chars.len() > MAX_FALLBACK_LEN {
         truncated.push('…');
     }
     truncated

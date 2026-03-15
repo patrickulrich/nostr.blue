@@ -545,29 +545,22 @@ pub async fn logout() -> Result<(), String> {
     spawn(async move {
         crate::services::search_relays::invalidate_search_relay_cache().await;
     });
-    let _ = nostr_client::set_read_only().await;
+    nostr_client::set_read_only()
+        .await
+        .map_err(|e| format!("Failed to set client to read-only during logout: {}", e))?;
+    for (storage_key, label) in [
+        (STORAGE_KEY_NSEC, "nsec"),
+        (STORAGE_KEY_NCRYPTSEC, "ncryptsec"),
+        (STORAGE_KEY_NPUB, "npub"),
+        (STORAGE_KEY_METHOD, "method"),
+        (STORAGE_KEY_BUNKER_URI, "bunker URI"),
+        (STORAGE_KEY_APP_KEYS, "app keys"),
+        (STORAGE_KEY_SIGNER_PACKAGE, "signer package"),
+    ] {
+        crate::platform::storage::delete(storage_key)
+            .map_err(|e| format!("Failed to delete {} during logout: {}", label, e))?;
+    }
     clear_auth();
-    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_NSEC) {
-        log::error!("Failed to delete nsec: {}", e);
-    }
-    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_NCRYPTSEC) {
-        log::error!("Failed to delete ncryptsec: {}", e);
-    }
-    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_NPUB) {
-        log::error!("Failed to delete npub: {}", e);
-    }
-    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_METHOD) {
-        log::error!("Failed to delete method: {}", e);
-    }
-    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_BUNKER_URI) {
-        log::error!("Failed to delete bunker URI: {}", e);
-    }
-    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_APP_KEYS) {
-        log::error!("Failed to delete app keys: {}", e);
-    }
-    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_SIGNER_PACKAGE) {
-        log::error!("Failed to delete signer package: {}", e);
-    }
     *PASSWORD_PROMPT.write() = PasswordPromptState::default();
     Ok(())
 }
