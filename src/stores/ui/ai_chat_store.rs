@@ -62,13 +62,6 @@ mod web_db {
         db: Rc<IdbDatabase>,
     }
 
-    // SAFETY: this wrapper is only used in the WASM web build, where the app runs on the
-    // browser main thread. We never move the underlying `Rc<IdbDatabase>` to worker threads,
-    // and the handle has no unsynchronized shared mutation beyond IndexedDB's own API.
-    // These impls rely on that single-threaded platform constraint.
-    unsafe impl Send for AiChatDb {}
-    unsafe impl Sync for AiChatDb {}
-
     thread_local! {
         static AI_CHAT_DB: RefCell<Option<AiChatDb>> = const { RefCell::new(None) };
     }

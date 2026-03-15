@@ -96,7 +96,13 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                                                 onclick: move |_| {
                                                     let mut next_state = state.read().clone();
                                                     next_state.selected_provider_id = provider_id_for_use.clone();
-                                                    persist_provider_state(next_state, state, is_saving, save_error);
+                                                    persist_provider_state(
+                                                        next_state,
+                                                        state,
+                                                        is_saving,
+                                                        save_error,
+                                                        || {},
+                                                    );
                                                 },
                                                 "Use"
                                             }
@@ -130,17 +136,24 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                                                     if next_state.selected_provider_id == provider_id_for_delete {
                                                         next_state.selected_provider_id = shakespeare_provider().id;
                                                     }
-                                                    if editing_provider_id.read().as_deref()
-                                                        == Some(provider_id_for_delete.as_str())
-                                                    {
-                                                        editing_provider_id.set(None);
-                                                        name.set(String::new());
-                                                        provider_id.set(String::new());
-                                                        base_url.set(String::new());
-                                                        api_key.set(String::new());
-                                                        save_error.set(None);
-                                                    }
-                                                    persist_provider_state(next_state, state, is_saving, save_error);
+                                                    let should_reset_editor = editing_provider_id.read().as_deref()
+                                                        == Some(provider_id_for_delete.as_str());
+                                                    persist_provider_state(
+                                                        next_state,
+                                                        state,
+                                                        is_saving,
+                                                        save_error,
+                                                        move || {
+                                                            if should_reset_editor {
+                                                                editing_provider_id.set(None);
+                                                                name.set(String::new());
+                                                                provider_id.set(String::new());
+                                                                base_url.set(String::new());
+                                                                api_key.set(String::new());
+                                                                save_error.set(None);
+                                                            }
+                                                        },
+                                                    );
                                                 },
                                                 "Delete"
                                             }
@@ -309,12 +322,16 @@ fn persist_provider_state(
     mut state: Signal<AiProviderState>,
     mut is_saving: Signal<bool>,
     mut save_error: Signal<Option<String>>,
+    on_success: impl FnOnce() + 'static,
 ) {
     is_saving.set(true);
     save_error.set(None);
     spawn(async move {
         match ai_provider_store::save_provider_state(&next_state).await {
-            Ok(()) => state.set(next_state),
+            Ok(()) => {
+                state.set(next_state);
+                on_success();
+            }
             Err(e) => save_error.set(Some(e)),
         }
         is_saving.set(false);

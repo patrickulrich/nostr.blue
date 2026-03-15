@@ -578,7 +578,7 @@ pub fn PersistentMusicPlayer() -> Element {
             if let Some(id) = podcast_id {
                 (
                     format!(
-                        "https://nostr.blue/podcast/rss/{}/episode/{}",
+                        "https://nostr.blue/podcast/rss/episode/{}/{}",
                         id,
                         urlencoding::encode(episode_guid)
                     ),
@@ -587,7 +587,7 @@ pub fn PersistentMusicPlayer() -> Element {
             } else {
                 (
                     format!(
-                        "https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
+                        "https://nostr.blue/podcast/rss/episode/{}/{}",
                         urlencoding::encode(feed_url),
                         urlencoding::encode(episode_guid)
                     ),

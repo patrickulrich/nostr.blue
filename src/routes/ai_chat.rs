@@ -74,12 +74,15 @@ pub fn AIChat() -> Element {
     let initial_loaded_messages_value = initial_loaded_messages.read().clone();
     let has_signer = *nostr_client::HAS_SIGNER.read();
     let selected_provider_id_for_models = provider_state.read().selected_provider_id.clone();
-    let persisted_messages: Vec<PersistedChatMessage> = messages
-        .read()
-        .iter()
-        .cloned()
-        .map(persisted_message_from_display)
-        .collect();
+    let persisted_messages = use_memo(move || {
+        messages
+            .read()
+            .iter()
+            .cloned()
+            .map(persisted_message_from_display)
+            .collect::<Vec<PersistedChatMessage>>()
+    });
+    let persisted_messages_value = persisted_messages.read().clone();
 
     use_effect(move || {
         if *provider_state_loaded.read() {
@@ -182,7 +185,7 @@ pub fn AIChat() -> Element {
         (
             &account_key,
             &chat_history_ready,
-            &persisted_messages,
+            &persisted_messages_value,
             &persisted_messages_dirty_value,
             &initial_loaded_messages_value,
         ),

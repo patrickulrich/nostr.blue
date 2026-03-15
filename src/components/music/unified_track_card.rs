@@ -132,7 +132,7 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
                 )
             } else {
                 format!(
-                    "https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
+                    "https://nostr.blue/podcast/rss/episode/{}/{}",
                     urlencoding::encode(feed_url),
                     urlencoding::encode(episode_guid),
                 )

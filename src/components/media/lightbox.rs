@@ -101,6 +101,10 @@ pub fn MediaLightbox() -> Element {
     #[cfg(feature = "native")]
     let viewport_size = use_signal(|| (1200.0f64, 800.0f64));
     #[cfg(feature = "web")]
+    let mut viewport_known = use_signal(|| false);
+    #[cfg(feature = "native")]
+    let viewport_known = use_signal(|| false);
+    #[cfg(feature = "web")]
     let mut viewport_resize_listeners =
         use_signal(|| None::<(EventListener, EventListener)>);
     #[cfg(feature = "web")]
@@ -130,17 +134,20 @@ pub fn MediaLightbox() -> Element {
 
         if let Some(size) = read_window_viewport_size() {
             viewport_size.set(size);
+            viewport_known.set(true);
         }
 
         let resize_listener = EventListener::new(&window, "resize", move |_| {
             if let Some(size) = read_window_viewport_size() {
                 viewport_size.set(size);
+                viewport_known.set(true);
             }
         });
 
         let orientation_listener = EventListener::new(&window, "orientationchange", move |_| {
             if let Some(size) = read_window_viewport_size() {
                 viewport_size.set(size);
+                viewport_known.set(true);
             }
         });
 
@@ -153,6 +160,9 @@ pub fn MediaLightbox() -> Element {
     });
 
     use_effect(move || {
+        if !*viewport_known.read() {
+            return;
+        }
         let zoom = *zoom_level.read();
         let intrinsic = *image_intrinsic_size.read();
         let viewport = *viewport_size.read();
@@ -172,10 +182,7 @@ pub fn MediaLightbox() -> Element {
             .unwrap_or_default();
         use_effect(use_reactive(
             &(state.is_open, state.current_index, current_image_url),
-            move |(is_open, _, _)| {
-                image_load_listener.set(None);
-                if !is_open {}
-            },
+            move |(_is_open, _, _)| image_load_listener.set(None),
         ));
     }
 
@@ -222,14 +229,15 @@ pub fn MediaLightbox() -> Element {
                 onclick: move |evt| evt.stop_propagation(),
                 onmounted: move |evt| async move {
                     let _ = evt.set_focus(true).await;
-                    #[cfg(feature = "web")]
-                    {
-                        if let Some(element) = evt.data().downcast::<web_sys::HtmlElement>() {
-                            let rect = element.get_bounding_client_rect();
-                            viewport_size.set((rect.width(), rect.height()));
+                        #[cfg(feature = "web")]
+                        {
+                            if let Some(element) = evt.data().downcast::<web_sys::HtmlElement>() {
+                                let rect = element.get_bounding_client_rect();
+                                viewport_size.set((rect.width(), rect.height()));
+                                viewport_known.set(true);
+                            }
                         }
-                    }
-                },
+                    },
                 onkeydown: move |evt: KeyboardEvent| {
                     match evt.key() {
                         Key::Escape => {
@@ -298,26 +306,34 @@ pub fn MediaLightbox() -> Element {
                         let delta_y = evt.delta().strip_units().y;
                         let next_zoom = clamp_zoom(*zoom_level.read() - delta_y * 0.0015);
                         zoom_level.set(next_zoom);
-                        let (pan_x, pan_y) = clamp_pan(
-                            pan_offset.read().0,
-                            pan_offset.read().1,
-                            next_zoom,
-                            *image_intrinsic_size.read(),
-                            *viewport_size.read(),
-                        );
+                        let (pan_x, pan_y) = if *viewport_known.read() {
+                            clamp_pan(
+                                pan_offset.read().0,
+                                pan_offset.read().1,
+                                next_zoom,
+                                *image_intrinsic_size.read(),
+                                *viewport_size.read(),
+                            )
+                        } else {
+                            (pan_offset.read().0, pan_offset.read().1)
+                        };
                         pan_offset.set((pan_x, pan_y));
                     },
                     ondoubleclick: move |evt: MouseEvent| {
                         evt.stop_propagation();
                         let next_zoom = if *zoom_level.read() > 1.0 { 1.0 } else { 2.0 };
                         zoom_level.set(next_zoom);
-                        let (pan_x, pan_y) = clamp_pan(
-                            0.0,
-                            0.0,
-                            next_zoom,
-                            *image_intrinsic_size.read(),
-                            *viewport_size.read(),
-                        );
+                        let (pan_x, pan_y) = if *viewport_known.read() {
+                            clamp_pan(
+                                0.0,
+                                0.0,
+                                next_zoom,
+                                *image_intrinsic_size.read(),
+                                *viewport_size.read(),
+                            )
+                        } else {
+                            (0.0, 0.0)
+                        };
                         pan_offset.set((pan_x, pan_y));
                     },
                     onpointerdown: move |evt: PointerEvent| {
@@ -348,13 +364,17 @@ pub fn MediaLightbox() -> Element {
                             coords.x - drag_origin.read().0,
                             coords.y - drag_origin.read().1,
                         );
-                        pan_offset.set(clamp_pan(
-                            next_pan.0,
-                            next_pan.1,
-                            *zoom_level.read(),
-                            *image_intrinsic_size.read(),
-                            *viewport_size.read(),
-                        ));
+                        pan_offset.set(if *viewport_known.read() {
+                            clamp_pan(
+                                next_pan.0,
+                                next_pan.1,
+                                *zoom_level.read(),
+                                *image_intrinsic_size.read(),
+                                *viewport_size.read(),
+                            )
+                        } else {
+                            next_pan
+                        });
                     },
                     onpointerup: move |evt: PointerEvent| {
                         if evt.pointer_type() == "touch" {
@@ -400,15 +420,19 @@ pub fn MediaLightbox() -> Element {
                                     let next_zoom =
                                         clamp_zoom(*pinch_start_zoom.read() * (distance / start_distance));
                                     let current_pan = *pan_offset.read();
-                                    let viewport = *viewport_size.read();
                                     zoom_level.set(next_zoom);
-                                    pan_offset.set(clamp_pan(
-                                        current_pan.0,
-                                        current_pan.1,
-                                        next_zoom,
-                                        *image_intrinsic_size.read(),
-                                        viewport,
-                                    ));
+                                    if *viewport_known.read() {
+                                        let viewport = *viewport_size.read();
+                                        pan_offset.set(clamp_pan(
+                                            current_pan.0,
+                                            current_pan.1,
+                                            next_zoom,
+                                            *image_intrinsic_size.read(),
+                                            viewport,
+                                        ));
+                                    } else {
+                                        pan_offset.set(current_pan);
+                                    }
                                 }
                             }
                         } else if touches.len() == 1 && *zoom_level.read() > 1.0 {
@@ -429,13 +453,17 @@ pub fn MediaLightbox() -> Element {
                             let delta_y = coords.y - start_y;
                             let current_pan = *pan_offset.read();
                             let new_pan = (current_pan.0 + delta_x, current_pan.1 + delta_y);
-                            pan_offset.set(clamp_pan(
-                                new_pan.0,
-                                new_pan.1,
-                                *zoom_level.read(),
-                                *image_intrinsic_size.read(),
-                                *viewport_size.read(),
-                            ));
+                            pan_offset.set(if *viewport_known.read() {
+                                clamp_pan(
+                                    new_pan.0,
+                                    new_pan.1,
+                                    *zoom_level.read(),
+                                    *image_intrinsic_size.read(),
+                                    *viewport_size.read(),
+                                )
+                            } else {
+                                new_pan
+                            });
                             swipe_start.set(Some((coords.x, coords.y)));
                         } else if touches.len() == 1 && *zoom_level.read() <= 1.0 {
                             let swipe_origin = *swipe_start.read();

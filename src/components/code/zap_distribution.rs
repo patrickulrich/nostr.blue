@@ -75,6 +75,9 @@ fn is_public_relay_url(url: &str) -> bool {
 
     match parsed.host() {
         Some(Host::Ipv4(ip)) => {
+            if ip.is_unspecified() {
+                return false;
+            }
             let octets = ip.octets();
             if octets[0] == 127 || octets[0] == 10 {
                 return false;
@@ -91,7 +94,7 @@ fn is_public_relay_url(url: &str) -> bool {
             true
         }
         Some(Host::Ipv6(ip)) => {
-            if ip.is_loopback() {
+            if ip.is_loopback() || ip.is_unspecified() {
                 return false;
             }
             let segments = ip.segments();
@@ -203,6 +206,10 @@ pub fn ZapDistribution(
     let mut send_progress = use_signal(|| 0usize);
     let mut send_total = use_signal(|| 0usize);
     let mut timed_out_pubkeys = use_signal(HashSet::<String>::new);
+    let mut persisted_send_pubkeys = use_signal(Vec::<String>::new);
+    let mut persisted_send_total = use_signal(|| 0u64);
+    let mut persisted_sendable_amounts =
+        use_signal(std::collections::HashMap::<String, u64>::new);
 
     // Deduplicate zap_splits by pubkey, summing weights for duplicates
     let deduped_splits = use_memo(use_reactive((&zap_splits,), |(splits,)| {
@@ -286,16 +293,29 @@ pub fn ZapDistribution(
         let weight_map: std::collections::HashMap<String, u64> =
             deduped_splits.read().iter().cloned().collect();
         let allocations = compute_allocations(&weight_map, &pubkeys, amount);
+        let should_use_persisted_amounts = !persisted_sendable_amounts.read().is_empty()
+            && *persisted_send_total.read() == amount
+            && persisted_send_pubkeys.read().as_slice() == pubkeys.as_slice();
+        let persisted_amounts = if should_use_persisted_amounts {
+            persisted_sendable_amounts.read().clone()
+        } else {
+            persisted_send_pubkeys.set(Vec::new());
+            persisted_send_total.set(0);
+            persisted_sendable_amounts.set(std::collections::HashMap::new());
+            std::collections::HashMap::new()
+        };
         let current = recipients.peek().clone();
         recipients.set(
             allocations
                 .into_iter()
                 .map(|(pk, weight, amt)| {
+                    let amount = persisted_amounts.get(&pk).copied().unwrap_or(amt);
                     let status = if let Some(existing) = current.iter().find(|r| r.pubkey == pk) {
                         let should_preserve_timeout = timed_out_pubkeys.peek().contains(&pk)
                             && matches!(existing.status, PaymentStatus::Timeout(_));
                         if should_preserve_timeout
-                            || (existing.status != PaymentStatus::Pending && existing.amount == amt)
+                            || (existing.status != PaymentStatus::Pending
+                                && existing.amount == amount)
                         {
                             existing.status.clone()
                         } else {
@@ -307,7 +327,7 @@ pub fn ZapDistribution(
                     ZapRecipient {
                         pubkey: pk,
                         weight,
-                        amount: amt,
+                        amount,
                         status,
                     }
                 })
@@ -394,6 +414,9 @@ pub fn ZapDistribution(
                 .iter()
                 .map(|(recip, _, _)| (recip.pubkey.clone(), recip.amount))
                 .collect::<std::collections::HashMap<_, _>>();
+            persisted_send_pubkeys.set(eligible_pubkeys);
+            persisted_send_total.set(send_amount);
+            persisted_sendable_amounts.set(sendable_amounts.clone());
             let mut current = recipients.write();
             for recip in current.iter_mut() {
                 if let Some(amount) = sendable_amounts.get(&recip.pubkey).copied() {
@@ -515,6 +538,9 @@ pub fn ZapDistribution(
             onclick: move |_| {
                 if !*is_sending.peek() {
                     timed_out_pubkeys.set(HashSet::new());
+                    persisted_send_pubkeys.set(Vec::new());
+                    persisted_send_total.set(0);
+                    persisted_sendable_amounts.set(std::collections::HashMap::new());
                     on_close.call(());
                 }
             },
@@ -537,6 +563,9 @@ pub fn ZapDistribution(
                     onclick: move |_| {
                         if !*is_sending.peek() {
                             timed_out_pubkeys.set(HashSet::new());
+                            persisted_send_pubkeys.set(Vec::new());
+                            persisted_send_total.set(0);
+                            persisted_sendable_amounts.set(std::collections::HashMap::new());
                             on_close.call(());
                         }
                     },

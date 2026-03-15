@@ -109,7 +109,7 @@ pub async fn publish_reaction_to_relays(
         .send_event_builder_to(urls, builder)
         .await
         .map_err(|e| format!("Failed to publish reaction: {}", e))?;
-    let result = PublishResult::from_output(output);
+    let result = PublishResult::from_output(output).ignoring_duplicate_event_failures();
     log::info!(
         "Reaction published to specific relays: {} ({}/{} relays succeeded)",
         result.event_id,
@@ -178,5 +178,7 @@ pub async fn broadcast_presigned_event(
     event: nostr::Event,
     relay_urls: Vec<String>,
 ) -> std::result::Result<PublishResult, String> {
-    send_presigned_event_to_relays(event, relay_urls).await
+    send_presigned_event_to_relays(event, relay_urls)
+        .await
+        .map(PublishResult::ignoring_duplicate_event_failures)
 }
