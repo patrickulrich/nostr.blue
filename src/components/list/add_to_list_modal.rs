@@ -530,7 +530,8 @@ async fn add_to_existing_list(list_event_id: String, event_id: String) -> Result
         }
     };
     let existing_content = list_event.content.clone();
-    let mut tags: Vec<Tag> = list_event.tags.into_iter().collect();
+    let mut tags: Vec<Tag> =
+        crate::utils::nips::nip89::strip_client_tags(list_event.tags.into_iter().collect());
     let normalized_event_id = target_event_id.to_hex();
     let already_exists = tags.iter().any(|tag| {
         tag.kind() == nostr_sdk::TagKind::e()

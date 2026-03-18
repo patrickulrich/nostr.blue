@@ -589,17 +589,13 @@ async fn publish_deletion_events(client: &nostr_sdk::Client, event_ids_to_delete
     }
     let tags = build_deletion_tags(&valid_event_ids);
     let deletion_builder = nostr_sdk::EventBuilder::new(Kind::from(5), "Swapped token").tags(tags);
-    match client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
-            deletion_builder.clone(),
-        ))
-        .await
-    {
+    let tagged_builder = crate::utils::nips::nip89::tag_event_builder(deletion_builder);
+    match client.send_event_builder(tagged_builder.clone()).await {
         Ok(output) => {
             if output.success.is_empty() {
                 log::warn!("No relays accepted deletion event, queuing for retry");
                 super::events::queue_event_for_retry(
-                    deletion_builder,
+                    tagged_builder,
                     PendingEventType::DeletionEvent,
                     None,
                     None,
@@ -617,7 +613,7 @@ async fn publish_deletion_events(client: &nostr_sdk::Client, event_ids_to_delete
         Err(e) => {
             log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
             super::events::queue_event_for_retry(
-                deletion_builder,
+                tagged_builder,
                 PendingEventType::DeletionEvent,
                 None,
                 None,

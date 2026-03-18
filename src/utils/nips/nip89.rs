@@ -1,5 +1,5 @@
 use dioxus::prelude::ReadableExt;
-use nostr_sdk::{EventBuilder, Tag};
+use nostr_sdk::{EventBuilder, Tag, TagKind};
 
 pub const CLIENT_NAME: &str = "nostr.blue";
 
@@ -19,6 +19,12 @@ pub fn tag_event_builder(builder: EventBuilder) -> EventBuilder {
     } else {
         builder
     }
+}
+
+pub fn strip_client_tags(tags: Vec<Tag>) -> Vec<Tag> {
+    tags.into_iter()
+        .filter(|tag| tag.kind() != TagKind::Client)
+        .collect()
 }
 
 #[cfg(test)]

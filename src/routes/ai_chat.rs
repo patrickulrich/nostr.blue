@@ -229,25 +229,26 @@ pub fn AIChat() -> Element {
         let generation = persisted_messages_save_generation_signal
             .read()
             .wrapping_add(1);
-            let chat_generation = *chat_history_generation_signal.read();
-            persisted_messages_save_in_flight_signal.set(true);
-            persisted_messages_save_generation_signal.set(generation);
-            spawn(async move {
-                const MAX_SAVE_ATTEMPTS: u32 = 4;
+        let chat_generation = *chat_history_generation_signal.read();
+        persisted_messages_save_in_flight_signal.set(true);
+        persisted_messages_save_generation_signal.set(generation);
+        spawn(async move {
+            const MAX_SAVE_ATTEMPTS: u32 = 4;
 
-                for attempt in 0..MAX_SAVE_ATTEMPTS {
-                    if *persisted_messages_save_generation_signal.read() != generation
-                        || *chat_history_generation_signal.read() != chat_generation
-                        || ai_chat_store::current_account_key() != account_key
-                    {
-                        persisted_messages_save_in_flight_signal.set(false);
-                        return;
-                    }
+            for attempt in 0..MAX_SAVE_ATTEMPTS {
+                if *persisted_messages_save_generation_signal.read() != generation
+                    || *chat_history_generation_signal.read() != chat_generation
+                    || ai_chat_store::current_account_key() != account_key
+                {
+                    persisted_messages_save_in_flight_signal.set(false);
+                    return;
+                }
 
                 let result = if persisted_messages_snapshot.is_empty() {
                     ai_chat_store::clear_chat_history(&account_key).await
                 } else {
-                    ai_chat_store::save_chat_history(&account_key, &persisted_messages_snapshot).await
+                    ai_chat_store::save_chat_history(&account_key, &persisted_messages_snapshot)
+                        .await
                 };
 
                 match result {
@@ -256,7 +257,8 @@ pub fn AIChat() -> Element {
                             && *chat_history_generation_signal.read() == chat_generation
                             && ai_chat_store::current_account_key() == account_key
                         {
-                            let latest_persisted_messages = persisted_messages_signal.read().clone();
+                            let latest_persisted_messages =
+                                persisted_messages_signal.read().clone();
                             if latest_persisted_messages == persisted_messages_snapshot {
                                 persisted_messages_dirty_signal.set(false);
                                 initial_loaded_messages_signal
@@ -266,17 +268,17 @@ pub fn AIChat() -> Element {
                         persisted_messages_save_in_flight_signal.set(false);
                         return;
                     }
-                        Err(e) => {
-                            if attempt + 1 == MAX_SAVE_ATTEMPTS {
-                                if *persisted_messages_save_generation_signal.read() == generation
+                    Err(e) => {
+                        if attempt + 1 == MAX_SAVE_ATTEMPTS {
+                            if *persisted_messages_save_generation_signal.read() == generation
                                 && *chat_history_generation_signal.read() == chat_generation
                                 && ai_chat_store::current_account_key() == account_key
-                                {
-                                    error.set(Some(e));
-                                }
-                                persisted_messages_save_in_flight_signal.set(false);
-                                return;
+                            {
+                                error.set(Some(e));
                             }
+                            persisted_messages_save_in_flight_signal.set(false);
+                            return;
+                        }
 
                         crate::platform::timer::sleep_ms((attempt + 1) * 100).await;
                     }

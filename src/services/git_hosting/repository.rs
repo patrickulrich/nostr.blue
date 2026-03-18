@@ -222,7 +222,9 @@ pub async fn delete_repository(coordinate: &Coordinate) -> Result<(), String> {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
     use nostr::nips::nip09::EventDeletionRequest;
-    let request = EventDeletionRequest::new().reason("Repository deleted");
+    let request = EventDeletionRequest::new()
+        .coordinate(coordinate.clone())
+        .reason("Repository deleted");
     let builder = EventBuilder::delete(request);
     client
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))

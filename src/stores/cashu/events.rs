@@ -963,7 +963,7 @@ pub async fn publish_orphaned_proofs_event(
         .await
         .map_err(|e| format!("Failed to encrypt: {}", e))?;
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-    let unsigned = crate::utils::nips::nip89::tag_event_builder(builder.clone()).build(pubkey);
+    let unsigned = crate::utils::nips::nip89::tag_event_builder(builder).build(pubkey);
     let signed_event = unsigned
         .sign(&signer)
         .await

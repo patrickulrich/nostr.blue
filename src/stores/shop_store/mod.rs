@@ -445,6 +445,9 @@ pub async fn publish_product(data: ProductFormData) -> Result<String> {
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(event_builder))
         .await
         .map_err(|e| format!("Failed to publish product: {}", e))?;
+    if output.success.is_empty() {
+        return Err("Failed to publish product: no relay accepted the event".to_string());
+    }
     log::info!(
         "Published product: {} (event: {:?})",
         data.title,
@@ -515,6 +518,9 @@ pub async fn publish_review(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(event_builder))
         .await
         .map_err(|e| format!("Failed to publish review: {}", e))?;
+    if output.success.is_empty() {
+        return Err("Failed to publish review: no relay accepted the event".to_string());
+    }
     log::info!(
         "Published review for {}: {:?}",
         product_coordinate,
@@ -671,6 +677,9 @@ pub async fn publish_collection(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish collection: {}", e))?;
+    if output.success.is_empty() {
+        return Err("Failed to publish collection: no relay accepted the event".to_string());
+    }
     log::info!("Published collection: {} (event: {})", d_tag, output.id());
     let _ = fetch_my_collections().await;
     Ok(d_tag)
@@ -694,10 +703,13 @@ pub async fn delete_collection(d_tag: &str) -> Result<()> {
     use nostr::nips::nip09::EventDeletionRequest;
     let deletion_request = EventDeletionRequest::new().id(event_id);
     let delete_builder = EventBuilder::delete(deletion_request);
-    client
+    let output = client
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(delete_builder))
         .await
         .map_err(|e| format!("Failed to delete collection: {}", e))?;
+    if output.success.is_empty() {
+        return Err("Failed to delete collection: no relay accepted the event".into());
+    }
     MY_COLLECTIONS.write().retain(|c| c.d_tag != d_tag);
     log::info!("Deleted collection: {}", d_tag);
     Ok(())
@@ -773,15 +785,19 @@ pub async fn delete_product(product_naddr: &str, d_tag: &str) -> Result<()> {
         .map_err(|e| format!("Failed to get pubkey: {}", e))?;
     let coordinate = format!("{}:{}:{}", KIND_PRODUCT, pubkey.to_hex(), d_tag);
     let tags = vec![Tag::custom(TagKind::custom("a"), vec![coordinate])];
-    let event = EventBuilder::new(Kind::EventDeletion, "Product deleted")
-        .tags(tags)
-        .sign(&signer)
-        .await
-        .map_err(|e| format!("Failed to sign deletion event: {}", e))?;
-    client
+    let event = crate::utils::nips::nip89::tag_event_builder(
+        EventBuilder::new(Kind::EventDeletion, "Product deleted").tags(tags),
+    )
+    .sign(&signer)
+    .await
+    .map_err(|e| format!("Failed to sign deletion event: {}", e))?;
+    let output = client
         .send_event(&event)
         .await
         .map_err(|e| format!("Failed to send deletion event: {}", e))?;
+    if output.success.is_empty() {
+        return Err("Failed to delete product: no relay accepted the event".into());
+    }
     MY_PRODUCTS.write().retain(|p| p.naddr != product_naddr);
     PRODUCTS_CACHE.write().pop(&product_naddr.to_string());
     log::info!("Product deleted: {}", d_tag);
@@ -872,15 +888,19 @@ pub async fn update_product(d_tag: &str, data: ProductFormData) -> Result<String
         .signer()
         .await
         .map_err(|e| format!("Failed to get signer: {}", e))?;
-    let event = EventBuilder::new(Kind::Custom(KIND_PRODUCT), data.description.clone())
-        .tags(tags)
-        .sign(&signer)
-        .await
-        .map_err(|e| format!("Failed to sign product event: {}", e))?;
-    client
+    let event = crate::utils::nips::nip89::tag_event_builder(
+        EventBuilder::new(Kind::Custom(KIND_PRODUCT), data.description.clone()).tags(tags),
+    )
+    .sign(&signer)
+    .await
+    .map_err(|e| format!("Failed to sign product event: {}", e))?;
+    let output = client
         .send_event(&event)
         .await
         .map_err(|e| format!("Failed to send product event: {}", e))?;
+    if output.success.is_empty() {
+        return Err("Failed to update product: no relay accepted the event".into());
+    }
     log::info!("Product updated: {}", d_tag);
     Ok(d_tag.to_string())
 }

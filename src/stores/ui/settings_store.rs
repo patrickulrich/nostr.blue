@@ -217,8 +217,8 @@ pub async fn update_publish_client_tag(enabled: bool) {
     };
     if let Err(e) = save_settings(&settings).await {
         log::warn!("Failed to persist client tag setting to Nostr: {}", e);
-        cache_settings(&settings);
     }
+    cache_settings(&settings);
 }
 /// Get current mempool endpoint (returns default if empty)
 pub fn get_mempool_endpoint() -> String {

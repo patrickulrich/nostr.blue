@@ -214,6 +214,9 @@ pub async fn set_private_relays(relays: Vec<String>) -> Result<String, String> {
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish Kind 10013: {}", e))?;
+    if output.success.is_empty() {
+        return Err("Failed to publish Kind 10013: no relay accepted the event".to_string());
+    }
     *PRIVATE_RELAYS.write() = relays;
     *PRIVATE_RELAYS_LOADED.write() = true;
     log::info!("Published Kind 10013: {}", output.id().to_hex());

@@ -446,6 +446,7 @@ pub async fn send_nutzap(
     }
     let content = comment.unwrap_or("");
     let builder = nostr_sdk::EventBuilder::new(Kind::from(9321), content).tags(tags.clone());
+    let tagged_builder = crate::utils::nips::nip89::tag_event_builder(builder);
     let recipient_relay_urls: Vec<nostr::RelayUrl> = recipient_info
         .relays
         .iter()
@@ -453,18 +454,14 @@ pub async fn send_nutzap(
         .collect();
     let output = if recipient_relay_urls.is_empty() {
         log::debug!("No valid recipient relays, using default relay routing");
-        client
-            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
-                builder.clone(),
-            ))
-            .await
+        client.send_event_builder(tagged_builder.clone()).await
     } else {
         log::debug!(
             "Publishing nutzap to {} recipient relays",
             recipient_relay_urls.len()
         );
         client
-            .send_event_builder_to(recipient_relay_urls, builder.clone())
+            .send_event_builder_to(recipient_relay_urls, tagged_builder.clone())
             .await
     };
     let output = match output {
@@ -472,7 +469,7 @@ pub async fn send_nutzap(
         Err(e) => {
             log::warn!("Failed to publish nutzap, queuing for retry: {}", e);
             super::events::queue_event_for_retry(
-                builder,
+                tagged_builder,
                 super::types::PendingEventType::NutzapEvent,
                 Some(pending_event_id.clone()),
                 Some(mint_url.to_string()),

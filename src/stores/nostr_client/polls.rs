@@ -77,7 +77,10 @@ pub async fn publish_poll_vote_tracked(
                 relay_urls.len()
             );
             client
-                .send_event_builder_to(relay_urls, builder)
+                .send_event_builder_to(
+                    relay_urls,
+                    crate::utils::nips::nip89::tag_event_builder(builder),
+                )
                 .await
                 .map_err(|e| format!("Failed to publish poll vote to poll relays: {}", e))
         } else {
@@ -186,7 +189,7 @@ pub async fn publish_poll_tracked(
                 .collect();
             log::info!("Publishing poll to {} connected poll relays", urls.len());
             client
-                .send_event_builder_to(urls, builder)
+                .send_event_builder_to(urls, crate::utils::nips::nip89::tag_event_builder(builder))
                 .await
                 .map_err(|e| format!("Failed to publish poll to specified relays: {}", e))
         } else {
