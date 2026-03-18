@@ -29,10 +29,29 @@ pub fn strip_client_tags(tags: Vec<Tag>) -> Vec<Tag> {
 
 #[cfg(test)]
 mod tests {
-    use super::{client_tag, CLIENT_NAME};
+    use super::{client_tag, strip_client_tags, CLIENT_NAME};
+    use crate::stores::settings_store::AppSettings;
 
     #[test]
     fn client_tag_uses_standard_sdk_format() {
         assert_eq!(client_tag().to_vec(), vec!["client", CLIENT_NAME]);
+    }
+
+    #[test]
+    fn strip_client_tags_removes_existing_client_tags() {
+        let tags = vec![
+            client_tag(),
+            nostr_sdk::Tag::identifier("demo"),
+            client_tag(),
+        ];
+
+        let stripped = strip_client_tags(tags);
+        assert_eq!(stripped.len(), 1);
+        assert_eq!(stripped[0].clone().to_vec(), vec!["d", "demo"]);
+    }
+
+    #[test]
+    fn settings_default_keeps_client_tag_enabled() {
+        assert!(AppSettings::default().publish_client_tag);
     }
 }
