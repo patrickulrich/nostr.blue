@@ -8,5 +8,6 @@ pub mod nip58;
 pub mod nip69;
 pub mod nip73;
 pub mod nip84;
+pub mod nip89;
 pub mod nip98;
 pub mod nip99;

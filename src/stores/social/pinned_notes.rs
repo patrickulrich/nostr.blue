@@ -344,7 +344,10 @@ async fn publish_pinned_notes(pins: Vec<String>) -> Result<(), String> {
     let event_ids: Result<Vec<EventId>, _> = pins.iter().map(|id| EventId::from_hex(id)).collect();
     let event_ids = event_ids.map_err(|e| format!("Invalid event ID: {}", e))?;
     let builder = EventBuilder::pinned_notes(event_ids);
-    match client.send_event_builder(builder).await {
+    match client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+        .await
+    {
         Ok(output) => {
             let success_count = output.success.len();
             let failed_count = output.failed.len();

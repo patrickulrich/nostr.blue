@@ -607,7 +607,7 @@ pub async fn publish_drive(
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_DRIVE), "").tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish drive: {}", e))?;
     log::info!("Drive published: {}", output.id().to_hex());
@@ -656,7 +656,7 @@ pub async fn publish_directory(
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_DIRECTORY), "").tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish directory: {}", e))?;
     log::info!("Directory published: {}", output.id().to_hex());
@@ -704,7 +704,7 @@ pub async fn publish_symlink(
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_SYMLINK), "").tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish symlink: {}", e))?;
     log::info!("Symlink published: {}", output.id().to_hex());

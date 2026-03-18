@@ -470,7 +470,10 @@ async fn publish_music_status(track: &MusicTrack) {
         }
     }
     let builder = EventBuilder::live_status(status, content);
-    match client.send_event_builder(builder).await {
+    match client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+        .await
+    {
         Ok(event_id) => {
             log::info!(
                 "Music status published: {} (event: {})",
@@ -494,7 +497,10 @@ async fn clear_music_status() {
     };
     let status = LiveStatus::new(StatusType::Music);
     let builder = EventBuilder::live_status(status, "");
-    match client.send_event_builder(builder).await {
+    match client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+        .await
+    {
         Ok(_) => {
             log::info!("Music status cleared");
         }
@@ -860,7 +866,10 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
         }
     }
     let builder = EventBuilder::new(Kind::from(KIND_MUSIC_VOTE), "").tags(tags);
-    match client.send_event_builder(builder).await {
+    match client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+        .await
+    {
         Ok(output) => {
             log::info!(
                 "Vote submitted for '{}' by {} (event: {})",

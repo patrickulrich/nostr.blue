@@ -18,7 +18,7 @@ pub async fn create_topic_post(topic: &str, content: &str) -> std::result::Resul
     let builder = EventBuilder::comment(content, target, None);
 
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish topic post: {}", e))?;
 
@@ -55,7 +55,7 @@ pub async fn reply_to_topic_post(
     let builder = EventBuilder::comment(content, comment_to, Some(root));
 
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish reply: {}", e))?;
 
@@ -92,7 +92,7 @@ pub async fn vote_on_post(
     let builder = EventBuilder::reaction(target, reaction);
 
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish vote: {}", e))?;
 
@@ -161,7 +161,7 @@ pub async fn update_subscriptions(topics: &[String]) -> std::result::Result<(), 
     let builder = EventBuilder::new(Kind::Custom(KIND_TOPIC_SUBSCRIPTION), "").tags(tags);
 
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to update subscriptions: {}", e))?;
 

@@ -42,7 +42,7 @@ pub async fn publish_repost_tracked(
     };
     let builder = nostr::EventBuilder::repost(&event, relay);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish repost: {}", e))?;
     let result = PublishResult::from_output(output);
@@ -85,7 +85,7 @@ pub async fn delete_repost(repost_event_id: String) -> std::result::Result<(), S
         vec![nostr::Kind::Repost.as_u16().to_string()],
     ));
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish deletion: {}", e))?;
     log::info!("Repost deleted successfully");

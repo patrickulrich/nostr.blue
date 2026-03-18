@@ -181,7 +181,10 @@ pub fn CommentComposer(
                     .tags(build_custom_emoji_tags(&content_for_publish));
 
                 // Sign the event first to get the full event
-                match client.sign_event_builder(builder).await {
+                match client
+                    .sign_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+                    .await
+                {
                     Ok(signed_event) => {
                         // Send the signed event
                         match client.send_event(&signed_event).await {

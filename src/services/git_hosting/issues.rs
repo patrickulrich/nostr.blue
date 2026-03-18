@@ -166,7 +166,7 @@ pub async fn publish_issue(
         builder = builder.tag(Tag::public_key(*pk));
     }
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish: {}", e))?;
     let event_id = *output.id();
@@ -188,7 +188,7 @@ pub async fn update_issue_status(
     let kind = status.to_kind();
     let builder = EventBuilder::new(kind, "").tag(Tag::event(issue_id));
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish status: {}", e))?;
     let event_id = *output.id();
@@ -216,7 +216,7 @@ pub async fn publish_issue_comment(
         builder = builder.tag(Tag::coordinate(coord.clone(), None));
     }
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish comment: {}", e))?;
     Ok(*output.id())

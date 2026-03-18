@@ -49,7 +49,7 @@ pub async fn publish_event_comment(coordinate: &str, content: &str) -> StdResult
             vec![author_hex],
         ));
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish comment: {}", e))?;
     Ok(output.id().to_string())
@@ -152,7 +152,7 @@ pub async fn publish_date_event(
     }
     let pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
     let _output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish event: {}", e))?;
     let naddr = encode_naddr(KIND_DATE_CALENDAR_EVENT, &pubkey, &d_tag);
@@ -250,7 +250,7 @@ pub async fn publish_time_event(
     }
     let pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
     let _output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish event: {}", e))?;
     let naddr = encode_naddr(KIND_TIME_CALENDAR_EVENT, &pubkey, &d_tag);
@@ -294,7 +294,7 @@ pub async fn publish_rsvp(
             vec![free_busy.as_str().to_string()],
         ));
     let output = client
-        .send_event_builder(event)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(event))
         .await
         .map_err(|e| format!("Failed to publish RSVP: {}", e))?;
     Ok(output.id().to_string())
@@ -402,7 +402,7 @@ pub async fn publish_availability_template(
         ));
     }
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish availability template: {}", e))?;
     Ok(output.id().to_string())
@@ -439,7 +439,7 @@ pub async fn publish_availability_block(
         ));
     }
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish availability block: {}", e))?;
     Ok(output.id().to_string())
@@ -471,7 +471,7 @@ pub async fn publish_calendar(
     }
     let pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
     let _output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish calendar: {}", e))?;
     let naddr = encode_naddr(KIND_CALENDAR, &pubkey, &d_tag);
