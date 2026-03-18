@@ -117,7 +117,7 @@ pub async fn publish_custom_nip_tracked(
         ));
     }
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish custom NIP: {}", e))?;
     let result = PublishResult::from_output(output);

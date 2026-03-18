@@ -152,7 +152,7 @@ pub async fn publish_repository_with_extras(
         builder = builder.tag(tag.clone());
     }
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish: {}", e))?;
     let event_id = *output.id();
@@ -204,7 +204,7 @@ pub async fn publish_fork(
             ],
         ));
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish fork: {}", e))?;
     let event_id = *output.id();
@@ -225,7 +225,7 @@ pub async fn delete_repository(coordinate: &Coordinate) -> Result<(), String> {
     let request = EventDeletionRequest::new().reason("Repository deleted");
     let builder = EventBuilder::delete(request);
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish deletion: {}", e))?;
     let coord_str = format!(

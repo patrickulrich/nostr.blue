@@ -474,14 +474,10 @@ async fn publish_station(form: StationFormData) -> std::result::Result<String, S
         }
         tags.push(Tag::custom(TagKind::custom("stream"), stream_values));
     }
-    tags.push(Tag::custom(
-        TagKind::custom("client"),
-        vec!["nostr.blue".to_string()],
-    ));
     let event_builder = EventBuilder::new(Kind::from(31237), "").tags(tags);
     let client = nostr_client::get_client().ok_or_else(|| "Failed to get client".to_string())?;
     let output = client
-        .send_event_builder(event_builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(event_builder))
         .await
         .map_err(|e| format!("Failed to publish event: {}", e))?;
     let event_id = output.id().to_string();

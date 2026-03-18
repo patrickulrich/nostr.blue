@@ -232,7 +232,10 @@ pub fn LiveStreamShareModal(
             let builder = EventBuilder::text_note(&text)
                 .tag(nostr_sdk::Tag::event(event_id))
                 .tags(build_custom_emoji_tags(&text));
-            match client.send_event_builder(builder).await {
+            match client
+                .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+                .await
+            {
                 Ok(output) => {
                     log::info!("Shared to Nostr: {:?}", output.val);
                     nostr_error.set(None);

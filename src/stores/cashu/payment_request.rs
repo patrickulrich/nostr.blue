@@ -351,10 +351,31 @@ pub async fn pay_payment_request(
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-        new_event_id = Some(match client.send_event_builder(builder.clone()).await {
-            Ok(event_output) => {
-                if event_output.success.is_empty() {
-                    log::warn!("No relays accepted token event, queuing for retry");
+        new_event_id = Some(
+            match client
+                .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+                    builder.clone(),
+                ))
+                .await
+            {
+                Ok(event_output) => {
+                    if event_output.success.is_empty() {
+                        log::warn!("No relays accepted token event, queuing for retry");
+                        let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+                        queue_event_for_retry(
+                            builder,
+                            PendingEventType::TokenEvent,
+                            Some(pending_id.clone()),
+                            Some(mint_url.clone()),
+                        )
+                        .await;
+                        pending_id
+                    } else {
+                        event_output.id().to_hex()
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to publish token event: {}", e);
                     let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
                     queue_event_for_retry(
                         builder,
@@ -364,23 +385,9 @@ pub async fn pay_payment_request(
                     )
                     .await;
                     pending_id
-                } else {
-                    event_output.id().to_hex()
                 }
-            }
-            Err(e) => {
-                log::warn!("Failed to publish token event: {}", e);
-                let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                queue_event_for_retry(
-                    builder,
-                    PendingEventType::TokenEvent,
-                    Some(pending_id.clone()),
-                    Some(mint_url.clone()),
-                )
-                .await;
-                pending_id
-            }
-        });
+            },
+        );
     } else if !event_ids_to_delete.is_empty() {
         use nostr::nips::nip09::EventDeletionRequest;
         let mut deletion_request = EventDeletionRequest::new();
@@ -390,7 +397,12 @@ pub async fn pay_payment_request(
             }
         }
         let builder = nostr_sdk::EventBuilder::delete(deletion_request);
-        match client.send_event_builder(builder.clone()).await {
+        match client
+            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+                builder.clone(),
+            ))
+            .await
+        {
             Ok(output) => {
                 if output.success.is_empty() {
                     log::warn!("No relays accepted deletion event, queuing for retry");
@@ -584,7 +596,12 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
         .await
         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-    let new_event_id = match client.send_event_builder(builder.clone()).await {
+    let new_event_id = match client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+            builder.clone(),
+        ))
+        .await
+    {
         Ok(event_output) => {
             if event_output.success.is_empty() {
                 log::warn!("No relays accepted token event, queuing for retry");

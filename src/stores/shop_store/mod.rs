@@ -442,7 +442,7 @@ pub async fn publish_product(data: ProductFormData) -> Result<String> {
     let content = data.description.clone();
     let event_builder = EventBuilder::new(Kind::Custom(KIND_PRODUCT), content).tags(tags);
     let output = client
-        .send_event_builder(event_builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(event_builder))
         .await
         .map_err(|e| format!("Failed to publish product: {}", e))?;
     log::info!(
@@ -512,7 +512,7 @@ pub async fn publish_review(
     }
     let event_builder = EventBuilder::new(Kind::Custom(KIND_REVIEW), content).tags(tags);
     let output = client
-        .send_event_builder(event_builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(event_builder))
         .await
         .map_err(|e| format!("Failed to publish review: {}", e))?;
     log::info!(
@@ -668,7 +668,7 @@ pub async fn publish_collection(
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_COLLECTION), &data.description).tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish collection: {}", e))?;
     log::info!("Published collection: {} (event: {})", d_tag, output.id());
@@ -695,7 +695,7 @@ pub async fn delete_collection(d_tag: &str) -> Result<()> {
     let deletion_request = EventDeletionRequest::new().id(event_id);
     let delete_builder = EventBuilder::delete(deletion_request);
     client
-        .send_event_builder(delete_builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(delete_builder))
         .await
         .map_err(|e| format!("Failed to delete collection: {}", e))?;
     MY_COLLECTIONS.write().retain(|c| c.d_tag != d_tag);

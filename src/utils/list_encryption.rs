@@ -112,7 +112,7 @@ pub async fn add_person_to_list(
     let encrypted_content = encrypt_private_tags(&private_tags).await?;
     let builder = EventBuilder::new(list_event.kind, encrypted_content).tags(public_tags);
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to update list: {}", e))?;
     Ok(())
@@ -159,7 +159,7 @@ pub async fn remove_person_from_list(
     let encrypted_content = encrypt_private_tags(&private_tags).await?;
     let builder = EventBuilder::new(list_event.kind, encrypted_content).tags(public_tags);
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to update list: {}", e))?;
     Ok(())
@@ -279,7 +279,7 @@ pub async fn create_people_list(
     };
     let builder = EventBuilder::new(Kind::from(NAMED_PEOPLE), content).tags(tags);
     let event = client
-        .sign_event_builder(builder)
+        .sign_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to sign list event: {}", e))?;
     client

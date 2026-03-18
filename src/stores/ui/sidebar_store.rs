@@ -557,7 +557,7 @@ pub async fn save_sidebar_preferences(
     let builder =
         EventBuilder::new(Kind::from(APP_DATA_KIND), content).tag(Tag::identifier(SIDEBAR_D_TAG));
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish sidebar preferences: {}", e))?;
     log::info!("Sidebar preferences saved to Nostr successfully");

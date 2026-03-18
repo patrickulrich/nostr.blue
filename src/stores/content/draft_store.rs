@@ -211,7 +211,7 @@ pub async fn set_private_relays(relays: Vec<String>) -> Result<String, String> {
         .map_err(|e| format!("Failed to encrypt: {}", e))?;
     let builder = EventBuilder::new(Kind::from(KIND_PRIVATE_RELAY_LIST), encrypted);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish Kind 10013: {}", e))?;
     *PRIVATE_RELAYS.write() = relays;
@@ -269,7 +269,7 @@ pub async fn save_draft(draft: &ArticleDraft) -> Result<String, String> {
     ];
     let builder = EventBuilder::new(Kind::from(KIND_DRAFT), encrypted).tags(tags);
     let event = client
-        .sign_event_builder(builder)
+        .sign_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to sign draft event: {}", e))?;
     let result =
@@ -400,7 +400,7 @@ pub async fn delete_draft(identifier: &str) -> Result<(), String> {
     ];
     let builder = EventBuilder::new(Kind::from(KIND_DRAFT), "").tags(tags);
     let event = client
-        .sign_event_builder(builder)
+        .sign_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to sign delete event: {}", e))?;
     nostr_client::send_presigned_event_to_relays(event, private_relays).await?;

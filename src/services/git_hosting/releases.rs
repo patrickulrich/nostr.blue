@@ -58,7 +58,7 @@ pub async fn publish_release(
         ));
     }
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish: {}", e))?;
     let event_id = *output.id();
@@ -80,7 +80,7 @@ pub async fn delete_release(release_event_id: EventId) -> Result<(), String> {
         .reason("Release deleted");
     let builder = EventBuilder::delete(request);
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to delete: {}", e))?;
     Ok(())
