@@ -487,7 +487,8 @@ pub fn ZapGoalsNew() -> Element {
             } else {
                 String::new()
             };
-            if *relays_prefilled.peek() || !relays_text.read().is_empty() {
+            if *relays_prefilled.peek() || !relays_text.read().is_empty() || relay_lines.is_empty()
+            {
                 return;
             }
             relays_text.set(relay_lines);
@@ -531,12 +532,18 @@ pub fn ZapGoalsNew() -> Element {
             None
         } else {
             match chrono::NaiveDateTime::parse_from_str(&closed_at_value, "%Y-%m-%dT%H:%M") {
-                Ok(value) => Local
-                    .from_local_datetime(&value)
-                    .earliest()
-                    .map(|local_dt| local_dt.with_timezone(&Utc).timestamp())
-                    .filter(|timestamp| *timestamp >= 0 && *timestamp > Utc::now().timestamp())
-                    .map(|timestamp| timestamp as u64),
+                Ok(value) => {
+                    let Some(local_dt) = Local.from_local_datetime(&value).earliest() else {
+                        error_message.set(Some("Use a valid close date/time.".to_string()));
+                        return;
+                    };
+                    let timestamp = local_dt.with_timezone(&Utc).timestamp();
+                    if timestamp <= Utc::now().timestamp() || timestamp < 0 {
+                        error_message.set(Some("Use a valid close date/time.".to_string()));
+                        return;
+                    }
+                    Some(timestamp as u64)
+                }
                 Err(_) => {
                     error_message.set(Some("Use a valid close date/time.".to_string()));
                     return;

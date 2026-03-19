@@ -122,6 +122,89 @@ fn parse_relays(event: &Event) -> Option<Vec<String>> {
     })
 }
 
+fn normalize_relays(relays: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    relays
+        .iter()
+        .map(|relay| relay.trim())
+        .filter(|relay| relay.starts_with("ws://") || relay.starts_with("wss://"))
+        .filter(|relay| seen.insert((*relay).to_string()))
+        .map(ToString::to_string)
+        .collect()
+}
+
+async fn fetch_zap_goal_events_paginated(
+    mut filter: Filter,
+    target_goal_count: usize,
+) -> Result<Vec<Event>, String> {
+    let timeout = Duration::from_secs(10);
+    let batch_size = target_goal_count.max(25);
+    let mut events = Vec::new();
+    let mut seen = HashSet::new();
+
+    loop {
+        let page = nostr_client::fetch_events_aggregated(filter.clone().limit(batch_size), timeout)
+            .await?;
+        if page.is_empty() {
+            break;
+        }
+
+        let oldest_created_at = page.iter().map(|event| event.created_at.as_secs()).min();
+        for event in page {
+            if seen.insert(event.id) {
+                events.push(event);
+            }
+        }
+
+        let parsed_count = events.iter().filter_map(parse_goal_event).count();
+        if parsed_count >= target_goal_count {
+            break;
+        }
+
+        let Some(oldest_created_at) = oldest_created_at else {
+            break;
+        };
+        if oldest_created_at == 0 {
+            break;
+        }
+        filter = filter.until(Timestamp::from(oldest_created_at.saturating_sub(1)));
+    }
+
+    Ok(events)
+}
+
+async fn fetch_zap_receipts_paginated(goal_event_id: EventId) -> Result<Vec<Event>, String> {
+    let timeout = Duration::from_secs(10);
+    let mut filter = Filter::new().kind(Kind::ZapReceipt).event(goal_event_id);
+    let mut receipts = Vec::new();
+    let mut seen = HashSet::new();
+
+    loop {
+        let page =
+            nostr_client::fetch_events_aggregated(filter.clone().limit(500), timeout).await?;
+        if page.is_empty() {
+            break;
+        }
+
+        let oldest_created_at = page.iter().map(|event| event.created_at.as_secs()).min();
+        for receipt in page {
+            if seen.insert(receipt.id) {
+                receipts.push(receipt);
+            }
+        }
+
+        let Some(oldest_created_at) = oldest_created_at else {
+            break;
+        };
+        if oldest_created_at == 0 {
+            break;
+        }
+        filter = filter.until(Timestamp::from(oldest_created_at.saturating_sub(1)));
+    }
+
+    Ok(receipts)
+}
+
 pub fn parse_goal_event(event: &Event) -> Option<ZapGoal> {
     if event.kind != Kind::Custom(KIND_ZAP_GOAL) {
         return None;
@@ -214,37 +297,36 @@ pub async fn fetch_goals_for_authors(
 
     let mut filter = Filter::new()
         .kind(Kind::Custom(KIND_ZAP_GOAL))
-        .authors(authors)
-        .limit(limit);
+        .authors(authors);
     if let Some(until) = until {
         filter = filter.until(Timestamp::from(until));
     }
 
-    let mut goals: Vec<ZapGoal> =
-        nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-            .await?
-            .into_iter()
-            .filter_map(|event| parse_goal_event(&event))
-            .collect();
+    let mut goals: Vec<ZapGoal> = fetch_zap_goal_events_paginated(filter, limit)
+        .await?
+        .into_iter()
+        .filter_map(|event| parse_goal_event(&event))
+        .collect();
     dedupe_goals(&mut goals);
     sort_goals(&mut goals);
+    goals.truncate(limit);
     Ok(goals)
 }
 
 pub async fn fetch_global_goals(limit: usize, until: Option<u64>) -> Result<Vec<ZapGoal>, String> {
-    let mut filter = Filter::new().kind(Kind::Custom(KIND_ZAP_GOAL)).limit(limit);
+    let mut filter = Filter::new().kind(Kind::Custom(KIND_ZAP_GOAL));
     if let Some(until) = until {
         filter = filter.until(Timestamp::from(until));
     }
 
-    let mut goals: Vec<ZapGoal> =
-        nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-            .await?
-            .into_iter()
-            .filter_map(|event| parse_goal_event(&event))
-            .collect();
+    let mut goals: Vec<ZapGoal> = fetch_zap_goal_events_paginated(filter, limit)
+        .await?
+        .into_iter()
+        .filter_map(|event| parse_goal_event(&event))
+        .collect();
     dedupe_goals(&mut goals);
     sort_goals(&mut goals);
+    goals.truncate(limit);
     Ok(goals)
 }
 
@@ -382,14 +464,7 @@ fn extract_zap_comment(event: &Event) -> Option<String> {
 pub async fn fetch_goal_progress(goal: &ZapGoal) -> Result<ZapGoalProgress, String> {
     let goal_event_id = EventId::parse(&goal.event_id)
         .map_err(|e| format!("Invalid goal event id {}: {e}", goal.event_id))?;
-    let receipts = nostr_client::fetch_events_aggregated(
-        Filter::new()
-            .kind(Kind::ZapReceipt)
-            .event(goal_event_id)
-            .limit(500),
-        Duration::from_secs(10),
-    )
-    .await?;
+    let receipts = fetch_zap_receipts_paginated(goal_event_id).await?;
 
     let mut total_sats = 0u64;
     let mut contributors: HashMap<String, ZapGoalContributor> = HashMap::new();
@@ -476,8 +551,9 @@ pub async fn publish_zap_goal_tracked(
     if amount_sats == 0 {
         return Err("Amount must be greater than zero".to_string());
     }
+    let relays = normalize_relays(&relays);
     if relays.is_empty() {
-        return Err("At least one relay is required".to_string());
+        return Err("At least one valid relay is required".to_string());
     }
 
     let mut builder = EventBuilder::new(Kind::Custom(KIND_ZAP_GOAL), content).tag(Tag::custom(
@@ -556,7 +632,7 @@ pub fn format_goal_date(timestamp: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_bolt11_amount;
+    use super::{normalize_relays, parse_bolt11_amount};
 
     #[test]
     fn parse_bolt11_amount_accepts_amounts_starting_with_one() {
@@ -568,5 +644,19 @@ mod tests {
     fn parse_bolt11_amount_rejects_zero_amount_invoices() {
         assert_eq!(parse_bolt11_amount("lnbc1"), None);
         assert_eq!(parse_bolt11_amount("lnbc1qpayload"), None);
+    }
+
+    #[test]
+    fn normalize_relays_trims_filters_and_dedupes() {
+        assert_eq!(
+            normalize_relays(&[
+                " wss://relay.one ".to_string(),
+                "".to_string(),
+                "https://relay.invalid".to_string(),
+                "ws://relay.two".to_string(),
+                "wss://relay.one".to_string(),
+            ]),
+            vec!["wss://relay.one".to_string(), "ws://relay.two".to_string(),]
+        );
     }
 }

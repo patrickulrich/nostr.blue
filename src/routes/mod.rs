@@ -714,13 +714,13 @@ fn handle_android_back(navigator: dioxus::router::Navigator, current_route: &Rou
     }
 
     if let Some(target) = fallback_route_for(current_route) {
-        navigator.replace(target);
-    }
-
-    #[cfg(feature = "mobile")]
-    {
-        if let Err(error) = crate::platform::mobile::finish_app() {
-            log::error!("Failed to finish Android activity: {}", error);
+        let _ = navigator.replace(target);
+    } else {
+        #[cfg(feature = "mobile")]
+        {
+            if let Err(error) = crate::platform::mobile::finish_app() {
+                log::error!("Failed to finish Android activity: {}", error);
+            }
         }
     }
 }
