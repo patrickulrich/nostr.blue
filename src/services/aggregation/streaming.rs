@@ -74,7 +74,7 @@ pub fn increment_cached_counts(
         }
         cached.cached_at = Instant::now();
         match kind {
-            Kind::TextNote => cached.counts.replies += 1,
+            kind if is_reply_kind(kind) => cached.counts.replies += 1,
             Kind::Reaction => {
                 let content = content.unwrap_or("+");
                 if content != "-" {
@@ -175,6 +175,7 @@ pub async fn stream_interaction_counts(
     let filter = Filter::new()
         .kinds(vec![
             Kind::TextNote,
+            Kind::Comment,
             Kind::Reaction,
             Kind::Repost,
             Kind::ZapReceipt,
@@ -313,4 +314,26 @@ pub async fn stream_interaction_counts(
         subscription_id,
         task: Some(task),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn increment_cached_counts_treats_comment_as_reply() {
+        let event_id = "event-id";
+        {
+            let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+                log::warn!("Counts cache mutex was poisoned, recovering");
+                poisoned.into_inner()
+            });
+            cache.insert(event_id.to_string(), InteractionCounts::default());
+        }
+
+        let updated = increment_cached_counts(event_id, Kind::Comment, None, false, None, None)
+            .expect("counts should be updated");
+
+        assert_eq!(updated.replies, 1);
+    }
 }

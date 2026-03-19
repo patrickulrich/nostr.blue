@@ -131,7 +131,14 @@ pub async fn get_counts_with_count_fallback(
     let (reactions, reposts, replies, zaps) = join!(
         try_count_from_relays(event_id, Kind::Reaction, timeout),
         try_count_from_relays(event_id, Kind::Repost, timeout),
-        try_count_from_relays(event_id, Kind::TextNote, timeout),
+        async {
+            let text_notes = try_count_from_relays(event_id, Kind::TextNote, timeout).await;
+            let comments = try_count_from_relays(event_id, Kind::Comment, timeout).await;
+            match (text_notes, comments) {
+                (Some(text_notes), Some(comments)) => Some(text_notes + comments),
+                _ => None,
+            }
+        },
         try_count_from_relays(event_id, Kind::ZapReceipt, timeout),
     );
     let mut needs_fallback = false;
@@ -222,6 +229,7 @@ pub async fn fetch_interaction_counts_batch(
     let filter = Filter::new()
         .kinds(vec![
             Kind::TextNote,
+            Kind::Comment,
             Kind::Reaction,
             Kind::Repost,
             Kind::ZapReceipt,
@@ -294,7 +302,7 @@ pub async fn fetch_interaction_counts_batch(
             .map(|pk| event.pubkey == pk)
             .unwrap_or(false);
         match event.kind {
-            Kind::TextNote => counts.replies += 1,
+            kind if is_reply_kind(kind) => counts.replies += 1,
             Kind::Reaction => {
                 let content = event.content.trim();
                 if content != "-" {
@@ -395,6 +403,7 @@ pub async fn sync_interaction_counts(
     let filter = Filter::new()
         .kinds(vec![
             Kind::TextNote,
+            Kind::Comment,
             Kind::Reaction,
             Kind::Repost,
             Kind::ZapReceipt,
@@ -456,7 +465,7 @@ pub async fn sync_interaction_counts(
                     .map(|pk| event.pubkey == pk)
                     .unwrap_or(false);
                 match event.kind {
-                    Kind::TextNote => counts.replies += 1,
+                    kind if is_reply_kind(kind) => counts.replies += 1,
                     Kind::Reaction => {
                         let content = event.content.trim();
                         if content != "-" {
@@ -662,6 +671,7 @@ pub async fn fetch_trending_interactions(
     let filter = Filter::new()
         .kinds(vec![
             Kind::TextNote,
+            Kind::Comment,
             Kind::Reaction,
             Kind::Repost,
             Kind::ZapReceipt,
@@ -682,7 +692,7 @@ pub async fn fetch_trending_interactions(
         let event_key = referenced_event_id.to_hex();
         let counts = counts_map.entry(event_key).or_default();
         match event.kind {
-            Kind::TextNote => counts.replies += 1,
+            kind if is_reply_kind(kind) => counts.replies += 1,
             Kind::Reaction => {
                 if event.content.trim() != "-" {
                     counts.likes += 1;
