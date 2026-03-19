@@ -46,6 +46,17 @@ EOF
         echo "ERROR: Unsupported Cargo.toml version format: $version" >&2
         exit 1
     fi
+
+    if ! [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: version_code_from_semver requires numeric major.minor.patch segments, got: $version" >&2
+        exit 1
+    fi
+
+    if [ "$minor" -ge 100 ] || [ "$patch" -ge 100 ]; then
+        echo "ERROR: version_code_from_semver requires minor and patch to be less than 100, got: $version" >&2
+        exit 1
+    fi
+
     echo $((major * 10000 + minor * 100 + patch))
 }
 
@@ -150,7 +161,7 @@ PY
 configure_outputs() {
     case "$ANDROID_PACKAGE_FORMAT" in
         apk)
-            case "$ANDROID_BUILD_MODE" in
+            case "$ANDROID_GRADLE_VARIANT" in
                 debug)
                     FINAL_GRADLE_TASK="assembleDebug"
                     ARTIFACT_SRC_REL="app/build/outputs/apk/debug/app-debug.apk"
@@ -164,14 +175,14 @@ configure_outputs() {
                     ARTIFACT_LABEL="APK"
                     ;;
                 *)
-                    echo "ERROR: Unsupported ANDROID_BUILD_MODE: $ANDROID_BUILD_MODE (expected debug or release)" >&2
+                    echo "ERROR: Unsupported ANDROID_GRADLE_VARIANT: $ANDROID_GRADLE_VARIANT (expected debug or release)" >&2
                     exit 1
                     ;;
             esac
             ;;
         aab)
-            if [ "$ANDROID_BUILD_MODE" != "release" ]; then
-                echo "ERROR: ANDROID_BUILD_MODE must be release for Android App Bundles" >&2
+            if [ "$ANDROID_GRADLE_VARIANT" != "release" ]; then
+                echo "ERROR: ANDROID_GRADLE_VARIANT must be release for Android App Bundles" >&2
                 exit 1
             fi
             FINAL_GRADLE_TASK="bundleRelease"
@@ -195,7 +206,7 @@ build_dx_android() {
         --features mobile
     )
 
-    if [ "$ANDROID_BUILD_MODE" = "release" ]; then
+    if [ "$ANDROID_RUST_PROFILE" = "release" ] || [ "${DX_RELEASE:-}" = "1" ] || [ "${DX_RELEASE:-}" = "true" ]; then
         dx_args+=(--release)
     fi
 
@@ -244,8 +255,10 @@ export ANDROID_HOME ANDROID_NDK_HOME ANDROID_SDK_ROOT
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ANDROID_BUILD_MODE="${ANDROID_BUILD_MODE:-debug}"
+ANDROID_GRADLE_VARIANT="${ANDROID_GRADLE_VARIANT:-$ANDROID_BUILD_MODE}"
 ANDROID_PACKAGE_FORMAT="${ANDROID_PACKAGE_FORMAT:-apk}"
-DX_BUILD_PROFILE="$ANDROID_BUILD_MODE"
+ANDROID_RUST_PROFILE="${ANDROID_RUST_PROFILE:-debug}"
+DX_BUILD_PROFILE="$ANDROID_RUST_PROFILE"
 DX_ANDROID="$PROJECT_ROOT/target/dx/nostrblue/$DX_BUILD_PROFILE/android/app"
 ANDROID_RES_SRC="$PROJECT_ROOT/android/res"
 ANDROID_KOTLIN_SRC="$PROJECT_ROOT/android/kotlin"
@@ -281,11 +294,12 @@ echo "Project: $PROJECT_ROOT"
 echo "Package format: $ANDROID_PACKAGE_FORMAT"
 echo "NDK: $ANDROID_NDK_HOME"
 echo "Version: $CARGO_VERSION ($ANDROID_VERSION_CODE)"
-echo "Build mode: $ANDROID_BUILD_MODE"
+echo "Gradle variant: $ANDROID_GRADLE_VARIANT"
+echo "Rust profile: $ANDROID_RUST_PROFILE"
 echo "Gradle home: $GRADLE_USER_HOME"
 echo "Android resources: $ANDROID_RES_SRC"
 
-if [ "$ANDROID_BUILD_MODE" = "release" ]; then
+if [ "$ANDROID_GRADLE_VARIANT" = "release" ]; then
     configure_release_signing
 fi
 

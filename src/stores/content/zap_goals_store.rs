@@ -155,6 +155,7 @@ async fn fetch_zap_goal_events_paginated(
     let batch_size = target_goal_count.max(25);
     let mut events = Vec::new();
     let mut seen = HashSet::new();
+    let mut previous_oldest_created_at = None;
 
     loop {
         let page = nostr_client::fetch_events_aggregated(filter.clone().limit(batch_size), timeout)
@@ -164,6 +165,7 @@ async fn fetch_zap_goal_events_paginated(
         }
 
         let oldest_created_at = page.iter().map(|event| event.created_at.as_secs()).min();
+        let seen_before = seen.len();
         for event in page {
             if seen.insert(event.id) {
                 events.push(event);
@@ -178,9 +180,13 @@ async fn fetch_zap_goal_events_paginated(
         let Some(oldest_created_at) = oldest_created_at else {
             break;
         };
-        if oldest_created_at == 0 {
+        if oldest_created_at == 0
+            || previous_oldest_created_at == Some(oldest_created_at)
+            || seen.len() == seen_before
+        {
             break;
         }
+        previous_oldest_created_at = Some(oldest_created_at);
         filter = filter.until(Timestamp::from(oldest_created_at));
     }
 
@@ -192,6 +198,7 @@ async fn fetch_zap_receipts_paginated(goal_event_id: EventId) -> Result<Vec<Even
     let mut filter = Filter::new().kind(Kind::ZapReceipt).event(goal_event_id);
     let mut receipts = Vec::new();
     let mut seen = HashSet::new();
+    let mut previous_oldest_created_at = None;
 
     loop {
         let page =
@@ -201,6 +208,7 @@ async fn fetch_zap_receipts_paginated(goal_event_id: EventId) -> Result<Vec<Even
         }
 
         let oldest_created_at = page.iter().map(|event| event.created_at.as_secs()).min();
+        let seen_before = seen.len();
         for receipt in page {
             if seen.insert(receipt.id) {
                 receipts.push(receipt);
@@ -210,9 +218,13 @@ async fn fetch_zap_receipts_paginated(goal_event_id: EventId) -> Result<Vec<Even
         let Some(oldest_created_at) = oldest_created_at else {
             break;
         };
-        if oldest_created_at == 0 {
+        if oldest_created_at == 0
+            || previous_oldest_created_at == Some(oldest_created_at)
+            || seen.len() == seen_before
+        {
             break;
         }
+        previous_oldest_created_at = Some(oldest_created_at);
         filter = filter.until(Timestamp::from(oldest_created_at));
     }
 

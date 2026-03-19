@@ -498,20 +498,27 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
         });
     };
     let copy_invoice = move |_| {
-        if let Some(_inv) = invoice.read().as_ref() {
-            #[cfg(feature = "web")]
-            {
-                use web_sys::window;
-                if let Some(window) = window() {
-                    let navigator = window.navigator();
-                    let clipboard = navigator.clipboard();
-                    let inv_clone = _inv.clone();
-                    spawn(async move {
-                        let promise = clipboard.write_text(&inv_clone);
-                        let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
-                    });
+        if let Some(inv) = invoice.read().as_ref() {
+            let inv_clone = inv.clone();
+            let toast_api = toast;
+            spawn(async move {
+                match crate::platform::clipboard::copy_to_clipboard(&inv_clone).await {
+                    Ok(()) => {
+                        toast_api.success(
+                            "Invoice copied".to_string(),
+                            ToastOptions::new().duration(Duration::from_secs(2)),
+                        );
+                    }
+                    Err(error) => {
+                        toast_api.error(
+                            "Copy failed".to_string(),
+                            ToastOptions::new()
+                                .description(error)
+                                .duration(Duration::from_secs(3)),
+                        );
+                    }
                 }
-            }
+            });
         }
     };
     let open_in_wallet = move |_| {

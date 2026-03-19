@@ -11,6 +11,12 @@ use nostr_sdk::{Event, EventId, Filter, Kind, TagStandard, Timestamp};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
+#[derive(Clone, Eq, Hash, PartialEq)]
+struct Nip45CacheKey {
+    relay_url: String,
+    kind: u16,
+}
+
 /// NIP-45 support status for a relay
 #[derive(Clone)]
 struct Nip45SupportStatus {
@@ -44,10 +50,10 @@ impl Nip45SupportStatus {
 /// - `Nip45SupportStatus { supported: true }`: Relay supports COUNT (permanent)
 /// - `Nip45SupportStatus { supported: false }`: Relay failed COUNT (TTL: 10 minutes)
 /// - Not present: Unknown, needs testing
-static NIP45_SUPPORT: OnceLock<Mutex<HashMap<String, Nip45SupportStatus>>> = OnceLock::new();
+static NIP45_SUPPORT: OnceLock<Mutex<HashMap<Nip45CacheKey, Nip45SupportStatus>>> = OnceLock::new();
 
 /// Get or initialize the NIP-45 support cache
-fn get_nip45_cache() -> &'static Mutex<HashMap<String, Nip45SupportStatus>> {
+fn get_nip45_cache() -> &'static Mutex<HashMap<Nip45CacheKey, Nip45SupportStatus>> {
     NIP45_SUPPORT.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -72,12 +78,16 @@ async fn try_count_from_relays(event_id: &EventId, kind: Kind, timeout: Duration
     let relays = client.relays().await;
     for (url, relay) in relays.iter() {
         let url_str = url.to_string();
+        let cache_key = Nip45CacheKey {
+            relay_url: url_str.clone(),
+            kind: kind.as_u16(),
+        };
         let should_try = {
             let cache = get_nip45_cache().lock().unwrap_or_else(|poisoned| {
                 log::warn!("NIP-45 cache mutex was poisoned, recovering");
                 poisoned.into_inner()
             });
-            match cache.get(&url_str) {
+            match cache.get(&cache_key) {
                 Some(status) if status.is_valid() => status.supported,
                 Some(_) => true,
                 None => true,
@@ -94,7 +104,7 @@ async fn try_count_from_relays(event_id: &EventId, kind: Kind, timeout: Duration
                         log::warn!("NIP-45 cache mutex was poisoned, recovering");
                         poisoned.into_inner()
                     });
-                    cache.insert(url_str, Nip45SupportStatus::new(true));
+                    cache.insert(cache_key.clone(), Nip45SupportStatus::new(true));
                 }
                 log::debug!("COUNT from {}: {} events", url, count);
                 return Some(count);
@@ -105,7 +115,7 @@ async fn try_count_from_relays(event_id: &EventId, kind: Kind, timeout: Duration
                         log::warn!("NIP-45 cache mutex was poisoned, recovering");
                         poisoned.into_inner()
                     });
-                    cache.insert(url_str, Nip45SupportStatus::new(false));
+                    cache.insert(cache_key.clone(), Nip45SupportStatus::new(false));
                 }
                 log::debug!("COUNT failed on {}: {}", url, e);
             }
@@ -132,8 +142,10 @@ pub async fn get_counts_with_count_fallback(
         try_count_from_relays(event_id, Kind::Reaction, timeout),
         try_count_from_relays(event_id, Kind::Repost, timeout),
         async {
-            let text_notes = try_count_from_relays(event_id, Kind::TextNote, timeout).await;
-            let comments = try_count_from_relays(event_id, Kind::Comment, timeout).await;
+            let (text_notes, comments) = join!(
+                try_count_from_relays(event_id, Kind::TextNote, timeout),
+                try_count_from_relays(event_id, Kind::Comment, timeout)
+            );
             match (text_notes, comments) {
                 (Some(text_notes), Some(comments)) => Some(text_notes + comments),
                 _ => None,

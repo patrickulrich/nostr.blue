@@ -12,7 +12,7 @@ use crate::components::{
     PodcastChapters, PodcastPersons, PodcastSoundbites, PodcastTranscript, V4VBoostButton, V4VInfo,
 };
 use crate::routes::Route;
-use crate::routes::podcast::podcast_rss_detail::{
+use crate::routes::podcast::podcast_shared_states::{
     PodcastApiAuthRequiredState, PodcastApiInitializingState,
 };
 use crate::services::podcast_rss::{self, format_duration};
@@ -106,7 +106,7 @@ pub fn PodcastRssEpisodeDetail(props: PodcastRssEpisodeDetailProps) -> Element {
             if !client_initialized {
                 return RssEpisodeDetailState::Initializing;
             }
-            if !has_signer {
+            if podcast_id.parse::<u64>().is_ok() && !has_signer {
                 return RssEpisodeDetailState::AuthRequired;
             }
             match fetch_rss_episode(&podcast_id, &episode_id).await {

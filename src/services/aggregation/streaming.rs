@@ -322,18 +322,31 @@ mod tests {
 
     #[test]
     fn increment_cached_counts_treats_comment_as_reply() {
-        let event_id = "event-id";
+        let event_id = format!(
+            "event-id-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        );
         {
             let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
                 log::warn!("Counts cache mutex was poisoned, recovering");
                 poisoned.into_inner()
             });
-            cache.insert(event_id.to_string(), InteractionCounts::default());
+            cache.invalidate(&event_id);
+            cache.insert(event_id.clone(), InteractionCounts::default());
         }
 
-        let updated = increment_cached_counts(event_id, Kind::Comment, None, false, None, None)
+        let updated = increment_cached_counts(&event_id, Kind::Comment, None, false, None, None)
             .expect("counts should be updated");
 
         assert_eq!(updated.replies, 1);
+
+        let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+            log::warn!("Counts cache mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
+        cache.invalidate(&event_id);
     }
 }

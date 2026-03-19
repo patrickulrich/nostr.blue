@@ -2,6 +2,7 @@ pub mod home;
 pub mod podcast_episode_detail;
 pub mod podcast_nostr_detail;
 pub mod podcast_rss_detail;
+pub(crate) mod podcast_shared_states;
 pub mod podcast_trending;
 
 pub use home::PodcastHome;

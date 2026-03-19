@@ -218,10 +218,14 @@ pub async fn update_publish_client_tag(enabled: bool) {
         w.publish_client_tag = enabled;
         w.clone()
     };
+    if !auth_store::is_authenticated() {
+        cache_settings(&settings);
+        return;
+    }
     if let Err(e) = save_settings(&settings).await {
         log::warn!("Failed to persist client tag setting to Nostr: {}", e);
+        cache_settings(&settings);
     }
-    cache_settings(&settings);
 }
 /// Get current mempool endpoint (returns default if empty)
 pub fn get_mempool_endpoint() -> String {

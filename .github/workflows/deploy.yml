@@ -333,8 +333,10 @@ jobs:
           grep -q "base/manifest/AndroidManifest.xml" aab-contents.txt
 
       - name: Validate AAB with bundletool when available
+        env:
+          GRADLE_USER_HOME: ${{ github.workspace }}/.gradle-home
         run: |
-          BUNDLETOOL="$(find "$HOME/.gradle" "$HOME/.cache" -type f -name 'bundletool*.jar' 2>/dev/null | head -n1)"
+          BUNDLETOOL="$(find "$GRADLE_USER_HOME" "$HOME/.gradle" "$HOME/.cache" -type f -name 'bundletool*.jar' 2>/dev/null | head -n1)"
           if [ -n "$BUNDLETOOL" ]; then
             java -jar "$BUNDLETOOL" validate --bundle=nostrblue-release.aab
           else

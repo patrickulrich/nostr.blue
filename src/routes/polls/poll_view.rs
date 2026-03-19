@@ -1,6 +1,7 @@
 use crate::components::{ClientInitializing, CommentComposer, PollCard, ThreadedComment};
 use crate::stores::nostr_client;
 use crate::utils::build_thread_tree;
+use crate::utils::thread_tree::invalidate_thread_tree_cache;
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
 use nostr_sdk::{Event as NostrEvent, EventId, Filter, Kind, RelayPoolNotification, SubscriptionId, Timestamp};
@@ -57,23 +58,30 @@ pub fn PollView(noteid: String) -> Element {
         let event_id = event.id;
         spawn(async move {
             loading_comments.set(true);
+            let subscription_handoff = Timestamp::now();
+            let mut live_since = subscription_handoff;
             let filter = Filter::new().kind(Kind::Comment).event(event_id).limit(500);
             match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
                 Ok(mut comment_events) => {
+                    live_since = comment_events
+                        .iter()
+                        .map(|event| event.created_at)
+                        .max()
+                        .unwrap_or(subscription_handoff);
                     comment_events.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                    invalidate_thread_tree_cache(&event_id);
                     comments.set(comment_events);
                 }
                 Err(e) => {
                     log::error!("Failed to fetch poll comments: {}", e);
                 }
             }
-            loading_comments.set(false);
 
             if let Some(client) = nostr_client::get_client() {
                 let filter = Filter::new()
                     .kind(Kind::Comment)
                     .event(event_id)
-                    .since(Timestamp::now())
+                    .since(live_since)
                     .limit(0);
 
                 match client.subscribe(filter, None).await {
@@ -94,6 +102,7 @@ pub fn PollView(noteid: String) -> Element {
                                         let already_exists =
                                             comments.read().iter().any(|e| e.id == event.id);
                                         if !already_exists {
+                                            invalidate_thread_tree_cache(&event_id);
                                             comments.write().push((*event).clone());
                                         }
                                     }
@@ -106,6 +115,7 @@ pub fn PollView(noteid: String) -> Element {
                     }
                 }
             }
+            loading_comments.set(false);
         });
     });
 
@@ -209,8 +219,8 @@ pub fn PollView(noteid: String) -> Element {
                                                 on_reply: move |reply_event: NostrEvent| {
                                                     let already_exists = comments.read().iter().any(|e| e.id == reply_event.id);
                                                     if !already_exists {
+                                                        invalidate_thread_tree_cache(&poll_event_id);
                                                         comments.write().push(reply_event);
-                                                        crate::utils::thread_tree::invalidate_thread_tree_cache(&poll_event_id);
                                                     }
                                                 },
                                             }
@@ -247,8 +257,8 @@ pub fn PollView(noteid: String) -> Element {
                                             }
                                         })
                                         .unwrap_or(event.id);
+                                    invalidate_thread_tree_cache(&root_event_id);
                                     comments.write().push(comment_event);
-                                    crate::utils::thread_tree::invalidate_thread_tree_cache(&root_event_id);
                                 }
                             },
                         }
