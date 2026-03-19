@@ -167,7 +167,7 @@ async fn fetch_zap_goal_events_paginated(
         if oldest_created_at == 0 {
             break;
         }
-        filter = filter.until(Timestamp::from(oldest_created_at.saturating_sub(1)));
+        filter = filter.until(Timestamp::from(oldest_created_at));
     }
 
     Ok(events)
@@ -199,7 +199,7 @@ async fn fetch_zap_receipts_paginated(goal_event_id: EventId) -> Result<Vec<Even
         if oldest_created_at == 0 {
             break;
         }
-        filter = filter.until(Timestamp::from(oldest_created_at.saturating_sub(1)));
+        filter = filter.until(Timestamp::from(oldest_created_at));
     }
 
     Ok(receipts)
@@ -532,8 +532,18 @@ pub async fn fetch_goal_progress(goal: &ZapGoal) -> Result<ZapGoalProgress, Stri
 pub async fn fetch_goal_progress_batch(goals: &[ZapGoal]) -> Result<Vec<ZapGoalProgress>, String> {
     let results = futures::future::join_all(goals.iter().map(fetch_goal_progress)).await;
     let mut progress = Vec::new();
-    for result in results {
-        progress.push(result?);
+    for (goal, result) in goals.iter().zip(results) {
+        match result {
+            Ok(goal_progress) => progress.push(goal_progress),
+            Err(error) => {
+                log::warn!(
+                    "Skipping zap goal progress for {} ({}): {}",
+                    goal.event_id,
+                    goal.author_pubkey,
+                    error
+                );
+            }
+        }
     }
     Ok(progress)
 }

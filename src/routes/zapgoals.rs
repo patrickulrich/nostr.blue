@@ -152,6 +152,7 @@ pub fn ZapGoalsHome() -> Element {
         let generation = request_generation.peek().wrapping_add(1);
         request_generation.set(generation);
         loading.set(true);
+        pagination_loading.set(false);
         goals.set(Vec::new());
         error_message.set(None);
         empty_message.set(None);
@@ -171,7 +172,7 @@ pub fn ZapGoalsHome() -> Element {
                     }
                     empty_message.set(message);
                     let has_more_results = feed_goals.len() >= PAGE_SIZE;
-                    oldest_timestamp.set(feed_goals.last().map(|goal| goal.created_at));
+                    oldest_timestamp.set(feed_goals.iter().map(|goal| goal.created_at).min());
 
                     let mut combined = project_goals;
                     combined.extend(feed_goals);
@@ -222,7 +223,7 @@ pub fn ZapGoalsHome() -> Element {
                     if *request_generation.peek() != generation {
                         return;
                     }
-                    oldest_timestamp.set(next_goals.last().map(|goal| goal.created_at));
+                    oldest_timestamp.set(next_goals.iter().map(|goal| goal.created_at).min());
                     has_more.set(next_goals.len() >= PAGE_SIZE);
                     match enrich_progress(next_goals).await {
                         Ok(progress) => {
@@ -471,6 +472,7 @@ pub fn ZapGoalsNew() -> Element {
     let mut error_message = use_signal(|| None::<String>);
 
     use_effect(move || {
+        let _ = *crate::stores::nostr_client::CLIENT_INITIALIZED.read();
         if *relays_prefilled.read() {
             return;
         }
