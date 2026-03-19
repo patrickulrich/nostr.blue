@@ -212,7 +212,7 @@ jobs:
           path: release-assets/nostrblue-linux-x86_64.AppImage
 
   android-build:
-    name: Build Android APK
+    name: Build Android Artifacts
     runs-on: ubuntu-latest
     needs: metadata
     if: github.ref == 'refs/heads/main'
@@ -312,16 +312,48 @@ jobs:
           grep -q "versionName='$VERSION'" apk-metadata.txt
           grep -q "application-label:'nostr.blue'" apk-metadata.txt
 
-      - name: Stage release asset
+      - name: Build Android release AAB
+        env:
+          GRADLE_USER_HOME: ${{ github.workspace }}/.gradle-home
+          ANDROID_BUILD_MODE: release
+          ANDROID_KEYSTORE_FILE: .ci-secrets/android-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.0.12077973"
+          ./scripts/build-android-aab.sh
+
+      - name: Verify AAB artifact
+        run: |
+          AAB=nostrblue-release.aab
+          test -f "$AAB"
+          unzip -l "$AAB" > aab-contents.txt
+          grep -q "BundleConfig.pb" aab-contents.txt
+          grep -q "base/manifest/AndroidManifest.xml" aab-contents.txt
+
+      - name: Validate AAB with bundletool when available
+        run: |
+          BUNDLETOOL="$(find "$HOME/.gradle" "$HOME/.cache" -type f -name 'bundletool*.jar' 2>/dev/null | head -n1)"
+          if [ -n "$BUNDLETOOL" ]; then
+            java -jar "$BUNDLETOOL" validate --bundle=nostrblue-release.aab
+          else
+            echo "bundletool not found in cache; skipping explicit validation"
+          fi
+
+      - name: Stage release assets
         run: |
           mkdir -p release-assets
           cp nostrblue-release.apk release-assets/nostrblue-android-arm64-release.apk
+          cp nostrblue-release.aab release-assets/nostrblue-android-release.aab
 
       - name: Upload Android artifact
         uses: actions/upload-artifact@v4
         with:
           name: android-release
-          path: release-assets/nostrblue-android-arm64-release.apk
+          path: |
+            release-assets/nostrblue-android-arm64-release.apk
+            release-assets/nostrblue-android-release.aab
 
   publish-release:
     name: Publish GitHub Release
@@ -346,6 +378,7 @@ jobs:
           mkdir -p release-upload
           cp release-assets/linux-release/nostrblue-linux-x86_64.AppImage release-upload/
           cp release-assets/android-release/nostrblue-android-arm64-release.apk release-upload/
+          cp release-assets/android-release/nostrblue-android-release.aab release-upload/
 
       - name: Validate release tag
         env:
