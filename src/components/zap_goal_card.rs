@@ -17,7 +17,9 @@ pub fn ZapGoalCard(props: ZapGoalCardProps) -> Element {
     let display_name = profile
         .as_ref()
         .map(|profile| profile.get_display_name())
-        .unwrap_or_else(|| crate::utils::format::truncate_pubkey(&props.progress.goal.author_pubkey));
+        .unwrap_or_else(|| {
+            crate::utils::format::truncate_pubkey(&props.progress.goal.author_pubkey)
+        });
     let avatar_url = profile
         .as_ref()
         .map(|profile| profile.get_avatar_url())

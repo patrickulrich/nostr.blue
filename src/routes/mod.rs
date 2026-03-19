@@ -577,12 +577,12 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::Privacy {}
         | Route::Cookies {}
         | Route::About {}
-        | Route::AboutDonate {}
-        | Route::ZapGoalsHome {}
-        | Route::ZapGoalsNew {}
         | Route::Nip19Handler { .. } => Some(Route::Home {
             list: String::new(),
         }),
+        Route::AboutDonate {} => Some(Route::About {}),
+        Route::ZapGoalsHome {} => Some(Route::About {}),
+        Route::ZapGoalsNew {} => Some(Route::ZapGoalsHome {}),
         Route::ArticleDetail { .. } | Route::ArticleNew {} => Some(Route::Articles {}),
         Route::VideoDetail { .. } | Route::VideoNewLandscape {} | Route::VideoNewPortrait {} => {
             Some(Route::Videos {})
@@ -1512,6 +1512,18 @@ mod tests {
                 naddr: "product".to_string(),
             }),
             Some(Route::ShopHome {})
+        );
+        assert_eq!(
+            fallback_route_for(&Route::AboutDonate {}),
+            Some(Route::About {})
+        );
+        assert_eq!(
+            fallback_route_for(&Route::ZapGoalsHome {}),
+            Some(Route::About {})
+        );
+        assert_eq!(
+            fallback_route_for(&Route::ZapGoalsNew {}),
+            Some(Route::ZapGoalsHome {})
         );
     }
 }

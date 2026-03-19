@@ -31,7 +31,10 @@ fn sort_progress(items: &mut [ZapGoalProgress]) {
     });
 }
 
-fn merge_progress(existing: &[ZapGoalProgress], incoming: Vec<ZapGoalProgress>) -> Vec<ZapGoalProgress> {
+fn merge_progress(
+    existing: &[ZapGoalProgress],
+    incoming: Vec<ZapGoalProgress>,
+) -> Vec<ZapGoalProgress> {
     let mut by_id = std::collections::HashMap::new();
     for item in existing.iter().cloned() {
         by_id.insert(item.goal.event_id.clone(), item);
@@ -97,13 +100,20 @@ async fn enrich_progress(goals: Vec<ZapGoal>) -> Result<Vec<ZapGoalProgress>, St
         return Ok(Vec::new());
     }
 
-    let author_pubkeys: Vec<String> = goals.iter().map(|goal| goal.author_pubkey.clone()).collect();
+    let author_pubkeys: Vec<String> = goals
+        .iter()
+        .map(|goal| goal.author_pubkey.clone())
+        .collect();
     profiles::prefetch_profiles(author_pubkeys).await;
 
     let progress = fetch_goal_progress_batch(&goals).await?;
     let contributor_pubkeys: Vec<String> = progress
         .iter()
-        .flat_map(|item| item.recent_contributors.iter().map(|contributor| contributor.pubkey.clone()))
+        .flat_map(|item| {
+            item.recent_contributors
+                .iter()
+                .map(|contributor| contributor.pubkey.clone())
+        })
         .collect();
     profiles::prefetch_profiles(contributor_pubkeys).await;
 
@@ -148,7 +158,9 @@ pub fn ZapGoalsHome() -> Element {
         oldest_timestamp.set(None);
         has_more.set(true);
         spawn(async move {
-            let project_goals = fetch_project_goals(PROJECT_PIN_LIMIT).await.unwrap_or_default();
+            let project_goals = fetch_project_goals(PROJECT_PIN_LIMIT)
+                .await
+                .unwrap_or_default();
             if *request_generation.peek() != generation {
                 return;
             }
@@ -242,7 +254,8 @@ pub fn ZapGoalsHome() -> Element {
     };
     let sentinel_id = use_infinite_scroll(load_more, has_more, pagination_loading);
 
-    let filtered_goals = zap_goals_store::filter_goals_by_query(&goals.read(), &search_query.read());
+    let filtered_goals =
+        zap_goals_store::filter_goals_by_query(&goals.read(), &search_query.read());
 
     let open_goal_modal = {
         move |goal: ZapGoalProgress| {
@@ -536,12 +549,24 @@ pub fn ZapGoalsNew() -> Element {
         spawn(async move {
             match publish_zap_goal_tracked(
                 amount_value,
-                if summary_value.is_empty() { None } else { Some(summary_value) },
+                if summary_value.is_empty() {
+                    None
+                } else {
+                    Some(summary_value)
+                },
                 content_value,
-                if image_value.is_empty() { None } else { Some(image_value) },
+                if image_value.is_empty() {
+                    None
+                } else {
+                    Some(image_value)
+                },
                 close_timestamp,
                 relays,
-                if url_value.is_empty() { None } else { Some(url_value) },
+                if url_value.is_empty() {
+                    None
+                } else {
+                    Some(url_value)
+                },
             )
             .await
             {

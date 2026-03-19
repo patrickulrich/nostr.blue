@@ -8,7 +8,8 @@ use std::time::Duration;
 
 pub const KIND_ZAP_GOAL: u16 = 9041;
 pub const PROJECT_DONATION_LUD16: &str = "nostrblue@sats.love";
-pub const PROJECT_DONATION_NPUB: &str = "npub10vz2md22xl8arjprqysn8f7j2guewzunaktnn94c55hlwcwyyu4qm6ac8k";
+pub const PROJECT_DONATION_NPUB: &str =
+    "npub10vz2md22xl8arjprqysn8f7j2guewzunaktnn94c55hlwcwyyu4qm6ac8k";
 pub const PROJECT_GOAL_AUTHOR_NPUB: &str = PROJECT_DONATION_NPUB;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -175,7 +176,8 @@ pub fn filter_goals_by_query(goals: &[ZapGoalProgress], query: &str) -> Vec<ZapG
         return goals.to_vec();
     }
 
-    goals.iter()
+    goals
+        .iter()
         .filter(|goal| {
             let profile = profiles::get_cached_profile(&goal.goal.author_pubkey);
             let author_name = profile
@@ -218,29 +220,29 @@ pub async fn fetch_goals_for_authors(
         filter = filter.until(Timestamp::from(until));
     }
 
-    let mut goals: Vec<ZapGoal> = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await?
-        .into_iter()
-        .filter_map(|event| parse_goal_event(&event))
-        .collect();
+    let mut goals: Vec<ZapGoal> =
+        nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?
+            .into_iter()
+            .filter_map(|event| parse_goal_event(&event))
+            .collect();
     dedupe_goals(&mut goals);
     sort_goals(&mut goals);
     Ok(goals)
 }
 
 pub async fn fetch_global_goals(limit: usize, until: Option<u64>) -> Result<Vec<ZapGoal>, String> {
-    let mut filter = Filter::new()
-        .kind(Kind::Custom(KIND_ZAP_GOAL))
-        .limit(limit);
+    let mut filter = Filter::new().kind(Kind::Custom(KIND_ZAP_GOAL)).limit(limit);
     if let Some(until) = until {
         filter = filter.until(Timestamp::from(until));
     }
 
-    let mut goals: Vec<ZapGoal> = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await?
-        .into_iter()
-        .filter_map(|event| parse_goal_event(&event))
-        .collect();
+    let mut goals: Vec<ZapGoal> =
+        nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?
+            .into_iter()
+            .filter_map(|event| parse_goal_event(&event))
+            .collect();
     dedupe_goals(&mut goals);
     sort_goals(&mut goals);
     Ok(goals)
@@ -292,7 +294,11 @@ fn extract_zap_amount_sats(event: &Event) -> Option<u64> {
     }
 
     json.get("amount")
-        .and_then(|value| value.as_u64().or_else(|| value.as_str()?.parse::<u64>().ok()))
+        .and_then(|value| {
+            value
+                .as_u64()
+                .or_else(|| value.as_str()?.parse::<u64>().ok())
+        })
         .map(|msats| msats / 1000)
 }
 
@@ -302,7 +308,13 @@ fn parse_bolt11_amount(bolt11: &str) -> Option<u64> {
         return None;
     }
     let rest = &lower[4..];
-    if rest.starts_with('1') {
+    if rest.starts_with('1')
+        && (rest.len() == 1
+            || !rest
+                .chars()
+                .nth(1)
+                .is_some_and(|ch| ch.is_ascii_digit() || ['m', 'u', 'n', 'p'].contains(&ch)))
+    {
         return None;
     }
     let mut amount_end = 0;
@@ -334,19 +346,23 @@ fn parse_bolt11_amount(bolt11: &str) -> Option<u64> {
 }
 
 fn extract_zap_sender(event: &Event) -> Option<String> {
-    event.tags.iter().find_map(|tag| {
-        let slice = tag.as_slice();
-        if slice.len() >= 2 && slice.first()?.as_str() == "P" {
-            Some(slice.get(1)?.as_str().to_string())
-        } else {
-            None
-        }
-    }).or_else(|| {
-        parse_description_json(event)?
-            .get("pubkey")
-            .and_then(|value| value.as_str())
-            .map(ToString::to_string)
-    })
+    event
+        .tags
+        .iter()
+        .find_map(|tag| {
+            let slice = tag.as_slice();
+            if slice.len() >= 2 && slice.first()?.as_str() == "P" {
+                Some(slice.get(1)?.as_str().to_string())
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            parse_description_json(event)?
+                .get("pubkey")
+                .and_then(|value| value.as_str())
+                .map(ToString::to_string)
+        })
 }
 
 fn extract_zap_comment(event: &Event) -> Option<String> {
@@ -380,7 +396,10 @@ pub async fn fetch_goal_progress(goal: &ZapGoal) -> Result<ZapGoalProgress, Stri
 
     for receipt in receipts {
         let created_at = receipt.created_at.as_secs();
-        if goal.closed_at.is_some_and(|closed_at| created_at > closed_at) {
+        if goal
+            .closed_at
+            .is_some_and(|closed_at| created_at > closed_at)
+        {
             continue;
         }
 
@@ -467,13 +486,31 @@ pub async fn publish_zap_goal_tracked(
     ));
     builder = builder.tag(Tag::custom(TagKind::custom("relays"), relays));
 
-    if let Some(summary) = summary.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
-        builder = builder.tag(Tag::custom(TagKind::custom("summary"), vec![summary.to_string()]));
+    if let Some(summary) = summary
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        builder = builder.tag(Tag::custom(
+            TagKind::custom("summary"),
+            vec![summary.to_string()],
+        ));
     }
-    if let Some(image) = image.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
-        builder = builder.tag(Tag::custom(TagKind::custom("image"), vec![image.to_string()]));
+    if let Some(image) = image
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        builder = builder.tag(Tag::custom(
+            TagKind::custom("image"),
+            vec![image.to_string()],
+        ));
     }
-    if let Some(url) = url.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+    if let Some(url) = url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         builder = builder.tag(Tag::custom(TagKind::custom("r"), vec![url.to_string()]));
     }
     if let Some(closed_at) = closed_at {
@@ -515,4 +552,21 @@ pub fn format_goal_date(timestamp: u64) -> String {
     DateTime::<Utc>::from_timestamp(timestamp as i64, 0)
         .map(|date| date.format("%b %-d, %Y").to_string())
         .unwrap_or_else(|| "Unknown date".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_bolt11_amount;
+
+    #[test]
+    fn parse_bolt11_amount_accepts_amounts_starting_with_one() {
+        assert_eq!(parse_bolt11_amount("lnbc1m1example"), Some(100_000));
+        assert_eq!(parse_bolt11_amount("lnbc100m1example"), Some(10_000_000));
+    }
+
+    #[test]
+    fn parse_bolt11_amount_rejects_zero_amount_invoices() {
+        assert_eq!(parse_bolt11_amount("lnbc1"), None);
+        assert_eq!(parse_bolt11_amount("lnbc1qpayload"), None);
+    }
 }

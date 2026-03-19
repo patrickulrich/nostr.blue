@@ -409,8 +409,7 @@ pub async fn pay_payment_request(
             }
             Err(e) => {
                 log::warn!("Failed to publish deletion event: {}", e);
-                queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None)
-                    .await;
+                queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None).await;
             }
         }
     }

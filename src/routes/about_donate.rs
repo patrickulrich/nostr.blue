@@ -1,5 +1,8 @@
 use crate::components::{ZapGoalCard, ZapModal};
-use crate::stores::zap_goals_store::{self, fetch_goal_progress_batch, fetch_project_goals, PROJECT_DONATION_LUD16, PROJECT_DONATION_NPUB};
+use crate::stores::zap_goals_store::{
+    self, fetch_goal_progress_batch, fetch_project_goals, PROJECT_DONATION_LUD16,
+    PROJECT_DONATION_NPUB,
+};
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use qrcode::render::svg;
@@ -20,16 +23,30 @@ fn load_project_goals(
     mut goals: Signal<Vec<zap_goals_store::ZapGoalProgress>>,
     mut loading: Signal<bool>,
     mut error_message: Signal<Option<String>>,
+    request_generation: &Signal<u32>,
 ) {
+    let mut request_generation = *request_generation;
+    let generation = request_generation.read().wrapping_add(1);
+    request_generation.set(generation);
     loading.set(true);
     error_message.set(None);
     spawn(async move {
-        match fetch_project_goals(6).await {
-            Ok(project_goals) => match fetch_goal_progress_batch(&project_goals).await {
-                Ok(progress) => goals.set(progress),
-                Err(error) => error_message.set(Some(error)),
-            },
+        let result = match fetch_project_goals(6).await {
+            Ok(project_goals) => fetch_goal_progress_batch(&project_goals).await,
+            Err(error) => Err(error),
+        };
+
+        if *request_generation.read() != generation {
+            return;
+        }
+
+        match result {
+            Ok(progress) => goals.set(progress),
             Err(error) => error_message.set(Some(error)),
+        }
+
+        if *request_generation.read() != generation {
+            return;
         }
         loading.set(false);
     });
@@ -43,6 +60,7 @@ pub fn AboutDonate() -> Element {
     let loading = use_signal(|| false);
     let goals = use_signal(Vec::<zap_goals_store::ZapGoalProgress>::new);
     let error_message = use_signal(|| None::<String>);
+    let request_generation = use_signal(|| 0u32);
     let mut selected_goal_event_id = use_signal(|| None::<String>);
     let mut selected_goal_relays = use_signal(|| None::<Vec<String>>);
     let qr_svg = donation_qr_svg().ok();
@@ -52,12 +70,12 @@ pub fn AboutDonate() -> Element {
         if !initialized {
             return;
         }
-        load_project_goals(goals, loading, error_message);
+        load_project_goals(goals, loading, error_message, &request_generation);
     });
 
     let copy_address = move |_| {
         spawn(async move {
-            match crate::utils::clipboard::copy_to_clipboard(PROJECT_DONATION_LUD16).await {
+            match crate::platform::clipboard::copy_to_clipboard(PROJECT_DONATION_LUD16).await {
                 Ok(_) => toast.success("Copied Lightning address".to_string(), ToastOptions::new()),
                 Err(error) => toast.error(error, ToastOptions::new()),
             }
@@ -149,7 +167,7 @@ pub fn AboutDonate() -> Element {
                         }
                     }
                 }
-            } else if goals.read().is_empty() {
+            } else if error_message.read().is_none() && goals.read().is_empty() {
                 div { class: "mt-4 rounded-2xl border border-dashed border-border bg-card px-6 py-10 text-center",
                     p { class: "text-sm text-muted-foreground",
                         "No project goals are published yet. You can still support development with a direct zap."
@@ -192,7 +210,7 @@ pub fn AboutDonate() -> Element {
                         selected_goal_event_id.set(None);
                         selected_goal_relays.set(None);
                         if *crate::stores::nostr_client::CLIENT_INITIALIZED.read() {
-                            load_project_goals(goals, loading, error_message);
+                            load_project_goals(goals, loading, error_message, &request_generation);
                         }
                     },
                 }
