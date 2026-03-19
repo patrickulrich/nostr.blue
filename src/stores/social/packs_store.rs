@@ -343,7 +343,7 @@ pub async fn publish_starter_pack(
     let builder = EventBuilder::new(Kind::Custom(STARTER_PACK_KIND), "").tags(tags);
 
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish starter pack: {}", e))?;
 
@@ -377,7 +377,7 @@ pub async fn delete_starter_pack(pack: &StarterPack) -> StdResult<(), String> {
     let builder = EventBuilder::delete(deletion_request);
 
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to delete starter pack: {}", e))?;
 

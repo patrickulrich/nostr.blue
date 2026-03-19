@@ -4,6 +4,7 @@ mod sidebar_icons;
 use nav_link::NavLink;
 use sidebar_icons::render_sidebar_icon;
 pub mod about;
+pub mod about_donate;
 pub mod ai_chat;
 pub mod articles;
 pub mod badges;
@@ -53,7 +54,9 @@ pub mod video_new_portrait;
 pub mod voice;
 pub mod webbookmarks;
 pub mod wiki;
+pub mod zapgoals;
 use about::About;
+use about_donate::AboutDonate;
 use ai_chat::AIChat;
 use articles::{
     ArticleDetail, ArticleNew, Articles, PublicationDetail, PublicationNew, PublicationSearch,
@@ -126,6 +129,7 @@ use video_new_portrait::VideoNewPortrait;
 use voice::{VoiceMessageDetail, VoiceMessageNew, VoiceMessages};
 use webbookmarks::WebBookmarks;
 use wiki::{WikiAuthor, WikiDetail, WikiHome, WikiNew};
+use zapgoals::{ZapGoalsHome, ZapGoalsNew};
 /// App routes
 #[derive(Clone, Routable, Debug, PartialEq)]
 #[rustfmt::skip]
@@ -480,6 +484,12 @@ pub enum Route {
     Cookies {},
     #[route("/about")]
     About {},
+    #[route("/about/donate")]
+    AboutDonate {},
+    #[route("/zapgoals")]
+    ZapGoalsHome {},
+    #[route("/zapgoals/new")]
+    ZapGoalsNew {},
 }
 
 #[cfg_attr(not(feature = "mobile"), allow(dead_code))]
@@ -570,6 +580,9 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::Nip19Handler { .. } => Some(Route::Home {
             list: String::new(),
         }),
+        Route::AboutDonate {} => Some(Route::About {}),
+        Route::ZapGoalsHome {} => Some(Route::About {}),
+        Route::ZapGoalsNew {} => Some(Route::ZapGoalsHome {}),
         Route::ArticleDetail { .. } | Route::ArticleNew {} => Some(Route::Articles {}),
         Route::VideoDetail { .. } | Route::VideoNewLandscape {} | Route::VideoNewPortrait {} => {
             Some(Route::Videos {})
@@ -701,13 +714,13 @@ fn handle_android_back(navigator: dioxus::router::Navigator, current_route: &Rou
     }
 
     if let Some(target) = fallback_route_for(current_route) {
-        navigator.replace(target);
-    }
-
-    #[cfg(feature = "mobile")]
-    {
-        if let Err(error) = crate::platform::mobile::finish_app() {
-            log::error!("Failed to finish Android activity: {}", error);
+        let _ = navigator.replace(target);
+    } else {
+        #[cfg(feature = "mobile")]
+        {
+            if let Err(error) = crate::platform::mobile::finish_app() {
+                log::error!("Failed to finish Android activity: {}", error);
+            }
         }
     }
 }
@@ -986,7 +999,11 @@ fn Layout() -> Element {
         || is_blossom_page
         || is_bible_page
         || is_creation_page
-        || is_topics_page;
+        || is_topics_page
+        || matches!(
+            current_route,
+            Route::AboutDonate {} | Route::ZapGoalsHome {} | Route::ZapGoalsNew {}
+        );
     let music_player_visible = {
         let state = MUSIC_PLAYER.read();
         state.is_visible && state.current_track.is_some()
@@ -1495,6 +1512,18 @@ mod tests {
                 naddr: "product".to_string(),
             }),
             Some(Route::ShopHome {})
+        );
+        assert_eq!(
+            fallback_route_for(&Route::AboutDonate {}),
+            Some(Route::About {})
+        );
+        assert_eq!(
+            fallback_route_for(&Route::ZapGoalsHome {}),
+            Some(Route::About {})
+        );
+        assert_eq!(
+            fallback_route_for(&Route::ZapGoalsNew {}),
+            Some(Route::ZapGoalsHome {})
         );
     }
 }

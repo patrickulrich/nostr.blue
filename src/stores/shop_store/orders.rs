@@ -267,7 +267,11 @@ pub async fn send_order_message(
         recipient_pubkey,
         content.message_type
     );
-    let rumor = EventBuilder::private_msg_rumor(recipient_pk, message_json).build(sender_pk);
+    let rumor = crate::utils::nips::nip89::tag_event_builder(EventBuilder::private_msg_rumor(
+        recipient_pk,
+        message_json,
+    ))
+    .build(sender_pk);
     send_gift_wrapped_rumor(
         &client,
         &signer,
@@ -334,9 +338,10 @@ pub async fn send_payment_receipt(
             vec![amount_sats.to_string(), "sat".to_string()],
         ),
     ];
-    let rumor = EventBuilder::new(Kind::Custom(KIND_PAYMENT_RECEIPT), &content)
-        .tags(tags)
-        .build(sender_pk);
+    let rumor = crate::utils::nips::nip89::tag_event_builder(
+        EventBuilder::new(Kind::Custom(KIND_PAYMENT_RECEIPT), &content).tags(tags),
+    )
+    .build(sender_pk);
     log::info!(
         "Sending payment receipt for order {} to merchant {}",
         order_id,

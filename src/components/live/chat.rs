@@ -250,7 +250,10 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
                         .tag(tag)
                         .tags(build_custom_emoji_tags(&content));
                     // Sign first to get the full event
-                    match client.sign_event_builder(builder).await {
+                    match client
+                        .sign_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+                        .await
+                    {
                         Ok(event) => {
                             // Send the signed event
                             match client.send_event(&event).await {

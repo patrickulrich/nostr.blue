@@ -23,6 +23,8 @@ pub struct AppSettings {
     pub payment_method_preference: String,
     #[serde(default = "default_mempool_endpoint")]
     pub mempool_endpoint: String,
+    #[serde(default = "default_publish_client_tag")]
+    pub publish_client_tag: bool,
     #[serde(default)]
     pub cashu_wallet_auto_load: bool,
     #[serde(default)]
@@ -30,6 +32,9 @@ pub struct AppSettings {
 }
 fn default_mempool_endpoint() -> String {
     crate::services::mempool::DEFAULT_ENDPOINT.to_string()
+}
+fn default_publish_client_tag() -> bool {
+    true
 }
 impl Default for AppSettings {
     fn default() -> Self {
@@ -39,8 +44,9 @@ impl Default for AppSettings {
             sync_notifications: false,
             payment_method_preference: "nwc_first".to_string(),
             mempool_endpoint: default_mempool_endpoint(),
+            publish_client_tag: default_publish_client_tag(),
             cashu_wallet_auto_load: false,
-            version: 5,
+            version: 6,
         }
     }
 }
@@ -161,7 +167,7 @@ pub async fn save_settings(settings: &AppSettings) -> Result<(), String> {
     let builder =
         EventBuilder::new(Kind::from(APP_DATA_KIND), content).tag(Tag::identifier(SETTINGS_D_TAG));
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish settings: {}", e))?;
     log::info!("Settings saved to Nostr successfully");
@@ -201,6 +207,18 @@ pub async fn update_payment_method_preference(preference: String) {
     if let Err(e) = save_settings(&settings).await {
         log::error!("Failed to save payment method preference: {}", e);
     }
+}
+/// Update client tag publishing setting and save to Nostr
+pub async fn update_publish_client_tag(enabled: bool) {
+    let settings = {
+        let mut w = SETTINGS.write();
+        w.publish_client_tag = enabled;
+        w.clone()
+    };
+    if let Err(e) = save_settings(&settings).await {
+        log::warn!("Failed to persist client tag setting to Nostr: {}", e);
+    }
+    cache_settings(&settings);
 }
 /// Get current mempool endpoint (returns default if empty)
 pub fn get_mempool_endpoint() -> String {
@@ -255,5 +273,17 @@ pub async fn update_cashu_wallet_auto_load(enabled: bool) {
             e
         );
         cache_settings(&settings);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AppSettings;
+
+    #[test]
+    fn publish_client_tag_defaults_to_true_when_missing() {
+        let settings: AppSettings =
+            serde_json::from_str(r#"{"theme":"system","version":5}"#).expect("valid settings");
+        assert!(settings.publish_client_tag);
     }
 }

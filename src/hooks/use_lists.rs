@@ -229,7 +229,7 @@ pub async fn delete_list(event: &Event) -> Result<(), String> {
     ];
     let builder = EventBuilder::new(Kind::EventDeletion, "Deleted list").tags(tags);
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish deletion: {}", e))?;
     log::info!("List deleted successfully");

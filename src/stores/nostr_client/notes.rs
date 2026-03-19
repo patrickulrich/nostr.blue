@@ -104,7 +104,7 @@ pub async fn publish_note_tracked(
     });
     let builder = nostr::EventBuilder::text_note(&content).tags(mention_tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish: {}", e))?;
     let result = PublishResult::from_output(output);

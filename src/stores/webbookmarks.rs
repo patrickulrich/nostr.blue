@@ -58,7 +58,10 @@ pub async fn add_webbookmark(
         use nostr_sdk::Tag;
         builder = builder.tag(Tag::custom(nostr_sdk::TagKind::custom("image"), vec![img]));
     }
-    match client.send_event_builder(builder).await {
+    match client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+        .await
+    {
         Ok(output) => {
             log::info!("Web bookmark published: {}", output.id());
             Ok(())
@@ -97,7 +100,10 @@ pub async fn delete_webbookmark(event: &Event) -> Result<(), String> {
     use nostr::nips::nip09::EventDeletionRequest;
     let request = EventDeletionRequest::new().id(event.id);
     let builder = EventBuilder::delete(request);
-    match client.send_event_builder(builder).await {
+    match client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+        .await
+    {
         Ok(_) => {
             log::info!("Web bookmark deleted");
             let mut bookmarks = WEB_BOOKMARKS.read().data().read().clone();

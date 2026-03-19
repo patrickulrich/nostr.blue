@@ -309,7 +309,7 @@ pub async fn publish_relay_list(
         .collect();
     let builder = EventBuilder::new(Kind::RelayList, "").tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish relay list: {}", e))?;
     log::info!("Relay list published: {}", output.id().to_hex());
@@ -331,7 +331,7 @@ pub async fn publish_dm_relay_list(
         .collect();
     let builder = EventBuilder::new(Kind::from(10050), "").tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish DM relay list: {}", e))?;
     log::info!("DM relay list published: {}", output.id().to_hex());
@@ -394,7 +394,7 @@ pub async fn publish_search_relays(
         .collect();
     let builder = EventBuilder::search_relays(urls);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish search relays: {}", e))?;
     log::info!(
@@ -416,7 +416,7 @@ pub async fn publish_blocked_relays(
         .collect();
     let builder = EventBuilder::blocked_relays(urls);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish blocked relays: {}", e))?;
     log::info!(

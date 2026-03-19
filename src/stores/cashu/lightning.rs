@@ -176,7 +176,7 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
         .ok_or("Client not initialized")?
         .clone();
     let event_output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish event: {}", e))?;
     let event_id = event_output.id().to_hex();
@@ -583,7 +583,12 @@ async fn publish_melt_events(
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-        match client.send_event_builder(builder.clone()).await {
+        match client
+            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+                builder.clone(),
+            ))
+            .await
+        {
             Ok(event_output) => {
                 let real_id = event_output.id().to_hex();
                 log::info!("Published new token event: {}", real_id);
@@ -619,7 +624,12 @@ async fn publish_melt_events(
             ));
             let deletion_builder =
                 nostr_sdk::EventBuilder::new(Kind::from(5), "Melted token").tags(tags);
-            match client.send_event_builder(deletion_builder.clone()).await {
+            match client
+                .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+                    deletion_builder.clone(),
+                ))
+                .await
+            {
                 Ok(_) => {
                     log::info!(
                         "Published deletion events for {} token events",
@@ -729,7 +739,7 @@ pub async fn create_history_event_with_type(
         .ok_or("Client not initialized")?
         .clone();
     let event_output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish history event: {}", e))?;
     log::info!("Published history event: {}", event_output.id().to_hex());
