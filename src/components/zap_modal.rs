@@ -64,8 +64,12 @@ pub struct ZapModalProps {
 #[component]
 pub fn ZapModal(props: ZapModalProps) -> Element {
     let initial_amount = props.initial_amount.unwrap_or(21);
+    let initial_custom_amount = props
+        .initial_amount
+        .map(|amount| amount.to_string())
+        .unwrap_or_default();
     let mut zap_amount = use_signal(|| initial_amount);
-    let mut custom_amount = use_signal(String::new);
+    let mut custom_amount = use_signal(|| initial_custom_amount.clone());
     let mut zap_message = use_signal(String::new);
     let mut loading = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);

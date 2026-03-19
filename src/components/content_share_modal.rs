@@ -262,6 +262,12 @@ pub fn ContentShareModal(
                 .await
             {
                 Ok(output) => {
+                    if output.success.is_empty() {
+                        log::warn!("All relays rejected content share event");
+                        nostr_error.set(Some("All relays rejected the event".to_string()));
+                        is_publishing.set(false);
+                        return;
+                    }
                     log::info!("Shared to Nostr: {:?}", output.val);
                     nostr_error.set(None);
                     nostr_text.set(String::new());

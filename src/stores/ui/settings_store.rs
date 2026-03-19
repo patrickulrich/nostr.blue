@@ -167,7 +167,10 @@ pub async fn save_settings(settings: &AppSettings) -> Result<(), String> {
     let builder =
         EventBuilder::new(Kind::from(APP_DATA_KIND), content).tag(Tag::identifier(SETTINGS_D_TAG));
     client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder_with_enabled(
+            builder,
+            settings_to_save.publish_client_tag,
+        ))
         .await
         .map_err(|e| format!("Failed to publish settings: {}", e))?;
     log::info!("Settings saved to Nostr successfully");

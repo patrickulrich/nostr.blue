@@ -5,6 +5,7 @@ use nostr_sdk::prelude::*;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
+use ::url::Url;
 
 pub const KIND_ZAP_GOAL: u16 = 9041;
 pub const PROJECT_DONATION_LUD16: &str = "nostrblue@sats.love";
@@ -108,8 +109,7 @@ fn parse_relays(event: &Event) -> Option<Vec<String>> {
                 .iter()
                 .skip(1)
                 .map(|relay| relay.as_str().trim())
-                .filter(|relay| relay.starts_with("ws://") || relay.starts_with("wss://"))
-                .map(ToString::to_string)
+                .filter_map(validate_relay_url)
                 .collect();
             if relays.is_empty() {
                 None
@@ -122,14 +122,28 @@ fn parse_relays(event: &Event) -> Option<Vec<String>> {
     })
 }
 
+fn validate_relay_url(relay: &str) -> Option<String> {
+    let relay = relay.trim();
+    if relay.is_empty() {
+        return None;
+    }
+
+    let parsed = Url::parse(relay).ok()?;
+    match parsed.scheme() {
+        "ws" | "wss" => {}
+        _ => return None,
+    }
+
+    parsed.host_str()?;
+    Some(relay.to_string())
+}
+
 fn normalize_relays(relays: &[String]) -> Vec<String> {
     let mut seen = HashSet::new();
     relays
         .iter()
-        .map(|relay| relay.trim())
-        .filter(|relay| relay.starts_with("ws://") || relay.starts_with("wss://"))
-        .filter(|relay| seen.insert((*relay).to_string()))
-        .map(ToString::to_string)
+        .filter_map(|relay| validate_relay_url(relay))
+        .filter(|relay| seen.insert(relay.clone()))
         .collect()
 }
 
@@ -416,6 +430,12 @@ fn parse_bolt11_amount(bolt11: &str) -> Option<u64> {
     if amount_end == 0 {
         return None;
     }
+
+    let separator_index = amount_end + usize::from(multiplier.is_some());
+    if rest.chars().nth(separator_index) != Some('1') {
+        return None;
+    }
+
     let amount: u64 = rest[..amount_end].parse().ok()?;
     match multiplier {
         Some('m') => Some(amount * 100_000),
@@ -537,11 +557,18 @@ pub async fn fetch_goal_progress_batch(goals: &[ZapGoal]) -> Result<Vec<ZapGoalP
             Ok(goal_progress) => progress.push(goal_progress),
             Err(error) => {
                 log::warn!(
-                    "Skipping zap goal progress for {} ({}): {}",
+                    "Falling back to empty zap goal progress for {} ({}): {}",
                     goal.event_id,
                     goal.author_pubkey,
                     error
                 );
+                progress.push(ZapGoalProgress {
+                    goal: goal.clone(),
+                    raised_sats: 0,
+                    contributor_count: 0,
+                    percentage: 0.0,
+                    recent_contributors: Vec::new(),
+                });
             }
         }
     }
@@ -657,12 +684,20 @@ mod tests {
     }
 
     #[test]
+    fn parse_bolt11_amount_rejects_missing_separator() {
+        assert_eq!(parse_bolt11_amount("lnbc100uNOT_AN_INVOICE"), None);
+        assert_eq!(parse_bolt11_amount("lnbc100000invoicepayload"), None);
+    }
+
+    #[test]
     fn normalize_relays_trims_filters_and_dedupes() {
         assert_eq!(
             normalize_relays(&[
                 " wss://relay.one ".to_string(),
                 "".to_string(),
                 "https://relay.invalid".to_string(),
+                "wss://".to_string(),
+                "wss://:".to_string(),
                 "ws://relay.two".to_string(),
                 "wss://relay.one".to_string(),
             ]),

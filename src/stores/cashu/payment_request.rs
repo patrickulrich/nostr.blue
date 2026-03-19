@@ -52,7 +52,7 @@ async fn send_tagged_event_with_retry(
     mint_url: Option<String>,
 ) -> String {
     let tagged_builder = crate::utils::nips::nip89::tag_event_builder(builder.clone());
-    let event_label = match event_type {
+    let event_label = match &event_type {
         PendingEventType::TokenEvent => "token",
         PendingEventType::DeletionEvent => "deletion",
         PendingEventType::HistoryEvent => "history",
