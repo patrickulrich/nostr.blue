@@ -351,7 +351,7 @@ pub async fn pay_payment_request(
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-        let tagged_builder = crate::utils::nips::nip89::tag_event_builder(builder);
+        let tagged_builder = crate::utils::nips::nip89::tag_event_builder(builder.clone());
         new_event_id = Some(
             match client.send_event_builder(tagged_builder.clone()).await {
                 Ok(event_output) => {
@@ -359,7 +359,7 @@ pub async fn pay_payment_request(
                         log::warn!("No relays accepted token event, queuing for retry");
                         let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
                         queue_event_for_retry(
-                            tagged_builder,
+                            builder.clone(),
                             PendingEventType::TokenEvent,
                             Some(pending_id.clone()),
                             Some(mint_url.clone()),
@@ -374,7 +374,7 @@ pub async fn pay_payment_request(
                     log::warn!("Failed to publish token event: {}", e);
                     let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
                     queue_event_for_retry(
-                        tagged_builder,
+                        builder,
                         PendingEventType::TokenEvent,
                         Some(pending_id.clone()),
                         Some(mint_url.clone()),
@@ -393,13 +393,13 @@ pub async fn pay_payment_request(
             }
         }
         let builder = nostr_sdk::EventBuilder::delete(deletion_request);
-        let tagged_builder = crate::utils::nips::nip89::tag_event_builder(builder);
+        let tagged_builder = crate::utils::nips::nip89::tag_event_builder(builder.clone());
         match client.send_event_builder(tagged_builder.clone()).await {
             Ok(output) => {
                 if output.success.is_empty() {
                     log::warn!("No relays accepted deletion event, queuing for retry");
                     queue_event_for_retry(
-                        tagged_builder,
+                        builder.clone(),
                         PendingEventType::DeletionEvent,
                         None,
                         None,
@@ -409,7 +409,7 @@ pub async fn pay_payment_request(
             }
             Err(e) => {
                 log::warn!("Failed to publish deletion event: {}", e);
-                queue_event_for_retry(tagged_builder, PendingEventType::DeletionEvent, None, None)
+                queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None)
                     .await;
             }
         }
