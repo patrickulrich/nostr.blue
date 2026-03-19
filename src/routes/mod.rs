@@ -999,7 +999,11 @@ fn Layout() -> Element {
         || is_blossom_page
         || is_bible_page
         || is_creation_page
-        || is_topics_page;
+        || is_topics_page
+        || matches!(
+            current_route,
+            Route::AboutDonate {} | Route::ZapGoalsHome {} | Route::ZapGoalsNew {}
+        );
     let music_player_visible = {
         let state = MUSIC_PLAYER.read();
         state.is_visible && state.current_track.is_some()

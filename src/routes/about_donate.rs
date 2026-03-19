@@ -16,14 +16,33 @@ fn donation_qr_svg() -> Result<String, String> {
         .build())
 }
 
+fn load_project_goals(
+    mut goals: Signal<Vec<zap_goals_store::ZapGoalProgress>>,
+    mut loading: Signal<bool>,
+    mut error_message: Signal<Option<String>>,
+) {
+    loading.set(true);
+    error_message.set(None);
+    spawn(async move {
+        match fetch_project_goals(6).await {
+            Ok(project_goals) => match fetch_goal_progress_batch(&project_goals).await {
+                Ok(progress) => goals.set(progress),
+                Err(error) => error_message.set(Some(error)),
+            },
+            Err(error) => error_message.set(Some(error)),
+        }
+        loading.set(false);
+    });
+}
+
 #[component]
 pub fn AboutDonate() -> Element {
     let toast = consume_toast();
     let mut selected_amount = use_signal(|| 21u64);
     let mut show_modal = use_signal(|| false);
-    let mut loading = use_signal(|| false);
-    let mut goals = use_signal(Vec::<zap_goals_store::ZapGoalProgress>::new);
-    let mut error_message = use_signal(|| None::<String>);
+    let loading = use_signal(|| false);
+    let goals = use_signal(Vec::<zap_goals_store::ZapGoalProgress>::new);
+    let error_message = use_signal(|| None::<String>);
     let mut selected_goal_event_id = use_signal(|| None::<String>);
     let mut selected_goal_relays = use_signal(|| None::<Vec<String>>);
     let qr_svg = donation_qr_svg().ok();
@@ -33,17 +52,7 @@ pub fn AboutDonate() -> Element {
         if !initialized {
             return;
         }
-        loading.set(true);
-        spawn(async move {
-            match fetch_project_goals(6).await {
-                Ok(project_goals) => match fetch_goal_progress_batch(&project_goals).await {
-                    Ok(progress) => goals.set(progress),
-                    Err(error) => error_message.set(Some(error)),
-                },
-                Err(error) => error_message.set(Some(error)),
-            }
-            loading.set(false);
-        });
+        load_project_goals(goals, loading, error_message);
     });
 
     let copy_address = move |_| {
@@ -182,6 +191,9 @@ pub fn AboutDonate() -> Element {
                         show_modal.set(false);
                         selected_goal_event_id.set(None);
                         selected_goal_relays.set(None);
+                        if *crate::stores::nostr_client::CLIENT_INITIALIZED.read() {
+                            load_project_goals(goals, loading, error_message);
+                        }
                     },
                 }
             }

@@ -7,6 +7,7 @@ use crate::stores::zap_goals_store::{
     self, fetch_global_goals, fetch_goal_progress_batch, fetch_goals_for_authors,
     fetch_project_goals, publish_zap_goal_tracked, ZapGoal, ZapGoalProgress, ZapGoalsFeedType,
 };
+use chrono::{Local, TimeZone, Utc};
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use nostr_sdk::PublicKey;
@@ -129,6 +130,7 @@ pub fn ZapGoalsHome() -> Element {
     let mut empty_message = use_signal(|| None::<String>);
     let mut error_message = use_signal(|| None::<String>);
     let mut selected_goal = use_signal(|| None::<ZapGoalProgress>);
+    let mut request_generation = use_signal(|| 0u32);
 
     use_effect(move || {
         let _ = refresh_trigger.read();
@@ -137,6 +139,8 @@ pub fn ZapGoalsHome() -> Element {
         if !initialized {
             return;
         }
+        let generation = request_generation.peek().wrapping_add(1);
+        request_generation.set(generation);
         loading.set(true);
         goals.set(Vec::new());
         error_message.set(None);
@@ -145,8 +149,14 @@ pub fn ZapGoalsHome() -> Element {
         has_more.set(true);
         spawn(async move {
             let project_goals = fetch_project_goals(PROJECT_PIN_LIMIT).await.unwrap_or_default();
+            if *request_generation.peek() != generation {
+                return;
+            }
             match fetch_feed_page(current_feed_type, None).await {
                 Ok((feed_goals, message)) => {
+                    if *request_generation.peek() != generation {
+                        return;
+                    }
                     empty_message.set(message);
                     let has_more_results = feed_goals.len() >= PAGE_SIZE;
                     oldest_timestamp.set(feed_goals.last().map(|goal| goal.created_at));
@@ -157,16 +167,31 @@ pub fn ZapGoalsHome() -> Element {
 
                     match enrich_progress(combined).await {
                         Ok(mut progress) => {
+                            if *request_generation.peek() != generation {
+                                return;
+                            }
                             sort_progress(&mut progress);
                             goals.set(progress);
                             has_more.set(has_more_results);
                         }
-                        Err(error) => error_message.set(Some(error)),
+                        Err(error) => {
+                            if *request_generation.peek() != generation {
+                                return;
+                            }
+                            error_message.set(Some(error));
+                        }
                     }
                 }
-                Err(error) => error_message.set(Some(error)),
+                Err(error) => {
+                    if *request_generation.peek() != generation {
+                        return;
+                    }
+                    error_message.set(Some(error));
+                }
             }
-            loading.set(false);
+            if *request_generation.peek() == generation {
+                loading.set(false);
+            }
         });
     });
 
@@ -176,23 +201,43 @@ pub fn ZapGoalsHome() -> Element {
         }
         let current_feed_type = *feed_type.read();
         let until = *oldest_timestamp.read();
+        let generation = request_generation.peek().wrapping_add(1);
+        request_generation.set(generation);
         pagination_loading.set(true);
         spawn(async move {
             match fetch_feed_page(current_feed_type, until).await {
                 Ok((next_goals, _)) => {
+                    if *request_generation.peek() != generation {
+                        return;
+                    }
                     oldest_timestamp.set(next_goals.last().map(|goal| goal.created_at));
                     has_more.set(next_goals.len() >= PAGE_SIZE);
                     match enrich_progress(next_goals).await {
                         Ok(progress) => {
+                            if *request_generation.peek() != generation {
+                                return;
+                            }
                             let existing = goals.read().clone();
                             goals.set(merge_progress(&existing, progress));
                         }
-                        Err(error) => error_message.set(Some(error)),
+                        Err(error) => {
+                            if *request_generation.peek() != generation {
+                                return;
+                            }
+                            error_message.set(Some(error));
+                        }
                     }
                 }
-                Err(error) => error_message.set(Some(error)),
+                Err(error) => {
+                    if *request_generation.peek() != generation {
+                        return;
+                    }
+                    error_message.set(Some(error));
+                }
             }
-            pagination_loading.set(false);
+            if *request_generation.peek() == generation {
+                pagination_loading.set(false);
+            }
         });
     };
     let sentinel_id = use_infinite_scroll(load_more, has_more, pagination_loading);
@@ -408,11 +453,12 @@ pub fn ZapGoalsNew() -> Element {
     let mut goal_url = use_signal(String::new);
     let mut closed_at = use_signal(String::new);
     let mut relays_text = use_signal(String::new);
+    let mut relays_prefilled = use_signal(|| false);
     let mut publishing = use_signal(|| false);
     let mut error_message = use_signal(|| None::<String>);
 
     use_effect(move || {
-        if !relays_text.read().is_empty() {
+        if *relays_prefilled.read() {
             return;
         }
         spawn(async move {
@@ -428,7 +474,11 @@ pub fn ZapGoalsNew() -> Element {
             } else {
                 String::new()
             };
+            if *relays_prefilled.peek() || !relays_text.read().is_empty() {
+                return;
+            }
             relays_text.set(relay_lines);
+            relays_prefilled.set(true);
         });
     });
 
@@ -468,7 +518,12 @@ pub fn ZapGoalsNew() -> Element {
             None
         } else {
             match chrono::NaiveDateTime::parse_from_str(&closed_at_value, "%Y-%m-%dT%H:%M") {
-                Ok(value) => Some(value.and_utc().timestamp() as u64),
+                Ok(value) => Local
+                    .from_local_datetime(&value)
+                    .earliest()
+                    .map(|local_dt| local_dt.with_timezone(&Utc).timestamp())
+                    .filter(|timestamp| *timestamp >= 0 && *timestamp > Utc::now().timestamp())
+                    .map(|timestamp| timestamp as u64),
                 Err(_) => {
                     error_message.set(Some("Use a valid close date/time.".to_string()));
                     return;

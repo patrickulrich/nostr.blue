@@ -302,6 +302,9 @@ fn parse_bolt11_amount(bolt11: &str) -> Option<u64> {
         return None;
     }
     let rest = &lower[4..];
+    if rest.starts_with('1') {
+        return None;
+    }
     let mut amount_end = 0;
     let mut multiplier = None;
     for (index, ch) in rest.chars().enumerate() {
@@ -508,6 +511,7 @@ pub fn format_time_remaining(closed_at: Option<u64>) -> String {
 }
 
 pub fn format_goal_date(timestamp: u64) -> String {
+    let timestamp = timestamp.min(253_402_300_799);
     DateTime::<Utc>::from_timestamp(timestamp as i64, 0)
         .map(|date| date.format("%b %-d, %Y").to_string())
         .unwrap_or_else(|| "Unknown date".to_string())

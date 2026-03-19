@@ -1,6 +1,7 @@
 use crate::stores::profiles;
 use crate::stores::zap_goals_store::{self, ZapGoalProgress};
 use dioxus::prelude::*;
+use url::Url;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct ZapGoalCardProps {
@@ -44,6 +45,10 @@ pub fn ZapGoalCard(props: ZapGoalCardProps) -> Element {
         content.chars().take(260).collect::<String>()
     };
     let percentage = props.progress.percentage.clamp(0.0, 100.0);
+    let safe_goal_url = props.progress.goal.url.as_ref().and_then(|url| {
+        let parsed = Url::parse(url).ok()?;
+        matches!(parsed.scheme(), "http" | "https").then(|| parsed.to_string())
+    });
 
     rsx! {
         article { class: "{card_class}",
@@ -122,7 +127,7 @@ pub fn ZapGoalCard(props: ZapGoalCardProps) -> Element {
 
                 div { class: "flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground",
                     span { "{props.progress.contributor_count} contributor(s)" }
-                    if let Some(url) = props.progress.goal.url.clone() {
+                    if let Some(url) = safe_goal_url {
                         a {
                             href: "{url}",
                             target: "_blank",

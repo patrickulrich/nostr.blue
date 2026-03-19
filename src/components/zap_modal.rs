@@ -143,20 +143,30 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
             } else {
                 None
             };
-            let relays = if let Some(relay_hints) = relay_hints {
-                relay_hints
-                    .iter()
-                    .filter_map(|relay| RelayUrl::parse(relay).ok())
-                    .collect::<Vec<RelayUrl>>()
-            } else if let Some(client) = get_client() {
-                client
-                    .relays()
-                    .await
-                    .into_keys()
-                    .take(5)
-                    .collect::<Vec<RelayUrl>>()
-            } else {
-                vec![]
+            let relays = {
+                let hinted_relays = relay_hints
+                    .as_ref()
+                    .map(|relay_hints| {
+                        relay_hints
+                            .iter()
+                            .filter_map(|relay| RelayUrl::parse(relay).ok())
+                            .take(5)
+                            .collect::<Vec<RelayUrl>>()
+                    })
+                    .filter(|relays| !relays.is_empty());
+
+                if let Some(relays) = hinted_relays {
+                    relays
+                } else if let Some(client) = get_client() {
+                    client
+                        .relays()
+                        .await
+                        .into_keys()
+                        .take(5)
+                        .collect::<Vec<RelayUrl>>()
+                } else {
+                    vec![]
+                }
             };
             if relays.is_empty() {
                 error_msg.set(Some("No relays available".to_string()));
