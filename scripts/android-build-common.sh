@@ -218,11 +218,16 @@ build_dx_android() {
 }
 
 # Android SDK/NDK paths
-ANDROID_HOME="${ANDROID_HOME:-${HOME}/Android/Sdk}"
+if [ -z "${ANDROID_SDK_ROOT:-}" ]; then
+    ANDROID_SDK_ROOT="${ANDROID_HOME:-${HOME}/Android/Sdk}"
+fi
+if [ -z "${ANDROID_HOME:-}" ]; then
+    ANDROID_HOME="$ANDROID_SDK_ROOT"
+fi
 if [ -z "${ANDROID_NDK_HOME:-}" ]; then
-    if [ -d "$ANDROID_HOME/ndk" ]; then
+    if [ -d "$ANDROID_SDK_ROOT/ndk" ]; then
         NDK_VERSION=$(
-            find "$ANDROID_HOME/ndk" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null \
+            find "$ANDROID_SDK_ROOT/ndk" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null \
                 | (
                     sort -V 2>/dev/null || python3 -c '
 import sys
@@ -235,15 +240,14 @@ if versions:
                 ) | tail -n1
         )
         if [ -n "$NDK_VERSION" ]; then
-            ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION"
+            ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/$NDK_VERSION"
         else
-            ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.0.12077973"
+            ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.0.12077973"
         fi
     else
-        ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.0.12077973"
+        ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.0.12077973"
     fi
 fi
-ANDROID_SDK_ROOT="$ANDROID_HOME"
 if [ ! -d "$ANDROID_NDK_HOME" ]; then
     echo "ERROR: ANDROID_NDK_HOME does not exist: $ANDROID_NDK_HOME" >&2
     echo "  Install NDK via: sdkmanager --install 'ndk;27.0.12077973'" >&2

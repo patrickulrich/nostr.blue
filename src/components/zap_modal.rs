@@ -63,9 +63,11 @@ pub struct ZapModalProps {
 }
 #[component]
 pub fn ZapModal(props: ZapModalProps) -> Element {
+    let preset_amounts = vec![21, 100, 500, 1000, 5000, 10000];
     let initial_amount = props.initial_amount.unwrap_or(21);
     let initial_custom_amount = props
         .initial_amount
+        .filter(|amount| !preset_amounts.contains(amount))
         .map(|amount| amount.to_string())
         .unwrap_or_default();
     let mut zap_amount = use_signal(|| initial_amount);
@@ -102,7 +104,6 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
             });
         }));
     }
-    let preset_amounts = vec![21, 100, 500, 1000, 5000, 10000];
     let handle_zap = move |_| {
         let recipient_pubkey_str = props.recipient_pubkey.clone();
         let lud16 = props.lud16.clone();

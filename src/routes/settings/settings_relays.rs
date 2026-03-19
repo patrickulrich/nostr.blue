@@ -151,6 +151,9 @@ pub fn SettingsRelays() -> Element {
             url.to_string()
         }
     };
+    let relay_detail_route = |url: &str| Route::RelayDetail {
+        relay_id: crate::utils::relay::encode_relay_route_id(url),
+    };
     let format_bytes = |bytes: usize| -> String {
         if bytes < 1024 {
             format!("{} B", bytes)
@@ -452,7 +455,11 @@ pub fn SettingsRelays() -> Element {
                                 rsx! {
                                     div { key: "{url}", class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
                                         div { class: "flex items-center justify-between",
-                                            span { class: "font-mono text-sm text-gray-900 dark:text-white", {display_relay_url(&url)} }
+                                            Link {
+                                                to: relay_detail_route(&url),
+                                                class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",
+                                                {display_relay_url(&url)}
+                                            }
                                             div { class: "flex items-center gap-2",
                                                 button {
                                                     class: if relay_config.read { "px-2 py-1 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 rounded text-xs font-medium" } else { "px-2 py-1 bg-gray-200 text-gray-600 dark:bg-gray-600 dark:text-gray-400 rounded text-xs font-medium" },
@@ -557,8 +564,13 @@ pub fn SettingsRelays() -> Element {
                                 rsx! {
                                     div { key: "{url_clone}", class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
                                         div { class: "flex items-center justify-between",
-                                            span { class: "font-mono text-sm text-gray-900 dark:text-white",
-                                                "📨 {display_relay_url(&url_clone)}"
+                                            div { class: "flex items-center gap-1 min-w-0",
+                                                span { "📨" }
+                                                Link {
+                                                    to: relay_detail_route(&url_clone),
+                                                    class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",
+                                                    {display_relay_url(&url_clone)}
+                                                }
                                             }
                                             button {
                                                 class: "px-2 py-1 bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-800 text-red-800 dark:text-red-200 rounded text-xs transition",
@@ -638,8 +650,13 @@ pub fn SettingsRelays() -> Element {
                                 rsx! {
                                     div { key: "{url_clone}", class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
                                         div { class: "flex items-center justify-between",
-                                            span { class: "font-mono text-sm text-gray-900 dark:text-white",
-                                                "🔍 {display_relay_url(&url_clone)}"
+                                            div { class: "flex items-center gap-1 min-w-0",
+                                                span { "🔍" }
+                                                Link {
+                                                    to: relay_detail_route(&url_clone),
+                                                    class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",
+                                                    {display_relay_url(&url_clone)}
+                                                }
                                             }
                                             button {
                                                 class: "px-2 py-1 bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-800 text-red-800 dark:text-red-200 rounded text-xs transition",
@@ -714,8 +731,13 @@ pub fn SettingsRelays() -> Element {
                                 rsx! {
                                     div { key: "{url_clone}", class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
                                         div { class: "flex items-center justify-between",
-                                            span { class: "font-mono text-sm text-gray-900 dark:text-white",
-                                                "🚫 {display_relay_url(&url_clone)}"
+                                            div { class: "flex items-center gap-1 min-w-0",
+                                                span { "🚫" }
+                                                Link {
+                                                    to: relay_detail_route(&url_clone),
+                                                    class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",
+                                                    {display_relay_url(&url_clone)}
+                                                }
                                             }
                                             button {
                                                 class: "px-2 py-1 bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-800 text-red-800 dark:text-red-200 rounded text-xs transition",
@@ -777,8 +799,13 @@ pub fn SettingsRelays() -> Element {
                                 rsx! {
                                     div { key: "{url_clone}", class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
                                         div { class: "flex items-center justify-between",
-                                            span { class: "font-mono text-sm text-gray-900 dark:text-white",
-                                                "🏠 {display_relay_url(&url_clone)}"
+                                            div { class: "flex items-center gap-1 min-w-0",
+                                                span { "🏠" }
+                                                Link {
+                                                    to: relay_detail_route(&url_clone),
+                                                    class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",
+                                                    {display_relay_url(&url_clone)}
+                                                }
                                             }
                                             button {
                                                 class: "px-2 py-1 bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-800 text-red-800 dark:text-red-200 rounded text-xs transition",
@@ -854,8 +881,13 @@ pub fn SettingsRelays() -> Element {
                                 rsx! {
                                     div { key: "{url_clone}", class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
                                         div { class: "flex items-center justify-between",
-                                            span { class: "font-mono text-sm text-gray-900 dark:text-white",
-                                                "📡 {display_relay_url(&url_clone)}"
+                                            div { class: "flex items-center gap-1 min-w-0",
+                                                span { "📡" }
+                                                Link {
+                                                    to: relay_detail_route(&url_clone),
+                                                    class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",
+                                                    {display_relay_url(&url_clone)}
+                                                }
                                             }
                                             button {
                                                 class: "px-2 py-1 bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-800 text-red-800 dark:text-red-200 rounded text-xs transition",
@@ -933,7 +965,9 @@ pub fn SettingsRelays() -> Element {
                                                     _ => "w-3 h-3 rounded-full bg-gray-400",
                                                 },
                                             }
-                                            span { class: "font-mono text-sm text-gray-900 dark:text-white",
+                                            Link {
+                                                to: relay_detail_route(&relay_info.url),
+                                                class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",
                                                 {display_relay_url(&relay_info.url)}
                                             }
                                         }

@@ -1,19 +1,34 @@
 use crate::components::{ClientInitializing, CommentComposer, PollCard, ThreadedComment};
+use crate::stores::subscription_manager;
 use crate::stores::nostr_client;
 use crate::utils::build_thread_tree;
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
 use dioxus::prelude::*;
-use dioxus_core::use_drop;
 use nostr_sdk::{Event as NostrEvent, EventId, Filter, Kind, RelayPoolNotification, SubscriptionId, Timestamp};
+use std::collections::HashMap;
 use std::time::Duration;
+
+fn merge_comments(existing: Vec<NostrEvent>, fetched: Vec<NostrEvent>) -> Vec<NostrEvent> {
+    let mut by_id: HashMap<EventId, NostrEvent> =
+        existing.into_iter().map(|event| (event.id, event)).collect();
+    for event in fetched {
+        by_id.insert(event.id, event);
+    }
+    let mut merged: Vec<NostrEvent> = by_id.into_values().collect();
+    merged.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+    merged
+}
+
 #[component]
 pub fn PollView(noteid: String) -> Element {
     let mut poll_event = use_signal(|| None::<NostrEvent>);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
     let mut comments = use_signal(Vec::<NostrEvent>::new);
+    let mut comments_error = use_signal(|| None::<String>);
     let mut loading_comments = use_signal(|| false);
     let mut show_comment_composer = use_signal(|| false);
+    let mut comments_refresh = use_signal(|| 0u64);
     let mut comment_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
 
     use_effect(move || {
@@ -50,6 +65,7 @@ pub fn PollView(noteid: String) -> Element {
     });
 
     use_effect(move || {
+        let _ = *comments_refresh.read();
         let event = poll_event.read().clone();
         let Some(event) = event else {
             return;
@@ -58,22 +74,24 @@ pub fn PollView(noteid: String) -> Element {
         let event_id = event.id;
         spawn(async move {
             loading_comments.set(true);
+            comments_error.set(None);
             let subscription_handoff = Timestamp::now();
             let mut live_since = subscription_handoff;
             let filter = Filter::new().kind(Kind::Comment).event(event_id).limit(500);
             match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
-                Ok(mut comment_events) => {
-                    live_since = comment_events
+                Ok(comment_events) => {
+                    let merged = merge_comments(comments.read().clone(), comment_events);
+                    live_since = merged
                         .iter()
                         .map(|event| event.created_at)
                         .max()
                         .unwrap_or(subscription_handoff);
-                    comment_events.sort_by(|a, b| a.created_at.cmp(&b.created_at));
                     invalidate_thread_tree_cache(&event_id);
-                    comments.set(comment_events);
+                    comments.set(merged);
                 }
                 Err(e) => {
                     log::error!("Failed to fetch poll comments: {}", e);
+                    comments_error.set(Some(format!("Failed to load comments: {}", e)));
                 }
             }
 
@@ -84,10 +102,14 @@ pub fn PollView(noteid: String) -> Element {
                     .since(live_since)
                     .limit(0);
 
-                match client.subscribe(filter, None).await {
-                    Ok(output) => {
-                        let subscription_id = output.val;
-                        comment_sub_id.set(Some(subscription_id.clone()));
+                match subscription_manager::subscribe_realtime(&client, filter, Some(600)).await {
+                    Ok(subscription_id) => {
+                        if let Some(old_sub_id) = comment_sub_id.replace(Some(subscription_id.clone())) {
+                            let client = client.clone();
+                            spawn(async move {
+                                subscription_manager::unsubscribe(&client, &old_sub_id).await;
+                            });
+                        }
 
                         spawn(async move {
                             let mut notifications = client.notifications();
@@ -117,16 +139,6 @@ pub fn PollView(noteid: String) -> Element {
             }
             loading_comments.set(false);
         });
-    });
-
-    use_drop(move || {
-        if let Some(sub_id) = comment_sub_id.peek().clone() {
-            spawn(async move {
-                if let Some(client) = nostr_client::get_client() {
-                    client.unsubscribe(&sub_id).await;
-                }
-            });
-        }
     });
 
     let current_poll_event = poll_event.read().clone();
@@ -201,7 +213,19 @@ pub fn PollView(noteid: String) -> Element {
                             let comment_vec = comments.read().clone();
                             let thread_tree = build_thread_tree(comment_vec, &event.id);
                             let poll_event_id = event.id;
-                            if thread_tree.is_empty() {
+                            if let Some(err) = comments_error.read().as_ref() {
+                                rsx! {
+                                    div { class: "flex flex-col items-center justify-center py-10 px-4 text-center",
+                                        p { class: "text-destructive font-medium", "Could not load comments" }
+                                        p { class: "text-sm text-muted-foreground mt-1 mb-4", "{err}" }
+                                        button {
+                                            class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
+                                            onclick: move |_| comments_refresh.with_mut(|value| *value = value.wrapping_add(1)),
+                                            "Retry"
+                                        }
+                                    }
+                                }
+                            } else if thread_tree.is_empty() {
                                 rsx! {
                                     div { class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
                                         p { "No comments yet" }

@@ -41,6 +41,7 @@ pub mod polls;
 pub mod privacy;
 pub mod profile;
 pub mod radio;
+pub mod relay_detail;
 pub mod recipes;
 pub mod search;
 pub mod settings;
@@ -111,6 +112,7 @@ use polls::{PollNew, PollView, Polls};
 use privacy::Privacy;
 use profile::Profile;
 use radio::{RadioHome, RadioStation, RadioStationNew};
+use relay_detail::RelayDetail;
 use recipes::{
     RecipeChef, RecipeDetail, RecipeFork, RecipeNew, RecipesAll, RecipesByTag, RecipesHome,
 };
@@ -476,6 +478,8 @@ pub enum Route {
     SettingsMuted {},
     #[route("/settings/relays")]
     SettingsRelays {},
+    #[route("/relays/:relay_id")]
+    RelayDetail { relay_id: String },
     #[route("/terms")]
     Terms {},
     #[route("/privacy")]
@@ -699,6 +703,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::SettingsBlocklist {}
         | Route::SettingsMuted {}
         | Route::SettingsRelays {} => Some(Route::Settings {}),
+        Route::RelayDetail { .. } => Some(Route::SettingsRelays {}),
     }
 }
 
@@ -1506,6 +1511,12 @@ mod tests {
         assert_eq!(
             fallback_route_for(&Route::SettingsRelays {}),
             Some(Route::Settings {})
+        );
+        assert_eq!(
+            fallback_route_for(&Route::RelayDetail {
+                relay_id: "wss%3A%2F%2Frelay.example.com".to_string(),
+            }),
+            Some(Route::SettingsRelays {})
         );
         assert_eq!(
             fallback_route_for(&Route::ShopProductDetail {

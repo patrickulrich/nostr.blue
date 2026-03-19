@@ -94,3 +94,61 @@ pub fn configured_write_relay_urls() -> Vec<RelayUrl> {
 
     relay_urls
 }
+
+pub fn encode_relay_route_id(url: &str) -> String {
+    urlencoding::encode(url).into_owned()
+}
+
+pub fn decode_relay_route_id(id: &str) -> Result<String, String> {
+    let decoded = urlencoding::decode(id)
+        .map_err(|e| format!("Invalid relay route id: {}", e))?
+        .into_owned();
+    RelayUrl::parse(&decoded)
+        .map_err(|e| format!("Invalid relay URL: {}", e))
+        .map(|url| url.to_string())
+}
+
+pub fn relay_http_url(relay_url: &str) -> Result<String, String> {
+    let mut url = Url::parse(relay_url).map_err(|e| format!("Invalid relay URL: {}", e))?;
+    match url.scheme() {
+        "wss" => url
+            .set_scheme("https")
+            .map_err(|_| "Failed to convert relay URL to HTTPS".to_string())?,
+        "ws" => url
+            .set_scheme("http")
+            .map_err(|_| "Failed to convert relay URL to HTTP".to_string())?,
+        scheme => return Err(format!("Unsupported relay scheme: {}", scheme)),
+    }
+    Ok(url.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relay_route_id_round_trips() {
+        let url = "wss://relay.example.com/path?q=1";
+        let encoded = encode_relay_route_id(url);
+        let decoded = decode_relay_route_id(&encoded).expect("route id should decode");
+        assert_eq!(decoded, url);
+    }
+
+    #[test]
+    fn relay_route_id_rejects_invalid_url() {
+        let encoded = encode_relay_route_id("not-a-relay-url");
+        assert!(decode_relay_route_id(&encoded).is_err());
+    }
+
+    #[test]
+    fn relay_http_url_converts_secure_ws() {
+        let http = relay_http_url("wss://relay.example.com/path?q=1").expect("should convert");
+        assert_eq!(http, "https://relay.example.com/path?q=1");
+    }
+
+    #[test]
+    fn relay_http_url_converts_insecure_ws() {
+        let http = relay_http_url("ws://relay.example.com:8080").expect("should convert");
+        assert_eq!(http, "http://relay.example.com:8080/");
+    }
+}
