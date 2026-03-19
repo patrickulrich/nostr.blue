@@ -26,6 +26,14 @@ fn truncate_guid(guid: &str) -> String {
         guid.to_string()
     }
 }
+
+fn extract_podcast_feed_guid(contents: &[(ExternalContentId, Option<String>)]) -> Option<String> {
+    contents.iter().find_map(|(content, _)| match content {
+        ExternalContentId::PodcastFeed(guid) => Some(guid.clone()),
+        _ => None,
+    })
+}
+
 /// Generic external content card dispatcher
 /// Routes to the appropriate card based on content type
 #[component]
@@ -106,27 +114,33 @@ pub fn ExternalContentList(
     if contents.is_empty() {
         return rsx! {};
     }
-    let (podcasts, other): (Vec<_>, Vec<_>) = contents.into_iter().partition(|(content, _)| {
-        matches!(
-            content,
-            ExternalContentId::PodcastFeed(_) | ExternalContentId::PodcastEpisode(_)
-        )
-    });
+    let default_podcast_guid = extract_podcast_feed_guid(&contents);
+    let (podcasts, other): (Vec<_>, Vec<_>) = contents.into_iter().enumerate().partition(
+        |(_, (content, _))| {
+            matches!(
+                content,
+                ExternalContentId::PodcastFeed(_) | ExternalContentId::PodcastEpisode(_)
+            )
+        },
+    );
     rsx! {
         div { class: "flex flex-col gap-2 mt-2",
-            for (content , hint) in podcasts.iter() {
+            for (index, (content, _hint)) in podcasts.iter() {
                 ExternalContentCard {
-                    key: "{nip73::get_raw_identifier(content)}:{hint.clone().unwrap_or_default()}",
+                    key: "{nip73::get_raw_identifier(content)}:{index}",
                     content: content.clone(),
                     compact: false,
-                    podcast_guid: hint.clone(),
+                    podcast_guid: match content {
+                        ExternalContentId::PodcastEpisode(_) => default_podcast_guid.clone(),
+                        _ => None,
+                    },
                 }
             }
             if !other.is_empty() {
                 div { class: "flex flex-wrap gap-2",
-                    for (content , _hint) in other.iter() {
+                    for (index, (content, _hint)) in other.iter() {
                         ExternalContentCard {
-                            key: "{nip73::get_raw_identifier(content)}",
+                            key: "{nip73::get_raw_identifier(content)}:{index}",
                             content: content.clone(),
                             compact,
                             podcast_guid: None,
@@ -137,6 +151,68 @@ pub fn ExternalContentList(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::extract_podcast_feed_guid;
+    use nostr::nips::nip73::ExternalContentId;
+
+    #[test]
+    fn extract_podcast_feed_guid_returns_first_feed_guid() {
+        let contents = vec![
+            (
+                ExternalContentId::PodcastEpisode("episode-guid".to_string()),
+                Some("https://fountain.fm/episode/example".to_string()),
+            ),
+            (
+                ExternalContentId::PodcastFeed("feed-guid".to_string()),
+                Some("https://example.com/show".to_string()),
+            ),
+            (
+                ExternalContentId::PodcastFeed("second-feed-guid".to_string()),
+                None,
+            ),
+        ];
+
+        assert_eq!(
+            extract_podcast_feed_guid(&contents),
+            Some("feed-guid".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_podcast_feed_guid_returns_none_without_feed() {
+        let contents = vec![
+            (
+                ExternalContentId::PodcastEpisode("episode-guid".to_string()),
+                Some("https://fountain.fm/episode/example".to_string()),
+            ),
+            (ExternalContentId::Book("9780765382030".to_string()), None),
+        ];
+
+        assert_eq!(extract_podcast_feed_guid(&contents), None);
+    }
+
+    #[test]
+    fn extract_podcast_feed_guid_ignores_hint_urls() {
+        let contents = vec![
+            (
+                ExternalContentId::PodcastEpisode("episode-guid".to_string()),
+                Some("https://wrong.example/podcast-guid".to_string()),
+            ),
+            (
+                ExternalContentId::PodcastFeed("actual-feed-guid".to_string()),
+                Some("https://fountain.fm/show/example".to_string()),
+            ),
+        ];
+
+        assert_eq!(
+            extract_podcast_feed_guid(&contents),
+            Some("actual-feed-guid".to_string())
+        );
+    }
+}
+
 #[derive(Props, Clone, PartialEq)]
 struct BookCardProps {
     isbn: String,
