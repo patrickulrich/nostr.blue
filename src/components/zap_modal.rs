@@ -55,11 +55,16 @@ pub struct ZapModalProps {
     pub lud16: Option<String>,
     pub lud06: Option<String>,
     pub event_id: Option<String>,
+    #[props(default)]
+    pub initial_amount: Option<u64>,
+    #[props(default)]
+    pub relay_hints: Option<Vec<String>>,
     pub on_close: EventHandler<()>,
 }
 #[component]
 pub fn ZapModal(props: ZapModalProps) -> Element {
-    let mut zap_amount = use_signal(|| 21u64);
+    let initial_amount = props.initial_amount.unwrap_or(21);
+    let mut zap_amount = use_signal(|| initial_amount);
     let mut custom_amount = use_signal(String::new);
     let mut zap_message = use_signal(String::new);
     let mut loading = use_signal(|| false);
@@ -101,6 +106,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
         let amount = *zap_amount.read();
         let message = zap_message.read().clone();
         let event_id_str = props.event_id.clone();
+        let relay_hints = props.relay_hints.clone();
         let toast_api = toast;
         loading.set(true);
         error_msg.set(None);
@@ -137,7 +143,12 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
             } else {
                 None
             };
-            let relays = if let Some(client) = get_client() {
+            let relays = if let Some(relay_hints) = relay_hints {
+                relay_hints
+                    .iter()
+                    .filter_map(|relay| RelayUrl::parse(relay).ok())
+                    .collect::<Vec<RelayUrl>>()
+            } else if let Some(client) = get_client() {
                 client
                     .relays()
                     .await

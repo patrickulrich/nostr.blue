@@ -4,6 +4,7 @@ mod sidebar_icons;
 use nav_link::NavLink;
 use sidebar_icons::render_sidebar_icon;
 pub mod about;
+pub mod about_donate;
 pub mod ai_chat;
 pub mod articles;
 pub mod badges;
@@ -53,7 +54,9 @@ pub mod video_new_portrait;
 pub mod voice;
 pub mod webbookmarks;
 pub mod wiki;
+pub mod zapgoals;
 use about::About;
+use about_donate::AboutDonate;
 use ai_chat::AIChat;
 use articles::{
     ArticleDetail, ArticleNew, Articles, PublicationDetail, PublicationNew, PublicationSearch,
@@ -126,6 +129,7 @@ use video_new_portrait::VideoNewPortrait;
 use voice::{VoiceMessageDetail, VoiceMessageNew, VoiceMessages};
 use webbookmarks::WebBookmarks;
 use wiki::{WikiAuthor, WikiDetail, WikiHome, WikiNew};
+use zapgoals::{ZapGoalsHome, ZapGoalsNew};
 /// App routes
 #[derive(Clone, Routable, Debug, PartialEq)]
 #[rustfmt::skip]
@@ -480,6 +484,12 @@ pub enum Route {
     Cookies {},
     #[route("/about")]
     About {},
+    #[route("/about/donate")]
+    AboutDonate {},
+    #[route("/zapgoals")]
+    ZapGoalsHome {},
+    #[route("/zapgoals/new")]
+    ZapGoalsNew {},
 }
 
 #[cfg_attr(not(feature = "mobile"), allow(dead_code))]
@@ -567,6 +577,9 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::Privacy {}
         | Route::Cookies {}
         | Route::About {}
+        | Route::AboutDonate {}
+        | Route::ZapGoalsHome {}
+        | Route::ZapGoalsNew {}
         | Route::Nip19Handler { .. } => Some(Route::Home {
             list: String::new(),
         }),
