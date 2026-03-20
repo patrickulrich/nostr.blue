@@ -12,6 +12,8 @@ use std::sync::{
 };
 use std::time::Duration;
 
+const LIVE_UPDATES_MAX_RETRIES: u32 = 4;
+
 fn merge_comments(existing: Vec<NostrEvent>, fetched: Vec<NostrEvent>) -> Vec<NostrEvent> {
     let mut by_id: HashMap<EventId, NostrEvent> =
         existing.into_iter().map(|event| (event.id, event)).collect();
@@ -30,9 +32,11 @@ pub fn PollView(noteid: String) -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut comments = use_signal(Vec::<NostrEvent>::new);
     let mut comments_error = use_signal(|| None::<String>);
+    let mut live_updates_warning = use_signal(|| None::<String>);
     let mut loading_comments = use_signal(|| false);
     let mut show_comment_composer = use_signal(|| false);
     let mut comments_refresh = use_signal(|| 0u64);
+    let mut live_updates_retry_count = use_signal(|| 0u32);
     let mut comment_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
     let comments_subscription_generation = use_hook(|| Arc::new(AtomicU64::new(0)));
 
@@ -82,6 +86,7 @@ pub fn PollView(noteid: String) -> Element {
         spawn(async move {
             loading_comments.set(true);
             comments_error.set(None);
+            live_updates_warning.set(None);
             let subscription_handoff = Timestamp::now();
             let mut live_since = subscription_handoff;
             let filter = Filter::new().kind(Kind::Comment).event(event_id).limit(500);
@@ -154,15 +159,42 @@ pub fn PollView(noteid: String) -> Element {
                                             comments.read().iter().any(|e| e.id == event.id);
                                         if !already_exists {
                                             invalidate_thread_tree_cache(&event_id);
+                                            comments_error.set(None);
+                                            live_updates_warning.set(None);
                                             comments.write().push((*event).clone());
                                         }
                                     }
                                 }
                             }
                         });
+                        live_updates_retry_count.set(0);
+                        live_updates_warning.set(None);
                     }
                     Err(e) => {
                         log::error!("Failed to subscribe for poll comments: {}", e);
+                        let retry_count = *live_updates_retry_count.read();
+                        let next_retry = retry_count.saturating_add(1);
+                        let retry_delay_secs = 2u64.saturating_pow(retry_count);
+                        if next_retry <= LIVE_UPDATES_MAX_RETRIES {
+                            live_updates_retry_count.set(next_retry);
+                            live_updates_warning.set(Some(format!(
+                                "Live updates unavailable. New comments may not appear automatically. Retrying in {}s, or use Retry. ({})",
+                                retry_delay_secs, e
+                            )));
+                            let generation_counter = generation_counter.clone();
+                            spawn(async move {
+                                tokio::time::sleep(Duration::from_secs(retry_delay_secs)).await;
+                                if generation_counter.load(Ordering::SeqCst) == generation {
+                                    comments_refresh
+                                        .with_mut(|value| *value = value.wrapping_add(1));
+                                }
+                            });
+                        } else {
+                            live_updates_warning.set(Some(format!(
+                                "Live updates unavailable. New comments may not appear automatically. Use Retry to try again. ({})",
+                                e
+                            )));
+                        }
                     }
                 }
             }
@@ -233,6 +265,11 @@ pub fn PollView(noteid: String) -> Element {
                                 span { "Add Comment" }
                             }
                         }
+                        if let Some(warning) = live_updates_warning.read().as_ref() {
+                            div { class: "mb-4 rounded-lg border border-yellow-300 bg-yellow-50 dark:bg-yellow-950/30 dark:border-yellow-800 p-3 text-sm text-yellow-800 dark:text-yellow-200",
+                                "{warning}"
+                            }
+                        }
                         if *loading_comments.read() {
                             div { class: "flex items-center justify-center py-10",
                                 div { class: "text-center",
@@ -275,6 +312,7 @@ pub fn PollView(noteid: String) -> Element {
                                                     let already_exists = comments.read().iter().any(|e| e.id == reply_event.id);
                                                     if !already_exists {
                                                         invalidate_thread_tree_cache(&poll_event_id);
+                                                        comments_error.set(None);
                                                         comments.write().push(reply_event);
                                                     }
                                                 },
@@ -313,6 +351,7 @@ pub fn PollView(noteid: String) -> Element {
                                         })
                                         .unwrap_or(event.id);
                                     invalidate_thread_tree_cache(&root_event_id);
+                                    comments_error.set(None);
                                     comments.write().push(comment_event);
                                 }
                             },

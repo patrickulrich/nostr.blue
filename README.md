@@ -246,7 +246,7 @@ dx serve --platform desktop --no-default-features --features desktop
 | [NIP-07](https://github.com/nostr-protocol/nips/blob/master/07.md) | Browser extension signing | ✅ |
 | [NIP-09](https://github.com/nostr-protocol/nips/blob/master/09.md) | Event Deletion | ✅ |
 | [NIP-10](https://github.com/nostr-protocol/nips/blob/master/10.md) | Text Notes and Threads | ✅ |
-| [NIP-11](https://github.com/nostr-protocol/nips/blob/master/11.md) | Relay Information Document | ❌ |
+| [NIP-11](https://github.com/nostr-protocol/nips/blob/master/11.md) | Relay Information Document | ✅ |
 | [NIP-13](https://github.com/nostr-protocol/nips/blob/master/13.md) | Proof of Work | ❌ |
 | [NIP-14](https://github.com/nostr-protocol/nips/blob/master/14.md) | Subject tag | ❌ |
 | [NIP-15](https://github.com/nostr-protocol/nips/blob/master/15.md) | Nostr Marketplace | ❌ |

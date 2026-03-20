@@ -51,6 +51,28 @@ fn is_webln_available() -> bool {
 
 const PRESET_AMOUNTS: [u64; 6] = [21, 100, 500, 1000, 5000, 10000];
 
+async fn collect_zap_relays(relay_hints: Option<&Vec<String>>) -> Vec<RelayUrl> {
+    let mut relays = relay_hints
+        .into_iter()
+        .flat_map(|relay_hints| relay_hints.iter())
+        .filter_map(|relay| RelayUrl::parse(relay).ok())
+        .collect::<Vec<_>>();
+
+    if let Some(client) = get_client() {
+        for relay in client.relays().await.into_keys() {
+            if relays.iter().all(|existing| existing != &relay) {
+                relays.push(relay);
+            }
+            if relays.len() >= 5 {
+                break;
+            }
+        }
+    }
+
+    relays.truncate(5);
+    relays
+}
+
 #[derive(Props, Clone, PartialEq)]
 pub struct ZapModalProps {
     pub recipient_pubkey: String,
@@ -150,31 +172,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
             } else {
                 None
             };
-            let relays = {
-                let hinted_relays = relay_hints
-                    .as_ref()
-                    .map(|relay_hints| {
-                        relay_hints
-                            .iter()
-                            .filter_map(|relay| RelayUrl::parse(relay).ok())
-                            .take(5)
-                            .collect::<Vec<RelayUrl>>()
-                    })
-                    .filter(|relays| !relays.is_empty());
-
-                if let Some(relays) = hinted_relays {
-                    relays
-                } else if let Some(client) = get_client() {
-                    client
-                        .relays()
-                        .await
-                        .into_keys()
-                        .take(5)
-                        .collect::<Vec<RelayUrl>>()
-                } else {
-                    vec![]
-                }
-            };
+            let relays = collect_zap_relays(relay_hints.as_ref()).await;
             if relays.is_empty() {
                 error_msg.set(Some("No relays available".to_string()));
                 loading.set(false);

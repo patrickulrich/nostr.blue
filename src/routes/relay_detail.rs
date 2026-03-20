@@ -1,12 +1,14 @@
 use crate::platform::http::http_client;
 use crate::routes::Route;
 use crate::stores::{nostr_client, relay};
+use crate::utils::is_valid_http_url;
 use crate::utils::relay::{decode_relay_route_id, relay_http_url};
 use crate::utils::format_bytes;
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip11::{FeeSchedule, Limitation, RelayInformationDocument, RetentionKind};
 use nostr_sdk::prelude::JsonUtil;
 use nostr_sdk::PublicKey;
+use std::collections::HashSet;
 
 #[derive(Clone, Debug, PartialEq)]
 struct RelayDetailData {
@@ -15,6 +17,10 @@ struct RelayDetailData {
     info: Option<RelayInformationDocument>,
     stats: Option<nostr_client::RelayDisplayInfo>,
     metadata_error: Option<String>,
+}
+
+fn normalize_relay_url(url: &str) -> String {
+    url.trim_end_matches('/').to_string()
 }
 
 async fn fetch_nip11_document(url: &str) -> Result<RelayInformationDocument, String> {
@@ -174,15 +180,43 @@ pub fn RelayDetail(relay_id: String) -> Element {
         async move {
             let relay_url = decode_relay_route_id(&relay_id)?;
             let http_url = relay_http_url(&relay_url)?;
-            let stats = nostr_client::get_relay_display_info()
-                .await
-                .into_iter()
-                .find(|info| info.url == relay_url);
+            let normalized_relay_url = normalize_relay_url(&relay_url);
+            let display_info = nostr_client::get_relay_display_info().await;
+            let stats = display_info
+                .iter()
+                .find(|info| normalize_relay_url(&info.url) == normalized_relay_url)
+                .cloned();
+            let mut known_relays = HashSet::new();
+            for info in &display_info {
+                known_relays.insert(normalize_relay_url(&info.url));
+            }
+            if let Some(metadata) = relay::USER_RELAY_METADATA.read().as_ref() {
+                for relay in &metadata.relays {
+                    known_relays.insert(normalize_relay_url(&relay.url));
+                }
+                for relay in &metadata.dm_relays {
+                    known_relays.insert(normalize_relay_url(relay));
+                }
+            }
+            for relay_url in relay::LOCAL_RELAYS.read().iter() {
+                known_relays.insert(normalize_relay_url(relay_url));
+            }
+            for relay_url in relay::SEARCH_RELAYS.read().iter() {
+                known_relays.insert(normalize_relay_url(relay_url));
+            }
+            for relay_url in relay::BROADCAST_RELAYS.read().iter() {
+                known_relays.insert(normalize_relay_url(relay_url));
+            }
+            for relay_url in relay::BLOCKED_RELAYS.read().iter() {
+                known_relays.insert(normalize_relay_url(relay_url));
+            }
             let (info, metadata_error) = if relay::is_relay_blocked(&relay_url) {
                 (
                     None,
                     Some("Relay metadata fetch skipped because this relay is blocked".to_string()),
                 )
+            } else if !known_relays.contains(&normalized_relay_url) {
+                return Err(format!("Unknown relay: {}", relay_url));
             } else {
                 match fetch_nip11_document(&http_url).await {
                     Ok(info) => (Some(info), None),
@@ -303,12 +337,16 @@ pub fn RelayDetail(relay_id: String) -> Element {
                                         if let Some(software) = info.as_ref().and_then(|info| info.software.clone()) {
                                             div {
                                                 h3 { class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-2", "Software" }
-                                                a {
-                                                    href: "{software}",
-                                                    target: "_blank",
-                                                    rel: "noopener noreferrer",
-                                                    class: "text-sm text-blue-600 dark:text-blue-400 hover:underline break-all",
-                                                    "{software}"
+                                                if is_valid_http_url(&software) {
+                                                    a {
+                                                        href: "{software}",
+                                                        target: "_blank",
+                                                        rel: "noopener noreferrer",
+                                                        class: "text-sm text-blue-600 dark:text-blue-400 hover:underline break-all",
+                                                        "{software}"
+                                                    }
+                                                } else {
+                                                    p { class: "text-sm text-gray-700 dark:text-gray-300 break-all", "{software}" }
                                                 }
                                             }
                                         }
@@ -465,24 +503,32 @@ pub fn RelayDetail(relay_id: String) -> Element {
                                             if let Some(posting_policy) = info.posting_policy.clone() {
                                                 div {
                                                     h3 { class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-2", "Posting Policy" }
-                                                    a {
-                                                        href: "{posting_policy}",
-                                                        target: "_blank",
-                                                        rel: "noopener noreferrer",
-                                                        class: "text-sm text-blue-600 dark:text-blue-400 hover:underline break-all",
-                                                        "{posting_policy}"
+                                                    if is_valid_http_url(&posting_policy) {
+                                                        a {
+                                                            href: "{posting_policy}",
+                                                            target: "_blank",
+                                                            rel: "noopener noreferrer",
+                                                            class: "text-sm text-blue-600 dark:text-blue-400 hover:underline break-all",
+                                                            "{posting_policy}"
+                                                        }
+                                                    } else {
+                                                        p { class: "text-sm text-gray-700 dark:text-gray-300 break-all", "{posting_policy}" }
                                                     }
                                                 }
                                             }
                                             if let Some(payments_url) = info.payments_url.clone() {
                                                 div {
                                                     h3 { class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-2", "Payments URL" }
-                                                    a {
-                                                        href: "{payments_url}",
-                                                        target: "_blank",
-                                                        rel: "noopener noreferrer",
-                                                        class: "text-sm text-blue-600 dark:text-blue-400 hover:underline break-all",
-                                                        "{payments_url}"
+                                                    if is_valid_http_url(&payments_url) {
+                                                        a {
+                                                            href: "{payments_url}",
+                                                            target: "_blank",
+                                                            rel: "noopener noreferrer",
+                                                            class: "text-sm text-blue-600 dark:text-blue-400 hover:underline break-all",
+                                                            "{payments_url}"
+                                                        }
+                                                    } else {
+                                                        p { class: "text-sm text-gray-700 dark:text-gray-300 break-all", "{payments_url}" }
                                                     }
                                                 }
                                             }

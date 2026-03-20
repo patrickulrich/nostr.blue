@@ -88,10 +88,26 @@ verify_gradle_value() {
 
 write_android_local_properties() {
     local local_properties="$DX_ANDROID/local.properties"
+    local sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-${HOME}/Android/Sdk}}"
+    local ndk_dir=""
+
+    if [ -n "${ANDROID_NDK_HOME:-}" ]; then
+        case "$ANDROID_NDK_HOME" in
+            "$sdk_root"/*) ndk_dir="$ANDROID_NDK_HOME" ;;
+        esac
+    fi
+    if [ -z "$ndk_dir" ]; then
+        if [ -d "$sdk_root/ndk" ]; then
+            ndk_dir="$ANDROID_NDK_HOME"
+        else
+            ndk_dir="$sdk_root/ndk"
+        fi
+    fi
+
     mkdir -p "$DX_ANDROID"
     {
-        printf 'sdk.dir=%s\n' "$(printf '%s' "$ANDROID_HOME" | sed 's/\\/\\\\/g')"
-        printf 'ndk.dir=%s\n' "$(printf '%s' "$ANDROID_NDK_HOME" | sed 's/\\/\\\\/g')"
+        printf 'sdk.dir=%s\n' "$(printf '%s' "$sdk_root" | sed 's/\\/\\\\/g')"
+        printf 'ndk.dir=%s\n' "$(printf '%s' "$ndk_dir" | sed 's/\\/\\\\/g')"
     } >"$local_properties"
     echo "Wrote Android SDK config: $local_properties"
 }
@@ -220,7 +236,7 @@ build_dx_android() {
         --features mobile
     )
 
-    if [ "$ANDROID_RUST_PROFILE" = "release" ] || [ "${DX_RELEASE:-}" = "1" ] || [ "${DX_RELEASE:-}" = "true" ]; then
+    if [ "$DX_BUILD_PROFILE" = "release" ]; then
         dx_args+=(--release)
     fi
 
@@ -276,7 +292,20 @@ ANDROID_BUILD_MODE="${ANDROID_BUILD_MODE:-debug}"
 ANDROID_GRADLE_VARIANT="${ANDROID_GRADLE_VARIANT:-$ANDROID_BUILD_MODE}"
 ANDROID_PACKAGE_FORMAT="${ANDROID_PACKAGE_FORMAT:-apk}"
 ANDROID_RUST_PROFILE="${ANDROID_RUST_PROFILE:-debug}"
-DX_BUILD_PROFILE="$ANDROID_RUST_PROFILE"
+case "$ANDROID_RUST_PROFILE" in
+    debug|release)
+        DX_BUILD_PROFILE="$ANDROID_RUST_PROFILE"
+        ;;
+    *)
+        echo "WARNING: Unsupported ANDROID_RUST_PROFILE '$ANDROID_RUST_PROFILE'; defaulting DX build profile to debug" >&2
+        DX_BUILD_PROFILE="debug"
+        ;;
+esac
+case "${DX_RELEASE:-}" in
+    1|true)
+        DX_BUILD_PROFILE="release"
+        ;;
+esac
 DX_ANDROID="$PROJECT_ROOT/target/dx/nostrblue/$DX_BUILD_PROFILE/android/app"
 ANDROID_RES_SRC="$PROJECT_ROOT/android/res"
 ANDROID_KOTLIN_SRC="$PROJECT_ROOT/android/kotlin"
@@ -313,7 +342,7 @@ echo "Package format: $ANDROID_PACKAGE_FORMAT"
 echo "NDK: $ANDROID_NDK_HOME"
 echo "Version: $CARGO_VERSION ($ANDROID_VERSION_CODE)"
 echo "Gradle variant: $ANDROID_GRADLE_VARIANT"
-echo "Rust profile: $ANDROID_RUST_PROFILE"
+echo "Rust profile: $DX_BUILD_PROFILE"
 echo "Gradle home: $GRADLE_USER_HOME"
 echo "Android resources: $ANDROID_RES_SRC"
 
