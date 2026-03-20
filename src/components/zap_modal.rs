@@ -61,9 +61,13 @@ async fn collect_zap_relays(relay_hints: Option<&Vec<String>>) -> Vec<RelayUrl> 
         if relays.iter().all(|existing| existing != &relay) {
             relays.push(relay);
         }
+        if relays.len() >= 5 {
+            break;
+        }
     }
 
-    if let Some(client) = get_client() {
+    if relays.len() < 5 {
+        if let Some(client) = get_client() {
         for relay in client.relays().await.into_keys() {
             if relays.iter().all(|existing| existing != &relay) {
                 relays.push(relay);
@@ -71,6 +75,7 @@ async fn collect_zap_relays(relay_hints: Option<&Vec<String>>) -> Vec<RelayUrl> 
             if relays.len() >= 5 {
                 break;
             }
+        }
         }
     }
 
@@ -111,6 +116,18 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
     let mut nutzap_mint = use_signal(|| None::<cashu::NutzapMint>);
     let mut checking_nutzap = use_signal(|| false);
     let mut nutzap_request_version = use_signal(|| 0u32);
+    {
+        let initial_amount_prop = props.initial_amount;
+        use_effect(use_reactive!(|initial_amount_prop| {
+            let initial_amount = initial_amount_prop.unwrap_or(21);
+            let initial_custom_amount = initial_amount_prop
+                .filter(|amount| !PRESET_AMOUNTS.contains(amount))
+                .map(|amount| amount.to_string())
+                .unwrap_or_default();
+            zap_amount.set(initial_amount);
+            custom_amount.set(initial_custom_amount);
+        }));
+    }
     {
         let recipient_pubkey = props.recipient_pubkey.clone();
         use_effect(use_reactive!(|recipient_pubkey| {

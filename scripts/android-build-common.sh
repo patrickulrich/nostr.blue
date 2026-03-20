@@ -377,9 +377,19 @@ find "$DX_ANDROID" \
 echo ""
 echo "--- Step 1a: Pre-copy Android resources ---"
 mkdir -p "$DX_ANDROID/app/src/main/res/xml"
-cp "$PROJECT_ROOT/android/res/xml/file_paths.xml" "$DX_ANDROID/app/src/main/res/xml/" 2>/dev/null && echo "Pre-copied file_paths.xml" || echo "Directory not yet created (will be handled post-build)"
+if cp "$PROJECT_ROOT/android/res/xml/file_paths.xml" "$DX_ANDROID/app/src/main/res/xml/"; then
+    echo "Pre-copied file_paths.xml"
+else
+    echo "ERROR: Failed to pre-copy file_paths.xml into $DX_ANDROID/app/src/main/res/xml/" >&2
+    exit 1
+fi
 mkdir -p "$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main"
-cp "$ANDROID_KOTLIN_SRC/dev/dioxus/main/"*.kt "$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main/" 2>/dev/null && echo "Pre-copied Android Kotlin sources" || echo "Kotlin source directory not yet created (will be handled post-build)"
+if cp "$ANDROID_KOTLIN_SRC/dev/dioxus/main/"*.kt "$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main/"; then
+    echo "Pre-copied Android Kotlin sources"
+else
+    echo "ERROR: Failed to pre-copy Android Kotlin sources into $DX_ANDROID/app/src/main/kotlin/dev/dioxus/main/" >&2
+    exit 1
+fi
 write_android_local_properties
 
 build_dx_android

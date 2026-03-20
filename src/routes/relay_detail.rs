@@ -411,9 +411,13 @@ pub fn RelayDetail(relay_id: String) -> Element {
                                             div { class: "rounded-lg bg-gray-50 dark:bg-gray-700 p-3",
                                                 p { class: "font-medium text-gray-900 dark:text-white", "Flags" }
                                                 p { class: "text-gray-700 dark:text-gray-300 mt-1",
-                                                    if stats.has_read { "R " }
-                                                    if stats.has_write { "W " }
-                                                    if stats.is_gossip { "G" }
+                                                    if stats.has_read || stats.has_write || stats.is_gossip {
+                                                        if stats.has_read { "R " }
+                                                        if stats.has_write { "W " }
+                                                        if stats.is_gossip { "G" }
+                                                    } else {
+                                                        "-"
+                                                    }
                                                 }
                                             }
                                             div { class: "rounded-lg bg-gray-50 dark:bg-gray-700 p-3",
