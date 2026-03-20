@@ -396,7 +396,12 @@ build_dx_android
 
 echo ""
 echo "--- Step 2b: Clean non-Android files ---"
-find "$DX_ANDROID" -name "CLAUDE.md" -type f -delete 2>/dev/null && echo "Cleaned CLAUDE.md files" || echo "No CLAUDE.md files to clean"
+removed_claude_count=$(find "$DX_ANDROID" -name "CLAUDE.md" -type f -print -delete 2>/dev/null | wc -l | tr -d '[:space:]')
+if [ "$removed_claude_count" -gt 0 ]; then
+    echo "Cleaned CLAUDE.md files"
+else
+    echo "No CLAUDE.md files to clean"
+fi
 
 echo ""
 echo "--- Step 2b.i: Normalize Android metadata ---"
@@ -583,7 +588,12 @@ require_files \
 echo ""
 echo "--- Step 5: Run Gradle packaging ---"
 cd "$DX_ANDROID"
-./gradlew "$FINAL_GRADLE_TASK"
+GRADLE_WRAPPER="$DX_ANDROID/gradlew"
+if [ ! -f "$GRADLE_WRAPPER" ] || [ ! -x "$GRADLE_WRAPPER" ]; then
+    echo "ERROR: Gradle wrapper missing or not executable at $GRADLE_WRAPPER; cannot run task $FINAL_GRADLE_TASK" >&2
+    exit 1
+fi
+"$GRADLE_WRAPPER" "$FINAL_GRADLE_TASK"
 
 echo ""
 echo "--- Step 6: Copy $ARTIFACT_LABEL ---"

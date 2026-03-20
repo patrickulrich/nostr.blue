@@ -1,14 +1,28 @@
-use crate::platform::http::http_client;
 use crate::routes::Route;
 use crate::stores::{nostr_client, relay};
-use crate::utils::is_valid_http_url;
 use crate::utils::relay::{decode_relay_route_id, relay_http_url};
 use crate::utils::format_bytes;
+use crate::utils::is_valid_http_url;
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip11::{FeeSchedule, Limitation, RelayInformationDocument, RetentionKind};
 use nostr_sdk::prelude::JsonUtil;
 use nostr_sdk::PublicKey;
 use std::collections::HashSet;
+
+#[cfg(not(feature = "web"))]
+use crate::platform::http::http_client;
+#[cfg(not(feature = "web"))]
+use futures::StreamExt;
+#[cfg(feature = "web")]
+use js_sys::Uint8Array;
+#[cfg(feature = "web")]
+use wasm_bindgen::JsCast;
+#[cfg(feature = "web")]
+use wasm_bindgen_futures::JsFuture;
+#[cfg(feature = "web")]
+use web_sys::{Request, RequestInit, RequestMode, RequestRedirect, Response};
+
+const MAX_NIP11_BYTES: usize = 1_048_576;
 
 #[derive(Clone, Debug, PartialEq)]
 struct RelayDetailData {
@@ -24,50 +38,105 @@ fn normalize_relay_url(url: &str) -> String {
 }
 
 async fn fetch_nip11_document(url: &str) -> Result<RelayInformationDocument, String> {
-    #[cfg(feature = "web")]
-    let response = {
-        use futures::FutureExt;
+    let body = fetch_nip11_body(url).await?;
+    RelayInformationDocument::from_json(&body)
+        .map_err(|e| format!("Failed to parse relay metadata: {}", e))
+}
 
-        let request = http_client()
-            .map_err(|e| format!("HTTP client init failed: {}", e))?
-            .get(url)
-            .header("Accept", "application/nostr+json")
-            .send()
-            .fuse();
-        let timeout = gloo_timers::future::TimeoutFuture::new(15_000).fuse();
-        futures::pin_mut!(request, timeout);
-        futures::select! {
-            resp = request => resp,
-            _ = timeout => return Err("Request timeout".to_string()),
-        }
-    };
+#[cfg(feature = "web")]
+async fn fetch_nip11_body(url: &str) -> Result<String, String> {
+    use futures::FutureExt;
 
-    #[cfg(not(feature = "web"))]
+    let opts = RequestInit::new();
+    opts.set_method("GET");
+    opts.set_mode(RequestMode::Cors);
+    opts.set_redirect(RequestRedirect::Error);
+
+    let request = Request::new_with_str_and_init(url, &opts)
+        .map_err(|e| format!("Failed to create relay metadata request: {:?}", e))?;
+    request
+        .headers()
+        .set("Accept", "application/nostr+json")
+        .map_err(|e| format!("Failed to set relay metadata headers: {:?}", e))?;
+
+    let window = web_sys::window().ok_or("No window object")?;
+    let request = JsFuture::from(window.fetch_with_request(&request)).fuse();
+    let timeout = gloo_timers::future::TimeoutFuture::new(15_000).fuse();
+    futures::pin_mut!(request, timeout);
+    let response = futures::select! {
+        resp = request => resp,
+        _ = timeout => return Err("Request timeout".to_string()),
+    }
+    .map_err(|e| format!("Failed to fetch relay metadata: {:?}", e))?;
+
+    let response: Response = response
+        .dyn_into()
+        .map_err(|_| "Failed to cast relay metadata response".to_string())?;
+    if !response.ok() {
+        return Err(format!(
+            "Relay metadata request failed: {}",
+            response.status()
+        ));
+    }
+
+    let body = JsFuture::from(
+        response
+            .array_buffer()
+            .map_err(|e| format!("Failed to read relay metadata body: {:?}", e))?,
+    )
+    .await
+    .map_err(|e| format!("Failed to read relay metadata body: {:?}", e))?;
+    let bytes = Uint8Array::new(&body).to_vec();
+    if bytes.len() > MAX_NIP11_BYTES {
+        return Err(format!(
+            "Relay metadata exceeds {} bytes",
+            MAX_NIP11_BYTES
+        ));
+    }
+
+    String::from_utf8(bytes)
+        .map_err(|e| format!("Failed to decode relay metadata as UTF-8: {}", e))
+}
+
+#[cfg(not(feature = "web"))]
+async fn fetch_nip11_body(url: &str) -> Result<String, String> {
     let response = http_client()
         .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(url)
         .header("Accept", "application/nostr+json")
         .send()
-        .await;
-
-    let response = response.map_err(|e| {
-        if e.is_timeout() {
-            "Request timeout".to_string()
-        } else {
-            format!("Failed to fetch relay metadata: {}", e)
-        }
-    })?;
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                "Request timeout".to_string()
+            } else {
+                format!("Failed to fetch relay metadata: {}", e)
+            }
+        })?;
 
     if !response.status().is_success() {
         return Err(format!("Relay metadata request failed: {}", response.status()));
     }
 
-    let body = response
-        .text()
-        .await
-        .map_err(|e| format!("Failed to read relay metadata: {}", e))?;
-    RelayInformationDocument::from_json(&body)
-        .map_err(|e| format!("Failed to parse relay metadata: {}", e))
+    let mut stream = response.bytes_stream();
+    let mut body = Vec::new();
+    let mut total_bytes = 0usize;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("Failed to stream relay metadata: {}", e))?;
+        total_bytes = total_bytes
+            .checked_add(chunk.len())
+            .ok_or_else(|| format!("Relay metadata exceeds {} bytes", MAX_NIP11_BYTES))?;
+        if total_bytes > MAX_NIP11_BYTES {
+            return Err(format!(
+                "Relay metadata exceeds {} bytes",
+                MAX_NIP11_BYTES
+            ));
+        }
+        body.extend_from_slice(&chunk);
+    }
+
+    String::from_utf8(body)
+        .map_err(|e| format!("Failed to decode relay metadata as UTF-8: {}", e))
 }
 
 fn limitation_rows(limitation: &Limitation) -> Vec<(String, String)> {
