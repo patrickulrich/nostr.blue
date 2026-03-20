@@ -275,7 +275,11 @@ pub fn RelayDetail(relay_id: String) -> Element {
                         .unwrap_or_default();
                     rsx! {
                         div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden",
-                            if let Some(icon) = info.as_ref().and_then(|info| info.icon.clone()) {
+                            if let Some(icon) = info
+                                .as_ref()
+                                .and_then(|info| info.icon.clone())
+                                .filter(|icon| is_valid_http_url(icon))
+                            {
                                 div { class: "p-6 border-b border-border flex items-center gap-4",
                                     img {
                                         class: "w-16 h-16 rounded-lg object-cover bg-muted",

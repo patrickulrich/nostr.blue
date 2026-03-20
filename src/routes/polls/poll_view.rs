@@ -93,12 +93,12 @@ pub fn PollView(noteid: String) -> Element {
             match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
                 Ok(comment_events) => {
                     if generation_counter.load(Ordering::SeqCst) == generation {
-                        let merged = merge_comments(comments.read().clone(), comment_events);
-                        live_since = merged
+                        live_since = comment_events
                             .iter()
                             .map(|event| event.created_at)
                             .max()
                             .unwrap_or(subscription_handoff);
+                        let merged = merge_comments(comments.read().clone(), comment_events);
                         invalidate_thread_tree_cache(&event_id);
                         comments.set(merged);
                     } else {
@@ -109,7 +109,18 @@ pub fn PollView(noteid: String) -> Element {
                 Err(e) => {
                     log::error!("Failed to fetch poll comments: {}", e);
                     if generation_counter.load(Ordering::SeqCst) == generation {
-                        comments_error.set(Some(format!("Failed to load comments: {}", e)));
+                        if comments.read().is_empty() {
+                            comments_error.set(Some(format!("Failed to load comments: {}", e)));
+                        } else {
+                            log::warn!(
+                                "Failed to refresh poll comments, keeping cached comments visible: {}",
+                                e
+                            );
+                            live_updates_warning.set(Some(format!(
+                                "Live updates unavailable. Showing cached comments. Use Retry to try again. ({})",
+                                e
+                            )));
+                        }
                     } else {
                         loading_comments.set(false);
                         return;
@@ -183,7 +194,7 @@ pub fn PollView(noteid: String) -> Element {
                             )));
                             let generation_counter = generation_counter.clone();
                             spawn(async move {
-                                tokio::time::sleep(Duration::from_secs(retry_delay_secs)).await;
+                                crate::platform::timer::sleep(Duration::from_secs(retry_delay_secs)).await;
                                 if generation_counter.load(Ordering::SeqCst) == generation {
                                     comments_refresh
                                         .with_mut(|value| *value = value.wrapping_add(1));
@@ -267,7 +278,18 @@ pub fn PollView(noteid: String) -> Element {
                         }
                         if let Some(warning) = live_updates_warning.read().as_ref() {
                             div { class: "mb-4 rounded-lg border border-yellow-300 bg-yellow-50 dark:bg-yellow-950/30 dark:border-yellow-800 p-3 text-sm text-yellow-800 dark:text-yellow-200",
-                                "{warning}"
+                                p { "{warning}" }
+                                if *live_updates_retry_count.read() >= LIVE_UPDATES_MAX_RETRIES {
+                                    button {
+                                        class: "mt-3 px-3 py-1.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
+                                        onclick: move |_| {
+                                            live_updates_retry_count.set(0);
+                                            live_updates_warning.set(None);
+                                            comments_refresh.with_mut(|value| *value = value.wrapping_add(1));
+                                        },
+                                        "Retry now"
+                                    }
+                                }
                             }
                         }
                         if *loading_comments.read() {

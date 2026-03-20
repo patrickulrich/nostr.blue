@@ -52,11 +52,16 @@ fn is_webln_available() -> bool {
 const PRESET_AMOUNTS: [u64; 6] = [21, 100, 500, 1000, 5000, 10000];
 
 async fn collect_zap_relays(relay_hints: Option<&Vec<String>>) -> Vec<RelayUrl> {
-    let mut relays = relay_hints
+    let mut relays = Vec::new();
+    for relay in relay_hints
         .into_iter()
         .flat_map(|relay_hints| relay_hints.iter())
         .filter_map(|relay| RelayUrl::parse(relay).ok())
-        .collect::<Vec<_>>();
+    {
+        if relays.iter().all(|existing| existing != &relay) {
+            relays.push(relay);
+        }
+    }
 
     if let Some(client) = get_client() {
         for relay in client.relays().await.into_keys() {

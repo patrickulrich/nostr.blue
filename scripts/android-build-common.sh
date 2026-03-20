@@ -1,6 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "ERROR: python3 is required but not found; please install Python 3" >&2
+    exit 1
+fi
+
 require_file() {
     local path="$1"
     local message="$2"
@@ -98,9 +103,9 @@ write_android_local_properties() {
     fi
     if [ -z "$ndk_dir" ]; then
         if [ -d "$sdk_root/ndk" ]; then
-            ndk_dir="$ANDROID_NDK_HOME"
-        else
             ndk_dir="$sdk_root/ndk"
+        else
+            ndk_dir="$ANDROID_NDK_HOME"
         fi
     fi
 

@@ -1174,5 +1174,8 @@ pub fn get_total_storage() -> u64 {
 /// Format bytes using the shared app-wide formatter while preserving the
 /// existing Blossom `u64` call sites.
 pub fn format_bytes(bytes: u64) -> String {
-    crate::utils::format_bytes(bytes as usize)
+    match usize::try_from(bytes) {
+        Ok(size) => crate::utils::format_bytes(size),
+        Err(_) => format!("{bytes} B"),
+    }
 }
