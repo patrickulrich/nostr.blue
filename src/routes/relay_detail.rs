@@ -14,7 +14,9 @@ use crate::platform::http::http_client;
 #[cfg(not(feature = "web"))]
 use futures::StreamExt;
 #[cfg(feature = "web")]
-use js_sys::Uint8Array;
+use js_sys::{Reflect, Uint8Array};
+#[cfg(feature = "web")]
+use web_sys::AbortController;
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 #[cfg(feature = "web")]
@@ -47,10 +49,13 @@ async fn fetch_nip11_document(url: &str) -> Result<RelayInformationDocument, Str
 async fn fetch_nip11_body(url: &str) -> Result<String, String> {
     use futures::FutureExt;
 
+    let controller = AbortController::new()
+        .map_err(|e| format!("Failed to create abort controller: {:?}", e))?;
     let opts = RequestInit::new();
     opts.set_method("GET");
     opts.set_mode(RequestMode::Cors);
     opts.set_redirect(RequestRedirect::Error);
+    opts.set_signal(Some(&controller.signal()));
 
     let request = Request::new_with_str_and_init(url, &opts)
         .map_err(|e| format!("Failed to create relay metadata request: {:?}", e))?;
@@ -65,7 +70,10 @@ async fn fetch_nip11_body(url: &str) -> Result<String, String> {
     futures::pin_mut!(request, timeout);
     let response = futures::select! {
         resp = request => resp,
-        _ = timeout => return Err("Request timeout".to_string()),
+        _ = timeout => {
+            controller.abort();
+            return Err("Request timeout".to_string());
+        },
     }
     .map_err(|e| format!("Failed to fetch relay metadata: {:?}", e))?;
 
@@ -79,21 +87,41 @@ async fn fetch_nip11_body(url: &str) -> Result<String, String> {
         ));
     }
 
-    let body = JsFuture::from(
-        response
-            .array_buffer()
-            .map_err(|e| format!("Failed to read relay metadata body: {:?}", e))?,
-    )
-    .await
-    .map_err(|e| format!("Failed to read relay metadata body: {:?}", e))?;
-    let bytes = Uint8Array::new(&body).to_vec();
-    if bytes.len() > MAX_NIP11_BYTES {
-        return Err(format!(
-            "Relay metadata exceeds {} bytes",
-            MAX_NIP11_BYTES
-        ));
+    let mut bytes = Vec::new();
+    let mut total_bytes = 0usize;
+    let body = response
+        .body()
+        .ok_or_else(|| "Relay metadata response body missing".to_string())?;
+    let reader = body
+        .get_reader()
+        .dyn_into::<web_sys::ReadableStreamDefaultReader>()
+        .map_err(|_| "Failed to create relay metadata stream reader".to_string())?;
+    loop {
+        let chunk = JsFuture::from(reader.read())
+            .await
+            .map_err(|e| format!("Failed to read relay metadata body: {:?}", e))?;
+        let done = Reflect::get(&chunk, &"done".into())
+            .map_err(|e| format!("Failed to inspect relay metadata stream state: {:?}", e))?
+            .as_bool()
+            .unwrap_or(false);
+        if done {
+            break;
+        }
+        let value = Reflect::get(&chunk, &"value".into())
+            .map_err(|e| format!("Failed to read relay metadata stream chunk: {:?}", e))?;
+        let chunk = Uint8Array::new(&value).to_vec();
+        total_bytes = total_bytes
+            .checked_add(chunk.len())
+            .ok_or_else(|| format!("Relay metadata exceeds {} bytes", MAX_NIP11_BYTES))?;
+        if total_bytes > MAX_NIP11_BYTES {
+            controller.abort();
+            return Err(format!(
+                "Relay metadata exceeds {} bytes",
+                MAX_NIP11_BYTES
+            ));
+        }
+        bytes.extend_from_slice(&chunk);
     }
-
     String::from_utf8(bytes)
         .map_err(|e| format!("Failed to decode relay metadata as UTF-8: {}", e))
 }
@@ -217,15 +245,17 @@ fn retention_rows(info: &RelayInformationDocument) -> Vec<String> {
         .map(|retention| {
             let mut parts = Vec::new();
             if let Some(kinds) = &retention.kinds {
-                let kinds = kinds
-                    .iter()
-                    .map(|kind| match kind {
-                        RetentionKind::Single(kind) => kind.to_string(),
-                        RetentionKind::Range(start, end) => format!("{start}-{end}"),
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                parts.push(format!("kinds {kinds}"));
+                if !kinds.is_empty() {
+                    let kinds = kinds
+                        .iter()
+                        .map(|kind| match kind {
+                            RetentionKind::Single(kind) => kind.to_string(),
+                            RetentionKind::Range(start, end) => format!("{start}-{end}"),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    parts.push(format!("kinds {kinds}"));
+                }
             }
             if let Some(time) = retention.time {
                 parts.push(format!("time {time}s"));
