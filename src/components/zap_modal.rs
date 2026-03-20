@@ -642,7 +642,10 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                                 for amount in preset_amounts {
                                     button {
                                         class: if *zap_amount.read() == amount { "px-4 py-2 rounded bg-primary text-primary-foreground font-medium" } else { "px-4 py-2 rounded bg-secondary text-secondary-foreground hover:bg-secondary/80" },
-                                        onclick: move |_| zap_amount.set(amount),
+                                        onclick: move |_| {
+                                            custom_amount.set(String::new());
+                                            zap_amount.set(amount);
+                                        },
                                         "{amount}"
                                     }
                                 }

@@ -6,6 +6,10 @@ use crate::utils::thread_tree::invalidate_thread_tree_cache;
 use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, EventId, Filter, Kind, RelayPoolNotification, SubscriptionId, Timestamp};
 use std::collections::HashMap;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 use std::time::Duration;
 
 fn merge_comments(existing: Vec<NostrEvent>, fetched: Vec<NostrEvent>) -> Vec<NostrEvent> {
@@ -30,6 +34,7 @@ pub fn PollView(noteid: String) -> Element {
     let mut show_comment_composer = use_signal(|| false);
     let mut comments_refresh = use_signal(|| 0u64);
     let mut comment_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
+    let comments_subscription_generation = use_hook(|| Arc::new(AtomicU64::new(0)));
 
     use_effect(move || {
         let noteid_str = noteid.clone();
@@ -72,6 +77,8 @@ pub fn PollView(noteid: String) -> Element {
         };
 
         let event_id = event.id;
+        let generation = comments_subscription_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let generation_counter = comments_subscription_generation.clone();
         spawn(async move {
             loading_comments.set(true);
             comments_error.set(None);
@@ -80,18 +87,28 @@ pub fn PollView(noteid: String) -> Element {
             let filter = Filter::new().kind(Kind::Comment).event(event_id).limit(500);
             match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
                 Ok(comment_events) => {
-                    let merged = merge_comments(comments.read().clone(), comment_events);
-                    live_since = merged
-                        .iter()
-                        .map(|event| event.created_at)
-                        .max()
-                        .unwrap_or(subscription_handoff);
-                    invalidate_thread_tree_cache(&event_id);
-                    comments.set(merged);
+                    if generation_counter.load(Ordering::SeqCst) == generation {
+                        let merged = merge_comments(comments.read().clone(), comment_events);
+                        live_since = merged
+                            .iter()
+                            .map(|event| event.created_at)
+                            .max()
+                            .unwrap_or(subscription_handoff);
+                        invalidate_thread_tree_cache(&event_id);
+                        comments.set(merged);
+                    } else {
+                        loading_comments.set(false);
+                        return;
+                    }
                 }
                 Err(e) => {
                     log::error!("Failed to fetch poll comments: {}", e);
-                    comments_error.set(Some(format!("Failed to load comments: {}", e)));
+                    if generation_counter.load(Ordering::SeqCst) == generation {
+                        comments_error.set(Some(format!("Failed to load comments: {}", e)));
+                    } else {
+                        loading_comments.set(false);
+                        return;
+                    }
                 }
             }
 
@@ -104,6 +121,12 @@ pub fn PollView(noteid: String) -> Element {
 
                 match subscription_manager::subscribe_realtime(&client, filter, Some(600)).await {
                     Ok(subscription_id) => {
+                        if generation_counter.load(Ordering::SeqCst) != generation {
+                            subscription_manager::unsubscribe(&client, &subscription_id).await;
+                            loading_comments.set(false);
+                            return;
+                        }
+
                         if let Some(old_sub_id) = comment_sub_id.replace(Some(subscription_id.clone())) {
                             let client = client.clone();
                             spawn(async move {
@@ -111,16 +134,22 @@ pub fn PollView(noteid: String) -> Element {
                             });
                         }
 
+                        let generation_counter = generation_counter.clone();
                         spawn(async move {
                             let mut notifications = client.notifications();
                             while let Ok(notification) = notifications.recv().await {
+                                if generation_counter.load(Ordering::SeqCst) != generation {
+                                    break;
+                                }
                                 if let RelayPoolNotification::Event {
                                     subscription_id: sub_id,
                                     event,
                                     ..
                                 } = notification
                                 {
-                                    if sub_id == subscription_id {
+                                    if sub_id == subscription_id
+                                        && generation_counter.load(Ordering::SeqCst) == generation
+                                    {
                                         let already_exists =
                                             comments.read().iter().any(|e| e.id == event.id);
                                         if !already_exists {
@@ -137,7 +166,9 @@ pub fn PollView(noteid: String) -> Element {
                     }
                 }
             }
-            loading_comments.set(false);
+            if generation_counter.load(Ordering::SeqCst) == generation {
+                loading_comments.set(false);
+            }
         });
     });
 

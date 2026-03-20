@@ -1,6 +1,6 @@
 use crate::platform::http::http_client;
 use crate::routes::Route;
-use crate::stores::nostr_client;
+use crate::stores::{nostr_client, relay};
 use crate::utils::relay::{decode_relay_route_id, relay_http_url};
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip11::{FeeSchedule, Limitation, RelayInformationDocument, RetentionKind};
@@ -189,9 +189,16 @@ pub fn RelayDetail(relay_id: String) -> Element {
                 .await
                 .into_iter()
                 .find(|info| info.url == relay_url);
-            let (info, metadata_error) = match fetch_nip11_document(&http_url).await {
-                Ok(info) => (Some(info), None),
-                Err(error) => (None, Some(error)),
+            let (info, metadata_error) = if relay::is_relay_blocked(&relay_url) {
+                (
+                    None,
+                    Some("Relay metadata fetch skipped because this relay is blocked".to_string()),
+                )
+            } else {
+                match fetch_nip11_document(&http_url).await {
+                    Ok(info) => (Some(info), None),
+                    Err(error) => (None, Some(error)),
+                }
             };
 
             Ok::<RelayDetailData, String>(RelayDetailData {
@@ -351,7 +358,7 @@ pub fn RelayDetail(relay_id: String) -> Element {
                                             h3 { class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-2", "Supported NIPs" }
                                             div { class: "flex flex-wrap gap-2",
                                                 for nip in nips {
-                                                    span { class: "px-2 py-1 rounded bg-muted text-muted-foreground text-xs font-medium", "NIP-{nip}" }
+                                                    span { key: "nip-{nip}", class: "px-2 py-1 rounded bg-muted text-muted-foreground text-xs font-medium", "NIP-{nip}" }
                                                 }
                                             }
                                         }
@@ -392,8 +399,8 @@ pub fn RelayDetail(relay_id: String) -> Element {
                                     div {
                                         h3 { class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-2", "Limitations" }
                                         div { class: "rounded-lg border border-border overflow-hidden",
-                                            for (label, value) in limitation_rows {
-                                                div { class: "grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3 px-4 py-3 border-b border-border last:border-b-0 text-sm",
+                                            for (index, (label, value)) in limitation_rows.into_iter().enumerate() {
+                                                div { key: "limitation-{index}", class: "grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3 px-4 py-3 border-b border-border last:border-b-0 text-sm",
                                                     span { class: "font-medium text-gray-900 dark:text-white", "{label}" }
                                                     span { class: "text-gray-700 dark:text-gray-300 break-all", "{value}" }
                                                 }
@@ -409,24 +416,24 @@ pub fn RelayDetail(relay_id: String) -> Element {
                                             if !admission.is_empty() {
                                                 div { class: "rounded-lg bg-gray-50 dark:bg-gray-700 p-3",
                                                     p { class: "font-medium text-gray-900 dark:text-white mb-2", "Admission" }
-                                                    for row in admission {
-                                                        p { class: "text-sm text-gray-700 dark:text-gray-300", "{row}" }
+                                                    for (index, row) in admission.into_iter().enumerate() {
+                                                        p { key: "admission-{index}", class: "text-sm text-gray-700 dark:text-gray-300", "{row}" }
                                                     }
                                                 }
                                             }
                                             if !subscription.is_empty() {
                                                 div { class: "rounded-lg bg-gray-50 dark:bg-gray-700 p-3",
                                                     p { class: "font-medium text-gray-900 dark:text-white mb-2", "Subscription" }
-                                                    for row in subscription {
-                                                        p { class: "text-sm text-gray-700 dark:text-gray-300", "{row}" }
+                                                    for (index, row) in subscription.into_iter().enumerate() {
+                                                        p { key: "subscription-{index}", class: "text-sm text-gray-700 dark:text-gray-300", "{row}" }
                                                     }
                                                 }
                                             }
                                             if !publication.is_empty() {
                                                 div { class: "rounded-lg bg-gray-50 dark:bg-gray-700 p-3",
                                                     p { class: "font-medium text-gray-900 dark:text-white mb-2", "Publication" }
-                                                    for row in publication {
-                                                        p { class: "text-sm text-gray-700 dark:text-gray-300", "{row}" }
+                                                    for (index, row) in publication.into_iter().enumerate() {
+                                                        p { key: "publication-{index}", class: "text-sm text-gray-700 dark:text-gray-300", "{row}" }
                                                     }
                                                 }
                                             }
@@ -438,8 +445,8 @@ pub fn RelayDetail(relay_id: String) -> Element {
                                     div {
                                         h3 { class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-2", "Retention" }
                                         div { class: "space-y-2",
-                                            for row in retention {
-                                                div { class: "rounded-lg bg-gray-50 dark:bg-gray-700 p-3 text-sm text-gray-700 dark:text-gray-300", "{row}" }
+                                            for (index, row) in retention.into_iter().enumerate() {
+                                                div { key: "retention-{index}", class: "rounded-lg bg-gray-50 dark:bg-gray-700 p-3 text-sm text-gray-700 dark:text-gray-300", "{row}" }
                                             }
                                         }
                                     }

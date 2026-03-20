@@ -12,6 +12,11 @@ require_file() {
 
 require_files() {
     local missing=()
+    if [ $(( $# % 2 )) -ne 0 ]; then
+        echo "ERROR: require_files expects path/label argument pairs" >&2
+        exit 1
+    fi
+
     while [ "$#" -gt 1 ]; do
         local path="$1"
         local label="$2"
@@ -32,7 +37,16 @@ require_files() {
 
 version_field() {
     local field="$1"
-    sed -n "s/^$field = \"\\([^\"]*\\)\"$/\\1/p" "$PROJECT_ROOT/Cargo.toml" | head -n1
+    awk -v field="$field" '
+        /^\[package\]$/ { in_package = 1; next }
+        /^\[/ && in_package { exit }
+        in_package && $0 ~ ("^" field " = \"") {
+            sub("^" field " = \"", "")
+            sub("\"$", "")
+            print
+            exit
+        }
+    ' "$PROJECT_ROOT/Cargo.toml"
 }
 
 version_code_from_semver() {

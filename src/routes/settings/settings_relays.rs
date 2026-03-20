@@ -566,9 +566,7 @@ pub fn SettingsRelays() -> Element {
                                         div { class: "flex items-center justify-between",
                                             div { class: "flex items-center gap-1 min-w-0",
                                                 span { "📨" }
-                                                Link {
-                                                    to: relay_detail_route(&url_clone),
-                                                    class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",
+                                                span { class: "font-mono text-sm text-gray-900 dark:text-white break-all",
                                                     {display_relay_url(&url_clone)}
                                                 }
                                             }
@@ -652,9 +650,7 @@ pub fn SettingsRelays() -> Element {
                                         div { class: "flex items-center justify-between",
                                             div { class: "flex items-center gap-1 min-w-0",
                                                 span { "🔍" }
-                                                Link {
-                                                    to: relay_detail_route(&url_clone),
-                                                    class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",
+                                                span { class: "font-mono text-sm text-gray-900 dark:text-white break-all",
                                                     {display_relay_url(&url_clone)}
                                                 }
                                             }
@@ -733,9 +729,7 @@ pub fn SettingsRelays() -> Element {
                                         div { class: "flex items-center justify-between",
                                             div { class: "flex items-center gap-1 min-w-0",
                                                 span { "🚫" }
-                                                Link {
-                                                    to: relay_detail_route(&url_clone),
-                                                    class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",
+                                                span { class: "font-mono text-sm text-gray-900 dark:text-white break-all",
                                                     {display_relay_url(&url_clone)}
                                                 }
                                             }
