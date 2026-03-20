@@ -77,7 +77,8 @@ pub async fn add_person_to_list(
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
     let target_pubkey =
         PublicKey::parse(person_pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let mut public_tags: Vec<Tag> = list_event.tags.clone().into_iter().collect();
+    let mut public_tags: Vec<Tag> =
+        crate::utils::nips::nip89::strip_client_tags(list_event.tags.clone().into_iter().collect());
     let mut private_tags = decrypt_private_tags(list_event).await.map_err(|e| {
         log::error!("Failed to decrypt private tags: {}", e);
         format!(
@@ -112,7 +113,7 @@ pub async fn add_person_to_list(
     let encrypted_content = encrypt_private_tags(&private_tags).await?;
     let builder = EventBuilder::new(list_event.kind, encrypted_content).tags(public_tags);
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to update list: {}", e))?;
     Ok(())
@@ -126,18 +127,17 @@ pub async fn remove_person_from_list(
     let target_pubkey =
         PublicKey::parse(person_pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let pubkey_hex = target_pubkey.to_hex();
-    let public_tags: Vec<Tag> = list_event
-        .tags
-        .clone()
-        .into_iter()
-        .filter(|tag| {
-            !(tag.kind() == nostr_sdk::TagKind::p()
-                && tag
-                    .content()
-                    .map(|c| c.eq_ignore_ascii_case(&pubkey_hex))
-                    .unwrap_or(false))
-        })
-        .collect();
+    let public_tags: Vec<Tag> =
+        crate::utils::nips::nip89::strip_client_tags(list_event.tags.clone().into_iter().collect())
+            .into_iter()
+            .filter(|tag| {
+                !(tag.kind() == nostr_sdk::TagKind::p()
+                    && tag
+                        .content()
+                        .map(|c| c.eq_ignore_ascii_case(&pubkey_hex))
+                        .unwrap_or(false))
+            })
+            .collect();
     let private_tags: Vec<Tag> = decrypt_private_tags(list_event)
         .await
         .map_err(|e| {
@@ -159,7 +159,7 @@ pub async fn remove_person_from_list(
     let encrypted_content = encrypt_private_tags(&private_tags).await?;
     let builder = EventBuilder::new(list_event.kind, encrypted_content).tags(public_tags);
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to update list: {}", e))?;
     Ok(())
@@ -279,7 +279,7 @@ pub async fn create_people_list(
     };
     let builder = EventBuilder::new(Kind::from(NAMED_PEOPLE), content).tags(tags);
     let event = client
-        .sign_event_builder(builder)
+        .sign_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to sign list event: {}", e))?;
     client

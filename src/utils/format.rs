@@ -22,6 +22,19 @@ pub fn display_server_url(url: &str) -> String {
         .trim_end_matches('/')
         .to_string()
 }
+
+/// Format bytes into a human-readable binary size string.
+pub fn format_bytes(bytes: usize) -> String {
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else if bytes < 1024 * 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    }
+}
 /// Format satoshi amount with thousands separator (e.g., 1,234,567)
 pub fn format_sats_with_separator(sats: u64) -> String {
     let s = sats.to_string();

@@ -39,7 +39,7 @@ pub async fn publish_pinboard(
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_PINBOARD), "").tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish pinboard: {}", e))?;
     let event_id = output.id().to_hex();
@@ -136,7 +136,7 @@ pub async fn publish_pin(input: PinInput) -> std::result::Result<String, String>
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_PIN), input.content).tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish pin: {}", e))?;
     let event_id = output.id().to_hex();
@@ -155,7 +155,7 @@ pub async fn delete_pin(pin_event_id: &str) -> std::result::Result<(), String> {
     let deletion_request = EventDeletionRequest::new().id(event_id);
     let builder = EventBuilder::delete(deletion_request);
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to delete pin: {}", e))?;
     remove_pin_from_cache(pin_event_id);
@@ -178,7 +178,7 @@ pub async fn delete_pinboard(board: &Pinboard) -> std::result::Result<String, St
     let deletion_request = EventDeletionRequest::new().coordinate(coord);
     let builder = EventBuilder::delete(deletion_request);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to delete pinboard: {}", e))?;
     remove_pinboard_from_cache(&board.a_tag);
@@ -226,7 +226,7 @@ pub async fn toggle_pinboard_reaction(
         let deletion_request = EventDeletionRequest::new().id(event_id);
         let builder = EventBuilder::delete(deletion_request);
         client
-            .send_event_builder(builder)
+            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
             .await
             .map_err(|e| format!("Failed to delete reaction: {}", e))?;
         Ok(false)
@@ -244,7 +244,7 @@ pub async fn toggle_pinboard_reaction(
         ];
         let builder = EventBuilder::new(Kind::Reaction, content).tags(tags);
         client
-            .send_event_builder(builder)
+            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
             .await
             .map_err(|e| format!("Failed to send reaction: {}", e))?;
         Ok(true)

@@ -145,7 +145,7 @@ pub async fn mute_post(event_id: String) -> std::result::Result<(), String> {
     let builder =
         nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish mute list: {}", e))?;
     super::signals::invalidate_mute_block_cache();
@@ -179,7 +179,7 @@ pub async fn unmute_post(event_id: String) -> std::result::Result<(), String> {
     let builder =
         nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish mute list: {}", e))?;
     super::signals::invalidate_mute_block_cache();
@@ -239,7 +239,7 @@ pub async fn block_user(pubkey: String) -> std::result::Result<(), String> {
     let builder =
         nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish mute list: {}", e))?;
     super::signals::invalidate_mute_block_cache();
@@ -274,7 +274,7 @@ pub async fn unblock_user(pubkey: String) -> std::result::Result<(), String> {
     let builder =
         nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish mute list: {}", e))?;
     super::signals::invalidate_mute_block_cache();
@@ -329,7 +329,10 @@ pub async fn report_post(
     ];
     let content = details.unwrap_or_default();
     let builder = nostr::EventBuilder::new(nostr::Kind::from(1984), content).tags(tags);
-    match client.send_event_builder(builder).await {
+    match client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+        .await
+    {
         Ok(output) => {
             let report_id = output.id().to_hex();
             log::info!("Report published successfully: {}", report_id);

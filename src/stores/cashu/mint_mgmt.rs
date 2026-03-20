@@ -521,7 +521,10 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to encrypt: {}", e))?;
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWallet, encrypted);
-    match client.send_event_builder(builder).await {
+    match client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+        .await
+    {
         Ok(_) => log::info!("Published updated wallet event with new mint"),
         Err(e) => {
             log::error!("Failed to publish wallet event: {}", e);
@@ -664,7 +667,9 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
             .ok_or("Client not initialized")?
             .clone();
         client
-            .send_event_builder(deletion_builder)
+            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+                deletion_builder,
+            ))
             .await
             .map_err(|e| format!("Failed to publish deletion event: {}", e))?;
         log::info!(
@@ -701,7 +706,10 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
                 .await
                 .map_err(|e| format!("Failed to encrypt: {}", e))?;
             let builder = nostr_sdk::EventBuilder::new(Kind::CashuWallet, encrypted);
-            match client.send_event_builder(builder).await {
+            match client
+                .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+                .await
+            {
                 Ok(_) => log::info!("Published updated wallet event after mint removal"),
                 Err(e) => log::warn!("Failed to publish wallet event: {}", e),
             }
@@ -1060,7 +1068,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         .await
         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-    let mut unsigned = builder.clone().build(pubkey);
+    let mut unsigned = crate::utils::nips::nip89::tag_event_builder(builder.clone()).build(pubkey);
     let pre_signed_event_id = unsigned.id().to_hex();
     let signed_event = unsigned
         .sign(&signer)
@@ -1201,7 +1209,10 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         }
     }
     let delete_builder = nostr_sdk::EventBuilder::delete(deletion_request);
-    if let Err(e) = client.send_event_builder(delete_builder).await {
+    if let Err(e) = client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(delete_builder))
+        .await
+    {
         log::warn!("Failed to publish deletion event: {}", e);
     }
     super::signals::update_wallet_balances();

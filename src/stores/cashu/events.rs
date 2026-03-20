@@ -113,6 +113,7 @@ pub async fn queue_signed_event_for_retry(
 pub async fn sign_event_builder(
     builder: nostr_sdk::EventBuilder,
 ) -> Result<nostr_sdk::Event, String> {
+    let builder = crate::utils::nips::nip89::tag_event_builder(builder);
     let signer =
         crate::stores::signer::get_signer().ok_or_else(|| "No signer available".to_string())?;
     match signer {
@@ -216,7 +217,10 @@ pub async fn publish_quote_event(
         .as_ref()
         .ok_or("Nostr client not initialized")?
         .clone();
-    match client.send_event_builder(builder).await {
+    match client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+        .await
+    {
         Ok(output) => {
             let event_id = output.id().to_hex();
             log::info!("Published quote event for quote {}: {}", quote_id, event_id);
@@ -243,7 +247,12 @@ pub async fn delete_quote_event(event_id: &str) -> Result<(), String> {
         ["7374"],
     ));
     let deletion_builder = nostr_sdk::EventBuilder::new(Kind::from(5), "Quote expired").tags(tags);
-    match client.send_event_builder(deletion_builder).await {
+    match client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+            deletion_builder,
+        ))
+        .await
+    {
         Ok(_) => {
             log::info!("Published deletion for quote event: {}", event_id);
             Ok(())
@@ -592,7 +601,7 @@ pub async fn create_history_event_full(
         .ok_or("Client not initialized")?
         .clone();
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish history event: {}", e))?;
     Ok(())
@@ -863,7 +872,10 @@ pub async fn reconcile_pending_event_ids() -> Result<usize, String> {
             }
         };
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-        match client.send_event_builder(builder).await {
+        match client
+            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+            .await
+        {
             Ok(output) => {
                 if !output.success.is_empty() {
                     let real_event_id = output.id().to_hex();
@@ -951,7 +963,7 @@ pub async fn publish_orphaned_proofs_event(
         .await
         .map_err(|e| format!("Failed to encrypt: {}", e))?;
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-    let unsigned = builder.clone().build(pubkey);
+    let unsigned = crate::utils::nips::nip89::tag_event_builder(builder).build(pubkey);
     let signed_event = unsigned
         .sign(&signer)
         .await

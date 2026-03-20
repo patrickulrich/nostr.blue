@@ -159,7 +159,7 @@ impl CountsCache {
         if let Some(cached) = self.cache.get_mut(event_id) {
             cached.cached_at = Instant::now();
             match kind {
-                Kind::TextNote => cached.counts.replies += 1,
+                kind if is_reply_kind(kind) => cached.counts.replies += 1,
                 Kind::Reaction => {
                     let content = content.unwrap_or("+");
                     if content != "-" {
@@ -224,6 +224,10 @@ static COUNTS_CACHE: OnceLock<Mutex<CountsCache>> = OnceLock::new();
 /// Get or initialize the counts cache
 pub(crate) fn get_counts_cache() -> &'static Mutex<CountsCache> {
     COUNTS_CACHE.get_or_init(|| Mutex::new(CountsCache::new(1000, Duration::from_secs(300))))
+}
+
+pub(crate) fn is_reply_kind(kind: Kind) -> bool {
+    matches!(kind, Kind::TextNote | Kind::Comment)
 }
 
 /// Invalidate cached counts for an event
@@ -369,5 +373,22 @@ mod tests {
         cache.insert("key".to_string(), InteractionCounts::default());
         cache.invalidate("key");
         assert!(cache.get("key").is_none());
+    }
+
+    #[test]
+    fn test_is_reply_kind_includes_comments() {
+        assert!(is_reply_kind(Kind::TextNote));
+        assert!(is_reply_kind(Kind::Comment));
+        assert!(!is_reply_kind(Kind::Reaction));
+    }
+
+    #[test]
+    fn test_cache_increment_counts_comment_as_reply() {
+        let mut cache = CountsCache::new(10, Duration::from_secs(60));
+        cache.insert("key".to_string(), InteractionCounts::default());
+        cache.increment("key", Kind::Comment, None, false, None);
+
+        let counts = cache.get("key").expect("cached counts should exist");
+        assert_eq!(counts.replies, 1);
     }
 }

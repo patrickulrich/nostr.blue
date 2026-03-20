@@ -700,7 +700,7 @@ pub async fn publish_track(
     }
     let builder = EventBuilder::new(Kind::from(KIND_MUSIC_TRACK), "").tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish track: {}", e))?;
     Ok(output.id().to_hex())
@@ -754,7 +754,7 @@ pub async fn publish_playlist(
     }
     let builder = EventBuilder::new(Kind::from(KIND_PLAYLIST), "").tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish playlist: {}", e))?;
     Ok(output.id().to_hex())

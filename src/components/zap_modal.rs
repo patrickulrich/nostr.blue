@@ -48,6 +48,41 @@ fn is_webln_available() -> bool {
     }
     false
 }
+
+const PRESET_AMOUNTS: [u64; 6] = [21, 100, 500, 1000, 5000, 10000];
+
+async fn collect_zap_relays(relay_hints: Option<&Vec<String>>) -> Vec<RelayUrl> {
+    let mut relays = Vec::new();
+    for relay in relay_hints
+        .into_iter()
+        .flat_map(|relay_hints| relay_hints.iter())
+        .filter_map(|relay| RelayUrl::parse(relay).ok())
+    {
+        if relays.iter().all(|existing| existing != &relay) {
+            relays.push(relay);
+        }
+        if relays.len() >= 5 {
+            break;
+        }
+    }
+
+    if relays.len() < 5 {
+        if let Some(client) = get_client() {
+        for relay in client.relays().await.into_keys() {
+            if relays.iter().all(|existing| existing != &relay) {
+                relays.push(relay);
+            }
+            if relays.len() >= 5 {
+                break;
+            }
+        }
+        }
+    }
+
+    relays.truncate(5);
+    relays
+}
+
 #[derive(Props, Clone, PartialEq)]
 pub struct ZapModalProps {
     pub recipient_pubkey: String,
@@ -55,12 +90,22 @@ pub struct ZapModalProps {
     pub lud16: Option<String>,
     pub lud06: Option<String>,
     pub event_id: Option<String>,
+    #[props(default)]
+    pub initial_amount: Option<u64>,
+    #[props(default)]
+    pub relay_hints: Option<Vec<String>>,
     pub on_close: EventHandler<()>,
 }
 #[component]
 pub fn ZapModal(props: ZapModalProps) -> Element {
-    let mut zap_amount = use_signal(|| 21u64);
-    let mut custom_amount = use_signal(String::new);
+    let initial_amount = props.initial_amount.unwrap_or(21);
+    let initial_custom_amount = props
+        .initial_amount
+        .filter(|amount| !PRESET_AMOUNTS.contains(amount))
+        .map(|amount| amount.to_string())
+        .unwrap_or_default();
+    let mut zap_amount = use_signal(|| initial_amount);
+    let mut custom_amount = use_signal(|| initial_custom_amount.clone());
     let mut zap_message = use_signal(String::new);
     let mut loading = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
@@ -71,6 +116,18 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
     let mut nutzap_mint = use_signal(|| None::<cashu::NutzapMint>);
     let mut checking_nutzap = use_signal(|| false);
     let mut nutzap_request_version = use_signal(|| 0u32);
+    {
+        let initial_amount_prop = props.initial_amount;
+        use_effect(use_reactive!(|initial_amount_prop| {
+            let initial_amount = initial_amount_prop.unwrap_or(21);
+            let initial_custom_amount = initial_amount_prop
+                .filter(|amount| !PRESET_AMOUNTS.contains(amount))
+                .map(|amount| amount.to_string())
+                .unwrap_or_default();
+            zap_amount.set(initial_amount);
+            custom_amount.set(initial_custom_amount);
+        }));
+    }
     {
         let recipient_pubkey = props.recipient_pubkey.clone();
         use_effect(use_reactive!(|recipient_pubkey| {
@@ -93,7 +150,6 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
             });
         }));
     }
-    let preset_amounts = vec![21, 100, 500, 1000, 5000, 10000];
     let handle_zap = move |_| {
         let recipient_pubkey_str = props.recipient_pubkey.clone();
         let lud16 = props.lud16.clone();
@@ -101,6 +157,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
         let amount = *zap_amount.read();
         let message = zap_message.read().clone();
         let event_id_str = props.event_id.clone();
+        let relay_hints = props.relay_hints.clone();
         let toast_api = toast;
         loading.set(true);
         error_msg.set(None);
@@ -137,16 +194,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
             } else {
                 None
             };
-            let relays = if let Some(client) = get_client() {
-                client
-                    .relays()
-                    .await
-                    .into_keys()
-                    .take(5)
-                    .collect::<Vec<RelayUrl>>()
-            } else {
-                vec![]
-            };
+            let relays = collect_zap_relays(relay_hints.as_ref()).await;
             if relays.is_empty() {
                 error_msg.set(Some("No relays available".to_string()));
                 loading.set(false);
@@ -473,20 +521,27 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
         });
     };
     let copy_invoice = move |_| {
-        if let Some(_inv) = invoice.read().as_ref() {
-            #[cfg(feature = "web")]
-            {
-                use web_sys::window;
-                if let Some(window) = window() {
-                    let navigator = window.navigator();
-                    let clipboard = navigator.clipboard();
-                    let inv_clone = _inv.clone();
-                    spawn(async move {
-                        let promise = clipboard.write_text(&inv_clone);
-                        let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
-                    });
+        if let Some(inv) = invoice.read().as_ref() {
+            let inv_clone = inv.clone();
+            let toast_api = toast;
+            spawn(async move {
+                match crate::platform::clipboard::copy_to_clipboard(&inv_clone).await {
+                    Ok(()) => {
+                        toast_api.success(
+                            "Invoice copied".to_string(),
+                            ToastOptions::new().duration(Duration::from_secs(2)),
+                        );
+                    }
+                    Err(error) => {
+                        toast_api.error(
+                            "Copy failed".to_string(),
+                            ToastOptions::new()
+                                .description(error)
+                                .duration(Duration::from_secs(3)),
+                        );
+                    }
                 }
-            }
+            });
         }
     };
     let open_in_wallet = move |_| {
@@ -606,10 +661,13 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                         div { class: "space-y-2",
                             label { class: "block text-sm font-medium mb-2", "Select Amount (sats)" }
                             div { class: "grid grid-cols-3 gap-2",
-                                for amount in preset_amounts {
+                                for amount in PRESET_AMOUNTS {
                                     button {
                                         class: if *zap_amount.read() == amount { "px-4 py-2 rounded bg-primary text-primary-foreground font-medium" } else { "px-4 py-2 rounded bg-secondary text-secondary-foreground hover:bg-secondary/80" },
-                                        onclick: move |_| zap_amount.set(amount),
+                                        onclick: move |_| {
+                                            custom_amount.set(String::new());
+                                            zap_amount.set(amount);
+                                        },
                                         "{amount}"
                                     }
                                 }

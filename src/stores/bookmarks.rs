@@ -449,7 +449,10 @@ async fn publish_bookmarks(bookmarks: Vec<String>) -> Result<(), String> {
         urls: Vec::new(),
     };
     let builder = EventBuilder::bookmarks(bookmark_list);
-    match client.send_event_builder(builder).await {
+    match client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+        .await
+    {
         Ok(output) => {
             let success_count = output.success.len();
             let failed_count = output.failed.len();

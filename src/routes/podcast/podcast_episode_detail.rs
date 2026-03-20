@@ -12,12 +12,23 @@ use crate::components::{
     PodcastChapters, PodcastPersons, PodcastSoundbites, PodcastTranscript, V4VBoostButton, V4VInfo,
 };
 use crate::routes::Route;
+use crate::routes::podcast::podcast_shared_states::{
+    PodcastApiAuthRequiredState, PodcastApiInitializingState,
+};
 use crate::services::podcast_rss::{self, format_duration};
 use crate::stores::{music_player, nostr_client, nostr_music};
 use crate::utils::podcast::{self, PodcastMetadata};
 use dioxus::prelude::*;
 use nostr_sdk::prelude::{Filter, Kind, PublicKey, SingleLetterTag};
 use std::time::Duration;
+
+enum RssEpisodeDetailState {
+    Initializing,
+    Loaded(Box<DisplayEpisode>),
+    AuthRequired,
+    Error(String),
+}
+
 #[derive(Props, Clone, PartialEq)]
 pub struct PodcastNostrEpisodeDetailProps {
     /// Episode naddr or coordinate
@@ -93,22 +104,35 @@ pub fn PodcastRssEpisodeDetail(props: PodcastRssEpisodeDetailProps) -> Element {
         let has_signer = nostr_client::has_signer();
         async move {
             if !client_initialized {
-                return Err("Waiting for client initialization...".to_string());
+                return RssEpisodeDetailState::Initializing;
             }
-            if !has_signer {
-                return Err("Please sign in to view episode details.".to_string());
+            if podcast_id.parse::<u64>().is_ok() && !has_signer {
+                return RssEpisodeDetailState::AuthRequired;
             }
-            fetch_rss_episode(&podcast_id, &episode_id).await
+            match fetch_rss_episode(&podcast_id, &episode_id).await {
+                Ok(episode) => RssEpisodeDetailState::Loaded(Box::new(episode)),
+                Err(error) => RssEpisodeDetailState::Error(error),
+            }
         }
     });
     rsx! {
         div { class: "min-h-screen",
             EpisodeDetailHeader {}
             match &*episode_data.read() {
-                Some(Ok(episode)) => rsx! {
-                    EpisodeDetailContent { episode: episode.clone(), podcast_metadata: None }
+                Some(RssEpisodeDetailState::Initializing) => rsx! {
+                    PodcastApiInitializingState {
+                        item_label: "episode",
+                    }
                 },
-                Some(Err(e)) => rsx! {
+                Some(RssEpisodeDetailState::Loaded(episode)) => rsx! {
+                    EpisodeDetailContent { episode: (**episode).clone(), podcast_metadata: None }
+                },
+                Some(RssEpisodeDetailState::AuthRequired) => rsx! {
+                    PodcastApiAuthRequiredState {
+                        item_label: "episode",
+                    }
+                },
+                Some(RssEpisodeDetailState::Error(e)) => rsx! {
                     div { class: "p-4 text-center",
                         div { class: "text-destructive mb-2", "Failed to load episode" }
                         div { class: "text-sm text-muted-foreground", "{e}" }

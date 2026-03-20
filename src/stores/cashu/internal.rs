@@ -390,7 +390,10 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-        match client.send_event_builder(builder).await {
+        match client
+            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+            .await
+        {
             Ok(event_output) => {
                 new_event_id = Some(event_output.id().to_hex());
                 log::info!(
@@ -419,7 +422,12 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
             ));
             let deletion_builder =
                 nostr_sdk::EventBuilder::new(Kind::from(5), "Spent proofs cleanup").tags(tags);
-            match client.send_event_builder(deletion_builder.clone()).await {
+            match client
+                .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+                    deletion_builder.clone(),
+                ))
+                .await
+            {
                 Ok(_) => {
                     log::info!(
                         "Published deletion event for {} token events",

@@ -185,26 +185,31 @@ export ANDROID_HOME="$HOME/android-sdk"
 export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.0.12077973"
 ```
 
-#### Building the APK
+#### Building Android release artifacts
 
-The build script handles everything: Rust cross-compilation, Gradle build, OpenSSL library bundling, ProGuard rules, app name/icons, and APK packaging.
+The Android build scripts handle Rust cross-compilation, Gradle packaging, OpenSSL library bundling, ProGuard rules, app name/icons, and release signing.
 
 ```bash
 # Build the Android APK (ARM64)
 ./scripts/build-android.sh
 
 # Output: ./nostrblue-release.apk
+
+# Build the Android App Bundle
+./scripts/build-android-aab.sh
+
+# Output: ./nostrblue-release.aab
 ```
 
 #### What the build script does
 
 1. Cleans stale JNI libraries from previous builds
-2. Runs `dx build --platform android --release --target aarch64-linux-android --no-default-features --features mobile`
+2. Runs `dx build --platform android --target aarch64-linux-android --no-default-features --features mobile`
 3. Ensures OpenSSL shared libraries (`libssl.so`, `libcrypto.so`) are in `jniLibs/arm64-v8a`
 4. Copies ProGuard rules to keep JNI bridge methods from R8 stripping
 5. Overlays the repo-owned Android resources from `android/res`, including launcher assets
-6. Re-runs Gradle (`assembleDebug`) to package everything into the final APK
-7. Copies the APK to project root as `nostrblue-release.apk`
+6. Re-runs Gradle (`assembleRelease` for APKs, `bundleRelease` for AABs) to package the final Android artifact
+7. Copies the artifact to project root as `nostrblue-release.apk` or `nostrblue-release.aab`
 
 #### Installing on a device
 
@@ -241,7 +246,7 @@ dx serve --platform desktop --no-default-features --features desktop
 | [NIP-07](https://github.com/nostr-protocol/nips/blob/master/07.md) | Browser extension signing | ✅ |
 | [NIP-09](https://github.com/nostr-protocol/nips/blob/master/09.md) | Event Deletion | ✅ |
 | [NIP-10](https://github.com/nostr-protocol/nips/blob/master/10.md) | Text Notes and Threads | ✅ |
-| [NIP-11](https://github.com/nostr-protocol/nips/blob/master/11.md) | Relay Information Document | ❌ |
+| [NIP-11](https://github.com/nostr-protocol/nips/blob/master/11.md) | Relay Information Document | ✅ |
 | [NIP-13](https://github.com/nostr-protocol/nips/blob/master/13.md) | Proof of Work | ❌ |
 | [NIP-14](https://github.com/nostr-protocol/nips/blob/master/14.md) | Subject tag | ❌ |
 | [NIP-15](https://github.com/nostr-protocol/nips/blob/master/15.md) | Nostr Marketplace | ❌ |
@@ -296,7 +301,7 @@ dx serve --platform desktop --no-default-features --features desktop
 | [NIP-71](https://github.com/nostr-protocol/nips/blob/master/71.md) | Video Events | ✅ |
 | [NIP-72](https://github.com/nostr-protocol/nips/blob/master/72.md) | Moderated Communities | ✅ |
 | [NIP-73](https://github.com/nostr-protocol/nips/blob/master/73.md) | External Content IDs | ✅ |
-| [NIP-75](https://github.com/nostr-protocol/nips/blob/master/75.md) | Zap Goals | ❌ |
+| [NIP-75](https://github.com/nostr-protocol/nips/blob/master/75.md) | Zap Goals | ✅ |
 | [NIP-77](https://github.com/nostr-protocol/nips/blob/master/77.md) | Negentropy Syncing | ❌ |
 | [NIP-78](https://github.com/nostr-protocol/nips/blob/master/78.md) | App-specific data | ✅ |
 | [NIP-7D](https://github.com/nostr-protocol/nips/blob/master/7D.md) | Threads | ❌ |
