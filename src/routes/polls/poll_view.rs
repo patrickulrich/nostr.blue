@@ -84,7 +84,9 @@ pub fn PollView(noteid: String) -> Element {
         let generation = comments_subscription_generation.fetch_add(1, Ordering::SeqCst) + 1;
         let generation_counter = comments_subscription_generation.clone();
         spawn(async move {
-            loading_comments.set(true);
+            if comments.read().is_empty() {
+                loading_comments.set(true);
+            }
             comments_error.set(None);
             live_updates_warning.set(None);
             let subscription_handoff = Timestamp::now();
@@ -183,6 +185,9 @@ pub fn PollView(noteid: String) -> Element {
                     }
                     Err(e) => {
                         log::error!("Failed to subscribe for poll comments: {}", e);
+                        if generation_counter.load(Ordering::SeqCst) != generation {
+                            return;
+                        }
                         let retry_count = *live_updates_retry_count.read();
                         let next_retry = retry_count.saturating_add(1);
                         let retry_delay_secs = 2u64.saturating_pow(retry_count);
@@ -195,10 +200,11 @@ pub fn PollView(noteid: String) -> Element {
                             let generation_counter = generation_counter.clone();
                             spawn(async move {
                                 crate::platform::timer::sleep(Duration::from_secs(retry_delay_secs)).await;
-                                if generation_counter.load(Ordering::SeqCst) == generation {
-                                    comments_refresh
-                                        .with_mut(|value| *value = value.wrapping_add(1));
+                                if generation_counter.load(Ordering::SeqCst) != generation {
+                                    return;
                                 }
+                                comments_refresh
+                                    .with_mut(|value| *value = value.wrapping_add(1));
                             });
                         } else {
                             live_updates_warning.set(Some(format!(

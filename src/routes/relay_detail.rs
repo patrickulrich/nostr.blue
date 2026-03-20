@@ -423,7 +423,7 @@ pub fn RelayDetail(relay_id: String) -> Element {
                                             div { class: "rounded-lg bg-gray-50 dark:bg-gray-700 p-3",
                                                 p { class: "font-medium text-gray-900 dark:text-white", "Reliability" }
                                                 p { class: "text-gray-700 dark:text-gray-300 mt-1",
-                                                    "{stats.successful_connections} successful / {stats.connection_attempts} attempts • {stats.success_rate as u8}%"
+                                                    "{stats.successful_connections} successful / {stats.connection_attempts} attempts • {(stats.success_rate * 100.0) as u8}%"
                                                 }
                                             }
                                         }
