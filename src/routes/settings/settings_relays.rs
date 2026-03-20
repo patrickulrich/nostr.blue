@@ -10,6 +10,7 @@
 //! 7. Connected Relays (read-only live stats)
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, relay};
+use crate::utils::format_bytes;
 use dioxus::prelude::*;
 use std::collections::HashMap;
 use url::Url;
@@ -153,17 +154,6 @@ pub fn SettingsRelays() -> Element {
     };
     let relay_detail_route = |url: &str| Route::RelayDetail {
         relay_id: crate::utils::relay::encode_relay_route_id(url),
-    };
-    let format_bytes = |bytes: usize| -> String {
-        if bytes < 1024 {
-            format!("{} B", bytes)
-        } else if bytes < 1024 * 1024 {
-            format!("{:.1} KB", bytes as f64 / 1024.0)
-        } else if bytes < 1024 * 1024 * 1024 {
-            format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
-        } else {
-            format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
-        }
     };
     let add_general_relay = move |_| {
         let url = new_general_relay.read().clone();
@@ -566,7 +556,9 @@ pub fn SettingsRelays() -> Element {
                                         div { class: "flex items-center justify-between",
                                             div { class: "flex items-center gap-1 min-w-0",
                                                 span { "📨" }
-                                                span { class: "font-mono text-sm text-gray-900 dark:text-white break-all",
+                                                Link {
+                                                    to: relay_detail_route(&url_clone),
+                                                    class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",
                                                     {display_relay_url(&url_clone)}
                                                 }
                                             }
@@ -650,7 +642,9 @@ pub fn SettingsRelays() -> Element {
                                         div { class: "flex items-center justify-between",
                                             div { class: "flex items-center gap-1 min-w-0",
                                                 span { "🔍" }
-                                                span { class: "font-mono text-sm text-gray-900 dark:text-white break-all",
+                                                Link {
+                                                    to: relay_detail_route(&url_clone),
+                                                    class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",
                                                     {display_relay_url(&url_clone)}
                                                 }
                                             }

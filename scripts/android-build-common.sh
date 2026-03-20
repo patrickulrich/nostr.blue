@@ -380,16 +380,32 @@ for pattern, replacement in replacements:
     if count != 1:
         raise SystemExit(f"failed to patch {pattern} in {path}")
 
-content = re.sub(
-    r'\n\s*kotlinOptions\s*\{\n\s*jvmTarget = "1\.8"\n\s*\}\n',
-    '\n    compileOptions {\n        sourceCompatibility = JavaVersion.VERSION_17\n        targetCompatibility = JavaVersion.VERSION_17\n    }\n',
-    content,
-    count=1,
-)
+kotlin_options_match = re.search(r'(?ms)^\s*kotlinOptions\s*\{\s*(.*?)^\s*\}\s*', content)
+if kotlin_options_match:
+    kotlin_options_block = kotlin_options_match.group(0)
+    updated_block, count = re.subn(
+        r'(?m)^(\s*jvmTarget\s*=\s*)"[^"]+"(\s*)$',
+        r'\1"17"\2',
+        kotlin_options_block,
+        count=1,
+    )
+    if count != 1:
+        raise SystemExit(f"unexpected kotlinOptions format in {path}")
+    content = (
+        content[:kotlin_options_match.start()]
+        + updated_block
+        + content[kotlin_options_match.end():]
+    )
 
 plugins_block = 'plugins {\n    id("com.android.application")\n    id("org.jetbrains.kotlin.android")\n}\n'
 compiler_options_block = '\nkotlin {\n    compilerOptions {\n        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17\n    }\n}\n'
-if "compilerOptions" not in content:
+if kotlin_options_match:
+    if re.search(r'(?m)^\s*kotlinOptions\s*\{', content) and not re.search(
+        r'(?m)^\s*jvmTarget\s*=\s*"17"\s*$',
+        content,
+    ):
+        raise SystemExit(f"unresolved kotlinOptions remains in {path}")
+elif "compilerOptions" not in content:
     if plugins_block not in content:
         raise SystemExit(f"failed to find plugins block in {path}")
     content = content.replace(plugins_block, plugins_block + compiler_options_block, 1)

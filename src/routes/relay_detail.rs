@@ -2,6 +2,7 @@ use crate::platform::http::http_client;
 use crate::routes::Route;
 use crate::stores::{nostr_client, relay};
 use crate::utils::relay::{decode_relay_route_id, relay_http_url};
+use crate::utils::format_bytes;
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip11::{FeeSchedule, Limitation, RelayInformationDocument, RetentionKind};
 use nostr_sdk::prelude::JsonUtil;
@@ -61,18 +62,6 @@ async fn fetch_nip11_document(url: &str) -> Result<RelayInformationDocument, Str
         .map_err(|e| format!("Failed to read relay metadata: {}", e))?;
     RelayInformationDocument::from_json(&body)
         .map_err(|e| format!("Failed to parse relay metadata: {}", e))
-}
-
-fn format_bytes(bytes: usize) -> String {
-    if bytes < 1024 {
-        format!("{} B", bytes)
-    } else if bytes < 1024 * 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else if bytes < 1024 * 1024 * 1024 {
-        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
-    } else {
-        format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
-    }
 }
 
 fn limitation_rows(limitation: &Limitation) -> Vec<(String, String)> {

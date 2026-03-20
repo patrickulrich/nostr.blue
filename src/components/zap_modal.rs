@@ -48,6 +48,9 @@ fn is_webln_available() -> bool {
     }
     false
 }
+
+const PRESET_AMOUNTS: [u64; 6] = [21, 100, 500, 1000, 5000, 10000];
+
 #[derive(Props, Clone, PartialEq)]
 pub struct ZapModalProps {
     pub recipient_pubkey: String,
@@ -63,11 +66,10 @@ pub struct ZapModalProps {
 }
 #[component]
 pub fn ZapModal(props: ZapModalProps) -> Element {
-    let preset_amounts = vec![21, 100, 500, 1000, 5000, 10000];
     let initial_amount = props.initial_amount.unwrap_or(21);
     let initial_custom_amount = props
         .initial_amount
-        .filter(|amount| !preset_amounts.contains(amount))
+        .filter(|amount| !PRESET_AMOUNTS.contains(amount))
         .map(|amount| amount.to_string())
         .unwrap_or_default();
     let mut zap_amount = use_signal(|| initial_amount);
@@ -639,7 +641,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                         div { class: "space-y-2",
                             label { class: "block text-sm font-medium mb-2", "Select Amount (sats)" }
                             div { class: "grid grid-cols-3 gap-2",
-                                for amount in preset_amounts {
+                                for amount in PRESET_AMOUNTS {
                                     button {
                                         class: if *zap_amount.read() == amount { "px-4 py-2 rounded bg-primary text-primary-foreground font-medium" } else { "px-4 py-2 rounded bg-secondary text-secondary-foreground hover:bg-secondary/80" },
                                         onclick: move |_| {
