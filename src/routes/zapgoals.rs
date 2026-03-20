@@ -124,7 +124,7 @@ async fn enrich_progress(goals: Vec<ZapGoal>) -> Result<Vec<ZapGoalProgress>, St
 pub fn ZapGoalsHome() -> Element {
     let toast = consume_toast();
     let navigator = use_navigator();
-    let mut refresh_trigger = use_signal(|| 0u64);
+    let mut refresh_trigger = use_signal(|| 0u32);
     let default_feed = if crate::stores::auth_store::get_pubkey().is_some() {
         ZapGoalsFeedType::Following
     } else {
@@ -309,7 +309,10 @@ pub fn ZapGoalsHome() -> Element {
                             div { class: "flex flex-wrap items-center gap-2",
                                 button {
                                     class: "rounded-lg border border-border px-3 py-2 text-sm transition hover:bg-accent",
-                                    onclick: move |_| refresh_trigger.with_mut(|value| *value += 1),
+                                    onclick: move |_| {
+                                        let next = refresh_trigger.read().wrapping_add(1);
+                                        refresh_trigger.set(next);
+                                    },
                                     "Refresh"
                                 }
                                 select {
@@ -444,7 +447,8 @@ pub fn ZapGoalsHome() -> Element {
                                 relay_hints: Some(goal.goal.relays.clone()),
                                 on_close: move |_| {
                                     selected_goal.set(None);
-                                    refresh_trigger.with_mut(|value| *value += 1);
+                                    let next = refresh_trigger.read().wrapping_add(1);
+                                    refresh_trigger.set(next);
                                 },
                             }
                         }

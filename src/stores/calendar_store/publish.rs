@@ -299,8 +299,7 @@ pub async fn publish_rsvp(
             TagKind::Custom("fb".into()),
             vec![free_busy.as_str().to_string()],
         ));
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(event))
+    let output = send_tagged_event_builder(&client, event)
         .await
         .map_err(|e| format!("Failed to publish RSVP: {}", e))?;
     Ok(output.id().to_string())

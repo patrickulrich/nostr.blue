@@ -27,7 +27,7 @@ fn truncate_guid(guid: &str) -> String {
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 fn extract_podcast_feed_guid(contents: &[(ExternalContentId, Option<String>)]) -> Option<String> {
     contents.iter().find_map(|(content, _)| match content {
         ExternalContentId::PodcastFeed(guid) => Some(guid.clone()),

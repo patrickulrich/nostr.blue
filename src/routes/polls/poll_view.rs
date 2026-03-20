@@ -377,7 +377,9 @@ pub fn PollView(noteid: String) -> Element {
                                         .iter()
                                         .find_map(|tag| {
                                             let slice = tag.as_slice();
-                                            if slice.first().map(|s| s.as_str()) == Some("e") {
+                                            if slice.first().map(|s| s.as_str()) == Some("e")
+                                                && slice.get(3).map(|s| s.as_str()) == Some("root")
+                                            {
                                                 slice.get(1).and_then(|id| EventId::from_hex(id).ok())
                                             } else {
                                                 None

@@ -63,10 +63,12 @@ async fn collect_zap_relays(relay_hints: Option<&Vec<String>>) -> Vec<RelayUrl> 
         }
     }
 
-    if let Some(client) = get_client() {
-        for relay in client.relays().await.into_keys() {
-            if relays.iter().all(|existing| existing != &relay) {
-                relays.push(relay);
+    if relay_hints.is_none() || relay_hints.is_some_and(|hints| hints.is_empty()) {
+        if let Some(client) = get_client() {
+            for relay in client.relays().await.into_keys() {
+                if relays.iter().all(|existing| existing != &relay) {
+                    relays.push(relay);
+                }
             }
         }
     }

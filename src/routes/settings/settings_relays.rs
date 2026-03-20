@@ -160,7 +160,7 @@ pub fn SettingsRelays() -> Element {
             .map(|parsed| parsed.to_string())
             .unwrap_or_else(|_| url.to_string())
     };
-    let is_relay_known = |url: &str| {
+    let can_open_relay_detail = |url: &str| {
         let mut known_relays = HashSet::new();
         for info in connection_info.read().as_ref().into_iter().flatten() {
             known_relays.insert(normalize_known_relay_url(&info.url));
@@ -185,7 +185,7 @@ pub fn SettingsRelays() -> Element {
         for relay_url in relay::BLOCKED_RELAYS.read().iter() {
             known_relays.insert(normalize_known_relay_url(relay_url));
         }
-        known_relays.contains(&normalize_known_relay_url(url))
+        !relay::is_relay_blocked(url) && known_relays.contains(&normalize_known_relay_url(url))
     };
     let add_general_relay = move |_| {
         let url = new_general_relay.read().clone();
@@ -477,7 +477,7 @@ pub fn SettingsRelays() -> Element {
                                 rsx! {
                                     div { key: "{url}", class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
                                         div { class: "flex items-center justify-between",
-                                            if is_relay_known(&url) {
+                                            if can_open_relay_detail(&url) {
                                                 Link {
                                                     to: relay_detail_route(&url),
                                                     class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",
@@ -595,7 +595,7 @@ pub fn SettingsRelays() -> Element {
                                         div { class: "flex items-center justify-between",
                                             div { class: "flex items-center gap-1 min-w-0",
                                                 span { "📨" }
-                                                if is_relay_known(&url_clone) {
+                                                if can_open_relay_detail(&url_clone) {
                                                     Link {
                                                         to: relay_detail_route(&url_clone),
                                                         class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",
@@ -688,7 +688,7 @@ pub fn SettingsRelays() -> Element {
                                         div { class: "flex items-center justify-between",
                                             div { class: "flex items-center gap-1 min-w-0",
                                                 span { "🔍" }
-                                                if is_relay_known(&url_clone) {
+                                                if can_open_relay_detail(&url_clone) {
                                                     Link {
                                                         to: relay_detail_route(&url_clone),
                                                         class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",

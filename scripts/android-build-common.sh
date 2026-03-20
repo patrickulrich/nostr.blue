@@ -6,6 +6,10 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 1
 fi
 
+# Keep this fallback in sync with ANDROID_NDK_HOME/ANDROID_SDK_ROOT auto-discovery
+# and any documented NDK_VERSION setup in project docs.
+NDK_FALLBACK_VERSION="${NDK_FALLBACK_VERSION:-27.0.12077973}"
+
 require_file() {
     local path="$1"
     local message="$2"
@@ -106,13 +110,10 @@ write_android_local_properties() {
         case "$ANDROID_NDK_HOME" in
             "$sdk_root"/*) ndk_dir="$ANDROID_NDK_HOME" ;;
         esac
-    fi
-    if [ -z "$ndk_dir" ]; then
-        if [ -n "${ANDROID_NDK_HOME:-}" ]; then
-            ndk_dir="$ANDROID_NDK_HOME"
-        elif [ -d "$sdk_root/ndk" ]; then
-            ndk_dir="$sdk_root/ndk"
-        fi
+    elif [ -n "${ANDROID_NDK_HOME:-}" ]; then
+        ndk_dir="$ANDROID_NDK_HOME"
+    elif [ -d "$sdk_root/ndk" ]; then
+        ndk_dir="$sdk_root/ndk"
     fi
 
     mkdir -p "$DX_ANDROID"
@@ -283,15 +284,15 @@ if versions:
         if [ -n "$NDK_VERSION" ]; then
             ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/$NDK_VERSION"
         else
-            ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.0.12077973"
+            ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/$NDK_FALLBACK_VERSION"
         fi
     else
-        ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.0.12077973"
+        ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/$NDK_FALLBACK_VERSION"
     fi
 fi
 if [ ! -d "$ANDROID_NDK_HOME" ]; then
     echo "ERROR: ANDROID_NDK_HOME does not exist: $ANDROID_NDK_HOME" >&2
-    echo "  Install NDK via: sdkmanager --install 'ndk;27.0.12077973'" >&2
+    echo "  Install NDK via: sdkmanager --install 'ndk;$NDK_FALLBACK_VERSION'" >&2
     exit 1
 fi
 export ANDROID_HOME ANDROID_NDK_HOME ANDROID_SDK_ROOT
