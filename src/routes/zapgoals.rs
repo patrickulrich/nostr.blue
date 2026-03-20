@@ -135,7 +135,7 @@ pub fn ZapGoalsHome() -> Element {
     let mut goals = use_signal(Vec::<ZapGoalProgress>::new);
     let mut loading = use_signal(|| false);
     let mut pagination_loading = use_signal(|| false);
-    let mut has_more = use_signal(|| true);
+    let mut has_more = use_signal(|| false);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let mut empty_message = use_signal(|| None::<String>);
     let mut error_message = use_signal(|| None::<String>);

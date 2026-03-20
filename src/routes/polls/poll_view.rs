@@ -39,6 +39,15 @@ pub fn PollView(noteid: String) -> Element {
     let mut live_updates_retry_count = use_signal(|| 0u32);
     let mut comment_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
     let comments_subscription_generation = use_hook(|| Arc::new(AtomicU64::new(0)));
+    use_drop(move || {
+        if let Some(sub_id) = comment_sub_id.replace(None) {
+            if let Some(client) = nostr_client::get_client() {
+                spawn(async move {
+                    subscription_manager::unsubscribe(&client, &sub_id).await;
+                });
+            }
+        }
+    });
 
     use_effect(move || {
         let noteid_str = noteid.clone();

@@ -143,12 +143,8 @@ pub fn ExternalContentList(
             )
         },
     );
-    let podcast_cards = map_podcast_items(
-        &podcasts
-            .iter()
-            .map(|(_, item)| item.clone())
-            .collect::<Vec<_>>(),
-    );
+    let podcast_items: Vec<_> = podcasts.into_iter().map(|(_, item)| item).collect();
+    let podcast_cards = map_podcast_items(&podcast_items);
     rsx! {
         div { class: "flex flex-col gap-2 mt-2",
             for (index, (content, podcast_guid)) in podcast_cards.iter().enumerate() {

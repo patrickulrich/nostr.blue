@@ -160,7 +160,7 @@ pub fn SettingsRelays() -> Element {
             .map(|parsed| parsed.to_string())
             .unwrap_or_else(|_| url.to_string())
     };
-    let can_open_relay_detail = |url: &str| {
+    let known_relays = use_memo(move || {
         let mut known_relays = HashSet::new();
         for info in connection_info.read().as_ref().into_iter().flatten() {
             known_relays.insert(normalize_known_relay_url(&info.url));
@@ -185,7 +185,13 @@ pub fn SettingsRelays() -> Element {
         for relay_url in relay::BLOCKED_RELAYS.read().iter() {
             known_relays.insert(normalize_known_relay_url(relay_url));
         }
-        !relay::is_relay_blocked(url) && known_relays.contains(&normalize_known_relay_url(url))
+        known_relays
+    });
+    let can_open_relay_detail = |url: &str| {
+        !relay::is_relay_blocked(url)
+            && known_relays
+                .read()
+                .contains(&normalize_known_relay_url(url))
     };
     let add_general_relay = move |_| {
         let url = new_general_relay.read().clone();
