@@ -970,6 +970,7 @@ fn Layout() -> Element {
             | Route::SettingsBlocklist {}
             | Route::SettingsMuted {}
             | Route::SettingsRelays {}
+            | Route::RelayDetail { .. }
     );
     let is_creation_page = matches!(
         current_route,

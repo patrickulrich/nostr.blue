@@ -42,6 +42,9 @@ pub async fn publish_pinboard(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish pinboard: {}", e))?;
+    if output.success.is_empty() {
+        return Err("No relays accepted event".to_string());
+    }
     let event_id = output.id().to_hex();
     log::info!("Pinboard published: {}", event_id);
     let signer = client
@@ -139,6 +142,9 @@ pub async fn publish_pin(input: PinInput) -> std::result::Result<String, String>
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish pin: {}", e))?;
+    if output.success.is_empty() {
+        return Err("No relays accepted event".to_string());
+    }
     let event_id = output.id().to_hex();
     log::info!("Pin published: {}", event_id);
     Ok(event_id)
@@ -154,10 +160,13 @@ pub async fn delete_pin(pin_event_id: &str) -> std::result::Result<(), String> {
         EventId::from_hex(pin_event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
     let deletion_request = EventDeletionRequest::new().id(event_id);
     let builder = EventBuilder::delete(deletion_request);
-    client
+    let output = client
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to delete pin: {}", e))?;
+    if output.success.is_empty() {
+        return Err("No relays accepted event".to_string());
+    }
     remove_pin_from_cache(pin_event_id);
     log::info!("Pin deleted: {}", pin_event_id);
     Ok(())
@@ -181,6 +190,9 @@ pub async fn delete_pinboard(board: &Pinboard) -> std::result::Result<String, St
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to delete pinboard: {}", e))?;
+    if output.success.is_empty() {
+        return Err("No relays accepted event".to_string());
+    }
     remove_pinboard_from_cache(&board.a_tag);
     log::info!("Pinboard deleted: {}", output.id().to_hex());
     Ok(output.id().to_hex())
@@ -225,10 +237,13 @@ pub async fn toggle_pinboard_reaction(
             .map_err(|e| format!("Invalid event ID: {}", e))?;
         let deletion_request = EventDeletionRequest::new().id(event_id);
         let builder = EventBuilder::delete(deletion_request);
-        client
+        let output = client
             .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
             .await
             .map_err(|e| format!("Failed to delete reaction: {}", e))?;
+        if output.success.is_empty() {
+            return Err("No relays accepted event".to_string());
+        }
         Ok(false)
     } else {
         let author_pubkey = PublicKey::from_hex(&board.pubkey)
@@ -243,10 +258,13 @@ pub async fn toggle_pinboard_reaction(
             Tag::public_key(author_pubkey),
         ];
         let builder = EventBuilder::new(Kind::Reaction, content).tags(tags);
-        client
+        let output = client
             .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
             .await
             .map_err(|e| format!("Failed to send reaction: {}", e))?;
+        if output.success.is_empty() {
+            return Err("No relays accepted event".to_string());
+        }
         Ok(true)
     }
 }

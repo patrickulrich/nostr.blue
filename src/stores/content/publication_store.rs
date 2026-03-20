@@ -947,6 +947,9 @@ pub async fn publish_publication_index(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish publication index: {}", e))?;
+    if output.success.is_empty() {
+        return Err("No relays accepted event".to_string());
+    }
     log::info!("Publication index published: {}", output.id().to_hex());
     Ok(output.id().to_hex())
 }
@@ -984,6 +987,9 @@ pub async fn publish_publication_section(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish section: {}", e))?;
+    if output.success.is_empty() {
+        return Err("No relays accepted event".to_string());
+    }
     log::info!("Publication section published: {}", output.id().to_hex());
     Ok(output.id().to_hex())
 }

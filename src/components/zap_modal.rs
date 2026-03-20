@@ -61,25 +61,16 @@ async fn collect_zap_relays(relay_hints: Option<&Vec<String>>) -> Vec<RelayUrl> 
         if relays.iter().all(|existing| existing != &relay) {
             relays.push(relay);
         }
-        if relays.len() >= 5 {
-            break;
-        }
     }
 
-    if relays.len() < 5 {
-        if let Some(client) = get_client() {
+    if let Some(client) = get_client() {
         for relay in client.relays().await.into_keys() {
             if relays.iter().all(|existing| existing != &relay) {
                 relays.push(relay);
             }
-            if relays.len() >= 5 {
-                break;
-            }
-        }
         }
     }
 
-    relays.truncate(5);
     relays
 }
 

@@ -95,10 +95,12 @@ pub fn PollView(noteid: String) -> Element {
             match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
                 Ok(comment_events) => {
                     if generation_counter.load(Ordering::SeqCst) == generation {
-                        live_since = comment_events
+                        let fetched_max = comment_events
                             .iter()
                             .map(|event| event.created_at)
-                            .max()
+                            .max();
+                        live_since = fetched_max
+                            .map(|timestamp| std::cmp::min(subscription_handoff, timestamp))
                             .unwrap_or(subscription_handoff);
                         let merged = merge_comments(comments.read().clone(), comment_events);
                         invalidate_thread_tree_cache(&event_id);
@@ -119,7 +121,7 @@ pub fn PollView(noteid: String) -> Element {
                                 e
                             );
                             live_updates_warning.set(Some(format!(
-                                "Live updates unavailable. Showing cached comments. Use Retry to try again. ({})",
+                                "Live updates unavailable. Showing cached comments. ({})",
                                 e
                             )));
                         }
@@ -188,13 +190,17 @@ pub fn PollView(noteid: String) -> Element {
                         if generation_counter.load(Ordering::SeqCst) != generation {
                             return;
                         }
+                        if let Some(old_sub_id) = comment_sub_id.replace(None) {
+                            subscription_manager::unsubscribe(&client, &old_sub_id).await;
+                        }
+                        loading_comments.set(false);
                         let retry_count = *live_updates_retry_count.read();
                         let next_retry = retry_count.saturating_add(1);
                         let retry_delay_secs = 2u64.saturating_pow(retry_count);
                         if next_retry <= LIVE_UPDATES_MAX_RETRIES {
                             live_updates_retry_count.set(next_retry);
                             live_updates_warning.set(Some(format!(
-                                "Live updates unavailable. New comments may not appear automatically. Retrying in {}s, or use Retry. ({})",
+                                "Live updates unavailable. New comments may not appear automatically. Retrying in {}s. ({})",
                                 retry_delay_secs, e
                             )));
                             let generation_counter = generation_counter.clone();
@@ -208,7 +214,7 @@ pub fn PollView(noteid: String) -> Element {
                             });
                         } else {
                             live_updates_warning.set(Some(format!(
-                                "Live updates unavailable. New comments may not appear automatically. Use Retry to try again. ({})",
+                                "Live updates unavailable. New comments may not appear automatically. ({})",
                                 e
                             )));
                         }

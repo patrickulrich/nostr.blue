@@ -51,6 +51,10 @@ pub fn ZapGoalCard(props: ZapGoalCardProps) -> Element {
         let parsed = Url::parse(url).ok()?;
         matches!(parsed.scheme(), "http" | "https").then(|| parsed.to_string())
     });
+    let safe_image_url = props.progress.goal.image.as_ref().and_then(|url| {
+        let parsed = Url::parse(url).ok()?;
+        matches!(parsed.scheme(), "http" | "https").then(|| parsed.to_string())
+    });
 
     rsx! {
         article { class: "{card_class}",
@@ -97,7 +101,7 @@ pub fn ZapGoalCard(props: ZapGoalCardProps) -> Element {
                     }
                 }
 
-                if let Some(image) = props.progress.goal.image.clone() {
+                if let Some(image) = safe_image_url {
                     img {
                         class: "max-h-72 w-full rounded-xl border border-border object-cover",
                         src: "{image}",

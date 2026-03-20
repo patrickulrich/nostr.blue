@@ -57,7 +57,7 @@ pub fn AboutDonate() -> Element {
     let toast = consume_toast();
     let mut selected_amount = use_signal(|| 21u64);
     let mut show_modal = use_signal(|| false);
-    let loading = use_signal(|| false);
+    let loading = use_signal(|| true);
     let goals = use_signal(Vec::<zap_goals_store::ZapGoalProgress>::new);
     let error_message = use_signal(|| None::<String>);
     let request_generation = use_signal(|| 0u32);
@@ -167,7 +167,10 @@ pub fn AboutDonate() -> Element {
                         }
                     }
                 }
-            } else if error_message.read().is_none() && goals.read().is_empty() {
+            } else if *crate::stores::nostr_client::CLIENT_INITIALIZED.read()
+                && error_message.read().is_none()
+                && goals.read().is_empty()
+            {
                 div { class: "mt-4 rounded-2xl border border-dashed border-border bg-card px-6 py-10 text-center",
                     p { class: "text-sm text-muted-foreground",
                         "No project goals are published yet. You can still support development with a direct zap."

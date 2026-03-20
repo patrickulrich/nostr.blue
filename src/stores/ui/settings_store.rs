@@ -166,13 +166,16 @@ pub async fn save_settings(settings: &AppSettings) -> Result<(), String> {
         .map_err(|e| format!("Failed to serialize settings: {}", e))?;
     let builder =
         EventBuilder::new(Kind::from(APP_DATA_KIND), content).tag(Tag::identifier(SETTINGS_D_TAG));
-    client
+    let output = client
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder_with_enabled(
             builder,
             settings_to_save.publish_client_tag,
         ))
         .await
         .map_err(|e| format!("Failed to publish settings: {}", e))?;
+    if output.success.is_empty() {
+        return Err("No relays accepted event".to_string());
+    }
     log::info!("Settings saved to Nostr successfully");
     cache_settings(&settings_to_save);
     SETTINGS.write().clone_from(&settings_to_save);

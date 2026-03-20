@@ -12,7 +12,7 @@ use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, relay};
 use crate::utils::format_bytes;
 use dioxus::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use url::Url;
 #[component]
 pub fn SettingsRelays() -> Element {
@@ -154,6 +154,38 @@ pub fn SettingsRelays() -> Element {
     };
     let relay_detail_route = |url: &str| Route::RelayDetail {
         relay_id: crate::utils::relay::encode_relay_route_id(url),
+    };
+    let normalize_known_relay_url = |url: &str| {
+        nostr::Url::parse(url)
+            .map(|parsed| parsed.to_string())
+            .unwrap_or_else(|_| url.to_string())
+    };
+    let is_relay_known = |url: &str| {
+        let mut known_relays = HashSet::new();
+        for info in connection_info.read().as_ref().into_iter().flatten() {
+            known_relays.insert(normalize_known_relay_url(&info.url));
+        }
+        if let Some(metadata) = relay::USER_RELAY_METADATA.read().as_ref() {
+            for relay in &metadata.relays {
+                known_relays.insert(normalize_known_relay_url(&relay.url));
+            }
+            for relay in &metadata.dm_relays {
+                known_relays.insert(normalize_known_relay_url(relay));
+            }
+        }
+        for relay_url in relay::LOCAL_RELAYS.read().iter() {
+            known_relays.insert(normalize_known_relay_url(relay_url));
+        }
+        for relay_url in relay::SEARCH_RELAYS.read().iter() {
+            known_relays.insert(normalize_known_relay_url(relay_url));
+        }
+        for relay_url in relay::BROADCAST_RELAYS.read().iter() {
+            known_relays.insert(normalize_known_relay_url(relay_url));
+        }
+        for relay_url in relay::BLOCKED_RELAYS.read().iter() {
+            known_relays.insert(normalize_known_relay_url(relay_url));
+        }
+        known_relays.contains(&normalize_known_relay_url(url))
     };
     let add_general_relay = move |_| {
         let url = new_general_relay.read().clone();
@@ -445,10 +477,17 @@ pub fn SettingsRelays() -> Element {
                                 rsx! {
                                     div { key: "{url}", class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
                                         div { class: "flex items-center justify-between",
-                                            Link {
-                                                to: relay_detail_route(&url),
-                                                class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",
-                                                {display_relay_url(&url)}
+                                            if is_relay_known(&url) {
+                                                Link {
+                                                    to: relay_detail_route(&url),
+                                                    class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",
+                                                    {display_relay_url(&url)}
+                                                }
+                                            } else {
+                                                span {
+                                                    class: "font-mono text-sm text-gray-900 dark:text-white break-all",
+                                                    {display_relay_url(&url)}
+                                                }
                                             }
                                             div { class: "flex items-center gap-2",
                                                 button {
@@ -556,10 +595,17 @@ pub fn SettingsRelays() -> Element {
                                         div { class: "flex items-center justify-between",
                                             div { class: "flex items-center gap-1 min-w-0",
                                                 span { "📨" }
-                                                Link {
-                                                    to: relay_detail_route(&url_clone),
-                                                    class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",
-                                                    {display_relay_url(&url_clone)}
+                                                if is_relay_known(&url_clone) {
+                                                    Link {
+                                                        to: relay_detail_route(&url_clone),
+                                                        class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",
+                                                        {display_relay_url(&url_clone)}
+                                                    }
+                                                } else {
+                                                    span {
+                                                        class: "font-mono text-sm text-gray-900 dark:text-white break-all",
+                                                        {display_relay_url(&url_clone)}
+                                                    }
                                                 }
                                             }
                                             button {
@@ -642,10 +688,17 @@ pub fn SettingsRelays() -> Element {
                                         div { class: "flex items-center justify-between",
                                             div { class: "flex items-center gap-1 min-w-0",
                                                 span { "🔍" }
-                                                Link {
-                                                    to: relay_detail_route(&url_clone),
-                                                    class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",
-                                                    {display_relay_url(&url_clone)}
+                                                if is_relay_known(&url_clone) {
+                                                    Link {
+                                                        to: relay_detail_route(&url_clone),
+                                                        class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",
+                                                        {display_relay_url(&url_clone)}
+                                                    }
+                                                } else {
+                                                    span {
+                                                        class: "font-mono text-sm text-gray-900 dark:text-white break-all",
+                                                        {display_relay_url(&url_clone)}
+                                                    }
                                                 }
                                             }
                                             button {

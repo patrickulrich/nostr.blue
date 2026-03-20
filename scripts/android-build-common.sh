@@ -76,7 +76,13 @@ EOF
         exit 1
     fi
 
-    echo $((major * 10000 + minor * 100 + patch))
+    local version_code=$((major * 10000 + minor * 100 + patch))
+    if [ "$version_code" -gt 2147483647 ]; then
+        echo "ERROR: version_code_from_semver exceeds Android versionCode max (2147483647): $version -> $version_code" >&2
+        exit 1
+    fi
+
+    echo "$version_code"
 }
 
 verify_gradle_value() {

@@ -236,7 +236,7 @@ pub async fn fetch_interaction_counts_batch(
     }
     let client = get_client().ok_or("Client not initialized")?;
     const MAX_RELAY_LIMIT: usize = 5000;
-    let requested_limit = uncached_ids.len() * 100;
+    let requested_limit = uncached_ids.len() * 200;
     let capped_limit = requested_limit.min(MAX_RELAY_LIMIT);
     let filter = Filter::new()
         .kinds(vec![

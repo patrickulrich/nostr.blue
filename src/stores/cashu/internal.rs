@@ -394,12 +394,15 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
             .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
             .await
         {
-            Ok(event_output) => {
+            Ok(event_output) if !event_output.success.is_empty() => {
                 new_event_id = Some(event_output.id().to_hex());
                 log::info!(
                     "Published cleanup token event: {}",
                     new_event_id.as_ref().unwrap()
                 );
+            }
+            Ok(_) => {
+                log::warn!("No relays accepted cleanup token event");
             }
             Err(e) => {
                 log::warn!("Failed to publish cleanup token event: {}", e);
@@ -428,11 +431,21 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
                 ))
                 .await
             {
-                Ok(_) => {
+                Ok(event_output) if !event_output.success.is_empty() => {
                     log::info!(
                         "Published deletion event for {} token events",
                         valid_event_ids.len()
                     );
+                }
+                Ok(_) => {
+                    log::warn!("No relays accepted cleanup deletion event, queuing for retry");
+                    super::events::queue_event_for_retry(
+                        deletion_builder,
+                        super::types::PendingEventType::DeletionEvent,
+                        None,
+                        None,
+                    )
+                    .await;
                 }
                 Err(e) => {
                     log::warn!("Failed to publish deletion event, queuing for retry: {}", e);

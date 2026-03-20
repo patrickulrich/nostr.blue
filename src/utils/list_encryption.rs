@@ -112,10 +112,13 @@ pub async fn add_person_to_list(
     }
     let encrypted_content = encrypt_private_tags(&private_tags).await?;
     let builder = EventBuilder::new(list_event.kind, encrypted_content).tags(public_tags);
-    client
+    let output = client
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to update list: {}", e))?;
+    if output.success.is_empty() {
+        return Err("No relays accepted event".to_string());
+    }
     Ok(())
 }
 /// Remove a person from a list (checks both public and private members)
@@ -158,10 +161,13 @@ pub async fn remove_person_from_list(
         .collect();
     let encrypted_content = encrypt_private_tags(&private_tags).await?;
     let builder = EventBuilder::new(list_event.kind, encrypted_content).tags(public_tags);
-    client
+    let output = client
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to update list: {}", e))?;
+    if output.success.is_empty() {
+        return Err("No relays accepted event".to_string());
+    }
     Ok(())
 }
 /// Result of getting list members with decryption status
@@ -282,10 +288,13 @@ pub async fn create_people_list(
         .sign_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to sign list event: {}", e))?;
-    client
+    let output = client
         .send_event(&event)
         .await
         .map_err(|e| format!("Failed to publish list: {}", e))?;
+    if output.success.is_empty() {
+        return Err("No relays accepted event".to_string());
+    }
     log::info!("Created new people list: {}", name);
     Ok(event)
 }

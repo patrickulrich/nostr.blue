@@ -157,7 +157,7 @@ pub fn ZapGoalsHome() -> Element {
         error_message.set(None);
         empty_message.set(None);
         oldest_timestamp.set(None);
-        has_more.set(true);
+        has_more.set(false);
         spawn(async move {
             let project_goals = fetch_project_goals(PROJECT_PIN_LIMIT)
                 .await
@@ -209,7 +209,7 @@ pub fn ZapGoalsHome() -> Element {
     });
 
     let load_more = move || {
-        if *pagination_loading.read() || !*has_more.read() {
+        if *loading.read() || *pagination_loading.read() || !*has_more.read() {
             return;
         }
         let current_feed_type = *feed_type.read();
