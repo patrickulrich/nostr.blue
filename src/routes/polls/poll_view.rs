@@ -30,6 +30,44 @@ fn merge_comments(existing: Vec<NostrEvent>, fetched: Vec<NostrEvent>) -> Vec<No
     merged
 }
 
+fn schedule_live_updates_retry(
+    generation_counter: Arc<AtomicU64>,
+    generation: u64,
+    reason: String,
+    mut loading_comments: Signal<bool>,
+    mut live_updates_retry_count: Signal<u32>,
+    mut live_updates_warning: Signal<Option<String>>,
+    mut comments_refresh: Signal<u64>,
+) {
+    if generation_counter.load(Ordering::SeqCst) != generation {
+        return;
+    }
+
+    loading_comments.set(false);
+    let retry_count = *live_updates_retry_count.read();
+    let next_retry = retry_count.saturating_add(1);
+    let retry_delay_secs = 2u64.saturating_pow(retry_count);
+    if next_retry <= LIVE_UPDATES_MAX_RETRIES {
+        live_updates_retry_count.set(next_retry);
+        live_updates_warning.set(Some(format!(
+            "Live updates unavailable. New comments may not appear automatically. Retrying in {}s. ({})",
+            retry_delay_secs, reason
+        )));
+        spawn(async move {
+            crate::platform::timer::sleep(Duration::from_secs(retry_delay_secs)).await;
+            if generation_counter.load(Ordering::SeqCst) != generation {
+                return;
+            }
+            comments_refresh.with_mut(|value| *value = value.wrapping_add(1));
+        });
+    } else {
+        live_updates_warning.set(Some(format!(
+            "Live updates unavailable. New comments may not appear automatically. Retry manually from the comments section. ({})",
+            reason
+        )));
+    }
+}
+
 #[component]
 pub fn PollView(noteid: String) -> Element {
     let mut poll_event = use_signal(|| None::<NostrEvent>);
@@ -178,9 +216,35 @@ pub fn PollView(noteid: String) -> Element {
                         comment_sub_id.set(Some(subscription_id.clone()));
 
                         let generation_counter = generation_counter.clone();
+                        let mut listener_comment_sub_id = comment_sub_id;
+                        let mut listener_comment_listener_task = comment_listener_task;
+                        let listener_subscription_id = subscription_id.clone();
                         let listener_task = spawn(async move {
                             let mut notifications = client.notifications();
-                            while let Ok(notification) = notifications.recv().await {
+                            loop {
+                                let notification = match notifications.recv().await {
+                                    Ok(notification) => notification,
+                                    Err(e) => {
+                                        if generation_counter.load(Ordering::SeqCst) == generation {
+                                            if listener_comment_sub_id.read().as_ref()
+                                                == Some(&listener_subscription_id)
+                                            {
+                                                listener_comment_sub_id.set(None);
+                                            }
+                                            listener_comment_listener_task.set(None);
+                                            schedule_live_updates_retry(
+                                                generation_counter.clone(),
+                                                generation,
+                                                e.to_string(),
+                                                loading_comments,
+                                                live_updates_retry_count,
+                                                live_updates_warning,
+                                                comments_refresh,
+                                            );
+                                        }
+                                        break;
+                                    }
+                                };
                                 if generation_counter.load(Ordering::SeqCst) != generation {
                                     break;
                                 }
@@ -217,33 +281,16 @@ pub fn PollView(noteid: String) -> Element {
                         if let Some(old_sub_id) = comment_sub_id.replace(None) {
                             subscription_manager::unsubscribe(&client, &old_sub_id).await;
                         }
-                        loading_comments.set(false);
-                        let retry_count = *live_updates_retry_count.read();
-                        let next_retry = retry_count.saturating_add(1);
-                        let retry_delay_secs = 2u64.saturating_pow(retry_count);
-                        if next_retry <= LIVE_UPDATES_MAX_RETRIES {
-                            live_updates_retry_count.set(next_retry);
-                            live_updates_warning.set(Some(format!(
-                                "Live updates unavailable. New comments may not appear automatically. Retrying in {}s. ({})",
-                                retry_delay_secs, e
-                            )));
-                            let generation_counter = generation_counter.clone();
-                            spawn(async move {
-                                crate::platform::timer::sleep(Duration::from_secs(
-                                    retry_delay_secs,
-                                ))
-                                .await;
-                                if generation_counter.load(Ordering::SeqCst) != generation {
-                                    return;
-                                }
-                                comments_refresh.with_mut(|value| *value = value.wrapping_add(1));
-                            });
-                        } else {
-                            live_updates_warning.set(Some(format!(
-                                "Live updates unavailable. New comments may not appear automatically. ({})",
-                                e
-                            )));
-                        }
+                        comment_listener_task.set(None);
+                        schedule_live_updates_retry(
+                            generation_counter.clone(),
+                            generation,
+                            e.to_string(),
+                            loading_comments,
+                            live_updates_retry_count,
+                            live_updates_warning,
+                            comments_refresh,
+                        );
                     }
                 }
             }

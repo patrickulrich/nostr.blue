@@ -61,12 +61,12 @@ async fn fetch_nip11_body(url: &str) -> Result<String, String> {
         .map_err(|e| format!("Failed to set relay metadata headers: {:?}", e))?;
 
     let window = web_sys::window().ok_or("No window object")?;
+    let deadline = crate::platform::timer::sleep_ms(15_000).fuse();
     let request = JsFuture::from(window.fetch_with_request(&request)).fuse();
-    let timeout = crate::platform::timer::sleep_ms(15_000).fuse();
-    futures::pin_mut!(request, timeout);
+    futures::pin_mut!(request, deadline);
     let response = futures::select! {
         resp = request => resp,
-        _ = timeout => {
+        _ = deadline => {
             controller.abort();
             return Err("Request timeout".to_string());
         },
@@ -94,11 +94,10 @@ async fn fetch_nip11_body(url: &str) -> Result<String, String> {
         .map_err(|_| "Failed to create relay metadata stream reader".to_string())?;
     loop {
         let read = JsFuture::from(reader.read()).fuse();
-        let timeout = crate::platform::timer::sleep_ms(15_000).fuse();
-        futures::pin_mut!(read, timeout);
+        futures::pin_mut!(read);
         let chunk = futures::select! {
             read = read => read,
-            _ = timeout => {
+            _ = deadline => {
                 controller.abort();
                 return Err("Request timeout".to_string());
             },

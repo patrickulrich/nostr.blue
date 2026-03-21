@@ -44,6 +44,52 @@ require_files() {
     fi
 }
 
+sync_overlay_dir() {
+    local src_dir="$1"
+    local dest_dir="$2"
+    shift 2
+
+    mkdir -p "$dest_dir"
+
+    if command -v rsync >/dev/null 2>&1; then
+        local rsync_args=(--archive --delete)
+        local preserve
+        for preserve in "$@"; do
+            rsync_args+=(--filter="P $preserve")
+        done
+        rsync "${rsync_args[@]}" "$src_dir"/ "$dest_dir"/
+        return
+    fi
+
+    local path rel preserve skip
+    while IFS= read -r -d '' path; do
+        rel="${path#$dest_dir/}"
+        skip=0
+        for preserve in "$@"; do
+            if [ "$rel" = "$preserve" ]; then
+                skip=1
+                break
+            fi
+        done
+        if [ "$skip" -eq 1 ]; then
+            continue
+        fi
+        if [ ! -e "$src_dir/$rel" ]; then
+            rm -rf "$path"
+        fi
+    done < <(find "$dest_dir" -mindepth 1 -depth -print0 2>/dev/null)
+
+    while IFS= read -r -d '' path; do
+        rel="${path#$src_dir/}"
+        if [ -d "$path" ]; then
+            mkdir -p "$dest_dir/$rel"
+        else
+            mkdir -p "$dest_dir/$(dirname "$rel")"
+            cp "$path" "$dest_dir/$rel"
+        fi
+    done < <(find "$src_dir" -mindepth 1 -print0)
+}
+
 version_field() {
     local field="$1"
     awk -v field="$field" '
@@ -386,8 +432,11 @@ else
     echo "ERROR: Failed to pre-copy file_paths.xml into $DX_ANDROID/app/src/main/res/xml/" >&2
     exit 1
 fi
-mkdir -p "$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main"
-if cp "$ANDROID_KOTLIN_SRC/dev/dioxus/main/"*.kt "$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main/"; then
+if sync_overlay_dir \
+    "$ANDROID_KOTLIN_SRC/dev/dioxus/main" \
+    "$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main" \
+    "MainActivity.kt"
+then
     echo "Pre-copied Android Kotlin sources"
 else
     echo "ERROR: Failed to pre-copy Android Kotlin sources into $DX_ANDROID/app/src/main/kotlin/dev/dioxus/main/" >&2
@@ -490,7 +539,15 @@ echo "Normalized Gradle metadata for $APP_ID"
 
 echo ""
 echo "--- Step 2c: Ensure OpenSSL libs ---"
-OPENSSL_SEARCH="$HOME/.local/share/.dx/prebuilt"
+if [ -n "${DX_HOME:-}" ]; then
+    OPENSSL_SEARCH="${DX_HOME}/prebuilt"
+elif [ -n "${XDG_DATA_HOME:-}" ]; then
+    OPENSSL_SEARCH="${XDG_DATA_HOME}/.dx/prebuilt"
+elif [ "$(uname -s)" = "Darwin" ]; then
+    OPENSSL_SEARCH="$HOME/.dx/prebuilt"
+else
+    OPENSSL_SEARCH="$HOME/.local/share/.dx/prebuilt"
+fi
 OPENSSL_PREBUILT=""
 if [ -d "$OPENSSL_SEARCH" ]; then
     matches=()
@@ -553,17 +610,10 @@ fi
 echo ""
 echo "--- Step 4: Overlay Android resources ---"
 if [ -d "$ANDROID_RES_SRC" ]; then
-    find "$DX_ANDROID/app/src/main/res" \
-        \( -path '*/mipmap-*/ic_launcher.webp' \
-        -o -path '*/mipmap-*/ic_launcher_round.webp' \
-        -o -path '*/mipmap-*/ic_launcher_foreground.webp' \
-        -o -path '*/mipmap-*/ic_launcher_foreground.png' \
-        -o -path '*/mipmap-anydpi-v26/ic_launcher.xml' \
-        -o -path '*/mipmap-anydpi-v26/ic_launcher_round.xml' \
-        -o -path '*/drawable-v24/ic_launcher_foreground.xml' \
-        -o -path '*/drawable/ic_launcher_background.xml' \) \
-        -delete
-    cp -R "$ANDROID_RES_SRC/." "$DX_ANDROID/app/src/main/res/"
+    sync_overlay_dir \
+        "$ANDROID_RES_SRC" \
+        "$DX_ANDROID/app/src/main/res" \
+        "values/strings.xml"
     echo "Copied repo-owned Android resources from android/res"
 else
     echo "WARNING: $ANDROID_RES_SRC not found, skipping Android resource overlay"
@@ -571,8 +621,10 @@ fi
 
 echo ""
 echo "--- Step 4c: Copy Android Kotlin sources ---"
-mkdir -p "$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main"
-cp "$ANDROID_KOTLIN_SRC/dev/dioxus/main/"*.kt "$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main/"
+sync_overlay_dir \
+    "$ANDROID_KOTLIN_SRC/dev/dioxus/main" \
+    "$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main" \
+    "MainActivity.kt"
 echo "Copied native Android Kotlin sources"
 
 echo ""
