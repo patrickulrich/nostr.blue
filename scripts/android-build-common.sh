@@ -107,10 +107,7 @@ write_android_local_properties() {
     local ndk_dir=""
 
     if [ -n "${ANDROID_NDK_HOME:-}" ]; then
-        case "$ANDROID_NDK_HOME" in
-            "$sdk_root"/*) ndk_dir="$ANDROID_NDK_HOME" ;;
-            *) ndk_dir="$ANDROID_NDK_HOME" ;;
-        esac
+        ndk_dir="$ANDROID_NDK_HOME"
     elif [ -d "$sdk_root/ndk" ]; then
         ndk_dir="$sdk_root/ndk"
     fi

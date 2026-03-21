@@ -370,6 +370,8 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
         .ok_or("Client not initialized")?
         .clone();
     let mut new_event_id: Option<String> = None;
+    let synthetic_pending_id = (!available_proofs.is_empty())
+        .then(|| format!("local_pending_{}", chrono::Utc::now().timestamp_millis()));
     if !available_proofs.is_empty() {
         use super::types::ExtendedCashuProof;
         use super::types::ExtendedTokenEvent;
@@ -408,7 +410,7 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
                 super::events::queue_event_for_retry(
                     builder,
                     super::types::PendingEventType::TokenEvent,
-                    None,
+                    synthetic_pending_id.clone(),
                     Some(mint_url.to_string()),
                 )
                 .await;
@@ -421,7 +423,7 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
                 super::events::queue_event_for_retry(
                     builder,
                     super::types::PendingEventType::TokenEvent,
-                    None,
+                    synthetic_pending_id.clone(),
                     Some(mint_url.to_string()),
                 )
                 .await;
@@ -489,7 +491,8 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
             created_at: chrono::Utc::now().timestamp() as u64,
         }]
     } else if !available_proofs.is_empty() {
-        let synthetic_id = format!("local_pending_{}", chrono::Utc::now().timestamp_millis(),);
+        let synthetic_id = synthetic_pending_id
+            .unwrap_or_else(|| format!("local_pending_{}", chrono::Utc::now().timestamp_millis()));
         log::warn!("Publish failed, using synthetic event_id: {}", synthetic_id);
         vec![super::types::TokenData {
             event_id: synthetic_id,

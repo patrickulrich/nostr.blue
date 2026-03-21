@@ -154,23 +154,32 @@ pub async fn get_counts_with_count_fallback(
         try_count_from_relays(event_id, Kind::ZapReceipt, timeout),
     );
     let mut needs_fallback = false;
+    let mut missing_reactions = false;
+    let mut missing_reposts = false;
+    let mut missing_replies = false;
+    let mut missing_zaps = false;
     if let Some(count) = reactions {
         counts.likes = count;
     } else {
         needs_fallback = true;
+        missing_reactions = true;
     }
     if let Some(count) = reposts {
         counts.reposts = count;
     } else {
         needs_fallback = true;
+        missing_reposts = true;
     }
     if let Some(count) = replies {
         counts.replies = count;
     } else {
         needs_fallback = true;
+        missing_replies = true;
     }
     if let Some(count) = zaps {
         counts.zaps = count;
+    } else {
+        missing_zaps = true;
     }
     if needs_fallback {
         log::debug!(
@@ -179,7 +188,19 @@ pub async fn get_counts_with_count_fallback(
         );
         if let Ok(batch_counts) = fetch_interaction_counts_batch(vec![*event_id], timeout).await {
             if let Some(fetched) = batch_counts.get(&event_id.to_hex()) {
-                return fetched.clone();
+                if missing_reactions {
+                    counts.likes = fetched.likes;
+                }
+                if missing_reposts {
+                    counts.reposts = fetched.reposts;
+                }
+                if missing_replies {
+                    counts.replies = fetched.replies;
+                }
+                if missing_zaps {
+                    counts.zaps = fetched.zaps;
+                    counts.zap_amount_sats = fetched.zap_amount_sats;
+                }
             }
         }
     }

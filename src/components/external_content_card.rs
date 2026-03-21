@@ -40,14 +40,23 @@ fn map_podcast_items(
 ) -> Vec<(ExternalContentId, Option<String>)> {
     let mut current_feed_guid = None;
     let mut mapped = Vec::new();
-    for (content, _) in contents {
+    for (index, (content, _)) in contents.iter().enumerate() {
         match content {
             ExternalContentId::PodcastFeed(guid) => {
                 current_feed_guid = Some(guid.clone());
                 mapped.push((content.clone(), None));
             }
             ExternalContentId::PodcastEpisode(_) => {
-                mapped.push((content.clone(), current_feed_guid.clone()));
+                let feed_guid = current_feed_guid.clone().or_else(|| {
+                    contents
+                        .iter()
+                        .skip(index + 1)
+                        .find_map(|(next_content, _)| match next_content {
+                            ExternalContentId::PodcastFeed(guid) => Some(guid.clone()),
+                            _ => None,
+                        })
+                });
+                mapped.push((content.clone(), feed_guid));
             }
             _ => {}
         }
@@ -262,6 +271,23 @@ mod tests {
         let mapped = map_podcast_items(&contents);
         assert_eq!(mapped[1].1.as_deref(), Some("feed-A"));
         assert_eq!(mapped[3].1.as_deref(), Some("feed-B"));
+    }
+
+    #[test]
+    fn map_podcast_items_looks_ahead_when_episode_precedes_feed() {
+        let contents = vec![
+            (
+                ExternalContentId::PodcastEpisode("episode-1".to_string()),
+                Some("https://example.com/episode-1".to_string()),
+            ),
+            (
+                ExternalContentId::PodcastFeed("feed-A".to_string()),
+                Some("https://example.com/feed-a".to_string()),
+            ),
+        ];
+
+        let mapped = map_podcast_items(&contents);
+        assert_eq!(mapped[0].1.as_deref(), Some("feed-A"));
     }
 }
 

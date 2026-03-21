@@ -9,20 +9,20 @@ use crate::platform::storage;
 const STORAGE_KEY_PREFIX: &str = "nostr_blue_ai_chat_history";
 const ANONYMOUS_ACCOUNT_KEY: &str = "anonymous";
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum PersistedChatRole {
     User,
     Assistant,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct PersistedToolCall {
     pub id: String,
     pub name: String,
     pub result: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct PersistedChatMessage {
     pub id: String,
     pub role: PersistedChatRole,

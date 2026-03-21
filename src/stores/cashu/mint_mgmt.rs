@@ -684,25 +684,12 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
             event_ids_to_delete.len()
         );
     }
-    {
-        let store = WALLET_TOKENS.read();
-        let mut data = store.data();
-        let mut tokens_write = data.write();
-        tokens_write.retain(|t| !mint_matches(&t.mint, mint_url));
-    }
-    {
-        let mut state_write = WALLET_STATE.write();
-        if let Some(ref mut state) = *state_write {
-            state.mints.retain(|m| !mint_matches(m, mint_url));
-        }
-    }
-    {
-        let wallet_state = WALLET_STATE.read().clone();
-        if let Some(ref state) = wallet_state {
-            let Some(ref privkey) = state.privkey else {
-                log::warn!("Cannot update wallet event: no private key available");
-                return Ok((token_count, total_amount));
-            };
+    let staged_wallet_state = WALLET_STATE.read().clone().map(|mut state| {
+        state.mints.retain(|m| !mint_matches(m, mint_url));
+        state
+    });
+    if let Some(ref state) = staged_wallet_state {
+        if let Some(ref privkey) = state.privkey {
             let signer = crate::stores::signer::get_signer()
                 .ok_or("No signer available")?
                 .as_nostr_signer();
@@ -725,19 +712,24 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
                 .await
                 .map_err(|e| format!("Failed to encrypt: {}", e))?;
             let builder = nostr_sdk::EventBuilder::new(Kind::CashuWallet, encrypted);
-            match client
+            let output = client
                 .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
                 .await
-            {
-                Ok(output) if !output.success.is_empty() => {
-                    log::info!("Published updated wallet event after mint removal")
-                }
-                Ok(_) => {
-                    log::warn!("Failed to publish wallet event: no relays accepted the event")
-                }
-                Err(e) => log::warn!("Failed to publish wallet event: {}", e),
+                .map_err(|e| format!("Failed to publish wallet event: {}", e))?;
+            if output.success.is_empty() {
+                return Err("Failed to publish wallet event: no relays accepted the event".into());
             }
+            log::info!("Published updated wallet event after mint removal");
         }
+    }
+    {
+        let store = WALLET_TOKENS.read();
+        let mut data = store.data();
+        let mut tokens_write = data.write();
+        tokens_write.retain(|t| !mint_matches(&t.mint, mint_url));
+    }
+    if let Some(state) = staged_wallet_state {
+        *WALLET_STATE.write() = Some(state);
     }
     super::signals::update_wallet_balances();
     log::info!("Removed mint {} ({} sats)", mint_url, total_amount);

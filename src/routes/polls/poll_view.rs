@@ -1,8 +1,8 @@
 use crate::components::{ClientInitializing, CommentComposer, PollCard, ThreadedComment};
 use crate::stores::nostr_client;
 use crate::stores::subscription_manager;
-use crate::utils::build_thread_tree;
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
+use crate::utils::{build_thread_tree, extract_root_event_id};
 use dioxus::prelude::*;
 use dioxus_core::{spawn_forever, Task};
 use nostr_sdk::{
@@ -398,20 +398,8 @@ pub fn PollView(noteid: String) -> Element {
                                 show_comment_composer.set(false);
                                 let already_exists = comments.read().iter().any(|e| e.id == comment_event.id);
                                 if !already_exists {
-                                    let root_event_id = comment_event
-                                        .tags
-                                        .iter()
-                                        .find_map(|tag| {
-                                            let slice = tag.as_slice();
-                                            if slice.first().map(|s| s.as_str()) == Some("e")
-                                                && slice.get(3).map(|s| s.as_str()) == Some("root")
-                                            {
-                                                slice.get(1).and_then(|id| EventId::from_hex(id).ok())
-                                            } else {
-                                                None
-                                            }
-                                        })
-                                        .unwrap_or(event.id);
+                                    let root_event_id =
+                                        extract_root_event_id(&comment_event).unwrap_or(event.id);
                                     invalidate_thread_tree_cache(&root_event_id);
                                     comments_error.set(None);
                                     comments.write().push(comment_event);

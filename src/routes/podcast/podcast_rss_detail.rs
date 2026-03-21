@@ -42,15 +42,15 @@ pub fn PodcastRssFeedDetail(props: PodcastRssFeedDetailProps) -> Element {
             if !client_initialized {
                 return RssPodcastDetailState::Initializing;
             }
-            if !has_signer {
-                return RssPodcastDetailState::AuthRequired;
-            }
             let id: u64 = match id_str.parse() {
                 Ok(id) => id,
                 Err(_) => {
                     return RssPodcastDetailState::Error(format!("Invalid podcast ID: {}", id_str))
                 }
             };
+            if !has_signer {
+                return RssPodcastDetailState::AuthRequired;
+            }
             log::info!("Fetching podcast metadata for ID: {}", id);
             match podcast_index::get_podcast_by_id(id).await {
                 Ok(feed) => {

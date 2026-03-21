@@ -70,7 +70,7 @@ async fn send_tagged_event_with_retry(
             let pending_id = pending_token_id
                 .clone()
                 .unwrap_or_else(|| format!("pending_{}", uuid::Uuid::new_v4()));
-            queue_event_for_retry(builder, event_type, pending_token_id, mint_url).await;
+            queue_event_for_retry(builder, event_type, Some(pending_id.clone()), mint_url).await;
             pending_id
         }
         Err(error) => {
@@ -78,7 +78,7 @@ async fn send_tagged_event_with_retry(
             let pending_id = pending_token_id
                 .clone()
                 .unwrap_or_else(|| format!("pending_{}", uuid::Uuid::new_v4()));
-            queue_event_for_retry(builder, event_type, pending_token_id, mint_url).await;
+            queue_event_for_retry(builder, event_type, Some(pending_id.clone()), mint_url).await;
             pending_id
         }
     }

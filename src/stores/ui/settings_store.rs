@@ -67,6 +67,36 @@ fn load_cached_settings() -> Option<AppSettings> {
 fn cache_settings(settings: &AppSettings) {
     let _ = storage::set(SETTINGS_LOCAL_STORAGE_KEY, settings);
 }
+
+async fn drain_publish_client_tag_queue() {
+    if !auth_store::is_authenticated() || *SETTINGS_LOADING.read() {
+        return;
+    }
+
+    SETTINGS_LOADING.write().clone_from(&true);
+    SETTINGS_ERROR.write().clone_from(&None);
+
+    loop {
+        let Some(next_enabled) = PUBLISH_CLIENT_TAG_SAVE_PENDING.write().take() else {
+            break;
+        };
+        let settings_to_save = {
+            let mut w = SETTINGS.write();
+            w.publish_client_tag = next_enabled;
+            w.clone()
+        };
+        cache_settings(&settings_to_save);
+
+        if let Err(e) = save_settings(&settings_to_save).await {
+            log::warn!("Failed to persist client tag setting to Nostr: {}", e);
+            SETTINGS_ERROR.write().clone_from(&Some(e));
+        } else {
+            SETTINGS_ERROR.write().clone_from(&None);
+        }
+    }
+
+    SETTINGS_LOADING.write().clone_from(&false);
+}
 /// Initialize settings from localStorage cache (synchronous, for instant UI)
 /// Call this during app init BEFORE async client initialization
 pub fn init_settings_from_cache() {
@@ -88,6 +118,7 @@ pub async fn load_settings() -> Result<(), String> {
     if !auth_store::is_authenticated() {
         log::info!("Not authenticated, using local settings");
         SETTINGS_LOADING.write().clone_from(&false);
+        drain_publish_client_tag_queue().await;
         return Ok(());
     }
     let client = nostr_client::NOSTR_CLIENT
@@ -126,6 +157,7 @@ pub async fn load_settings() -> Result<(), String> {
                         cache_settings(&settings);
                         SETTINGS.write().clone_from(&settings);
                         SETTINGS_LOADING.write().clone_from(&false);
+                        drain_publish_client_tag_queue().await;
                         return Ok(());
                     }
                     Err(e) => {
@@ -147,6 +179,7 @@ pub async fn load_settings() -> Result<(), String> {
         }
     }
     SETTINGS_LOADING.write().clone_from(&false);
+    drain_publish_client_tag_queue().await;
     Ok(())
 }
 /// Save settings to Nostr relays (NIP-78)
@@ -174,17 +207,24 @@ pub async fn save_settings(settings: &AppSettings) -> Result<(), String> {
         ))
         .await
         .map_err(|e| format!("Failed to publish settings: {}", e))?;
-    if output.success.is_empty() {
-        log::warn!(
-            "Settings publish was not accepted by any relay (failed_relays={})",
+    let publish_error = if output.success.is_empty() {
+        let error = format!(
+            "Failed to publish settings: no relays accepted the event (failed_relays={})",
             output.failed.len()
         );
+        log::warn!("{}", error);
+        Some(error)
     } else {
         log::info!("Settings saved to Nostr successfully");
-    }
+        None
+    };
     cache_settings(&settings_to_save);
     SETTINGS.write().clone_from(&settings_to_save);
-    Ok(())
+    if let Some(error) = publish_error {
+        Err(error)
+    } else {
+        Ok(())
+    }
 }
 /// Update theme and save to Nostr
 #[allow(dead_code)]
@@ -232,33 +272,7 @@ pub async fn update_publish_client_tag(enabled: bool) {
     }
 
     PUBLISH_CLIENT_TAG_SAVE_PENDING.write().replace(enabled);
-    if *SETTINGS_LOADING.read() {
-        return;
-    }
-
-    SETTINGS_LOADING.write().clone_from(&true);
-    SETTINGS_ERROR.write().clone_from(&None);
-
-    loop {
-        let Some(next_enabled) = PUBLISH_CLIENT_TAG_SAVE_PENDING.write().take() else {
-            break;
-        };
-        let settings_to_save = {
-            let mut w = SETTINGS.write();
-            w.publish_client_tag = next_enabled;
-            w.clone()
-        };
-        cache_settings(&settings_to_save);
-
-        if let Err(e) = save_settings(&settings_to_save).await {
-            log::warn!("Failed to persist client tag setting to Nostr: {}", e);
-            SETTINGS_ERROR.write().clone_from(&Some(e));
-        } else {
-            SETTINGS_ERROR.write().clone_from(&None);
-        }
-    }
-
-    SETTINGS_LOADING.write().clone_from(&false);
+    drain_publish_client_tag_queue().await;
 }
 /// Get current mempool endpoint (returns default if empty)
 pub fn get_mempool_endpoint() -> String {

@@ -62,7 +62,7 @@ async fn fetch_nip11_body(url: &str) -> Result<String, String> {
 
     let window = web_sys::window().ok_or("No window object")?;
     let request = JsFuture::from(window.fetch_with_request(&request)).fuse();
-    let timeout = gloo_timers::future::TimeoutFuture::new(15_000).fuse();
+    let timeout = crate::platform::timer::sleep_ms(15_000).fuse();
     futures::pin_mut!(request, timeout);
     let response = futures::select! {
         resp = request => resp,
@@ -93,9 +93,17 @@ async fn fetch_nip11_body(url: &str) -> Result<String, String> {
         .dyn_into::<web_sys::ReadableStreamDefaultReader>()
         .map_err(|_| "Failed to create relay metadata stream reader".to_string())?;
     loop {
-        let chunk = JsFuture::from(reader.read())
-            .await
-            .map_err(|e| format!("Failed to read relay metadata body: {:?}", e))?;
+        let read = JsFuture::from(reader.read()).fuse();
+        let timeout = crate::platform::timer::sleep_ms(15_000).fuse();
+        futures::pin_mut!(read, timeout);
+        let chunk = futures::select! {
+            read = read => read,
+            _ = timeout => {
+                controller.abort();
+                return Err("Request timeout".to_string());
+            },
+        }
+        .map_err(|e| format!("Failed to read relay metadata body: {:?}", e))?;
         let done = Reflect::get(&chunk, &"done".into())
             .map_err(|e| format!("Failed to inspect relay metadata stream state: {:?}", e))?
             .as_bool()

@@ -237,6 +237,9 @@ pub fn parse_goal_event(event: &Event) -> Option<ZapGoal> {
     }
 
     let amount_msats = parse_u64_tag(event, "amount")?;
+    if amount_msats == 0 {
+        return None;
+    }
     let relays = parse_relays(event)?;
     let closed_at = parse_u64_tag(event, "closed_at");
     if closed_at.is_some_and(|timestamp| timestamp <= now_ts()) {
@@ -692,7 +695,8 @@ pub fn format_goal_date(timestamp: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_relays, parse_bolt11_amount};
+    use super::{normalize_relays, parse_bolt11_amount, parse_goal_event};
+    use nostr_sdk::{EventBuilder, Keys, Kind, Tag};
 
     #[test]
     fn parse_bolt11_amount_accepts_amounts_starting_with_one() {
@@ -726,5 +730,19 @@ mod tests {
             ]),
             vec!["wss://relay.one".to_string(), "ws://relay.two".to_string(),]
         );
+    }
+
+    #[test]
+    fn parse_goal_event_rejects_zero_amount_goals() {
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::Custom(super::KIND_ZAP_GOAL), "goal")
+            .tags(vec![
+                Tag::parse(["amount", "0"]).unwrap(),
+                Tag::parse(["relays", "wss://relay.one"]).unwrap(),
+            ])
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        assert!(parse_goal_event(&event).is_none());
     }
 }

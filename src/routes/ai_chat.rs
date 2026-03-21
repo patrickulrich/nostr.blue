@@ -16,6 +16,7 @@ use crate::utils::markdown::render_markdown;
 use dioxus::document;
 use dioxus::prelude::*;
 use serde_json::json;
+use std::hash::{Hash, Hasher};
 
 const SYSTEM_PROMPT: &str = "You are Nostrich, an AI assistant inside nostr.blue. Be concise and helpful for the user. Your personality is a fun ostrich that represents the nostr community.";
 const THEME_TOOL_NAME: &str = "set_theme";
@@ -54,11 +55,28 @@ fn history_save_snapshot_key(
     persisted_messages: &[PersistedChatMessage],
     initial_loaded_messages: &[PersistedChatMessage],
 ) -> String {
+    fn hash_messages(messages: &[PersistedChatMessage]) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        messages.len().hash(&mut hasher);
+        for message in messages {
+            message.id.hash(&mut hasher);
+            message.role.hash(&mut hasher);
+            message.content.hash(&mut hasher);
+            message.tool_calls.len().hash(&mut hasher);
+            for call in &message.tool_calls {
+                call.id.hash(&mut hasher);
+                call.name.hash(&mut hasher);
+                call.result.hash(&mut hasher);
+            }
+        }
+        hasher.finish()
+    }
+
     format!(
-        "{}:{}:{}",
+        "{}:{:016x}:{:016x}",
         account_key,
-        serde_json::to_string(persisted_messages).unwrap_or_default(),
-        serde_json::to_string(initial_loaded_messages).unwrap_or_default(),
+        hash_messages(persisted_messages),
+        hash_messages(initial_loaded_messages),
     )
 }
 
@@ -161,6 +179,9 @@ pub fn AIChat() -> Element {
     });
 
     use_effect(move || {
+        if persisted_messages_failed_snapshot.read().is_none() {
+            return;
+        }
         let account_key = ai_chat_store::current_account_key();
         let snapshot_key = history_save_snapshot_key(
             &account_key,
@@ -1003,4 +1024,48 @@ fn persist_selected_model(
     let next_generation = provider_state_save_generation.read().wrapping_add(1);
     provider_state_save_generation.set(next_generation);
     error.set(None);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::history_save_snapshot_key;
+    use crate::stores::ai_chat_store::{
+        PersistedChatMessage, PersistedChatRole, PersistedToolCall,
+    };
+
+    #[test]
+    fn history_snapshot_key_is_deterministic() {
+        let messages = vec![PersistedChatMessage {
+            id: "1".to_string(),
+            role: PersistedChatRole::User,
+            content: "hello".to_string(),
+            tool_calls: vec![],
+        }];
+
+        let first = history_save_snapshot_key("account", &messages, &messages);
+        let second = history_save_snapshot_key("account", &messages, &messages);
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn history_snapshot_key_changes_when_message_content_changes() {
+        let messages = vec![PersistedChatMessage {
+            id: "1".to_string(),
+            role: PersistedChatRole::Assistant,
+            content: "before".to_string(),
+            tool_calls: vec![PersistedToolCall {
+                id: "tool-1".to_string(),
+                name: "set_theme".to_string(),
+                result: "{\"success\":true}".to_string(),
+            }],
+        }];
+        let mut edited_messages = messages.clone();
+        edited_messages[0].content = "after".to_string();
+
+        assert_ne!(
+            history_save_snapshot_key("account", &messages, &messages),
+            history_save_snapshot_key("account", &edited_messages, &messages),
+        );
+    }
 }

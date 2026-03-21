@@ -313,6 +313,7 @@ pub async fn report_post(
     details: Option<String>,
 ) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
+    super::fetching::ensure_relays_ready(&client).await;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
