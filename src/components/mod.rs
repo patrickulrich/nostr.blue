@@ -31,6 +31,7 @@ pub mod note_menu;
 pub mod nwc_setup_modal;
 pub mod password_modal;
 pub mod photo_card;
+pub mod ppq_settings_panel;
 pub mod profile_badges;
 pub mod profile_editor_modal;
 pub mod radial_menu;

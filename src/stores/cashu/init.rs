@@ -6,7 +6,9 @@ use super::events::{fetch_tokens, start_pending_events_processor};
 use super::history::fetch_history;
 use super::internal::{init_multi_mint_wallet, inject_nip60_proofs_to_cdk};
 use super::recovery::{recover_pending_operations, sync_state_with_all_mints};
-use super::signals::{PENDING_NOSTR_EVENTS, TERMS_ACCEPTED, TERMS_D_TAG, WALLET_STATE, WALLET_STATUS};
+use super::signals::{
+    PENDING_NOSTR_EVENTS, TERMS_ACCEPTED, TERMS_D_TAG, WALLET_STATE, WALLET_STATUS,
+};
 use super::types::PendingEventType;
 use super::types::{WalletState, WalletStatus};
 use super::utils::normalize_mint_url;
@@ -25,22 +27,30 @@ impl WalletEvent {
     }
 }
 
+async fn initialize_wallet_source(event: &Event, source: &str) -> Result<(), String> {
+    initialize_wallet_from_event(event)
+        .await
+        .map_err(|error| format!("Failed to initialize {source} wallet snapshot: {error}"))
+}
+
 fn latest_pending_wallet_snapshot_event() -> Option<Event> {
     PENDING_NOSTR_EVENTS
         .read()
         .iter()
         .filter(|event| event.event_type == PendingEventType::WalletSnapshot)
-        .filter_map(|event| match serde_json::from_str::<Event>(&event.builder_json) {
-            Ok(parsed) => Some(parsed),
-            Err(error) => {
-                log::warn!(
-                    "Failed to deserialize queued wallet snapshot {}: {}",
-                    event.id,
-                    error
-                );
-                None
-            }
-        })
+        .filter_map(
+            |event| match serde_json::from_str::<Event>(&event.builder_json) {
+                Ok(parsed) => Some(parsed),
+                Err(error) => {
+                    log::warn!(
+                        "Failed to deserialize queued wallet snapshot {}: {}",
+                        event.id,
+                        error
+                    );
+                    None
+                }
+            },
+        )
         .max_by(|left, right| left.created_at.cmp(&right.created_at))
 }
 
@@ -83,7 +93,8 @@ async fn initialize_wallet_from_event(wallet_event: &Event) -> Result<(), String
                 if result.proofs_recovered > 0 {
                     log::info!(
                         "Orphan sync: recovered {} proofs ({} sats) from CDK to NIP-60",
-                        result.proofs_recovered, result.sats_recovered
+                        result.proofs_recovered,
+                        result.sats_recovered
                     );
                 }
                 if !result.errors.is_empty() {
@@ -249,37 +260,50 @@ pub async fn init_wallet() -> Result<(), String> {
     match client.fetch_events(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             let relay_wallet_event = events.into_iter().next();
-            let selected_wallet_event = match (relay_wallet_event, pending_wallet_event) {
-                (Some(relay), Some(pending)) => {
-                    if pending.created_at > relay.created_at {
-                        Some(pending)
+            match (pending_wallet_event.as_ref(), relay_wallet_event.as_ref()) {
+                (Some(pending), Some(relay)) => match initialize_wallet_source(pending, "queued")
+                    .await
+                {
+                    Ok(()) => Ok(()),
+                    Err(pending_error) => {
+                        log::warn!("{}", pending_error);
+                        if let Err(relay_error) = initialize_wallet_source(relay, "relay").await {
+                            log::error!("{}", relay_error);
+                            *WALLET_STATUS.write() = WalletStatus::Error(relay_error.clone());
+                            Err(relay_error)
+                        } else {
+                            Ok(())
+                        }
+                    }
+                },
+                (Some(pending), None) => {
+                    if let Err(error) = initialize_wallet_source(pending, "queued").await {
+                        log::error!("{}", error);
+                        *WALLET_STATUS.write() = WalletStatus::Error(error.clone());
+                        Err(error)
                     } else {
-                        Some(relay)
+                        Ok(())
                     }
                 }
-                (Some(relay), None) => Some(relay),
-                (None, Some(pending)) => Some(pending),
-                (None, None) => None,
-            };
-
-            if let Some(wallet_event) = selected_wallet_event {
-                if let Err(e) = initialize_wallet_from_event(&wallet_event).await {
-                    let error = format!("Failed to decrypt wallet: {}", e);
-                    log::error!("{}", error);
-                    *WALLET_STATUS.write() = WalletStatus::Error(error.clone());
-                    Err(error)
-                } else {
+                (None, Some(relay)) => {
+                    if let Err(error) = initialize_wallet_source(relay, "relay").await {
+                        log::error!("{}", error);
+                        *WALLET_STATUS.write() = WalletStatus::Error(error.clone());
+                        Err(error)
+                    } else {
+                        Ok(())
+                    }
+                }
+                (None, None) => {
+                    log::info!("No wallet found");
+                    *WALLET_STATE.write() = Some(WalletState {
+                        privkey: None,
+                        mints: Vec::new(),
+                        initialized: false,
+                    });
+                    *WALLET_STATUS.write() = WalletStatus::Ready;
                     Ok(())
                 }
-            } else {
-                log::info!("No wallet found");
-                *WALLET_STATE.write() = Some(WalletState {
-                    privkey: None,
-                    mints: Vec::new(),
-                    initialized: false,
-                });
-                *WALLET_STATUS.write() = WalletStatus::Ready;
-                Ok(())
             }
         }
         Err(e) => {
@@ -288,8 +312,7 @@ pub async fn init_wallet() -> Result<(), String> {
                     "Failed to fetch wallet from relays, using queued wallet snapshot: {}",
                     e
                 );
-                if let Err(init_error) = initialize_wallet_from_event(&wallet_event).await {
-                    let error = format!("Failed to decrypt queued wallet snapshot: {}", init_error);
+                if let Err(error) = initialize_wallet_source(&wallet_event, "queued").await {
                     log::error!("{}", error);
                     *WALLET_STATUS.write() = WalletStatus::Error(error.clone());
                     Err(error)

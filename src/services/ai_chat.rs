@@ -1,9 +1,6 @@
 //! Provider-aware AI chat service client.
 use crate::platform::http::http_client;
 use crate::stores::ai_provider_store::{AiProviderConfig, AiProviderKind, ProviderAuth};
-use crate::utils::nip98 as nip98_utils;
-use nostr_sdk::hashes::{sha256, Hash};
-use nostr_sdk::nips::nip98;
 use reqwest::{Method, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -182,7 +179,7 @@ async fn parse_models_response(
 
 fn is_chat_model(provider: &AiProviderConfig, model: &WireModel) -> bool {
     match provider.provider_kind {
-        AiProviderKind::Shakespeare | AiProviderKind::OpenAiCompatible => {
+        AiProviderKind::Ppq | AiProviderKind::OpenAiCompatible => {
             model.model_type.is_empty() || model.model_type == "chat"
         }
     }
@@ -197,21 +194,12 @@ async fn send_provider_request(
     let client = http_client().map_err(|e| format!("HTTP client init failed: {}", e))?;
 
     match &provider.auth {
-        ProviderAuth::Nip98 => {
-            let signed = if let Some(body_bytes) = body.clone() {
-                let payload_hash = sha256::Hash::hash(&body_bytes);
-                nip98_utils::create_auth_header_with_payload(
-                    url,
-                    nip98::HttpMethod::POST,
-                    payload_hash,
-                )
-                .await?
-            } else {
-                nip98_utils::create_auth_header(url, nip98::HttpMethod::GET).await?
+        ProviderAuth::PpqManaged { api_key } => {
+            let Some(api_key) = api_key.as_ref().filter(|key| !key.trim().is_empty()) else {
+                return Err("PPQ account is not set up yet".to_string());
             };
-
-            let mut request = client.request(method, &signed.signed_url);
-            request = request.header("Authorization", &signed.header);
+            let mut request = client.request(method, url);
+            request = request.header("Authorization", format!("Bearer {}", api_key));
             if let Some(body_bytes) = body {
                 request = request
                     .header("Content-Type", "application/json")
@@ -254,7 +242,7 @@ fn preview_body(body: &str) -> String {
 mod tests {
     use super::*;
     use crate::stores::ai_provider_store::{
-        shakespeare_provider, AiProviderConfig, AiProviderKind, ProviderAuth,
+        ppq_provider, AiProviderConfig, AiProviderKind, ProviderAuth,
     };
 
     #[test]
@@ -271,8 +259,8 @@ mod tests {
     }
 
     #[test]
-    fn keeps_only_chat_models_for_shakespeare() {
-        let provider = shakespeare_provider();
+    fn keeps_only_chat_models_for_ppq() {
+        let provider = ppq_provider(None);
         assert!(is_chat_model(
             &provider,
             &WireModel {

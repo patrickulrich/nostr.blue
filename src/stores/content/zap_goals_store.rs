@@ -806,11 +806,17 @@ mod tests {
         let goal = parse_goal_event(&goal_event).unwrap();
 
         let matching_receipt = EventBuilder::new(Kind::ZapReceipt, "")
-            .tags(vec![Tag::event(goal_event.id), Tag::public_key(goal_event.pubkey)])
+            .tags(vec![
+                Tag::event(goal_event.id),
+                Tag::public_key(goal_event.pubkey),
+            ])
             .sign_with_keys(&provider_keys)
             .unwrap();
         let wrong_author_receipt = EventBuilder::new(Kind::ZapReceipt, "")
-            .tags(vec![Tag::event(goal_event.id), Tag::public_key(other_keys.public_key())])
+            .tags(vec![
+                Tag::event(goal_event.id),
+                Tag::public_key(other_keys.public_key()),
+            ])
             .sign_with_keys(&provider_keys)
             .unwrap();
         let wrong_event_receipt = EventBuilder::new(Kind::ZapReceipt, "")

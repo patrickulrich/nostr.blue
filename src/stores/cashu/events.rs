@@ -81,7 +81,8 @@ pub async fn queue_signed_event_for_retry(
     pending_token_id: Option<String>,
     mint_url: Option<String>,
 ) {
-    let _ = queue_signed_event_for_retry_result(event, event_type, pending_token_id, mint_url).await;
+    let _ =
+        queue_signed_event_for_retry_result(event, event_type, pending_token_id, mint_url).await;
 }
 
 pub async fn queue_signed_event_for_retry_result(
@@ -792,6 +793,7 @@ pub async fn process_pending_events() -> Result<usize, String> {
                         }
                     }
 
+                    let mut history_handled = true;
                     if let Some(history_amount) = event.history_amount {
                         let history_type = event.history_type.as_deref();
                         if let Err(error) = super::lightning::create_history_event_with_type(
@@ -809,7 +811,11 @@ pub async fn process_pending_events() -> Result<usize, String> {
                                 nostr_event_id,
                                 error
                             );
+                            history_handled = false;
                         }
+                    }
+                    if !history_handled {
+                        continue;
                     }
                 }
                 let _ = remove_pending_event(&event.id).await;

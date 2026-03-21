@@ -201,10 +201,7 @@ pub async fn get_counts_with_count_fallback(
         && (missing_zaps
             || (counts.zaps > 0 && (counts.user_zapped.is_none() || counts.zap_amount_sats == 0)));
     if needs_zap_details {
-        log::debug!(
-            "Fetching zap receipt details for {}",
-            event_id.to_hex()
-        );
+        log::debug!("Fetching zap receipt details for {}", event_id.to_hex());
         if let Ok(fetched) = fetch_zap_receipt_counts(event_id, timeout).await {
             counts.zaps = fetched.zaps;
             counts.zap_amount_sats = fetched.zap_amount_sats;
@@ -248,7 +245,10 @@ async fn fetch_events_for_filter(
         }
     };
     let relay_page_len = relay_events.len();
-    let relay_oldest_created_at = relay_events.iter().map(|event| event.created_at.as_secs()).min();
+    let relay_oldest_created_at = relay_events
+        .iter()
+        .map(|event| event.created_at.as_secs())
+        .min();
 
     let mut event_map: HashMap<EventId, Event> = HashMap::new();
     for event in db_events {

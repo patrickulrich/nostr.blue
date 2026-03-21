@@ -26,7 +26,7 @@ use crate::platform::http::http_client;
 /// Error message returned when a payment request is cancelled by the user.
 /// This is NOT an error condition - it indicates a clean shutdown.
 pub const PAYMENT_CANCELLED_MSG: &str = "Payment request cancelled";
-use super::events::queue_event_for_retry;
+use super::events::queue_signed_event_for_retry_result;
 use super::internal::create_ephemeral_wallet;
 use super::mint_mgmt::{get_mint_balance, get_mints};
 use super::proofs::{
@@ -41,17 +41,43 @@ use super::types::{
     ProofData, TokenData, WalletTokensStoreStoreExt,
 };
 use super::utils::{mint_matches, normalize_mint_url};
+use crate::stores::signer::SignerType;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::shorten_url;
 
+async fn sign_cashu_event_builder(
+    signer: &SignerType,
+    builder: nostr_sdk::EventBuilder,
+) -> Result<nostr_sdk::Event, String> {
+    let builder = crate::utils::nips::nip89::tag_event_builder(builder);
+    match signer {
+        SignerType::Keys(keys) => builder
+            .sign_with_keys(keys)
+            .map_err(|e| format!("Failed to sign event: {}", e)),
+        #[cfg(target_family = "wasm")]
+        SignerType::BrowserExtension(browser_signer) => builder
+            .sign(&**browser_signer)
+            .await
+            .map_err(|e| format!("Failed to sign event: {}", e)),
+        SignerType::NostrConnect(remote_signer) => builder
+            .sign(&**remote_signer)
+            .await
+            .map_err(|e| format!("Failed to sign event: {}", e)),
+        #[cfg(feature = "mobile")]
+        SignerType::AndroidSigner(android_signer) => builder
+            .sign(&**android_signer)
+            .await
+            .map_err(|e| format!("Failed to sign event: {}", e)),
+    }
+}
+
 async fn send_tagged_event_with_retry(
     client: &nostr_sdk::Client,
-    builder: nostr_sdk::EventBuilder,
+    event: nostr_sdk::Event,
     event_type: PendingEventType,
     pending_token_id: Option<String>,
     mint_url: Option<String>,
 ) -> String {
-    let tagged_builder = crate::utils::nips::nip89::tag_event_builder(builder.clone());
     let event_label = match &event_type {
         PendingEventType::TokenEvent => "token",
         PendingEventType::DeletionEvent => "deletion",
@@ -61,7 +87,7 @@ async fn send_tagged_event_with_retry(
         PendingEventType::NutzapEvent => "nutzap",
     };
 
-    match client.send_event_builder(tagged_builder).await {
+    match client.send_event(&event).await {
         Ok(event_output) if !event_output.success.is_empty() => event_output.id().to_hex(),
         Ok(_) => {
             log::warn!(
@@ -71,7 +97,20 @@ async fn send_tagged_event_with_retry(
             let pending_id = pending_token_id
                 .clone()
                 .unwrap_or_else(|| format!("pending_{}", uuid::Uuid::new_v4()));
-            queue_event_for_retry(builder, event_type, Some(pending_id.clone()), mint_url).await;
+            if let Err(queue_error) = queue_signed_event_for_retry_result(
+                event,
+                event_type,
+                Some(pending_id.clone()),
+                mint_url,
+            )
+            .await
+            {
+                log::warn!(
+                    "Failed to persist signed {} event for retry: {}",
+                    event_label,
+                    queue_error
+                );
+            }
             pending_id
         }
         Err(error) => {
@@ -79,7 +118,20 @@ async fn send_tagged_event_with_retry(
             let pending_id = pending_token_id
                 .clone()
                 .unwrap_or_else(|| format!("pending_{}", uuid::Uuid::new_v4()));
-            queue_event_for_retry(builder, event_type, Some(pending_id.clone()), mint_url).await;
+            if let Err(queue_error) = queue_signed_event_for_retry_result(
+                event,
+                event_type,
+                Some(pending_id.clone()),
+                mint_url,
+            )
+            .await
+            {
+                log::warn!(
+                    "Failed to persist signed {} event for retry: {}",
+                    event_label,
+                    queue_error
+                );
+            }
             pending_id
         }
     }
@@ -363,9 +415,8 @@ pub async fn pay_payment_request(
     }
     super::proofs::move_proofs_to_spent(&token_proof_secrets);
     let _token_proofs: Vec<ProofData> = proofs.iter().map(cdk_proof_to_proof_data).collect();
-    let signer = crate::stores::signer::get_signer()
-        .ok_or("No signer available")?
-        .as_nostr_signer();
+    let signer = crate::stores::signer::get_signer().ok_or("No signer available")?;
+    let nostr_signer = signer.as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
     let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let client = nostr_client::NOSTR_CLIENT
@@ -388,16 +439,17 @@ pub async fn pay_payment_request(
         };
         let json_content = serde_json::to_string(&token_event_data)
             .map_err(|e| format!("Failed to serialize token event: {}", e))?;
-        let encrypted = signer
+        let encrypted = nostr_signer
             .nip44_encrypt(&pubkey, &json_content)
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+        let event = sign_cashu_event_builder(&signer, builder).await?;
         let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
         new_event_id = Some(
             send_tagged_event_with_retry(
                 &client,
-                builder,
+                event,
                 PendingEventType::TokenEvent,
                 Some(pending_id),
                 Some(mint_url.clone()),
@@ -412,10 +464,12 @@ pub async fn pay_payment_request(
                 deletion_request = deletion_request.id(event_id);
             }
         }
-        let builder = nostr_sdk::EventBuilder::delete(deletion_request);
+        let event =
+            sign_cashu_event_builder(&signer, nostr_sdk::EventBuilder::delete(deletion_request))
+                .await?;
         let _ = send_tagged_event_with_retry(
             &client,
-            builder,
+            event,
             PendingEventType::DeletionEvent,
             None,
             None,
@@ -574,9 +628,8 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
         .await
         .map_err(|e| format!("Failed to swap proofs: {}", e))?;
     let final_proofs = swapped.ok_or("Swap validation failed - proofs rejected by mint")?;
-    let signer = crate::stores::signer::get_signer()
-        .ok_or("No signer available")?
-        .as_nostr_signer();
+    let signer = crate::stores::signer::get_signer().ok_or("No signer available")?;
+    let nostr_signer = signer.as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
     let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let client = nostr_client::NOSTR_CLIENT
@@ -597,15 +650,16 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
     };
     let json_content = serde_json::to_string(&token_event_data)
         .map_err(|e| format!("Failed to serialize token event: {}", e))?;
-    let encrypted = signer
+    let encrypted = nostr_signer
         .nip44_encrypt(&pubkey, &json_content)
         .await
         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+    let event = sign_cashu_event_builder(&signer, builder).await?;
     let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
     let new_event_id = send_tagged_event_with_retry(
         &client,
-        builder,
+        event,
         PendingEventType::TokenEvent,
         Some(pending_id),
         Some(mint_url.to_string()),

@@ -838,29 +838,29 @@ pub async fn create_history_event_with_type(
         .await
         .map_err(|e| format!("Failed to encrypt: {}", e))?;
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletSpendingHistory, encrypted);
-    let client = nostr_client::NOSTR_CLIENT
-        .read()
-        .as_ref()
-        .ok_or("Client not initialized")?
-        .clone();
-    match send_signed_builder(&client, builder.clone()).await {
-        Ok(event_output) if !event_output.success.is_empty() => {
-            log::info!("Published history event: {}", event_output.id().to_hex());
+    if let Some(client) = nostr_client::NOSTR_CLIENT.read().as_ref().cloned() {
+        match send_signed_builder(&client, builder.clone()).await {
+            Ok(event_output) if !event_output.success.is_empty() => {
+                log::info!("Published history event: {}", event_output.id().to_hex());
+            }
+            Ok(event_output) => {
+                log::warn!(
+                    "No relays accepted history event {}, queuing for retry",
+                    event_output.id().to_hex()
+                );
+                queue_event_for_retry(builder, PendingEventType::HistoryEvent, None, None).await;
+            }
+            Err(error) => {
+                log::warn!(
+                    "Failed to publish history event, queuing for retry: {}",
+                    error
+                );
+                queue_event_for_retry(builder, PendingEventType::HistoryEvent, None, None).await;
+            }
         }
-        Ok(event_output) => {
-            log::warn!(
-                "No relays accepted history event {}, queuing for retry",
-                event_output.id().to_hex()
-            );
-            queue_event_for_retry(builder, PendingEventType::HistoryEvent, None, None).await;
-        }
-        Err(error) => {
-            log::warn!(
-                "Failed to publish history event, queuing for retry: {}",
-                error
-            );
-            queue_event_for_retry(builder, PendingEventType::HistoryEvent, None, None).await;
-        }
+    } else {
+        log::warn!("Client not initialized, queuing history event for retry");
+        queue_event_for_retry(builder, PendingEventType::HistoryEvent, None, None).await;
     }
     Ok(())
 }

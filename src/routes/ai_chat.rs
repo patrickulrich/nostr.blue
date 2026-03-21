@@ -5,14 +5,16 @@ use crate::services::ai_chat::{
     get_available_models, send_chat_message, ChatCompletionRequest, ChatCompletionResponse,
     ChatMessage, ChatModel, ChatRole, ToolCall, ToolDefinition, ToolFunction,
 };
+use crate::services::ppq;
 use crate::stores::ai_chat_store::{
     self, PersistedChatMessage, PersistedChatRole, PersistedToolCall,
 };
 use crate::stores::ai_provider_store::{
-    self, resolve_providers, shakespeare_provider, AiProviderConfig, AiProviderState,
+    self, ppq_provider, resolve_providers, AiProviderConfig, AiProviderState, PpqAccountState,
 };
 use crate::stores::{nostr_client, theme_store};
 use crate::utils::markdown::render_markdown;
+use dioxus::core::spawn_forever;
 use dioxus::document;
 use dioxus::prelude::*;
 use serde_json::json;
@@ -23,6 +25,7 @@ const THEME_TOOL_NAME: &str = "set_theme";
 const AI_CHAT_PROVIDER_PERSISTENCE_ENABLED: bool = true;
 const AI_CHAT_HISTORY_LOAD_ENABLED: bool = true;
 const AI_CHAT_HISTORY_SAVE_ENABLED: bool = true;
+const AI_CHAT_HISTORY_SAVE_FAILURE_COOLDOWN_MS: u64 = 5_000;
 
 #[derive(Clone, Debug, PartialEq)]
 struct DisplayMessage {
@@ -43,6 +46,12 @@ struct ExecutedToolCall {
     id: String,
     name: String,
     result: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct FailedHistorySnapshot {
+    snapshot_key: String,
+    failed_at_ms: u64,
 }
 
 #[derive(Clone, serde::Deserialize)]
@@ -81,18 +90,17 @@ pub fn AIChat() -> Element {
     let mut models = use_signal(Vec::<ChatModel>::new);
     let mut selected_model = use_signal(String::new);
     let mut provider_state = use_signal(AiProviderState::default);
-    let mut providers = use_signal(|| vec![shakespeare_provider()]);
+    let mut providers = use_signal(|| vec![ppq_provider(None)]);
     let mut provider_state_loaded = use_signal(|| false);
     let mut provider_state_loading = use_signal(|| false);
+    let mut ppq_bootstrap_loading = use_signal(|| false);
     let mut chat_history_loaded = use_signal(|| false);
     let mut chat_history_loading = use_signal(|| false);
     let mut chat_history_generation = use_signal(|| 0u32);
     let mut persisted_messages_dirty = use_signal(|| false);
     let persisted_messages_save_generation = use_signal(|| 0u32);
     let persisted_messages_save_in_flight = use_signal(|| false);
-    let mut persisted_messages_failed_snapshot = use_signal(|| None::<String>);
-    let provider_state_save_generation = use_signal(|| 0u32);
-    let mut provider_state_save_in_flight = use_signal(|| false);
+    let mut persisted_messages_failed_snapshot = use_signal(|| None::<FailedHistorySnapshot>);
     let mut provider_models_generation = use_signal(|| 0u32);
     let mut initial_loaded_messages = use_signal(Vec::<PersistedChatMessage>::new);
     let messages_container_id = use_signal(|| "ai-chat-messages".to_string());
@@ -123,7 +131,7 @@ pub fn AIChat() -> Element {
                         .iter()
                         .any(|provider| provider.id == loaded_state.selected_provider_id)
                     {
-                        loaded_state.selected_provider_id = shakespeare_provider().id;
+                        loaded_state.selected_provider_id = ppq_provider(None).id;
                     }
                     providers.set(resolve_providers(&loaded_state));
                     provider_state.set(loaded_state);
@@ -183,7 +191,7 @@ pub fn AIChat() -> Element {
         if persisted_messages_failed_snapshot
             .read()
             .as_ref()
-            .is_some_and(|failed| failed != &snapshot_key)
+            .is_some_and(|failed| failed.snapshot_key != snapshot_key)
         {
             persisted_messages_failed_snapshot.set(None);
         }
@@ -259,12 +267,20 @@ pub fn AIChat() -> Element {
             &persisted_messages_snapshot,
             &initial_loaded_messages_snapshot,
         );
+        let failed_snapshot_cooldown_active = persisted_messages_failed_snapshot
+            .read()
+            .as_ref()
+            .is_some_and(|failed| {
+                failed.snapshot_key == computed_snapshot_key
+                    && crate::platform::timestamp::now_millis().saturating_sub(failed.failed_at_ms)
+                        <= AI_CHAT_HISTORY_SAVE_FAILURE_COOLDOWN_MS
+            });
 
         if !chat_history_ready
             || !persisted_messages_dirty_value
             || persisted_messages_snapshot == initial_loaded_messages_snapshot
             || ai_chat_store::current_account_key() != account_key
-            || persisted_messages_failed_snapshot.read().as_ref() == Some(&computed_snapshot_key)
+            || failed_snapshot_cooldown_active
         {
             return;
         }
@@ -326,8 +342,12 @@ pub fn AIChat() -> Element {
                                 && ai_chat_store::current_account_key() == account_key
                             {
                                 error.set(Some(e));
-                                persisted_messages_failed_snapshot_signal
-                                    .set(Some(computed_snapshot_key.clone()));
+                                persisted_messages_failed_snapshot_signal.set(Some(
+                                    FailedHistorySnapshot {
+                                        snapshot_key: computed_snapshot_key.clone(),
+                                        failed_at_ms: crate::platform::timestamp::now_millis(),
+                                    },
+                                ));
                             }
                             persisted_messages_save_in_flight_signal.set(false);
                             return;
@@ -341,42 +361,8 @@ pub fn AIChat() -> Element {
     });
 
     use_effect(move || {
-        if !AI_CHAT_PROVIDER_PERSISTENCE_ENABLED {
-            return;
-        }
-        let save_generation = *provider_state_save_generation.read();
-        if save_generation == 0 || *provider_state_save_in_flight.peek() {
-            return;
-        }
-
-        provider_state_save_in_flight.set(true);
-        spawn(async move {
-            loop {
-                let generation = *provider_state_save_generation.peek();
-                let snapshot = provider_state.read().clone();
-                match ai_provider_store::save_provider_state(&snapshot).await {
-                    Ok(()) => {
-                        if *provider_state_save_generation.peek() == generation {
-                            provider_state_save_in_flight.set(false);
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        error.set(Some(e));
-                        if *provider_state_save_generation.peek() == generation {
-                            provider_state_save_in_flight.set(false);
-                            break;
-                        }
-                    }
-                }
-            }
-        });
-    });
-
-    use_effect(move || {
         let provider_state_ready = *provider_state_loaded.read();
         let selected_provider_id = provider_state.read().selected_provider_id.clone();
-        let has_signer = *nostr_client::HAS_SIGNER.read();
 
         if !provider_state_ready {
             return;
@@ -395,7 +381,7 @@ pub fn AIChat() -> Element {
                 return;
             };
 
-            if provider.requires_signer() && !has_signer {
+            if provider.requires_setup() {
                 models.set(Vec::new());
                 selected_model.set(String::new());
                 error.set(None);
@@ -414,29 +400,19 @@ pub fn AIChat() -> Element {
                         .selected_model_by_provider
                         .get(&provider.id)
                         .cloned();
-                    let selected_is_valid = available_models
-                        .iter()
-                        .any(|model| model.id == *selected_model.read());
-                    let saved_is_valid = saved_model
-                        .as_ref()
-                        .map(|saved| available_models.iter().any(|model| model.id == *saved))
-                        .unwrap_or(false);
-                    let next_model = if selected_is_valid {
-                        selected_model.read().clone()
-                    } else if saved_is_valid {
-                        saved_model.clone().unwrap_or_default()
-                    } else {
-                        available_models
-                            .first()
-                            .map(|model| model.id.clone())
-                            .unwrap_or_default()
-                    };
+                    let next_model = resolve_selected_model(
+                        &selected_model.read(),
+                        saved_model.as_deref(),
+                        &available_models,
+                    );
 
                     if *provider_models_generation.peek() != local_generation
                         || provider_state.read().selected_provider_id != provider.id
                     {
                         return;
                     }
+
+                    models.set(available_models);
 
                     if !next_model.is_empty() {
                         selected_model.set(next_model.clone());
@@ -445,14 +421,12 @@ pub fn AIChat() -> Element {
                                 provider.id.clone(),
                                 next_model,
                                 provider_state,
-                                provider_state_save_generation,
                                 error,
                             );
                         }
                     } else {
                         selected_model.set(String::new());
                     }
-                    models.set(available_models);
                     error.set(None);
                 }
                 Err(e) => {
@@ -474,8 +448,7 @@ pub fn AIChat() -> Element {
     }
 
     let active_provider = current_provider(&providers.read(), &provider_state.read());
-    let shakespeare_blocked =
-        active_provider.requires_signer() && !*nostr_client::HAS_SIGNER.read();
+    let ppq_blocked = active_provider.requires_setup();
 
     let provider_for_keydown = active_provider.clone();
     let provider_for_click = active_provider.clone();
@@ -497,9 +470,10 @@ pub fn AIChat() -> Element {
                     }
                     div { class: "flex items-center gap-2",
                         select {
+                            key: "{active_provider.id}:{models.read().len()}:{selected_model}",
                             class: "h-10 rounded-lg border border-border bg-card px-3 text-sm text-foreground focus:outline-hidden",
                             value: "{selected_model}",
-                            disabled: models.read().is_empty() || *loading.read() || shakespeare_blocked,
+                            disabled: models.read().is_empty() || *loading.read() || ppq_blocked,
                             onchange: move |evt| {
                                 let value = evt.value();
                                 selected_model.set(value.clone());
@@ -507,12 +481,15 @@ pub fn AIChat() -> Element {
                                     active_provider.id.clone(),
                                     value,
                                     provider_state,
-                                    provider_state_save_generation,
                                     error,
                                 );
                             },
                             if models.read().is_empty() {
-                                option { value: "", if shakespeare_blocked { "Sign in for Shakespeare models" } else { "Loading models..." } }
+                                option {
+                                    value: "",
+                                    selected: selected_model.read().is_empty(),
+                                    if ppq_blocked { "Set up PPQ or switch providers" } else { "Loading models..." }
+                                }
                             } else {
                                 for model in models.read().iter() {
                                     {
@@ -522,7 +499,12 @@ pub fn AIChat() -> Element {
                                             model.name.clone()
                                         };
                                         rsx! {
-                                            option { key: "{model.id}", value: "{model.id}", "{label}" }
+                                            option {
+                                                key: "{model.id}",
+                                                value: "{model.id}",
+                                                selected: *selected_model.read() == model.id,
+                                                "{label}"
+                                            }
                                         }
                                     }
                                 }
@@ -560,8 +542,44 @@ pub fn AIChat() -> Element {
                 id: "{messages_container_id}",
                 class: "flex-1 overflow-y-auto",
                 div { class: "mx-auto flex max-w-5xl flex-col gap-6 px-4 py-6",
-                    if shakespeare_blocked {
-                        SignInGate {}
+                    if ppq_blocked {
+                        PpqSetupGate {
+                            loading: ppq_bootstrap_loading,
+                            on_create_account: move |_| {
+                                if *ppq_bootstrap_loading.read() {
+                                    return;
+                                }
+                                ppq_bootstrap_loading.set(true);
+                                error.set(None);
+                                spawn(async move {
+                                    match ppq::create_account().await {
+                                        Ok(account) => {
+                                        let mut next_state = provider_state.read().clone();
+                                        next_state.selected_provider_id = ppq_provider(None).id;
+                                        next_state.ppq_account = Some(PpqAccountState {
+                                            credit_id: account.credit_id,
+                                            api_key: account.api_key,
+                                            active_api_key_id: None,
+                                        });
+                                        if let Err(err) = ai_provider_store::cache_provider_state(&next_state) {
+                                            error.set(Some(err));
+                                            ppq_bootstrap_loading.set(false);
+                                            return;
+                                        }
+                                        match ai_provider_store::save_provider_state(&next_state).await {
+                                            Ok(()) => {
+                                                providers.set(resolve_providers(&next_state));
+                                                    provider_state.set(next_state);
+                                                }
+                                                Err(err) => error.set(Some(err)),
+                                            }
+                                        }
+                                        Err(err) => error.set(Some(err)),
+                                    }
+                                    ppq_bootstrap_loading.set(false);
+                                });
+                            }
+                        }
                     } else if messages.read().is_empty() {
                         EmptyState { provider_name: active_provider.name.clone() }
                     } else {
@@ -589,15 +607,15 @@ pub fn AIChat() -> Element {
                     div { class: "rounded-2xl border border-border bg-card p-3 shadow-sm",
                         textarea {
                             class: "min-h-[96px] w-full resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden disabled:cursor-not-allowed disabled:opacity-60",
-                            placeholder: if shakespeare_blocked {
-                                "Open AI settings to switch providers or sign in for Shakespeare..."
+                            placeholder: if ppq_blocked {
+                                "Create a PPQ account here or open AI settings to switch to a custom provider..."
                             } else if selected_model.read().is_empty() {
                                 "Select a model first..."
                             } else {
                                 "Send a message..."
                             },
                             value: "{input}",
-                            disabled: selected_model.read().is_empty() || *loading.read() || shakespeare_blocked,
+                            disabled: selected_model.read().is_empty() || *loading.read() || ppq_blocked,
                             oninput: move |evt| input.set(evt.value()),
                             onkeydown: move |evt| {
                                 if evt.key() == Key::Enter && !evt.modifiers().shift() {
@@ -617,12 +635,12 @@ pub fn AIChat() -> Element {
                         div { class: "mt-3 flex items-center justify-between gap-3",
                             p { class: "text-xs text-muted-foreground", "Enter to send. Shift+Enter for newline." }
                             button {
-                                class: if input.read().trim().is_empty() || selected_model.read().is_empty() || *loading.read() || shakespeare_blocked {
+                                class: if input.read().trim().is_empty() || selected_model.read().is_empty() || *loading.read() || ppq_blocked {
                                     "inline-flex h-11 w-11 items-center justify-center rounded-xl bg-muted text-muted-foreground cursor-not-allowed"
                                 } else {
                                     "inline-flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-primary-foreground transition hover:bg-primary/90"
                                 },
-                                disabled: input.read().trim().is_empty() || selected_model.read().is_empty() || *loading.read() || shakespeare_blocked,
+                                disabled: input.read().trim().is_empty() || selected_model.read().is_empty() || *loading.read() || ppq_blocked,
                                 onclick: move |_| {
                                     submit_message(
                                         input,
@@ -645,16 +663,31 @@ pub fn AIChat() -> Element {
 }
 
 #[component]
-fn SignInGate() -> Element {
+fn PpqSetupGate(loading: Signal<bool>, on_create_account: EventHandler<MouseEvent>) -> Element {
     rsx! {
         div { class: "flex min-h-[50vh] items-center justify-center p-6",
             div { class: "max-w-md w-full rounded-2xl border border-border bg-card p-8 text-center shadow-sm",
                 div { class: "mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary",
                     SparklesIcon { class: "w-7 h-7".to_string() }
                 }
-                h2 { class: "text-2xl font-semibold", "Sign in to use Shakespeare" }
+                h2 { class: "text-2xl font-semibold", "Set Up PPQ to Use AI Chat" }
                 p { class: "mt-2 text-sm text-muted-foreground",
-                    "Shakespeare uses NIP-98 authenticated requests. Sign in, or open AI settings and switch to a custom provider with your own API key."
+                    "PPQ is the default built-in AI provider. Create a PPQ account here, or open AI settings and switch to your own custom OpenAI-compatible provider."
+                }
+                div { class: "mt-5 flex flex-col gap-3 sm:flex-row sm:justify-center",
+                    button {
+                        class: "rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-60",
+                        disabled: *loading.read(),
+                        onclick: move |evt| on_create_account.call(evt),
+                        if *loading.read() { "Creating PPQ Account..." } else { "Create PPQ Account" }
+                    }
+                    button {
+                        class: "rounded-lg border border-border px-4 py-2 text-sm transition hover:bg-accent",
+                        onclick: move |_| {
+                            navigator().push(Route::SettingsAi {});
+                        },
+                        "Use Custom Provider Instead"
+                    }
                 }
             }
         }
@@ -722,7 +755,7 @@ fn current_provider(providers: &[AiProviderConfig], state: &AiProviderState) -> 
         .iter()
         .find(|provider| provider.id == state.selected_provider_id)
         .cloned()
-        .unwrap_or_else(shakespeare_provider)
+        .unwrap_or_else(|| ppq_provider(state.ppq_account.as_ref()))
 }
 
 fn build_api_messages(messages: &[DisplayMessage]) -> Vec<ChatMessage> {
@@ -1005,22 +1038,69 @@ fn persist_selected_model(
     provider_id: String,
     model_id: String,
     mut provider_state: Signal<AiProviderState>,
-    mut provider_state_save_generation: Signal<u32>,
     mut error: Signal<Option<String>>,
 ) {
     let mut next_state = provider_state.read().clone();
     next_state
         .selected_model_by_provider
-        .insert(provider_id, model_id);
+        .insert(provider_id.clone(), model_id.clone());
     provider_state.set(next_state.clone());
-    let next_generation = provider_state_save_generation.read().wrapping_add(1);
-    provider_state_save_generation.set(next_generation);
-    error.set(None);
+    match ai_provider_store::cache_provider_state(&next_state) {
+        Ok(()) => error.set(None),
+        Err(e) => {
+            error.set(Some(e));
+            return;
+        }
+    }
+
+    if !AI_CHAT_PROVIDER_PERSISTENCE_ENABLED {
+        return;
+    }
+
+    if let Some(snapshot) = ai_provider_store::queue_provider_state_save(next_state) {
+        spawn_forever(async move {
+            let mut next_snapshot = Some(snapshot);
+            while let Some(current_snapshot) = next_snapshot {
+                if let Err(e) = ai_provider_store::save_provider_state(&current_snapshot).await {
+                    error.set(Some(e));
+                }
+                next_snapshot = ai_provider_store::finish_provider_state_save();
+            }
+        });
+    }
+}
+
+fn resolve_selected_model(
+    current_model_id: &str,
+    saved_model_id: Option<&str>,
+    available_models: &[ChatModel],
+) -> String {
+    if available_models
+        .iter()
+        .any(|model| model.id == current_model_id)
+    {
+        return current_model_id.to_string();
+    }
+
+    if let Some(saved_model_id) = saved_model_id {
+        if available_models
+            .iter()
+            .any(|model| model.id == saved_model_id)
+        {
+            return saved_model_id.to_string();
+        }
+    }
+
+    available_models
+        .first()
+        .map(|model| model.id.clone())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::history_save_snapshot_key;
+    use super::{history_save_snapshot_key, resolve_selected_model};
+    use crate::services::ai_chat::ChatModel;
     use crate::stores::ai_chat_store::{
         PersistedChatMessage, PersistedChatRole, PersistedToolCall,
     };
@@ -1126,5 +1206,79 @@ mod tests {
             history_save_snapshot_key("account", &messages, &messages),
             history_save_snapshot_key("account", &messages, &different_initial_loaded_messages,),
         );
+    }
+
+    #[test]
+    fn resolve_selected_model_prefers_current_when_valid() {
+        let models = vec![
+            ChatModel {
+                id: "model-a".to_string(),
+                name: "Model A".to_string(),
+                description: String::new(),
+                total_cost: None,
+            },
+            ChatModel {
+                id: "model-b".to_string(),
+                name: "Model B".to_string(),
+                description: String::new(),
+                total_cost: None,
+            },
+        ];
+
+        assert_eq!(
+            resolve_selected_model("model-b", Some("model-a"), &models),
+            "model-b"
+        );
+    }
+
+    #[test]
+    fn resolve_selected_model_falls_back_to_saved_model() {
+        let models = vec![
+            ChatModel {
+                id: "model-a".to_string(),
+                name: "Model A".to_string(),
+                description: String::new(),
+                total_cost: None,
+            },
+            ChatModel {
+                id: "model-b".to_string(),
+                name: "Model B".to_string(),
+                description: String::new(),
+                total_cost: None,
+            },
+        ];
+
+        assert_eq!(
+            resolve_selected_model("missing", Some("model-b"), &models),
+            "model-b"
+        );
+    }
+
+    #[test]
+    fn resolve_selected_model_defaults_to_first_available_model() {
+        let models = vec![
+            ChatModel {
+                id: "model-a".to_string(),
+                name: "Model A".to_string(),
+                description: String::new(),
+                total_cost: None,
+            },
+            ChatModel {
+                id: "model-b".to_string(),
+                name: "Model B".to_string(),
+                description: String::new(),
+                total_cost: None,
+            },
+        ];
+
+        assert_eq!(
+            resolve_selected_model("missing", Some("also-missing"), &models),
+            "model-a"
+        );
+    }
+
+    #[test]
+    fn resolve_selected_model_returns_empty_without_available_models() {
+        assert!(resolve_selected_model("missing", Some("also-missing"), &[]).is_empty());
     }
 }

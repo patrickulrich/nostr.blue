@@ -12,6 +12,7 @@ pub mod payments;
 pub use payments::btc_price;
 pub use payments::lnurl;
 pub use payments::mempool;
+pub mod ppq;
 
 #[cfg(all(feature = "web", feature = "desktop"))]
 compile_error!("Cannot enable both 'web' and 'desktop' features");

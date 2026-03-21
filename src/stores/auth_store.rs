@@ -542,6 +542,7 @@ pub async fn logout() -> Result<(), String> {
     crate::stores::shop_store::clear_caches();
     crate::stores::dms::clear_caches();
     crate::stores::shop_store::reset_orders_loaded_flag();
+    crate::stores::nwc_store::disconnect_nwc(false);
     spawn(async move {
         crate::services::search_relays::invalidate_search_relay_cache().await;
     });

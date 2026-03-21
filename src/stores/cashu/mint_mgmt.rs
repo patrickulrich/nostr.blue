@@ -3,8 +3,8 @@
 //! Functions for adding, removing, and managing mints.
 //! Includes counter backup/restore for mint re-addition.
 #![allow(dead_code)]
-use super::events::queue_signed_event_for_retry_result;
 use super::errors::CashuResult;
+use super::events::queue_signed_event_for_retry_result;
 use super::internal::create_ephemeral_wallet;
 use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof};
 use super::signals::{
@@ -90,7 +90,10 @@ async fn publish_or_queue_wallet_snapshot(event: Event) -> Result<(), String> {
                 log::warn!("No relays accepted wallet event, queueing for retry");
             }
             Err(error) => {
-                log::warn!("Failed to publish wallet event, queueing for retry: {}", error);
+                log::warn!(
+                    "Failed to publish wallet event, queueing for retry: {}",
+                    error
+                );
             }
         }
     } else {
@@ -98,7 +101,9 @@ async fn publish_or_queue_wallet_snapshot(event: Event) -> Result<(), String> {
     }
 
     if SHARED_LOCALSTORE.read().as_ref().is_none() {
-        return Err("Localstore not initialized; cannot persist queued wallet snapshot".to_string());
+        return Err(
+            "Localstore not initialized; cannot persist queued wallet snapshot".to_string(),
+        );
     }
 
     queue_signed_event_for_retry_result(
