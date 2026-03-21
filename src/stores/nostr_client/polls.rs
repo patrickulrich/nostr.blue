@@ -97,6 +97,9 @@ pub async fn publish_poll_vote_tracked(
             .await
             .map_err(|e| format!("Failed to publish poll vote: {}", e))?
     };
+    if output.success.is_empty() {
+        return Err("No relays accepted event".to_string());
+    }
     let result = PublishResult::from_output(output);
     log::info!(
         "Poll vote published: {} ({}/{} relays succeeded)",
@@ -206,6 +209,9 @@ pub async fn publish_poll_tracked(
             .await
             .map_err(|e| format!("Failed to publish poll: {}", e))?
     };
+    if output.success.is_empty() {
+        return Err("No relays accepted event".to_string());
+    }
     let result = PublishResult::from_output(output);
     log::info!(
         "Poll '{}' published: {} ({}/{} relays succeeded)",

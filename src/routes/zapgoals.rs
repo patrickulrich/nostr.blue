@@ -140,6 +140,7 @@ pub fn ZapGoalsHome() -> Element {
     let mut empty_message = use_signal(|| None::<String>);
     let mut error_message = use_signal(|| None::<String>);
     let mut selected_goal = use_signal(|| None::<ZapGoalProgress>);
+    let mut open_goal_request = use_signal(|| 0u32);
     let mut request_generation = use_signal(|| 0u32);
 
     use_effect(move || {
@@ -258,11 +259,16 @@ pub fn ZapGoalsHome() -> Element {
     let filtered_goals =
         zap_goals_store::filter_goals_by_query(&goals.read(), &search_query.read());
 
-    let open_goal_modal = {
+    let mut open_goal_modal = {
         move |goal: ZapGoalProgress| {
             let goal_clone = goal.clone();
+            let request_token = open_goal_request.peek().wrapping_add(1);
+            open_goal_request.set(request_token);
             spawn(async move {
                 if goal_clone.goal.is_project_goal {
+                    if *open_goal_request.peek() != request_token {
+                        return;
+                    }
                     selected_goal.set(Some(goal_clone));
                     return;
                 }
@@ -270,6 +276,9 @@ pub fn ZapGoalsHome() -> Element {
                 if let Some(profile) = profiles::get_cached_profile(&goal_clone.goal.author_pubkey)
                 {
                     if profile.lud16.is_some() || profile.lud06.is_some() {
+                        if *open_goal_request.peek() != request_token {
+                            return;
+                        }
                         selected_goal.set(Some(goal_clone));
                         return;
                     }
@@ -277,6 +286,9 @@ pub fn ZapGoalsHome() -> Element {
 
                 match profiles::fetch_profile(goal_clone.goal.author_pubkey.clone()).await {
                     Ok(profile) => {
+                        if *open_goal_request.peek() != request_token {
+                            return;
+                        }
                         if profile.lud16.is_some() || profile.lud06.is_some() {
                             selected_goal.set(Some(goal_clone));
                         } else {
@@ -287,6 +299,9 @@ pub fn ZapGoalsHome() -> Element {
                         }
                     }
                     Err(error) => {
+                        if *open_goal_request.peek() != request_token {
+                            return;
+                        }
                         toast.error(
                             format!("Could not load author profile: {error}"),
                             ToastOptions::new(),

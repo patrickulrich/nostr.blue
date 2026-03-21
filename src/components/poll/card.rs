@@ -525,6 +525,7 @@ pub fn PollCard(
             div { class: "flex items-center justify-between max-w-md mt-2 -ml-2",
                 button {
                     r#type: "button",
+                    aria_label: "Comment",
                     class: "flex items-center gap-1 hover:text-blue-500 hover:bg-blue-500/10 transition px-2 py-1.5 rounded text-muted-foreground",
                     onclick: move |e: MouseEvent| {
                         e.stop_propagation();
@@ -773,7 +774,7 @@ pub fn PollCard(
                         show_comment_composer.set(false);
                     },
                     on_success: move |comment_event: NostrEvent| {
-                        if replies_count.is_none() {
+                        if on_comment_created.is_none() {
                             let current = *reply_count.read();
                             reply_count.set((current + 1).min(501));
                         }

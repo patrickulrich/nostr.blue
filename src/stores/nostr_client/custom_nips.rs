@@ -121,6 +121,9 @@ pub async fn publish_custom_nip_tracked(
         .await
         .map_err(|e| format!("Failed to publish custom NIP: {}", e))?;
     let result = PublishResult::from_output(output);
+    if !result.is_success() {
+        return Err("Failed to publish custom NIP: no relays accepted the event".to_string());
+    }
     log::info!(
         "Custom NIP published: {} ({}/{} relays succeeded)",
         result.event_id,

@@ -63,7 +63,7 @@ sync_overlay_dir() {
 
     local path rel preserve skip
     while IFS= read -r -d '' path; do
-        rel="${path#$dest_dir/}"
+        rel="${path#"$dest_dir"/}"
         skip=0
         for preserve in "$@"; do
             if [ "$rel" = "$preserve" ]; then
@@ -80,7 +80,7 @@ sync_overlay_dir() {
     done < <(find "$dest_dir" -mindepth 1 -depth -print0 2>/dev/null)
 
     while IFS= read -r -d '' path; do
-        rel="${path#$src_dir/}"
+        rel="${path#"$src_dir"/}"
         if [ -d "$path" ]; then
             mkdir -p "$dest_dir/$rel"
         else

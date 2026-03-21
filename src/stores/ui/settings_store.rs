@@ -77,7 +77,11 @@ async fn drain_publish_client_tag_queue() {
     SETTINGS_ERROR.write().clone_from(&None);
 
     loop {
-        let Some(next_enabled) = PUBLISH_CLIENT_TAG_SAVE_PENDING.write().take() else {
+        let next_enabled = {
+            let pending = PUBLISH_CLIENT_TAG_SAVE_PENDING.read();
+            pending.as_ref().copied()
+        };
+        let Some(next_enabled) = next_enabled else {
             break;
         };
         let settings_to_save = {
@@ -90,8 +94,10 @@ async fn drain_publish_client_tag_queue() {
         if let Err(e) = save_settings(&settings_to_save).await {
             log::warn!("Failed to persist client tag setting to Nostr: {}", e);
             SETTINGS_ERROR.write().clone_from(&Some(e));
+            break;
         } else {
             SETTINGS_ERROR.write().clone_from(&None);
+            PUBLISH_CLIENT_TAG_SAVE_PENDING.write().take();
         }
     }
 
@@ -267,11 +273,10 @@ pub async fn update_publish_client_tag(enabled: bool) {
         w.clone()
     };
     cache_settings(&settings);
+    PUBLISH_CLIENT_TAG_SAVE_PENDING.write().replace(enabled);
     if !auth_store::is_authenticated() {
         return;
     }
-
-    PUBLISH_CLIENT_TAG_SAVE_PENDING.write().replace(enabled);
     drain_publish_client_tag_queue().await;
 }
 /// Get current mempool endpoint (returns default if empty)

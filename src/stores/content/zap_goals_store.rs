@@ -135,7 +135,7 @@ fn validate_relay_url(relay: &str) -> Option<String> {
     }
 
     parsed.host_str()?;
-    Some(relay.to_string())
+    Some(parsed.to_string())
 }
 
 fn normalize_relays(relays: &[String]) -> Vec<String> {
@@ -154,6 +154,7 @@ async fn fetch_zap_goal_events_paginated(
     let timeout = Duration::from_secs(10);
     let batch_size = target_goal_count.max(25);
     let mut events = Vec::new();
+    let mut parsed_count = 0usize;
     let mut seen = HashSet::new();
     let mut previous_oldest_created_at = None;
 
@@ -168,11 +169,13 @@ async fn fetch_zap_goal_events_paginated(
         let seen_before = seen.len();
         for event in page {
             if seen.insert(event.id) {
+                if parse_goal_event(&event).is_some() {
+                    parsed_count += 1;
+                }
                 events.push(event);
             }
         }
 
-        let parsed_count = events.iter().filter_map(parse_goal_event).count();
         if parsed_count >= target_goal_count {
             break;
         }
@@ -193,6 +196,8 @@ async fn fetch_zap_goal_events_paginated(
     Ok(events)
 }
 
+const SAFETY_MAX_RECEIPTS: usize = 5_000;
+
 async fn fetch_zap_receipts_paginated(goal_event_id: EventId) -> Result<Vec<Event>, String> {
     let timeout = Duration::from_secs(10);
     let mut filter = Filter::new().kind(Kind::ZapReceipt).event(goal_event_id);
@@ -212,6 +217,9 @@ async fn fetch_zap_receipts_paginated(goal_event_id: EventId) -> Result<Vec<Even
         for receipt in page {
             if seen.insert(receipt.id) {
                 receipts.push(receipt);
+                if receipts.len() >= SAFETY_MAX_RECEIPTS {
+                    return Ok(receipts);
+                }
             }
         }
 
@@ -452,14 +460,15 @@ fn parse_bolt11_amount(bolt11: &str) -> Option<u64> {
     }
 
     let amount: u64 = rest[..amount_end].parse().ok()?;
-    match multiplier {
-        Some('m') => Some(amount * 100_000),
-        Some('u') => Some(amount * 100),
-        Some('n') => Some(amount / 10),
-        Some('p') => Some(amount / 10000),
-        Some(_) => None,
-        None => Some(amount * 100_000_000),
-    }
+    let amount_msats = match multiplier {
+        Some('m') => amount.checked_mul(100_000_000)?,
+        Some('u') => amount.checked_mul(100_000)?,
+        Some('n') => amount.checked_mul(100)?,
+        Some('p') => amount / 10,
+        Some(_) => return None,
+        None => amount.checked_mul(100_000_000_000)?,
+    };
+    Some(amount_msats / 1000)
 }
 
 fn extract_zap_sender(event: &Event) -> Option<String> {
@@ -717,6 +726,13 @@ mod tests {
     }
 
     #[test]
+    fn parse_bolt11_amount_truncates_sub_sat_amounts() {
+        assert_eq!(parse_bolt11_amount("lnbc5n1example"), Some(0));
+        assert_eq!(parse_bolt11_amount("lnbc15000p1example"), Some(1));
+        assert_eq!(parse_bolt11_amount("lnbc5p1example"), Some(0));
+    }
+
+    #[test]
     fn normalize_relays_trims_filters_and_dedupes() {
         assert_eq!(
             normalize_relays(&[
@@ -728,7 +744,7 @@ mod tests {
                 "ws://relay.two".to_string(),
                 "wss://relay.one".to_string(),
             ]),
-            vec!["wss://relay.one".to_string(), "ws://relay.two".to_string(),]
+            vec!["wss://relay.one/".to_string(), "ws://relay.two/".to_string(),]
         );
     }
 

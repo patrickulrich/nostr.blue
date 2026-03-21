@@ -26,7 +26,7 @@ fn load_project_goals(
     request_generation: &Signal<u32>,
 ) {
     let mut request_generation = *request_generation;
-    let generation = request_generation.read().wrapping_add(1);
+    let generation = request_generation.peek().wrapping_add(1);
     request_generation.set(generation);
     loading.set(true);
     error_message.set(None);
@@ -36,7 +36,7 @@ fn load_project_goals(
             Err(error) => Err(error),
         };
 
-        if *request_generation.read() != generation {
+        if *request_generation.peek() != generation {
             return;
         }
 
@@ -45,7 +45,7 @@ fn load_project_goals(
             Err(error) => error_message.set(Some(error)),
         }
 
-        if *request_generation.read() != generation {
+        if *request_generation.peek() != generation {
             return;
         }
         loading.set(false);

@@ -1,5 +1,16 @@
 use super::*;
 
+fn ensure_publish_accepted(
+    output: &nostr_relay_pool::Output<EventId>,
+    action: &str,
+) -> std::result::Result<(), String> {
+    if output.success.is_empty() {
+        Err(format!("{action}: no relays accepted the event"))
+    } else {
+        Ok(())
+    }
+}
+
 /// Create a new community (kind 34550)
 pub async fn create_community(
     identifier: &str,
@@ -40,6 +51,7 @@ pub async fn create_community(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish community: {}", e))?;
+    ensure_publish_accepted(&output, "Failed to publish community")?;
     log::info!("Community created: {}", output.id().to_hex());
     Ok(output.id().to_hex())
 }
@@ -64,6 +76,7 @@ pub async fn post_to_community(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish post: {}", e))?;
+    ensure_publish_accepted(&output, "Failed to publish post")?;
     log::info!("Community post published: {}", output.id().to_hex());
     Ok(output.id().to_hex())
 }
@@ -94,6 +107,7 @@ pub async fn reply_to_post(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish reply: {}", e))?;
+    ensure_publish_accepted(&output, "Failed to publish reply")?;
     log::info!("Community reply published: {}", output.id().to_hex());
     Ok(output.id().to_hex())
 }
@@ -128,6 +142,7 @@ pub async fn approve_post(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to approve post: {}", e))?;
+    ensure_publish_accepted(&output, "Failed to approve post")?;
     log::info!("Post approved: {}", output.id().to_hex());
     Ok(output.id().to_hex())
 }
@@ -163,6 +178,7 @@ pub async fn remove_post(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to remove post: {}", e))?;
+    ensure_publish_accepted(&output, "Failed to remove post")?;
     log::info!("Post removed: {}", output.id().to_hex());
     Ok(output.id().to_hex())
 }
@@ -194,6 +210,7 @@ pub async fn update_approved_members(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to update approved members: {}", e))?;
+    ensure_publish_accepted(&output, "Failed to update approved members")?;
     APPROVED_MEMBERS_CACHE
         .write()
         .insert(community.a_tag.clone(), members.into_iter().collect());
@@ -239,6 +256,7 @@ pub async fn submit_join_request(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to submit join request: {}", e))?;
+    ensure_publish_accepted(&output, "Failed to submit join request")?;
     let request_id = output.id().to_hex();
     let request = JoinRequest {
         id: request_id.clone(),
@@ -324,6 +342,7 @@ pub async fn decline_join_request(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to decline join request: {}", e))?;
+    ensure_publish_accepted(&output, "Failed to decline join request")?;
     DECLINED_MEMBERS_CACHE
         .write()
         .insert(community.a_tag.clone(), declined.into_iter().collect());

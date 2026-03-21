@@ -221,11 +221,12 @@ pub async fn publish_quote_event(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
     {
-        Ok(output) => {
+        Ok(output) if !output.success.is_empty() => {
             let event_id = output.id().to_hex();
             log::info!("Published quote event for quote {}: {}", quote_id, event_id);
             Ok(event_id)
         }
+        Ok(_) => Err("Failed to publish quote event: no relays accepted the event".to_string()),
         Err(e) => {
             log::warn!("Failed to publish quote event: {}", e);
             Err(format!("Failed to publish quote event: {}", e))
@@ -253,13 +254,14 @@ pub async fn delete_quote_event(event_id: &str) -> Result<(), String> {
         ))
         .await
     {
-        Ok(_) => {
+        Ok(output) if !output.success.is_empty() => {
             log::info!("Published deletion for quote event: {}", event_id);
             Ok(())
         }
+        Ok(_) => Err("Failed to delete quote event: no relays accepted the event".to_string()),
         Err(e) => {
             log::warn!("Failed to delete quote event: {}", e);
-            Ok(())
+            Err(format!("Failed to delete quote event: {}", e))
         }
     }
 }
@@ -600,10 +602,13 @@ pub async fn create_history_event_full(
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-    client
+    let output = client
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish history event: {}", e))?;
+    if output.success.is_empty() {
+        return Err("Failed to publish history event: no relays accepted the event".to_string());
+    }
     Ok(())
 }
 /// Publish a single pending event and return the Nostr event ID

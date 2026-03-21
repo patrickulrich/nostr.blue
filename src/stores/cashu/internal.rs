@@ -430,7 +430,8 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
             }
         }
     }
-    if !event_ids_to_delete.is_empty() {
+    let allow_deletion = available_proofs.is_empty() || new_event_id.is_some();
+    if allow_deletion && !event_ids_to_delete.is_empty() {
         let valid_event_ids: Vec<_> = event_ids_to_delete
             .iter()
             .filter(|id| EventId::from_hex(id).is_ok())

@@ -171,7 +171,7 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
     let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-    let event_id = match nostr_client::NOSTR_CLIENT.read().as_ref().cloned() {
+    let published_event_id = match nostr_client::NOSTR_CLIENT.read().as_ref().cloned() {
         Some(client) => match client
             .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
                 builder.clone(),
@@ -181,7 +181,7 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
             Ok(event_output) if !event_output.success.is_empty() => {
                 let event_id = event_output.id().to_hex();
                 log::info!("Published token event: {}", event_id);
-                event_id
+                Some(event_id)
             }
             Ok(event_output) => {
                 log::warn!(
@@ -195,7 +195,7 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
                     Some(mint_url.clone()),
                 )
                 .await;
-                pending_id.clone()
+                None
             }
             Err(error) => {
                 log::warn!(
@@ -209,7 +209,7 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
                     Some(mint_url.clone()),
                 )
                 .await;
-                pending_id.clone()
+                None
             }
         },
         None => {
@@ -221,32 +221,37 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
                 Some(mint_url.clone()),
             )
             .await;
-            pending_id.clone()
+            None
         }
     };
+    let stored_event_id = published_event_id
+        .clone()
+        .unwrap_or_else(|| pending_id.clone());
     {
         let store = WALLET_TOKENS.read();
         let mut data = store.data();
         let mut tokens = data.write();
         tokens.push(TokenData {
-            event_id: event_id.clone(),
+            event_id: stored_event_id.clone(),
             mint: mint_url.clone(),
             unit: "sat".to_string(),
             proofs: proof_data.clone(),
             created_at: chrono::Utc::now().timestamp() as u64,
         });
-        register_proofs_in_event_map(&event_id, &proof_data);
+        register_proofs_in_event_map(&stored_event_id, &proof_data);
     }
     super::signals::update_wallet_balances();
-    create_history_event_with_type(
-        "in",
-        amount_minted,
-        vec![event_id.clone()],
-        vec![],
-        Some("lightning_mint"),
-        None,
-    )
-    .await?;
+    if let Some(event_id) = published_event_id {
+        create_history_event_with_type(
+            "in",
+            amount_minted,
+            vec![event_id],
+            vec![],
+            Some("lightning_mint"),
+            None,
+        )
+        .await?;
+    }
     if let Err(e) = wallet.localstore.remove_mint_quote(&quote_id).await {
         log::warn!("Failed to remove mint quote from database: {}", e);
     }

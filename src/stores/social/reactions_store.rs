@@ -303,6 +303,15 @@ pub async fn save_preferred_reactions(reactions: Vec<PreferredReaction>) -> Resu
             log::warn!("Relay {} failed: {}", relay, error);
         }
     }
+    if output.success.is_empty() {
+        let error = format!(
+            "Failed to publish reactions: no relays accepted event {}",
+            output.id().to_hex()
+        );
+        log::warn!("{}", error);
+        *REACTIONS_STATE.write() = Nip78LoadState::Failed(error.clone());
+        return Err(error);
+    }
     cache_reactions(&data);
     *PREFERRED_REACTIONS.write() = reactions;
     *REACTIONS_STATE.write() = Nip78LoadState::Loaded;

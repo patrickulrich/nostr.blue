@@ -59,15 +59,7 @@ fn history_save_snapshot_key(
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         messages.len().hash(&mut hasher);
         for message in messages {
-            message.id.hash(&mut hasher);
-            message.role.hash(&mut hasher);
-            message.content.hash(&mut hasher);
-            message.tool_calls.len().hash(&mut hasher);
-            for call in &message.tool_calls {
-                call.id.hash(&mut hasher);
-                call.name.hash(&mut hasher);
-                call.result.hash(&mut hasher);
-            }
+            message.hash(&mut hasher);
         }
         hasher.finish()
     }

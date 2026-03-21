@@ -352,6 +352,12 @@ async fn publish_pinned_notes(pins: Vec<String>) -> Result<(), String> {
             let success_count = output.success.len();
             let failed_count = output.failed.len();
             let total = success_count + failed_count;
+            if output.success.is_empty() {
+                return Err(format!(
+                    "Failed to publish pinned notes: no relays accepted the event (failed_relays={})",
+                    failed_count
+                ));
+            }
             log::info!(
                 "Pinned notes published: {} ({}/{} relays succeeded)",
                 output.id().to_hex(),

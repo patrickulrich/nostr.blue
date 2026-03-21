@@ -38,6 +38,15 @@ fn extract_podcast_feed_guid(contents: &[(ExternalContentId, Option<String>)]) -
 fn map_podcast_items(
     contents: &[(ExternalContentId, Option<String>)],
 ) -> Vec<(ExternalContentId, Option<String>)> {
+    let mut feed_guids_after = vec![None; contents.len()];
+    let mut next_feed_guid = None;
+    for (index, (content, _)) in contents.iter().enumerate().rev() {
+        if let ExternalContentId::PodcastFeed(guid) = content {
+            next_feed_guid = Some(guid.clone());
+        }
+        feed_guids_after[index] = next_feed_guid.clone();
+    }
+
     let mut current_feed_guid = None;
     let mut mapped = Vec::new();
     for (index, (content, _)) in contents.iter().enumerate() {
@@ -47,15 +56,9 @@ fn map_podcast_items(
                 mapped.push((content.clone(), None));
             }
             ExternalContentId::PodcastEpisode(_) => {
-                let feed_guid = current_feed_guid.clone().or_else(|| {
-                    contents
-                        .iter()
-                        .skip(index + 1)
-                        .find_map(|(next_content, _)| match next_content {
-                            ExternalContentId::PodcastFeed(guid) => Some(guid.clone()),
-                            _ => None,
-                        })
-                });
+                let feed_guid = current_feed_guid
+                    .clone()
+                    .or_else(|| feed_guids_after[index].clone());
                 mapped.push((content.clone(), feed_guid));
             }
             _ => {}

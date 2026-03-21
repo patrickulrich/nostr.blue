@@ -11,6 +11,17 @@ use std::time::Duration;
 /// Default timeout for fetching events
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 
+fn ensure_publish_accepted(
+    output: &nostr_relay_pool::Output<EventId>,
+    action: &str,
+) -> Result<(), String> {
+    if output.success.is_empty() {
+        Err(format!("{action}: no relays accepted the event"))
+    } else {
+        Ok(())
+    }
+}
+
 /// Fetch status events for a set of PR event IDs and apply them to the cache
 async fn fetch_and_apply_pr_statuses(event_ids: &[EventId]) {
     if event_ids.is_empty() {
@@ -212,6 +223,7 @@ pub async fn publish_patch(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish: {}", e))?;
+    ensure_publish_accepted(&output, "Failed to publish")?;
     let event_id = *output.id();
     let filter = Filter::new().id(event_id);
     if let Ok(events) = fetch_events_aggregated(filter, Duration::from_secs(2)).await {
@@ -254,6 +266,7 @@ pub async fn publish_pr_update(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish PR update: {}", e))?;
+    ensure_publish_accepted(&output, "Failed to publish PR update")?;
     Ok(*output.id())
 }
 
@@ -285,6 +298,7 @@ pub async fn update_pr_status(pr_id: EventId, status: IssueStatus) -> Result<Eve
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish status: {}", e))?;
+    ensure_publish_accepted(&output, "Failed to publish status")?;
     let event_id = *output.id();
     let filter = Filter::new().id(event_id);
     if let Ok(events) = fetch_events_aggregated(filter, Duration::from_secs(2)).await {
@@ -313,6 +327,7 @@ pub async fn publish_pr_comment(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish comment: {}", e))?;
+    ensure_publish_accepted(&output, "Failed to publish comment")?;
     Ok(*output.id())
 }
 /// Fetch comments for a PR
@@ -429,6 +444,7 @@ pub async fn publish_line_comment(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish line comment: {}", e))?;
+    ensure_publish_accepted(&output, "Failed to publish line comment")?;
     Ok(*output.id())
 }
 

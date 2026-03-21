@@ -82,6 +82,7 @@ pub fn ZapGoalCard(props: ZapGoalCardProps) -> Element {
                     }
                 }
                 button {
+                    r#type: "button",
                     class: "shrink-0 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90",
                     onclick: move |_| props.on_contribute.call(()),
                     "Contribute"

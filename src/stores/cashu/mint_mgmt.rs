@@ -676,51 +676,59 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
     if !event_ids_to_delete.is_empty() {
         let mut tags = Vec::new();
         for event_id in &event_ids_to_delete {
-            tags.push(nostr_sdk::Tag::event(
-                nostr_sdk::EventId::parse(event_id)
-                    .map_err(|e| format!("Invalid event ID: {}", e))?,
-            ));
+            match nostr_sdk::EventId::parse(event_id) {
+                Ok(parsed) => tags.push(nostr_sdk::Tag::event(parsed)),
+                Err(error) => {
+                    log::debug!(
+                        "Skipping non-Nostr token event ID {} during mint removal deletion tagging: {}",
+                        event_id,
+                        error
+                    );
+                }
+            }
         }
-        tags.push(nostr_sdk::Tag::custom(
-            nostr_sdk::TagKind::custom("k"),
-            ["7375"],
-        ));
-        let deletion_builder = nostr_sdk::EventBuilder::new(
-            Kind::from(5),
-            format!("Removed mint: {}", normalized_mint_url),
-        )
-        .tags(tags);
-        match client
-            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
-                deletion_builder.clone(),
-            ))
-            .await
-        {
-            Ok(output) if !output.success.is_empty() => {
-                log::info!(
-                    "Published deletion event for {} token events",
-                    event_ids_to_delete.len()
-                );
-            }
-            Ok(_) => {
-                log::warn!("No relays accepted deletion event, queuing for retry");
-                super::events::queue_event_for_retry(
-                    deletion_builder,
-                    super::types::PendingEventType::DeletionEvent,
-                    None,
-                    None,
-                )
-                .await;
-            }
-            Err(e) => {
-                log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
-                super::events::queue_event_for_retry(
-                    deletion_builder,
-                    super::types::PendingEventType::DeletionEvent,
-                    None,
-                    None,
-                )
-                .await;
+        if !tags.is_empty() {
+            tags.push(nostr_sdk::Tag::custom(
+                nostr_sdk::TagKind::custom("k"),
+                ["7375"],
+            ));
+            let deletion_builder = nostr_sdk::EventBuilder::new(
+                Kind::from(5),
+                format!("Removed mint: {}", normalized_mint_url),
+            )
+            .tags(tags);
+            match client
+                .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+                    deletion_builder.clone(),
+                ))
+                .await
+            {
+                Ok(output) if !output.success.is_empty() => {
+                    log::info!(
+                        "Published deletion event for {} token events",
+                        event_ids_to_delete.len()
+                    );
+                }
+                Ok(_) => {
+                    log::warn!("No relays accepted deletion event, queuing for retry");
+                    super::events::queue_event_for_retry(
+                        deletion_builder,
+                        super::types::PendingEventType::DeletionEvent,
+                        None,
+                        None,
+                    )
+                    .await;
+                }
+                Err(e) => {
+                    log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
+                    super::events::queue_event_for_retry(
+                        deletion_builder,
+                        super::types::PendingEventType::DeletionEvent,
+                        None,
+                        None,
+                    )
+                    .await;
+                }
             }
         }
     }
@@ -737,6 +745,7 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
             .mints
             .retain(|m| !mint_matches(m, &normalized_mint_url));
     }
+    super::proofs::rebuild_proof_event_map();
     super::signals::update_wallet_balances();
     log::info!(
         "Removed mint {} ({} sats)",
