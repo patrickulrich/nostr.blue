@@ -292,13 +292,13 @@ pub fn RelayDetail(relay_id: String) -> Element {
                 .find(|info| normalize_known_relay_url(&info.url) == normalized_relay_url)
                 .cloned();
             let known_relays = build_known_relay_set(Some(&display_info));
-            let (info, metadata_error) = if relay::is_relay_blocked(&relay_url) {
+            let (info, metadata_error) = if !known_relays.contains(&normalized_relay_url) {
+                return Err(format!("Unknown relay: {}", relay_url));
+            } else if relay::is_relay_blocked(&relay_url) {
                 (
                     None,
                     Some("Relay metadata fetch skipped because this relay is blocked".to_string()),
                 )
-            } else if !known_relays.contains(&normalized_relay_url) {
-                return Err(format!("Unknown relay: {}", relay_url));
             } else {
                 match fetch_nip11_document(&http_url).await {
                     Ok(info) => (Some(info), None),

@@ -1,4 +1,4 @@
-use crate::components::{ClientInitializing, CommentComposer, PollCard, ThreadedComment};
+use crate::components::{ClientInitializing, PollCard, ThreadedComment};
 use crate::stores::nostr_client;
 use crate::stores::subscription_manager;
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
@@ -10,7 +10,7 @@ use nostr_sdk::{
 };
 use std::collections::HashMap;
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicU32, Ordering},
     Arc,
 };
 use std::time::Duration;
@@ -31,8 +31,8 @@ fn merge_comments(existing: Vec<NostrEvent>, fetched: Vec<NostrEvent>) -> Vec<No
 }
 
 fn schedule_live_updates_retry(
-    generation_counter: Arc<AtomicU64>,
-    generation: u64,
+    generation_counter: Arc<AtomicU32>,
+    generation: u32,
     reason: String,
     mut loading_comments: Signal<bool>,
     mut live_updates_retry_count: Signal<u32>,
@@ -77,12 +77,11 @@ pub fn PollView(noteid: String) -> Element {
     let mut comments_error = use_signal(|| None::<String>);
     let mut live_updates_warning = use_signal(|| None::<String>);
     let mut loading_comments = use_signal(|| false);
-    let mut show_comment_composer = use_signal(|| false);
     let mut comments_refresh = use_signal(|| 0u64);
     let mut live_updates_retry_count = use_signal(|| 0u32);
     let mut comment_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
     let mut comment_listener_task: Signal<Option<Task>> = use_signal(|| None);
-    let comments_subscription_generation = use_hook(|| Arc::new(AtomicU64::new(0)));
+    let comments_subscription_generation = use_hook(|| Arc::new(AtomicU32::new(0)));
     use_drop(move || {
         if let Some(task) = comment_listener_task.replace(None) {
             task.cancel();
@@ -350,16 +349,23 @@ pub fn PollView(noteid: String) -> Element {
                     }
                 } else if let Some(event) = current_poll_event.clone() {
                     div { class: "border-b border-border",
-                        PollCard { event: event.clone() }
+                        PollCard {
+                            event: event.clone(),
+                            on_comment_created: move |comment_event: NostrEvent| {
+                                let already_exists = comments.read().iter().any(|e| e.id == comment_event.id);
+                                if !already_exists {
+                                    let root_event_id =
+                                        extract_root_event_id(&comment_event).unwrap_or(event.id);
+                                    invalidate_thread_tree_cache(&root_event_id);
+                                    comments_error.set(None);
+                                    comments.write().push(comment_event);
+                                }
+                            },
+                        }
                     }
                     div { class: "pt-6 px-4",
-                        div { class: "flex items-center justify-between mb-6",
+                        div { class: "mb-6",
                             h3 { class: "text-2xl font-bold", "Comments" }
-                            button {
-                                class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition flex items-center gap-2",
-                                onclick: move |_| show_comment_composer.set(true),
-                                span { "Add Comment" }
-                            }
                         }
                         if let Some(warning) = live_updates_warning.read().as_ref() {
                             div { class: "mb-4 rounded-lg border border-yellow-300 bg-yellow-50 dark:bg-yellow-950/30 dark:border-yellow-800 p-3 text-sm text-yellow-800 dark:text-yellow-200",
@@ -434,24 +440,6 @@ pub fn PollView(noteid: String) -> Element {
                         p {
                             "Poll ID: "
                             code { class: "text-xs bg-muted px-2 py-1 rounded", "{event.id.to_hex()}" }
-                        }
-                    }
-                    if *show_comment_composer.read() {
-                        CommentComposer {
-                            comment_on: event.clone(),
-                            parent_comment: None,
-                            on_close: move |_| show_comment_composer.set(false),
-                            on_success: move |comment_event: NostrEvent| {
-                                show_comment_composer.set(false);
-                                let already_exists = comments.read().iter().any(|e| e.id == comment_event.id);
-                                if !already_exists {
-                                    let root_event_id =
-                                        extract_root_event_id(&comment_event).unwrap_or(event.id);
-                                    invalidate_thread_tree_cache(&root_event_id);
-                                    comments_error.set(None);
-                                    comments.write().push(comment_event);
-                                }
-                            },
                         }
                     }
                 } else {
