@@ -143,6 +143,7 @@ pub async fn get_counts_with_count_fallback(
     timeout: Duration,
 ) -> InteractionCounts {
     let mut counts = InteractionCounts::default();
+    let mut zap_receipts_materialized = false;
     let (reactions, reposts, replies, zaps) = join!(
         try_count_from_relays(event_id, Kind::Reaction, timeout),
         try_count_from_relays(event_id, Kind::Repost, timeout),
@@ -191,21 +192,21 @@ pub async fn get_counts_with_count_fallback(
         if let Ok(batch_counts) = fetch_interaction_counts_batch(vec![*event_id], timeout).await {
             if let Some(fetched) = batch_counts.get(&event_id.to_hex()) {
                 counts = fetched.clone();
+                zap_receipts_materialized = true;
             }
         }
     }
 
-    let needs_zap_details = missing_zaps
-        || (counts.zaps > 0 && (counts.user_zapped.is_none() || counts.zap_amount_sats == 0));
+    let needs_zap_details = !zap_receipts_materialized
+        && (missing_zaps
+            || (counts.zaps > 0 && (counts.user_zapped.is_none() || counts.zap_amount_sats == 0)));
     if needs_zap_details {
         log::debug!(
             "Fetching zap receipt details for {}",
             event_id.to_hex()
         );
         if let Ok(fetched) = fetch_zap_receipt_counts(event_id, timeout).await {
-            if missing_zaps {
-                counts.zaps = fetched.zaps;
-            }
+            counts.zaps = fetched.zaps;
             counts.zap_amount_sats = fetched.zap_amount_sats;
             counts.user_zapped = fetched.user_zapped;
         }
@@ -213,11 +214,17 @@ pub async fn get_counts_with_count_fallback(
     counts
 }
 
+struct FetchEventsPage {
+    events: Vec<Event>,
+    relay_page_len: usize,
+    relay_oldest_created_at: Option<u64>,
+}
+
 async fn fetch_events_for_filter(
     client: &Client,
     filter: Filter,
     timeout: Duration,
-) -> Result<Vec<Event>, String> {
+) -> Result<FetchEventsPage, String> {
     let db_events: Vec<Event> = match client.database().query(filter.clone()).await {
         Ok(events) => events.into_iter().collect(),
         Err(e) => {
@@ -240,6 +247,8 @@ async fn fetch_events_for_filter(
             }
         }
     };
+    let relay_page_len = relay_events.len();
+    let relay_oldest_created_at = relay_events.iter().map(|event| event.created_at.as_secs()).min();
 
     let mut event_map: HashMap<EventId, Event> = HashMap::new();
     for event in db_events {
@@ -248,7 +257,11 @@ async fn fetch_events_for_filter(
     for event in relay_events {
         event_map.insert(event.id, event);
     }
-    Ok(event_map.into_values().collect())
+    Ok(FetchEventsPage {
+        events: event_map.into_values().collect(),
+        relay_page_len,
+        relay_oldest_created_at,
+    })
 }
 
 async fn fetch_paginated_interaction_events(
@@ -271,21 +284,19 @@ async fn fetch_paginated_interaction_events(
         }
 
         let page = fetch_events_for_filter(client, filter, timeout).await?;
-        if page.is_empty() {
+        if page.events.is_empty() {
             break;
         }
 
-        let page_len = page.len();
-        let oldest_created_at = page.iter().map(|event| event.created_at.as_secs()).min();
         let previous_len = all_events.len();
-        for event in page {
+        for event in page.events {
             all_events.insert(event.id, event);
         }
 
-        let Some(oldest_created_at) = oldest_created_at else {
+        let Some(oldest_created_at) = page.relay_oldest_created_at else {
             break;
         };
-        if page_len < INTERACTION_PAGE_LIMIT
+        if page.relay_page_len < INTERACTION_PAGE_LIMIT
             || oldest_created_at == 0
             || previous_oldest_created_at == Some(oldest_created_at)
             || all_events.len() == previous_len

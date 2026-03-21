@@ -6,7 +6,8 @@ use super::events::{fetch_tokens, start_pending_events_processor};
 use super::history::fetch_history;
 use super::internal::{init_multi_mint_wallet, inject_nip60_proofs_to_cdk};
 use super::recovery::{recover_pending_operations, sync_state_with_all_mints};
-use super::signals::{TERMS_ACCEPTED, TERMS_D_TAG, WALLET_STATE, WALLET_STATUS};
+use super::signals::{PENDING_NOSTR_EVENTS, TERMS_ACCEPTED, TERMS_D_TAG, WALLET_STATE, WALLET_STATUS};
+use super::types::PendingEventType;
 use super::types::{WalletState, WalletStatus};
 use super::utils::normalize_mint_url;
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
@@ -22,6 +23,139 @@ impl WalletEvent {
     fn new(privkey: String, mints: Vec<Url>) -> Self {
         Self { privkey, mints }
     }
+}
+
+fn latest_pending_wallet_snapshot_event() -> Option<Event> {
+    PENDING_NOSTR_EVENTS
+        .read()
+        .iter()
+        .filter(|event| event.event_type == PendingEventType::WalletSnapshot)
+        .filter_map(|event| match serde_json::from_str::<Event>(&event.builder_json) {
+            Ok(parsed) => Some(parsed),
+            Err(error) => {
+                log::warn!(
+                    "Failed to deserialize queued wallet snapshot {}: {}",
+                    event.id,
+                    error
+                );
+                None
+            }
+        })
+        .max_by(|left, right| left.created_at.cmp(&right.created_at))
+}
+
+async fn initialize_wallet_from_event(wallet_event: &Event) -> Result<(), String> {
+    let wallet_data = decrypt_wallet_event(wallet_event).await?;
+    log::info!("Wallet loaded with {} mints", wallet_data.mints.len());
+    *WALLET_STATE.write() = Some(WalletState {
+        privkey: Some(wallet_data.privkey.clone()),
+        mints: wallet_data
+            .mints
+            .iter()
+            .map(|u| normalize_mint_url(u.as_ref()))
+            .collect(),
+        initialized: true,
+    });
+    if let Err(e) = init_multi_mint_wallet(&wallet_data.mints).await {
+        log::error!("Failed to initialize MultiMintWallet: {}", e);
+    }
+    if let Err(e) = fetch_tokens().await {
+        log::error!("Failed to fetch tokens: {}", e);
+    }
+    if let Err(e) = inject_nip60_proofs_to_cdk().await {
+        log::warn!("Failed to inject NIP-60 proofs to CDK: {}", e);
+    }
+    if let Err(e) = fetch_history().await {
+        log::error!("Failed to fetch history: {}", e);
+    }
+    if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
+        log::warn!("Failed to sync MultiMintWallet state: {}", e);
+    }
+    super::signals::load_pending_secrets().await;
+    super::signals::load_in_flight_melt_requests().await;
+    start_pending_events_processor();
+    *WALLET_STATUS.write() = WalletStatus::Recovering;
+    spawn(async move {
+        crate::platform::timer::sleep_ms(500).await;
+        super::signals::cleanup_expired_pending_secrets().await;
+        match super::recovery::sync_orphaned_cdk_proofs_to_nostr().await {
+            Ok(result) => {
+                if result.proofs_recovered > 0 {
+                    log::info!(
+                        "Orphan sync: recovered {} proofs ({} sats) from CDK to NIP-60",
+                        result.proofs_recovered, result.sats_recovered
+                    );
+                }
+                if !result.errors.is_empty() {
+                    for err in result.errors {
+                        log::warn!("Orphan sync error: {}", err);
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("Orphan sync failed: {}", e);
+            }
+        }
+        log::info!("Starting wallet recovery - syncing with mints...");
+        if let Err(e) = sync_state_with_all_mints().await {
+            log::warn!("Mint sync during recovery failed: {}", e);
+        }
+        if let Err(e) = recover_pending_operations().await {
+            log::warn!("Pending operation recovery failed: {}", e);
+        }
+        match super::recovery::recover_all_pending_melt_quotes().await {
+            Ok(result) => {
+                if result.quotes_paid > 0 || result.change_recovered > 0 {
+                    log::info!(
+                        "In-flight melt recovery: {} paid, {} sats recovered",
+                        result.quotes_paid,
+                        result.change_recovered
+                    );
+                }
+                if !result.errors.is_empty() {
+                    for err in result.errors {
+                        log::warn!("In-flight melt recovery error: {}", err);
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("In-flight melt quote recovery failed: {}", e);
+            }
+        }
+        let result = super::proof_recovery::run_full_recovery().await;
+        if result.recovered_count > 0 || result.spent_count > 0 {
+            log::info!(
+                "Proof recovery: {} recovered ({} sats), {} spent ({} sats)",
+                result.recovered_count,
+                result.recovered_value,
+                result.spent_count,
+                result.spent_value
+            );
+        }
+        if !result.errors.is_empty() {
+            for err in &result.errors {
+                log::warn!("Proof recovery error: {}", err);
+            }
+        }
+        if let Some(multi_wallet) = cashu_cdk_bridge::MULTI_WALLET.read().as_ref() {
+            match multi_wallet.check_all_mint_quotes(None).await {
+                Ok(amount) => {
+                    if u64::from(amount) > 0 {
+                        log::info!("Recovered {} sats from paid mint quotes", u64::from(amount));
+                        let _ = cashu_cdk_bridge::sync_wallet_state().await;
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Mint quote recovery failed: {}", e);
+                }
+            }
+        }
+        super::proof_recovery::recalculate_balance();
+        log::debug!("Final balance recalculation complete");
+        log::info!("Wallet recovery complete");
+        *WALLET_STATUS.write() = WalletStatus::Ready;
+    });
+    Ok(())
 }
 /// Check if user has accepted Cashu wallet terms (NIP-78)
 /// Returns true if the terms agreement event exists, false otherwise
@@ -107,137 +241,35 @@ pub async fn init_wallet() -> Result<(), String> {
         .author(pubkey)
         .kind(Kind::from(17375))
         .limit(1);
+    if let Err(e) = load_pending_events().await {
+        log::warn!("Failed to load pending events: {}", e);
+    }
+    let pending_wallet_event = latest_pending_wallet_snapshot_event();
     nostr_client::ensure_relays_ready(&client).await;
     match client.fetch_events(filter, Duration::from_secs(10)).await {
         Ok(events) => {
-            if let Some(wallet_event) = events.into_iter().next() {
-                match decrypt_wallet_event(&wallet_event).await {
-                    Ok(wallet_data) => {
-                        log::info!("Wallet loaded with {} mints", wallet_data.mints.len());
-                        *WALLET_STATE.write() = Some(WalletState {
-                            privkey: Some(wallet_data.privkey.clone()),
-                            mints: wallet_data
-                                .mints
-                                .iter()
-                                .map(|u| normalize_mint_url(u.as_ref()))
-                                .collect(),
-                            initialized: true,
-                        });
-                        if let Err(e) = init_multi_mint_wallet(&wallet_data.mints).await {
-                            log::error!("Failed to initialize MultiMintWallet: {}", e);
-                        }
-                        if let Err(e) = fetch_tokens().await {
-                            log::error!("Failed to fetch tokens: {}", e);
-                        }
-                        if let Err(e) = inject_nip60_proofs_to_cdk().await {
-                            log::warn!("Failed to inject NIP-60 proofs to CDK: {}", e);
-                        }
-                        if let Err(e) = fetch_history().await {
-                            log::error!("Failed to fetch history: {}", e);
-                        }
-                        if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
-                            log::warn!("Failed to sync MultiMintWallet state: {}", e);
-                        }
-                        if let Err(e) = load_pending_events().await {
-                            log::warn!("Failed to load pending events: {}", e);
-                        }
-                        super::signals::load_pending_secrets().await;
-                        super::signals::load_in_flight_melt_requests().await;
-                        start_pending_events_processor();
-                        *WALLET_STATUS.write() = WalletStatus::Recovering;
-                        spawn(async move {
-                            crate::platform::timer::sleep_ms(500).await;
-                            super::signals::cleanup_expired_pending_secrets().await;
-                            match super::recovery::sync_orphaned_cdk_proofs_to_nostr().await {
-                                Ok(result) => {
-                                    if result.proofs_recovered > 0 {
-                                        log::info!(
-                                            "Orphan sync: recovered {} proofs ({} sats) from CDK to NIP-60",
-                                            result.proofs_recovered, result.sats_recovered
-                                        );
-                                    }
-                                    if !result.errors.is_empty() {
-                                        for err in result.errors {
-                                            log::warn!("Orphan sync error: {}", err);
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    log::warn!("Orphan sync failed: {}", e);
-                                }
-                            }
-                            log::info!("Starting wallet recovery - syncing with mints...");
-                            if let Err(e) = sync_state_with_all_mints().await {
-                                log::warn!("Mint sync during recovery failed: {}", e);
-                            }
-                            if let Err(e) = recover_pending_operations().await {
-                                log::warn!("Pending operation recovery failed: {}", e);
-                            }
-                            match super::recovery::recover_all_pending_melt_quotes().await {
-                                Ok(result) => {
-                                    if result.quotes_paid > 0 || result.change_recovered > 0 {
-                                        log::info!(
-                                            "In-flight melt recovery: {} paid, {} sats recovered",
-                                            result.quotes_paid,
-                                            result.change_recovered
-                                        );
-                                    }
-                                    if !result.errors.is_empty() {
-                                        for err in result.errors {
-                                            log::warn!("In-flight melt recovery error: {}", err);
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    log::warn!("In-flight melt quote recovery failed: {}", e);
-                                }
-                            }
-                            let result = super::proof_recovery::run_full_recovery().await;
-                            if result.recovered_count > 0 || result.spent_count > 0 {
-                                log::info!(
-                                    "Proof recovery: {} recovered ({} sats), {} spent ({} sats)",
-                                    result.recovered_count,
-                                    result.recovered_value,
-                                    result.spent_count,
-                                    result.spent_value
-                                );
-                            }
-                            if !result.errors.is_empty() {
-                                for err in &result.errors {
-                                    log::warn!("Proof recovery error: {}", err);
-                                }
-                            }
-                            if let Some(multi_wallet) =
-                                cashu_cdk_bridge::MULTI_WALLET.read().as_ref()
-                            {
-                                match multi_wallet.check_all_mint_quotes(None).await {
-                                    Ok(amount) => {
-                                        if u64::from(amount) > 0 {
-                                            log::info!(
-                                                "Recovered {} sats from paid mint quotes",
-                                                u64::from(amount)
-                                            );
-                                            let _ = cashu_cdk_bridge::sync_wallet_state().await;
-                                        }
-                                    }
-                                    Err(e) => {
-                                        log::warn!("Mint quote recovery failed: {}", e);
-                                    }
-                                }
-                            }
-                            super::proof_recovery::recalculate_balance();
-                            log::debug!("Final balance recalculation complete");
-                            log::info!("Wallet recovery complete");
-                            *WALLET_STATUS.write() = WalletStatus::Ready;
-                        });
-                        Ok(())
+            let relay_wallet_event = events.into_iter().next();
+            let selected_wallet_event = match (relay_wallet_event, pending_wallet_event) {
+                (Some(relay), Some(pending)) => {
+                    if pending.created_at > relay.created_at {
+                        Some(pending)
+                    } else {
+                        Some(relay)
                     }
-                    Err(e) => {
-                        let error = format!("Failed to decrypt wallet: {}", e);
-                        log::error!("{}", error);
-                        *WALLET_STATUS.write() = WalletStatus::Error(error.clone());
-                        Err(error)
-                    }
+                }
+                (Some(relay), None) => Some(relay),
+                (None, Some(pending)) => Some(pending),
+                (None, None) => None,
+            };
+
+            if let Some(wallet_event) = selected_wallet_event {
+                if let Err(e) = initialize_wallet_from_event(&wallet_event).await {
+                    let error = format!("Failed to decrypt wallet: {}", e);
+                    log::error!("{}", error);
+                    *WALLET_STATUS.write() = WalletStatus::Error(error.clone());
+                    Err(error)
+                } else {
+                    Ok(())
                 }
             } else {
                 log::info!("No wallet found");
@@ -251,10 +283,25 @@ pub async fn init_wallet() -> Result<(), String> {
             }
         }
         Err(e) => {
-            let error = format!("Failed to fetch wallet: {}", e);
-            log::error!("{}", error);
-            *WALLET_STATUS.write() = WalletStatus::Error(error.clone());
-            Err(error)
+            if let Some(wallet_event) = pending_wallet_event {
+                log::warn!(
+                    "Failed to fetch wallet from relays, using queued wallet snapshot: {}",
+                    e
+                );
+                if let Err(init_error) = initialize_wallet_from_event(&wallet_event).await {
+                    let error = format!("Failed to decrypt queued wallet snapshot: {}", init_error);
+                    log::error!("{}", error);
+                    *WALLET_STATUS.write() = WalletStatus::Error(error.clone());
+                    Err(error)
+                } else {
+                    Ok(())
+                }
+            } else {
+                let error = format!("Failed to fetch wallet: {}", e);
+                log::error!("{}", error);
+                *WALLET_STATUS.write() = WalletStatus::Error(error.clone());
+                Err(error)
+            }
         }
     }
 }

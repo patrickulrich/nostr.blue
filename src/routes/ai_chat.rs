@@ -1067,6 +1067,27 @@ mod tests {
     }
 
     #[test]
+    fn history_snapshot_key_changes_when_tool_calls_change() {
+        let messages = vec![PersistedChatMessage {
+            id: "1".to_string(),
+            role: PersistedChatRole::Assistant,
+            content: "hello".to_string(),
+            tool_calls: vec![],
+        }];
+        let mut with_tool_call = messages.clone();
+        with_tool_call[0].tool_calls.push(PersistedToolCall {
+            id: "tool-1".to_string(),
+            name: "set_theme".to_string(),
+            result: "{\"success\":true}".to_string(),
+        });
+
+        assert_ne!(
+            history_save_snapshot_key("account", &messages, &messages),
+            history_save_snapshot_key("account", &with_tool_call, &messages),
+        );
+    }
+
+    #[test]
     fn history_snapshot_key_changes_when_account_key_changes() {
         let messages = vec![PersistedChatMessage {
             id: "1".to_string(),

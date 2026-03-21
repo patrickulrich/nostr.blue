@@ -212,10 +212,10 @@ pub fn PollView(noteid: String) -> Element {
                     .kind(Kind::Comment)
                     .event(event_id)
                     .since(live_since);
+                let mut notifications = client.notifications();
 
                 match subscription_manager::subscribe_realtime(&client, filter, Some(600)).await {
                     Ok(subscription_id) => {
-                        let mut notifications = client.notifications();
                         if generation_counter.load(Ordering::SeqCst) != generation {
                             subscription_manager::unsubscribe(&client, &subscription_id).await;
                             return;
@@ -455,6 +455,7 @@ pub fn PollView(noteid: String) -> Element {
                                                         invalidate_thread_tree_cache(&poll_event_id);
                                                         comments_error.set(None);
                                                         comments.write().push(reply_event);
+                                                        reply_total.with_mut(|count| *count = count.saturating_add(1));
                                                     }
                                                 },
                                             }

@@ -57,6 +57,7 @@ async fn send_tagged_event_with_retry(
         PendingEventType::DeletionEvent => "deletion",
         PendingEventType::HistoryEvent => "history",
         PendingEventType::QuoteEvent => "quote",
+        PendingEventType::WalletSnapshot => "wallet snapshot",
         PendingEventType::NutzapEvent => "nutzap",
     };
 

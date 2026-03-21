@@ -626,11 +626,7 @@ async fn publish_melt_events(
         .as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
     let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let client = nostr_client::NOSTR_CLIENT
-        .read()
-        .as_ref()
-        .ok_or("Client not initialized")?
-        .clone();
+    let client = nostr_client::NOSTR_CLIENT.read().as_ref().cloned();
     let mut new_event_id: Option<String> = None;
     if !keep_proofs.is_empty() {
         let proof_data: Vec<ProofData> = keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
@@ -651,36 +647,49 @@ async fn publish_melt_events(
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-        match send_signed_builder(&client, builder.clone()).await {
-            Ok(event_output) if !event_output.success.is_empty() => {
-                let real_id = event_output.id().to_hex();
-                log::info!("Published new token event: {}", real_id);
-                new_event_id = Some(real_id);
+        if let Some(client) = client.as_ref() {
+            match send_signed_builder(client, builder.clone()).await {
+                Ok(event_output) if !event_output.success.is_empty() => {
+                    let real_id = event_output.id().to_hex();
+                    log::info!("Published new token event: {}", real_id);
+                    new_event_id = Some(real_id);
+                }
+                Ok(_) => {
+                    log::warn!("No relays accepted token event, queuing for retry");
+                    let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+                    queue_event_for_retry(
+                        builder,
+                        PendingEventType::TokenEvent,
+                        Some(pending_id.clone()),
+                        Some(mint_url.to_string()),
+                    )
+                    .await;
+                    new_event_id = Some(pending_id);
+                }
+                Err(e) => {
+                    log::warn!("Failed to publish token event, queuing for retry: {}", e);
+                    let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+                    queue_event_for_retry(
+                        builder,
+                        PendingEventType::TokenEvent,
+                        Some(pending_id.clone()),
+                        Some(mint_url.to_string()),
+                    )
+                    .await;
+                    new_event_id = Some(pending_id);
+                }
             }
-            Ok(_) => {
-                log::warn!("No relays accepted token event, queuing for retry");
-                let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                queue_event_for_retry(
-                    builder,
-                    PendingEventType::TokenEvent,
-                    Some(pending_id.clone()),
-                    Some(mint_url.to_string()),
-                )
-                .await;
-                new_event_id = Some(pending_id);
-            }
-            Err(e) => {
-                log::warn!("Failed to publish token event, queuing for retry: {}", e);
-                let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                queue_event_for_retry(
-                    builder,
-                    PendingEventType::TokenEvent,
-                    Some(pending_id.clone()),
-                    Some(mint_url.to_string()),
-                )
-                .await;
-                new_event_id = Some(pending_id);
-            }
+        } else {
+            log::warn!("Client not initialized, queuing token event for retry");
+            let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+            queue_event_for_retry(
+                builder,
+                PendingEventType::TokenEvent,
+                Some(pending_id.clone()),
+                Some(mint_url.to_string()),
+            )
+            .await;
+            new_event_id = Some(pending_id);
         }
     }
     if !event_ids_to_delete.is_empty() {
@@ -699,38 +708,49 @@ async fn publish_melt_events(
             ));
             let deletion_builder =
                 nostr_sdk::EventBuilder::new(Kind::from(5), "Melted token").tags(tags);
-            match client
-                .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
-                    deletion_builder.clone(),
-                ))
-                .await
-            {
-                Ok(output) if !output.success.is_empty() => {
-                    log::info!(
-                        "Published deletion events for {} token events",
-                        valid_event_ids.len()
-                    );
+            if let Some(client) = client.as_ref() {
+                match client
+                    .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+                        deletion_builder.clone(),
+                    ))
+                    .await
+                {
+                    Ok(output) if !output.success.is_empty() => {
+                        log::info!(
+                            "Published deletion events for {} token events",
+                            valid_event_ids.len()
+                        );
+                    }
+                    Ok(_) => {
+                        log::warn!("No relays accepted deletion event, queuing for retry");
+                        queue_event_for_retry(
+                            deletion_builder,
+                            PendingEventType::DeletionEvent,
+                            None,
+                            None,
+                        )
+                        .await;
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
+                        queue_event_for_retry(
+                            deletion_builder,
+                            PendingEventType::DeletionEvent,
+                            None,
+                            None,
+                        )
+                        .await;
+                    }
                 }
-                Ok(_) => {
-                    log::warn!("No relays accepted deletion event, queuing for retry");
-                    queue_event_for_retry(
-                        deletion_builder,
-                        PendingEventType::DeletionEvent,
-                        None,
-                        None,
-                    )
-                    .await;
-                }
-                Err(e) => {
-                    log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
-                    queue_event_for_retry(
-                        deletion_builder,
-                        PendingEventType::DeletionEvent,
-                        None,
-                        None,
-                    )
-                    .await;
-                }
+            } else {
+                log::warn!("Client not initialized, queuing deletion event for retry");
+                queue_event_for_retry(
+                    deletion_builder,
+                    PendingEventType::DeletionEvent,
+                    None,
+                    None,
+                )
+                .await;
             }
         }
     }

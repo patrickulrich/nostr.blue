@@ -3,6 +3,7 @@
 //! Functions for adding, removing, and managing mints.
 //! Includes counter backup/restore for mint re-addition.
 #![allow(dead_code)]
+use super::events::queue_signed_event_for_retry_result;
 use super::errors::CashuResult;
 use super::internal::create_ephemeral_wallet;
 use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof};
@@ -17,7 +18,7 @@ use super::types::{
 use super::utils::{mint_matches, normalize_mint_url, now_secs};
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
-use nostr_sdk::{Filter, Kind, PublicKey};
+use nostr_sdk::{Event, Filter, Kind, PublicKey};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::OnceLock;
@@ -36,19 +37,13 @@ fn wallet_snapshot_publish_lock() -> &'static tokio::sync::Mutex<()> {
     WALLET_SNAPSHOT_PUBLISH_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
-async fn publish_wallet_snapshot(privkey: &str, mints: &[String]) -> Result<(), String> {
+async fn publish_wallet_snapshot(privkey: &str, mints: &[String]) -> Result<Event, String> {
     use nostr_sdk::signer::NostrSigner;
 
     let signer = crate::stores::signer::get_signer().ok_or("No signer available")?;
     let nostr_signer = signer.as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
     let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let client = nostr_client::NOSTR_CLIENT
-        .read()
-        .as_ref()
-        .ok_or("Client not initialized")?
-        .clone();
-
     let mut content_array: Vec<Vec<&str>> = vec![vec!["privkey", privkey]];
     for mint in mints {
         content_array.push(vec!["mint", mint.as_str()]);
@@ -82,14 +77,37 @@ async fn publish_wallet_snapshot(privkey: &str, mints: &[String]) -> Result<(), 
             .await
             .map_err(|e| format!("Failed to sign wallet event: {}", e))?,
     };
-    let output = client
-        .send_event(&event)
-        .await
-        .map_err(|e| format!("Failed to publish wallet event: {}", e))?;
-    if output.success.is_empty() {
-        return Err("Failed to publish wallet event: no relays accepted the event".to_string());
+
+    Ok(event)
+}
+
+async fn publish_or_queue_wallet_snapshot(event: Event) -> Result<(), String> {
+    let client = nostr_client::NOSTR_CLIENT.read().as_ref().cloned();
+    if let Some(client) = client {
+        match client.send_event(&event).await {
+            Ok(output) if !output.success.is_empty() => return Ok(()),
+            Ok(_) => {
+                log::warn!("No relays accepted wallet event, queueing for retry");
+            }
+            Err(error) => {
+                log::warn!("Failed to publish wallet event, queueing for retry: {}", error);
+            }
+        }
+    } else {
+        log::warn!("Client not initialized, queueing wallet snapshot for retry");
     }
-    Ok(())
+
+    if SHARED_LOCALSTORE.read().as_ref().is_none() {
+        return Err("Localstore not initialized; cannot persist queued wallet snapshot".to_string());
+    }
+
+    queue_signed_event_for_retry_result(
+        event,
+        super::types::PendingEventType::WalletSnapshot,
+        None,
+        None,
+    )
+    .await
 }
 /// Result of keyset collision check
 #[derive(Debug, Clone)]
@@ -557,7 +575,8 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
         staged_mints.push(mint_url.clone());
         (privkey, staged_mints)
     };
-    match publish_wallet_snapshot(privkey.as_str(), &staged_mints).await {
+    let wallet_snapshot_event = publish_wallet_snapshot(privkey.as_str(), &staged_mints).await?;
+    match publish_or_queue_wallet_snapshot(wallet_snapshot_event).await {
         Ok(()) => {
             let mut state = WALLET_STATE.write();
             let wallet_state = state.as_mut().ok_or("Wallet not initialized")?;
@@ -687,13 +706,11 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
         remaining_mints.retain(|m| !mint_matches(m, &normalized_mint_url));
         (privkey, remaining_mints)
     };
-    let client = nostr_client::NOSTR_CLIENT
-        .read()
-        .as_ref()
-        .ok_or("Client not initialized")?
-        .clone();
-    publish_wallet_snapshot(wallet_privkey.as_str(), &remaining_mints).await?;
-    log::info!("Published updated wallet event after mint removal");
+    let client = nostr_client::NOSTR_CLIENT.read().as_ref().cloned();
+    let wallet_snapshot_event =
+        publish_wallet_snapshot(wallet_privkey.as_str(), &remaining_mints).await?;
+    publish_or_queue_wallet_snapshot(wallet_snapshot_event).await?;
+    log::info!("Published or queued updated wallet event after mint removal");
     if !event_ids_to_delete.is_empty() {
         let mut tags = Vec::new();
         for event_id in &event_ids_to_delete {
@@ -718,38 +735,49 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
                 format!("Removed mint: {}", normalized_mint_url),
             )
             .tags(tags);
-            match client
-                .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
-                    deletion_builder.clone(),
-                ))
-                .await
-            {
-                Ok(output) if !output.success.is_empty() => {
-                    log::info!(
-                        "Published deletion event for {} token events",
-                        event_ids_to_delete.len()
-                    );
+            if let Some(client) = client.as_ref() {
+                match client
+                    .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+                        deletion_builder.clone(),
+                    ))
+                    .await
+                {
+                    Ok(output) if !output.success.is_empty() => {
+                        log::info!(
+                            "Published deletion event for {} token events",
+                            event_ids_to_delete.len()
+                        );
+                    }
+                    Ok(_) => {
+                        log::warn!("No relays accepted deletion event, queuing for retry");
+                        super::events::queue_event_for_retry(
+                            deletion_builder,
+                            super::types::PendingEventType::DeletionEvent,
+                            None,
+                            None,
+                        )
+                        .await;
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
+                        super::events::queue_event_for_retry(
+                            deletion_builder,
+                            super::types::PendingEventType::DeletionEvent,
+                            None,
+                            None,
+                        )
+                        .await;
+                    }
                 }
-                Ok(_) => {
-                    log::warn!("No relays accepted deletion event, queuing for retry");
-                    super::events::queue_event_for_retry(
-                        deletion_builder,
-                        super::types::PendingEventType::DeletionEvent,
-                        None,
-                        None,
-                    )
-                    .await;
-                }
-                Err(e) => {
-                    log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
-                    super::events::queue_event_for_retry(
-                        deletion_builder,
-                        super::types::PendingEventType::DeletionEvent,
-                        None,
-                        None,
-                    )
-                    .await;
-                }
+            } else {
+                log::warn!("Client not initialized, queuing deletion event for retry");
+                super::events::queue_event_for_retry(
+                    deletion_builder,
+                    super::types::PendingEventType::DeletionEvent,
+                    None,
+                    None,
+                )
+                .await;
             }
         }
     }

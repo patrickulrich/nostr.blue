@@ -650,10 +650,13 @@ pub async fn publish_zap_goal_tracked(
     if relays.is_empty() {
         return Err("At least one valid relay is required".to_string());
     }
+    let msats = amount_sats
+        .checked_mul(1000)
+        .ok_or_else(|| "amount is too large".to_string())?;
 
     let mut builder = EventBuilder::new(Kind::Custom(KIND_ZAP_GOAL), content).tag(Tag::custom(
         TagKind::custom("amount"),
-        vec![amount_sats.saturating_mul(1000).to_string()],
+        vec![msats.to_string()],
     ));
     builder = builder.tag(Tag::custom(TagKind::custom("relays"), relays));
 

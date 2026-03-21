@@ -52,6 +52,7 @@ pub async fn queue_nostr_event(
             PendingEventType::DeletionEvent => "deletion",
             PendingEventType::HistoryEvent => "history",
             PendingEventType::QuoteEvent => "quote",
+            PendingEventType::WalletSnapshot => "wallet snapshot",
             PendingEventType::NutzapEvent => "nutzap",
         },
         event_id
@@ -80,12 +81,22 @@ pub async fn queue_signed_event_for_retry(
     pending_token_id: Option<String>,
     mint_url: Option<String>,
 ) {
+    let _ = queue_signed_event_for_retry_result(event, event_type, pending_token_id, mint_url).await;
+}
+
+pub async fn queue_signed_event_for_retry_result(
+    event: nostr_sdk::Event,
+    event_type: PendingEventType,
+    pending_token_id: Option<String>,
+    mint_url: Option<String>,
+) -> Result<(), String> {
     let event_id = event.id.to_hex();
     let event_json = match serde_json::to_string(&event) {
         Ok(j) => j,
         Err(e) => {
-            log::error!("Failed to serialize event for queueing: {}", e);
-            return;
+            let message = format!("Failed to serialize event for queueing: {}", e);
+            log::error!("{}", message);
+            return Err(message);
         }
     };
     let pending_event = PendingNostrEvent {
@@ -103,7 +114,9 @@ pub async fn queue_signed_event_for_retry(
     PENDING_NOSTR_EVENTS.write().push(pending_event.clone());
     if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
         if let Err(e) = localstore.add_pending_event(&pending_event).await {
-            log::warn!("Failed to persist pending event: {}", e);
+            let message = format!("Failed to persist pending event: {}", e);
+            log::warn!("{}", message);
+            return Err(message);
         }
     }
     log::info!(
@@ -111,6 +124,7 @@ pub async fn queue_signed_event_for_retry(
         event_id,
         pending_event.id
     );
+    Ok(())
 }
 /// Sign an EventBuilder using the current signer
 /// Returns Ok(Event) or Err(error_message)

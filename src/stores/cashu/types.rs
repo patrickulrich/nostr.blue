@@ -727,6 +727,7 @@ pub enum PendingEventType {
     DeletionEvent,
     HistoryEvent,
     QuoteEvent,
+    WalletSnapshot,
     /// NIP-61 nutzap events (kind 9321)
     NutzapEvent,
 }
