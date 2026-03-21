@@ -5,6 +5,7 @@ pub use content::draft_store;
 pub use content::publication_store;
 pub use content::recipe_store;
 pub use content::wiki_store;
+pub use content::zap_goals_store;
 
 pub mod audio;
 pub use audio::music_player;

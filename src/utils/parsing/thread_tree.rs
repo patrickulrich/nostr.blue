@@ -95,6 +95,20 @@ fn get_parent_id(event: &Event) -> Option<EventId> {
     None
 }
 
+/// Extract the root event id from an event's NIP-10 root tag.
+pub fn extract_root_event_id(event: &Event) -> Option<EventId> {
+    event.tags.iter().find_map(|tag| {
+        let slice = tag.as_slice();
+        if slice.first().map(|s| s.as_str()) == Some("e")
+            && slice.get(3).map(|s| s.as_str()) == Some("root")
+        {
+            slice.get(1).and_then(|id| EventId::from_hex(id).ok())
+        } else {
+            None
+        }
+    })
+}
+
 /// Cached thread tree with TTL tracking
 #[derive(Clone, Debug)]
 struct CachedThreadTree {
@@ -317,4 +331,37 @@ pub fn invalidate_thread_tree_cache(root_event_id: &EventId) {
         cache.invalidate(&root_id_hex);
     }
     log::debug!("Invalidated thread tree cache for {}", root_id_hex);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_root_event_id;
+    use nostr_sdk::{EventBuilder, EventId, Keys, Kind, Tag};
+
+    #[test]
+    fn extract_root_event_id_returns_root_marker_event() {
+        let keys = Keys::generate();
+        let root_id = EventId::all_zeros();
+        let event = EventBuilder::new(Kind::TextNote, "reply")
+            .tags(vec![
+                Tag::parse(["e", &root_id.to_hex(), "", "root"]).unwrap()
+            ])
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        assert_eq!(extract_root_event_id(&event), Some(root_id));
+    }
+
+    #[test]
+    fn extract_root_event_id_returns_none_without_root_marker() {
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::TextNote, "reply")
+            .tags(vec![
+                Tag::parse(["e", &EventId::all_zeros().to_hex()]).unwrap()
+            ])
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        assert_eq!(extract_root_event_id(&event), None);
+    }
 }

@@ -170,17 +170,60 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
         .await
         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-    let client = nostr_client::NOSTR_CLIENT
-        .read()
-        .as_ref()
-        .ok_or("Client not initialized")?
-        .clone();
-    let event_output = client
-        .send_event_builder(builder)
-        .await
-        .map_err(|e| format!("Failed to publish event: {}", e))?;
-    let event_id = event_output.id().to_hex();
-    log::info!("Published token event: {}", event_id);
+    let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+    let event_id = match nostr_client::NOSTR_CLIENT.read().as_ref().cloned() {
+        Some(client) => match client
+            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+                builder.clone(),
+            ))
+            .await
+        {
+            Ok(event_output) if !event_output.success.is_empty() => {
+                let event_id = event_output.id().to_hex();
+                log::info!("Published token event: {}", event_id);
+                event_id
+            }
+            Ok(event_output) => {
+                log::warn!(
+                    "No relays accepted minted token event, queuing for retry (failed_relays={})",
+                    event_output.failed.len()
+                );
+                queue_event_for_retry(
+                    builder.clone(),
+                    PendingEventType::TokenEvent,
+                    Some(pending_id.clone()),
+                    Some(mint_url.clone()),
+                )
+                .await;
+                pending_id.clone()
+            }
+            Err(error) => {
+                log::warn!(
+                    "Failed to publish minted token event, queuing for retry: {}",
+                    error
+                );
+                queue_event_for_retry(
+                    builder.clone(),
+                    PendingEventType::TokenEvent,
+                    Some(pending_id.clone()),
+                    Some(mint_url.clone()),
+                )
+                .await;
+                pending_id.clone()
+            }
+        },
+        None => {
+            log::warn!("Client not initialized during mint finalization, queuing token event");
+            queue_event_for_retry(
+                builder.clone(),
+                PendingEventType::TokenEvent,
+                Some(pending_id.clone()),
+                Some(mint_url.clone()),
+            )
+            .await;
+            pending_id.clone()
+        }
+    };
     {
         let store = WALLET_TOKENS.read();
         let mut data = store.data();
@@ -583,11 +626,28 @@ async fn publish_melt_events(
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-        match client.send_event_builder(builder.clone()).await {
-            Ok(event_output) => {
+        match client
+            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+                builder.clone(),
+            ))
+            .await
+        {
+            Ok(event_output) if !event_output.success.is_empty() => {
                 let real_id = event_output.id().to_hex();
                 log::info!("Published new token event: {}", real_id);
                 new_event_id = Some(real_id);
+            }
+            Ok(_) => {
+                log::warn!("No relays accepted token event, queuing for retry");
+                let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+                queue_event_for_retry(
+                    builder,
+                    PendingEventType::TokenEvent,
+                    Some(pending_id.clone()),
+                    Some(mint_url.to_string()),
+                )
+                .await;
+                new_event_id = Some(pending_id);
             }
             Err(e) => {
                 log::warn!("Failed to publish token event, queuing for retry: {}", e);
@@ -619,12 +679,27 @@ async fn publish_melt_events(
             ));
             let deletion_builder =
                 nostr_sdk::EventBuilder::new(Kind::from(5), "Melted token").tags(tags);
-            match client.send_event_builder(deletion_builder.clone()).await {
-                Ok(_) => {
+            match client
+                .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+                    deletion_builder.clone(),
+                ))
+                .await
+            {
+                Ok(output) if !output.success.is_empty() => {
                     log::info!(
                         "Published deletion events for {} token events",
                         valid_event_ids.len()
                     );
+                }
+                Ok(_) => {
+                    log::warn!("No relays accepted deletion event, queuing for retry");
+                    queue_event_for_retry(
+                        deletion_builder,
+                        PendingEventType::DeletionEvent,
+                        None,
+                        None,
+                    )
+                    .await;
                 }
                 Err(e) => {
                     log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
@@ -728,10 +803,29 @@ pub async fn create_history_event_with_type(
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-    let event_output = client
-        .send_event_builder(builder)
+    match client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+            builder.clone(),
+        ))
         .await
-        .map_err(|e| format!("Failed to publish history event: {}", e))?;
-    log::info!("Published history event: {}", event_output.id().to_hex());
+    {
+        Ok(event_output) if !event_output.success.is_empty() => {
+            log::info!("Published history event: {}", event_output.id().to_hex());
+        }
+        Ok(event_output) => {
+            log::warn!(
+                "No relays accepted history event {}, queuing for retry",
+                event_output.id().to_hex()
+            );
+            queue_event_for_retry(builder, PendingEventType::HistoryEvent, None, None).await;
+        }
+        Err(error) => {
+            log::warn!(
+                "Failed to publish history event, queuing for retry: {}",
+                error
+            );
+            queue_event_for_retry(builder, PendingEventType::HistoryEvent, None, None).await;
+        }
+    }
     Ok(())
 }

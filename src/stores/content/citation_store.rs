@@ -513,9 +513,12 @@ pub async fn publish_internal_citation(
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_INTERNAL_REF), cited_text).tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish citation: {}", e))?;
+    if output.success.is_empty() {
+        return Err("Failed to publish citation: no relays accepted the event".to_string());
+    }
     log::info!("Internal citation published: {}", output.id().to_hex());
     Ok(output.id().to_hex())
 }
@@ -564,9 +567,12 @@ pub async fn publish_external_citation(
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_EXTERNAL_WEB), cited_text).tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish citation: {}", e))?;
+    if output.success.is_empty() {
+        return Err("Failed to publish citation: no relays accepted the event".to_string());
+    }
     log::info!("External citation published: {}", output.id().to_hex());
     Ok(output.id().to_hex())
 }
@@ -620,9 +626,12 @@ pub async fn publish_hardcopy_citation(
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_HARDCOPY), cited_text).tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish citation: {}", e))?;
+    if output.success.is_empty() {
+        return Err("Failed to publish citation: no relays accepted the event".to_string());
+    }
     log::info!("Hardcopy citation published: {}", output.id().to_hex());
     Ok(output.id().to_hex())
 }
@@ -685,9 +694,12 @@ pub async fn publish_prompt_citation(
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_PROMPT), cited_text).tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish citation: {}", e))?;
+    if output.success.is_empty() {
+        return Err("Failed to publish citation: no relays accepted the event".to_string());
+    }
     log::info!("Prompt citation published: {}", output.id().to_hex());
     Ok(output.id().to_hex())
 }

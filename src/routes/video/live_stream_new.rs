@@ -262,7 +262,7 @@ async fn publish_live_stream(
         }
     }
     let _output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish event: {}", e))?;
     let pubkey = nostr_client::get_cached_pubkey()?;

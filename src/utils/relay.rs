@@ -1,5 +1,8 @@
+use crate::stores::relay::RelayDisplayInfo;
 use crate::stores::relay::{self, DEFAULT_RELAYS};
+use dioxus::prelude::ReadableExt;
 use nostr_sdk::RelayUrl;
+use std::collections::HashSet;
 use url::{Host, Url};
 
 pub fn default_relay_urls() -> Vec<RelayUrl> {
@@ -93,4 +96,103 @@ pub fn configured_write_relay_urls() -> Vec<RelayUrl> {
     }
 
     relay_urls
+}
+
+pub fn encode_relay_route_id(url: &str) -> String {
+    urlencoding::encode(url).into_owned()
+}
+
+pub fn decode_relay_route_id(id: &str) -> Result<String, String> {
+    let decoded = urlencoding::decode(id)
+        .map_err(|e| format!("Invalid relay route id: {}", e))?
+        .into_owned();
+    RelayUrl::parse(&decoded)
+        .map_err(|e| format!("Invalid relay URL: {}", e))
+        .map(|url| url.to_string())
+}
+
+pub fn relay_http_url(relay_url: &str) -> Result<String, String> {
+    let mut url = Url::parse(relay_url).map_err(|e| format!("Invalid relay URL: {}", e))?;
+    match url.scheme() {
+        "wss" => url
+            .set_scheme("https")
+            .map_err(|_| "Failed to convert relay URL to HTTPS".to_string())?,
+        "ws" => url
+            .set_scheme("http")
+            .map_err(|_| "Failed to convert relay URL to HTTP".to_string())?,
+        scheme => return Err(format!("Unsupported relay scheme: {}", scheme)),
+    }
+    Ok(url.to_string())
+}
+
+pub fn normalize_known_relay_url(url: &str) -> String {
+    nostr::Url::parse(url)
+        .map(|parsed| parsed.to_string())
+        .unwrap_or_else(|_| url.to_string())
+}
+
+pub fn build_persisted_relay_set() -> HashSet<String> {
+    let mut known_relays = HashSet::new();
+    if let Some(metadata) = relay::USER_RELAY_METADATA.read().as_ref() {
+        for relay in &metadata.relays {
+            known_relays.insert(normalize_known_relay_url(&relay.url));
+        }
+        for relay in &metadata.dm_relays {
+            known_relays.insert(normalize_known_relay_url(relay));
+        }
+    }
+    for relay_url in relay::LOCAL_RELAYS.read().iter() {
+        known_relays.insert(normalize_known_relay_url(relay_url));
+    }
+    for relay_url in relay::SEARCH_RELAYS.read().iter() {
+        known_relays.insert(normalize_known_relay_url(relay_url));
+    }
+    for relay_url in relay::BROADCAST_RELAYS.read().iter() {
+        known_relays.insert(normalize_known_relay_url(relay_url));
+    }
+    for relay_url in relay::BLOCKED_RELAYS.read().iter() {
+        known_relays.insert(normalize_known_relay_url(relay_url));
+    }
+    known_relays
+}
+
+pub fn build_known_relay_set(connection_info: Option<&[RelayDisplayInfo]>) -> HashSet<String> {
+    let mut known_relays = build_persisted_relay_set();
+    if let Some(connection_info) = connection_info {
+        for info in connection_info {
+            known_relays.insert(normalize_known_relay_url(&info.url));
+        }
+    }
+    known_relays
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relay_route_id_round_trips() {
+        let url = "wss://relay.example.com/path?q=1";
+        let encoded = encode_relay_route_id(url);
+        let decoded = decode_relay_route_id(&encoded).expect("route id should decode");
+        assert_eq!(decoded, url);
+    }
+
+    #[test]
+    fn relay_route_id_rejects_invalid_url() {
+        let encoded = encode_relay_route_id("not-a-relay-url");
+        assert!(decode_relay_route_id(&encoded).is_err());
+    }
+
+    #[test]
+    fn relay_http_url_converts_secure_ws() {
+        let http = relay_http_url("wss://relay.example.com/path?q=1").expect("should convert");
+        assert_eq!(http, "https://relay.example.com/path?q=1");
+    }
+
+    #[test]
+    fn relay_http_url_converts_insecure_ws() {
+        let http = relay_http_url("ws://relay.example.com:8080").expect("should convert");
+        assert_eq!(http, "http://relay.example.com:8080/");
+    }
 }

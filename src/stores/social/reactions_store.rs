@@ -286,7 +286,7 @@ pub async fn save_preferred_reactions(reactions: Vec<PreferredReaction>) -> Resu
     let builder =
         EventBuilder::new(Kind::from(APP_DATA_KIND), content).tag(Tag::identifier(REACTIONS_D_TAG));
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish reactions: {}", e))?;
     let success_count = output.success.len();

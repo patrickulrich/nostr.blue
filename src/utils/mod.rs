@@ -63,13 +63,13 @@ pub mod video_kinds;
 pub use data_state::DataState;
 pub use error::log_fetch_error;
 pub use format::{
-    format_relative_time_or, format_sats_compact, format_sats_with_separator, shorten_url,
-    truncate_pubkey,
+    format_bytes, format_relative_time_or, format_sats_compact, format_sats_with_separator,
+    shorten_url, truncate_pubkey,
 };
 pub use list_kinds::{get_item_count, get_list_icon, get_list_type_name};
 pub use path_validation::is_safe_path;
 pub use repost::{extract_reposted_event, process_events_to_feed_items, FeedItem};
-pub use thread_tree::{build_thread_tree, ThreadNode};
+pub use thread_tree::{build_thread_tree, extract_root_event_id, ThreadNode};
 pub use time::{format_commit_date, format_time_ago, safe_duration_millis};
 pub use validation::{css_safe_url, is_valid_http_url};
 /// Generate a random alphanumeric ID (9 characters)

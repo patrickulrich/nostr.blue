@@ -157,7 +157,7 @@ pub async fn publish_nutzap_info(
         .ok_or("Client not initialized")?
         .clone();
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish nutzap info: {}", e))?;
     if output.success.is_empty() {
@@ -446,6 +446,7 @@ pub async fn send_nutzap(
     }
     let content = comment.unwrap_or("");
     let builder = nostr_sdk::EventBuilder::new(Kind::from(9321), content).tags(tags.clone());
+    let tagged_builder = crate::utils::nips::nip89::tag_event_builder(builder.clone());
     let recipient_relay_urls: Vec<nostr::RelayUrl> = recipient_info
         .relays
         .iter()
@@ -453,14 +454,14 @@ pub async fn send_nutzap(
         .collect();
     let output = if recipient_relay_urls.is_empty() {
         log::debug!("No valid recipient relays, using default relay routing");
-        client.send_event_builder(builder.clone()).await
+        client.send_event_builder(tagged_builder.clone()).await
     } else {
         log::debug!(
             "Publishing nutzap to {} recipient relays",
             recipient_relay_urls.len()
         );
         client
-            .send_event_builder_to(recipient_relay_urls, builder.clone())
+            .send_event_builder_to(recipient_relay_urls, tagged_builder.clone())
             .await
     };
     let output = match output {
@@ -1093,7 +1094,12 @@ async fn publish_change_token_event(
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-    let output = match client.send_event_builder(builder.clone()).await {
+    let output = match client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+            builder.clone(),
+        ))
+        .await
+    {
         Ok(out) => out,
         Err(e) => {
             let pending_id = format!("pending_{}", uuid::Uuid::new_v4());

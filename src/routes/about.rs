@@ -1,3 +1,4 @@
+use crate::components::icons::ZapIcon;
 use dioxus::prelude::*;
 #[component]
 pub fn About() -> Element {
@@ -146,13 +147,21 @@ pub fn About() -> Element {
                 section { class: "space-y-4",
                     h2 { class: "text-2xl font-semibold", "Support the Project" }
                     p {
-                        "nostr.blue is free and open source. If you'd like to support development, you can:"
+                        "nostr.blue is free and open source. If you'd like to support ongoing development, you can:"
+                    }
+                    div { class: "flex flex-wrap gap-3",
+                        Link {
+                            to: crate::routes::Route::AboutDonate {},
+                            class: "inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground no-underline transition hover:bg-primary/90",
+                            ZapIcon { class: "h-4 w-4 text-current".to_string() }
+                            "Donate with sats"
+                        }
                     }
                     ul { class: "list-disc pl-6 space-y-2",
                         li { "Contribute code on GitHub" }
                         li { "Report bugs and suggest features" }
                         li { "Share nostr.blue with others" }
-                        li { "Send Lightning zaps to the developers on Nostr" }
+                        li { "Fund a published zap goal or send a direct Lightning zap" }
                     }
                 }
                 section { class: "space-y-4",

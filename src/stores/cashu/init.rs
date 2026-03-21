@@ -71,10 +71,13 @@ pub async fn accept_terms() -> Result<(), String> {
     let now = crate::platform::timestamp::now_secs();
     let content = serde_json::json!({ "accepted_at" : now, "version" : 1 }).to_string();
     let builder = EventBuilder::new(Kind::from(30078), content).tag(Tag::identifier(TERMS_D_TAG));
-    client
-        .send_event_builder(builder)
+    let output = client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish terms acceptance: {}", e))?;
+    if output.success.is_empty() {
+        return Err("Failed to publish terms acceptance: no relay accepted".to_string());
+    }
     log::info!("Terms acceptance published successfully");
     *TERMS_ACCEPTED.write() = Some(true);
     Ok(())
@@ -299,8 +302,11 @@ pub async fn create_wallet(mints: Vec<String>) -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to encrypt wallet data: {}", e))?;
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWallet, encrypted_content);
-    match client.send_event_builder(builder).await {
-        Ok(_) => {
+    match client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+        .await
+    {
+        Ok(output) if !output.success.is_empty() => {
             log::info!("Wallet created successfully");
             *WALLET_STATE.write() = Some(WalletState {
                 privkey: Some(wallet_privkey),
@@ -309,6 +315,11 @@ pub async fn create_wallet(mints: Vec<String>) -> Result<(), String> {
             });
             *WALLET_STATUS.write() = WalletStatus::Ready;
             Ok(())
+        }
+        Ok(_) => {
+            let error = "Failed to create wallet: no relay accepted the event".to_string();
+            log::error!("{}", error);
+            Err(error)
         }
         Err(e) => {
             let error = format!("Failed to create wallet: {}", e);

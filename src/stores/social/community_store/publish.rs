@@ -37,7 +37,7 @@ pub async fn create_community(
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_COMMUNITY_DEFINITION), "").tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish community: {}", e))?;
     log::info!("Community created: {}", output.id().to_hex());
@@ -61,7 +61,7 @@ pub async fn post_to_community(
     let target = CommentTarget::coordinate(Cow::Owned(coord), None);
     let builder = EventBuilder::comment(content, target, None);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish post: {}", e))?;
     log::info!("Community post published: {}", output.id().to_hex());
@@ -91,7 +91,7 @@ pub async fn reply_to_post(
     let parent_target = CommentTarget::event(parent_id, Kind::Comment, Some(parent_pubkey), None);
     let builder = EventBuilder::comment(content, parent_target, Some(root_target));
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish reply: {}", e))?;
     log::info!("Community reply published: {}", output.id().to_hex());
@@ -125,7 +125,7 @@ pub async fn approve_post(
     ];
     let builder = EventBuilder::new(Kind::Custom(KIND_APPROVAL), &post_json).tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to approve post: {}", e))?;
     log::info!("Post approved: {}", output.id().to_hex());
@@ -160,7 +160,7 @@ pub async fn remove_post(
     ];
     let builder = EventBuilder::new(Kind::Custom(KIND_REMOVAL), content).tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to remove post: {}", e))?;
     log::info!("Post removed: {}", output.id().to_hex());
@@ -191,7 +191,7 @@ pub async fn update_approved_members(
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_APPROVED_MEMBERS), "").tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to update approved members: {}", e))?;
     APPROVED_MEMBERS_CACHE
@@ -236,7 +236,7 @@ pub async fn submit_join_request(
     ];
     let builder = EventBuilder::new(Kind::Custom(KIND_JOIN_REQUEST), content).tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to submit join request: {}", e))?;
     let request_id = output.id().to_hex();
@@ -321,7 +321,7 @@ pub async fn decline_join_request(
     let content = reason.unwrap_or("");
     let builder = EventBuilder::new(Kind::Custom(KIND_DECLINED_MEMBERS), content).tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to decline join request: {}", e))?;
     DECLINED_MEMBERS_CACHE

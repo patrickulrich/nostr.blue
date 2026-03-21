@@ -260,7 +260,10 @@ pub fn ReplyComposer(
             let builder = EventBuilder::text_note(&content_for_publish).tags(tags);
 
             // Sign the event first to get the full event
-            match client.sign_event_builder(builder).await {
+            match client
+                .sign_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+                .await
+            {
                 Ok(signed_event) => {
                     // Send the signed event
                     match client.send_event(&signed_event).await {

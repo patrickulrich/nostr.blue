@@ -16,6 +16,7 @@ use crate::utils::markdown::render_markdown;
 use dioxus::document;
 use dioxus::prelude::*;
 use serde_json::json;
+use std::hash::{Hash, Hasher};
 
 const SYSTEM_PROMPT: &str = "You are Nostrich, an AI assistant inside nostr.blue. Be concise and helpful for the user. Your personality is a fun ostrich that represents the nostr community.";
 const THEME_TOOL_NAME: &str = "set_theme";
@@ -49,6 +50,36 @@ struct ThemeToolArgs {
     theme: String,
 }
 
+fn history_save_snapshot_key(
+    account_key: &str,
+    persisted_messages: &[PersistedChatMessage],
+    initial_loaded_messages: &[PersistedChatMessage],
+) -> String {
+    fn hash_messages(messages: &[PersistedChatMessage]) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        messages.len().hash(&mut hasher);
+        for message in messages {
+            message.id.hash(&mut hasher);
+            message.role.hash(&mut hasher);
+            message.content.hash(&mut hasher);
+            message.tool_calls.len().hash(&mut hasher);
+            for call in &message.tool_calls {
+                call.id.hash(&mut hasher);
+                call.name.hash(&mut hasher);
+                call.result.hash(&mut hasher);
+            }
+        }
+        hasher.finish()
+    }
+
+    format!(
+        "{}:{:016x}:{:016x}",
+        account_key,
+        hash_messages(persisted_messages),
+        hash_messages(initial_loaded_messages),
+    )
+}
+
 #[component]
 pub fn AIChat() -> Element {
     let mut messages = use_signal(Vec::<DisplayMessage>::new);
@@ -67,6 +98,7 @@ pub fn AIChat() -> Element {
     let mut persisted_messages_dirty = use_signal(|| false);
     let persisted_messages_save_generation = use_signal(|| 0u32);
     let persisted_messages_save_in_flight = use_signal(|| false);
+    let mut persisted_messages_failed_snapshot = use_signal(|| None::<String>);
     let provider_state_save_generation = use_signal(|| 0u32);
     let mut provider_state_save_in_flight = use_signal(|| false);
     let mut provider_models_generation = use_signal(|| 0u32);
@@ -147,6 +179,25 @@ pub fn AIChat() -> Element {
     });
 
     use_effect(move || {
+        if persisted_messages_failed_snapshot.read().is_none() {
+            return;
+        }
+        let account_key = ai_chat_store::current_account_key();
+        let snapshot_key = history_save_snapshot_key(
+            &account_key,
+            &persisted_messages.read(),
+            &initial_loaded_messages.read(),
+        );
+        if persisted_messages_failed_snapshot
+            .read()
+            .as_ref()
+            .is_some_and(|failed| failed != &snapshot_key)
+        {
+            persisted_messages_failed_snapshot.set(None);
+        }
+    });
+
+    use_effect(move || {
         if !AI_CHAT_HISTORY_LOAD_ENABLED {
             chat_history_loaded.set(true);
             return;
@@ -211,11 +262,17 @@ pub fn AIChat() -> Element {
         let persisted_messages_dirty_value = *persisted_messages_dirty.read();
         let initial_loaded_messages_snapshot = initial_loaded_messages.read().clone();
         let persisted_messages_snapshot = persisted_messages.read().clone();
+        let failed_snapshot_key = history_save_snapshot_key(
+            &account_key,
+            &persisted_messages_snapshot,
+            &initial_loaded_messages_snapshot,
+        );
 
         if !chat_history_ready
             || !persisted_messages_dirty_value
             || persisted_messages_snapshot == initial_loaded_messages_snapshot
             || ai_chat_store::current_account_key() != account_key
+            || persisted_messages_failed_snapshot.read().as_ref() == Some(&failed_snapshot_key)
         {
             return;
         }
@@ -226,28 +283,30 @@ pub fn AIChat() -> Element {
         let persisted_messages_signal = persisted_messages;
         let chat_history_generation_signal = chat_history_generation;
         let mut initial_loaded_messages_signal = initial_loaded_messages;
+        let mut persisted_messages_failed_snapshot_signal = persisted_messages_failed_snapshot;
         let generation = persisted_messages_save_generation_signal
             .read()
             .wrapping_add(1);
-            let chat_generation = *chat_history_generation_signal.read();
-            persisted_messages_save_in_flight_signal.set(true);
-            persisted_messages_save_generation_signal.set(generation);
-            spawn(async move {
-                const MAX_SAVE_ATTEMPTS: u32 = 4;
+        let chat_generation = *chat_history_generation_signal.read();
+        persisted_messages_save_in_flight_signal.set(true);
+        persisted_messages_save_generation_signal.set(generation);
+        spawn(async move {
+            const MAX_SAVE_ATTEMPTS: u32 = 4;
 
-                for attempt in 0..MAX_SAVE_ATTEMPTS {
-                    if *persisted_messages_save_generation_signal.read() != generation
-                        || *chat_history_generation_signal.read() != chat_generation
-                        || ai_chat_store::current_account_key() != account_key
-                    {
-                        persisted_messages_save_in_flight_signal.set(false);
-                        return;
-                    }
+            for attempt in 0..MAX_SAVE_ATTEMPTS {
+                if *persisted_messages_save_generation_signal.read() != generation
+                    || *chat_history_generation_signal.read() != chat_generation
+                    || ai_chat_store::current_account_key() != account_key
+                {
+                    persisted_messages_save_in_flight_signal.set(false);
+                    return;
+                }
 
                 let result = if persisted_messages_snapshot.is_empty() {
                     ai_chat_store::clear_chat_history(&account_key).await
                 } else {
-                    ai_chat_store::save_chat_history(&account_key, &persisted_messages_snapshot).await
+                    ai_chat_store::save_chat_history(&account_key, &persisted_messages_snapshot)
+                        .await
                 };
 
                 match result {
@@ -256,27 +315,31 @@ pub fn AIChat() -> Element {
                             && *chat_history_generation_signal.read() == chat_generation
                             && ai_chat_store::current_account_key() == account_key
                         {
-                            let latest_persisted_messages = persisted_messages_signal.read().clone();
+                            let latest_persisted_messages =
+                                persisted_messages_signal.read().clone();
                             if latest_persisted_messages == persisted_messages_snapshot {
                                 persisted_messages_dirty_signal.set(false);
                                 initial_loaded_messages_signal
                                     .set(persisted_messages_snapshot.clone());
                             }
+                            persisted_messages_failed_snapshot_signal.set(None);
                         }
                         persisted_messages_save_in_flight_signal.set(false);
                         return;
                     }
-                        Err(e) => {
-                            if attempt + 1 == MAX_SAVE_ATTEMPTS {
-                                if *persisted_messages_save_generation_signal.read() == generation
+                    Err(e) => {
+                        if attempt + 1 == MAX_SAVE_ATTEMPTS {
+                            if *persisted_messages_save_generation_signal.read() == generation
                                 && *chat_history_generation_signal.read() == chat_generation
                                 && ai_chat_store::current_account_key() == account_key
-                                {
-                                    error.set(Some(e));
-                                }
-                                persisted_messages_save_in_flight_signal.set(false);
-                                return;
+                            {
+                                error.set(Some(e));
+                                persisted_messages_failed_snapshot_signal
+                                    .set(Some(failed_snapshot_key.clone()));
                             }
+                            persisted_messages_save_in_flight_signal.set(false);
+                            return;
+                        }
 
                         crate::platform::timer::sleep_ms((attempt + 1) * 100).await;
                     }
@@ -961,4 +1024,48 @@ fn persist_selected_model(
     let next_generation = provider_state_save_generation.read().wrapping_add(1);
     provider_state_save_generation.set(next_generation);
     error.set(None);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::history_save_snapshot_key;
+    use crate::stores::ai_chat_store::{
+        PersistedChatMessage, PersistedChatRole, PersistedToolCall,
+    };
+
+    #[test]
+    fn history_snapshot_key_is_deterministic() {
+        let messages = vec![PersistedChatMessage {
+            id: "1".to_string(),
+            role: PersistedChatRole::User,
+            content: "hello".to_string(),
+            tool_calls: vec![],
+        }];
+
+        let first = history_save_snapshot_key("account", &messages, &messages);
+        let second = history_save_snapshot_key("account", &messages, &messages);
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn history_snapshot_key_changes_when_message_content_changes() {
+        let messages = vec![PersistedChatMessage {
+            id: "1".to_string(),
+            role: PersistedChatRole::Assistant,
+            content: "before".to_string(),
+            tool_calls: vec![PersistedToolCall {
+                id: "tool-1".to_string(),
+                name: "set_theme".to_string(),
+                result: "{\"success\":true}".to_string(),
+            }],
+        }];
+        let mut edited_messages = messages.clone();
+        edited_messages[0].content = "after".to_string();
+
+        assert_ne!(
+            history_save_snapshot_key("account", &messages, &messages),
+            history_save_snapshot_key("account", &edited_messages, &messages),
+        );
+    }
 }

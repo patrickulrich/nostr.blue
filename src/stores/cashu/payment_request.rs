@@ -43,6 +43,47 @@ use super::types::{
 use super::utils::{mint_matches, normalize_mint_url};
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::shorten_url;
+
+async fn send_tagged_event_with_retry(
+    client: &nostr_sdk::Client,
+    builder: nostr_sdk::EventBuilder,
+    event_type: PendingEventType,
+    pending_token_id: Option<String>,
+    mint_url: Option<String>,
+) -> String {
+    let tagged_builder = crate::utils::nips::nip89::tag_event_builder(builder.clone());
+    let event_label = match &event_type {
+        PendingEventType::TokenEvent => "token",
+        PendingEventType::DeletionEvent => "deletion",
+        PendingEventType::HistoryEvent => "history",
+        PendingEventType::QuoteEvent => "quote",
+        PendingEventType::NutzapEvent => "nutzap",
+    };
+
+    match client.send_event_builder(tagged_builder).await {
+        Ok(event_output) if !event_output.success.is_empty() => event_output.id().to_hex(),
+        Ok(_) => {
+            log::warn!(
+                "No relays accepted {} event, queuing for retry",
+                event_label
+            );
+            let pending_id = pending_token_id
+                .clone()
+                .unwrap_or_else(|| format!("pending_{}", uuid::Uuid::new_v4()));
+            queue_event_for_retry(builder, event_type, Some(pending_id.clone()), mint_url).await;
+            pending_id
+        }
+        Err(error) => {
+            log::warn!("Failed to publish {} event: {}", event_label, error);
+            let pending_id = pending_token_id
+                .clone()
+                .unwrap_or_else(|| format!("pending_{}", uuid::Uuid::new_v4()));
+            queue_event_for_retry(builder, event_type, Some(pending_id.clone()), mint_url).await;
+            pending_id
+        }
+    }
+}
+
 /// Create a payment request (NUT-18)
 ///
 /// Returns the request string (creqA...) and optionally NostrPaymentWaitInfo
@@ -351,36 +392,17 @@ pub async fn pay_payment_request(
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-        new_event_id = Some(match client.send_event_builder(builder.clone()).await {
-            Ok(event_output) => {
-                if event_output.success.is_empty() {
-                    log::warn!("No relays accepted token event, queuing for retry");
-                    let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                    queue_event_for_retry(
-                        builder,
-                        PendingEventType::TokenEvent,
-                        Some(pending_id.clone()),
-                        Some(mint_url.clone()),
-                    )
-                    .await;
-                    pending_id
-                } else {
-                    event_output.id().to_hex()
-                }
-            }
-            Err(e) => {
-                log::warn!("Failed to publish token event: {}", e);
-                let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                queue_event_for_retry(
-                    builder,
-                    PendingEventType::TokenEvent,
-                    Some(pending_id.clone()),
-                    Some(mint_url.clone()),
-                )
-                .await;
-                pending_id
-            }
-        });
+        let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+        new_event_id = Some(
+            send_tagged_event_with_retry(
+                &client,
+                builder,
+                PendingEventType::TokenEvent,
+                Some(pending_id),
+                Some(mint_url.clone()),
+            )
+            .await,
+        );
     } else if !event_ids_to_delete.is_empty() {
         use nostr::nips::nip09::EventDeletionRequest;
         let mut deletion_request = EventDeletionRequest::new();
@@ -390,19 +412,14 @@ pub async fn pay_payment_request(
             }
         }
         let builder = nostr_sdk::EventBuilder::delete(deletion_request);
-        match client.send_event_builder(builder.clone()).await {
-            Ok(output) => {
-                if output.success.is_empty() {
-                    log::warn!("No relays accepted deletion event, queuing for retry");
-                    queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None)
-                        .await;
-                }
-            }
-            Err(e) => {
-                log::warn!("Failed to publish deletion event: {}", e);
-                queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None).await;
-            }
-        }
+        let _ = send_tagged_event_with_retry(
+            &client,
+            builder,
+            PendingEventType::DeletionEvent,
+            None,
+            None,
+        )
+        .await;
     }
     {
         let store = WALLET_TOKENS.read();
@@ -584,36 +601,15 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
         .await
         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-    let new_event_id = match client.send_event_builder(builder.clone()).await {
-        Ok(event_output) => {
-            if event_output.success.is_empty() {
-                log::warn!("No relays accepted token event, queuing for retry");
-                let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                queue_event_for_retry(
-                    builder,
-                    PendingEventType::TokenEvent,
-                    Some(pending_id.clone()),
-                    Some(mint_url.to_string()),
-                )
-                .await;
-                pending_id
-            } else {
-                event_output.id().to_hex()
-            }
-        }
-        Err(e) => {
-            log::warn!("Failed to publish token event: {}", e);
-            let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-            queue_event_for_retry(
-                builder,
-                PendingEventType::TokenEvent,
-                Some(pending_id.clone()),
-                Some(mint_url.to_string()),
-            )
-            .await;
-            pending_id
-        }
-    };
+    let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+    let new_event_id = send_tagged_event_with_retry(
+        &client,
+        builder,
+        PendingEventType::TokenEvent,
+        Some(pending_id),
+        Some(mint_url.to_string()),
+    )
+    .await;
     {
         let store = WALLET_TOKENS.read();
         let mut data = store.data();

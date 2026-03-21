@@ -1170,18 +1170,25 @@ pub fn get_media_counts() -> HashMap<MediaFilter, usize> {
 pub fn get_total_storage() -> u64 {
     MEDIA_ITEMS.read().iter().map(|i| i.size).sum()
 }
-/// Format bytes as human-readable string
+
+/// Format bytes using the shared app-wide formatter while preserving the
+/// existing Blossom `u64` call sites.
 pub fn format_bytes(bytes: u64) -> String {
-    const KB: u64 = 1024;
-    const MB: u64 = KB * 1024;
-    const GB: u64 = MB * 1024;
-    if bytes >= GB {
-        format!("{:.2} GB", bytes as f64 / GB as f64)
-    } else if bytes >= MB {
-        format!("{:.2} MB", bytes as f64 / MB as f64)
-    } else if bytes >= KB {
-        format!("{:.2} KB", bytes as f64 / KB as f64)
-    } else {
-        format!("{} B", bytes)
+    match usize::try_from(bytes) {
+        Ok(size) => crate::utils::format_bytes(size),
+        Err(_) => {
+            let units = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
+            let mut value = bytes as f64;
+            let mut unit_index = 0usize;
+            while value >= 1024.0 && unit_index < units.len() - 1 {
+                value /= 1024.0;
+                unit_index += 1;
+            }
+            if unit_index == 0 {
+                format!("{} {}", bytes, units[unit_index])
+            } else {
+                format!("{value:.1} {}", units[unit_index])
+            }
+        }
     }
 }
