@@ -66,7 +66,7 @@ sync_overlay_dir() {
         rel="${path#"$dest_dir"/}"
         skip=0
         for preserve in "$@"; do
-            if [ "$rel" = "$preserve" ]; then
+            if [ "$rel" = "$preserve" ] || [[ "$preserve" == "$rel/"* ]]; then
                 skip=1
                 break
             fi
@@ -204,11 +204,6 @@ cleanup() {
 }
 
 configure_release_signing() {
-    if grep -q '^\[bundle\.android\]' "$DIOXUS_CONFIG"; then
-        echo "INFO: Dioxus.toml already defines [bundle.android]; using existing release signing config"
-        return 0
-    fi
-
     require_env ANDROID_KEYSTORE_FILE
     if [ ! -f "$ANDROID_KEYSTORE_FILE" ] || [ ! -r "$ANDROID_KEYSTORE_FILE" ]; then
         echo "ERROR: ANDROID_KEYSTORE_FILE is not a readable regular file: $ANDROID_KEYSTORE_FILE" >&2
@@ -233,12 +228,58 @@ jks_password = os.environ["ANDROID_KEYSTORE_PASSWORD"]
 key_alias = os.environ["ANDROID_KEY_ALIAS"]
 key_password = os.environ["ANDROID_KEY_PASSWORD"]
 
-with path.open("a", encoding="utf-8") as f:
-    f.write("\n[bundle.android]\n")
-    f.write(f"jks_file = {json.dumps(jks_file)}\n")
-    f.write(f"jks_password = {json.dumps(jks_password)}\n")
-    f.write(f"key_alias = {json.dumps(key_alias)}\n")
-    f.write(f"key_password = {json.dumps(key_password)}\n")
+required_keys = {
+    "jks_file": jks_file,
+    "jks_password": jks_password,
+    "key_alias": key_alias,
+    "key_password": key_password,
+}
+
+text = path.read_text(encoding="utf-8")
+lines = text.splitlines()
+section_start = None
+section_end = len(lines)
+existing_keys = set()
+in_bundle_android = False
+
+for index, line in enumerate(lines):
+    stripped = line.strip()
+    if stripped == "[bundle.android]":
+        section_start = index
+        section_end = len(lines)
+        in_bundle_android = True
+        continue
+    if in_bundle_android and stripped.startswith("[") and stripped.endswith("]"):
+        section_end = index
+        break
+    if in_bundle_android:
+        key, sep, _ = stripped.partition("=")
+        if sep:
+            existing_keys.add(key.strip())
+
+missing_keys = [key for key in required_keys if key not in existing_keys]
+if section_start is not None and not missing_keys:
+    print("INFO: Dioxus.toml already defines complete [bundle.android] signing config")
+    raise SystemExit(0)
+
+new_lines = list(lines)
+if section_start is None:
+    if new_lines and new_lines[-1].strip():
+        new_lines.append("")
+    new_lines.append("[bundle.android]")
+    section_end = len(new_lines)
+else:
+    insertion_index = section_end
+    for key in missing_keys:
+        new_lines.insert(insertion_index, f"{key} = {json.dumps(required_keys[key])}")
+        insertion_index += 1
+    path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    raise SystemExit(0)
+
+for key, value in required_keys.items():
+    new_lines.append(f"{key} = {json.dumps(value)}")
+
+path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
 PY
 }
 

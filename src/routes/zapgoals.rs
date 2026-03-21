@@ -11,6 +11,7 @@ use chrono::{Local, TimeZone, Utc};
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use nostr_sdk::PublicKey;
+use std::collections::HashSet;
 
 const PAGE_SIZE: usize = 20;
 const PROJECT_PIN_LIMIT: usize = 6;
@@ -103,6 +104,8 @@ async fn enrich_progress(goals: Vec<ZapGoal>) -> Result<Vec<ZapGoalProgress>, St
     let author_pubkeys: Vec<String> = goals
         .iter()
         .map(|goal| goal.author_pubkey.clone())
+        .collect::<HashSet<_>>()
+        .into_iter()
         .collect();
     profiles::prefetch_profiles(author_pubkeys).await;
 
@@ -114,6 +117,8 @@ async fn enrich_progress(goals: Vec<ZapGoal>) -> Result<Vec<ZapGoalProgress>, St
                 .iter()
                 .map(|contributor| contributor.pubkey.clone())
         })
+        .collect::<HashSet<_>>()
+        .into_iter()
         .collect();
     profiles::prefetch_profiles(contributor_pubkeys).await;
 
@@ -459,8 +464,8 @@ pub fn ZapGoalsHome() -> Element {
                             ZapModal {
                                 recipient_pubkey: if goal.goal.is_project_goal {
                                     PublicKey::parse(zap_goals_store::PROJECT_DONATION_NPUB)
-                                        .map(|pubkey| pubkey.to_hex())
-                                        .unwrap_or_else(|_| zap_goals_store::PROJECT_DONATION_NPUB.to_string())
+                                        .expect("PROJECT_DONATION_NPUB must be a valid pubkey")
+                                        .to_hex()
                                 } else {
                                     goal.goal.author_pubkey.clone()
                                 },

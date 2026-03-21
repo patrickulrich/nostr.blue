@@ -1033,9 +1033,14 @@ mod tests {
             content: "hello".to_string(),
             tool_calls: vec![],
         }];
+        let initial_loaded_messages = messages.clone();
 
-        let first = history_save_snapshot_key("account", &messages, &messages);
-        let second = history_save_snapshot_key("account", &messages, &messages);
+        let first = history_save_snapshot_key("account", &messages, &initial_loaded_messages);
+        let second = history_save_snapshot_key(
+            "account",
+            &messages.clone(),
+            &initial_loaded_messages.clone(),
+        );
 
         assert_eq!(first, second);
     }
@@ -1058,6 +1063,47 @@ mod tests {
         assert_ne!(
             history_save_snapshot_key("account", &messages, &messages),
             history_save_snapshot_key("account", &edited_messages, &messages),
+        );
+    }
+
+    #[test]
+    fn history_snapshot_key_changes_when_account_key_changes() {
+        let messages = vec![PersistedChatMessage {
+            id: "1".to_string(),
+            role: PersistedChatRole::Assistant,
+            content: "hello".to_string(),
+            tool_calls: vec![PersistedToolCall {
+                id: "tool-1".to_string(),
+                name: "set_theme".to_string(),
+                result: "{\"success\":true}".to_string(),
+            }],
+        }];
+
+        assert_ne!(
+            history_save_snapshot_key("account-a", &messages, &messages),
+            history_save_snapshot_key("account-b", &messages, &messages),
+        );
+    }
+
+    #[test]
+    fn history_snapshot_key_changes_when_initial_loaded_messages_change() {
+        let messages = vec![PersistedChatMessage {
+            id: "1".to_string(),
+            role: PersistedChatRole::User,
+            content: "hello".to_string(),
+            tool_calls: vec![],
+        }];
+        let mut different_initial_loaded_messages = messages.clone();
+        different_initial_loaded_messages.push(PersistedChatMessage {
+            id: "2".to_string(),
+            role: PersistedChatRole::Assistant,
+            content: "welcome".to_string(),
+            tool_calls: vec![],
+        });
+
+        assert_ne!(
+            history_save_snapshot_key("account", &messages, &messages),
+            history_save_snapshot_key("account", &messages, &different_initial_loaded_messages,),
         );
     }
 }

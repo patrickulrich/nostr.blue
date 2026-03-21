@@ -242,7 +242,7 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
     }
     super::signals::update_wallet_balances();
     if let Some(event_id) = published_event_id {
-        create_history_event_with_type(
+        if let Err(error) = create_history_event_with_type(
             "in",
             amount_minted,
             vec![event_id],
@@ -250,7 +250,15 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
             Some("lightning_mint"),
             None,
         )
-        .await?;
+        .await
+        {
+            log::warn!(
+                "Failed to publish mint history event for {} sats (event {}): {}",
+                amount_minted,
+                stored_event_id,
+                error
+            );
+        }
     }
     if let Err(e) = wallet.localstore.remove_mint_quote(&quote_id).await {
         log::warn!("Failed to remove mint quote from database: {}", e);

@@ -7,9 +7,14 @@ use dioxus::prelude::ReadableExt;
 use futures::join;
 use instant::{Duration, Instant};
 use nostr_relay_pool::{SyncDirection, SyncOptions};
+use nostr_sdk::Client;
 use nostr_sdk::{Event, EventId, Filter, Kind, TagStandard, Timestamp};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
+
+const MAX_RELAY_LIMIT: usize = 5_000;
+const INTERACTION_PAGE_LIMIT: usize = 1_000;
+const INTERACTION_EVENT_BATCH_SIZE: usize = 25;
 
 #[derive(Clone, Eq, Hash, PartialEq)]
 struct Nip45CacheKey {
@@ -156,7 +161,7 @@ pub async fn get_counts_with_count_fallback(
     let mut missing_reactions = false;
     let mut missing_reposts = false;
     let mut missing_replies = false;
-    let missing_zaps = true;
+    let mut missing_zaps = false;
     if let Some(count) = reactions {
         counts.likes = count;
     } else {
@@ -174,8 +179,10 @@ pub async fn get_counts_with_count_fallback(
     }
     if let Some(count) = zaps {
         counts.zaps = count;
+    } else {
+        missing_zaps = true;
     }
-    let needs_fallback = missing_reactions || missing_reposts || missing_replies || missing_zaps;
+    let needs_fallback = missing_reactions || missing_reposts || missing_replies;
     if needs_fallback {
         log::debug!(
             "COUNT incomplete for {}, using full fetch",
@@ -183,23 +190,140 @@ pub async fn get_counts_with_count_fallback(
         );
         if let Ok(batch_counts) = fetch_interaction_counts_batch(vec![*event_id], timeout).await {
             if let Some(fetched) = batch_counts.get(&event_id.to_hex()) {
-                if missing_reactions {
-                    counts.likes = fetched.likes;
-                }
-                if missing_reposts {
-                    counts.reposts = fetched.reposts;
-                }
-                if missing_replies {
-                    counts.replies = fetched.replies;
-                }
-                if missing_zaps {
-                    counts.zaps = fetched.zaps;
-                    counts.zap_amount_sats = fetched.zap_amount_sats;
-                }
+                counts = fetched.clone();
             }
+        }
+    } else if missing_zaps {
+        log::debug!(
+            "COUNT missing zaps for {}, fetching receipts",
+            event_id.to_hex()
+        );
+        if let Ok(fetched) = fetch_zap_receipt_counts(event_id, timeout).await {
+            counts.zaps = fetched.zaps;
+            counts.zap_amount_sats = fetched.zap_amount_sats;
+            counts.user_zapped = fetched.user_zapped;
         }
     }
     counts
+}
+
+async fn fetch_events_for_filter(
+    client: &Client,
+    filter: Filter,
+    timeout: Duration,
+) -> Result<Vec<Event>, String> {
+    let db_events: Vec<Event> = match client.database().query(filter.clone()).await {
+        Ok(events) => events.into_iter().collect(),
+        Err(e) => {
+            log::debug!("Database query for interactions failed: {}", e);
+            Vec::new()
+        }
+    };
+    let relay_events: Vec<Event> = match client.fetch_events(filter, timeout).await {
+        Ok(events) => events.into_iter().collect(),
+        Err(e) => {
+            if !db_events.is_empty() {
+                log::warn!(
+                    "Relay fetch failed but using {} cached events: {}",
+                    db_events.len(),
+                    e
+                );
+                Vec::new()
+            } else {
+                return Err(format!("Failed to fetch interactions: {}", e));
+            }
+        }
+    };
+
+    let mut event_map: HashMap<EventId, Event> = HashMap::new();
+    for event in db_events {
+        event_map.insert(event.id, event);
+    }
+    for event in relay_events {
+        event_map.insert(event.id, event);
+    }
+    Ok(event_map.into_values().collect())
+}
+
+async fn fetch_paginated_interaction_events(
+    client: &Client,
+    event_ids: &[EventId],
+    kinds: &[Kind],
+    timeout: Duration,
+) -> Result<Vec<Event>, String> {
+    let mut all_events: HashMap<EventId, Event> = HashMap::new();
+    let mut until = None;
+    let mut previous_oldest_created_at = None;
+
+    loop {
+        let mut filter = Filter::new()
+            .kinds(kinds.to_vec())
+            .events(event_ids.to_vec())
+            .limit(INTERACTION_PAGE_LIMIT.min(MAX_RELAY_LIMIT));
+        if let Some(until_ts) = until {
+            filter = filter.until(until_ts);
+        }
+
+        let page = fetch_events_for_filter(client, filter, timeout).await?;
+        if page.is_empty() {
+            break;
+        }
+
+        let page_len = page.len();
+        let oldest_created_at = page.iter().map(|event| event.created_at.as_secs()).min();
+        let previous_len = all_events.len();
+        for event in page {
+            all_events.insert(event.id, event);
+        }
+
+        let Some(oldest_created_at) = oldest_created_at else {
+            break;
+        };
+        if page_len < INTERACTION_PAGE_LIMIT
+            || oldest_created_at == 0
+            || previous_oldest_created_at == Some(oldest_created_at)
+            || all_events.len() == previous_len
+        {
+            break;
+        }
+
+        previous_oldest_created_at = Some(oldest_created_at);
+        until = Some(Timestamp::from(oldest_created_at.saturating_sub(1)));
+    }
+
+    Ok(all_events.into_values().collect())
+}
+
+async fn fetch_zap_receipt_counts(
+    event_id: &EventId,
+    timeout: Duration,
+) -> Result<InteractionCounts, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+    let events =
+        fetch_paginated_interaction_events(&client, &[*event_id], &[Kind::ZapReceipt], timeout)
+            .await?;
+    let current_user_pk: Option<nostr_sdk::PublicKey> = SIGNER_INFO
+        .read()
+        .as_ref()
+        .and_then(|info| nostr_sdk::PublicKey::from_hex(&info.public_key).ok());
+    let mut counts = InteractionCounts::default();
+
+    for event in events {
+        counts.zaps += 1;
+        if let Some(amount) = extract_zap_amount(&event) {
+            counts.zap_amount_sats += amount;
+        }
+        if let Some(sender) = extract_zap_sender(&event) {
+            if current_user_pk
+                .map(|pk| sender == pk.to_hex())
+                .unwrap_or(false)
+            {
+                counts.user_zapped = Some(true);
+            }
+        }
+    }
+
+    Ok(counts)
 }
 
 /// Batch fetch interaction counts for multiple events
@@ -251,56 +375,29 @@ pub async fn fetch_interaction_counts_batch(
         return Ok(cached_counts);
     }
     let client = get_client().ok_or("Client not initialized")?;
-    const MAX_RELAY_LIMIT: usize = 5000;
-    let requested_limit = uncached_ids.len() * 200;
-    let capped_limit = requested_limit.min(MAX_RELAY_LIMIT);
-    let filter = Filter::new()
-        .kinds(vec![
-            Kind::TextNote,
-            Kind::Comment,
-            Kind::Reaction,
-            Kind::Repost,
-            Kind::ZapReceipt,
-        ])
-        .events(uncached_ids.clone())
-        .limit(capped_limit);
-    let db_events: Vec<Event> = match client.database().query(filter.clone()).await {
-        Ok(events) => {
-            let count = events.len();
-            if count > 0 {
-                log::info!("Found {} interaction events in local database", count);
-            }
-            events.into_iter().collect()
-        }
-        Err(e) => {
-            log::debug!("Database query for interactions failed: {}", e);
-            Vec::new()
-        }
-    };
-    let relay_events: Vec<Event> = match client.fetch_events(filter, timeout).await {
-        Ok(events) => {
-            log::info!("Fetched {} interaction events from relays", events.len());
-            events.into_iter().collect()
-        }
-        Err(e) => {
-            if !db_events.is_empty() {
-                log::warn!(
-                    "Relay fetch failed but using {} cached events: {}",
-                    db_events.len(),
-                    e
-                );
-                Vec::new()
-            } else {
-                return Err(format!("Failed to fetch interactions: {}", e));
-            }
-        }
-    };
     let mut event_map: HashMap<EventId, Event> = HashMap::new();
-    for event in db_events {
-        event_map.insert(event.id, event);
-    }
-    for event in relay_events {
-        event_map.insert(event.id, event);
+    for batch in uncached_ids.chunks(INTERACTION_EVENT_BATCH_SIZE) {
+        let batch_events = fetch_paginated_interaction_events(
+            &client,
+            batch,
+            &[
+                Kind::TextNote,
+                Kind::Comment,
+                Kind::Reaction,
+                Kind::Repost,
+                Kind::ZapReceipt,
+            ],
+            timeout,
+        )
+        .await?;
+        log::info!(
+            "Fetched {} interaction events for batch of {} requested IDs",
+            batch_events.len(),
+            batch.len()
+        );
+        for event in batch_events {
+            event_map.insert(event.id, event);
+        }
     }
     let events: Vec<Event> = event_map.into_values().collect();
     log::info!(
@@ -308,8 +405,7 @@ pub async fn fetch_interaction_counts_batch(
         events.len()
     );
     let mut freshly_fetched: HashMap<String, InteractionCounts> = HashMap::new();
-    let requested_ids: std::collections::HashSet<String> =
-        uncached_ids.iter().map(|id| id.to_hex()).collect();
+    let requested_ids: HashSet<String> = uncached_ids.iter().map(|id| id.to_hex()).collect();
     for event_id in &uncached_ids {
         freshly_fetched.insert(event_id.to_hex(), InteractionCounts::default());
     }

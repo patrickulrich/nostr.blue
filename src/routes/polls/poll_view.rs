@@ -438,12 +438,6 @@ pub fn PollView(noteid: String) -> Element {
                             }
                         }}
                     }
-                    div { class: "p-4 text-sm text-muted-foreground",
-                        p {
-                            "Poll ID: "
-                            code { class: "text-xs bg-muted px-2 py-1 rounded", "{event.id.to_hex()}" }
-                        }
-                    }
                 } else {
                     div { class: "text-center py-12 px-4",
                         div { class: "text-6xl mb-4", "📊" }

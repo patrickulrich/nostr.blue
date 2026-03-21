@@ -505,6 +505,19 @@ fn extract_zap_comment(event: &Event) -> Option<String> {
         })
 }
 
+fn receipt_targets_goal(receipt: &Event, goal: &ZapGoal, goal_event_id: EventId) -> bool {
+    if receipt.pubkey.to_hex() != goal.author_pubkey {
+        return false;
+    }
+
+    receipt.tags.iter().any(|tag| {
+        matches!(
+            tag.as_standardized(),
+            Some(TagStandard::Event { event_id, .. }) if *event_id == goal_event_id
+        )
+    })
+}
+
 pub async fn fetch_goal_progress(goal: &ZapGoal) -> Result<ZapGoalProgress, String> {
     let goal_event_id = EventId::parse(&goal.event_id)
         .map_err(|e| format!("Invalid goal event id {}: {e}", goal.event_id))?;
@@ -519,6 +532,9 @@ pub async fn fetch_goal_progress(goal: &ZapGoal) -> Result<ZapGoalProgress, Stri
             .closed_at
             .is_some_and(|closed_at| created_at > closed_at)
         {
+            continue;
+        }
+        if !receipt_targets_goal(&receipt, goal, goal_event_id) {
             continue;
         }
 
@@ -704,7 +720,7 @@ pub fn format_goal_date(timestamp: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_relays, parse_bolt11_amount, parse_goal_event};
+    use super::{normalize_relays, parse_bolt11_amount, parse_goal_event, receipt_targets_goal};
     use nostr_sdk::{EventBuilder, Keys, Kind, Tag};
 
     #[test]
@@ -744,7 +760,10 @@ mod tests {
                 "ws://relay.two".to_string(),
                 "wss://relay.one".to_string(),
             ]),
-            vec!["wss://relay.one/".to_string(), "ws://relay.two/".to_string(),]
+            vec![
+                "wss://relay.one/".to_string(),
+                "ws://relay.two/".to_string(),
+            ]
         );
     }
 
@@ -760,5 +779,53 @@ mod tests {
             .unwrap();
 
         assert!(parse_goal_event(&event).is_none());
+    }
+
+    #[test]
+    fn receipt_targets_goal_requires_matching_event_and_author() {
+        let goal_keys = Keys::generate();
+        let other_keys = Keys::generate();
+        let goal_event = EventBuilder::new(Kind::Custom(super::KIND_ZAP_GOAL), "goal")
+            .tags(vec![
+                Tag::parse(["amount", "21000"]).unwrap(),
+                Tag::parse(["relays", "wss://relay.one"]).unwrap(),
+            ])
+            .sign_with_keys(&goal_keys)
+            .unwrap();
+        let goal = parse_goal_event(&goal_event).unwrap();
+
+        let matching_receipt = EventBuilder::new(Kind::ZapReceipt, "")
+            .tag(Tag::event(goal_event.id))
+            .sign_with_keys(&goal_keys)
+            .unwrap();
+        let wrong_author_receipt = EventBuilder::new(Kind::ZapReceipt, "")
+            .tag(Tag::event(goal_event.id))
+            .sign_with_keys(&other_keys)
+            .unwrap();
+        let wrong_event_receipt = EventBuilder::new(Kind::ZapReceipt, "")
+            .tag(Tag::event(
+                EventBuilder::text_note("other")
+                    .sign_with_keys(&other_keys)
+                    .unwrap()
+                    .id,
+            ))
+            .sign_with_keys(&goal_keys)
+            .unwrap();
+
+        assert!(receipt_targets_goal(
+            &matching_receipt,
+            &goal,
+            goal_event.id
+        ));
+        assert!(!receipt_targets_goal(
+            &wrong_author_receipt,
+            &goal,
+            goal_event.id
+        ));
+        assert!(!receipt_targets_goal(
+            &wrong_event_receipt,
+            &goal,
+            goal_event.id
+        ));
     }
 }

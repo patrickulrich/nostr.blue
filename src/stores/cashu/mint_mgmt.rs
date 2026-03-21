@@ -39,9 +39,8 @@ fn wallet_snapshot_publish_lock() -> &'static tokio::sync::Mutex<()> {
 async fn publish_wallet_snapshot(privkey: &str, mints: &[String]) -> Result<(), String> {
     use nostr_sdk::signer::NostrSigner;
 
-    let signer = crate::stores::signer::get_signer()
-        .ok_or("No signer available")?
-        .as_nostr_signer();
+    let signer = crate::stores::signer::get_signer().ok_or("No signer available")?;
+    let nostr_signer = signer.as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
     let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let client = nostr_client::NOSTR_CLIENT
@@ -56,13 +55,35 @@ async fn publish_wallet_snapshot(privkey: &str, mints: &[String]) -> Result<(), 
     }
     let json_content = serde_json::to_string(&content_array)
         .map_err(|e| format!("Failed to serialize wallet data: {}", e))?;
-    let encrypted = signer
+    let encrypted = nostr_signer
         .nip44_encrypt(&pubkey, &json_content)
         .await
         .map_err(|e| format!("Failed to encrypt: {}", e))?;
-    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWallet, encrypted);
+    let builder = crate::utils::nips::nip89::tag_event_builder(nostr_sdk::EventBuilder::new(
+        Kind::CashuWallet,
+        encrypted,
+    ));
+    let event = match signer {
+        crate::stores::signer::SignerType::Keys(keys) => builder
+            .sign_with_keys(&keys)
+            .map_err(|e| format!("Failed to sign wallet event: {}", e))?,
+        #[cfg(target_family = "wasm")]
+        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => builder
+            .sign(&*browser_signer)
+            .await
+            .map_err(|e| format!("Failed to sign wallet event: {}", e))?,
+        crate::stores::signer::SignerType::NostrConnect(remote_signer) => builder
+            .sign(&*remote_signer)
+            .await
+            .map_err(|e| format!("Failed to sign wallet event: {}", e))?,
+        #[cfg(feature = "mobile")]
+        crate::stores::signer::SignerType::AndroidSigner(android_signer) => builder
+            .sign(&*android_signer)
+            .await
+            .map_err(|e| format!("Failed to sign wallet event: {}", e))?,
+    };
     let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+        .send_event(&event)
         .await
         .map_err(|e| format!("Failed to publish wallet event: {}", e))?;
     if output.success.is_empty() {
@@ -1243,33 +1264,35 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
             deletion_request = deletion_request.id(event_id);
         }
     }
-    let delete_builder = nostr_sdk::EventBuilder::delete(deletion_request);
-    match client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
-            delete_builder.clone(),
-        ))
-        .await
-    {
-        Ok(output) if !output.success.is_empty() => {}
-        Ok(_) => {
-            log::warn!("Failed to publish deletion event: no relays accepted the event");
-            super::events::queue_event_for_retry(
-                delete_builder,
-                super::types::PendingEventType::DeletionEvent,
-                None,
-                None,
-            )
-            .await;
-        }
-        Err(e) => {
-            log::warn!("Failed to publish deletion event: {}", e);
-            super::events::queue_event_for_retry(
-                delete_builder,
-                super::types::PendingEventType::DeletionEvent,
-                None,
-                None,
-            )
-            .await;
+    if !deletion_request.ids.is_empty() {
+        let delete_builder = nostr_sdk::EventBuilder::delete(deletion_request);
+        match client
+            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+                delete_builder.clone(),
+            ))
+            .await
+        {
+            Ok(output) if !output.success.is_empty() => {}
+            Ok(_) => {
+                log::warn!("Failed to publish deletion event: no relays accepted the event");
+                super::events::queue_event_for_retry(
+                    delete_builder,
+                    super::types::PendingEventType::DeletionEvent,
+                    None,
+                    None,
+                )
+                .await;
+            }
+            Err(e) => {
+                log::warn!("Failed to publish deletion event: {}", e);
+                super::events::queue_event_for_retry(
+                    delete_builder,
+                    super::types::PendingEventType::DeletionEvent,
+                    None,
+                    None,
+                )
+                .await;
+            }
         }
     }
     super::signals::update_wallet_balances();
