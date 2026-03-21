@@ -1,5 +1,5 @@
-use crate::stores::relay::{self, DEFAULT_RELAYS};
 use crate::stores::relay::RelayDisplayInfo;
+use crate::stores::relay::{self, DEFAULT_RELAYS};
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::RelayUrl;
 use std::collections::HashSet;

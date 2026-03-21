@@ -16,10 +16,15 @@ pub(super) fn encode_naddr(kind: u16, pubkey: &str, d_tag: &str) -> String {
 async fn send_tagged_event_builder(
     client: &std::sync::Arc<nostr_sdk::Client>,
     builder: EventBuilder,
-) -> std::result::Result<Output<nostr_sdk::EventId>, nostr_sdk::client::Error> {
-    client
+) -> StdResult<Output<nostr_sdk::EventId>, String> {
+    let output = client
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
+        .map_err(|e| e.to_string())?;
+    if output.success.is_empty() {
+        return Err("No relays accepted event".to_string());
+    }
+    Ok(output)
 }
 
 /// Publish a comment on a calendar event

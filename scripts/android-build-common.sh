@@ -161,6 +161,11 @@ cleanup() {
 }
 
 configure_release_signing() {
+    if grep -q '^\[bundle\.android\]' "$DIOXUS_CONFIG"; then
+        echo "INFO: Dioxus.toml already defines [bundle.android]; using existing release signing config"
+        return 0
+    fi
+
     require_env ANDROID_KEYSTORE_FILE
     if [ ! -f "$ANDROID_KEYSTORE_FILE" ] || [ ! -r "$ANDROID_KEYSTORE_FILE" ]; then
         echo "ERROR: ANDROID_KEYSTORE_FILE is not a readable regular file: $ANDROID_KEYSTORE_FILE" >&2
@@ -169,11 +174,6 @@ configure_release_signing() {
     require_env ANDROID_KEYSTORE_PASSWORD
     require_env ANDROID_KEY_ALIAS
     require_env ANDROID_KEY_PASSWORD
-
-    if grep -q '^\[bundle\.android\]' "$DIOXUS_CONFIG"; then
-        echo "ERROR: Dioxus.toml already defines [bundle.android]; refusing to overwrite it" >&2
-        exit 1
-    fi
 
     DIOXUS_CONFIG_BACKUP="${DIOXUS_CONFIG}.bak"
     cp "$DIOXUS_CONFIG" "$DIOXUS_CONFIG_BACKUP"

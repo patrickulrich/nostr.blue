@@ -610,6 +610,9 @@ pub async fn publish_drive(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish drive: {}", e))?;
+    if output.success.is_empty() {
+        return Err("No relays accepted event".to_string());
+    }
     log::info!("Drive published: {}", output.id().to_hex());
     Ok(output.id().to_hex())
 }
@@ -659,6 +662,9 @@ pub async fn publish_directory(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish directory: {}", e))?;
+    if output.success.is_empty() {
+        return Err("No relays accepted event".to_string());
+    }
     log::info!("Directory published: {}", output.id().to_hex());
     Ok(output.id().to_hex())
 }
@@ -707,6 +713,9 @@ pub async fn publish_symlink(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish symlink: {}", e))?;
+    if output.success.is_empty() {
+        return Err("No relays accepted event".to_string());
+    }
     log::info!("Symlink published: {}", output.id().to_hex());
     Ok(output.id().to_hex())
 }

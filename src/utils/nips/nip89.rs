@@ -13,7 +13,10 @@ pub fn should_publish_client_tag() -> bool {
         .publish_client_tag
 }
 
-pub fn tag_event_builder_with_enabled(builder: EventBuilder, publish_client_tag: bool) -> EventBuilder {
+pub fn tag_event_builder_with_enabled(
+    builder: EventBuilder,
+    publish_client_tag: bool,
+) -> EventBuilder {
     if publish_client_tag {
         builder.tag(client_tag())
     } else {
@@ -63,14 +66,19 @@ mod tests {
     #[test]
     fn explicit_tagging_flag_controls_client_tag() {
         let keys = Keys::generate();
-        let tagged = tag_event_builder_with_enabled(EventBuilder::new(Kind::TextNote, "tagged"), true)
-            .sign_with_keys(&keys)
-            .unwrap();
+        let tagged =
+            tag_event_builder_with_enabled(EventBuilder::new(Kind::TextNote, "tagged"), true)
+                .sign_with_keys(&keys)
+                .unwrap();
         assert!(tagged.tags.iter().any(|tag| tag.kind() == TagKind::Client));
 
-        let untagged = tag_event_builder_with_enabled(EventBuilder::new(Kind::TextNote, "plain"), false)
-            .sign_with_keys(&keys)
-            .unwrap();
-        assert!(!untagged.tags.iter().any(|tag| tag.kind() == TagKind::Client));
+        let untagged =
+            tag_event_builder_with_enabled(EventBuilder::new(Kind::TextNote, "plain"), false)
+                .sign_with_keys(&keys)
+                .unwrap();
+        assert!(!untagged
+            .tags
+            .iter()
+            .any(|tag| tag.kind() == TagKind::Client));
     }
 }

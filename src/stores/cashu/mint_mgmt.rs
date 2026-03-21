@@ -525,7 +525,21 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
     {
-        Ok(_) => log::info!("Published updated wallet event with new mint"),
+        Ok(output) if !output.success.is_empty() => {
+            log::info!("Published updated wallet event with new mint")
+        }
+        Ok(_) => {
+            log::error!("Failed to publish wallet event: no relays accepted the event");
+            {
+                let mut state = WALLET_STATE.write();
+                if let Some(ref mut wallet_state) = *state {
+                    wallet_state
+                        .mints
+                        .retain(|m| normalize_mint_url(m) != mint_url);
+                }
+            }
+            return Err("Failed to publish wallet event: no relays accepted the event".to_string());
+        }
         Err(e) => {
             log::error!("Failed to publish wallet event: {}", e);
             {
@@ -634,18 +648,6 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
         token_count,
         total_amount
     );
-    {
-        let store = WALLET_TOKENS.read();
-        let mut data = store.data();
-        let mut tokens_write = data.write();
-        tokens_write.retain(|t| !mint_matches(&t.mint, mint_url));
-    }
-    {
-        let mut state_write = WALLET_STATE.write();
-        if let Some(ref mut state) = *state_write {
-            state.mints.retain(|m| !mint_matches(m, mint_url));
-        }
-    }
     if !event_ids_to_delete.is_empty() {
         let mut tags = Vec::new();
         for event_id in &event_ids_to_delete {
@@ -666,16 +668,33 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
             .as_ref()
             .ok_or("Client not initialized")?
             .clone();
-        client
+        let output = client
             .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
                 deletion_builder,
             ))
             .await
             .map_err(|e| format!("Failed to publish deletion event: {}", e))?;
+        if output.success.is_empty() {
+            return Err(
+                "Failed to publish deletion event: no relays accepted the event".to_string(),
+            );
+        }
         log::info!(
             "Published deletion event for {} token events",
             event_ids_to_delete.len()
         );
+    }
+    {
+        let store = WALLET_TOKENS.read();
+        let mut data = store.data();
+        let mut tokens_write = data.write();
+        tokens_write.retain(|t| !mint_matches(&t.mint, mint_url));
+    }
+    {
+        let mut state_write = WALLET_STATE.write();
+        if let Some(ref mut state) = *state_write {
+            state.mints.retain(|m| !mint_matches(m, mint_url));
+        }
     }
     {
         let wallet_state = WALLET_STATE.read().clone();
@@ -710,7 +729,12 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
                 .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
                 .await
             {
-                Ok(_) => log::info!("Published updated wallet event after mint removal"),
+                Ok(output) if !output.success.is_empty() => {
+                    log::info!("Published updated wallet event after mint removal")
+                }
+                Ok(_) => {
+                    log::warn!("Failed to publish wallet event: no relays accepted the event")
+                }
                 Err(e) => log::warn!("Failed to publish wallet event: {}", e),
             }
         }
@@ -1209,11 +1233,17 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         }
     }
     let delete_builder = nostr_sdk::EventBuilder::delete(deletion_request);
-    if let Err(e) = client
+    match client
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(delete_builder))
         .await
     {
-        log::warn!("Failed to publish deletion event: {}", e);
+        Ok(output) if !output.success.is_empty() => {}
+        Ok(_) => {
+            log::warn!("Failed to publish deletion event: no relays accepted the event");
+        }
+        Err(e) => {
+            log::warn!("Failed to publish deletion event: {}", e);
+        }
     }
     super::signals::update_wallet_balances();
     if let Err(e) = crate::stores::cashu_cdk_bridge::sync_wallet_state().await {

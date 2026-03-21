@@ -267,6 +267,14 @@ pub fn ZapGoalsHome() -> Element {
                     return;
                 }
 
+                if let Some(profile) = profiles::get_cached_profile(&goal_clone.goal.author_pubkey)
+                {
+                    if profile.lud16.is_some() || profile.lud06.is_some() {
+                        selected_goal.set(Some(goal_clone));
+                        return;
+                    }
+                }
+
                 match profiles::fetch_profile(goal_clone.goal.author_pubkey.clone()).await {
                     Ok(profile) => {
                         if profile.lud16.is_some() || profile.lud06.is_some() {
@@ -546,7 +554,9 @@ pub fn ZapGoalsNew() -> Element {
                         return;
                     };
                     let timestamp = local_dt.with_timezone(&Utc).timestamp();
-                    if timestamp <= Utc::now().timestamp() || timestamp < 0 {
+                    if timestamp <= Utc::now().timestamp()
+                        || !(0..=253_402_300_799).contains(&timestamp)
+                    {
                         error_message.set(Some("Use a valid close date/time.".to_string()));
                         return;
                     }

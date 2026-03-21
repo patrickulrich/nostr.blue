@@ -1,11 +1,11 @@
 use crate::stores::nostr_client::{self, PublishResult};
 use crate::stores::profiles;
+use ::url::Url;
 use chrono::{DateTime, Utc};
 use nostr_sdk::prelude::*;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
-use ::url::Url;
 
 pub const KIND_ZAP_GOAL: u16 = 9041;
 pub const PROJECT_DONATION_LUD16: &str = "nostrblue@sats.love";
@@ -596,9 +596,20 @@ pub async fn publish_zap_goal_tracked(
     relays: Vec<String>,
     url: Option<String>,
 ) -> Result<PublishResult, String> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
     if amount_sats == 0 {
         return Err("Amount must be greater than zero".to_string());
+    }
+    if let Some(closed_at) = closed_at {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+        if closed_at <= now {
+            return Err("closed_at must be a future timestamp".to_string());
+        }
     }
     let relays = normalize_relays(&relays);
     if relays.is_empty() {

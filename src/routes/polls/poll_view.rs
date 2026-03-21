@@ -1,23 +1,27 @@
 use crate::components::{ClientInitializing, CommentComposer, PollCard, ThreadedComment};
-use crate::stores::subscription_manager;
 use crate::stores::nostr_client;
+use crate::stores::subscription_manager;
 use crate::utils::build_thread_tree;
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
 use dioxus::prelude::*;
-use dioxus_core::spawn_forever;
-use nostr_sdk::{Event as NostrEvent, EventId, Filter, Kind, RelayPoolNotification, SubscriptionId, Timestamp};
+use dioxus_core::{spawn_forever, Task};
+use nostr_sdk::{
+    Event as NostrEvent, EventId, Filter, Kind, RelayPoolNotification, SubscriptionId, Timestamp,
+};
 use std::collections::HashMap;
 use std::sync::{
-    Arc,
     atomic::{AtomicU64, Ordering},
+    Arc,
 };
 use std::time::Duration;
 
 const LIVE_UPDATES_MAX_RETRIES: u32 = 4;
 
 fn merge_comments(existing: Vec<NostrEvent>, fetched: Vec<NostrEvent>) -> Vec<NostrEvent> {
-    let mut by_id: HashMap<EventId, NostrEvent> =
-        existing.into_iter().map(|event| (event.id, event)).collect();
+    let mut by_id: HashMap<EventId, NostrEvent> = existing
+        .into_iter()
+        .map(|event| (event.id, event))
+        .collect();
     for event in fetched {
         by_id.insert(event.id, event);
     }
@@ -39,8 +43,12 @@ pub fn PollView(noteid: String) -> Element {
     let mut comments_refresh = use_signal(|| 0u64);
     let mut live_updates_retry_count = use_signal(|| 0u32);
     let mut comment_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
+    let mut comment_listener_task: Signal<Option<Task>> = use_signal(|| None);
     let comments_subscription_generation = use_hook(|| Arc::new(AtomicU64::new(0)));
     use_drop(move || {
+        if let Some(task) = comment_listener_task.replace(None) {
+            task.cancel();
+        }
         if let Some(sub_id) = comment_sub_id.replace(None) {
             if let Some(client) = nostr_client::get_client() {
                 spawn_forever(async move {
@@ -93,6 +101,16 @@ pub fn PollView(noteid: String) -> Element {
         let event_id = event.id;
         let generation = comments_subscription_generation.fetch_add(1, Ordering::SeqCst) + 1;
         let generation_counter = comments_subscription_generation.clone();
+        if let Some(task) = comment_listener_task.replace(None) {
+            task.cancel();
+        }
+        if let Some(old_sub_id) = comment_sub_id.replace(None) {
+            if let Some(client) = nostr_client::get_client() {
+                spawn(async move {
+                    subscription_manager::unsubscribe(&client, &old_sub_id).await;
+                });
+            }
+        }
         spawn(async move {
             if comments.read().is_empty() {
                 loading_comments.set(true);
@@ -100,7 +118,11 @@ pub fn PollView(noteid: String) -> Element {
             comments_error.set(None);
             live_updates_warning.set(None);
             let subscription_handoff = Timestamp::now();
-            let cached_max = comments.read().iter().map(|comment| comment.created_at).max();
+            let cached_max = comments
+                .read()
+                .iter()
+                .map(|comment| comment.created_at)
+                .max();
             let mut live_since = cached_max
                 .map(|timestamp| std::cmp::min(subscription_handoff, timestamp))
                 .unwrap_or(subscription_handoff);
@@ -108,10 +130,7 @@ pub fn PollView(noteid: String) -> Element {
             match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
                 Ok(comment_events) => {
                     if generation_counter.load(Ordering::SeqCst) == generation {
-                        let fetched_max = comment_events
-                            .iter()
-                            .map(|event| event.created_at)
-                            .max();
+                        let fetched_max = comment_events.iter().map(|event| event.created_at).max();
                         live_since = fetched_max
                             .map(|timestamp| std::cmp::min(subscription_handoff, timestamp))
                             .unwrap_or(subscription_handoff);
@@ -156,15 +175,10 @@ pub fn PollView(noteid: String) -> Element {
                             return;
                         }
 
-                        if let Some(old_sub_id) = comment_sub_id.replace(Some(subscription_id.clone())) {
-                            let client = client.clone();
-                            spawn(async move {
-                                subscription_manager::unsubscribe(&client, &old_sub_id).await;
-                            });
-                        }
+                        comment_sub_id.set(Some(subscription_id.clone()));
 
                         let generation_counter = generation_counter.clone();
-                        spawn(async move {
+                        let listener_task = spawn(async move {
                             let mut notifications = client.notifications();
                             while let Ok(notification) = notifications.recv().await {
                                 if generation_counter.load(Ordering::SeqCst) != generation {
@@ -191,6 +205,7 @@ pub fn PollView(noteid: String) -> Element {
                                 }
                             }
                         });
+                        comment_listener_task.set(Some(listener_task));
                         live_updates_retry_count.set(0);
                         live_updates_warning.set(None);
                     }
@@ -214,12 +229,14 @@ pub fn PollView(noteid: String) -> Element {
                             )));
                             let generation_counter = generation_counter.clone();
                             spawn(async move {
-                                crate::platform::timer::sleep(Duration::from_secs(retry_delay_secs)).await;
+                                crate::platform::timer::sleep(Duration::from_secs(
+                                    retry_delay_secs,
+                                ))
+                                .await;
                                 if generation_counter.load(Ordering::SeqCst) != generation {
                                     return;
                                 }
-                                comments_refresh
-                                    .with_mut(|value| *value = value.wrapping_add(1));
+                                comments_refresh.with_mut(|value| *value = value.wrapping_add(1));
                             });
                         } else {
                             live_updates_warning.set(Some(format!(

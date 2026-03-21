@@ -9,10 +9,10 @@ use crate::components::{
     icons, ContentShareModal, ContentType, DisplayEpisode, PodcastEpisodeList,
 };
 use crate::hooks::use_infinite_scroll;
-use crate::routes::Route;
 use crate::routes::podcast::podcast_shared_states::{
     PodcastApiAuthRequiredState, PodcastApiInitializingState,
 };
+use crate::routes::Route;
 use crate::services::podcast_index::{self, PodcastFeed};
 use crate::stores::{auth_store, nostr_client, podcast_subscription};
 use crate::utils::markdown::sanitize_html;
@@ -47,7 +47,9 @@ pub fn PodcastRssFeedDetail(props: PodcastRssFeedDetailProps) -> Element {
             }
             let id: u64 = match id_str.parse() {
                 Ok(id) => id,
-                Err(_) => return RssPodcastDetailState::Error(format!("Invalid podcast ID: {}", id_str)),
+                Err(_) => {
+                    return RssPodcastDetailState::Error(format!("Invalid podcast ID: {}", id_str))
+                }
             };
             log::info!("Fetching podcast metadata for ID: {}", id);
             match podcast_index::get_podcast_by_id(id).await {

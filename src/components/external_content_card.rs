@@ -135,14 +135,16 @@ pub fn ExternalContentList(
     if contents.is_empty() {
         return rsx! {};
     }
-    let (podcasts, other): (Vec<_>, Vec<_>) = contents.into_iter().enumerate().partition(
-        |(_, (content, _))| {
-            matches!(
-                content,
-                ExternalContentId::PodcastFeed(_) | ExternalContentId::PodcastEpisode(_)
-            )
-        },
-    );
+    let (podcasts, other): (Vec<_>, Vec<_>) =
+        contents
+            .into_iter()
+            .enumerate()
+            .partition(|(_, (content, _))| {
+                matches!(
+                    content,
+                    ExternalContentId::PodcastFeed(_) | ExternalContentId::PodcastEpisode(_)
+                )
+            });
     let podcast_items: Vec<_> = podcasts.into_iter().map(|(_, item)| item).collect();
     let podcast_cards = map_podcast_items(&podcast_items);
     rsx! {
@@ -252,7 +254,10 @@ mod tests {
             ),
         ];
 
-        assert_eq!(extract_podcast_feed_guid(&contents), Some("feed-A".to_string()));
+        assert_eq!(
+            extract_podcast_feed_guid(&contents),
+            Some("feed-A".to_string())
+        );
 
         let mapped = map_podcast_items(&contents);
         assert_eq!(mapped[1].1.as_deref(), Some("feed-A"));

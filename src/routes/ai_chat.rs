@@ -49,6 +49,19 @@ struct ThemeToolArgs {
     theme: String,
 }
 
+fn history_save_snapshot_key(
+    account_key: &str,
+    persisted_messages: &[PersistedChatMessage],
+    initial_loaded_messages: &[PersistedChatMessage],
+) -> String {
+    format!(
+        "{}:{}:{}",
+        account_key,
+        serde_json::to_string(persisted_messages).unwrap_or_default(),
+        serde_json::to_string(initial_loaded_messages).unwrap_or_default(),
+    )
+}
+
 #[component]
 pub fn AIChat() -> Element {
     let mut messages = use_signal(Vec::<DisplayMessage>::new);
@@ -67,6 +80,7 @@ pub fn AIChat() -> Element {
     let mut persisted_messages_dirty = use_signal(|| false);
     let persisted_messages_save_generation = use_signal(|| 0u32);
     let persisted_messages_save_in_flight = use_signal(|| false);
+    let mut persisted_messages_failed_snapshot = use_signal(|| None::<String>);
     let provider_state_save_generation = use_signal(|| 0u32);
     let mut provider_state_save_in_flight = use_signal(|| false);
     let mut provider_models_generation = use_signal(|| 0u32);
@@ -147,6 +161,22 @@ pub fn AIChat() -> Element {
     });
 
     use_effect(move || {
+        let account_key = ai_chat_store::current_account_key();
+        let snapshot_key = history_save_snapshot_key(
+            &account_key,
+            &persisted_messages.read(),
+            &initial_loaded_messages.read(),
+        );
+        if persisted_messages_failed_snapshot
+            .read()
+            .as_ref()
+            .is_some_and(|failed| failed != &snapshot_key)
+        {
+            persisted_messages_failed_snapshot.set(None);
+        }
+    });
+
+    use_effect(move || {
         if !AI_CHAT_HISTORY_LOAD_ENABLED {
             chat_history_loaded.set(true);
             return;
@@ -211,11 +241,17 @@ pub fn AIChat() -> Element {
         let persisted_messages_dirty_value = *persisted_messages_dirty.read();
         let initial_loaded_messages_snapshot = initial_loaded_messages.read().clone();
         let persisted_messages_snapshot = persisted_messages.read().clone();
+        let failed_snapshot_key = history_save_snapshot_key(
+            &account_key,
+            &persisted_messages_snapshot,
+            &initial_loaded_messages_snapshot,
+        );
 
         if !chat_history_ready
             || !persisted_messages_dirty_value
             || persisted_messages_snapshot == initial_loaded_messages_snapshot
             || ai_chat_store::current_account_key() != account_key
+            || persisted_messages_failed_snapshot.read().as_ref() == Some(&failed_snapshot_key)
         {
             return;
         }
@@ -226,6 +262,7 @@ pub fn AIChat() -> Element {
         let persisted_messages_signal = persisted_messages;
         let chat_history_generation_signal = chat_history_generation;
         let mut initial_loaded_messages_signal = initial_loaded_messages;
+        let mut persisted_messages_failed_snapshot_signal = persisted_messages_failed_snapshot;
         let generation = persisted_messages_save_generation_signal
             .read()
             .wrapping_add(1);
@@ -264,6 +301,7 @@ pub fn AIChat() -> Element {
                                 initial_loaded_messages_signal
                                     .set(persisted_messages_snapshot.clone());
                             }
+                            persisted_messages_failed_snapshot_signal.set(None);
                         }
                         persisted_messages_save_in_flight_signal.set(false);
                         return;
@@ -275,6 +313,8 @@ pub fn AIChat() -> Element {
                                 && ai_chat_store::current_account_key() == account_key
                             {
                                 error.set(Some(e));
+                                persisted_messages_failed_snapshot_signal
+                                    .set(Some(failed_snapshot_key.clone()));
                             }
                             persisted_messages_save_in_flight_signal.set(false);
                             return;

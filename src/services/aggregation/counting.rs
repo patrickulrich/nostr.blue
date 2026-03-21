@@ -147,8 +147,8 @@ pub async fn get_counts_with_count_fallback(
                 try_count_from_relays(event_id, Kind::Comment, timeout)
             );
             match (text_notes, comments) {
-                (Some(text_notes), Some(comments)) => Some(text_notes + comments),
-                _ => None,
+                (None, None) => None,
+                (text_notes, comments) => Some(text_notes.unwrap_or(0) + comments.unwrap_or(0)),
             }
         },
         try_count_from_relays(event_id, Kind::ZapReceipt, timeout),

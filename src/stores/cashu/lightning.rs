@@ -179,6 +179,9 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish event: {}", e))?;
+    if event_output.success.is_empty() {
+        return Err("Failed to publish event: no relays accepted the event".to_string());
+    }
     let event_id = event_output.id().to_hex();
     log::info!("Published token event: {}", event_id);
     {
@@ -589,10 +592,22 @@ async fn publish_melt_events(
             ))
             .await
         {
-            Ok(event_output) => {
+            Ok(event_output) if !event_output.success.is_empty() => {
                 let real_id = event_output.id().to_hex();
                 log::info!("Published new token event: {}", real_id);
                 new_event_id = Some(real_id);
+            }
+            Ok(_) => {
+                log::warn!("No relays accepted token event, queuing for retry");
+                let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+                queue_event_for_retry(
+                    builder,
+                    PendingEventType::TokenEvent,
+                    Some(pending_id.clone()),
+                    Some(mint_url.to_string()),
+                )
+                .await;
+                new_event_id = Some(pending_id);
             }
             Err(e) => {
                 log::warn!("Failed to publish token event, queuing for retry: {}", e);
@@ -630,11 +645,21 @@ async fn publish_melt_events(
                 ))
                 .await
             {
-                Ok(_) => {
+                Ok(output) if !output.success.is_empty() => {
                     log::info!(
                         "Published deletion events for {} token events",
                         valid_event_ids.len()
                     );
+                }
+                Ok(_) => {
+                    log::warn!("No relays accepted deletion event, queuing for retry");
+                    queue_event_for_retry(
+                        deletion_builder,
+                        PendingEventType::DeletionEvent,
+                        None,
+                        None,
+                    )
+                    .await;
                 }
                 Err(e) => {
                     log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
@@ -742,6 +767,9 @@ pub async fn create_history_event_with_type(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish history event: {}", e))?;
+    if event_output.success.is_empty() {
+        return Err("Failed to publish history event: no relays accepted the event".to_string());
+    }
     log::info!("Published history event: {}", event_output.id().to_hex());
     Ok(())
 }

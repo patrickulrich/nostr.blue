@@ -287,9 +287,13 @@ pub fn Settings() -> Element {
                             input {
                                 r#type: "checkbox",
                                 class: "sr-only peer",
+                                aria_label: "Publish client tag",
                                 checked: settings_store::SETTINGS.read().publish_client_tag,
-                                disabled: !auth.is_authenticated,
+                                disabled: !auth.is_authenticated || *settings_store::SETTINGS_LOADING.read(),
                                 onchange: move |evt| {
+                                    if *settings_store::SETTINGS_LOADING.read() {
+                                        return;
+                                    }
                                     let enabled = evt.checked();
                                     spawn(async move {
                                         settings_store::update_publish_client_tag(enabled).await;
@@ -299,6 +303,9 @@ pub fn Settings() -> Element {
                             div { class: "w-11 h-6 bg-gray-300 dark:bg-gray-700 peer-focus:outline-hidden peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600" }
                         }
                         span { class: "text-sm font-medium text-gray-900 dark:text-white",
+                            "Publish client tag"
+                        }
+                        span { class: "text-sm text-gray-500 dark:text-gray-400",
                             if settings_store::SETTINGS.read().publish_client_tag {
                                 "Enabled"
                             } else {

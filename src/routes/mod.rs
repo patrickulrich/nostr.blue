@@ -41,8 +41,8 @@ pub mod polls;
 pub mod privacy;
 pub mod profile;
 pub mod radio;
-pub mod relay_detail;
 pub mod recipes;
+pub mod relay_detail;
 pub mod search;
 pub mod settings;
 pub mod shop;
@@ -112,10 +112,10 @@ use polls::{PollNew, PollView, Polls};
 use privacy::Privacy;
 use profile::Profile;
 use radio::{RadioHome, RadioStation, RadioStationNew};
-use relay_detail::RelayDetail;
 use recipes::{
     RecipeChef, RecipeDetail, RecipeFork, RecipeNew, RecipesAll, RecipesByTag, RecipesHome,
 };
+use relay_detail::RelayDetail;
 use search::Search;
 use settings::{Settings, SettingsAi, SettingsBlocklist, SettingsMuted, SettingsRelays};
 use shop::{

@@ -1,24 +1,26 @@
-use crate::routes::Route;
-use crate::stores::{nostr_client, relay};
-use crate::utils::relay::{build_known_relay_set, decode_relay_route_id, normalize_known_relay_url, relay_http_url};
-use crate::utils::format_bytes;
-use crate::utils::is_valid_http_url;
-use dioxus::prelude::*;
-use nostr_sdk::nips::nip11::{FeeSchedule, Limitation, RelayInformationDocument, RetentionKind};
-use nostr_sdk::prelude::JsonUtil;
-use nostr_sdk::PublicKey;
 #[cfg(not(feature = "web"))]
 use crate::platform::http::http_client;
+use crate::routes::Route;
+use crate::stores::{nostr_client, relay};
+use crate::utils::format_bytes;
+use crate::utils::is_valid_http_url;
+use crate::utils::relay::{
+    build_known_relay_set, decode_relay_route_id, normalize_known_relay_url, relay_http_url,
+};
+use dioxus::prelude::*;
 #[cfg(not(feature = "web"))]
 use futures::StreamExt;
 #[cfg(feature = "web")]
 use js_sys::{Reflect, Uint8Array};
-#[cfg(feature = "web")]
-use web_sys::AbortController;
+use nostr_sdk::nips::nip11::{FeeSchedule, Limitation, RelayInformationDocument, RetentionKind};
+use nostr_sdk::prelude::JsonUtil;
+use nostr_sdk::PublicKey;
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 #[cfg(feature = "web")]
 use wasm_bindgen_futures::JsFuture;
+#[cfg(feature = "web")]
+use web_sys::AbortController;
 #[cfg(feature = "web")]
 use web_sys::{Request, RequestInit, RequestMode, RequestRedirect, Response};
 
@@ -109,15 +111,11 @@ async fn fetch_nip11_body(url: &str) -> Result<String, String> {
             .ok_or_else(|| format!("Relay metadata exceeds {} bytes", MAX_NIP11_BYTES))?;
         if total_bytes > MAX_NIP11_BYTES {
             controller.abort();
-            return Err(format!(
-                "Relay metadata exceeds {} bytes",
-                MAX_NIP11_BYTES
-            ));
+            return Err(format!("Relay metadata exceeds {} bytes", MAX_NIP11_BYTES));
         }
         bytes.extend_from_slice(&chunk);
     }
-    String::from_utf8(bytes)
-        .map_err(|e| format!("Failed to decode relay metadata as UTF-8: {}", e))
+    String::from_utf8(bytes).map_err(|e| format!("Failed to decode relay metadata as UTF-8: {}", e))
 }
 
 #[cfg(not(feature = "web"))]
@@ -137,7 +135,10 @@ async fn fetch_nip11_body(url: &str) -> Result<String, String> {
         })?;
 
     if !response.status().is_success() {
-        return Err(format!("Relay metadata request failed: {}", response.status()));
+        return Err(format!(
+            "Relay metadata request failed: {}",
+            response.status()
+        ));
     }
 
     let mut stream = response.bytes_stream();
@@ -149,16 +150,12 @@ async fn fetch_nip11_body(url: &str) -> Result<String, String> {
             .checked_add(chunk.len())
             .ok_or_else(|| format!("Relay metadata exceeds {} bytes", MAX_NIP11_BYTES))?;
         if total_bytes > MAX_NIP11_BYTES {
-            return Err(format!(
-                "Relay metadata exceeds {} bytes",
-                MAX_NIP11_BYTES
-            ));
+            return Err(format!("Relay metadata exceeds {} bytes", MAX_NIP11_BYTES));
         }
         body.extend_from_slice(&chunk);
     }
 
-    String::from_utf8(body)
-        .map_err(|e| format!("Failed to decode relay metadata as UTF-8: {}", e))
+    String::from_utf8(body).map_err(|e| format!("Failed to decode relay metadata as UTF-8: {}", e))
 }
 
 fn limitation_rows(limitation: &Limitation) -> Vec<(String, String)> {
@@ -198,19 +195,27 @@ fn limitation_rows(limitation: &Limitation) -> Vec<(String, String)> {
     );
     push_opt(
         "Auth required",
-        limitation.auth_required.map(|v| if v { "Yes" } else { "No" }.to_string()),
+        limitation
+            .auth_required
+            .map(|v| if v { "Yes" } else { "No" }.to_string()),
     );
     push_opt(
         "Payment required",
-        limitation.payment_required.map(|v| if v { "Yes" } else { "No" }.to_string()),
+        limitation
+            .payment_required
+            .map(|v| if v { "Yes" } else { "No" }.to_string()),
     );
     push_opt(
         "Created_at lower limit",
-        limitation.created_at_lower_limit.map(|v| v.as_secs().to_string()),
+        limitation
+            .created_at_lower_limit
+            .map(|v| v.as_secs().to_string()),
     );
     push_opt(
         "Created_at upper limit",
-        limitation.created_at_upper_limit.map(|v| v.as_secs().to_string()),
+        limitation
+            .created_at_upper_limit
+            .map(|v| v.as_secs().to_string()),
     );
 
     rows
@@ -646,8 +651,12 @@ mod tests {
         };
 
         let rows = limitation_rows(&limitation);
-        assert!(rows.iter().any(|(label, value)| label == "Max message length" && value == "1234"));
-        assert!(rows.iter().any(|(label, value)| label == "Auth required" && value == "Yes"));
+        assert!(rows
+            .iter()
+            .any(|(label, value)| label == "Max message length" && value == "1234"));
+        assert!(rows
+            .iter()
+            .any(|(label, value)| label == "Auth required" && value == "Yes"));
         assert_eq!(rows.len(), 2);
     }
 

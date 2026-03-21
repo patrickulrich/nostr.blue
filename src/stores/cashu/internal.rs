@@ -391,7 +391,9 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
         match client
-            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder.clone()))
+            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+                builder.clone(),
+            ))
             .await
         {
             Ok(event_output) if !event_output.success.is_empty() => {
@@ -412,7 +414,10 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
                 .await;
             }
             Err(e) => {
-                log::warn!("Failed to publish cleanup token event, queuing for retry: {}", e);
+                log::warn!(
+                    "Failed to publish cleanup token event, queuing for retry: {}",
+                    e
+                );
                 super::events::queue_event_for_retry(
                     builder,
                     super::types::PendingEventType::TokenEvent,
@@ -423,7 +428,7 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
             }
         }
     }
-    if new_event_id.is_some() && !event_ids_to_delete.is_empty() {
+    if !event_ids_to_delete.is_empty() {
         let valid_event_ids: Vec<_> = event_ids_to_delete
             .iter()
             .filter(|id| EventId::from_hex(id).is_ok())

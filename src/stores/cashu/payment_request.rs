@@ -63,7 +63,10 @@ async fn send_tagged_event_with_retry(
     match client.send_event_builder(tagged_builder).await {
         Ok(event_output) if !event_output.success.is_empty() => event_output.id().to_hex(),
         Ok(_) => {
-            log::warn!("No relays accepted {} event, queuing for retry", event_label);
+            log::warn!(
+                "No relays accepted {} event, queuing for retry",
+                event_label
+            );
             let pending_id = pending_token_id
                 .clone()
                 .unwrap_or_else(|| format!("pending_{}", uuid::Uuid::new_v4()));

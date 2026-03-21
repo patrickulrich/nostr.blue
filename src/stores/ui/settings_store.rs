@@ -58,6 +58,7 @@ const SETTINGS_D_TAG: &str = "nostr.blue/settings";
 pub static SETTINGS: GlobalSignal<AppSettings> = Signal::global(AppSettings::default);
 pub static SETTINGS_LOADING: GlobalSignal<bool> = Signal::global(|| false);
 pub static SETTINGS_ERROR: GlobalSignal<Option<String>> = Signal::global(|| None);
+pub static PUBLISH_CLIENT_TAG_SAVE_PENDING: GlobalSignal<Option<bool>> = Signal::global(|| None);
 /// Load cached settings from localStorage (synchronous)
 fn load_cached_settings() -> Option<AppSettings> {
     storage::get::<AppSettings>(SETTINGS_LOCAL_STORAGE_KEY).ok()
@@ -174,9 +175,13 @@ pub async fn save_settings(settings: &AppSettings) -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to publish settings: {}", e))?;
     if output.success.is_empty() {
-        return Err("No relays accepted event".to_string());
+        log::warn!(
+            "Settings publish was not accepted by any relay (failed_relays={})",
+            output.failed.len()
+        );
+    } else {
+        log::info!("Settings saved to Nostr successfully");
     }
-    log::info!("Settings saved to Nostr successfully");
     cache_settings(&settings_to_save);
     SETTINGS.write().clone_from(&settings_to_save);
     Ok(())
@@ -221,14 +226,39 @@ pub async fn update_publish_client_tag(enabled: bool) {
         w.publish_client_tag = enabled;
         w.clone()
     };
+    cache_settings(&settings);
     if !auth_store::is_authenticated() {
-        cache_settings(&settings);
         return;
     }
-    if let Err(e) = save_settings(&settings).await {
-        log::warn!("Failed to persist client tag setting to Nostr: {}", e);
-        cache_settings(&settings);
+
+    PUBLISH_CLIENT_TAG_SAVE_PENDING.write().replace(enabled);
+    if *SETTINGS_LOADING.read() {
+        return;
     }
+
+    SETTINGS_LOADING.write().clone_from(&true);
+    SETTINGS_ERROR.write().clone_from(&None);
+
+    loop {
+        let Some(next_enabled) = PUBLISH_CLIENT_TAG_SAVE_PENDING.write().take() else {
+            break;
+        };
+        let settings_to_save = {
+            let mut w = SETTINGS.write();
+            w.publish_client_tag = next_enabled;
+            w.clone()
+        };
+        cache_settings(&settings_to_save);
+
+        if let Err(e) = save_settings(&settings_to_save).await {
+            log::warn!("Failed to persist client tag setting to Nostr: {}", e);
+            SETTINGS_ERROR.write().clone_from(&Some(e));
+        } else {
+            SETTINGS_ERROR.write().clone_from(&None);
+        }
+    }
+
+    SETTINGS_LOADING.write().clone_from(&false);
 }
 /// Get current mempool endpoint (returns default if empty)
 pub fn get_mempool_endpoint() -> String {

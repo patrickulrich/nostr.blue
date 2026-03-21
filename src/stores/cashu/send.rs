@@ -677,11 +677,21 @@ async fn publish_send_events(
                 ))
                 .await
             {
-                Ok(_) => {
+                Ok(response) if !response.success.is_empty() => {
                     log::info!(
                         "Published deletion events for {} token events",
                         valid_event_ids.len()
                     );
+                }
+                Ok(_) => {
+                    log::warn!("No relays accepted deletion event, queuing for retry");
+                    queue_event_for_retry(
+                        deletion_builder,
+                        PendingEventType::DeletionEvent,
+                        None,
+                        None,
+                    )
+                    .await;
                 }
                 Err(e) => {
                     log::warn!("Failed to publish deletion event, queuing for retry: {}", e);

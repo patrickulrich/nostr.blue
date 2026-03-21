@@ -11,7 +11,7 @@
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, relay};
 use crate::utils::format_bytes;
-use crate::utils::relay::{build_known_relay_set, build_persisted_relay_set, normalize_known_relay_url};
+use crate::utils::relay::{build_known_relay_set, normalize_known_relay_url};
 use dioxus::prelude::*;
 use std::collections::HashMap;
 use url::Url;
@@ -156,26 +156,10 @@ pub fn SettingsRelays() -> Element {
     let relay_detail_route = |url: &str| Route::RelayDetail {
         relay_id: crate::utils::relay::encode_relay_route_id(url),
     };
-    let known_relays = use_memo(move || {
-        build_known_relay_set(connection_info.read().as_deref())
-    });
-    let persisted_relays = use_memo(move || {
-        let _ = relay::USER_RELAY_METADATA.read();
-        let _ = relay::LOCAL_RELAYS.read();
-        let _ = relay::SEARCH_RELAYS.read();
-        let _ = relay::BROADCAST_RELAYS.read();
-        let _ = relay::BLOCKED_RELAYS.read();
-        build_persisted_relay_set()
-    });
+    let known_relays = use_memo(move || build_known_relay_set(connection_info.read().as_deref()));
     let can_open_relay_detail = |url: &str| {
         !relay::is_relay_blocked(url)
             && known_relays
-                .read()
-                .contains(&normalize_known_relay_url(url))
-    };
-    let can_open_persisted_relay_detail = |url: &str| {
-        !relay::is_relay_blocked(url)
-            && persisted_relays
                 .read()
                 .contains(&normalize_known_relay_url(url))
     };
@@ -1012,7 +996,7 @@ pub fn SettingsRelays() -> Element {
                                                     _ => "w-3 h-3 rounded-full bg-gray-400",
                                                 },
                                             }
-                                            if can_open_persisted_relay_detail(&relay_info.url) {
+                                            if can_open_relay_detail(&relay_info.url) {
                                                 Link {
                                                     to: relay_detail_route(&relay_info.url),
                                                     class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",
