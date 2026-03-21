@@ -300,6 +300,7 @@ pub fn PollView(noteid: String) -> Element {
     });
 
     let current_poll_event = poll_event.read().clone();
+    let route_replies_count = comments.read().len();
 
     rsx! {
         div { class: "min-h-screen",
@@ -351,6 +352,7 @@ pub fn PollView(noteid: String) -> Element {
                     div { class: "border-b border-border",
                         PollCard {
                             event: event.clone(),
+                            replies_count: Some(route_replies_count),
                             on_comment_created: move |comment_event: NostrEvent| {
                                 let already_exists = comments.read().iter().any(|e| e.id == comment_event.id);
                                 if !already_exists {

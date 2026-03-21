@@ -1236,15 +1236,31 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
     }
     let delete_builder = nostr_sdk::EventBuilder::delete(deletion_request);
     match client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(delete_builder))
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+            delete_builder.clone(),
+        ))
         .await
     {
         Ok(output) if !output.success.is_empty() => {}
         Ok(_) => {
             log::warn!("Failed to publish deletion event: no relays accepted the event");
+            super::events::queue_event_for_retry(
+                delete_builder,
+                super::types::PendingEventType::DeletionEvent,
+                None,
+                None,
+            )
+            .await;
         }
         Err(e) => {
             log::warn!("Failed to publish deletion event: {}", e);
+            super::events::queue_event_for_retry(
+                delete_builder,
+                super::types::PendingEventType::DeletionEvent,
+                None,
+                None,
+            )
+            .await;
         }
     }
     super::signals::update_wallet_balances();

@@ -27,6 +27,7 @@ use std::time::Duration;
 pub fn PollCard(
     event: NostrEvent,
     #[props(default = None)] precomputed_counts: Option<InteractionCounts>,
+    #[props(default = None)] replies_count: Option<usize>,
     #[props(default = None)] on_comment_created: Option<EventHandler<NostrEvent>>,
 ) -> Element {
     let author_pubkey = event.pubkey.to_string();
@@ -535,7 +536,7 @@ pub fn PollCard(
                     }
                     span { class: "text-xs",
                         {
-                            let count = *reply_count.read();
+                            let count = replies_count.unwrap_or(*reply_count.read());
                             if count > 500 {
                                 "500+".to_string()
                             } else if count > 0 {
@@ -772,8 +773,10 @@ pub fn PollCard(
                         show_comment_composer.set(false);
                     },
                     on_success: move |comment_event: NostrEvent| {
-                        let current = *reply_count.read();
-                        reply_count.set((current + 1).min(501));
+                        if replies_count.is_none() {
+                            let current = *reply_count.read();
+                            reply_count.set((current + 1).min(501));
+                        }
                         if let Some(handler) = on_comment_created.as_ref() {
                             handler.call(comment_event);
                         }
