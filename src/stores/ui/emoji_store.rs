@@ -388,7 +388,7 @@ pub async fn publish_emoji_collection(
 
     let builder = EventBuilder::emojis(Emojis { emojis, coordinate });
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish emoji collection: {}", e))?;
 

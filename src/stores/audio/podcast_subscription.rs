@@ -335,7 +335,7 @@ async fn publish_subscriptions(subscriptions: &[PodcastSubscription]) -> Result<
     }
     let builder = EventBuilder::new(Kind::from(LIST_KIND), "").tags(tags);
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish subscriptions: {}", e))?;
     log::info!("Podcast subscriptions saved to Nostr successfully");

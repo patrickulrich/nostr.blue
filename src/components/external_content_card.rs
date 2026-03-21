@@ -26,6 +26,35 @@ fn truncate_guid(guid: &str) -> String {
         guid.to_string()
     }
 }
+
+#[cfg(test)]
+fn extract_podcast_feed_guid(contents: &[(ExternalContentId, Option<String>)]) -> Option<String> {
+    contents.iter().find_map(|(content, _)| match content {
+        ExternalContentId::PodcastFeed(guid) => Some(guid.clone()),
+        _ => None,
+    })
+}
+
+fn map_podcast_items(
+    contents: &[(ExternalContentId, Option<String>)],
+) -> Vec<(ExternalContentId, Option<String>)> {
+    let mut current_feed_guid = None;
+    let mut mapped = Vec::new();
+    for (content, _) in contents {
+        match content {
+            ExternalContentId::PodcastFeed(guid) => {
+                current_feed_guid = Some(guid.clone());
+                mapped.push((content.clone(), None));
+            }
+            ExternalContentId::PodcastEpisode(_) => {
+                mapped.push((content.clone(), current_feed_guid.clone()));
+            }
+            _ => {}
+        }
+    }
+    mapped
+}
+
 /// Generic external content card dispatcher
 /// Routes to the appropriate card based on content type
 #[component]
@@ -106,27 +135,31 @@ pub fn ExternalContentList(
     if contents.is_empty() {
         return rsx! {};
     }
-    let (podcasts, other): (Vec<_>, Vec<_>) = contents.into_iter().partition(|(content, _)| {
-        matches!(
-            content,
-            ExternalContentId::PodcastFeed(_) | ExternalContentId::PodcastEpisode(_)
-        )
-    });
+    let (podcasts, other): (Vec<_>, Vec<_>) = contents.into_iter().enumerate().partition(
+        |(_, (content, _))| {
+            matches!(
+                content,
+                ExternalContentId::PodcastFeed(_) | ExternalContentId::PodcastEpisode(_)
+            )
+        },
+    );
+    let podcast_items: Vec<_> = podcasts.into_iter().map(|(_, item)| item).collect();
+    let podcast_cards = map_podcast_items(&podcast_items);
     rsx! {
         div { class: "flex flex-col gap-2 mt-2",
-            for (content , hint) in podcasts.iter() {
+            for (index, (content, podcast_guid)) in podcast_cards.iter().enumerate() {
                 ExternalContentCard {
-                    key: "{nip73::get_raw_identifier(content)}:{hint.clone().unwrap_or_default()}",
+                    key: "{nip73::get_raw_identifier(content)}:{index}",
                     content: content.clone(),
                     compact: false,
-                    podcast_guid: hint.clone(),
+                    podcast_guid: podcast_guid.clone(),
                 }
             }
             if !other.is_empty() {
                 div { class: "flex flex-wrap gap-2",
-                    for (content , _hint) in other.iter() {
+                    for (index, (content, _hint)) in other.iter() {
                         ExternalContentCard {
-                            key: "{nip73::get_raw_identifier(content)}",
+                            key: "{nip73::get_raw_identifier(content)}:{index}",
                             content: content.clone(),
                             compact,
                             podcast_guid: None,
@@ -137,6 +170,96 @@ pub fn ExternalContentList(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{extract_podcast_feed_guid, map_podcast_items};
+    use nostr::nips::nip73::ExternalContentId;
+
+    #[test]
+    fn extract_podcast_feed_guid_returns_first_feed_guid() {
+        let contents = vec![
+            (
+                ExternalContentId::PodcastEpisode("episode-guid".to_string()),
+                Some("https://fountain.fm/episode/example".to_string()),
+            ),
+            (
+                ExternalContentId::PodcastFeed("feed-guid".to_string()),
+                Some("https://example.com/show".to_string()),
+            ),
+            (
+                ExternalContentId::PodcastFeed("second-feed-guid".to_string()),
+                None,
+            ),
+        ];
+
+        assert_eq!(
+            extract_podcast_feed_guid(&contents),
+            Some("feed-guid".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_podcast_feed_guid_returns_none_without_feed() {
+        let contents = vec![
+            (
+                ExternalContentId::PodcastEpisode("episode-guid".to_string()),
+                Some("https://fountain.fm/episode/example".to_string()),
+            ),
+            (ExternalContentId::Book("9780765382030".to_string()), None),
+        ];
+
+        assert_eq!(extract_podcast_feed_guid(&contents), None);
+    }
+
+    #[test]
+    fn extract_podcast_feed_guid_ignores_hint_urls() {
+        let contents = vec![
+            (
+                ExternalContentId::PodcastEpisode("episode-guid".to_string()),
+                Some("https://wrong.example/podcast-guid".to_string()),
+            ),
+            (
+                ExternalContentId::PodcastFeed("actual-feed-guid".to_string()),
+                Some("https://fountain.fm/show/example".to_string()),
+            ),
+        ];
+
+        assert_eq!(
+            extract_podcast_feed_guid(&contents),
+            Some("actual-feed-guid".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_podcast_feed_guid_mixed_feed_regression() {
+        let contents = vec![
+            (
+                ExternalContentId::PodcastFeed("feed-A".to_string()),
+                Some("https://example.com/feed-a".to_string()),
+            ),
+            (
+                ExternalContentId::PodcastEpisode("episode-1".to_string()),
+                Some("https://example.com/episode-1".to_string()),
+            ),
+            (
+                ExternalContentId::PodcastFeed("feed-B".to_string()),
+                Some("https://example.com/feed-b".to_string()),
+            ),
+            (
+                ExternalContentId::PodcastEpisode("episode-2".to_string()),
+                Some("https://example.com/episode-2".to_string()),
+            ),
+        ];
+
+        assert_eq!(extract_podcast_feed_guid(&contents), Some("feed-A".to_string()));
+
+        let mapped = map_podcast_items(&contents);
+        assert_eq!(mapped[1].1.as_deref(), Some("feed-A"));
+        assert_eq!(mapped[3].1.as_deref(), Some("feed-B"));
+    }
+}
+
 #[derive(Props, Clone, PartialEq)]
 struct BookCardProps {
     isbn: String,

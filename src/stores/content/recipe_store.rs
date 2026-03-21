@@ -559,7 +559,7 @@ pub async fn publish_recipe(
     }
     let builder = EventBuilder::long_form_text_note(content).tags(event_tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish recipe: {}", e))?;
     log::info!("Recipe published: {}", output.id().to_hex());
@@ -612,7 +612,7 @@ pub async fn fork_recipe(
     }
     let builder = EventBuilder::long_form_text_note(new_content).tags(event_tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to fork recipe: {}", e))?;
     log::info!("Recipe forked: {}", output.id().to_hex());
@@ -667,7 +667,7 @@ pub async fn update_recipe(
     }
     let builder = EventBuilder::long_form_text_note(content).tags(event_tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to update recipe: {}", e))?;
     log::info!("Recipe updated: {}", output.id().to_hex());
@@ -692,7 +692,7 @@ pub async fn delete_recipe(recipe: &CachedRecipe) -> StdResult<String, String> {
     let deletion_request = EventDeletionRequest::new().coordinate(coord);
     let builder = EventBuilder::delete(deletion_request);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to delete recipe: {}", e))?;
     RECIPES_CACHE.write().pop(&recipe.a_tag);
@@ -717,7 +717,7 @@ pub async fn comment_on_recipe(recipe: &CachedRecipe, content: &str) -> StdResul
     ];
     let builder = EventBuilder::text_note(content).tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to post comment: {}", e))?;
     log::info!("Comment posted: {}", output.id().to_hex());
@@ -768,7 +768,7 @@ pub async fn toggle_recipe_bookmark(recipe: &CachedRecipe) -> StdResult<bool, St
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_BOOKMARK_LIST), "").tags(tags);
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to update bookmarks: {}", e))?;
     log::info!("Bookmark toggled for {}: {}", recipe.a_tag, !is_bookmarked);

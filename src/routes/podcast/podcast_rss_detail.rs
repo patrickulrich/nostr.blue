@@ -10,10 +10,21 @@ use crate::components::{
 };
 use crate::hooks::use_infinite_scroll;
 use crate::routes::Route;
+use crate::routes::podcast::podcast_shared_states::{
+    PodcastApiAuthRequiredState, PodcastApiInitializingState,
+};
 use crate::services::podcast_index::{self, PodcastFeed};
 use crate::stores::{auth_store, nostr_client, podcast_subscription};
 use crate::utils::markdown::sanitize_html;
 use dioxus::prelude::*;
+
+enum RssPodcastDetailState {
+    Initializing,
+    Loaded(Box<PodcastFeed>, u64),
+    AuthRequired,
+    Error(String),
+}
+
 #[derive(Props, Clone, PartialEq)]
 pub struct PodcastRssFeedDetailProps {
     pub podcast_id: String,
@@ -29,18 +40,23 @@ pub fn PodcastRssFeedDetail(props: PodcastRssFeedDetailProps) -> Element {
         let has_signer = nostr_client::has_signer();
         async move {
             if !client_initialized {
-                return Err("Waiting for client initialization...".to_string());
+                return RssPodcastDetailState::Initializing;
             }
             if !has_signer {
-                return Err("Please sign in to view podcast details.".to_string());
+                return RssPodcastDetailState::AuthRequired;
             }
-            let id: u64 = id_str
-                .parse()
-                .map_err(|_| format!("Invalid podcast ID: {}", id_str))?;
+            let id: u64 = match id_str.parse() {
+                Ok(id) => id,
+                Err(_) => return RssPodcastDetailState::Error(format!("Invalid podcast ID: {}", id_str)),
+            };
             log::info!("Fetching podcast metadata for ID: {}", id);
-            let feed = podcast_index::get_podcast_by_id(id).await?;
-            log::info!("Successfully loaded podcast: {}", feed.title);
-            Ok::<_, String>((feed, id))
+            match podcast_index::get_podcast_by_id(id).await {
+                Ok(feed) => {
+                    log::info!("Successfully loaded podcast: {}", feed.title);
+                    RssPodcastDetailState::Loaded(Box::new(feed), id)
+                }
+                Err(error) => RssPodcastDetailState::Error(error),
+            }
         }
     });
     rsx! {
@@ -56,10 +72,20 @@ pub fn PodcastRssFeedDetail(props: PodcastRssFeedDetailProps) -> Element {
                 }
             }
             match &*podcast_data.read() {
-                Some(Ok((feed, id))) => rsx! {
-                    RssPodcastDetailContent { feed: feed.clone(), podcast_id: *id }
+                Some(RssPodcastDetailState::Initializing) => rsx! {
+                    PodcastApiInitializingState {
+                        item_label: "podcast",
+                    }
                 },
-                Some(Err(e)) => rsx! {
+                Some(RssPodcastDetailState::Loaded(feed, id)) => rsx! {
+                    RssPodcastDetailContent { feed: (**feed).clone(), podcast_id: *id }
+                },
+                Some(RssPodcastDetailState::AuthRequired) => rsx! {
+                    PodcastApiAuthRequiredState {
+                        item_label: "podcast",
+                    }
+                },
+                Some(RssPodcastDetailState::Error(e)) => rsx! {
                     div { class: "p-4 text-center",
                         div { class: "text-destructive mb-2", "Failed to load podcast" }
                         div { class: "text-sm text-muted-foreground", "{e}" }
@@ -72,6 +98,7 @@ pub fn PodcastRssFeedDetail(props: PodcastRssFeedDetailProps) -> Element {
         }
     }
 }
+
 #[derive(Props, Clone, PartialEq)]
 struct RssPodcastDetailContentProps {
     feed: PodcastFeed,

@@ -944,9 +944,12 @@ pub async fn publish_publication_index(
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_INDEX), "").tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish publication index: {}", e))?;
+    if output.success.is_empty() {
+        return Err("No relays accepted event".to_string());
+    }
     log::info!("Publication index published: {}", output.id().to_hex());
     Ok(output.id().to_hex())
 }
@@ -981,9 +984,12 @@ pub async fn publish_publication_section(
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_CONTENT), content).tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish section: {}", e))?;
+    if output.success.is_empty() {
+        return Err("No relays accepted event".to_string());
+    }
     log::info!("Publication section published: {}", output.id().to_hex());
     Ok(output.id().to_hex())
 }

@@ -72,7 +72,7 @@ pub async fn accept_terms() -> Result<(), String> {
     let content = serde_json::json!({ "accepted_at" : now, "version" : 1 }).to_string();
     let builder = EventBuilder::new(Kind::from(30078), content).tag(Tag::identifier(TERMS_D_TAG));
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish terms acceptance: {}", e))?;
     log::info!("Terms acceptance published successfully");
@@ -299,7 +299,10 @@ pub async fn create_wallet(mints: Vec<String>) -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to encrypt wallet data: {}", e))?;
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWallet, encrypted_content);
-    match client.send_event_builder(builder).await {
+    match client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+        .await
+    {
         Ok(_) => {
             log::info!("Wallet created successfully");
             *WALLET_STATE.write() = Some(WalletState {

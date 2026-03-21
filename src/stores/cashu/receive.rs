@@ -341,7 +341,7 @@ pub async fn receive_tokens_with_options(
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-    let signed_event = builder
+    let signed_event = crate::utils::nips::nip89::tag_event_builder(builder)
         .build(pubkey)
         .sign(&signer)
         .await

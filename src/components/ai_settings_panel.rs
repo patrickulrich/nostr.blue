@@ -395,9 +395,10 @@ fn build_custom_provider(
         Some(original) => original != provider_id,
         None => true,
     };
-    let duplicate = state.custom_providers.iter().any(|provider| {
-        provider.id == provider_id && is_different_original
-    });
+    let duplicate = state
+        .custom_providers
+        .iter()
+        .any(|provider| provider.id == provider_id && is_different_original);
     if duplicate {
         return Err("ID must be unique across custom providers".to_string());
     }

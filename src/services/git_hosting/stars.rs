@@ -29,7 +29,7 @@ pub async fn publish_star(coordinate: &Coordinate) -> Result<EventId, NostrBlueE
     let builder =
         EventBuilder::new(Kind::Reaction, "+").tag(Tag::coordinate(coordinate.clone(), None));
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish star: {}", e))?;
     let event_id = *output.id();
@@ -68,7 +68,7 @@ pub async fn remove_star(coordinate: &Coordinate) -> Result<(), NostrBlueError> 
         let request = EventDeletionRequest::new().id(star_event.id);
         let builder = EventBuilder::delete(request);
         client
-            .send_event_builder(builder)
+            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
             .await
             .map_err(|e| format!("Failed to publish delete: {}", e))?;
     }

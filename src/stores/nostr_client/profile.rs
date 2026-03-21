@@ -19,7 +19,7 @@ pub async fn publish_metadata_tracked(
     log::info!("Publishing profile metadata");
     let builder = EventBuilder::metadata(&metadata);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish metadata: {}", e))?;
     let result = PublishResult::from_output(output);

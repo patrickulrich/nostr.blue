@@ -522,7 +522,7 @@ async fn submit_new_file(
         .tag(Tag::hashtag("new-file"));
 
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish patch: {}", e))?;
 

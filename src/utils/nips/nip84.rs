@@ -315,7 +315,7 @@ pub async fn create_highlight(
     }
     let event = EventBuilder::new(highlight_kind(), content).tags(tags);
     let output = client
-        .send_event_builder(event)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(event))
         .await
         .map_err(|e| format!("Failed to publish highlight: {}", e))?;
     log::info!("Highlight published: {}", output.id().to_hex());

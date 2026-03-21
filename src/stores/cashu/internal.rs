@@ -390,20 +390,40 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-        match client.send_event_builder(builder).await {
-            Ok(event_output) => {
+        match client
+            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder.clone()))
+            .await
+        {
+            Ok(event_output) if !event_output.success.is_empty() => {
                 new_event_id = Some(event_output.id().to_hex());
                 log::info!(
                     "Published cleanup token event: {}",
                     new_event_id.as_ref().unwrap()
                 );
             }
+            Ok(_) => {
+                log::warn!("No relays accepted cleanup token event, queuing for retry");
+                super::events::queue_event_for_retry(
+                    builder,
+                    super::types::PendingEventType::TokenEvent,
+                    None,
+                    Some(mint_url.to_string()),
+                )
+                .await;
+            }
             Err(e) => {
-                log::warn!("Failed to publish cleanup token event: {}", e);
+                log::warn!("Failed to publish cleanup token event, queuing for retry: {}", e);
+                super::events::queue_event_for_retry(
+                    builder,
+                    super::types::PendingEventType::TokenEvent,
+                    None,
+                    Some(mint_url.to_string()),
+                )
+                .await;
             }
         }
     }
-    if !event_ids_to_delete.is_empty() {
+    if new_event_id.is_some() && !event_ids_to_delete.is_empty() {
         let valid_event_ids: Vec<_> = event_ids_to_delete
             .iter()
             .filter(|id| EventId::from_hex(id).is_ok())
@@ -419,12 +439,27 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
             ));
             let deletion_builder =
                 nostr_sdk::EventBuilder::new(Kind::from(5), "Spent proofs cleanup").tags(tags);
-            match client.send_event_builder(deletion_builder.clone()).await {
-                Ok(_) => {
+            match client
+                .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+                    deletion_builder.clone(),
+                ))
+                .await
+            {
+                Ok(event_output) if !event_output.success.is_empty() => {
                     log::info!(
                         "Published deletion event for {} token events",
                         valid_event_ids.len()
                     );
+                }
+                Ok(_) => {
+                    log::warn!("No relays accepted cleanup deletion event, queuing for retry");
+                    super::events::queue_event_for_retry(
+                        deletion_builder,
+                        super::types::PendingEventType::DeletionEvent,
+                        None,
+                        None,
+                    )
+                    .await;
                 }
                 Err(e) => {
                     log::warn!("Failed to publish deletion event, queuing for retry: {}", e);

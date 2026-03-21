@@ -330,7 +330,10 @@ async fn publish_pinned_communities(pins: Vec<String>) -> Result<(), String> {
         .filter_map(|a_tag| parse_a_tag_to_coordinate(a_tag))
         .collect();
     let builder = EventBuilder::communities(coordinates);
-    match client.send_event_builder(builder).await {
+    match client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+        .await
+    {
         Ok(_) => {
             log::info!("Pinned communities published successfully");
             Ok(())

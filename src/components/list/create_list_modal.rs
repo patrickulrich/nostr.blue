@@ -314,7 +314,7 @@ async fn create_list(
     };
     let builder = EventBuilder::new(Kind::from_u16(list_type.kind()), content).tags(tags);
     client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to create list: {}", e))?;
     log::info!("Created new {} list: {}", list_type.label(), name);

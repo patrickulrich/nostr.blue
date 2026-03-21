@@ -679,7 +679,7 @@ async fn generate_nostr_zap_invoice(
     let client =
         nostr_client::get_client().ok_or_else(|| "Nostr client not available".to_string())?;
     let zap_request = client
-        .sign_event_builder(builder)
+        .sign_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to sign zap request: {}", e))?;
     log::info!("Zap request event created: {}", zap_request.id.to_hex());
