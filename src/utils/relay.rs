@@ -1,5 +1,8 @@
 use crate::stores::relay::{self, DEFAULT_RELAYS};
+use crate::stores::relay::RelayDisplayInfo;
+use dioxus::prelude::ReadableExt;
 use nostr_sdk::RelayUrl;
+use std::collections::HashSet;
 use url::{Host, Url};
 
 pub fn default_relay_urls() -> Vec<RelayUrl> {
@@ -120,6 +123,47 @@ pub fn relay_http_url(relay_url: &str) -> Result<String, String> {
         scheme => return Err(format!("Unsupported relay scheme: {}", scheme)),
     }
     Ok(url.to_string())
+}
+
+pub fn normalize_known_relay_url(url: &str) -> String {
+    nostr::Url::parse(url)
+        .map(|parsed| parsed.to_string())
+        .unwrap_or_else(|_| url.to_string())
+}
+
+pub fn build_persisted_relay_set() -> HashSet<String> {
+    let mut known_relays = HashSet::new();
+    if let Some(metadata) = relay::USER_RELAY_METADATA.read().as_ref() {
+        for relay in &metadata.relays {
+            known_relays.insert(normalize_known_relay_url(&relay.url));
+        }
+        for relay in &metadata.dm_relays {
+            known_relays.insert(normalize_known_relay_url(relay));
+        }
+    }
+    for relay_url in relay::LOCAL_RELAYS.read().iter() {
+        known_relays.insert(normalize_known_relay_url(relay_url));
+    }
+    for relay_url in relay::SEARCH_RELAYS.read().iter() {
+        known_relays.insert(normalize_known_relay_url(relay_url));
+    }
+    for relay_url in relay::BROADCAST_RELAYS.read().iter() {
+        known_relays.insert(normalize_known_relay_url(relay_url));
+    }
+    for relay_url in relay::BLOCKED_RELAYS.read().iter() {
+        known_relays.insert(normalize_known_relay_url(relay_url));
+    }
+    known_relays
+}
+
+pub fn build_known_relay_set(connection_info: Option<&[RelayDisplayInfo]>) -> HashSet<String> {
+    let mut known_relays = build_persisted_relay_set();
+    if let Some(connection_info) = connection_info {
+        for info in connection_info {
+            known_relays.insert(normalize_known_relay_url(&info.url));
+        }
+    }
+    known_relays
 }
 
 #[cfg(test)]

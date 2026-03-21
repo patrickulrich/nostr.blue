@@ -1,14 +1,12 @@
 use crate::routes::Route;
 use crate::stores::{nostr_client, relay};
-use crate::utils::relay::{decode_relay_route_id, relay_http_url};
+use crate::utils::relay::{build_known_relay_set, decode_relay_route_id, normalize_known_relay_url, relay_http_url};
 use crate::utils::format_bytes;
 use crate::utils::is_valid_http_url;
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip11::{FeeSchedule, Limitation, RelayInformationDocument, RetentionKind};
 use nostr_sdk::prelude::JsonUtil;
 use nostr_sdk::PublicKey;
-use std::collections::HashSet;
-
 #[cfg(not(feature = "web"))]
 use crate::platform::http::http_client;
 #[cfg(not(feature = "web"))]
@@ -33,10 +31,6 @@ struct RelayDetailData {
     info: Option<RelayInformationDocument>,
     stats: Option<nostr_client::RelayDisplayInfo>,
     metadata_error: Option<String>,
-}
-
-fn normalize_relay_url(url: &str) -> String {
-    url.trim_end_matches('/').to_string()
 }
 
 async fn fetch_nip11_document(url: &str) -> Result<RelayInformationDocument, String> {
@@ -279,36 +273,13 @@ pub fn RelayDetail(relay_id: String) -> Element {
         async move {
             let relay_url = decode_relay_route_id(&relay_id)?;
             let http_url = relay_http_url(&relay_url)?;
-            let normalized_relay_url = normalize_relay_url(&relay_url);
+            let normalized_relay_url = normalize_known_relay_url(&relay_url);
             let display_info = nostr_client::get_relay_display_info().await;
             let stats = display_info
                 .iter()
-                .find(|info| normalize_relay_url(&info.url) == normalized_relay_url)
+                .find(|info| normalize_known_relay_url(&info.url) == normalized_relay_url)
                 .cloned();
-            let mut known_relays = HashSet::new();
-            for info in &display_info {
-                known_relays.insert(normalize_relay_url(&info.url));
-            }
-            if let Some(metadata) = relay::USER_RELAY_METADATA.read().as_ref() {
-                for relay in &metadata.relays {
-                    known_relays.insert(normalize_relay_url(&relay.url));
-                }
-                for relay in &metadata.dm_relays {
-                    known_relays.insert(normalize_relay_url(relay));
-                }
-            }
-            for relay_url in relay::LOCAL_RELAYS.read().iter() {
-                known_relays.insert(normalize_relay_url(relay_url));
-            }
-            for relay_url in relay::SEARCH_RELAYS.read().iter() {
-                known_relays.insert(normalize_relay_url(relay_url));
-            }
-            for relay_url in relay::BROADCAST_RELAYS.read().iter() {
-                known_relays.insert(normalize_relay_url(relay_url));
-            }
-            for relay_url in relay::BLOCKED_RELAYS.read().iter() {
-                known_relays.insert(normalize_relay_url(relay_url));
-            }
+            let known_relays = build_known_relay_set(Some(&display_info));
             let (info, metadata_error) = if relay::is_relay_blocked(&relay_url) {
                 (
                     None,

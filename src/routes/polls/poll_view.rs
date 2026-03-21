@@ -119,9 +119,6 @@ pub fn PollView(noteid: String) -> Element {
                         invalidate_thread_tree_cache(&event_id);
                         comments.set(merged);
                     } else {
-                        if generation_counter.load(Ordering::SeqCst) == generation {
-                            loading_comments.set(false);
-                        }
                         return;
                     }
                 }
@@ -141,9 +138,6 @@ pub fn PollView(noteid: String) -> Element {
                             )));
                         }
                     } else {
-                        if generation_counter.load(Ordering::SeqCst) == generation {
-                            loading_comments.set(false);
-                        }
                         return;
                     }
                 }
@@ -159,9 +153,6 @@ pub fn PollView(noteid: String) -> Element {
                     Ok(subscription_id) => {
                         if generation_counter.load(Ordering::SeqCst) != generation {
                             subscription_manager::unsubscribe(&client, &subscription_id).await;
-                            if generation_counter.load(Ordering::SeqCst) == generation {
-                                loading_comments.set(false);
-                            }
                             return;
                         }
 
