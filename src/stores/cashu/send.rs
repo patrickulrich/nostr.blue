@@ -685,23 +685,35 @@ async fn publish_send_events(
                 }
                 Ok(_) => {
                     log::warn!("No relays accepted deletion event, queuing for retry");
-                    queue_event_for_retry(
+                    if let Err(queue_err) = queue_event_for_retry(
                         deletion_builder,
                         PendingEventType::DeletionEvent,
                         None,
                         None,
                     )
-                    .await;
+                    .await
+                    {
+                        log::error!(
+                            "Failed to queue send deletion event for retry: {}",
+                            queue_err
+                        );
+                    }
                 }
                 Err(e) => {
                     log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
-                    queue_event_for_retry(
+                    if let Err(queue_err) = queue_event_for_retry(
                         deletion_builder,
                         PendingEventType::DeletionEvent,
                         None,
                         None,
                     )
-                    .await;
+                    .await
+                    {
+                        log::error!(
+                            "Failed to queue send deletion event for retry: {}",
+                            queue_err
+                        );
+                    }
                 }
             }
         }

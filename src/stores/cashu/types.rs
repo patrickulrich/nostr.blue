@@ -755,6 +755,9 @@ pub struct PendingNostrEvent {
     /// History type to recreate after a token retry succeeds
     #[serde(default)]
     pub history_type: Option<String>,
+    /// Real Nostr event id after publish succeeds but follow-up work still needs retry
+    #[serde(default)]
+    pub published_event_id: Option<String>,
 }
 /// Counter backup for mint removal/re-addition
 #[derive(Clone, Debug, Serialize, Deserialize)]

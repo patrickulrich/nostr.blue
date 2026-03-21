@@ -22,11 +22,22 @@ pub struct PersistedToolCall {
     pub result: String,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct PersistedChatImage {
+    pub url: String,
+    #[serde(default)]
+    pub alt: String,
+    #[serde(default)]
+    pub title: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct PersistedChatMessage {
     pub id: String,
     pub role: PersistedChatRole,
     pub content: String,
+    #[serde(default)]
+    pub images: Vec<PersistedChatImage>,
     #[serde(default)]
     pub tool_calls: Vec<PersistedToolCall>,
 }

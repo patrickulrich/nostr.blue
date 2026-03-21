@@ -35,6 +35,8 @@ pub struct PpqAccountState {
     pub credit_id: String,
     pub api_key: String,
     #[serde(default)]
+    pub managed_api_key: Option<String>,
+    #[serde(default)]
     pub active_api_key_id: Option<String>,
 }
 
@@ -82,7 +84,7 @@ impl AiProviderConfig {
     }
 
     pub fn supports_tools(&self) -> bool {
-        false
+        !matches!(self.provider_kind, AiProviderKind::Ppq)
     }
 
     pub fn authentication_label(&self) -> &'static str {
@@ -101,7 +103,12 @@ pub fn ppq_provider(account: Option<&PpqAccountState>) -> AiProviderConfig {
         provider_kind: AiProviderKind::Ppq,
         auth: ProviderAuth::PpqManaged {
             api_key: account.and_then(|account| {
-                let trimmed = account.api_key.trim();
+                let selected_key = account
+                    .managed_api_key
+                    .as_deref()
+                    .filter(|key| !key.trim().is_empty())
+                    .unwrap_or(account.api_key.as_str());
+                let trimmed = selected_key.trim();
                 (!trimmed.is_empty()).then(|| trimmed.to_string())
             }),
         },
@@ -316,6 +323,7 @@ mod tests {
             ppq_account: Some(PpqAccountState {
                 credit_id: "credit-123".to_string(),
                 api_key: "sk-managed".to_string(),
+                managed_api_key: None,
                 active_api_key_id: Some("key-1".to_string()),
             }),
         };
@@ -336,6 +344,19 @@ mod tests {
         let provider = ppq_provider(None);
         assert!(provider.requires_setup());
         assert!(!provider.supports_tools());
+    }
+
+    #[test]
+    fn custom_provider_supports_tools() {
+        let provider = AiProviderConfig {
+            id: "custom".to_string(),
+            name: "Custom".to_string(),
+            base_url: "https://example.com/v1".to_string(),
+            provider_kind: AiProviderKind::OpenAiCompatible,
+            auth: ProviderAuth::BearerToken("secret".to_string()),
+            is_builtin: false,
+        };
+        assert!(provider.supports_tools());
     }
 
     #[test]

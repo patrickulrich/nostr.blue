@@ -755,34 +755,52 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
                     }
                     Ok(_) => {
                         log::warn!("No relays accepted deletion event, queuing for retry");
-                        super::events::queue_event_for_retry(
+                        if let Err(queue_err) = super::events::queue_event_for_retry(
                             deletion_builder,
                             super::types::PendingEventType::DeletionEvent,
                             None,
                             None,
                         )
-                        .await;
+                        .await
+                        {
+                            log::error!(
+                                "Failed to queue mint deletion event for retry: {}",
+                                queue_err
+                            );
+                        }
                     }
                     Err(e) => {
                         log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
-                        super::events::queue_event_for_retry(
+                        if let Err(queue_err) = super::events::queue_event_for_retry(
                             deletion_builder,
                             super::types::PendingEventType::DeletionEvent,
                             None,
                             None,
                         )
-                        .await;
+                        .await
+                        {
+                            log::error!(
+                                "Failed to queue mint deletion event for retry: {}",
+                                queue_err
+                            );
+                        }
                     }
                 }
             } else {
                 log::warn!("Client not initialized, queuing deletion event for retry");
-                super::events::queue_event_for_retry(
+                if let Err(queue_err) = super::events::queue_event_for_retry(
                     deletion_builder,
                     super::types::PendingEventType::DeletionEvent,
                     None,
                     None,
                 )
-                .await;
+                .await
+                {
+                    log::error!(
+                        "Failed to queue mint deletion event for retry: {}",
+                        queue_err
+                    );
+                }
             }
         }
     }
@@ -1308,23 +1326,35 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
             Ok(output) if !output.success.is_empty() => {}
             Ok(_) => {
                 log::warn!("Failed to publish deletion event: no relays accepted the event");
-                super::events::queue_event_for_retry(
+                if let Err(queue_err) = super::events::queue_event_for_retry(
                     delete_builder,
                     super::types::PendingEventType::DeletionEvent,
                     None,
                     None,
                 )
-                .await;
+                .await
+                {
+                    log::error!(
+                        "Failed to queue deletion event for retry after consolidation: {}",
+                        queue_err
+                    );
+                }
             }
             Err(e) => {
                 log::warn!("Failed to publish deletion event: {}", e);
-                super::events::queue_event_for_retry(
+                if let Err(queue_err) = super::events::queue_event_for_retry(
                     delete_builder,
                     super::types::PendingEventType::DeletionEvent,
                     None,
                     None,
                 )
-                .await;
+                .await
+                {
+                    log::error!(
+                        "Failed to queue deletion event for retry after consolidation: {}",
+                        queue_err
+                    );
+                }
             }
         }
     }

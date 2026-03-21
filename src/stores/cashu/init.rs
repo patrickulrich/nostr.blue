@@ -2,7 +2,10 @@
 //!
 //! Functions for initializing the wallet, checking/accepting terms,
 //! and creating new wallets.
-use super::events::{fetch_tokens, start_pending_events_processor};
+use super::events::{
+    fetch_tokens, publish_signed_event, sign_event_builder_with_signer,
+    start_pending_events_processor,
+};
 use super::history::fetch_history;
 use super::internal::{init_multi_mint_wallet, inject_nip60_proofs_to_cdk};
 use super::recovery::{recover_pending_operations, sync_state_with_all_mints};
@@ -261,21 +264,30 @@ pub async fn init_wallet() -> Result<(), String> {
         Ok(events) => {
             let relay_wallet_event = events.into_iter().next();
             match (pending_wallet_event.as_ref(), relay_wallet_event.as_ref()) {
-                (Some(pending), Some(relay)) => match initialize_wallet_source(pending, "queued")
-                    .await
-                {
-                    Ok(()) => Ok(()),
-                    Err(pending_error) => {
-                        log::warn!("{}", pending_error);
-                        if let Err(relay_error) = initialize_wallet_source(relay, "relay").await {
-                            log::error!("{}", relay_error);
-                            *WALLET_STATUS.write() = WalletStatus::Error(relay_error.clone());
-                            Err(relay_error)
+                (Some(pending), Some(relay)) => {
+                    let (primary, primary_label, fallback, fallback_label) =
+                        if pending.created_at >= relay.created_at {
+                            (pending, "queued", relay, "relay")
                         } else {
-                            Ok(())
+                            (relay, "relay", pending, "queued")
+                        };
+                    match initialize_wallet_source(primary, primary_label).await {
+                        Ok(()) => Ok(()),
+                        Err(primary_error) => {
+                            log::warn!("{}", primary_error);
+                            if let Err(fallback_error) =
+                                initialize_wallet_source(fallback, fallback_label).await
+                            {
+                                log::error!("{}", fallback_error);
+                                *WALLET_STATUS.write() =
+                                    WalletStatus::Error(fallback_error.clone());
+                                Err(fallback_error)
+                            } else {
+                                Ok(())
+                            }
                         }
                     }
-                },
+                }
                 (Some(pending), None) => {
                     if let Err(error) = initialize_wallet_source(pending, "queued").await {
                         log::error!("{}", error);
@@ -341,9 +353,8 @@ pub async fn create_wallet(mints: Vec<String>) -> Result<(), String> {
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-    let signer = crate::stores::signer::get_signer()
-        .ok_or("No signer available")?
-        .as_nostr_signer();
+    let signer_type = crate::stores::signer::get_signer().ok_or("No signer available")?;
+    let signer = signer_type.as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
     let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let wallet_secret = SecretKey::generate();
@@ -372,10 +383,8 @@ pub async fn create_wallet(mints: Vec<String>) -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to encrypt wallet data: {}", e))?;
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWallet, encrypted_content);
-    match client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
-        .await
-    {
+    let event = sign_event_builder_with_signer(builder, signer_type).await?;
+    match publish_signed_event(&client, &event).await {
         Ok(output) if !output.success.is_empty() => {
             log::info!("Wallet created successfully");
             *WALLET_STATE.write() = Some(WalletState {

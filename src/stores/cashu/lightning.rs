@@ -2,8 +2,8 @@
 //!
 //! Functions for mint/melt operations (lightning topup and withdrawal).
 use super::events::{
-    publish_quote_event, queue_event_for_retry, queue_token_event_for_retry_with_history,
-    sign_event_builder,
+    publish_quote_event, publish_signed_event, queue_event_for_retry,
+    queue_token_event_for_retry_with_history, sign_event_builder, sign_event_builder_with_signer,
 };
 use super::internal::{
     cleanup_spent_proofs_internal, create_ephemeral_wallet, is_token_spent_error_string,
@@ -28,17 +28,13 @@ use super::utils::{mint_matches, normalize_mint_url};
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
 use dioxus::prelude::*;
 use nostr_sdk::signer::NostrSigner;
-use nostr_sdk::{Client, EventBuilder, EventId, Kind, PublicKey};
+use nostr_sdk::{Client, EventId, Kind, PublicKey};
 
 async fn send_signed_builder(
     client: &Client,
-    builder: EventBuilder,
+    event: &nostr_sdk::Event,
 ) -> Result<nostr_relay_pool::Output<EventId>, String> {
-    let event = sign_event_builder(builder).await?;
-    client
-        .send_event(&event)
-        .await
-        .map_err(|e| format!("Failed to publish signed event: {}", e))
+    publish_signed_event(client, event).await
 }
 /// Create a mint quote (request lightning invoice to receive sats)
 pub async fn create_mint_quote(
@@ -172,9 +168,8 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
         proofs: extended_proofs,
         del: vec![],
     };
-    let signer = crate::stores::signer::get_signer()
-        .ok_or("No signer available")?
-        .as_nostr_signer();
+    let signer_type = crate::stores::signer::get_signer().ok_or("No signer available")?;
+    let signer = signer_type.as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
     let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let json_content = serde_json::to_string(&token_event_data)
@@ -184,9 +179,10 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
         .await
         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+    let signed_event = sign_event_builder_with_signer(builder.clone(), signer_type).await?;
     let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
     let published_event_id = match nostr_client::NOSTR_CLIENT.read().as_ref().cloned() {
-        Some(client) => match send_signed_builder(&client, builder.clone()).await {
+        Some(client) => match send_signed_builder(&client, &signed_event).await {
             Ok(event_output) if !event_output.success.is_empty() => {
                 let event_id = event_output.id().to_hex();
                 log::info!("Published token event: {}", event_id);
@@ -204,7 +200,7 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
                     amount_minted,
                     "lightning_mint".to_string(),
                 )
-                .await;
+                .await?;
                 None
             }
             Err(error) => {
@@ -219,7 +215,7 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
                     amount_minted,
                     "lightning_mint".to_string(),
                 )
-                .await;
+                .await?;
                 None
             }
         },
@@ -232,7 +228,7 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
                 amount_minted,
                 "lightning_mint".to_string(),
             )
-            .await;
+            .await?;
             None
         }
     };
@@ -621,9 +617,8 @@ async fn publish_melt_events(
     keep_proofs: &[cdk::nuts::Proof],
     event_ids_to_delete: &[String],
 ) -> Result<Option<String>, String> {
-    let signer = crate::stores::signer::get_signer()
-        .ok_or("No signer available")?
-        .as_nostr_signer();
+    let signer_type = crate::stores::signer::get_signer().ok_or("No signer available")?;
+    let signer = signer_type.as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
     let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let client = nostr_client::NOSTR_CLIENT.read().as_ref().cloned();
@@ -647,8 +642,10 @@ async fn publish_melt_events(
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+        let signed_event =
+            sign_event_builder_with_signer(builder.clone(), signer_type.clone()).await?;
         if let Some(client) = client.as_ref() {
-            match send_signed_builder(client, builder.clone()).await {
+            match send_signed_builder(client, &signed_event).await {
                 Ok(event_output) if !event_output.success.is_empty() => {
                     let real_id = event_output.id().to_hex();
                     log::info!("Published new token event: {}", real_id);
@@ -663,7 +660,7 @@ async fn publish_melt_events(
                         Some(pending_id.clone()),
                         Some(mint_url.to_string()),
                     )
-                    .await;
+                    .await?;
                     new_event_id = Some(pending_id);
                 }
                 Err(e) => {
@@ -675,7 +672,7 @@ async fn publish_melt_events(
                         Some(pending_id.clone()),
                         Some(mint_url.to_string()),
                     )
-                    .await;
+                    .await?;
                     new_event_id = Some(pending_id);
                 }
             }
@@ -688,7 +685,7 @@ async fn publish_melt_events(
                 Some(pending_id.clone()),
                 Some(mint_url.to_string()),
             )
-            .await;
+            .await?;
             new_event_id = Some(pending_id);
         }
     }
@@ -708,13 +705,9 @@ async fn publish_melt_events(
             ));
             let deletion_builder =
                 nostr_sdk::EventBuilder::new(Kind::from(5), "Melted token").tags(tags);
+            let signed_deletion = sign_event_builder(deletion_builder.clone()).await?;
             if let Some(client) = client.as_ref() {
-                match client
-                    .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
-                        deletion_builder.clone(),
-                    ))
-                    .await
-                {
+                match publish_signed_event(client, &signed_deletion).await {
                     Ok(output) if !output.success.is_empty() => {
                         log::info!(
                             "Published deletion events for {} token events",
@@ -729,7 +722,7 @@ async fn publish_melt_events(
                             None,
                             None,
                         )
-                        .await;
+                        .await?;
                     }
                     Err(e) => {
                         log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
@@ -739,7 +732,7 @@ async fn publish_melt_events(
                             None,
                             None,
                         )
-                        .await;
+                        .await?;
                     }
                 }
             } else {
@@ -750,7 +743,7 @@ async fn publish_melt_events(
                     None,
                     None,
                 )
-                .await;
+                .await?;
             }
         }
     }
@@ -799,9 +792,8 @@ pub async fn create_history_event_with_type(
     operation_type: Option<&str>,
     invoice: Option<&str>,
 ) -> Result<(), String> {
-    let signer = crate::stores::signer::get_signer()
-        .ok_or("No signer available")?
-        .as_nostr_signer();
+    let signer_type = crate::stores::signer::get_signer().ok_or("No signer available")?;
+    let signer = signer_type.as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
     let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let mut content_array = vec![
@@ -838,8 +830,9 @@ pub async fn create_history_event_with_type(
         .await
         .map_err(|e| format!("Failed to encrypt: {}", e))?;
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletSpendingHistory, encrypted);
+    let signed_event = sign_event_builder_with_signer(builder.clone(), signer_type).await?;
     if let Some(client) = nostr_client::NOSTR_CLIENT.read().as_ref().cloned() {
-        match send_signed_builder(&client, builder.clone()).await {
+        match send_signed_builder(&client, &signed_event).await {
             Ok(event_output) if !event_output.success.is_empty() => {
                 log::info!("Published history event: {}", event_output.id().to_hex());
             }
@@ -848,19 +841,19 @@ pub async fn create_history_event_with_type(
                     "No relays accepted history event {}, queuing for retry",
                     event_output.id().to_hex()
                 );
-                queue_event_for_retry(builder, PendingEventType::HistoryEvent, None, None).await;
+                queue_event_for_retry(builder, PendingEventType::HistoryEvent, None, None).await?;
             }
             Err(error) => {
                 log::warn!(
                     "Failed to publish history event, queuing for retry: {}",
                     error
                 );
-                queue_event_for_retry(builder, PendingEventType::HistoryEvent, None, None).await;
+                queue_event_for_retry(builder, PendingEventType::HistoryEvent, None, None).await?;
             }
         }
     } else {
         log::warn!("Client not initialized, queuing history event for retry");
-        queue_event_for_retry(builder, PendingEventType::HistoryEvent, None, None).await;
+        queue_event_for_retry(builder, PendingEventType::HistoryEvent, None, None).await?;
     }
     Ok(())
 }

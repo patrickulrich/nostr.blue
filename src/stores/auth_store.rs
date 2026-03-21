@@ -542,7 +542,6 @@ pub async fn logout() -> Result<(), String> {
     crate::stores::shop_store::clear_caches();
     crate::stores::dms::clear_caches();
     crate::stores::shop_store::reset_orders_loaded_flag();
-    crate::stores::nwc_store::disconnect_nwc(false);
     spawn(async move {
         crate::services::search_relays::invalidate_search_relay_cache().await;
     });
@@ -561,6 +560,7 @@ pub async fn logout() -> Result<(), String> {
         crate::platform::storage::delete(storage_key)
             .map_err(|e| format!("Failed to delete {} during logout: {}", label, e))?;
     }
+    crate::stores::nwc_store::disconnect_nwc(false);
     clear_auth();
     *PASSWORD_PROMPT.write() = PasswordPromptState::default();
     Ok(())

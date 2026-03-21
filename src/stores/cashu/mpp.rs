@@ -339,13 +339,19 @@ pub async fn execute_mpp_melt(
                                 mint_url
                             );
                             let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                            queue_event_for_retry(
+                            if let Err(queue_err) = queue_event_for_retry(
                                 builder,
                                 PendingEventType::TokenEvent,
                                 Some(pending_id.clone()),
                                 Some(mint_url.clone()),
                             )
-                            .await;
+                            .await
+                            {
+                                log::error!(
+                                    "Failed to queue MPP token event for retry: {}",
+                                    queue_err
+                                );
+                            }
                             new_tokens.push(TokenData {
                                 event_id: pending_id,
                                 mint: mint_url.clone(),
@@ -362,13 +368,19 @@ pub async fn execute_mpp_melt(
                                 e
                             );
                             let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                            queue_event_for_retry(
+                            if let Err(queue_err) = queue_event_for_retry(
                                 builder,
                                 PendingEventType::TokenEvent,
                                 Some(pending_id.clone()),
                                 Some(mint_url.clone()),
                             )
-                            .await;
+                            .await
+                            {
+                                log::error!(
+                                    "Failed to queue MPP token event for retry: {}",
+                                    queue_err
+                                );
+                            }
                             new_tokens.push(TokenData {
                                 event_id: pending_id,
                                 mint: mint_url.clone(),
@@ -436,26 +448,38 @@ pub async fn execute_mpp_melt(
                     }
                     Ok(_) => {
                         log::warn!("No relays accepted MPP deletion event, will queue for retry");
-                        queue_event_for_retry(
+                        if let Err(queue_err) = queue_event_for_retry(
                             deletion_builder,
                             PendingEventType::DeletionEvent,
                             None,
                             None,
                         )
-                        .await;
+                        .await
+                        {
+                            log::error!(
+                                "Failed to queue MPP deletion event for retry: {}",
+                                queue_err
+                            );
+                        }
                     }
                     Err(e) => {
                         log::warn!(
                             "Failed to publish MPP deletion event, will queue for retry: {}",
                             e
                         );
-                        queue_event_for_retry(
+                        if let Err(queue_err) = queue_event_for_retry(
                             deletion_builder,
                             PendingEventType::DeletionEvent,
                             None,
                             None,
                         )
-                        .await;
+                        .await
+                        {
+                            log::error!(
+                                "Failed to queue MPP deletion event for retry: {}",
+                                queue_err
+                            );
+                        }
                     }
                 }
             }

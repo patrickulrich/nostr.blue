@@ -190,10 +190,14 @@ pub fn PpqSettingsPanel(
                                         next_state.ppq_account = Some(PpqAccountState {
                                             credit_id: created_account.credit_id,
                                             api_key: created_account.api_key,
+                                            managed_api_key: None,
                                             active_api_key_id: None,
                                         });
-                                        match ai_provider_store::save_provider_state(&next_state).await {
-                                            Ok(()) => state.set(next_state),
+                                        state.set(next_state.clone());
+                                        match ai_provider_store::save_provider_state(&next_state)
+                                            .await
+                                        {
+                                            Ok(()) => {}
                                             Err(err) => save_error.set(Some(err)),
                                         }
                                     }
@@ -243,7 +247,14 @@ pub fn PpqSettingsPanel(
                             class: "rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-60",
                             disabled: *topup_loading.read(),
                             onclick: move |_| {
-                                let amount = parse_optional_f64(&topup_amount.read()).unwrap_or(0.0);
+                                let amount = match parse_optional_f64(&topup_amount.read()) {
+                                    Ok(Some(amount)) => amount,
+                                    Ok(None) => 0.0,
+                                    Err(_) => {
+                                        topup_error.set(Some("Topup amount must be a valid number".to_string()));
+                                        return;
+                                    }
+                                };
                                 if amount <= 0.0 {
                                     topup_error.set(Some("Topup amount must be greater than 0".to_string()));
                                     return;
@@ -382,8 +393,22 @@ pub fn PpqSettingsPanel(
                                 }
                                 nwc_loading.set(true);
                                 nwc_error.set(None);
-                                let threshold_usd = parse_optional_f64(&nwc_threshold.read());
-                                let topup_amount_usd = parse_optional_f64(&nwc_topup_amount.read());
+                                let threshold_usd = match parse_optional_f64(&nwc_threshold.read()) {
+                                    Ok(value) => value,
+                                    Err(_) => {
+                                        nwc_loading.set(false);
+                                        nwc_error.set(Some("Threshold USD must be a valid number".to_string()));
+                                        return;
+                                    }
+                                };
+                                let topup_amount_usd = match parse_optional_f64(&nwc_topup_amount.read()) {
+                                    Ok(value) => value,
+                                    Err(_) => {
+                                        nwc_loading.set(false);
+                                        nwc_error.set(Some("Topup USD must be a valid number".to_string()));
+                                        return;
+                                    }
+                                };
                                 let credit_id = connect_nwc_credit_id.clone();
                                 spawn(async move {
                                     match ppq::connect_nwc_auto_topup(&credit_id, &nwc_url_value, threshold_usd, topup_amount_usd).await {
@@ -501,7 +526,13 @@ pub fn PpqSettingsPanel(
                                     key_form_error.set(Some("Key name is required".to_string()));
                                     return;
                                 }
-                                let usage_limit_usd = parse_optional_f64(&key_usage_limit.read());
+                                let usage_limit_usd = match parse_optional_f64(&key_usage_limit.read()) {
+                                    Ok(value) => value,
+                                    Err(_) => {
+                                        key_form_error.set(Some("Usage limit USD must be a valid number".to_string()));
+                                        return;
+                                    }
+                                };
                                 let reset_period = empty_to_none(key_reset_period.read().clone());
                                 if usage_limit_usd.is_none() && reset_period.is_some() {
                                     key_form_error.set(Some("Reset period requires a usage limit".to_string()));
@@ -804,7 +835,7 @@ fn set_active_ppq_key(
         return;
     };
     account.active_api_key_id = Some(key_id);
-    account.api_key = api_key;
+    account.managed_api_key = Some(api_key);
     persist_state(next_state, state, is_saving, save_error);
 }
 
@@ -818,7 +849,7 @@ fn clear_active_ppq_key(
         return;
     };
     account.active_api_key_id = None;
-    account.api_key.clear();
+    account.managed_api_key = None;
     persist_state(next_state, state, is_saving, save_error);
 }
 
@@ -844,12 +875,12 @@ fn persist_state(
     });
 }
 
-fn parse_optional_f64(input: &str) -> Option<f64> {
+fn parse_optional_f64(input: &str) -> Result<Option<f64>, std::num::ParseFloatError> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
-        None
+        Ok(None)
     } else {
-        trimmed.parse::<f64>().ok()
+        trimmed.parse::<f64>().map(Some)
     }
 }
 

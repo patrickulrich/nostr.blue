@@ -384,6 +384,9 @@ fn parse_description_json(event: &Event) -> Option<Value> {
 }
 
 fn extract_zap_amount_sats(event: &Event) -> Option<u64> {
+    if event.verify().is_err() {
+        return None;
+    }
     if let Some(bolt11_tag) = event.tags.iter().find(|tag| {
         tag.as_slice()
             .first()

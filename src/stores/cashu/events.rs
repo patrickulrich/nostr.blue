@@ -38,6 +38,7 @@ pub async fn queue_nostr_event(
         mint_url: None,
         history_amount: None,
         history_type: None,
+        published_event_id: None,
     };
     PENDING_NOSTR_EVENTS.write().push(pending.clone());
     if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
@@ -111,10 +112,15 @@ pub async fn queue_signed_event_for_retry_result(
         mint_url,
         history_amount: None,
         history_type: None,
+        published_event_id: None,
     };
+    let pending_event_id = pending_event.id.clone();
     PENDING_NOSTR_EVENTS.write().push(pending_event.clone());
     if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
         if let Err(e) = localstore.add_pending_event(&pending_event).await {
+            PENDING_NOSTR_EVENTS
+                .write()
+                .retain(|event| event.id != pending_event_id);
             let message = format!("Failed to persist pending event: {}", e);
             log::warn!("{}", message);
             return Err(message);
@@ -132,9 +138,16 @@ pub async fn queue_signed_event_for_retry_result(
 pub async fn sign_event_builder(
     builder: nostr_sdk::EventBuilder,
 ) -> Result<nostr_sdk::Event, String> {
-    let builder = crate::utils::nips::nip89::tag_event_builder(builder);
     let signer =
         crate::stores::signer::get_signer().ok_or_else(|| "No signer available".to_string())?;
+    sign_event_builder_with_signer(builder, signer).await
+}
+
+pub async fn sign_event_builder_with_signer(
+    builder: nostr_sdk::EventBuilder,
+    signer: crate::stores::signer::SignerType,
+) -> Result<nostr_sdk::Event, String> {
+    let builder = crate::utils::nips::nip89::tag_event_builder(builder);
     match signer {
         crate::stores::signer::SignerType::Keys(keys) => builder
             .sign_with_keys(&keys)
@@ -155,6 +168,16 @@ pub async fn sign_event_builder(
             .map_err(|e| format!("Failed to sign event: {}", e)),
     }
 }
+
+pub async fn publish_signed_event(
+    client: &nostr_sdk::Client,
+    event: &nostr_sdk::Event,
+) -> Result<nostr_relay_pool::Output<EventId>, String> {
+    client
+        .send_event(event)
+        .await
+        .map_err(|e| format!("Failed to publish signed event: {}", e))
+}
 /// Queue an EventBuilder for retry when initial publication fails
 ///
 /// Optional `pending_token_id` and `mint_url` link this pending event to a token
@@ -166,12 +189,12 @@ pub async fn queue_token_event_for_retry_with_history(
     mint_url: String,
     history_amount: u64,
     history_type: String,
-) {
+) -> Result<(), String> {
     let event = match sign_event_builder(builder).await {
         Ok(e) => e,
         Err(e) => {
             log::error!("Cannot queue token event with history metadata: {}", e);
-            return;
+            return Err(e);
         }
     };
     let pending_event = PendingNostrEvent {
@@ -179,8 +202,9 @@ pub async fn queue_token_event_for_retry_with_history(
         builder_json: match serde_json::to_string(&event) {
             Ok(j) => j,
             Err(e) => {
-                log::error!("Failed to serialize event for queueing: {}", e);
-                return;
+                let message = format!("Failed to serialize event for queueing: {}", e);
+                log::error!("{}", message);
+                return Err(message);
             }
         },
         event_type: PendingEventType::TokenEvent,
@@ -191,17 +215,25 @@ pub async fn queue_token_event_for_retry_with_history(
         mint_url: Some(mint_url),
         history_amount: Some(history_amount),
         history_type: Some(history_type),
+        published_event_id: None,
     };
+    let pending_event_id = pending_event.id.clone();
     PENDING_NOSTR_EVENTS.write().push(pending_event.clone());
     if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
         if let Err(e) = localstore.add_pending_event(&pending_event).await {
-            log::warn!("Failed to persist pending event: {}", e);
+            PENDING_NOSTR_EVENTS
+                .write()
+                .retain(|event| event.id != pending_event_id);
+            let message = format!("Failed to persist pending event: {}", e);
+            log::warn!("{}", message);
+            return Err(message);
         }
     }
     log::info!(
         "Queued token event for retry with history metadata, pending_id={}",
         pending_token_id
     );
+    Ok(())
 }
 
 pub async fn queue_event_for_retry(
@@ -209,15 +241,15 @@ pub async fn queue_event_for_retry(
     event_type: PendingEventType,
     pending_token_id: Option<String>,
     mint_url: Option<String>,
-) {
+) -> Result<(), String> {
     let event = match sign_event_builder(builder).await {
         Ok(e) => e,
         Err(e) => {
             log::error!("Failed to sign event for queueing: {}", e);
-            return;
+            return Err(e);
         }
     };
-    queue_signed_event_for_retry(event, event_type, pending_token_id, mint_url).await;
+    queue_signed_event_for_retry_result(event, event_type, pending_token_id, mint_url).await
 }
 /// Queue a token event for retry with tracking info
 ///
@@ -260,10 +292,8 @@ pub async fn publish_quote_event(
     mint_url: &str,
     expiration_days: u64,
 ) -> Result<String, String> {
-    use nostr_sdk::signer::NostrSigner;
-    let signer = crate::stores::signer::get_signer()
-        .ok_or("No signer available")?
-        .as_nostr_signer();
+    let signer_type = crate::stores::signer::get_signer().ok_or("No signer available")?;
+    let signer = signer_type.as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
     let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let encrypted = signer
@@ -280,10 +310,8 @@ pub async fn publish_quote_event(
         .as_ref()
         .ok_or("Nostr client not initialized")?
         .clone();
-    match client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
-        .await
-    {
+    let event = sign_event_builder_with_signer(builder, signer_type).await?;
+    match publish_signed_event(&client, &event).await {
         Ok(output) if !output.success.is_empty() => {
             let event_id = output.id().to_hex();
             log::info!("Published quote event for quote {}: {}", quote_id, event_id);
@@ -584,9 +612,8 @@ pub async fn create_history_event_full(
     redeemed_tokens: Vec<String>,
 ) -> Result<(), String> {
     use nostr_sdk::signer::NostrSigner;
-    let signer = crate::stores::signer::get_signer()
-        .ok_or("No signer available")?
-        .as_nostr_signer();
+    let signer_type = crate::stores::signer::get_signer().ok_or("No signer available")?;
+    let signer = signer_type.as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
     let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let direction_enum = match direction {
@@ -665,10 +692,8 @@ pub async fn create_history_event_full(
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
-        .await
-        .map_err(|e| format!("Failed to publish history event: {}", e))?;
+    let event = sign_event_builder_with_signer(builder, signer_type).await?;
+    let output = publish_signed_event(&client, &event).await?;
     if output.success.is_empty() {
         return Err("Failed to publish history event: no relays accepted the event".to_string());
     }
@@ -744,7 +769,12 @@ pub async fn process_pending_events() -> Result<usize, String> {
             );
             continue;
         }
-        match publish_pending_event(&event).await {
+        let publish_result = if let Some(published_event_id) = event.published_event_id.as_ref() {
+            Ok(published_event_id.clone())
+        } else {
+            publish_pending_event(&event).await
+        };
+        match publish_result {
             Ok(nostr_event_id) => {
                 log::info!(
                     "Published pending event: {} -> nostr:{}",
@@ -811,6 +841,17 @@ pub async fn process_pending_events() -> Result<usize, String> {
                                 nostr_event_id,
                                 error
                             );
+                            let mut updated_event = event.clone();
+                            updated_event.published_event_id = Some(nostr_event_id.clone());
+                            let mut events = PENDING_NOSTR_EVENTS.write();
+                            if let Some(pos) = events.iter().position(|entry| entry.id == event.id)
+                            {
+                                events[pos] = updated_event.clone();
+                            }
+                            drop(events);
+                            if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
+                                let _ = localstore.update_pending_event(&updated_event).await;
+                            }
                             history_handled = false;
                         }
                     }

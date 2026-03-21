@@ -268,25 +268,37 @@ pub async fn transfer_between_mints(
             Ok(_) => {
                 log::warn!("No relays accepted source token event");
                 let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                queue_event_for_retry(
+                if let Err(queue_err) = queue_event_for_retry(
                     builder,
                     PendingEventType::TokenEvent,
                     Some(pending_id.clone()),
                     Some(source_mint.clone()),
                 )
-                .await;
+                .await
+                {
+                    log::error!(
+                        "Failed to queue source token event for retry: {}",
+                        queue_err
+                    );
+                }
                 source_new_event_id = Some(pending_id);
             }
             Err(e) => {
                 log::warn!("Failed to publish source token event: {}", e);
                 let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                queue_event_for_retry(
+                if let Err(queue_err) = queue_event_for_retry(
                     builder,
                     PendingEventType::TokenEvent,
                     Some(pending_id.clone()),
                     Some(source_mint.clone()),
                 )
-                .await;
+                .await
+                {
+                    log::error!(
+                        "Failed to queue source token event for retry: {}",
+                        queue_err
+                    );
+                }
                 source_new_event_id = Some(pending_id);
             }
         }
@@ -308,11 +320,27 @@ pub async fn transfer_between_mints(
             Ok(event_output) if !event_output.success.is_empty() => {}
             Ok(_) => {
                 log::warn!("No relays accepted deletion event");
-                queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None).await;
+                if let Err(queue_err) =
+                    queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None)
+                        .await
+                {
+                    log::error!(
+                        "Failed to queue transfer deletion event for retry: {}",
+                        queue_err
+                    );
+                }
             }
             Err(e) => {
                 log::warn!("Failed to publish deletion event: {}", e);
-                queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None).await;
+                if let Err(queue_err) =
+                    queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None)
+                        .await
+                {
+                    log::error!(
+                        "Failed to queue transfer deletion event for retry: {}",
+                        queue_err
+                    );
+                }
             }
         }
     }
@@ -350,25 +378,37 @@ pub async fn transfer_between_mints(
             Ok(_) => {
                 log::warn!("No relays accepted target token event");
                 let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                queue_event_for_retry(
+                if let Err(queue_err) = queue_event_for_retry(
                     builder,
                     PendingEventType::TokenEvent,
                     Some(pending_id.clone()),
                     Some(target_mint.clone()),
                 )
-                .await;
+                .await
+                {
+                    log::error!(
+                        "Failed to queue target token event for retry: {}",
+                        queue_err
+                    );
+                }
                 pending_id
             }
             Err(e) => {
                 log::warn!("Failed to publish target token event: {}", e);
                 let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                queue_event_for_retry(
+                if let Err(queue_err) = queue_event_for_retry(
                     builder,
                     PendingEventType::TokenEvent,
                     Some(pending_id.clone()),
                     Some(target_mint.clone()),
                 )
-                .await;
+                .await
+                {
+                    log::error!(
+                        "Failed to queue target token event for retry: {}",
+                        queue_err
+                    );
+                }
                 pending_id
             }
         }

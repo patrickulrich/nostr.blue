@@ -237,6 +237,11 @@ pub fn PollView(noteid: String) -> Element {
                                             if listener_comment_sub_id.read().as_ref()
                                                 == Some(&listener_subscription_id)
                                             {
+                                                subscription_manager::unsubscribe(
+                                                    &client_for_listener,
+                                                    &listener_subscription_id,
+                                                )
+                                                .await;
                                                 listener_comment_sub_id.set(None);
                                             }
                                             listener_comment_listener_task.set(None);

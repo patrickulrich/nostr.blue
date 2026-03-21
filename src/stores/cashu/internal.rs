@@ -407,26 +407,38 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
             }
             Ok(_) => {
                 log::warn!("No relays accepted cleanup token event, queuing for retry");
-                super::events::queue_event_for_retry(
+                if let Err(queue_err) = super::events::queue_event_for_retry(
                     builder,
                     super::types::PendingEventType::TokenEvent,
                     synthetic_pending_id.clone(),
                     Some(mint_url.to_string()),
                 )
-                .await;
+                .await
+                {
+                    log::error!(
+                        "Failed to queue cleanup token event for retry: {}",
+                        queue_err
+                    );
+                }
             }
             Err(e) => {
                 log::warn!(
                     "Failed to publish cleanup token event, queuing for retry: {}",
                     e
                 );
-                super::events::queue_event_for_retry(
+                if let Err(queue_err) = super::events::queue_event_for_retry(
                     builder,
                     super::types::PendingEventType::TokenEvent,
                     synthetic_pending_id.clone(),
                     Some(mint_url.to_string()),
                 )
-                .await;
+                .await
+                {
+                    log::error!(
+                        "Failed to queue cleanup token event for retry: {}",
+                        queue_err
+                    );
+                }
             }
         }
     }
@@ -461,23 +473,35 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
                 }
                 Ok(_) => {
                     log::warn!("No relays accepted cleanup deletion event, queuing for retry");
-                    super::events::queue_event_for_retry(
+                    if let Err(queue_err) = super::events::queue_event_for_retry(
                         deletion_builder,
                         super::types::PendingEventType::DeletionEvent,
                         None,
                         None,
                     )
-                    .await;
+                    .await
+                    {
+                        log::error!(
+                            "Failed to queue cleanup deletion event for retry: {}",
+                            queue_err
+                        );
+                    }
                 }
                 Err(e) => {
                     log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
-                    super::events::queue_event_for_retry(
+                    if let Err(queue_err) = super::events::queue_event_for_retry(
                         deletion_builder,
                         super::types::PendingEventType::DeletionEvent,
                         None,
                         None,
                     )
-                    .await;
+                    .await
+                    {
+                        log::error!(
+                            "Failed to queue cleanup deletion event for retry: {}",
+                            queue_err
+                        );
+                    }
                 }
             }
         }

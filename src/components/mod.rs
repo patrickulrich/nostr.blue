@@ -69,6 +69,8 @@ pub use mobile_search_slideout::MobileSearchSlideout;
 pub use note_card::{NoteCard, NoteCardSkeleton};
 pub use note_composer::NoteComposer;
 pub use photo_card::PhotoCard;
+#[allow(unused_imports)]
+pub use ppq_settings_panel::PpqSettingsPanel;
 pub use reply_composer::ReplyComposer;
 pub use rich_content::RichContent;
 pub use search_input::SearchInput;

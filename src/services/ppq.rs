@@ -70,18 +70,10 @@ pub async fn create_account() -> Result<PpqAccount, String> {
     )
     .await?;
     let data = data_or_root(&value);
-    let credit_id = string_field(data, &["credit_id", "creditId"]).ok_or_else(|| {
-        format!(
-            "PPQ account response missing credit_id: {}",
-            pretty_json(&value)
-        )
-    })?;
-    let api_key = string_field(data, &["api_key", "apiKey"]).ok_or_else(|| {
-        format!(
-            "PPQ account response missing api_key: {}",
-            pretty_json(&value)
-        )
-    })?;
+    let credit_id = string_field(data, &["credit_id", "creditId"])
+        .ok_or_else(|| "PPQ account response missing field: credit_id".to_string())?;
+    let api_key = string_field(data, &["api_key", "apiKey"])
+        .ok_or_else(|| "PPQ account response missing field: api_key".to_string())?;
     Ok(PpqAccount { credit_id, api_key })
 }
 
@@ -408,6 +400,9 @@ async fn parse_response(response: Response) -> Result<Value, String> {
         .map_err(|e| format!("Failed to read PPQ response: {}", e))?;
     if !status.is_success() {
         return Err(format!("PPQ request failed ({}): {}", status, body));
+    }
+    if body.trim().is_empty() {
+        return Ok(Value::Null);
     }
     serde_json::from_str(&body)
         .map_err(|e| format!("Failed to parse PPQ response: {}. Body: {}", e, body))

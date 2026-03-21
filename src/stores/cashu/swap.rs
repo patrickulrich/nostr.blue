@@ -594,13 +594,19 @@ async fn publish_deletion_events(client: &nostr_sdk::Client, event_ids_to_delete
         Ok(output) => {
             if output.success.is_empty() {
                 log::warn!("No relays accepted deletion event, queuing for retry");
-                super::events::queue_event_for_retry(
+                if let Err(queue_err) = super::events::queue_event_for_retry(
                     deletion_builder.clone(),
                     PendingEventType::DeletionEvent,
                     None,
                     None,
                 )
-                .await;
+                .await
+                {
+                    log::error!(
+                        "Failed to queue swap deletion event for retry: {}",
+                        queue_err
+                    );
+                }
             } else {
                 log::info!(
                     "Published deletion events for {} token events (to {}/{} relays)",
@@ -612,13 +618,19 @@ async fn publish_deletion_events(client: &nostr_sdk::Client, event_ids_to_delete
         }
         Err(e) => {
             log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
-            super::events::queue_event_for_retry(
+            if let Err(queue_err) = super::events::queue_event_for_retry(
                 deletion_builder,
                 PendingEventType::DeletionEvent,
                 None,
                 None,
             )
-            .await;
+            .await
+            {
+                log::error!(
+                    "Failed to queue swap deletion event for retry: {}",
+                    queue_err
+                );
+            }
         }
     }
     let invalid_count = event_ids_to_delete.len() - valid_event_ids.len();
