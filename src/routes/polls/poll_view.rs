@@ -4,6 +4,7 @@ use crate::stores::nostr_client;
 use crate::utils::build_thread_tree;
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
 use dioxus::prelude::*;
+use dioxus_core::spawn_forever;
 use nostr_sdk::{Event as NostrEvent, EventId, Filter, Kind, RelayPoolNotification, SubscriptionId, Timestamp};
 use std::collections::HashMap;
 use std::sync::{
@@ -42,7 +43,7 @@ pub fn PollView(noteid: String) -> Element {
     use_drop(move || {
         if let Some(sub_id) = comment_sub_id.replace(None) {
             if let Some(client) = nostr_client::get_client() {
-                spawn(async move {
+                spawn_forever(async move {
                     subscription_manager::unsubscribe(&client, &sub_id).await;
                 });
             }
@@ -99,7 +100,10 @@ pub fn PollView(noteid: String) -> Element {
             comments_error.set(None);
             live_updates_warning.set(None);
             let subscription_handoff = Timestamp::now();
-            let mut live_since = subscription_handoff;
+            let cached_max = comments.read().iter().map(|comment| comment.created_at).max();
+            let mut live_since = cached_max
+                .map(|timestamp| std::cmp::min(subscription_handoff, timestamp))
+                .unwrap_or(subscription_handoff);
             let filter = Filter::new().kind(Kind::Comment).event(event_id).limit(500);
             match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
                 Ok(comment_events) => {
@@ -115,7 +119,9 @@ pub fn PollView(noteid: String) -> Element {
                         invalidate_thread_tree_cache(&event_id);
                         comments.set(merged);
                     } else {
-                        loading_comments.set(false);
+                        if generation_counter.load(Ordering::SeqCst) == generation {
+                            loading_comments.set(false);
+                        }
                         return;
                     }
                 }
@@ -135,7 +141,9 @@ pub fn PollView(noteid: String) -> Element {
                             )));
                         }
                     } else {
-                        loading_comments.set(false);
+                        if generation_counter.load(Ordering::SeqCst) == generation {
+                            loading_comments.set(false);
+                        }
                         return;
                     }
                 }
@@ -145,14 +153,15 @@ pub fn PollView(noteid: String) -> Element {
                 let filter = Filter::new()
                     .kind(Kind::Comment)
                     .event(event_id)
-                    .since(live_since)
-                    .limit(0);
+                    .since(live_since);
 
                 match subscription_manager::subscribe_realtime(&client, filter, Some(600)).await {
                     Ok(subscription_id) => {
                         if generation_counter.load(Ordering::SeqCst) != generation {
                             subscription_manager::unsubscribe(&client, &subscription_id).await;
-                            loading_comments.set(false);
+                            if generation_counter.load(Ordering::SeqCst) == generation {
+                                loading_comments.set(false);
+                            }
                             return;
                         }
 

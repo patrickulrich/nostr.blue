@@ -385,14 +385,14 @@ pub fn ZapGoalsHome() -> Element {
                         }
                     } else {
                         div { class: "space-y-4",
-                            for progress in filtered_goals.iter() {
+                            for goal in filtered_goals.iter().cloned() {
                                 {
-                                    let goal = progress.clone();
+                                    let goal_for_click = goal.clone();
                                     rsx! {
                                         ZapGoalCard {
                                             key: "{goal.goal.event_id}",
-                                            progress: goal.clone(),
-                                            on_contribute: move |_| open_goal_modal(goal.clone()),
+                                            progress: goal,
+                                            on_contribute: move |_| open_goal_modal(goal_for_click.clone()),
                                         }
                                     }
                                 }
@@ -435,7 +435,9 @@ pub fn ZapGoalsHome() -> Element {
                         rsx! {
                             ZapModal {
                                 recipient_pubkey: if goal.goal.is_project_goal {
-                                    zap_goals_store::PROJECT_DONATION_NPUB.to_string()
+                                    PublicKey::parse(zap_goals_store::PROJECT_DONATION_NPUB)
+                                        .map(|pubkey| pubkey.to_hex())
+                                        .unwrap_or_else(|_| zap_goals_store::PROJECT_DONATION_NPUB.to_string())
                                 } else {
                                     goal.goal.author_pubkey.clone()
                                 },
