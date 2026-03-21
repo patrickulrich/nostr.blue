@@ -1,15 +1,5 @@
 use super::*;
-
-fn ensure_publish_accepted(
-    output: &nostr_relay_pool::Output<EventId>,
-    action: &str,
-) -> std::result::Result<(), String> {
-    if output.success.is_empty() {
-        Err(format!("{action}: no relays accepted the event"))
-    } else {
-        Ok(())
-    }
-}
+use crate::utils::relay_output::ensure_publish_accepted;
 
 /// Create a new community (kind 34550)
 pub async fn create_community(

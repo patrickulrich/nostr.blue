@@ -1,4 +1,5 @@
 use crate::components::{ClientInitializing, PollCard, ThreadedComment};
+use crate::services::aggregation::get_counts_with_count_fallback;
 use crate::stores::nostr_client;
 use crate::stores::subscription_manager;
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
@@ -77,6 +78,7 @@ pub fn PollView(noteid: String) -> Element {
     let mut comments_error = use_signal(|| None::<String>);
     let mut live_updates_warning = use_signal(|| None::<String>);
     let mut loading_comments = use_signal(|| false);
+    let mut reply_total = use_signal(|| 0usize);
     let mut comments_refresh = use_signal(|| 0u64);
     let mut live_updates_retry_count = use_signal(|| 0u32);
     let mut comment_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
@@ -155,6 +157,12 @@ pub fn PollView(noteid: String) -> Element {
             comments_error.set(None);
             live_updates_warning.set(None);
             let subscription_handoff = Timestamp::now();
+            let counts = get_counts_with_count_fallback(&event_id, Duration::from_secs(10)).await;
+            if generation_counter.load(Ordering::SeqCst) == generation {
+                reply_total.set(counts.replies);
+            } else {
+                return;
+            }
             let cached_max = comments
                 .read()
                 .iter()
@@ -207,6 +215,7 @@ pub fn PollView(noteid: String) -> Element {
 
                 match subscription_manager::subscribe_realtime(&client, filter, Some(600)).await {
                     Ok(subscription_id) => {
+                        let mut notifications = client.notifications();
                         if generation_counter.load(Ordering::SeqCst) != generation {
                             subscription_manager::unsubscribe(&client, &subscription_id).await;
                             return;
@@ -217,9 +226,9 @@ pub fn PollView(noteid: String) -> Element {
                         let generation_counter = generation_counter.clone();
                         let mut listener_comment_sub_id = comment_sub_id;
                         let mut listener_comment_listener_task = comment_listener_task;
+                        let client_for_listener = client.clone();
                         let listener_subscription_id = subscription_id.clone();
                         let listener_task = spawn(async move {
-                            let mut notifications = client.notifications();
                             loop {
                                 let notification = match notifications.recv().await {
                                     Ok(notification) => notification,
@@ -245,6 +254,11 @@ pub fn PollView(noteid: String) -> Element {
                                     }
                                 };
                                 if generation_counter.load(Ordering::SeqCst) != generation {
+                                    subscription_manager::unsubscribe(
+                                        &client_for_listener,
+                                        &listener_subscription_id,
+                                    )
+                                    .await;
                                     break;
                                 }
                                 if let RelayPoolNotification::Event {
@@ -263,6 +277,8 @@ pub fn PollView(noteid: String) -> Element {
                                             comments_error.set(None);
                                             live_updates_warning.set(None);
                                             comments.write().push((*event).clone());
+                                            reply_total
+                                                .with_mut(|count| *count = count.saturating_add(1));
                                         }
                                     }
                                 }
@@ -300,7 +316,8 @@ pub fn PollView(noteid: String) -> Element {
     });
 
     let current_poll_event = poll_event.read().clone();
-    let route_replies_count = comments.read().len();
+    let route_loaded_comments = comments.read().len();
+    let route_replies_count = std::cmp::max(*reply_total.read(), route_loaded_comments);
 
     rsx! {
         div { class: "min-h-screen",
@@ -361,13 +378,22 @@ pub fn PollView(noteid: String) -> Element {
                                     invalidate_thread_tree_cache(&root_event_id);
                                     comments_error.set(None);
                                     comments.write().push(comment_event);
+                                    reply_total.with_mut(|count| *count = count.saturating_add(1));
                                 }
                             },
                         }
                     }
                     div { class: "pt-6 px-4",
                         div { class: "mb-6",
-                            h3 { class: "text-2xl font-bold", "Comments" }
+                            h3 { class: "text-2xl font-bold",
+                                if route_replies_count > route_loaded_comments {
+                                    "Comments (showing {route_loaded_comments} of {route_replies_count})"
+                                } else if route_replies_count > 0 {
+                                    "Comments ({route_replies_count})"
+                                } else {
+                                    "Comments"
+                                }
+                            }
                         }
                         if let Some(warning) = live_updates_warning.read().as_ref() {
                             div { class: "mb-4 rounded-lg border border-yellow-300 bg-yellow-50 dark:bg-yellow-950/30 dark:border-yellow-800 p-3 text-sm text-yellow-800 dark:text-yellow-200",

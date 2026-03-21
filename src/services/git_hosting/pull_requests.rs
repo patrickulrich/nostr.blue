@@ -5,22 +5,12 @@
 use crate::stores::code_store::{cache_pr_events, get_cached_pr, update_pr_statuses};
 use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
 use crate::utils::nip34::{decode_event_id, GitComment, IssueStatus, PullRequest};
+use crate::utils::relay_output::ensure_publish_accepted;
 use dioxus::signals::ReadableExt;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
 /// Default timeout for fetching events
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
-
-fn ensure_publish_accepted(
-    output: &nostr_relay_pool::Output<EventId>,
-    action: &str,
-) -> Result<(), String> {
-    if output.success.is_empty() {
-        Err(format!("{action}: no relays accepted the event"))
-    } else {
-        Ok(())
-    }
-}
 
 async fn send_and_ensure_published(
     client: &Client,

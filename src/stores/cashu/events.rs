@@ -36,6 +36,8 @@ pub async fn queue_nostr_event(
         last_retry_at: None,
         pending_token_id: None,
         mint_url: None,
+        history_amount: None,
+        history_type: None,
     };
     PENDING_NOSTR_EVENTS.write().push(pending.clone());
     if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
@@ -95,6 +97,8 @@ pub async fn queue_signed_event_for_retry(
         last_retry_at: None,
         pending_token_id,
         mint_url,
+        history_amount: None,
+        history_type: None,
     };
     PENDING_NOSTR_EVENTS.write().push(pending_event.clone());
     if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
@@ -141,6 +145,50 @@ pub async fn sign_event_builder(
 /// Optional `pending_token_id` and `mint_url` link this pending event to a token
 /// in WALLET_TOKENS, allowing the token's event_id to be updated when background
 /// publish succeeds.
+pub async fn queue_token_event_for_retry_with_history(
+    builder: nostr_sdk::EventBuilder,
+    pending_token_id: String,
+    mint_url: String,
+    history_amount: u64,
+    history_type: String,
+) {
+    let event = match sign_event_builder(builder).await {
+        Ok(e) => e,
+        Err(e) => {
+            log::error!("Cannot queue token event with history metadata: {}", e);
+            return;
+        }
+    };
+    let pending_event = PendingNostrEvent {
+        id: uuid::Uuid::new_v4().to_string(),
+        builder_json: match serde_json::to_string(&event) {
+            Ok(j) => j,
+            Err(e) => {
+                log::error!("Failed to serialize event for queueing: {}", e);
+                return;
+            }
+        },
+        event_type: PendingEventType::TokenEvent,
+        created_at: chrono::Utc::now().timestamp() as u64,
+        retry_count: 0,
+        last_retry_at: None,
+        pending_token_id: Some(pending_token_id.clone()),
+        mint_url: Some(mint_url),
+        history_amount: Some(history_amount),
+        history_type: Some(history_type),
+    };
+    PENDING_NOSTR_EVENTS.write().push(pending_event.clone());
+    if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
+        if let Err(e) = localstore.add_pending_event(&pending_event).await {
+            log::warn!("Failed to persist pending event: {}", e);
+        }
+    }
+    log::info!(
+        "Queued token event for retry with history metadata, pending_id={}",
+        pending_token_id
+    );
+}
+
 pub async fn queue_event_for_retry(
     builder: nostr_sdk::EventBuilder,
     event_type: PendingEventType,
@@ -727,6 +775,26 @@ pub async fn process_pending_events() -> Result<usize, String> {
                                 nostr_event_id
                             );
                             update_token_event_id(&old_id, &nostr_event_id);
+                        }
+                    }
+
+                    if let Some(history_amount) = event.history_amount {
+                        let history_type = event.history_type.as_deref();
+                        if let Err(error) = super::lightning::create_history_event_with_type(
+                            "in",
+                            history_amount,
+                            vec![nostr_event_id.clone()],
+                            vec![],
+                            history_type,
+                            None,
+                        )
+                        .await
+                        {
+                            log::warn!(
+                                "Failed to create retried mint history event for {}: {}",
+                                nostr_event_id,
+                                error
+                            );
                         }
                     }
                 }

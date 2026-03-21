@@ -748,6 +748,12 @@ pub struct PendingNostrEvent {
     /// Mint URL for recovery context if token lookup fails
     #[serde(default)]
     pub mint_url: Option<String>,
+    /// Amount for a history event that should be created after a token retry succeeds
+    #[serde(default)]
+    pub history_amount: Option<u64>,
+    /// History type to recreate after a token retry succeeds
+    #[serde(default)]
+    pub history_type: Option<String>,
 }
 /// Counter backup for mint removal/re-addition
 #[derive(Clone, Debug, Serialize, Deserialize)]

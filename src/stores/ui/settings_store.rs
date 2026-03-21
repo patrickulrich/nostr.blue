@@ -97,7 +97,10 @@ async fn drain_publish_client_tag_queue() {
             break;
         } else {
             SETTINGS_ERROR.write().clone_from(&None);
-            PUBLISH_CLIENT_TAG_SAVE_PENDING.write().take();
+            let mut pending = PUBLISH_CLIENT_TAG_SAVE_PENDING.write();
+            if pending.as_ref() == Some(&next_enabled) {
+                pending.take();
+            }
         }
     }
 

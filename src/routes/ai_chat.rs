@@ -254,7 +254,7 @@ pub fn AIChat() -> Element {
         let persisted_messages_dirty_value = *persisted_messages_dirty.read();
         let initial_loaded_messages_snapshot = initial_loaded_messages.read().clone();
         let persisted_messages_snapshot = persisted_messages.read().clone();
-        let failed_snapshot_key = history_save_snapshot_key(
+        let computed_snapshot_key = history_save_snapshot_key(
             &account_key,
             &persisted_messages_snapshot,
             &initial_loaded_messages_snapshot,
@@ -264,7 +264,7 @@ pub fn AIChat() -> Element {
             || !persisted_messages_dirty_value
             || persisted_messages_snapshot == initial_loaded_messages_snapshot
             || ai_chat_store::current_account_key() != account_key
-            || persisted_messages_failed_snapshot.read().as_ref() == Some(&failed_snapshot_key)
+            || persisted_messages_failed_snapshot.read().as_ref() == Some(&computed_snapshot_key)
         {
             return;
         }
@@ -327,7 +327,7 @@ pub fn AIChat() -> Element {
                             {
                                 error.set(Some(e));
                                 persisted_messages_failed_snapshot_signal
-                                    .set(Some(failed_snapshot_key.clone()));
+                                    .set(Some(computed_snapshot_key.clone()));
                             }
                             persisted_messages_save_in_flight_signal.set(false);
                             return;

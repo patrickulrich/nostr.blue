@@ -1,7 +1,10 @@
 //! Lightning integration
 //!
 //! Functions for mint/melt operations (lightning topup and withdrawal).
-use super::events::{publish_quote_event, queue_event_for_retry};
+use super::events::{
+    publish_quote_event, queue_event_for_retry, queue_token_event_for_retry_with_history,
+    sign_event_builder,
+};
 use super::internal::{
     cleanup_spent_proofs_internal, create_ephemeral_wallet, is_token_spent_error_string,
     remove_melt_quote_from_db,
@@ -25,7 +28,18 @@ use super::utils::{mint_matches, normalize_mint_url};
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
 use dioxus::prelude::*;
 use nostr_sdk::signer::NostrSigner;
-use nostr_sdk::{EventId, Kind, PublicKey};
+use nostr_sdk::{Client, EventBuilder, EventId, Kind, PublicKey};
+
+async fn send_signed_builder(
+    client: &Client,
+    builder: EventBuilder,
+) -> Result<nostr_relay_pool::Output<EventId>, String> {
+    let event = sign_event_builder(builder).await?;
+    client
+        .send_event(&event)
+        .await
+        .map_err(|e| format!("Failed to publish signed event: {}", e))
+}
 /// Create a mint quote (request lightning invoice to receive sats)
 pub async fn create_mint_quote(
     mint_url: String,
@@ -172,12 +186,7 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
     let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
     let published_event_id = match nostr_client::NOSTR_CLIENT.read().as_ref().cloned() {
-        Some(client) => match client
-            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
-                builder.clone(),
-            ))
-            .await
-        {
+        Some(client) => match send_signed_builder(&client, builder.clone()).await {
             Ok(event_output) if !event_output.success.is_empty() => {
                 let event_id = event_output.id().to_hex();
                 log::info!("Published token event: {}", event_id);
@@ -188,11 +197,12 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
                     "No relays accepted minted token event, queuing for retry (failed_relays={})",
                     event_output.failed.len()
                 );
-                queue_event_for_retry(
+                queue_token_event_for_retry_with_history(
                     builder.clone(),
-                    PendingEventType::TokenEvent,
-                    Some(pending_id.clone()),
-                    Some(mint_url.clone()),
+                    pending_id.clone(),
+                    mint_url.clone(),
+                    amount_minted,
+                    "lightning_mint".to_string(),
                 )
                 .await;
                 None
@@ -202,11 +212,12 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
                     "Failed to publish minted token event, queuing for retry: {}",
                     error
                 );
-                queue_event_for_retry(
+                queue_token_event_for_retry_with_history(
                     builder.clone(),
-                    PendingEventType::TokenEvent,
-                    Some(pending_id.clone()),
-                    Some(mint_url.clone()),
+                    pending_id.clone(),
+                    mint_url.clone(),
+                    amount_minted,
+                    "lightning_mint".to_string(),
                 )
                 .await;
                 None
@@ -214,11 +225,12 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
         },
         None => {
             log::warn!("Client not initialized during mint finalization, queuing token event");
-            queue_event_for_retry(
+            queue_token_event_for_retry_with_history(
                 builder.clone(),
-                PendingEventType::TokenEvent,
-                Some(pending_id.clone()),
-                Some(mint_url.clone()),
+                pending_id.clone(),
+                mint_url.clone(),
+                amount_minted,
+                "lightning_mint".to_string(),
             )
             .await;
             None
@@ -639,12 +651,7 @@ async fn publish_melt_events(
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-        match client
-            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
-                builder.clone(),
-            ))
-            .await
-        {
+        match send_signed_builder(&client, builder.clone()).await {
             Ok(event_output) if !event_output.success.is_empty() => {
                 let real_id = event_output.id().to_hex();
                 log::info!("Published new token event: {}", real_id);
@@ -816,12 +823,7 @@ pub async fn create_history_event_with_type(
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-    match client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
-            builder.clone(),
-        ))
-        .await
-    {
+    match send_signed_builder(&client, builder.clone()).await {
         Ok(event_output) if !event_output.success.is_empty() => {
             log::info!("Published history event: {}", event_output.id().to_hex());
         }

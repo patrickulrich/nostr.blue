@@ -193,13 +193,19 @@ pub async fn get_counts_with_count_fallback(
                 counts = fetched.clone();
             }
         }
-    } else if missing_zaps {
+    }
+
+    let needs_zap_details = missing_zaps
+        || (counts.zaps > 0 && (counts.user_zapped.is_none() || counts.zap_amount_sats == 0));
+    if needs_zap_details {
         log::debug!(
-            "COUNT missing zaps for {}, fetching receipts",
+            "Fetching zap receipt details for {}",
             event_id.to_hex()
         );
         if let Ok(fetched) = fetch_zap_receipt_counts(event_id, timeout).await {
-            counts.zaps = fetched.zaps;
+            if missing_zaps {
+                counts.zaps = fetched.zaps;
+            }
             counts.zap_amount_sats = fetched.zap_amount_sats;
             counts.user_zapped = fetched.user_zapped;
         }
@@ -399,7 +405,8 @@ pub async fn fetch_interaction_counts_batch(
             event_map.insert(event.id, event);
         }
     }
-    let events: Vec<Event> = event_map.into_values().collect();
+    let mut events: Vec<Event> = event_map.into_values().collect();
+    events.sort_by(|left, right| right.created_at.cmp(&left.created_at));
     log::info!(
         "Processing {} total interaction events (DB + relay, deduplicated)",
         events.len()
@@ -559,6 +566,7 @@ pub async fn sync_interaction_counts(
                     new_events.push(event);
                 }
             }
+            new_events.sort_by(|left, right| right.created_at.cmp(&left.created_at));
             let mut result = {
                 let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
                     log::warn!("Counts cache mutex was poisoned, recovering");

@@ -288,7 +288,11 @@ pub async fn save_preferred_reactions(reactions: Vec<PreferredReaction>) -> Resu
     let output = client
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
-        .map_err(|e| format!("Failed to publish reactions: {}", e))?;
+        .map_err(|e| {
+            let error = format!("Failed to publish reactions: {}", e);
+            *REACTIONS_STATE.write() = Nip78LoadState::Failed(error.clone());
+            error
+        })?;
     let success_count = output.success.len();
     let failed_count = output.failed.len();
     let total = success_count + failed_count;

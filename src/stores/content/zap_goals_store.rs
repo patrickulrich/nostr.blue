@@ -506,7 +506,14 @@ fn extract_zap_comment(event: &Event) -> Option<String> {
 }
 
 fn receipt_targets_goal(receipt: &Event, goal: &ZapGoal, goal_event_id: EventId) -> bool {
-    if receipt.pubkey.to_hex() != goal.author_pubkey {
+    let matches_recipient = receipt.tags.iter().any(|tag| {
+        matches!(
+            tag.as_standardized(),
+            Some(TagStandard::PublicKey { public_key, .. })
+                if public_key.to_hex() == goal.author_pubkey
+        )
+    });
+    if !matches_recipient {
         return false;
     }
 
@@ -784,6 +791,7 @@ mod tests {
     #[test]
     fn receipt_targets_goal_requires_matching_event_and_author() {
         let goal_keys = Keys::generate();
+        let provider_keys = Keys::generate();
         let other_keys = Keys::generate();
         let goal_event = EventBuilder::new(Kind::Custom(super::KIND_ZAP_GOAL), "goal")
             .tags(vec![
@@ -795,21 +803,24 @@ mod tests {
         let goal = parse_goal_event(&goal_event).unwrap();
 
         let matching_receipt = EventBuilder::new(Kind::ZapReceipt, "")
-            .tag(Tag::event(goal_event.id))
-            .sign_with_keys(&goal_keys)
+            .tags(vec![Tag::event(goal_event.id), Tag::public_key(goal_event.pubkey)])
+            .sign_with_keys(&provider_keys)
             .unwrap();
         let wrong_author_receipt = EventBuilder::new(Kind::ZapReceipt, "")
-            .tag(Tag::event(goal_event.id))
-            .sign_with_keys(&other_keys)
+            .tags(vec![Tag::event(goal_event.id), Tag::public_key(other_keys.public_key())])
+            .sign_with_keys(&provider_keys)
             .unwrap();
         let wrong_event_receipt = EventBuilder::new(Kind::ZapReceipt, "")
-            .tag(Tag::event(
-                EventBuilder::text_note("other")
-                    .sign_with_keys(&other_keys)
-                    .unwrap()
-                    .id,
-            ))
-            .sign_with_keys(&goal_keys)
+            .tags(vec![
+                Tag::event(
+                    EventBuilder::text_note("other")
+                        .sign_with_keys(&other_keys)
+                        .unwrap()
+                        .id,
+                ),
+                Tag::public_key(goal_event.pubkey),
+            ])
+            .sign_with_keys(&provider_keys)
             .unwrap();
 
         assert!(receipt_targets_goal(

@@ -502,6 +502,7 @@ pub fn ZapGoalsNew() -> Element {
     let mut closed_at = use_signal(String::new);
     let mut relays_text = use_signal(String::new);
     let mut relays_prefilled = use_signal(|| false);
+    let mut relays_prefill_generation = use_signal(|| 0u64);
     let mut publishing = use_signal(|| false);
     let mut error_message = use_signal(|| None::<String>);
 
@@ -510,6 +511,8 @@ pub fn ZapGoalsNew() -> Element {
         if *relays_prefilled.read() {
             return;
         }
+        let generation = relays_prefill_generation.read().wrapping_add(1);
+        relays_prefill_generation.set(generation);
         spawn(async move {
             let relay_lines = if let Some(client) = get_client() {
                 client
@@ -523,7 +526,10 @@ pub fn ZapGoalsNew() -> Element {
             } else {
                 String::new()
             };
-            if *relays_prefilled.peek() || !relays_text.read().is_empty() || relay_lines.is_empty()
+            if *relays_prefill_generation.peek() != generation
+                || *relays_prefilled.peek()
+                || !relays_text.read().is_empty()
+                || relay_lines.is_empty()
             {
                 return;
             }
