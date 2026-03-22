@@ -518,6 +518,7 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
     let tokens_to_add = if let Some(ref event_id) = new_event_id {
         vec![super::types::TokenData {
             event_id: event_id.clone(),
+            pending_publish: super::types::token_publish_pending(event_id),
             mint: mint_url.to_string(),
             unit: "sat".to_string(),
             proofs: available_proofs,
@@ -535,6 +536,7 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
         );
         vec![super::types::TokenData {
             event_id: synthetic_id,
+            pending_publish: true,
             mint: mint_url.to_string(),
             unit: "sat".to_string(),
             proofs: available_proofs,

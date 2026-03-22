@@ -495,6 +495,7 @@ fn update_local_state_after_swap(
     let proof_data: Vec<ProofData> = output_proofs.iter().map(cdk_proof_to_proof_data).collect();
     let new_token = TokenData {
         event_id: new_event_id.to_string(),
+        pending_publish: super::types::token_publish_pending(new_event_id),
         mint: normalize_mint_url(mint_url),
         unit: "sat".to_string(),
         proofs: proof_data.clone(),
@@ -789,7 +790,7 @@ fn get_proofs_for_mint(mint_url: &str) -> Result<Vec<ProofData>, String> {
     let normalized_url = normalize_mint_url(mint_url);
     let proofs: Vec<ProofData> = tokens
         .iter()
-        .filter(|t| mint_matches(&t.mint, &normalized_url))
+        .filter(|t| mint_matches(&t.mint, &normalized_url) && !t.pending_publish)
         .flat_map(|t| t.proofs.clone())
         .filter(|p| p.state.is_spendable())
         .collect();

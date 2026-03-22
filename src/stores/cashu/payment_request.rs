@@ -309,7 +309,7 @@ pub async fn pay_payment_request(
         let tokens = data.read();
         let mint_tokens: Vec<_> = tokens
             .iter()
-            .filter(|t| mint_matches(&t.mint, &mint_url))
+            .filter(|t| mint_matches(&t.mint, &mint_url) && !t.pending_publish)
             .collect();
         let mut all_proofs = Vec::new();
         let mut event_ids = Vec::new();
@@ -527,6 +527,7 @@ pub async fn pay_payment_request(
                 new_event_id.unwrap_or_else(|| format!("local-{}", chrono::Utc::now().timestamp()));
             tokens.push(TokenData {
                 event_id: event_id.clone(),
+                pending_publish: super::types::token_publish_pending(&event_id),
                 mint: mint_url,
                 unit: "sat".to_string(),
                 proofs: proof_data.clone(),
@@ -667,64 +668,80 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
         .await
         .map_err(|e| format!("Failed to swap proofs: {}", e))?;
     let final_proofs = swapped.ok_or("Swap validation failed - proofs rejected by mint")?;
-    let signer = crate::stores::signer::get_signer().ok_or("No signer available")?;
-    let nostr_signer = signer.as_nostr_signer();
-    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let client = nostr_client::NOSTR_CLIENT
-        .read()
-        .as_ref()
-        .ok_or("Client not initialized")?
-        .clone();
     let proof_data: Vec<ProofData> = final_proofs.iter().map(cdk_proof_to_proof_data).collect();
-    let extended_proofs: Vec<ExtendedCashuProof> = proof_data
-        .iter()
-        .map(|p| ExtendedCashuProof::from(p.clone()))
-        .collect();
-    let token_event_data = ExtendedTokenEvent {
-        mint: mint_url.to_string(),
-        unit: "sat".to_string(),
-        proofs: extended_proofs,
-        del: vec![],
-    };
-    let json_content = serde_json::to_string(&token_event_data)
-        .map_err(|e| format!("Failed to serialize token event: {}", e))?;
-    let encrypted = nostr_signer
-        .nip44_encrypt(&pubkey, &json_content)
-        .await
-        .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
-    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-    let event = sign_cashu_event_builder(&signer, builder).await?;
     let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-    let publish_outcome = send_tagged_event_with_retry(
-        &client,
-        event,
-        PendingEventType::TokenEvent,
-        Some(pending_id),
-        Some(mint_url.to_string()),
-    )
-    .await;
-    if let Some(warning) = publish_outcome.warning() {
-        log::warn!(
-            "Received-proof token event publish completed without durable retry state: {}",
-            warning
-        );
-    }
     {
         let store = WALLET_TOKENS.read();
         let mut data = store.data();
         let mut tokens = data.write();
-        let event_id = publish_outcome.event_id().to_string();
         tokens.push(TokenData {
-            event_id: event_id.clone(),
+            event_id: pending_id.clone(),
+            pending_publish: true,
             mint: mint_url.to_string(),
             unit: "sat".to_string(),
             proofs: proof_data.clone(),
             created_at: chrono::Utc::now().timestamp() as u64,
         });
-        register_proofs_in_event_map(&event_id, &proof_data);
+        register_proofs_in_event_map(&pending_id, &proof_data);
     }
     super::signals::update_wallet_balances();
+    let publish_result: Result<TaggedEventPublishOutcome, String> = async {
+        let signer = crate::stores::signer::get_signer().ok_or("No signer available")?;
+        let nostr_signer = signer.as_nostr_signer();
+        let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
+        let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
+        let client = nostr_client::NOSTR_CLIENT
+            .read()
+            .as_ref()
+            .ok_or("Client not initialized")?
+            .clone();
+        let extended_proofs: Vec<ExtendedCashuProof> = proof_data
+            .iter()
+            .map(|p| ExtendedCashuProof::from(p.clone()))
+            .collect();
+        let token_event_data = ExtendedTokenEvent {
+            mint: mint_url.to_string(),
+            unit: "sat".to_string(),
+            proofs: extended_proofs,
+            del: vec![],
+        };
+        let json_content = serde_json::to_string(&token_event_data)
+            .map_err(|e| format!("Failed to serialize token event: {}", e))?;
+        let encrypted = nostr_signer
+            .nip44_encrypt(&pubkey, &json_content)
+            .await
+            .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
+        let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+        let event = sign_cashu_event_builder(&signer, builder).await?;
+        Ok(send_tagged_event_with_retry(
+            &client,
+            event,
+            PendingEventType::TokenEvent,
+            Some(pending_id.clone()),
+            Some(mint_url.to_string()),
+        )
+        .await)
+    }
+    .await;
+    match publish_result {
+        Ok(publish_outcome) => {
+            if let Some(warning) = publish_outcome.warning() {
+                log::warn!(
+                    "Received-proof token event publish completed without durable retry state: {}",
+                    warning
+                );
+            }
+            if let TaggedEventPublishOutcome::Published(real_event_id) = publish_outcome {
+                super::events::update_token_event_id(&pending_id, &real_event_id);
+            }
+        }
+        Err(err) => {
+            log::warn!(
+                "Received proofs were stored locally but token event sync failed: {}",
+                err
+            );
+        }
+    }
     log::info!("Received {} sats from payment request", amount);
     Ok(amount)
 }

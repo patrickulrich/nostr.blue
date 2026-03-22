@@ -936,6 +936,7 @@ async fn redeem_nutzap_inner(
     let proof_data: Vec<ProofData> = new_proofs.iter().map(cdk_proof_to_proof_data).collect();
     let token = TokenData {
         event_id: new_event_id.clone(),
+        pending_publish: super::types::token_publish_pending(&new_event_id),
         mint: mint_url.to_string(),
         unit: pending.unit.clone(),
         proofs: proof_data.clone(),
@@ -1011,7 +1012,7 @@ fn get_proofs_for_mint(mint_url: &str, unit: &str) -> Result<Vec<cdk::nuts::Proo
     let mut all_proofs = Vec::new();
     for token in tokens
         .iter()
-        .filter(|t| mint_matches(&t.mint, mint_url) && t.unit == unit)
+        .filter(|t| mint_matches(&t.mint, mint_url) && t.unit == unit && !t.pending_publish)
     {
         for proof in &token.proofs {
             if proof.state == super::types::ProofState::Unspent {
@@ -1028,7 +1029,7 @@ fn get_event_ids_for_mint(mint_url: &str, unit: &str) -> Vec<String> {
     let tokens = data.read();
     tokens
         .iter()
-        .filter(|t| mint_matches(&t.mint, mint_url) && t.unit == unit)
+        .filter(|t| mint_matches(&t.mint, mint_url) && t.unit == unit && !t.pending_publish)
         .map(|t| t.event_id.clone())
         .collect()
 }
@@ -1059,6 +1060,7 @@ async fn update_local_state_after_nutzap_send(
     let keep_proof_data: Vec<ProofData> = keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
     let token = TokenData {
         event_id: pending_event_id.clone(),
+        pending_publish: true,
         mint: mint_url.to_string(),
         unit: unit.to_string(),
         proofs: keep_proof_data.clone(),

@@ -17,6 +17,7 @@ use crate::services::podcast_index::{self, PodcastFeed};
 use crate::stores::{auth_store, nostr_client, podcast_subscription};
 use crate::utils::markdown::sanitize_html;
 use dioxus::prelude::*;
+use dioxus_primitives::toast::{consume_toast, ToastOptions};
 
 enum RssPodcastDetailState {
     Initializing,
@@ -124,6 +125,7 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
     let feed = props.feed.clone();
     let podcast_id = props.podcast_id;
     let auth = auth_store::AUTH_STATE.read();
+    let toast = consume_toast();
     let mut show_share_modal = use_signal(|| false);
 
     // Infinite scroll state
@@ -310,10 +312,21 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
                                                             "Subscribed to podcast: {} (guid: {})", url, guid
                                                         )
                                                     }
-                                                    Err(e) => log::error!("Failed to subscribe: {}", e),
+                                                    Err(e) => {
+                                                        log::error!("Failed to subscribe: {}", e);
+                                                        toast.error(
+                                                            format!("Cannot subscribe: {}", e),
+                                                            ToastOptions::new(),
+                                                        );
+                                                    }
                                                 }
                                             } else {
                                                 log::error!("Cannot subscribe: podcast does not have a GUID");
+                                                toast.error(
+                                                    "Cannot subscribe: podcast missing identifier"
+                                                        .to_string(),
+                                                    ToastOptions::new(),
+                                                );
                                             }
                                             subscribing.set(false);
                                         });

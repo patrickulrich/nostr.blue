@@ -241,6 +241,7 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
         let mut tokens = data.write();
         tokens.push(TokenData {
             event_id: stored_event_id.clone(),
+            pending_publish: super::types::token_publish_pending(&stored_event_id),
             mint: mint_url.clone(),
             unit: "sat".to_string(),
             proofs: proof_data.clone(),
@@ -767,6 +768,7 @@ fn update_local_state_after_melt(
                 keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
             vec![TokenData {
                 event_id: event_id.clone(),
+                pending_publish: super::types::token_publish_pending(event_id),
                 mint: mint_url.to_string(),
                 unit: "sat".to_string(),
                 proofs: proof_data,

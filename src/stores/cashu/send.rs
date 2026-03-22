@@ -325,7 +325,10 @@ fn get_proofs_for_mint(mint_url: &str) -> Result<Vec<cdk::nuts::Proof>, String> 
     let data = store.data();
     let tokens = data.read();
     let mut all_proofs = Vec::new();
-    for token in tokens.iter().filter(|t| mint_matches(&t.mint, mint_url)) {
+    for token in tokens
+        .iter()
+        .filter(|t| mint_matches(&t.mint, mint_url) && !t.pending_publish)
+    {
         for proof in &token.proofs {
             all_proofs.push(proof_data_to_cdk_proof(proof)?);
         }
@@ -339,7 +342,7 @@ fn get_event_ids_for_mint(mint_url: &str) -> Vec<String> {
     let tokens = data.read();
     tokens
         .iter()
-        .filter(|t| mint_matches(&t.mint, mint_url))
+        .filter(|t| mint_matches(&t.mint, mint_url) && !t.pending_publish)
         .map(|t| t.event_id.clone())
         .collect()
 }
@@ -636,7 +639,10 @@ async fn publish_send_events(
                         Some(pending_event_id.to_string()),
                         Some(mint_url.to_string()),
                     )
-                    .await;
+                    .await
+                    .map_err(|queue_err| {
+                        format!("Failed to queue send token event for retry: {}", queue_err)
+                    })?;
                     new_event_id = Some(pending_event_id.to_string());
                 }
             }
@@ -648,7 +654,10 @@ async fn publish_send_events(
                     Some(pending_event_id.to_string()),
                     Some(mint_url.to_string()),
                 )
-                .await;
+                .await
+                .map_err(|queue_err| {
+                    format!("Failed to queue send token event for retry: {}", queue_err)
+                })?;
                 new_event_id = Some(pending_event_id.to_string());
             }
         }
@@ -740,6 +749,7 @@ fn update_local_state_after_send(
                 keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
             let token = TokenData {
                 event_id: event_id.clone(),
+                pending_publish: super::types::token_publish_pending(event_id),
                 mint: mint_url.to_string(),
                 unit: "sat".to_string(),
                 proofs: keep_proof_data,

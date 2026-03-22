@@ -564,6 +564,20 @@ pub fn play_track(
     index_override: Option<usize>,
 ) {
     let mut state = MUSIC_PLAYER.write();
+    #[cfg(feature = "mobile")]
+    let previous_track = state.current_track.clone();
+    #[cfg(feature = "mobile")]
+    let previous_playlist = state.playlist.clone();
+    #[cfg(feature = "mobile")]
+    let previous_index = state.current_index;
+    #[cfg(feature = "mobile")]
+    let previous_is_playing = state.is_playing;
+    #[cfg(feature = "mobile")]
+    let previous_is_visible = state.is_visible;
+    #[cfg(feature = "mobile")]
+    let previous_current_time = state.current_time;
+    #[cfg(feature = "mobile")]
+    let previous_now_playing = state.now_playing.clone();
     let playlist = playlist.unwrap_or_else(|| vec![track.clone()]);
     let index = index_override
         .unwrap_or_else(|| playlist.iter().position(|t| t.id == track.id).unwrap_or(0));
@@ -581,6 +595,13 @@ pub fn play_track(
             match android_media::set_queue(&state.playlist, state.current_index, true) {
                 Ok(()) => true,
                 Err(e) => {
+                    state.current_track = previous_track;
+                    state.playlist = previous_playlist;
+                    state.current_index = previous_index;
+                    state.is_playing = previous_is_playing;
+                    state.is_visible = previous_is_visible;
+                    state.current_time = previous_current_time;
+                    state.now_playing = previous_now_playing;
                     log::error!("Failed to start native Android playback queue: {}", e);
                     state.playback_error = Some(format!("Android playback failed: {}", e));
                     false
@@ -669,6 +690,14 @@ pub fn next_track() {
     if state.playlist.is_empty() {
         return;
     }
+    #[cfg(feature = "mobile")]
+    let previous_track = state.current_track.clone();
+    #[cfg(feature = "mobile")]
+    let previous_index = state.current_index;
+    #[cfg(feature = "mobile")]
+    let previous_is_playing = state.is_playing;
+    #[cfg(feature = "mobile")]
+    let previous_current_time = state.current_time;
     state.current_index = (state.current_index + 1) % state.playlist.len();
     state.current_track = state.playlist.get(state.current_index).cloned();
     state.is_playing = true;
@@ -681,6 +710,10 @@ pub fn next_track() {
                 match android_media::next_track() {
                     Ok(()) => true,
                     Err(e) => {
+                        state.current_track = previous_track;
+                        state.current_index = previous_index;
+                        state.is_playing = previous_is_playing;
+                        state.current_time = previous_current_time;
                         log::error!("Failed to skip to next native Android track: {}", e);
                         state.playback_error = Some(format!("Android playback failed: {}", e));
                         false
@@ -707,6 +740,8 @@ pub fn previous_track() {
         return;
     }
     if state.current_time > 3.0 {
+        #[cfg(feature = "mobile")]
+        let previous_current_time = state.current_time;
         state.current_time = 0.0;
         let should_publish_status = {
             #[cfg(feature = "mobile")]
@@ -714,6 +749,7 @@ pub fn previous_track() {
                 match android_media::seek_to(0.0) {
                     Ok(()) => true,
                     Err(e) => {
+                        state.current_time = previous_current_time;
                         log::error!("Failed to rewind native Android track: {}", e);
                         state.playback_error = Some(format!("Android playback failed: {}", e));
                         false
@@ -735,6 +771,14 @@ pub fn previous_track() {
         }
         return;
     }
+    #[cfg(feature = "mobile")]
+    let previous_track = state.current_track.clone();
+    #[cfg(feature = "mobile")]
+    let previous_index = state.current_index;
+    #[cfg(feature = "mobile")]
+    let previous_is_playing = state.is_playing;
+    #[cfg(feature = "mobile")]
+    let previous_current_time = state.current_time;
     state.current_index = if state.current_index == 0 {
         state.playlist.len() - 1
     } else {
@@ -751,6 +795,10 @@ pub fn previous_track() {
                 match android_media::previous_track() {
                     Ok(()) => true,
                     Err(e) => {
+                        state.current_track = previous_track;
+                        state.current_index = previous_index;
+                        state.is_playing = previous_is_playing;
+                        state.current_time = previous_current_time;
                         log::error!("Failed to skip to previous native Android track: {}", e);
                         state.playback_error = Some(format!("Android playback failed: {}", e));
                         false

@@ -43,7 +43,12 @@ pub async fn queue_nostr_event(
     PENDING_NOSTR_EVENTS.write().push(pending.clone());
     if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
         if let Err(e) = localstore.add_pending_event(&pending).await {
-            log::warn!("Failed to persist pending event to IndexedDB: {}", e);
+            PENDING_NOSTR_EVENTS
+                .write()
+                .retain(|event| event.id != event_id);
+            let message = format!("Failed to persist pending event to IndexedDB: {}", e);
+            log::warn!("{}", message);
+            return Err(message);
         }
     }
     log::debug!(
@@ -81,9 +86,8 @@ pub async fn queue_signed_event_for_retry(
     event_type: PendingEventType,
     pending_token_id: Option<String>,
     mint_url: Option<String>,
-) {
-    let _ =
-        queue_signed_event_for_retry_result(event, event_type, pending_token_id, mint_url).await;
+) -> Result<(), String> {
+    queue_signed_event_for_retry_result(event, event_type, pending_token_id, mint_url).await
 }
 
 pub async fn queue_signed_event_for_retry_result(
@@ -276,11 +280,20 @@ pub async fn queue_token_event_for_retry(
         Some(pending_token_id.clone()),
         Some(mint_url),
     )
-    .await;
-    log::info!(
-        "Queued token event for retry, pending_id={}",
-        pending_token_id
-    );
+    .await
+    .map(|_| {
+        log::info!(
+            "Queued token event for retry, pending_id={}",
+            pending_token_id
+        );
+    })
+    .unwrap_or_else(|err| {
+        log::error!(
+            "Failed to queue token event for retry, pending_id={}: {}",
+            pending_token_id,
+            err
+        );
+    });
 }
 /// Get count of pending events waiting to be published
 pub fn get_pending_event_count() -> usize {
@@ -507,6 +520,7 @@ pub async fn fetch_tokens() -> Result<(), String> {
                                     })?;
                                 tokens.push(TokenData {
                                     event_id: event_id_hex,
+                                    pending_publish: false,
                                     mint: normalize_mint_url(&token_event.mint),
                                     unit: token_event.unit.clone(),
                                     proofs,
@@ -901,6 +915,7 @@ pub(crate) fn update_token_event_id(pending_id: &str, real_event_id: &str) {
                 real_event_id_owned
             );
             token.event_id = real_event_id_owned.clone();
+            token.pending_publish = false;
             Ok(())
         } else {
             Err(format!(
@@ -1112,6 +1127,7 @@ pub async fn publish_orphaned_proofs_event(
     let normalized_mint = normalize_mint_url(mint_url);
     let token_data = TokenData {
         event_id: pending_id.clone(),
+        pending_publish: true,
         mint: normalized_mint.clone(),
         unit: unit.to_string(),
         proofs: proofs.to_vec(),
@@ -1147,7 +1163,13 @@ pub async fn publish_orphaned_proofs_event(
                     Some(pending_id.clone()),
                     Some(mint_url.to_string()),
                 )
-                .await;
+                .await
+                .map_err(|queue_err| {
+                    format!(
+                        "Failed to queue orphaned proofs event for retry: {}",
+                        queue_err
+                    )
+                })?;
                 Ok(pending_id)
             }
         }
@@ -1162,7 +1184,13 @@ pub async fn publish_orphaned_proofs_event(
                 Some(pending_id.clone()),
                 Some(mint_url.to_string()),
             )
-            .await;
+            .await
+            .map_err(|queue_err| {
+                format!(
+                    "Failed to queue orphaned proofs event for retry: {}",
+                    queue_err
+                )
+            })?;
             Ok(pending_id)
         }
     }

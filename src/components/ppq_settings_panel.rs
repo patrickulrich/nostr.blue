@@ -1,5 +1,6 @@
 use crate::services::ppq::{
-    self, PpqApiKey, PpqApiKeyInput, PpqBalance, PpqNwcAutoTopup, PpqTopupInvoice,
+    self, PatchField, PpqApiKey, PpqApiKeyInput, PpqApiKeyPatchInput, PpqBalance, PpqNwcAutoTopup,
+    PpqTopupInvoice,
 };
 use crate::stores::ai_provider_store::{
     self, AiProviderState, PpqAccountState, PROVIDER_STATE_SAVE_EVENT,
@@ -34,6 +35,7 @@ pub fn PpqSettingsPanel(
     let keys_loading = use_signal(|| false);
     let mut keys_error = use_signal(|| None::<String>);
     let mut editing_key_id = use_signal(|| None::<String>);
+    let mut editing_key_original = use_signal(|| None::<PpqApiKey>);
     let mut key_name = use_signal(String::new);
     let mut key_usage_limit = use_signal(String::new);
     let mut key_reset_period = use_signal(String::new);
@@ -398,6 +400,7 @@ pub fn PpqSettingsPanel(
                                     topup_error.set(Some("Current invoice has no invoice id".to_string()));
                                     return;
                                 }
+                                topup_error.set(None);
                                 topup_loading.set(true);
                                 let api_key = refresh_topup_api_key.clone();
                                 let credit_id = refresh_topup_credit_id.clone();
@@ -656,21 +659,45 @@ pub fn PpqSettingsPanel(
                                 key_form_loading.set(true);
                                 let credit_id = key_form_credit_id.clone();
                                 let editing = editing_key_id.read().clone();
-                                let input = PpqApiKeyInput {
-                                    name,
-                                    usage_limit_usd,
-                                    reset_period,
-                                    expire_at: empty_to_none(key_expire_at.read().clone()),
-                                };
+                                let expire_at = empty_to_none(key_expire_at.read().clone());
+                                let editing_original = editing_key_original.read().clone();
                                 spawn(async move {
                                     let result = if let Some(key_id) = editing.as_deref() {
-                                        ppq::update_api_key(&credit_id, key_id, &input).await
+                                        let patch = PpqApiKeyPatchInput {
+                                            name: name.clone(),
+                                            usage_limit_usd: patch_field_from_optional(
+                                                usage_limit_usd,
+                                                editing_original
+                                                    .as_ref()
+                                                    .and_then(|key| key.usage_limit_usd),
+                                            ),
+                                            reset_period: patch_field_from_optional(
+                                                reset_period.clone(),
+                                                editing_original
+                                                    .as_ref()
+                                                    .and_then(|key| key.reset_period.clone()),
+                                            ),
+                                            expire_at: patch_field_from_optional(
+                                                expire_at.clone(),
+                                                editing_original
+                                                    .as_ref()
+                                                    .and_then(|key| key.expire_at.clone()),
+                                            ),
+                                        };
+                                        ppq::update_api_key(&credit_id, key_id, &patch).await
                                     } else {
+                                        let input = PpqApiKeyInput {
+                                            name: name.clone(),
+                                            usage_limit_usd,
+                                            reset_period: reset_period.clone(),
+                                            expire_at: expire_at.clone(),
+                                        };
                                         ppq::create_api_key(&credit_id, &input).await
                                     };
                                     match result {
                                         Ok(created_or_updated) => {
                                             editing_key_id.set(None);
+                                            editing_key_original.set(None);
                                             key_name.set(String::new());
                                             key_usage_limit.set(String::new());
                                             key_reset_period.set(String::new());
@@ -715,6 +742,7 @@ pub fn PpqSettingsPanel(
                                 disabled: *key_form_loading.read() || *key_section_loading.read(),
                                 onclick: move |_| {
                                     editing_key_id.set(None);
+                                    editing_key_original.set(None);
                                     key_name.set(String::new());
                                     key_usage_limit.set(String::new());
                                     key_reset_period.set(String::new());
@@ -826,6 +854,7 @@ pub fn PpqSettingsPanel(
                                                             || *key_section_loading.read(),
                                                         onclick: move |_| {
                                                             editing_key_id.set(Some(key_for_edit.id.clone()));
+                                                            editing_key_original.set(Some(key_for_edit.clone()));
                                                             key_name.set(key_for_edit.name.clone());
                                                             key_usage_limit.set(key_for_edit.usage_limit_usd.map(|value| value.to_string()).unwrap_or_default());
                                                             key_reset_period.set(key_for_edit.reset_period.clone().unwrap_or_default());
@@ -1158,6 +1187,18 @@ fn parse_optional_f64(input: &str) -> Result<Option<f64>, String> {
         } else {
             Err("non-finite float".to_string())
         }
+    }
+}
+
+fn patch_field_from_optional<T: PartialEq>(
+    current: Option<T>,
+    original: Option<T>,
+) -> PatchField<T> {
+    match (current, original) {
+        (Some(current), Some(original)) if current == original => PatchField::Unchanged,
+        (Some(current), _) => PatchField::Set(current),
+        (None, Some(_)) => PatchField::Clear,
+        (None, None) => PatchField::Unchanged,
     }
 }
 

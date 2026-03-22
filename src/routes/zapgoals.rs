@@ -468,7 +468,21 @@ pub fn ZapGoalsHome() -> Element {
                             ZapModal {
                                 recipient_pubkey: if goal.goal.is_project_goal {
                                     PublicKey::parse(zap_goals_store::PROJECT_DONATION_NPUB)
-                                        .expect("PROJECT_DONATION_NPUB must be a valid pubkey")
+                                        .unwrap_or_else(|err| {
+                                            log::error!(
+                                                "Invalid PROJECT_DONATION_NPUB configured for project goal zaps: {}",
+                                                err
+                                            );
+                                            PublicKey::parse(&goal.goal.author_pubkey)
+                                                .unwrap_or_else(|fallback_err| {
+                                                    log::error!(
+                                                        "Failed to fall back to goal author pubkey {}: {}",
+                                                        goal.goal.author_pubkey,
+                                                        fallback_err
+                                                    );
+                                                    goal.goal.event.pubkey
+                                                })
+                                        })
                                         .to_hex()
                                 } else {
                                     goal.goal.author_pubkey.clone()

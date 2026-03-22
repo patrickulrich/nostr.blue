@@ -2,6 +2,7 @@ use dioxus::core::spawn_forever;
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
@@ -27,7 +28,7 @@ pub enum AiProviderKind {
     OpenAiCompatible,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CustomAiProvider {
     pub id: String,
     pub name: String,
@@ -36,7 +37,19 @@ pub struct CustomAiProvider {
     pub provider_kind: AiProviderKind,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+impl fmt::Debug for CustomAiProvider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CustomAiProvider")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("base_url", &self.base_url)
+            .field("api_key", &"<redacted>")
+            .field("provider_kind", &self.provider_kind)
+            .finish()
+    }
+}
+
+#[derive(Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PpqAccountState {
     pub credit_id: String,
     pub api_key: String,
@@ -44,6 +57,23 @@ pub struct PpqAccountState {
     pub managed_api_key: Option<String>,
     #[serde(default)]
     pub active_api_key_id: Option<String>,
+}
+
+impl fmt::Debug for PpqAccountState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PpqAccountState")
+            .field("credit_id", &self.credit_id)
+            .field("api_key", &"<redacted>")
+            .field(
+                "managed_api_key",
+                &self.managed_api_key.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "active_api_key_id",
+                &self.active_api_key_id.as_ref().map(|_| "<redacted>"),
+            )
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -75,10 +105,22 @@ impl Default for AiProviderState {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum ProviderAuth {
     PpqManaged { api_key: Option<String> },
     BearerToken(String),
+}
+
+impl fmt::Debug for ProviderAuth {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PpqManaged { api_key } => f
+                .debug_struct("PpqManaged")
+                .field("api_key", &api_key.as_ref().map(|_| "<redacted>"))
+                .finish(),
+            Self::BearerToken(_) => f.debug_tuple("BearerToken").field(&"<redacted>").finish(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -216,7 +258,9 @@ pub fn process_queued_provider_state_saves(initial_snapshot: AiProviderState) {
     spawn_forever(async move {
         let mut next_snapshot = Some(initial_snapshot);
         while let Some(current_snapshot) = next_snapshot {
-            let result = save_provider_state(&current_snapshot).await;
+            let result = save_provider_state(&current_snapshot)
+                .await
+                .and_then(|_| cache_provider_state(&current_snapshot));
             emit_provider_state_save_event(current_snapshot, result);
             next_snapshot = finish_provider_state_save();
         }
@@ -405,6 +449,35 @@ mod tests {
             is_builtin: false,
         };
         assert!(provider.supports_tools());
+    }
+
+    #[test]
+    fn debug_output_redacts_provider_secrets() {
+        let provider = CustomAiProvider {
+            id: "custom".to_string(),
+            name: "Custom".to_string(),
+            base_url: "https://example.com/v1".to_string(),
+            api_key: "secret-api-key".to_string(),
+            provider_kind: AiProviderKind::OpenAiCompatible,
+        };
+        let account = PpqAccountState {
+            credit_id: "credit-123".to_string(),
+            api_key: "secret-account-key".to_string(),
+            managed_api_key: Some("secret-managed-key".to_string()),
+            active_api_key_id: Some("key-123".to_string()),
+        };
+        let provider_debug = format!("{provider:?}");
+        let account_debug = format!("{account:?}");
+        let auth_debug = format!(
+            "{:?}",
+            ProviderAuth::BearerToken("secret-bearer-key".to_string())
+        );
+
+        assert!(!provider_debug.contains("secret-api-key"));
+        assert!(!account_debug.contains("secret-account-key"));
+        assert!(!account_debug.contains("secret-managed-key"));
+        assert!(!account_debug.contains("key-123"));
+        assert!(!auth_debug.contains("secret-bearer-key"));
     }
 
     #[test]

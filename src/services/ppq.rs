@@ -142,6 +142,21 @@ pub struct PpqApiKeyInput {
     pub expire_at: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum PatchField<T> {
+    Unchanged,
+    Set(T),
+    Clear,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PpqApiKeyPatchInput {
+    pub name: String,
+    pub usage_limit_usd: PatchField<f64>,
+    pub reset_period: PatchField<String>,
+    pub expire_at: PatchField<String>,
+}
+
 pub async fn create_account() -> Result<PpqAccount, String> {
     let value = send_request(
         Method::POST,
@@ -327,7 +342,7 @@ pub async fn create_api_key(credit_id: &str, input: &PpqApiKeyInput) -> Result<P
 pub async fn update_api_key(
     credit_id: &str,
     key_id: &str,
-    input: &PpqApiKeyInput,
+    input: &PpqApiKeyPatchInput,
 ) -> Result<PpqApiKey, String> {
     let url = build_ppq_url(&["keys", key_id])?;
     let value = send_request(
@@ -361,17 +376,35 @@ fn api_key_payload(input: &PpqApiKeyInput) -> Value {
     })
 }
 
-fn api_key_patch_payload(input: &PpqApiKeyInput) -> Value {
+fn api_key_patch_payload(input: &PpqApiKeyPatchInput) -> Value {
     let mut object = serde_json::Map::new();
     object.insert("name".to_string(), json!(input.name));
-    if let Some(limit) = input.usage_limit_usd {
-        object.insert("usage_limit_usd".to_string(), json!(limit));
+    match &input.usage_limit_usd {
+        PatchField::Unchanged => {}
+        PatchField::Set(limit) => {
+            object.insert("usage_limit_usd".to_string(), json!(limit));
+        }
+        PatchField::Clear => {
+            object.insert("usage_limit_usd".to_string(), Value::Null);
+        }
     }
-    if let Some(reset_period) = input.reset_period.as_deref() {
-        object.insert("reset_period".to_string(), json!(reset_period));
+    match &input.reset_period {
+        PatchField::Unchanged => {}
+        PatchField::Set(reset_period) => {
+            object.insert("reset_period".to_string(), json!(reset_period));
+        }
+        PatchField::Clear => {
+            object.insert("reset_period".to_string(), Value::Null);
+        }
     }
-    if let Some(expire_at) = input.expire_at.as_deref() {
-        object.insert("expire_at".to_string(), json!(expire_at));
+    match &input.expire_at {
+        PatchField::Unchanged => {}
+        PatchField::Set(expire_at) => {
+            object.insert("expire_at".to_string(), json!(expire_at));
+        }
+        PatchField::Clear => {
+            object.insert("expire_at".to_string(), Value::Null);
+        }
     }
     Value::Object(object)
 }
@@ -583,17 +616,17 @@ mod tests {
     }
 
     #[test]
-    fn patch_payload_omits_none_fields() {
-        let payload = api_key_patch_payload(&PpqApiKeyInput {
+    fn patch_payload_preserves_unchanged_and_allows_clear() {
+        let payload = api_key_patch_payload(&PpqApiKeyPatchInput {
             name: "Renamed".to_string(),
-            usage_limit_usd: None,
-            reset_period: None,
-            expire_at: Some("2027-01-01T00:00:00Z".to_string()),
+            usage_limit_usd: PatchField::Unchanged,
+            reset_period: PatchField::Clear,
+            expire_at: PatchField::Set("2027-01-01T00:00:00Z".to_string()),
         });
 
         assert_eq!(payload["name"], json!("Renamed"));
         assert!(payload.get("usage_limit_usd").is_none());
-        assert!(payload.get("reset_period").is_none());
+        assert!(payload["reset_period"].is_null());
         assert_eq!(payload["expire_at"], json!("2027-01-01T00:00:00Z"));
     }
 }

@@ -102,11 +102,10 @@ async fn drain_publish_client_tag_queue() {
             break;
         };
         let settings_to_save = {
-            let mut w = SETTINGS.write();
-            w.publish_client_tag = next_enabled;
-            w.clone()
+            let mut next = SETTINGS.read().clone();
+            next.publish_client_tag = next_enabled;
+            next
         };
-        cache_settings(&settings_to_save);
 
         if let Err(e) = save_settings(&settings_to_save).await {
             log::warn!("Failed to persist client tag setting to Nostr: {}", e);
@@ -114,6 +113,8 @@ async fn drain_publish_client_tag_queue() {
             break;
         } else {
             SETTINGS_ERROR.write().clone_from(&None);
+            SETTINGS.write().clone_from(&settings_to_save);
+            cache_settings(&settings_to_save);
             let mut pending = PUBLISH_CLIENT_TAG_SAVE_PENDING.write();
             if pending.as_ref() == Some(&next_enabled) {
                 pending.take();

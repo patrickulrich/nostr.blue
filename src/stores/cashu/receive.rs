@@ -446,6 +446,7 @@ pub async fn receive_tokens_with_options(
         let mut tokens = data.write();
         tokens.push(TokenData {
             event_id: event_id.clone(),
+            pending_publish: super::types::token_publish_pending(&event_id),
             mint: mint_url.clone(),
             unit: "sat".to_string(),
             proofs: proof_data.clone(),

@@ -327,6 +327,7 @@ pub async fn execute_mpp_melt(
                             new_event_ids.push(real_id.clone());
                             new_tokens.push(TokenData {
                                 event_id: real_id,
+                                pending_publish: false,
                                 mint: mint_url.clone(),
                                 unit: "sat".to_string(),
                                 proofs: proof_data,
@@ -354,6 +355,7 @@ pub async fn execute_mpp_melt(
                             } else {
                                 new_tokens.push(TokenData {
                                     event_id: pending_id,
+                                    pending_publish: true,
                                     mint: mint_url.clone(),
                                     unit: "sat".to_string(),
                                     proofs: proof_data,
@@ -384,6 +386,7 @@ pub async fn execute_mpp_melt(
                             } else {
                                 new_tokens.push(TokenData {
                                     event_id: pending_id,
+                                    pending_publish: true,
                                     mint: mint_url.clone(),
                                     unit: "sat".to_string(),
                                     proofs: proof_data,

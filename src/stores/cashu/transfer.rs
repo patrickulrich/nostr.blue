@@ -137,7 +137,10 @@ pub async fn transfer_between_mints(
         let store = WALLET_TOKENS.read();
         let data = store.data();
         let tokens = data.read();
-        let mint_tokens: Vec<_> = tokens.iter().filter(|t| t.mint == source_mint).collect();
+        let mint_tokens: Vec<_> = tokens
+            .iter()
+            .filter(|t| t.mint == source_mint && !t.pending_publish)
+            .collect();
         let mut all_proofs = Vec::new();
         let mut event_ids = Vec::new();
         for token in &mint_tokens {
@@ -430,6 +433,7 @@ pub async fn transfer_between_mints(
             });
             tokens.push(TokenData {
                 event_id: event_id.clone(),
+                pending_publish: super::types::token_publish_pending(&event_id),
                 mint: source_mint.clone(),
                 unit: "sat".to_string(),
                 proofs: proof_data.clone(),
@@ -442,6 +446,7 @@ pub async fn transfer_between_mints(
         let target_event_id = target_new_event_id.clone();
         tokens.push(TokenData {
             event_id: target_event_id.clone(),
+            pending_publish: super::types::token_publish_pending(&target_event_id),
             mint: target_mint.clone(),
             unit: "sat".to_string(),
             proofs: target_proof_data.clone(),

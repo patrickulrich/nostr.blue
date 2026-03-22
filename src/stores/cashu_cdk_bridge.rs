@@ -171,6 +171,7 @@ pub async fn sync_wallet_state() -> Result<(), String> {
             .collect();
         tokens.push(TokenData {
             event_id: String::new(),
+            pending_publish: false,
             mint: mint_url.to_string(),
             unit: "sat".to_string(),
             proofs: proof_data,

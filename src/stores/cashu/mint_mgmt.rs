@@ -85,10 +85,43 @@ async fn publish_wallet_snapshot(privkey: &str, mints: &[String]) -> Result<Even
 }
 
 async fn publish_or_queue_wallet_snapshot(event: Event) -> Result<(), String> {
+    async fn remove_stale_pending_wallet_snapshots(
+        stale_pending_ids: &[String],
+    ) -> Result<(), String> {
+        if let Some(localstore) = SHARED_LOCALSTORE.read().as_ref().cloned() {
+            for pending_id in stale_pending_ids {
+                localstore
+                    .remove_pending_event(pending_id)
+                    .await
+                    .map_err(|e| {
+                        format!(
+                            "Failed to replace pending wallet snapshot {}: {}",
+                            pending_id, e
+                        )
+                    })?;
+            }
+        }
+        if !stale_pending_ids.is_empty() {
+            PENDING_NOSTR_EVENTS
+                .write()
+                .retain(|pending| !stale_pending_ids.contains(&pending.id));
+        }
+        Ok(())
+    }
+
     let client = nostr_client::NOSTR_CLIENT.read().as_ref().cloned();
+    let stale_pending_ids: Vec<String> = PENDING_NOSTR_EVENTS
+        .read()
+        .iter()
+        .filter(|pending| pending.event_type == super::types::PendingEventType::WalletSnapshot)
+        .map(|pending| pending.id.clone())
+        .collect();
     if let Some(client) = client {
         match client.send_event(&event).await {
-            Ok(output) if !output.success.is_empty() => return Ok(()),
+            Ok(output) if !output.success.is_empty() => {
+                remove_stale_pending_wallet_snapshots(&stale_pending_ids).await?;
+                return Ok(());
+            }
             Ok(_) => {
                 log::warn!("No relays accepted wallet event, queueing for retry");
             }
@@ -109,38 +142,15 @@ async fn publish_or_queue_wallet_snapshot(event: Event) -> Result<(), String> {
         );
     }
 
-    let stale_pending_ids: Vec<String> = PENDING_NOSTR_EVENTS
-        .read()
-        .iter()
-        .filter(|pending| pending.event_type == super::types::PendingEventType::WalletSnapshot)
-        .map(|pending| pending.id.clone())
-        .collect();
-    if let Some(localstore) = SHARED_LOCALSTORE.read().as_ref().cloned() {
-        for pending_id in &stale_pending_ids {
-            localstore
-                .remove_pending_event(pending_id)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "Failed to replace pending wallet snapshot {}: {}",
-                        pending_id, e
-                    )
-                })?;
-        }
-    }
-    if !stale_pending_ids.is_empty() {
-        PENDING_NOSTR_EVENTS
-            .write()
-            .retain(|pending| !stale_pending_ids.contains(&pending.id));
-    }
-
     queue_signed_event_for_retry_result(
         event,
         super::types::PendingEventType::WalletSnapshot,
         None,
         None,
     )
-    .await
+    .await?;
+
+    remove_stale_pending_wallet_snapshots(&stale_pending_ids).await
 }
 
 async fn queue_mint_deletion_event_durably(builder: nostr_sdk::EventBuilder) -> Result<(), String> {
@@ -1109,6 +1119,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         emergency_event_id = Some(temp_emergency_id.clone());
         let emergency_token = TokenData {
             event_id: temp_emergency_id.clone(),
+            pending_publish: false,
             mint: mint_url.clone(),
             unit: unit_str.clone(),
             proofs: emergency_proof_data.clone(),
@@ -1307,6 +1318,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         let local_only_id = format!("local_{}", uuid::Uuid::new_v4());
         let local_token = TokenData {
             event_id: local_only_id.clone(),
+            pending_publish: false,
             mint: mint_url.clone(),
             unit: unit_str.clone(),
             proofs: proof_data.clone(),
@@ -1332,6 +1344,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
     if let Some(ref emergency_id) = emergency_event_id {
         let replacement_token = TokenData {
             event_id: new_event_id.clone(),
+            pending_publish: super::types::token_publish_pending(&new_event_id),
             mint: mint_url.clone(),
             unit: unit_str.clone(),
             proofs: proof_data.clone(),
@@ -1356,6 +1369,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
     } else {
         let new_token = TokenData {
             event_id: new_event_id.clone(),
+            pending_publish: super::types::token_publish_pending(&new_event_id),
             mint: mint_url.clone(),
             unit: unit_str.clone(),
             proofs: proof_data,

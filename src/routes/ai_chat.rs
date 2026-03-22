@@ -260,6 +260,11 @@ pub fn AIChat() -> Element {
         }
         last_account_key.set(Some(account_key));
         messages.set(Vec::new());
+        input.set(String::new());
+        pending_images.set(Vec::new());
+        compose_notice.set(None);
+        error.set(None);
+        show_image_upload.set(false);
         chat_history_loaded.set(false);
         chat_history_loading.set(false);
         persisted_messages_dirty.set(false);
@@ -500,6 +505,9 @@ pub fn AIChat() -> Element {
             *generation = generation.wrapping_add(1);
             *generation
         });
+        models.set(Vec::new());
+        selected_model.set(String::new());
+        error.set(None);
         spawn(async move {
             let Some(provider) = available_providers
                 .into_iter()
@@ -1236,6 +1244,25 @@ fn submit_message(
 
                 match generate_images(&provider, &request).await {
                     Ok(response) => {
+                        let images: Vec<ChatImage> = response
+                            .images
+                            .into_iter()
+                            .filter_map(|image| {
+                                sanitize_chat_image_src(&image.url).map(|url| ChatImage {
+                                    url,
+                                    alt: "Generated image".to_string(),
+                                    title: String::new(),
+                                })
+                            })
+                            .collect();
+                        if images.is_empty() {
+                            error.set(Some(
+                                "Image generation completed but returned no usable image URLs."
+                                    .to_string(),
+                            ));
+                            loading.set(false);
+                            return;
+                        }
                         let mut final_messages = next_messages;
                         final_messages.push(DisplayMessage {
                             id: format!(
@@ -1244,17 +1271,7 @@ fn submit_message(
                             ),
                             role: DisplayRole::Assistant,
                             content: String::new(),
-                            images: response
-                                .images
-                                .into_iter()
-                                .filter_map(|image| {
-                                    sanitize_chat_image_src(&image.url).map(|url| ChatImage {
-                                        url,
-                                        alt: "Generated image".to_string(),
-                                        title: String::new(),
-                                    })
-                                })
-                                .collect(),
+                            images,
                             tool_calls: Vec::new(),
                         });
                         messages.set(final_messages);

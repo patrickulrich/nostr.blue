@@ -304,10 +304,15 @@ pub struct SyncState {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TokenData {
     pub event_id: String,
+    pub pending_publish: bool,
     pub mint: String,
     pub unit: String,
     pub proofs: Vec<ProofData>,
     pub created_at: u64,
+}
+
+pub fn token_publish_pending(event_id: &str) -> bool {
+    event_id.starts_with("pending_") || event_id.starts_with("local_pending_")
 }
 /// Transaction history item with event metadata
 #[derive(Clone, Debug, PartialEq)]
