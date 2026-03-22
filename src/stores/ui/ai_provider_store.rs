@@ -403,4 +403,41 @@ mod tests {
 
         reset_provider_state_save_queue();
     }
+
+    #[test]
+    fn queued_provider_state_save_keeps_latest_custom_provider_snapshot() {
+        reset_provider_state_save_queue();
+
+        let first = AiProviderState {
+            selected_provider_id: "custom-a".to_string(),
+            selected_model_by_provider: HashMap::new(),
+            custom_providers: vec![CustomAiProvider {
+                id: "custom-a".to_string(),
+                name: "Custom A".to_string(),
+                base_url: "https://example.com/v1".to_string(),
+                api_key: "secret-a".to_string(),
+                provider_kind: AiProviderKind::OpenAiCompatible,
+            }],
+            ppq_account: None,
+        };
+        let second = AiProviderState {
+            selected_provider_id: "custom-b".to_string(),
+            selected_model_by_provider: HashMap::new(),
+            custom_providers: vec![CustomAiProvider {
+                id: "custom-b".to_string(),
+                name: "Custom B".to_string(),
+                base_url: "https://example.net/v1".to_string(),
+                api_key: "secret-b".to_string(),
+                provider_kind: AiProviderKind::OpenAiCompatible,
+            }],
+            ppq_account: None,
+        };
+
+        assert_eq!(queue_provider_state_save(first.clone()), Some(first));
+        assert_eq!(queue_provider_state_save(second.clone()), None);
+        assert_eq!(finish_provider_state_save(), Some(second));
+        assert_eq!(finish_provider_state_save(), None);
+
+        reset_provider_state_save_queue();
+    }
 }

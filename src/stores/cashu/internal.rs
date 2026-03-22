@@ -512,6 +512,8 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
             created_at: chrono::Utc::now().timestamp() as u64,
         }]
     } else if !available_proofs.is_empty() {
+        // Invariant: non-empty available_proofs should have produced a real or queued new_event_id.
+        // Keep this fallback so cleanup still preserves spendable proofs if that invariant is broken.
         let synthetic_id = synthetic_pending_id
             .clone()
             .ok_or_else(|| "Cleanup token event was not published or queued".to_string())?;

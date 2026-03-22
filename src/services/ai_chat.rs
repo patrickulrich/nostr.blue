@@ -137,6 +137,12 @@ struct WireModel {
     #[serde(rename = "type")]
     model_type: String,
     #[serde(default)]
+    image_input: Option<bool>,
+    #[serde(default)]
+    capabilities: Option<Vec<String>>,
+    #[serde(default)]
+    input_modalities: Option<Vec<String>>,
+    #[serde(default)]
     pricing: Option<Value>,
 }
 
@@ -233,6 +239,7 @@ async fn fetch_models_from_endpoint(
         .into_iter()
         .map(|model| {
             let kind = model_kind(provider, endpoint, &model).unwrap_or(ChatModelKind::Chat);
+            let supports_image_input = model_supports_image_input(&model);
             ChatModel {
                 name: if model.name.trim().is_empty() {
                     model.id.clone()
@@ -242,7 +249,7 @@ async fn fetch_models_from_endpoint(
                 id: model.id,
                 description: model.description,
                 kind,
-                supports_image_input: matches!(kind, ChatModelKind::Chat),
+                supports_image_input,
                 total_cost: model.pricing.as_ref().and_then(parse_total_cost),
             }
         })
@@ -321,14 +328,37 @@ fn model_kind(
     }
 
     let model_type = model.model_type.trim().to_ascii_lowercase();
+    if model_type.is_empty() {
+        return Some(ChatModelKind::Chat);
+    }
     if model_type == "image" || model_type == "images" || model_type == "image_generation" {
         return Some(ChatModelKind::Image);
     }
     if model_type == "video" || model_type == "videos" || model_type == "video_generation" {
         return None;
     }
+    if matches!(
+        model_type.as_str(),
+        "chat" | "text" | "llm" | "language" | "completion" | "completions"
+    ) {
+        return Some(ChatModelKind::Chat);
+    }
 
-    Some(ChatModelKind::Chat)
+    None
+}
+
+fn model_supports_image_input(model: &WireModel) -> bool {
+    if model.image_input == Some(true) {
+        return true;
+    }
+
+    model
+        .capabilities
+        .iter()
+        .flatten()
+        .chain(model.input_modalities.iter().flatten())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .any(|value| matches!(value.as_str(), "image" | "images" | "image_input" | "vision"))
 }
 
 fn model_kind_rank(kind: ChatModelKind) -> u8 {
@@ -524,6 +554,9 @@ mod tests {
                 name: "Claude".to_string(),
                 description: String::new(),
                 model_type: "chat".to_string(),
+                image_input: None,
+                capabilities: None,
+                input_modalities: None,
                 pricing: None,
             }
         ));
@@ -535,6 +568,9 @@ mod tests {
                 name: "Image".to_string(),
                 description: String::new(),
                 model_type: String::new(),
+                image_input: None,
+                capabilities: None,
+                input_modalities: None,
                 pricing: None,
             }
         ));
@@ -558,6 +594,9 @@ mod tests {
                 name: String::new(),
                 description: String::new(),
                 model_type: String::new(),
+                image_input: None,
+                capabilities: None,
+                input_modalities: None,
                 pricing: None,
             }
         ));
@@ -578,6 +617,9 @@ mod tests {
             name: "Image Model".to_string(),
             description: String::new(),
             model_type: "image".to_string(),
+            image_input: None,
+            capabilities: None,
+            input_modalities: None,
             pricing: None,
         };
 
@@ -595,6 +637,9 @@ mod tests {
             name: "Gemini 2.5 Flash Image".to_string(),
             description: String::new(),
             model_type: String::new(),
+            image_input: None,
+            capabilities: None,
+            input_modalities: None,
             pricing: None,
         };
 
@@ -633,6 +678,58 @@ mod tests {
         sort_and_dedup_models(&mut models);
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].kind, ChatModelKind::Image);
+    }
+
+    #[test]
+    fn rejects_unknown_explicit_model_types() {
+        let provider = AiProviderConfig {
+            id: "custom".to_string(),
+            name: "Custom".to_string(),
+            base_url: "https://example.com/v1".to_string(),
+            provider_kind: AiProviderKind::OpenAiCompatible,
+            auth: ProviderAuth::BearerToken("secret".to_string()),
+            is_builtin: false,
+        };
+        let model = WireModel {
+            id: "embedding-model".to_string(),
+            name: "Embedding".to_string(),
+            description: String::new(),
+            model_type: "embedding".to_string(),
+            image_input: Some(true),
+            capabilities: None,
+            input_modalities: None,
+            pricing: None,
+        };
+
+        assert_eq!(model_kind(&provider, "models", &model), None);
+        assert!(!is_supported_model(&provider, "models", &model));
+    }
+
+    #[test]
+    fn supports_image_input_only_with_explicit_metadata() {
+        let with_capability = WireModel {
+            id: "vision-model".to_string(),
+            name: "Vision".to_string(),
+            description: String::new(),
+            model_type: "chat".to_string(),
+            image_input: None,
+            capabilities: Some(vec!["vision".to_string()]),
+            input_modalities: None,
+            pricing: None,
+        };
+        let without_capability = WireModel {
+            id: "chat-model".to_string(),
+            name: "Chat".to_string(),
+            description: String::new(),
+            model_type: "chat".to_string(),
+            image_input: None,
+            capabilities: None,
+            input_modalities: None,
+            pricing: None,
+        };
+
+        assert!(model_supports_image_input(&with_capability));
+        assert!(!model_supports_image_input(&without_capability));
     }
 
     #[test]

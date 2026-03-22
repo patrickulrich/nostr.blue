@@ -30,7 +30,9 @@
 //! Currently marked as dead_code - functions not yet wired to UI.
 #![allow(dead_code)]
 use super::denomination::DenominationStrategy;
-use super::events::{queue_signed_event_for_retry, update_token_event_id};
+use super::events::{
+    queue_signed_event_for_retry, queue_signed_event_for_retry_result, update_token_event_id,
+};
 use super::internal::get_or_create_wallet;
 use super::proofs::{
     cdk_proof_to_proof_data, get_event_ids_for_proofs, proof_data_to_cdk_proof,
@@ -87,6 +89,15 @@ impl SwapOptions {
         self.include_fee = include;
         self
     }
+}
+
+#[derive(Debug, Clone)]
+enum SwapPublishOutcome {
+    Published {
+        event_id: String,
+        deletion_follow_up_failed: bool,
+    },
+    RetryQueued,
 }
 /// Result of a swap operation
 #[derive(Debug, Clone)]
@@ -368,12 +379,24 @@ pub async fn execute_swap_with_nip60(
     )
     .await
     {
-        Ok(real_id) => {
-            update_token_event_id(&pending_event_id, &real_id);
-            real_id
+        Ok(SwapPublishOutcome::Published {
+            event_id,
+            deletion_follow_up_failed,
+        }) => {
+            update_token_event_id(&pending_event_id, &event_id);
+            if deletion_follow_up_failed {
+                log::warn!(
+                    "Swap token event {} was published, but deletion follow-up failed",
+                    event_id
+                );
+            }
+            event_id
+        }
+        Ok(SwapPublishOutcome::RetryQueued) => {
+            pending_event_id.clone()
         }
         Err(e) => {
-            log::warn!("Nostr publish failed, queued for retry: {}", e);
+            log::warn!("Nostr publish failed: {}", e);
             pending_event_id.clone()
         }
     };
@@ -449,7 +472,7 @@ async fn publish_swap_events(
     output_proofs: &[cdk::nuts::Proof],
     event_ids_to_delete: &[String],
     pending_event_id: &str,
-) -> Result<String, String> {
+) -> Result<SwapPublishOutcome, String> {
     if output_proofs.is_empty() {
         return Err("No proofs to publish".to_string());
     }
@@ -514,20 +537,28 @@ async fn publish_swap_events(
                         "Swap token event {} already exists on all relays (duplicate)",
                         event_id_hex
                     );
-                    publish_deletion_events(&client, &valid_del_ids).await?;
+                    let deletion_follow_up_failed = record_deletion_follow_up(
+                        publish_deletion_events(&client, &valid_del_ids).await,
+                        pending_event_id,
+                        mint_url,
+                    );
+                    Ok(SwapPublishOutcome::Published {
+                        event_id: event_id_hex,
+                        deletion_follow_up_failed,
+                    })
                 } else {
                     log::warn!(
                         "No relays accepted swap token event (failed: {:?}), queuing for retry",
                         output.failed.keys().collect::<Vec<_>>()
                     );
-                    queue_signed_event_for_retry(
+                    queue_signed_event_for_retry_result(
                         signed_event,
                         PendingEventType::TokenEvent,
                         Some(pending_event_id.to_string()),
                         Some(mint_url.to_string()),
                     )
-                    .await;
-                    return Err("No relays accepted swap token event".to_string());
+                    .await?;
+                    Ok(SwapPublishOutcome::RetryQueued)
                 }
             } else {
                 log::info!(
@@ -536,7 +567,15 @@ async fn publish_swap_events(
                     output.success.len(),
                     output.success.len() + output.failed.len()
                 );
-                publish_deletion_events(&client, &valid_del_ids).await?;
+                let deletion_follow_up_failed = record_deletion_follow_up(
+                    publish_deletion_events(&client, &valid_del_ids).await,
+                    pending_event_id,
+                    mint_url,
+                );
+                Ok(SwapPublishOutcome::Published {
+                    event_id: event_id_hex,
+                    deletion_follow_up_failed,
+                })
             }
         }
         Err(e) => {
@@ -551,10 +590,27 @@ async fn publish_swap_events(
                 Some(mint_url.to_string()),
             )
             .await;
-            return Err(format!("Failed to publish swap token event: {}", e));
+            Ok(SwapPublishOutcome::RetryQueued)
         }
     }
-    Ok(event_id_hex)
+}
+
+fn record_deletion_follow_up(
+    result: Result<(), String>,
+    pending_event_id: &str,
+    mint_url: &str,
+) -> bool {
+    if let Err(err) = result {
+        log::error!(
+            "Swap deletion follow-up failed for pending_event_id={} mint={}: {}",
+            pending_event_id,
+            mint_url,
+            err
+        );
+        true
+    } else {
+        false
+    }
 }
 /// Build deletion event tags for token events
 ///

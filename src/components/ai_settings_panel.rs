@@ -3,6 +3,7 @@ use crate::stores::ai_provider_store::{
     self, normalize_base_url, ppq_provider, resolve_providers, sanitize_provider_input,
     AiProviderKind, AiProviderState, CustomAiProvider, ProviderAuth,
 };
+use dioxus::core::spawn_forever;
 use dioxus::prelude::*;
 use regex::Regex;
 use std::net::IpAddr;
@@ -359,16 +360,30 @@ fn persist_provider_state(
         is_saving.set(false);
         return;
     }
-    spawn(async move {
-        match ai_provider_store::save_provider_state(&next_state).await {
-            Ok(()) => {
-                state.set(next_state);
+    state.set(next_state.clone());
+
+    if let Some(snapshot) = ai_provider_store::queue_provider_state_save(next_state) {
+        spawn_forever(async move {
+            let mut next_snapshot = Some(snapshot);
+            let mut completed_without_error = true;
+
+            while let Some(current_snapshot) = next_snapshot {
+                if let Err(e) = ai_provider_store::save_provider_state(&current_snapshot).await {
+                    completed_without_error = false;
+                    save_error.set(Some(e));
+                }
+                next_snapshot = ai_provider_store::finish_provider_state_save();
+            }
+
+            if completed_without_error {
                 on_success();
             }
-            Err(e) => save_error.set(Some(e)),
-        }
+            is_saving.set(false);
+        });
+    } else {
+        on_success();
         is_saving.set(false);
-    });
+    }
 }
 
 fn build_custom_provider(

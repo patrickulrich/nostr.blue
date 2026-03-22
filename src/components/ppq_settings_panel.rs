@@ -652,7 +652,7 @@ pub fn PpqSettingsPanel(
                         }
                     } else {
                         div { class: "space-y-3",
-                            for key in api_keys_list.clone() {
+                            for key in api_keys_list {
                                 {
                                     let is_active = active_key_id.as_deref() == Some(key.id.as_str());
                                     let key_clone = key.clone();
@@ -704,6 +704,7 @@ pub fn PpqSettingsPanel(
                                                             let credit_id = key_credit_id_for_use.clone();
                                                             let key_id = key_clone.id.clone();
                                                             keys_error.set(None);
+                                                            is_saving.set(true);
                                                             spawn(async move {
                                                                 match ppq::get_api_key(&credit_id, &key_id, true).await {
                                                                     Ok(full_key) => {
@@ -716,10 +717,14 @@ pub fn PpqSettingsPanel(
                                                                                 api_key.clone(),
                                                                             );
                                                                         } else {
+                                                                            is_saving.set(false);
                                                                             keys_error.set(Some("PPQ did not return the full API key for this key id".to_string()));
                                                                         }
                                                                     }
-                                                                    Err(err) => keys_error.set(Some(err)),
+                                                                    Err(err) => {
+                                                                        is_saving.set(false);
+                                                                        keys_error.set(Some(err));
+                                                                    }
                                                                 }
                                                             });
                                                         },

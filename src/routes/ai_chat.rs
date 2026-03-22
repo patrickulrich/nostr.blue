@@ -254,9 +254,11 @@ pub fn AIChat() -> Element {
                     if *chat_history_generation.read() != generation
                         || ai_chat_store::current_account_key() != account_key
                     {
+                        chat_history_loading.set(false);
                         return;
                     }
                     if *persisted_messages_dirty.read() || !messages.read().is_empty() {
+                        chat_history_loading.set(false);
                         return;
                     }
                     initial_loaded_messages.set(history.clone());
@@ -272,6 +274,7 @@ pub fn AIChat() -> Element {
                     if *chat_history_generation.read() != generation
                         || ai_chat_store::current_account_key() != account_key
                     {
+                        chat_history_loading.set(false);
                         return;
                     }
                     error.set(Some(e));
@@ -945,22 +948,21 @@ fn build_api_messages(messages: &[DisplayMessage]) -> Vec<ChatMessage> {
         content: ChatMessageContent::Text(SYSTEM_PROMPT.to_string()),
     }];
     for message in messages {
-        let content = match message.role {
-            DisplayRole::User if !message.images.is_empty() => {
-                let mut parts = Vec::new();
-                if !message.content.trim().is_empty() {
-                    parts.push(ChatMessagePart::Text {
-                        text: message.content.clone(),
-                    });
-                }
-                parts.extend(message.images.iter().cloned().map(|image| {
-                    ChatMessagePart::ImageUrl {
-                        image_url: ChatImageUrl { url: image.url },
-                    }
-                }));
-                ChatMessageContent::Parts(parts)
+        let content = if !message.images.is_empty() {
+            let mut parts = Vec::new();
+            if !message.content.trim().is_empty() {
+                parts.push(ChatMessagePart::Text {
+                    text: message.content.clone(),
+                });
             }
-            _ => ChatMessageContent::Text(message.content.clone()),
+            parts.extend(message.images.iter().cloned().map(|image| {
+                ChatMessagePart::ImageUrl {
+                    image_url: ChatImageUrl { url: image.url },
+                }
+            }));
+            ChatMessageContent::Parts(parts)
+        } else {
+            ChatMessageContent::Text(message.content.clone())
         };
         api_messages.push(ChatMessage {
             role: match message.role {
@@ -1448,8 +1450,13 @@ impl From<ImageInsertData> for ChatImage {
 
 #[cfg(test)]
 mod tests {
-    use super::{history_save_snapshot_key, resolve_selected_model};
-    use crate::services::ai_chat::{ChatModel, ChatModelKind};
+    use super::{
+        build_api_messages, history_save_snapshot_key, resolve_selected_model, ChatImage,
+        DisplayMessage, DisplayRole,
+    };
+    use crate::services::ai_chat::{
+        ChatMessageContent, ChatMessagePart, ChatModel, ChatModelKind,
+    };
     use crate::stores::ai_chat_store::{
         PersistedChatMessage, PersistedChatRole, PersistedToolCall,
     };
@@ -1647,5 +1654,41 @@ mod tests {
     #[test]
     fn resolve_selected_model_returns_empty_without_available_models() {
         assert!(resolve_selected_model("missing", Some("also-missing"), &[]).is_empty());
+    }
+
+    #[test]
+    fn build_api_messages_keeps_assistant_images_as_parts() {
+        let api_messages = build_api_messages(&[DisplayMessage {
+            id: "1".to_string(),
+            role: DisplayRole::Assistant,
+            content: "See attached".to_string(),
+            images: vec![ChatImage {
+                url: "https://cdn.example.com/image.png".to_string(),
+                alt: String::new(),
+                title: String::new(),
+            }],
+            tool_calls: vec![],
+        }]);
+
+        assert_eq!(api_messages.len(), 2);
+        match &api_messages[1].content {
+            ChatMessageContent::Parts(parts) => {
+                assert_eq!(
+                    parts[0],
+                    ChatMessagePart::Text {
+                        text: "See attached".to_string()
+                    }
+                );
+                assert_eq!(
+                    parts[1],
+                    ChatMessagePart::ImageUrl {
+                        image_url: crate::services::ai_chat::ChatImageUrl {
+                            url: "https://cdn.example.com/image.png".to_string()
+                        }
+                    }
+                );
+            }
+            other => panic!("expected multipart assistant message, got {other:?}"),
+        }
     }
 }

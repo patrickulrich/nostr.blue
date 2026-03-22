@@ -429,7 +429,7 @@ pub fn ZapGoalsHome() -> Element {
                         }
                     }
 
-                    if *has_more.read() && filtered_goals.len() == goals.read().len() {
+                    if *has_more.read() {
                         div {
                             id: "{sentinel_id}",
                             class: "py-8 text-center text-sm text-muted-foreground",
@@ -629,15 +629,26 @@ pub fn ZapGoalsNew() -> Element {
             .await
             {
                 Ok(result) => {
-                    toast.success(
-                        format!(
-                            "Zap goal published to {}/{} relays",
-                            result.success_count(),
-                            result.total_attempted()
-                        ),
-                        ToastOptions::new(),
-                    );
-                    navigator.push(Route::ZapGoalsHome {});
+                    if result.success_count() > 0 {
+                        toast.success(
+                            format!(
+                                "Zap goal published to {}/{} relays",
+                                result.success_count(),
+                                result.total_attempted()
+                            ),
+                            ToastOptions::new(),
+                        );
+                        navigator.push(Route::ZapGoalsHome {});
+                    } else {
+                        toast.error(
+                            format!(
+                                "Failed to publish to any relays (0/{})",
+                                result.total_attempted()
+                            ),
+                            ToastOptions::new(),
+                        );
+                        publishing.set(false);
+                    }
                 }
                 Err(error) => {
                     error_message.set(Some(error));

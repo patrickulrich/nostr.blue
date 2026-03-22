@@ -5,7 +5,7 @@ use crate::stores::subscription_manager;
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
 use crate::utils::{build_thread_tree, extract_root_event_id};
 use dioxus::prelude::*;
-use dioxus_core::{spawn_forever, Task};
+use dioxus_core::Task;
 use nostr_sdk::{
     Event as NostrEvent, EventId, Filter, Kind, RelayPoolNotification, SubscriptionId, Timestamp,
 };
@@ -96,13 +96,7 @@ pub fn PollView(noteid: String) -> Element {
         if let Some(task) = comment_listener_task.replace(None) {
             task.cancel();
         }
-        if let Some(sub_id) = comment_sub_id.replace(None) {
-            if let Some(client) = nostr_client::get_client() {
-                spawn_forever(async move {
-                    subscription_manager::unsubscribe(&client, &sub_id).await;
-                });
-            }
-        }
+        comment_sub_id.set(None);
     });
 
     use_effect(move || {
@@ -335,6 +329,7 @@ pub fn PollView(noteid: String) -> Element {
     let current_poll_event = poll_event.read().clone();
     let route_loaded_comments = comments.read().len();
     let route_replies_count = std::cmp::max(*reply_total.read(), route_loaded_comments);
+    let route_comments_partial = route_loaded_comments == 0 && route_replies_count > 0;
 
     rsx! {
         div { class: "min-h-screen",
@@ -405,7 +400,9 @@ pub fn PollView(noteid: String) -> Element {
                     div { class: "pt-6 px-4",
                         div { class: "mb-6",
                             h3 { class: "text-2xl font-bold",
-                                if route_replies_count > route_loaded_comments {
+                                if route_comments_partial {
+                                    "Comments (showing {route_loaded_comments} of {route_replies_count})"
+                                } else if route_replies_count > route_loaded_comments {
                                     "Comments (showing {route_loaded_comments} of {route_replies_count})"
                                 } else if route_replies_count > 0 {
                                     "Comments ({route_replies_count})"
@@ -451,6 +448,13 @@ pub fn PollView(noteid: String) -> Element {
                                             onclick: move |_| comments_refresh.with_mut(|value| *value = value.wrapping_add(1)),
                                             "Retry"
                                         }
+                                    }
+                                }
+                            } else if route_comments_partial && thread_tree.is_empty() {
+                                rsx! {
+                                    div { class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
+                                        p { "Comments unavailable" }
+                                        p { class: "text-sm", "Showing 0 of {route_replies_count} known comments." }
                                     }
                                 }
                             } else if thread_tree.is_empty() {

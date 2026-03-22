@@ -218,9 +218,19 @@ async fn fetch_zap_receipts_paginated(goal_event_id: EventId) -> Result<Vec<Even
         let oldest_created_at = page.iter().map(|event| event.created_at.as_secs()).min();
         let seen_before = seen.len();
         for receipt in page {
-            if seen.insert(receipt.id) && receipt.verify().is_ok() {
+            if !seen.insert(receipt.id) {
+                continue;
+            }
+            if receipts.len() >= SAFETY_MAX_RECEIPTS {
+                break;
+            }
+            if receipt.verify().is_ok() {
                 receipts.push(receipt);
             }
+        }
+
+        if receipts.len() >= SAFETY_MAX_RECEIPTS {
+            break;
         }
 
         let Some(oldest_created_at) = oldest_created_at else {
@@ -248,7 +258,7 @@ pub fn parse_goal_event(event: &Event) -> Option<ZapGoal> {
     }
 
     let amount_msats = parse_u64_tag(event, "amount")?;
-    if amount_msats == 0 {
+    if amount_msats == 0 || amount_msats % 1000 != 0 {
         return None;
     }
     let relays = parse_relays(event)?;
@@ -413,7 +423,7 @@ fn extract_zap_amount_sats(event: &Event) -> Option<u64> {
                 if tag_values.first().and_then(|value| value.as_str()) == Some("amount") {
                     if let Some(msats) = tag_values.get(1).and_then(|value| value.as_str()) {
                         if let Ok(parsed) = msats.parse::<u64>() {
-                            return Some(parsed / 1000);
+                            return msats_to_sats(parsed);
                         }
                     }
                 }
@@ -427,7 +437,7 @@ fn extract_zap_amount_sats(event: &Event) -> Option<u64> {
                 .as_u64()
                 .or_else(|| value.as_str()?.parse::<u64>().ok())
         })
-        .map(|msats| msats / 1000)
+        .and_then(msats_to_sats)
 }
 
 fn parse_bolt11_amount(bolt11: &str) -> Option<u64> {
@@ -477,7 +487,11 @@ fn parse_bolt11_amount(bolt11: &str) -> Option<u64> {
         Some(_) => return None,
         None => amount.checked_mul(100_000_000_000)?,
     };
-    Some(amount_msats / 1000)
+    msats_to_sats(amount_msats)
+}
+
+fn msats_to_sats(amount_msats: u64) -> Option<u64> {
+    (amount_msats > 0 && amount_msats % 1000 == 0).then_some(amount_msats / 1000)
 }
 
 fn extract_zap_sender(event: &Event) -> Option<String> {
@@ -744,7 +758,10 @@ pub fn format_goal_date(timestamp: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_relays, parse_bolt11_amount, parse_goal_event, receipt_targets_goal};
+    use super::{
+        extract_zap_amount_sats, normalize_relays, parse_bolt11_amount, parse_goal_event,
+        receipt_targets_goal,
+    };
     use nostr_sdk::{EventBuilder, Keys, Kind, Tag};
 
     #[test]
@@ -766,10 +783,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_bolt11_amount_truncates_sub_sat_amounts() {
-        assert_eq!(parse_bolt11_amount("lnbc5n1example"), Some(0));
-        assert_eq!(parse_bolt11_amount("lnbc15000p1example"), Some(1));
-        assert_eq!(parse_bolt11_amount("lnbc5p1example"), Some(0));
+    fn parse_bolt11_amount_rejects_fractional_sat_amounts() {
+        assert_eq!(parse_bolt11_amount("lnbc5n1example"), None);
+        assert_eq!(parse_bolt11_amount("lnbc15000p1example"), None);
+        assert_eq!(parse_bolt11_amount("lnbc5p1example"), None);
     }
 
     #[test]
@@ -803,6 +820,35 @@ mod tests {
             .unwrap();
 
         assert!(parse_goal_event(&event).is_none());
+    }
+
+    #[test]
+    fn parse_goal_event_rejects_fractional_sat_goals() {
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::Custom(super::KIND_ZAP_GOAL), "goal")
+            .tags(vec![
+                Tag::parse(["amount", "1500"]).unwrap(),
+                Tag::parse(["relays", "wss://relay.one"]).unwrap(),
+            ])
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        assert!(parse_goal_event(&event).is_none());
+    }
+
+    #[test]
+    fn extract_zap_amount_sats_rejects_fractional_description_amounts() {
+        let keys = Keys::generate();
+        let receipt = EventBuilder::new(Kind::ZapReceipt, "")
+            .tags(vec![Tag::parse([
+                "description",
+                r#"{"tags":[["amount","1500"]]}"#,
+            ])
+            .unwrap()])
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        assert_eq!(extract_zap_amount_sats(&receipt), None);
     }
 
     #[test]

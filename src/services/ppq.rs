@@ -277,7 +277,7 @@ fn api_key_payload(input: &PpqApiKeyInput) -> Value {
 fn parse_topup_invoice(value: &Value) -> Result<PpqTopupInvoice, String> {
     let data = data_or_root(value);
     let invoice_id = string_field(data, &["invoice_id", "id", "invoiceId"])
-        .ok_or_else(|| format!("PPQ topup invoice response missing required id: {}", pretty_json(value)))?;
+        .ok_or_else(|| "PPQ topup invoice response missing required id (<redacted response>)".to_string())?;
     Ok(PpqTopupInvoice {
         invoice_id,
         status: string_field(data, &["status"]),
@@ -299,7 +299,7 @@ fn parse_topup_invoice(value: &Value) -> Result<PpqTopupInvoice, String> {
 
 fn parse_api_key(value: &Value) -> Result<PpqApiKey, String> {
     let id = string_field(value, &["_id", "id"])
-        .ok_or_else(|| format!("PPQ API key response missing required id: {}", pretty_json(value)))?;
+        .ok_or_else(|| "PPQ API key response missing required id (<redacted response>)".to_string())?;
     Ok(PpqApiKey {
         id,
         name: string_field(value, &["name"]).unwrap_or_default(),
