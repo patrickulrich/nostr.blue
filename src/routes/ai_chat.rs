@@ -1467,9 +1467,23 @@ fn sanitize_chat_image_src(url: &str) -> Option<String> {
     }
 
     let lower = trimmed.to_ascii_lowercase();
-    lower
-        .starts_with("data:image/")
-        .then(|| trimmed.to_string())
+    if !lower.starts_with("data:image/") {
+        return None;
+    }
+
+    let metadata_end = lower.find(',').unwrap_or(lower.len());
+    let metadata = &lower[..metadata_end];
+    let mime_type = metadata.split(';').next().unwrap_or_default();
+    matches!(
+        mime_type,
+        "data:image/png"
+            | "data:image/jpeg"
+            | "data:image/jpg"
+            | "data:image/gif"
+            | "data:image/webp"
+            | "data:image/bmp"
+    )
+    .then(|| trimmed.to_string())
 }
 
 fn execute_tool_calls(tool_calls: &[ToolCall]) -> Vec<ExecutedToolCall> {
@@ -1549,12 +1563,10 @@ fn display_message_from_persisted(message: PersistedChatMessage) -> DisplayMessa
         images: message
             .images
             .into_iter()
-            .filter_map(|image| {
-                sanitize_chat_image_src(&image.url).map(|url| ChatImage {
-                    url,
-                    alt: image.alt,
-                    title: image.title,
-                })
+            .map(|image| ChatImage {
+                url: image.url,
+                alt: image.alt,
+                title: image.title,
             })
             .collect(),
         tool_calls: message

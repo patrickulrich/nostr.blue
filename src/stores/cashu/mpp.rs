@@ -348,10 +348,10 @@ pub async fn execute_mpp_melt(
                             )
                             .await
                             {
-                                log::error!(
+                                return Err(format!(
                                     "Failed to queue MPP token event for retry: {}",
                                     queue_err
-                                );
+                                ));
                             } else {
                                 new_tokens.push(TokenData {
                                     event_id: pending_id,
@@ -379,10 +379,10 @@ pub async fn execute_mpp_melt(
                             )
                             .await
                             {
-                                log::error!(
+                                return Err(format!(
                                     "Failed to queue MPP token event for retry: {}",
                                     queue_err
-                                );
+                                ));
                             } else {
                                 new_tokens.push(TokenData {
                                     event_id: pending_id,

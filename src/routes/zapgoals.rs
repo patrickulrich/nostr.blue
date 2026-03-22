@@ -151,6 +151,16 @@ pub fn ZapGoalsHome() -> Element {
     let mut request_generation = use_signal(|| 0u32);
 
     use_effect(move || {
+        let has_signer = *crate::stores::nostr_client::HAS_SIGNER.read();
+        if !has_signer || crate::stores::auth_store::get_pubkey().is_none() {
+            return;
+        }
+        if *feed_type.read() == default_feed {
+            feed_type.set(ZapGoalsFeedType::Following);
+        }
+    });
+
+    use_effect(move || {
         let _ = refresh_trigger.read();
         let current_feed_type = *feed_type.read();
         let initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -705,6 +715,10 @@ pub fn ZapGoalsNew() -> Element {
         });
     };
 
+    if !client_initialized {
+        return rsx! { ClientInitializing {} };
+    }
+
     if !signed_in {
         return rsx! {
             div { class: "mx-auto max-w-3xl px-4 py-16",
@@ -721,10 +735,6 @@ pub fn ZapGoalsNew() -> Element {
                 }
             }
         };
-    }
-
-    if !client_initialized {
-        return rsx! { ClientInitializing {} };
     }
 
     rsx! {

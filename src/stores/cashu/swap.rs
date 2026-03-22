@@ -397,7 +397,13 @@ pub async fn execute_swap_with_nip60(
         Ok(SwapPublishOutcome::RetryQueued) => SwapPublishOutcome::RetryQueued,
         Err(e) => {
             log::warn!("Nostr publish failed: {}", e);
-            SwapPublishOutcome::RetryQueued
+            if let Err(sync_err) = cashu_cdk_bridge::sync_wallet_state().await {
+                log::warn!(
+                    "Failed to sync wallet state after swap publish failure: {}",
+                    sync_err
+                );
+            }
+            return Err(e);
         }
     };
     let final_event_id = match &publish_outcome {

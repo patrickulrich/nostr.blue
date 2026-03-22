@@ -180,9 +180,14 @@ pub async fn sync_wallet_state() -> Result<(), String> {
     }
     let existing_tokens = WALLET_TOKENS.read().data().read().clone();
     for token in &mut tokens {
-        if let Some(existing) = existing_tokens.iter().find(|t| t.mint == token.mint) {
+        if let Some(existing) = existing_tokens
+            .iter()
+            .filter(|t| t.mint == token.mint)
+            .max_by_key(|t| (t.created_at, t.pending_publish))
+        {
             token.event_id = existing.event_id.clone();
             token.created_at = existing.created_at;
+            token.pending_publish = existing.pending_publish;
         }
     }
     *WALLET_TOKENS.read().data().write() = tokens;

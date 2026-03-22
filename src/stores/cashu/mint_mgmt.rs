@@ -116,25 +116,25 @@ async fn publish_or_queue_wallet_snapshot(event: Event) -> Result<(), String> {
         .filter(|pending| pending.event_type == super::types::PendingEventType::WalletSnapshot)
         .map(|pending| pending.id.clone())
         .collect();
-    if let Some(client) = client {
+    let _send_succeeded = if let Some(client) = client {
         match client.send_event(&event).await {
-            Ok(output) if !output.success.is_empty() => {
-                remove_stale_pending_wallet_snapshots(&stale_pending_ids).await?;
-                return Ok(());
-            }
+            Ok(output) if !output.success.is_empty() => true,
             Ok(_) => {
                 log::warn!("No relays accepted wallet event, queueing for retry");
+                false
             }
             Err(error) => {
                 log::warn!(
                     "Failed to publish wallet event, queueing for retry: {}",
                     error
                 );
+                false
             }
         }
     } else {
         log::warn!("Client not initialized, queueing wallet snapshot for retry");
-    }
+        false
+    };
 
     if SHARED_LOCALSTORE.read().as_ref().is_none() {
         return Err(
@@ -150,7 +150,14 @@ async fn publish_or_queue_wallet_snapshot(event: Event) -> Result<(), String> {
     )
     .await?;
 
-    remove_stale_pending_wallet_snapshots(&stale_pending_ids).await
+    if let Err(error) = remove_stale_pending_wallet_snapshots(&stale_pending_ids).await {
+        log::error!(
+            "Failed to clean up stale pending wallet snapshots after snapshot replace: {}",
+            error
+        );
+    }
+
+    Ok(())
 }
 
 async fn queue_mint_deletion_event_durably(builder: nostr_sdk::EventBuilder) -> Result<(), String> {

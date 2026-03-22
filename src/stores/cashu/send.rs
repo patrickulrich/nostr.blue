@@ -148,6 +148,12 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
             None
         }
         Err(e) => {
+            if let Err(sync_err) = cashu_cdk_bridge::sync_wallet_state().await {
+                log::warn!(
+                    "Failed to sync wallet state after send publish failure: {}",
+                    sync_err
+                );
+            }
             return Err(e);
         }
     };

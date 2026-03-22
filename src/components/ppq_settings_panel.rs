@@ -149,24 +149,11 @@ pub fn PpqSettingsPanel(
         .as_ref()
         .map(|account| account.credit_id.clone())
         .unwrap_or_default();
-    let active_account_api_key = ppq_account
-        .as_ref()
-        .map(|account| {
-            account
-                .managed_api_key
-                .clone()
-                .unwrap_or_else(|| account.api_key.clone())
-        })
-        .unwrap_or_default();
     let main_nwc_status = nwc_store::NWC_STATUS.read().clone();
     let main_nwc_uri = nwc_store::current_nwc_uri();
     let refresh_balance_credit_id = account_credit_id.clone();
     let refresh_keys_credit_id = account_credit_id.clone();
     let refresh_nwc_credit_id = account_credit_id.clone();
-    let create_topup_api_key = active_account_api_key.clone();
-    let create_topup_credit_id = account_credit_id.clone();
-    let refresh_topup_api_key = active_account_api_key.clone();
-    let refresh_topup_credit_id = account_credit_id.clone();
     let connect_nwc_credit_id = account_credit_id.clone();
     let disconnect_nwc_credit_id = account_credit_id.clone();
     let key_form_credit_id = account_credit_id.clone();
@@ -345,8 +332,11 @@ pub fn PpqSettingsPanel(
                     div { class: "flex flex-wrap gap-3",
                         button {
                             class: "rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-60",
-                            disabled: *topup_loading.read(),
+                            disabled: *topup_loading.read() || *is_saving.read(),
                             onclick: move |_| {
+                                if *is_saving.read() {
+                                    return;
+                                }
                                 let amount = match parse_optional_f64(&topup_amount.read()) {
                                     Ok(Some(amount)) => amount,
                                     Ok(None) => 0.0,
@@ -359,15 +349,20 @@ pub fn PpqSettingsPanel(
                                     topup_error.set(Some("Topup amount must be greater than 0".to_string()));
                                     return;
                                 }
-                                if create_topup_api_key.trim().is_empty() {
+                                let current_account = state.read().ppq_account.clone();
+                                let Some(current_account) = current_account else {
+                                    topup_error.set(Some("PPQ account is missing".to_string()));
+                                    return;
+                                };
+                                let api_key = resolve_active_ppq_api_key(&current_account);
+                                if api_key.trim().is_empty() {
                                     topup_error.set(Some("PPQ account is missing an API key".to_string()));
                                     return;
                                 }
                                 topup_loading.set(true);
                                 topup_error.set(None);
                                 let currency = topup_currency.read().trim().to_uppercase();
-                                let api_key = create_topup_api_key.clone();
-                                let credit_id = create_topup_credit_id.clone();
+                                let credit_id = current_account.credit_id.clone();
                                 spawn(async move {
                                     match ppq::create_topup_invoice(&api_key, "btc-lightning", amount, &currency).await {
                                         Ok(invoice) => {
@@ -391,8 +386,11 @@ pub fn PpqSettingsPanel(
                         }
                         button {
                             class: "rounded-lg border border-border px-4 py-2 text-sm transition hover:bg-accent disabled:opacity-60",
-                            disabled: *topup_loading.read() || topup_invoice.read().is_none(),
+                            disabled: *topup_loading.read() || *is_saving.read() || topup_invoice.read().is_none(),
                             onclick: move |_| {
+                                if *is_saving.read() {
+                                    return;
+                                }
                                 let Some(invoice_id) = topup_invoice.read().as_ref().map(|invoice| invoice.invoice_id.clone()) else {
                                     return;
                                 };
@@ -400,10 +398,19 @@ pub fn PpqSettingsPanel(
                                     topup_error.set(Some("Current invoice has no invoice id".to_string()));
                                     return;
                                 }
+                                let current_account = state.read().ppq_account.clone();
+                                let Some(current_account) = current_account else {
+                                    topup_error.set(Some("PPQ account is missing".to_string()));
+                                    return;
+                                };
+                                let api_key = resolve_active_ppq_api_key(&current_account);
+                                if api_key.trim().is_empty() {
+                                    topup_error.set(Some("PPQ account is missing an API key".to_string()));
+                                    return;
+                                }
                                 topup_error.set(None);
                                 topup_loading.set(true);
-                                let api_key = refresh_topup_api_key.clone();
-                                let credit_id = refresh_topup_credit_id.clone();
+                                let credit_id = current_account.credit_id.clone();
                                 spawn(async move {
                                     match ppq::get_topup_status(&api_key, &invoice_id).await {
                                         Ok(invoice) => {
@@ -1096,6 +1103,13 @@ fn next_request_generation(mut request_generation: Signal<u32>) -> (Signal<u32>,
     let generation = request_generation.peek().wrapping_add(1);
     request_generation.set(generation);
     (request_generation, generation)
+}
+
+fn resolve_active_ppq_api_key(account: &PpqAccountState) -> String {
+    account
+        .managed_api_key
+        .clone()
+        .unwrap_or_else(|| account.api_key.clone())
 }
 
 fn set_active_ppq_key(

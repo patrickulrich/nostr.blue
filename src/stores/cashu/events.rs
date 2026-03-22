@@ -192,7 +192,7 @@ pub async fn queue_token_event_for_retry_with_history(
     pending_token_id: String,
     mint_url: String,
     history_amount: u64,
-    history_type: String,
+    history_type: Option<String>,
 ) -> Result<(), String> {
     let event = match sign_event_builder(builder).await {
         Ok(e) => e,
@@ -218,7 +218,7 @@ pub async fn queue_token_event_for_retry_with_history(
         pending_token_id: Some(pending_token_id.clone()),
         mint_url: Some(mint_url),
         history_amount: Some(history_amount),
-        history_type: Some(history_type),
+        history_type,
         published_event_id: None,
     };
     let pending_event_id = pending_event.id.clone();
@@ -929,6 +929,23 @@ pub(crate) fn update_token_event_id(pending_id: &str, real_event_id: &str) {
     }
     rebuild_proof_event_map();
 }
+
+pub(crate) fn remove_token_by_event_id(event_id: &str) {
+    let event_id_owned = event_id.to_string();
+    if let Err(e) = super::signals::atomic_token_update(|tokens| {
+        let original_len = tokens.len();
+        tokens.retain(|token| token.event_id != event_id_owned);
+        if tokens.len() == original_len {
+            Err(format!("Token with event_id {} not found", event_id_owned))
+        } else {
+            Ok(())
+        }
+    }) {
+        log::warn!("Failed to remove token event_id {}: {}", event_id, e);
+        return;
+    }
+    rebuild_proof_event_map();
+}
 /// Reconcile tokens with pending event IDs
 ///
 /// Finds tokens in WALLET_TOKENS that have `pending_*` event IDs and attempts
@@ -998,7 +1015,7 @@ pub async fn reconcile_pending_event_ids() -> Result<usize, String> {
                 real_event_id,
                 old_event_id
             );
-            update_token_event_id(&old_event_id, &real_event_id);
+            remove_token_by_event_id(&old_event_id);
             reconciled += 1;
             continue;
         }

@@ -1,6 +1,6 @@
 use crate::platform::http::http_client;
 use reqwest::{Method, Response};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::fmt;
 use url::Url;
 
@@ -265,15 +265,19 @@ pub async fn connect_nwc_auto_topup(
     threshold_usd: Option<f64>,
     topup_amount_usd: Option<f64>,
 ) -> Result<PpqNwcAutoTopup, String> {
+    let mut payload = Map::new();
+    payload.insert("nwc_url".to_string(), Value::String(nwc_url.to_string()));
+    if let Some(threshold_usd) = threshold_usd {
+        payload.insert("threshold_usd".to_string(), json!(threshold_usd));
+    }
+    if let Some(topup_amount_usd) = topup_amount_usd {
+        payload.insert("topup_amount_usd".to_string(), json!(topup_amount_usd));
+    }
     let value = send_request(
         Method::POST,
         &format!("{PPQ_API_ROOT}/nwc-auto-topup/connect"),
         Some(vec![("x-credit-id".to_string(), credit_id.to_string())]),
-        Some(json!({
-            "nwc_url": nwc_url,
-            "threshold_usd": threshold_usd,
-            "topup_amount_usd": topup_amount_usd,
-        })),
+        Some(Value::Object(payload)),
     )
     .await?;
     let data = data_or_root(&value);
@@ -304,8 +308,13 @@ pub async fn list_api_keys(credit_id: &str) -> Result<Vec<PpqApiKey>, String> {
         None,
     )
     .await?;
-    let keys = array_from_value(&value);
-    keys.iter().map(|value| parse_api_key(value)).collect()
+    let keys = data_or_root(&value).as_array().ok_or_else(|| {
+        format!(
+            "Expected API key list response to be an array, got: {}",
+            pretty_json(&value)
+        )
+    })?;
+    keys.iter().map(parse_api_key).collect()
 }
 
 pub async fn get_api_key(
@@ -461,16 +470,6 @@ fn parse_api_key(value: &Value) -> Result<PpqApiKey, String> {
 
 fn data_or_root(value: &Value) -> &Value {
     value.get("data").unwrap_or(value)
-}
-
-fn array_from_value(value: &Value) -> Vec<&Value> {
-    if let Some(items) = data_or_root(value).as_array() {
-        return items.iter().collect();
-    }
-    if let Some(items) = value.as_array() {
-        return items.iter().collect();
-    }
-    Vec::new()
 }
 
 fn string_field(value: &Value, keys: &[&str]) -> Option<String> {

@@ -151,17 +151,25 @@ write_android_local_properties() {
     local local_properties="$DX_ANDROID/local.properties"
     local sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-${HOME}/Android/Sdk}}"
     local ndk_dir=""
+    local ndk_candidate=""
 
-    if [ -n "${ANDROID_NDK_HOME:-}" ]; then
+    if [ -n "${ANDROID_NDK_HOME:-}" ] && [ -d "${ANDROID_NDK_HOME:-}" ]; then
         ndk_dir="$ANDROID_NDK_HOME"
     elif [ -d "$sdk_root/ndk" ]; then
-        ndk_dir="$sdk_root/ndk"
+        for ndk_candidate in "$sdk_root"/ndk/*; do
+            if [ -n "$ndk_candidate" ] && [ -d "$ndk_candidate" ]; then
+                ndk_dir="$ndk_candidate"
+                break
+            fi
+        done
     fi
 
     mkdir -p "$DX_ANDROID"
     {
         printf 'sdk.dir=%s\n' "$(printf '%s' "$sdk_root" | sed 's/\\/\\\\/g')"
-        printf 'ndk.dir=%s\n' "$(printf '%s' "$ndk_dir" | sed 's/\\/\\\\/g')"
+        if [ -n "$ndk_dir" ] && [ -d "$ndk_dir" ]; then
+            printf 'ndk.dir=%s\n' "$(printf '%s' "$ndk_dir" | sed 's/\\/\\\\/g')"
+        fi
     } >"$local_properties"
     echo "Wrote Android SDK config: $local_properties"
 }
@@ -626,7 +634,7 @@ if [ -d "$OPENSSL_SEARCH" ]; then
             matches+=("$dir")
         fi
     done
-    if [ ${#matches[@]} -gt 0 ]; then
+    if [ "${#matches[@]}" -gt 0 ]; then
         sorted=()
         while IFS= read -r line; do
             sorted+=("$line")

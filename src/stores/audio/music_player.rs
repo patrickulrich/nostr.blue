@@ -14,8 +14,15 @@ use nostr_sdk::nips::nip38::{LiveStatus, StatusType};
 use nostr_sdk::{EventBuilder, Kind, Tag, TagKind, Timestamp};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
 /// Kind number for Music Vote events (addressable, one per user)
 pub const KIND_MUSIC_VOTE: u16 = 33169;
+static MUSIC_STATUS_SEND_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+
+fn music_status_send_lock() -> &'static tokio::sync::Mutex<()> {
+    MUSIC_STATUS_SEND_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 /// Music track for the player (unified for Wavlake, Nostr music, and Podcasts)
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MusicTrack {
@@ -487,6 +494,10 @@ async fn publish_music_status(track: &MusicTrack, generation: u64) {
         return;
     }
     let builder = EventBuilder::live_status(status, content);
+    let _send_guard = music_status_send_lock().lock().await;
+    if !is_current_music_status_generation(generation) {
+        return;
+    }
     match client
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
@@ -530,6 +541,7 @@ async fn clear_music_status(generation: u64) {
     };
     let status = LiveStatus::new(StatusType::Music);
     let builder = EventBuilder::live_status(status, "");
+    let _send_guard = music_status_send_lock().lock().await;
     if !is_current_music_status_generation(generation) {
         return;
     }
@@ -821,15 +833,19 @@ pub fn previous_track() {
 /// Set volume (0.0 - 1.0)
 pub fn set_volume(volume: f64) {
     let clamped = volume.clamp(0.0, 1.0);
-    {
+    let persisted_volume = {
         let mut state = MUSIC_PLAYER.write();
+        #[cfg(feature = "mobile")]
+        let previous_volume = state.volume;
         state.volume = clamped;
         #[cfg(feature = "mobile")]
         if let Err(e) = android_media::set_volume(if state.is_muted { 0.0 } else { clamped }) {
+            state.volume = previous_volume;
             log::error!("Failed to set native Android volume: {}", e);
             state.playback_error = Some(format!("Android playback failed: {}", e));
         }
-    }
+        state.volume
+    };
     let gen = VOLUME_PERSIST_GEN
         .fetch_add(1, Ordering::SeqCst)
         .wrapping_add(1);
@@ -838,16 +854,19 @@ pub fn set_volume(volume: f64) {
         if VOLUME_PERSIST_GEN.load(Ordering::SeqCst) != gen {
             return;
         }
-        storage::set(STORAGE_KEY_VOLUME, &clamped).ok();
+        storage::set(STORAGE_KEY_VOLUME, &persisted_volume).ok();
     });
 }
 /// Toggle mute
 pub fn toggle_mute() {
     let is_muted = {
         let mut state = MUSIC_PLAYER.write();
+        #[cfg(feature = "mobile")]
+        let previous_is_muted = state.is_muted;
         state.is_muted = !state.is_muted;
         #[cfg(feature = "mobile")]
         if let Err(e) = android_media::set_volume(if state.is_muted { 0.0 } else { state.volume }) {
+            state.is_muted = previous_is_muted;
             log::error!("Failed to toggle native Android mute: {}", e);
             state.playback_error = Some(format!("Android playback failed: {}", e));
         }
@@ -865,9 +884,12 @@ pub fn set_current_time(time: f64) {
 /// This sets the current time in state and triggers audio element seek via JS
 pub fn seek_to(time: f64) {
     let mut state = MUSIC_PLAYER.write();
+    #[cfg(feature = "mobile")]
+    let previous_current_time = state.current_time;
     state.current_time = time;
     #[cfg(feature = "mobile")]
     if let Err(e) = android_media::seek_to(time) {
+        state.current_time = previous_current_time;
         log::error!("Failed to seek native Android playback: {}", e);
         state.playback_error = Some(format!("Android playback failed: {}", e));
     }
@@ -895,24 +917,42 @@ pub fn set_duration(duration: f64) {
 }
 /// Close/hide the player
 pub fn close_player() {
-    let mut state = MUSIC_PLAYER.write();
-    state.is_visible = false;
-    state.is_playing = false;
+    let previous_state = {
+        let state = MUSIC_PLAYER.read();
+        (state.is_visible, state.is_playing)
+    };
     #[cfg(feature = "mobile")]
-    {
-        let mut cleared_native = true;
+    let (stop_failed, playback_errors): (bool, Vec<String>) = {
+        let mut stop_failed = false;
+        let mut playback_errors: Vec<String> = Vec::new();
         if let Err(e) = android_media::stop() {
             log::error!("Failed to stop native Android playback: {}", e);
-            cleared_native = false;
+            playback_errors.push(format!("stop failed: {}", e));
+            stop_failed = true;
         }
         if let Err(e) = android_media::clear_queue() {
             log::error!("Failed to clear native Android playback queue: {}", e);
-            cleared_native = false;
+            playback_errors.push(format!("clear queue failed: {}", e));
         }
-        if !cleared_native {
-            return;
-        }
+        (stop_failed, playback_errors)
+    };
+    #[cfg(not(feature = "mobile"))]
+    let (stop_failed, playback_errors): (bool, Vec<String>) = (false, Vec::new());
+    let mut state = MUSIC_PLAYER.write();
+    if stop_failed {
+        state.is_visible = previous_state.0;
+        state.is_playing = previous_state.1;
+    } else {
+        state.is_visible = false;
+        state.is_playing = false;
     }
+    if !playback_errors.is_empty() {
+        state.playback_error = Some(format!(
+            "Android playback failed: {}",
+            playback_errors.join("; ")
+        ));
+    }
+    drop(state);
     let generation = next_music_status_generation();
     spawn(async move {
         clear_music_status(generation).await;
@@ -1083,17 +1123,21 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
 /// Set playback speed (for podcasts)
 pub fn set_playback_speed(speed: f64) {
     let speed = speed.clamp(0.5, 3.0);
-    {
+    let persisted_speed = {
         let mut state = MUSIC_PLAYER.write();
+        #[cfg(feature = "mobile")]
+        let previous_speed = state.playback_speed;
         state.playback_speed = speed;
         #[cfg(feature = "mobile")]
         if let Err(e) = android_media::set_playback_speed(speed) {
+            state.playback_speed = previous_speed;
             log::error!("Failed to set native Android playback speed: {}", e);
             state.playback_error = Some(format!("Android playback failed: {}", e));
         }
-    }
-    storage::set(STORAGE_KEY_PLAYBACK_SPEED, &speed).ok();
-    log::debug!("Playback speed set to {}x", speed);
+        state.playback_speed
+    };
+    storage::set(STORAGE_KEY_PLAYBACK_SPEED, &persisted_speed).ok();
+    log::debug!("Playback speed set to {}x", persisted_speed);
 }
 /// Skip forward by specified seconds (for podcasts)
 pub fn skip_forward(seconds: f64) {

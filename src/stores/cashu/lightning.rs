@@ -28,13 +28,16 @@ use super::utils::{mint_matches, normalize_mint_url};
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
 use dioxus::prelude::*;
 use nostr_sdk::signer::NostrSigner;
-use nostr_sdk::{Client, EventId, Kind, PublicKey};
+use nostr_sdk::{EventId, Kind, PublicKey};
 
-async fn send_signed_builder(
-    client: &Client,
-    event: &nostr_sdk::Event,
-) -> Result<nostr_relay_pool::Output<EventId>, String> {
-    publish_signed_event(client, event).await
+async fn sync_wallet_state_after_mint_error(error: String) -> String {
+    if let Err(sync_err) = cashu_cdk_bridge::sync_wallet_state().await {
+        log::warn!(
+            "Failed to sync wallet state after mint-side publish preparation failure: {}",
+            sync_err
+        );
+    }
+    error
 }
 /// Create a mint quote (request lightning invoice to receive sats)
 pub async fn create_mint_quote(
@@ -168,21 +171,57 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
         proofs: extended_proofs,
         del: vec![],
     };
-    let signer_type = crate::stores::signer::get_signer().ok_or("No signer available")?;
+    let signer_type = match crate::stores::signer::get_signer() {
+        Some(signer_type) => signer_type,
+        None => {
+            return Err(sync_wallet_state_after_mint_error("No signer available".to_string()).await)
+        }
+    };
     let signer = signer_type.as_nostr_signer();
-    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let json_content = serde_json::to_string(&token_event_data)
-        .map_err(|e| format!("Failed to serialize token event: {}", e))?;
-    let encrypted = signer
-        .nip44_encrypt(&pubkey, &json_content)
-        .await
-        .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
+    let pubkey_str = match auth_store::get_pubkey() {
+        Some(pubkey_str) => pubkey_str,
+        None => return Err(sync_wallet_state_after_mint_error("Not authenticated".to_string()).await),
+    };
+    let pubkey = match PublicKey::parse(&pubkey_str) {
+        Ok(pubkey) => pubkey,
+        Err(e) => {
+            return Err(
+                sync_wallet_state_after_mint_error(format!("Invalid pubkey: {}", e)).await,
+            )
+        }
+    };
+    let json_content = match serde_json::to_string(&token_event_data) {
+        Ok(json_content) => json_content,
+        Err(e) => {
+            return Err(
+                sync_wallet_state_after_mint_error(format!(
+                    "Failed to serialize token event: {}",
+                    e
+                ))
+                .await,
+            )
+        }
+    };
+    let encrypted = match signer.nip44_encrypt(&pubkey, &json_content).await {
+        Ok(encrypted) => encrypted,
+        Err(e) => {
+            return Err(
+                sync_wallet_state_after_mint_error(format!(
+                    "Failed to encrypt token event: {}",
+                    e
+                ))
+                .await,
+            )
+        }
+    };
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-    let signed_event = sign_event_builder_with_signer(builder.clone(), signer_type).await?;
+    let signed_event = match sign_event_builder_with_signer(builder.clone(), signer_type).await {
+        Ok(signed_event) => signed_event,
+        Err(error) => return Err(sync_wallet_state_after_mint_error(error).await),
+    };
     let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
     let published_event_id = match nostr_client::NOSTR_CLIENT.read().as_ref().cloned() {
-        Some(client) => match send_signed_builder(&client, &signed_event).await {
+        Some(client) => match publish_signed_event(&client, &signed_event).await {
             Ok(event_output) if !event_output.success.is_empty() => {
                 let event_id = event_output.id().to_hex();
                 log::info!("Published token event: {}", event_id);
@@ -198,7 +237,7 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
                     pending_id.clone(),
                     mint_url.clone(),
                     amount_minted,
-                    "lightning_mint".to_string(),
+                    Some("lightning_mint".to_string()),
                 )
                 .await?;
                 None
@@ -213,7 +252,7 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
                     pending_id.clone(),
                     mint_url.clone(),
                     amount_minted,
-                    "lightning_mint".to_string(),
+                    Some("lightning_mint".to_string()),
                 )
                 .await?;
                 None
@@ -226,7 +265,7 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
                 pending_id.clone(),
                 mint_url.clone(),
                 amount_minted,
-                "lightning_mint".to_string(),
+                Some("lightning_mint".to_string()),
             )
             .await?;
             None
@@ -643,10 +682,9 @@ async fn publish_melt_events(
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-        let signed_event =
-            sign_event_builder_with_signer(builder.clone(), signer_type.clone()).await?;
+        let signed_event = sign_event_builder_with_signer(builder.clone(), signer_type).await?;
         if let Some(client) = client.as_ref() {
-            match send_signed_builder(client, &signed_event).await {
+            match publish_signed_event(client, &signed_event).await {
                 Ok(event_output) if !event_output.success.is_empty() => {
                     let real_id = event_output.id().to_hex();
                     log::info!("Published new token event: {}", real_id);
@@ -834,7 +872,7 @@ pub async fn create_history_event_with_type(
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletSpendingHistory, encrypted);
     let signed_event = sign_event_builder_with_signer(builder.clone(), signer_type).await?;
     if let Some(client) = nostr_client::NOSTR_CLIENT.read().as_ref().cloned() {
-        match send_signed_builder(&client, &signed_event).await {
+        match publish_signed_event(&client, &signed_event).await {
             Ok(event_output) if !event_output.success.is_empty() => {
                 log::info!("Published history event: {}", event_output.id().to_hex());
             }

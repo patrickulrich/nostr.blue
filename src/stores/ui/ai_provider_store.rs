@@ -357,10 +357,31 @@ mod web_db {
 pub async fn load_provider_state() -> Result<AiProviderState, String> {
     #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
     {
-        if let Ok(cached_state) = storage::get(STORAGE_KEY) {
-            return Ok(migrate_legacy_state(cached_state));
+        match web_db::AiProviderDb::new().await {
+            Ok(db) => match db.load_state().await {
+                Ok(state) => return Ok(state),
+                Err(db_error) => {
+                    log::warn!(
+                        "Failed to load AI provider state from IndexedDB, falling back to local storage: {}",
+                        db_error
+                    );
+                }
+            },
+            Err(db_error) => {
+                log::warn!(
+                    "Failed to open AI provider database, falling back to local storage: {}",
+                    db_error
+                );
+            }
         }
-        return web_db::AiProviderDb::new().await?.load_state().await;
+        storage::get(STORAGE_KEY)
+            .map(migrate_legacy_state)
+            .map_err(|storage_error| {
+                format!(
+                    "Failed to load AI provider state from fallback local storage: {}",
+                    storage_error
+                )
+            })
     }
 
     #[cfg(not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))))]
@@ -379,8 +400,7 @@ pub async fn save_provider_state(state: &AiProviderState) -> Result<(), String> 
 
     #[cfg(not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))))]
     {
-        let _ = state;
-        Ok(())
+        cache_provider_state(state)
     }
 }
 

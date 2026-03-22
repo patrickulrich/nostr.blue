@@ -48,7 +48,11 @@ use crate::utils::shorten_url;
 enum TaggedEventPublishOutcome {
     Published(String),
     Queued(String),
-    LocalOnly { event_id: String, warning: String },
+    LocalOnly {
+        event_id: String,
+        recovery_pending_id: Option<String>,
+        warning: String,
+    },
 }
 
 impl TaggedEventPublishOutcome {
@@ -62,6 +66,16 @@ impl TaggedEventPublishOutcome {
     fn warning(&self) -> Option<&str> {
         match self {
             Self::LocalOnly { warning, .. } => Some(warning),
+            _ => None,
+        }
+    }
+
+    fn recovery_pending_id(&self) -> Option<&str> {
+        match self {
+            Self::LocalOnly {
+                recovery_pending_id: Some(recovery_pending_id),
+                ..
+            } => Some(recovery_pending_id),
             _ => None,
         }
     }
@@ -100,6 +114,29 @@ async fn send_tagged_event_with_retry(
     pending_token_id: Option<String>,
     mint_url: Option<String>,
 ) -> TaggedEventPublishOutcome {
+    async fn queue_signed_event_and_build_outcome(
+        event: nostr_sdk::Event,
+        event_type: PendingEventType,
+        pending_id: String,
+        mint_url: Option<String>,
+        event_label: &str,
+    ) -> TaggedEventPublishOutcome {
+        let real_event_id = event.id.to_hex();
+        match queue_signed_event_for_retry_result(event, event_type, Some(pending_id.clone()), mint_url)
+            .await
+        {
+            Ok(()) => TaggedEventPublishOutcome::Queued(pending_id),
+            Err(queue_error) => TaggedEventPublishOutcome::LocalOnly {
+                event_id: real_event_id,
+                recovery_pending_id: Some(pending_id),
+                warning: format!(
+                    "Failed to persist signed {} event for retry: {}",
+                    event_label, queue_error
+                ),
+            },
+        }
+    }
+
     let event_label = match &event_type {
         PendingEventType::TokenEvent => "token",
         PendingEventType::DeletionEvent => "deletion",
@@ -108,6 +145,9 @@ async fn send_tagged_event_with_retry(
         PendingEventType::WalletSnapshot => "wallet snapshot",
         PendingEventType::NutzapEvent => "nutzap",
     };
+    let pending_id = pending_token_id
+        .clone()
+        .unwrap_or_else(|| format!("pending_{}", uuid::Uuid::new_v4()));
 
     match client.send_event(&event).await {
         Ok(event_output) if !event_output.success.is_empty() => {
@@ -118,49 +158,25 @@ async fn send_tagged_event_with_retry(
                 "No relays accepted {} event, queuing for retry",
                 event_label
             );
-            let pending_id = pending_token_id
-                .clone()
-                .unwrap_or_else(|| format!("pending_{}", uuid::Uuid::new_v4()));
-            match queue_signed_event_for_retry_result(
+            queue_signed_event_and_build_outcome(
                 event,
                 event_type,
-                Some(pending_id.clone()),
+                pending_id,
                 mint_url,
+                event_label,
             )
             .await
-            {
-                Ok(()) => TaggedEventPublishOutcome::Queued(pending_id),
-                Err(queue_error) => TaggedEventPublishOutcome::LocalOnly {
-                    event_id: format!("local_pending_{}", uuid::Uuid::new_v4()),
-                    warning: format!(
-                        "Failed to persist signed {} event for retry: {}",
-                        event_label, queue_error
-                    ),
-                },
-            }
         }
         Err(error) => {
             log::warn!("Failed to publish {} event: {}", event_label, error);
-            let pending_id = pending_token_id
-                .clone()
-                .unwrap_or_else(|| format!("pending_{}", uuid::Uuid::new_v4()));
-            match queue_signed_event_for_retry_result(
+            queue_signed_event_and_build_outcome(
                 event,
                 event_type,
-                Some(pending_id.clone()),
+                pending_id,
                 mint_url,
+                event_label,
             )
             .await
-            {
-                Ok(()) => TaggedEventPublishOutcome::Queued(pending_id),
-                Err(queue_error) => TaggedEventPublishOutcome::LocalOnly {
-                    event_id: format!("local_pending_{}", uuid::Uuid::new_v4()),
-                    warning: format!(
-                        "Failed to persist signed {} event for retry: {}",
-                        event_label, queue_error
-                    ),
-                },
-            }
         }
     }
 }
@@ -443,75 +459,111 @@ pub async fn pay_payment_request(
     }
     super::proofs::move_proofs_to_spent(&token_proof_secrets);
     let _token_proofs: Vec<ProofData> = proofs.iter().map(cdk_proof_to_proof_data).collect();
-    let signer = crate::stores::signer::get_signer().ok_or("No signer available")?;
-    let nostr_signer = signer.as_nostr_signer();
-    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let client = nostr_client::NOSTR_CLIENT
-        .read()
-        .as_ref()
-        .ok_or("Client not initialized")?
-        .clone();
     let mut new_event_id: Option<String> = None;
     if !keep_proofs.is_empty() {
-        let proof_data: Vec<ProofData> = keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
-        let extended_proofs: Vec<ExtendedCashuProof> = proof_data
-            .iter()
-            .map(|p| ExtendedCashuProof::from(p.clone()))
-            .collect();
-        let token_event_data = ExtendedTokenEvent {
-            mint: mint_url.clone(),
-            unit: "sat".to_string(),
-            proofs: extended_proofs,
-            del: event_ids_to_delete.clone(),
-        };
-        let json_content = serde_json::to_string(&token_event_data)
-            .map_err(|e| format!("Failed to serialize token event: {}", e))?;
-        let encrypted = nostr_signer
-            .nip44_encrypt(&pubkey, &json_content)
-            .await
-            .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
-        let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-        let event = sign_cashu_event_builder(&signer, builder).await?;
-        let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-        let publish_outcome = send_tagged_event_with_retry(
-            &client,
-            event,
-            PendingEventType::TokenEvent,
-            Some(pending_id),
-            Some(mint_url.clone()),
-        )
-        .await;
-        if let Some(warning) = publish_outcome.warning() {
-            log::warn!(
-                "Token event publish completed without durable retry state: {}",
-                warning
-            );
+        let publish_result: Result<TaggedEventPublishOutcome, String> = async {
+            let signer = crate::stores::signer::get_signer().ok_or("No signer available")?;
+            let nostr_signer = signer.as_nostr_signer();
+            let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
+            let pubkey =
+                PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
+            let client = nostr_client::NOSTR_CLIENT
+                .read()
+                .as_ref()
+                .ok_or("Client not initialized")?
+                .clone();
+            let proof_data: Vec<ProofData> =
+                keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
+            let extended_proofs: Vec<ExtendedCashuProof> = proof_data
+                .iter()
+                .map(|p| ExtendedCashuProof::from(p.clone()))
+                .collect();
+            let token_event_data = ExtendedTokenEvent {
+                mint: mint_url.clone(),
+                unit: "sat".to_string(),
+                proofs: extended_proofs,
+                del: event_ids_to_delete.clone(),
+            };
+            let json_content = serde_json::to_string(&token_event_data)
+                .map_err(|e| format!("Failed to serialize token event: {}", e))?;
+            let encrypted = nostr_signer
+                .nip44_encrypt(&pubkey, &json_content)
+                .await
+                .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
+            let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+            let event = sign_cashu_event_builder(&signer, builder).await?;
+            let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+            Ok(
+                send_tagged_event_with_retry(
+                    &client,
+                    event,
+                    PendingEventType::TokenEvent,
+                    Some(pending_id),
+                    Some(mint_url.clone()),
+                )
+                .await,
+            )
         }
-        new_event_id = Some(publish_outcome.event_id().to_string());
-    } else if !event_ids_to_delete.is_empty() {
-        use nostr::nips::nip09::EventDeletionRequest;
-        let mut deletion_request = EventDeletionRequest::new();
-        for event_id_str in &event_ids_to_delete {
-            if let Ok(event_id) = EventId::parse(event_id_str) {
-                deletion_request = deletion_request.id(event_id);
+        .await;
+        match publish_result {
+            Ok(publish_outcome) => {
+                if let Some(warning) = publish_outcome.warning() {
+                    log::warn!(
+                        "Token event publish completed without durable retry state: {}",
+                        warning
+                    );
+                }
+                new_event_id = Some(publish_outcome.event_id().to_string());
+            }
+            Err(err) => {
+                log::warn!(
+                    "Payment request send completed, but token event sync failed: {}",
+                    err
+                );
+                new_event_id = Some(format!("local_pending_{}", uuid::Uuid::new_v4()));
             }
         }
-        let event =
-            sign_cashu_event_builder(&signer, nostr_sdk::EventBuilder::delete(deletion_request))
-                .await?;
-        let publish_outcome = send_tagged_event_with_retry(
-            &client,
-            event,
-            PendingEventType::DeletionEvent,
-            None,
-            None,
-        )
+    } else if !event_ids_to_delete.is_empty() {
+        let deletion_sync: Result<(), String> = async {
+            use nostr::nips::nip09::EventDeletionRequest;
+            let signer = crate::stores::signer::get_signer().ok_or("No signer available")?;
+            let client = nostr_client::NOSTR_CLIENT
+                .read()
+                .as_ref()
+                .ok_or("Client not initialized")?
+                .clone();
+            let mut deletion_request = EventDeletionRequest::new();
+            for event_id_str in &event_ids_to_delete {
+                if let Ok(event_id) = EventId::parse(event_id_str) {
+                    deletion_request = deletion_request.id(event_id);
+                }
+            }
+            let event = sign_cashu_event_builder(
+                &signer,
+                nostr_sdk::EventBuilder::delete(deletion_request),
+            )
+            .await?;
+            let publish_outcome = send_tagged_event_with_retry(
+                &client,
+                event,
+                PendingEventType::DeletionEvent,
+                None,
+                None,
+            )
+            .await;
+            if let Some(warning) = publish_outcome.warning() {
+                log::warn!(
+                    "Deletion event publish completed without durable retry state: {}",
+                    warning
+                );
+            }
+            Ok(())
+        }
         .await;
-        if let Some(warning) = publish_outcome.warning() {
+        if let Err(err) = deletion_sync {
             log::warn!(
-                "Deletion event publish completed without durable retry state: {}",
-                warning
+                "Payment request send completed, but deletion event sync failed: {}",
+                err
             );
         }
     }
@@ -731,8 +783,13 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
                     warning
                 );
             }
-            if let TaggedEventPublishOutcome::Published(real_event_id) = publish_outcome {
-                super::events::update_token_event_id(&pending_id, &real_event_id);
+            let was_published = matches!(&publish_outcome, TaggedEventPublishOutcome::Published(_));
+            let published_event_id = publish_outcome.event_id().to_string();
+            let recovery_pending_id = publish_outcome.recovery_pending_id().map(str::to_string);
+            if was_published {
+                super::events::update_token_event_id(&pending_id, &published_event_id);
+            } else if let Some(recovery_pending_id) = recovery_pending_id {
+                super::events::update_token_event_id(&recovery_pending_id, &published_event_id);
             }
         }
         Err(err) => {

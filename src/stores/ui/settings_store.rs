@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 /// localStorage key for settings cache
 const SETTINGS_LOCAL_STORAGE_KEY: &str = "nostr_blue_settings";
-const PUBLISH_CLIENT_TAG_PENDING_LOCAL_STORAGE_KEY: &str = "nostr_blue_publish_client_tag_pending";
+const PUBLISH_CLIENT_TAG_PENDING_LOCAL_STORAGE_KEY_PREFIX: &str =
+    "nostr_blue_publish_client_tag_pending";
 /// App settings stored on Nostr via NIP-78
 /// Note: Relay configuration is now stored via NIP-65 (kind 10002) and NIP-17 (kind 10050)
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -69,17 +70,42 @@ fn cache_settings(settings: &AppSettings) {
     let _ = storage::set(SETTINGS_LOCAL_STORAGE_KEY, settings);
 }
 
+fn pending_publish_client_tag_storage_key() -> Option<String> {
+    auth_store::AUTH_STATE
+        .read()
+        .pubkey
+        .clone()
+        .filter(|pubkey| !pubkey.trim().is_empty())
+        .map(|pubkey| {
+            format!(
+                "{}_{}",
+                PUBLISH_CLIENT_TAG_PENDING_LOCAL_STORAGE_KEY_PREFIX, pubkey
+            )
+        })
+}
+
 fn load_pending_publish_client_tag() -> Option<bool> {
-    storage::get::<bool>(PUBLISH_CLIENT_TAG_PENDING_LOCAL_STORAGE_KEY).ok()
+    let key = pending_publish_client_tag_storage_key()?;
+    storage::get::<bool>(&key).ok()
+}
+
+pub fn clear_pending_publish_client_tag_cache() {
+    if let Some(key) = pending_publish_client_tag_storage_key() {
+        let _ = storage::delete(&key);
+    }
+    PUBLISH_CLIENT_TAG_SAVE_PENDING.write().take();
 }
 
 fn cache_pending_publish_client_tag(value: Option<bool>) {
+    let Some(key) = pending_publish_client_tag_storage_key() else {
+        return;
+    };
     match value {
         Some(enabled) => {
-            let _ = storage::set(PUBLISH_CLIENT_TAG_PENDING_LOCAL_STORAGE_KEY, &enabled);
+            let _ = storage::set(&key, &enabled);
         }
         None => {
-            let _ = storage::delete(PUBLISH_CLIENT_TAG_PENDING_LOCAL_STORAGE_KEY);
+            let _ = storage::delete(&key);
         }
     }
 }
@@ -108,6 +134,13 @@ async fn drain_publish_client_tag_queue() {
         };
 
         if let Err(e) = save_settings(&settings_to_save).await {
+            let latest_settings = {
+                let mut latest = SETTINGS.read().clone();
+                latest.publish_client_tag = next_enabled;
+                latest
+            };
+            SETTINGS.write().clone_from(&latest_settings);
+            cache_settings(&latest_settings);
             log::warn!("Failed to persist client tag setting to Nostr: {}", e);
             SETTINGS_ERROR.write().clone_from(&Some(e));
             break;
@@ -144,6 +177,7 @@ pub async fn load_settings() -> Result<(), String> {
     log::info!("Loading settings from Nostr (NIP-78)...");
     SETTINGS_LOADING.write().clone_from(&true);
     SETTINGS_ERROR.write().clone_from(&None);
+    let mut initial_error: Option<String> = None;
     if !auth_store::is_authenticated() {
         log::info!("Not authenticated, using local settings");
         SETTINGS_LOADING.write().clone_from(&false);
@@ -197,9 +231,9 @@ pub async fn load_settings() -> Result<(), String> {
                     }
                     Err(e) => {
                         log::warn!("Failed to parse settings: {}", e);
-                        SETTINGS_ERROR
-                            .write()
-                            .clone_from(&Some(format!("Parse error: {}", e)));
+                        let error = format!("Parse error: {}", e);
+                        SETTINGS_ERROR.write().clone_from(&Some(error.clone()));
+                        initial_error = Some(error);
                     }
                 }
             } else {
@@ -208,13 +242,17 @@ pub async fn load_settings() -> Result<(), String> {
         }
         Err(e) => {
             log::warn!("Failed to fetch settings: {}", e);
-            SETTINGS_ERROR
-                .write()
-                .clone_from(&Some(format!("Fetch error: {}", e)));
+            let error = format!("Fetch error: {}", e);
+            SETTINGS_ERROR.write().clone_from(&Some(error.clone()));
+            initial_error = Some(error);
         }
     }
     SETTINGS_LOADING.write().clone_from(&false);
     drain_publish_client_tag_queue().await;
+    if let Some(error) = initial_error {
+        SETTINGS_ERROR.write().clone_from(&Some(error.clone()));
+        return Err(error);
+    }
     Ok(())
 }
 /// Save settings to Nostr relays (NIP-78)

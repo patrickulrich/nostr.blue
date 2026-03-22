@@ -14,9 +14,20 @@ use super::types::{
     WalletTokensStoreStoreExt,
 };
 use super::utils::normalize_mint_url;
-use crate::stores::{auth_store, nostr_client};
+use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
 use dioxus::prelude::*;
 use nostr_sdk::{EventId, Kind, PublicKey};
+
+async fn reconcile_wallet_after_transfer_queue_failure(context: &str, queue_err: String) -> String {
+    if let Err(sync_err) = cashu_cdk_bridge::sync_wallet_state().await {
+        log::warn!(
+            "Failed to sync wallet state after {} queue failure: {}",
+            context,
+            sync_err
+        );
+    }
+    format!("Failed to queue {} for retry: {}", context, queue_err)
+}
 /// Transfer tokens from one mint to another via Lightning
 ///
 /// This performs a melt at the source mint and mint at the target mint,
@@ -271,37 +282,43 @@ pub async fn transfer_between_mints(
             Ok(_) => {
                 log::warn!("No relays accepted source token event");
                 let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                queue_event_for_retry(
+                if let Err(queue_err) = queue_event_for_retry(
                     builder,
                     PendingEventType::TokenEvent,
                     Some(pending_id.clone()),
                     Some(source_mint.clone()),
                 )
                 .await
-                .map_err(|queue_err| {
-                    format!(
-                        "Failed to queue source token event for retry: {}",
-                        queue_err
-                    )
-                })?;
+                {
+                    return Err(
+                        reconcile_wallet_after_transfer_queue_failure(
+                            "source token event",
+                            queue_err,
+                        )
+                        .await,
+                    );
+                }
                 source_new_event_id = Some(pending_id);
             }
             Err(e) => {
                 log::warn!("Failed to publish source token event: {}", e);
                 let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                queue_event_for_retry(
+                if let Err(queue_err) = queue_event_for_retry(
                     builder,
                     PendingEventType::TokenEvent,
                     Some(pending_id.clone()),
                     Some(source_mint.clone()),
                 )
                 .await
-                .map_err(|queue_err| {
-                    format!(
-                        "Failed to queue source token event for retry: {}",
-                        queue_err
-                    )
-                })?;
+                {
+                    return Err(
+                        reconcile_wallet_after_transfer_queue_failure(
+                            "source token event",
+                            queue_err,
+                        )
+                        .await,
+                    );
+                }
                 source_new_event_id = Some(pending_id);
             }
         }
@@ -323,25 +340,33 @@ pub async fn transfer_between_mints(
             Ok(event_output) if !event_output.success.is_empty() => {}
             Ok(_) => {
                 log::warn!("No relays accepted deletion event");
-                queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None)
-                    .await
-                    .map_err(|queue_err| {
-                        format!(
-                            "Failed to queue transfer deletion event for retry: {}",
-                            queue_err
+                if let Err(queue_err) =
+                    queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None)
+                        .await
+                {
+                    return Err(
+                        reconcile_wallet_after_transfer_queue_failure(
+                            "transfer deletion event",
+                            queue_err,
                         )
-                    })?;
+                        .await,
+                    );
+                }
             }
             Err(e) => {
                 log::warn!("Failed to publish deletion event: {}", e);
-                queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None)
-                    .await
-                    .map_err(|queue_err| {
-                        format!(
-                            "Failed to queue transfer deletion event for retry: {}",
-                            queue_err
+                if let Err(queue_err) =
+                    queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None)
+                        .await
+                {
+                    return Err(
+                        reconcile_wallet_after_transfer_queue_failure(
+                            "transfer deletion event",
+                            queue_err,
                         )
-                    })?;
+                        .await,
+                    );
+                }
             }
         }
     }
@@ -379,37 +404,43 @@ pub async fn transfer_between_mints(
             Ok(_) => {
                 log::warn!("No relays accepted target token event");
                 let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                queue_event_for_retry(
+                if let Err(queue_err) = queue_event_for_retry(
                     builder,
                     PendingEventType::TokenEvent,
                     Some(pending_id.clone()),
                     Some(target_mint.clone()),
                 )
                 .await
-                .map_err(|queue_err| {
-                    format!(
-                        "Failed to queue target token event for retry: {}",
-                        queue_err
-                    )
-                })?;
+                {
+                    return Err(
+                        reconcile_wallet_after_transfer_queue_failure(
+                            "target token event",
+                            queue_err,
+                        )
+                        .await,
+                    );
+                }
                 pending_id
             }
             Err(e) => {
                 log::warn!("Failed to publish target token event: {}", e);
                 let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                queue_event_for_retry(
+                if let Err(queue_err) = queue_event_for_retry(
                     builder,
                     PendingEventType::TokenEvent,
                     Some(pending_id.clone()),
                     Some(target_mint.clone()),
                 )
                 .await
-                .map_err(|queue_err| {
-                    format!(
-                        "Failed to queue target token event for retry: {}",
-                        queue_err
-                    )
-                })?;
+                {
+                    return Err(
+                        reconcile_wallet_after_transfer_queue_failure(
+                            "target token event",
+                            queue_err,
+                        )
+                        .await,
+                    );
+                }
                 pending_id
             }
         }

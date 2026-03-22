@@ -120,6 +120,49 @@ struct RssPodcastDetailContentProps {
     feed: PodcastFeed,
     podcast_id: u64,
 }
+
+#[allow(clippy::too_many_arguments)]
+fn load_episode_page(
+    podcast_id: u64,
+    feed: PodcastFeed,
+    offset: Option<usize>,
+    replace: bool,
+    mark_initial_complete: bool,
+    mut episodes: Signal<Vec<DisplayEpisode>>,
+    mut has_more: Signal<bool>,
+    mut loading_more: Signal<bool>,
+    mut initial_load_complete: Signal<bool>,
+    mut episode_error: Signal<Option<String>>,
+) {
+    episode_error.set(None);
+    loading_more.set(true);
+    spawn(async move {
+        match podcast_index::get_episodes_by_feed_id(podcast_id, Some(30), offset).await {
+            Ok(next_eps) => {
+                has_more.set(next_eps.len() >= 30);
+                let display_eps: Vec<DisplayEpisode> = next_eps
+                    .iter()
+                    .map(|ep| DisplayEpisode::from_podcast_index_episode(ep, &feed))
+                    .collect();
+                if replace {
+                    episodes.set(display_eps);
+                } else {
+                    episodes.write().extend(display_eps);
+                }
+            }
+            Err(error) => {
+                log::error!("Failed to load episodes: {}", error);
+                has_more.set(false);
+                episode_error.set(Some(error));
+            }
+        }
+        if mark_initial_complete {
+            initial_load_complete.set(true);
+        }
+        loading_more.set(false);
+    });
+}
+
 #[component]
 fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
     let feed = props.feed.clone();
@@ -129,11 +172,12 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
     let mut show_share_modal = use_signal(|| false);
 
     // Infinite scroll state
-    let mut episodes = use_signal(Vec::<DisplayEpisode>::new);
-    let mut loading_more = use_signal(|| false);
-    let mut has_more = use_signal(|| true);
+    let episodes = use_signal(Vec::<DisplayEpisode>::new);
+    let loading_more = use_signal(|| false);
+    let has_more = use_signal(|| true);
     let mut initial_load_started = use_signal(|| false);
-    let mut initial_load_complete = use_signal(|| false);
+    let initial_load_complete = use_signal(|| false);
+    let episode_error = use_signal(|| None::<String>);
 
     // Initial episode load
     {
@@ -143,23 +187,19 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
                 return;
             }
             initial_load_started.set(true);
-            let feed = feed.clone();
-            spawn(async move {
-                log::info!("Loading initial episodes for podcast {}", podcast_id);
-                match podcast_index::get_episodes_by_feed_id(podcast_id, Some(30), None).await {
-                    Ok(eps) => {
-                        log::info!("Loaded {} initial episodes", eps.len());
-                        has_more.set(eps.len() >= 30);
-                        let display_eps: Vec<DisplayEpisode> = eps
-                            .iter()
-                            .map(|ep| DisplayEpisode::from_podcast_index_episode(ep, &feed))
-                            .collect();
-                        episodes.set(display_eps);
-                    }
-                    Err(e) => log::error!("Failed to load episodes: {}", e),
-                }
-                initial_load_complete.set(true);
-            });
+            log::info!("Loading initial episodes for podcast {}", podcast_id);
+            load_episode_page(
+                podcast_id,
+                feed.clone(),
+                None,
+                true,
+                true,
+                episodes,
+                has_more,
+                loading_more,
+                initial_load_complete,
+                episode_error,
+            );
         });
     }
 
@@ -173,35 +213,19 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
                     return;
                 }
                 let current_count = episodes.peek().len();
-                let feed = feed.clone();
-                loading_more.set(true);
-                spawn(async move {
-                    log::info!("Loading more episodes, skip: {}", current_count);
-                    match podcast_index::get_episodes_by_feed_id(
-                        podcast_id,
-                        Some(30),
-                        Some(current_count),
-                    )
-                    .await
-                    {
-                        Ok(new_eps) => {
-                            log::info!("Loaded {} more episodes", new_eps.len());
-                            if new_eps.is_empty() {
-                                has_more.set(false);
-                            } else {
-                                has_more.set(new_eps.len() >= 30);
-                                episodes.write().extend(new_eps.iter().map(|ep| {
-                                    DisplayEpisode::from_podcast_index_episode(ep, &feed)
-                                }));
-                            }
-                        }
-                        Err(e) => {
-                            has_more.set(false);
-                            log::error!("Load more failed: {}", e);
-                        }
-                    }
-                    loading_more.set(false);
-                });
+                log::info!("Loading more episodes, skip: {}", current_count);
+                load_episode_page(
+                    podcast_id,
+                    feed.clone(),
+                    Some(current_count),
+                    false,
+                    false,
+                    episodes,
+                    has_more,
+                    loading_more,
+                    initial_load_complete,
+                    episode_error,
+                );
             }
         };
 
@@ -402,6 +426,36 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
                     episodes: episodes.read().clone(),
                     show_podcast_title: false,
                     enable_playlist: true,
+                }
+                if let Some(error) = episode_error.read().as_ref() {
+                    div { class: "mt-4 rounded-lg border border-destructive/30 bg-destructive/5 p-4 space-y-3",
+                        p { class: "text-sm text-destructive", "{error}" }
+                        button {
+                            class: "rounded-lg border border-border px-4 py-2 text-sm transition hover:bg-accent disabled:opacity-60",
+                            disabled: *loading_more.read(),
+                            onclick: {
+                                let feed = feed.clone();
+                                move |_| {
+                                    let current_count = episodes.read().len();
+                                    let offset = if current_count == 0 { None } else { Some(current_count) };
+                                    let replace = offset.is_none();
+                                    load_episode_page(
+                                        podcast_id,
+                                        feed.clone(),
+                                        offset,
+                                        replace,
+                                        replace,
+                                        episodes,
+                                        has_more,
+                                        loading_more,
+                                        initial_load_complete,
+                                        episode_error,
+                                    );
+                                }
+                            },
+                            if *loading_more.read() { "Retrying..." } else { "Retry" }
+                        }
+                    }
                 }
                 // Sentinel element for infinite scroll
                 if *has_more.read() {
