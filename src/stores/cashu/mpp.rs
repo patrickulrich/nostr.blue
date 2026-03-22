@@ -351,15 +351,16 @@ pub async fn execute_mpp_melt(
                                     "Failed to queue MPP token event for retry: {}",
                                     queue_err
                                 );
+                            } else {
+                                new_tokens.push(TokenData {
+                                    event_id: pending_id,
+                                    mint: mint_url.clone(),
+                                    unit: "sat".to_string(),
+                                    proofs: proof_data,
+                                    created_at: super::proofs::now_secs(),
+                                });
+                                publish_failures += 1;
                             }
-                            new_tokens.push(TokenData {
-                                event_id: pending_id,
-                                mint: mint_url.clone(),
-                                unit: "sat".to_string(),
-                                proofs: proof_data,
-                                created_at: super::proofs::now_secs(),
-                            });
-                            publish_failures += 1;
                         }
                         Err(e) => {
                             log::warn!(
@@ -380,15 +381,16 @@ pub async fn execute_mpp_melt(
                                     "Failed to queue MPP token event for retry: {}",
                                     queue_err
                                 );
+                            } else {
+                                new_tokens.push(TokenData {
+                                    event_id: pending_id,
+                                    mint: mint_url.clone(),
+                                    unit: "sat".to_string(),
+                                    proofs: proof_data,
+                                    created_at: super::proofs::now_secs(),
+                                });
+                                publish_failures += 1;
                             }
-                            new_tokens.push(TokenData {
-                                event_id: pending_id,
-                                mint: mint_url.clone(),
-                                unit: "sat".to_string(),
-                                proofs: proof_data,
-                                created_at: super::proofs::now_secs(),
-                            });
-                            publish_failures += 1;
                         }
                     }
                 }

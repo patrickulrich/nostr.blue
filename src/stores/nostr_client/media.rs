@@ -157,6 +157,17 @@ pub async fn publish_picture_tracked(
         .await
         .map_err(|e| format!("Failed to publish picture: {}", e))?;
     let result = PublishResult::from_output(output);
+    if result.success_count() == 0 {
+        let details: Vec<String> = result
+            .failed_relays
+            .iter()
+            .map(|(relay, reason)| format!("{}: {}", relay, reason))
+            .collect();
+        return Err(format!(
+            "Failed to publish picture: no relays accepted the event; failures: {}",
+            details.join(", ")
+        ));
+    }
     log::info!(
         "Picture '{}' published: {} ({}/{} relays succeeded)",
         title,
@@ -276,6 +287,17 @@ pub async fn publish_video_tracked(
         .await
         .map_err(|e| format!("Failed to publish video: {}", e))?;
     let result = PublishResult::from_output(output);
+    if result.success_count() == 0 {
+        let details: Vec<String> = result
+            .failed_relays
+            .iter()
+            .map(|(relay, reason)| format!("{}: {}", relay, reason))
+            .collect();
+        return Err(format!(
+            "Failed to publish video: no relays accepted the event; failures: {}",
+            details.join(", ")
+        ));
+    }
     log::info!(
         "Addressable video '{}' published: {} (d-tag: {}, {}/{} relays succeeded)",
         title,
@@ -358,6 +380,17 @@ pub async fn publish_voice_message_tracked(
         .await
         .map_err(|e| format!("Failed to publish voice message: {}", e))?;
     let result = PublishResult::from_output(output);
+    if result.success_count() == 0 {
+        let details: Vec<String> = result
+            .failed_relays
+            .iter()
+            .map(|(relay, reason)| format!("{}: {}", relay, reason))
+            .collect();
+        return Err(format!(
+            "Failed to publish voice message: no relays accepted the event; failures: {}",
+            details.join(", ")
+        ));
+    }
     log::info!(
         "Voice message published: {} ({}/{} relays succeeded)",
         result.event_id,
@@ -474,6 +507,17 @@ pub async fn publish_voice_message_reply_tracked(
         .await
         .map_err(|e| format!("Failed to publish voice message reply: {}", e))?;
     let result = PublishResult::from_output(output);
+    if result.success_count() == 0 {
+        let details: Vec<String> = result
+            .failed_relays
+            .iter()
+            .map(|(relay, reason)| format!("{}: {}", relay, reason))
+            .collect();
+        return Err(format!(
+            "Failed to publish voice message reply: no relays accepted the event; failures: {}",
+            details.join(", ")
+        ));
+    }
     log::info!(
         "Voice message reply published: {} ({}/{} relays succeeded)",
         result.event_id,

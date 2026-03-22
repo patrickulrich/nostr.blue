@@ -122,7 +122,7 @@ pub fn ZapGoalCard(props: ZapGoalCardProps) -> Element {
                     }
                     div { class: "h-2.5 overflow-hidden rounded-full bg-muted",
                         div {
-                            class: "h-full rounded-full bg-linear-to-r from-sky-400 via-cyan-400 to-emerald-400 transition-all",
+                            class: "h-full rounded-full bg-gradient-to-r from-sky-400 via-cyan-400 to-emerald-400 transition-all",
                             style: "width: {percentage}%;",
                         }
                     }

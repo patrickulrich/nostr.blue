@@ -474,12 +474,25 @@ async fn publish_music_status(track: &MusicTrack) {
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
     {
-        Ok(event_id) => {
-            log::info!(
-                "Music status published: {} (event: {})",
-                track.title,
-                event_id.to_hex()
-            );
+        Ok(output) => {
+            if output.success.is_empty() {
+                let details: Vec<String> = output
+                    .failed
+                    .iter()
+                    .map(|(relay, reason)| format!("{}: {}", relay, reason))
+                    .collect();
+                log::error!(
+                    "Failed to publish music status for {}: no relays accepted (failures: {})",
+                    track.title,
+                    details.join(", ")
+                );
+            } else {
+                log::info!(
+                    "Music status published: {} (event: {})",
+                    track.title,
+                    output.id().to_hex()
+                );
+            }
         }
         Err(e) => {
             log::error!("Failed to publish music status: {}", e);
@@ -501,8 +514,12 @@ async fn clear_music_status() {
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
     {
-        Ok(_) => {
-            log::info!("Music status cleared");
+        Ok(output) => {
+            if output.success.is_empty() {
+                log::warn!("Music status clear: no relays accepted");
+            } else {
+                log::info!("Music status cleared");
+            }
         }
         Err(e) => {
             log::error!("Failed to clear music status: {}", e);
@@ -871,13 +888,27 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
         .await
     {
         Ok(output) => {
-            log::info!(
-                "Vote submitted for '{}' by {} (event: {})",
-                track.title,
-                track.artist,
-                output.id().to_hex()
-            );
-            Ok(())
+            if output.success.is_empty() {
+                let details: Vec<String> = output
+                    .failed
+                    .iter()
+                    .map(|(relay, reason)| format!("{}: {}", relay, reason))
+                    .collect();
+                log::error!(
+                    "Failed to publish vote for '{}': no relays accepted (failures: {})",
+                    track.title,
+                    details.join(", ")
+                );
+                Err("No relays accepted vote event".to_string())
+            } else {
+                log::info!(
+                    "Vote submitted for '{}' by {} (event: {})",
+                    track.title,
+                    track.artist,
+                    output.id().to_hex()
+                );
+                Ok(())
+            }
         }
         Err(e) => {
             log::error!("Failed to publish vote: {}", e);

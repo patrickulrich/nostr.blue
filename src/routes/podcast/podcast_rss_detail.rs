@@ -33,12 +33,14 @@ pub struct PodcastRssFeedDetailProps {
 #[component]
 pub fn PodcastRssFeedDetail(props: PodcastRssFeedDetailProps) -> Element {
     let podcast_id = props.podcast_id.clone();
+    let mut refresh_trigger = use_signal(|| 0u32);
     // Only fetch feed metadata, episodes are loaded incrementally
     let podcast_data = use_resource(move || {
         let id_str = podcast_id.clone();
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        let has_signer = nostr_client::has_signer();
         async move {
+            let refresh = *refresh_trigger.read();
+            let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+            let has_signer = nostr_client::has_signer();
             if !client_initialized {
                 return RssPodcastDetailState::Initializing;
             }
@@ -51,7 +53,7 @@ pub fn PodcastRssFeedDetail(props: PodcastRssFeedDetailProps) -> Element {
             if !has_signer {
                 return RssPodcastDetailState::AuthRequired;
             }
-            log::info!("Fetching podcast metadata for ID: {}", id);
+            log::info!("Fetching podcast metadata for ID: {} (refresh: {})", id, refresh);
             match podcast_index::get_podcast_by_id(id).await {
                 Ok(feed) => {
                     log::info!("Successfully loaded podcast: {}", feed.title);
@@ -88,9 +90,16 @@ pub fn PodcastRssFeedDetail(props: PodcastRssFeedDetailProps) -> Element {
                     }
                 },
                 Some(RssPodcastDetailState::Error(e)) => rsx! {
-                    div { class: "p-4 text-center",
+                    div { class: "p-4 text-center space-y-3",
                         div { class: "text-destructive mb-2", "Failed to load podcast" }
                         div { class: "text-sm text-muted-foreground", "{e}" }
+                        button {
+                            class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
+                            onclick: move |_| {
+                                refresh_trigger.with_mut(|v| *v = v.wrapping_add(1));
+                            },
+                            "Try Again"
+                        }
                     }
                 },
                 None => rsx! {

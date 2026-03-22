@@ -63,6 +63,20 @@ pub async fn add_webbookmark(
         .await
     {
         Ok(output) => {
+            if output.success.is_empty() {
+                let details: Vec<String> = output
+                    .failed
+                    .iter()
+                    .map(|(relay, reason)| format!("{}: {}", relay, reason))
+                    .collect();
+                log::error!(
+                    "Failed to publish web bookmark: no relays accepted (failures: {})",
+                    details.join(", ")
+                );
+                return Err(
+                    "Failed to publish web bookmark: no relays accepted the event".to_string()
+                );
+            }
             log::info!("Web bookmark published: {}", output.id());
             Ok(())
         }
@@ -104,7 +118,21 @@ pub async fn delete_webbookmark(event: &Event) -> Result<(), String> {
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
     {
-        Ok(_) => {
+        Ok(output) => {
+            if output.success.is_empty() {
+                let details: Vec<String> = output
+                    .failed
+                    .iter()
+                    .map(|(relay, reason)| format!("{}: {}", relay, reason))
+                    .collect();
+                log::error!(
+                    "Failed to delete web bookmark: no relays accepted (failures: {})",
+                    details.join(", ")
+                );
+                return Err(
+                    "Failed to delete web bookmark: no relays accepted the event".to_string()
+                );
+            }
             log::info!("Web bookmark deleted");
             let mut bookmarks = WEB_BOOKMARKS.read().data().read().clone();
             bookmarks.retain(|e| e.id != event.id);

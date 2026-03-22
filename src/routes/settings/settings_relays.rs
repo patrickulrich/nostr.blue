@@ -501,8 +501,8 @@ pub fn SettingsRelays() -> Element {
                                                     },
                                                     "● {info.status_str()}"
                                                 }
-                                                span { "↓ {format_bytes(info.bytes_received)}" }
-                                                span { "↑ {format_bytes(info.bytes_sent)}" }
+                                                span { "↓ {format_bytes(info.bytes_received as u64)}" }
+                                                span { "↑ {format_bytes(info.bytes_sent as u64)}" }
                                                 if info.connection_attempts > 0 {
                                                     span { class: if info.success_rate > 80.0 { "text-green-600 dark:text-green-400" } else { "text-yellow-600 dark:text-yellow-400" },
                                                         "{info.success_rate as u8}%"
@@ -600,8 +600,8 @@ pub fn SettingsRelays() -> Element {
                                                     },
                                                     "● {info.status_str()}"
                                                 }
-                                                span { "↓ {format_bytes(info.bytes_received)}" }
-                                                span { "↑ {format_bytes(info.bytes_sent)}" }
+                                                span { "↓ {format_bytes(info.bytes_received as u64)}" }
+                                                span { "↑ {format_bytes(info.bytes_sent as u64)}" }
                                             }
                                         }
                                     }
@@ -693,8 +693,8 @@ pub fn SettingsRelays() -> Element {
                                                     },
                                                     "● {info.status_str()}"
                                                 }
-                                                span { "↓ {format_bytes(info.bytes_received)}" }
-                                                span { "↑ {format_bytes(info.bytes_sent)}" }
+                                                span { "↓ {format_bytes(info.bytes_received as u64)}" }
+                                                span { "↑ {format_bytes(info.bytes_sent as u64)}" }
                                             }
                                         }
                                     }
@@ -847,8 +847,8 @@ pub fn SettingsRelays() -> Element {
                                                     },
                                                     "● {info.status_str()}"
                                                 }
-                                                span { "↓ {format_bytes(info.bytes_received)}" }
-                                                span { "↑ {format_bytes(info.bytes_sent)}" }
+                                                span { "↓ {format_bytes(info.bytes_received as u64)}" }
+                                                span { "↑ {format_bytes(info.bytes_sent as u64)}" }
                                             }
                                         }
                                     }
@@ -936,8 +936,8 @@ pub fn SettingsRelays() -> Element {
                                                     },
                                                     "● {info.status_str()}"
                                                 }
-                                                span { "↓ {format_bytes(info.bytes_received)}" }
-                                                span { "↑ {format_bytes(info.bytes_sent)}" }
+                                                span { "↓ {format_bytes(info.bytes_received as u64)}" }
+                                                span { "↑ {format_bytes(info.bytes_sent as u64)}" }
                                             }
                                         }
                                     }
@@ -1023,8 +1023,8 @@ pub fn SettingsRelays() -> Element {
                                     }
                                     div { class: "flex items-center gap-4 mt-2 text-xs text-gray-500 dark:text-gray-400",
                                         span { "{relay_info.status_str()}" }
-                                        span { "↓ {format_bytes(relay_info.bytes_received)}" }
-                                        span { "↑ {format_bytes(relay_info.bytes_sent)}" }
+                                        span { "↓ {format_bytes(relay_info.bytes_received as u64)}" }
+                                        span { "↑ {format_bytes(relay_info.bytes_sent as u64)}" }
                                         if relay_info.connection_attempts > 0 {
                                             span { class: if relay_info.success_rate > 80.0 { "text-green-600 dark:text-green-400" } else if relay_info.success_rate > 50.0 { "text-yellow-600 dark:text-yellow-400" } else { "text-red-600 dark:text-red-400" },
                                                 "{relay_info.success_rate as u8}%"

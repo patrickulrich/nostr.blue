@@ -95,6 +95,7 @@ pub async fn publish_ssh_key(title: &str, public_key: &str) -> Result<EventId, S
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish SSH key: {}", e))?;
+    crate::utils::relay_output::ensure_publish_accepted(&output, "publish SSH key")?;
     let event_id = *output.id();
     Ok(event_id)
 }
@@ -127,9 +128,10 @@ pub async fn delete_ssh_key(event_id: EventId) -> Result<(), String> {
         .id(event_id)
         .reason("SSH key deleted");
     let builder = EventBuilder::delete(request);
-    client
+    let output = client
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to delete SSH key: {}", e))?;
+    crate::utils::relay_output::ensure_publish_accepted(&output, "delete SSH key")?;
     Ok(())
 }

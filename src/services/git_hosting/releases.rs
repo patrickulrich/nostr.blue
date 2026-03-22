@@ -61,6 +61,17 @@ pub async fn publish_release(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish: {}", e))?;
+    if output.success.is_empty() {
+        let details: Vec<String> = output
+            .failed
+            .iter()
+            .map(|(relay, reason)| format!("{}: {}", relay, reason))
+            .collect();
+        return Err(format!(
+            "Failed to publish release: no relays accepted the event; failures: {}",
+            details.join(", ")
+        ));
+    }
     let event_id = *output.id();
     let filter = Filter::new().id(event_id);
     if let Ok(events) = fetch_events_aggregated(filter, Duration::from_secs(2)).await {
@@ -79,10 +90,21 @@ pub async fn delete_release(release_event_id: EventId) -> Result<(), String> {
         .id(release_event_id)
         .reason("Release deleted");
     let builder = EventBuilder::delete(request);
-    client
+    let output = client
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to delete: {}", e))?;
+    if output.success.is_empty() {
+        let details: Vec<String> = output
+            .failed
+            .iter()
+            .map(|(relay, reason)| format!("{}: {}", relay, reason))
+            .collect();
+        return Err(format!(
+            "Failed to delete release: no relays accepted the event; failures: {}",
+            details.join(", ")
+        ));
+    }
     Ok(())
 }
 /// Fetch a release by its event ID (note1 or nevent1)

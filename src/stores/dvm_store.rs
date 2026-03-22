@@ -172,6 +172,7 @@ pub async fn request_content_feed(provider: Option<PublicKey>) -> Result<Vec<Eve
             *DVM_FEED_EVENTS.write() = Vec::new();
             *DVM_FEED_LOADING.write() = false;
             *DVM_FEED_ERROR.write() = Some(format!("Failed to submit job: {}", e));
+            *DVM_LAST_REQUEST_ID.write() = None;
             format!("Failed to submit job: {}", e)
         })?;
     if output.success.is_empty() {
@@ -179,6 +180,7 @@ pub async fn request_content_feed(provider: Option<PublicKey>) -> Result<Vec<Eve
         *DVM_FEED_EVENTS.write() = Vec::new();
         *DVM_FEED_LOADING.write() = false;
         *DVM_FEED_ERROR.write() = Some(error.clone());
+        *DVM_LAST_REQUEST_ID.write() = None;
         return Err(error);
     }
     let request_id = *output.id();

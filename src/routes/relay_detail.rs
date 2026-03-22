@@ -488,7 +488,7 @@ pub fn RelayDetail(relay_id: String) -> Element {
                                             }
                                             div { class: "rounded-lg bg-gray-50 dark:bg-gray-700 p-3",
                                                 p { class: "font-medium text-gray-900 dark:text-white", "Traffic" }
-                                                p { class: "text-gray-700 dark:text-gray-300 mt-1", "↓ {format_bytes(stats.bytes_received)} • ↑ {format_bytes(stats.bytes_sent)}" }
+                                                p { class: "text-gray-700 dark:text-gray-300 mt-1", "↓ {format_bytes(stats.bytes_received as u64)} • ↑ {format_bytes(stats.bytes_sent as u64)}" }
                                             }
                                             div { class: "rounded-lg bg-gray-50 dark:bg-gray-700 p-3",
                                                 p { class: "font-medium text-gray-900 dark:text-white", "Flags" }

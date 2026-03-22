@@ -566,14 +566,36 @@ pub fn ZapGoalsNew() -> Element {
         let relays: Vec<String> = relays_value
             .split(|ch: char| ch == '\n' || ch == ',' || ch.is_whitespace())
             .map(str::trim)
-            .filter_map(|relay| {
-                let parsed = Url::parse(relay).ok()?;
-                matches!(parsed.scheme(), "ws" | "wss")
-                    .then_some(parsed.host_str().is_some())
-                    .filter(|valid| *valid)
-                    .map(|_| parsed.to_string())
-            })
+            .filter(|relay| !relay.is_empty())
+            .map(|relay| relay.to_string())
             .collect();
+        for relay in &relays {
+            match Url::parse(relay) {
+                Ok(parsed) => {
+                    if !matches!(parsed.scheme(), "ws" | "wss") {
+                        error_message.set(Some(format!(
+                            "Invalid relay URL \"{}\": scheme must be ws or wss",
+                            relay
+                        )));
+                        return;
+                    }
+                    if parsed.host_str().is_none() {
+                        error_message.set(Some(format!(
+                            "Invalid relay URL \"{}\": missing host",
+                            relay
+                        )));
+                        return;
+                    }
+                }
+                Err(_) => {
+                    error_message.set(Some(format!(
+                        "Invalid relay URL \"{}\": failed to parse",
+                        relay
+                    )));
+                    return;
+                }
+            }
+        }
         if relays.is_empty() {
             error_message.set(Some("Add at least one valid relay URL.".to_string()));
             return;

@@ -24,7 +24,7 @@ pub fn display_server_url(url: &str) -> String {
 }
 
 /// Format bytes into a human-readable binary size string.
-pub fn format_bytes(bytes: usize) -> String {
+pub fn format_bytes(bytes: u64) -> String {
     let units = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
     let mut value = bytes as f64;
     let mut unit_index = 0usize;

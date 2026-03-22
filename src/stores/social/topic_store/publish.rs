@@ -21,7 +21,17 @@ pub async fn create_topic_post(topic: &str, content: &str) -> std::result::Resul
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish topic post: {}", e))?;
-
+    if output.success.is_empty() {
+        let details: Vec<String> = output
+            .failed
+            .iter()
+            .map(|(relay, reason)| format!("{}: {}", relay, reason))
+            .collect();
+        return Err(format!(
+            "Failed to publish topic post: no relays accepted the event; failures: {}",
+            details.join(", ")
+        ));
+    }
     log::info!(
         "Topic post published in #{}: {}",
         topic,
@@ -58,7 +68,17 @@ pub async fn reply_to_topic_post(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish reply: {}", e))?;
-
+    if output.success.is_empty() {
+        let details: Vec<String> = output
+            .failed
+            .iter()
+            .map(|(relay, reason)| format!("{}: {}", relay, reason))
+            .collect();
+        return Err(format!(
+            "Failed to publish reply: no relays accepted the event; failures: {}",
+            details.join(", ")
+        ));
+    }
     log::info!("Topic reply published: {}", output.id().to_hex());
     Ok(output.id().to_hex())
 }
@@ -95,6 +115,17 @@ pub async fn vote_on_post(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish vote: {}", e))?;
+    if output.success.is_empty() {
+        let details: Vec<String> = output
+            .failed
+            .iter()
+            .map(|(relay, reason)| format!("{}: {}", relay, reason))
+            .collect();
+        return Err(format!(
+            "Failed to publish vote: no relays accepted the event; failures: {}",
+            details.join(", ")
+        ));
+    }
 
     // Update cached vote counts optimistically
     let mut counts = get_cached_votes(&post.id).unwrap_or_default();
@@ -160,10 +191,21 @@ pub async fn update_subscriptions(topics: &[String]) -> std::result::Result<(), 
 
     let builder = EventBuilder::new(Kind::Custom(KIND_TOPIC_SUBSCRIPTION), "").tags(tags);
 
-    client
+    let output = client
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to update subscriptions: {}", e))?;
+    if output.success.is_empty() {
+        let details: Vec<String> = output
+            .failed
+            .iter()
+            .map(|(relay, reason)| format!("{}: {}", relay, reason))
+            .collect();
+        return Err(format!(
+            "Failed to update subscriptions: no relays accepted the event; failures: {}",
+            details.join(", ")
+        ));
+    }
 
     log::info!("Updated topic subscriptions ({} topics)", topics.len());
     Ok(())

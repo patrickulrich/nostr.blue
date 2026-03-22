@@ -18,7 +18,8 @@ pub fn tag_event_builder_with_enabled(
     publish_client_tag: bool,
 ) -> EventBuilder {
     if publish_client_tag {
-        builder.tag(client_tag())
+        let client_tag = client_tag();
+        builder.tag(client_tag)
     } else {
         builder
     }

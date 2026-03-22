@@ -155,6 +155,17 @@ pub async fn publish_repository_with_extras(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish: {}", e))?;
+    if output.success.is_empty() {
+        let details: Vec<String> = output
+            .failed
+            .iter()
+            .map(|(relay, reason)| format!("{}: {}", relay, reason))
+            .collect();
+        return Err(format!(
+            "Failed to publish repository: no relays accepted the event; failures: {}",
+            details.join(", ")
+        ));
+    }
     let event_id = *output.id();
     let filter = Filter::new().id(event_id);
     if let Ok(events) = fetch_events_aggregated(filter, Duration::from_secs(2)).await {
@@ -207,6 +218,17 @@ pub async fn publish_fork(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish fork: {}", e))?;
+    if output.success.is_empty() {
+        let details: Vec<String> = output
+            .failed
+            .iter()
+            .map(|(relay, reason)| format!("{}: {}", relay, reason))
+            .collect();
+        return Err(format!(
+            "Failed to publish fork: no relays accepted the event; failures: {}",
+            details.join(", ")
+        ));
+    }
     let event_id = *output.id();
     let filter = Filter::new().id(event_id);
     if let Ok(events) = fetch_events_aggregated(filter, Duration::from_secs(2)).await {
@@ -226,10 +248,21 @@ pub async fn delete_repository(coordinate: &Coordinate) -> Result<(), String> {
         .coordinate(coordinate.clone())
         .reason("Repository deleted");
     let builder = EventBuilder::delete(request);
-    client
+    let output = client
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish deletion: {}", e))?;
+    if output.success.is_empty() {
+        let details: Vec<String> = output
+            .failed
+            .iter()
+            .map(|(relay, reason)| format!("{}: {}", relay, reason))
+            .collect();
+        return Err(format!(
+            "Failed to delete repository: no relays accepted the event; failures: {}",
+            details.join(", ")
+        ));
+    }
     let coord_str = format!(
         "{}:{}:{}",
         coordinate.kind.as_u16(),

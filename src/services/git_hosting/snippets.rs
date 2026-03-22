@@ -146,6 +146,7 @@ pub async fn publish_snippet(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish: {}", e))?;
+    crate::utils::relay_output::ensure_publish_accepted(&output, "publish snippet")?;
     let event_id = *output.id();
     let filter = Filter::new().id(event_id);
     if let Ok(events) = fetch_events_aggregated(filter, Duration::from_secs(2)).await {
@@ -164,10 +165,11 @@ pub async fn delete_snippet(event_id: EventId) -> Result<(), String> {
         .id(event_id)
         .reason("Snippet deleted");
     let builder = EventBuilder::delete(request);
-    client
+    let output = client
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish deletion: {}", e))?;
+    crate::utils::relay_output::ensure_publish_accepted(&output, "delete snippet")?;
     crate::stores::code_store::CODE_SNIPPETS_CACHE
         .write()
         .pop(&event_id.to_hex());

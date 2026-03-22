@@ -237,12 +237,23 @@ pub fn LiveStreamShareModal(
                 .await
             {
                 Ok(output) => {
-                    log::info!("Shared to Nostr: {:?}", output.val);
-                    nostr_error.set(None);
-                    nostr_text.set(String::new());
-                    share_mode.set(ShareMode::Main);
-                    is_publishing.set(false);
-                    on_close.call(());
+                    if output.success.is_empty() {
+                        let details: Vec<String> = output
+                            .failed
+                            .iter()
+                            .map(|(relay, reason)| format!("{}: {}", relay, reason))
+                            .collect();
+                        log::error!("Failed to share to Nostr: no relays accepted (failures: {})", details.join(", "));
+                        nostr_error.set(Some("Failed to post to Nostr: no relays accepted the event".to_string()));
+                        is_publishing.set(false);
+                    } else {
+                        log::info!("Shared to Nostr: {:?}", output.val);
+                        nostr_error.set(None);
+                        nostr_text.set(String::new());
+                        share_mode.set(ShareMode::Main);
+                        is_publishing.set(false);
+                        on_close.call(());
+                    }
                 }
                 Err(e) => {
                     log::error!("Failed to share to Nostr: {}", e);

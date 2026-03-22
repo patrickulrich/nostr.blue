@@ -313,10 +313,10 @@ pub async fn report_post(
     details: Option<String>,
 ) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
-    super::fetching::ensure_relays_ready(&client).await;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
+    super::fetching::ensure_relays_ready(&client).await;
     let report_type = report_type.trim().to_lowercase();
     if report_type.is_empty() {
         return Err("Report type cannot be empty (NIP-56)".to_string());

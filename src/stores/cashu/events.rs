@@ -843,6 +843,9 @@ pub async fn process_pending_events() -> Result<usize, String> {
                             );
                             let mut updated_event = event.clone();
                             updated_event.published_event_id = Some(nostr_event_id.clone());
+                            // Update retry metadata so history-only retries respect MAX_RETRIES
+                            updated_event.retry_count += 1;
+                            updated_event.last_retry_at = Some(now);
                             let mut events = PENDING_NOSTR_EVENTS.write();
                             if let Some(pos) = events.iter().position(|entry| entry.id == event.id)
                             {
@@ -940,7 +943,7 @@ pub async fn reconcile_pending_event_ids() -> Result<usize, String> {
         let tokens = data.read();
         tokens
             .iter()
-            .filter(|t| t.event_id.starts_with("pending_"))
+            .filter(|t| t.event_id.starts_with("pending_") || t.event_id.starts_with("local_pending_"))
             .cloned()
             .collect()
     };

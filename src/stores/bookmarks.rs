@@ -458,9 +458,14 @@ async fn publish_bookmarks(bookmarks: Vec<String>) -> Result<(), String> {
             let failed_count = output.failed.len();
             let total = success_count + failed_count;
             if output.success.is_empty() {
+                let details: Vec<String> = output
+                    .failed
+                    .iter()
+                    .map(|(relay, reason)| format!("{}: {}", relay, reason))
+                    .collect();
                 return Err(format!(
-                    "Failed to publish bookmarks: no relays accepted the event (failed_relays={})",
-                    failed_count
+                    "Failed to publish bookmarks: no relays accepted the event; failures: {}",
+                    details.join(", ")
                 ));
             }
             log::info!(

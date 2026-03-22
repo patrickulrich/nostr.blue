@@ -84,7 +84,7 @@ pub fn AboutDonate() -> Element {
 
     rsx! {
         div { class: "mx-auto max-w-5xl px-4 py-8",
-            div { class: "rounded-3xl border border-sky-300/50 bg-linear-to-br from-sky-500/12 via-background to-cyan-500/10 p-6 shadow-sm",
+            div { class: "rounded-3xl border border-sky-300/50 bg-gradient-to-br from-sky-500/12 via-background to-cyan-500/10 p-6 shadow-sm",
                 div { class: "inline-flex rounded-full bg-sky-500/15 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300",
                     "Support nostr.blue"
                 }

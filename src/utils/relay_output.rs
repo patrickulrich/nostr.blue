@@ -5,7 +5,15 @@ pub fn ensure_publish_accepted(
     action: &str,
 ) -> Result<(), String> {
     if output.success.is_empty() {
-        Err(format!("{action}: no relays accepted the event"))
+        let details: Vec<String> = output
+            .failed
+            .iter()
+            .map(|(relay, reason)| format!("{}: {}", relay, reason))
+            .collect();
+        Err(format!(
+            "{action}: no relays accepted the event; failures: {}",
+            details.join(", ")
+        ))
     } else {
         Ok(())
     }

@@ -562,6 +562,17 @@ pub async fn publish_recipe(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish recipe: {}", e))?;
+    if output.success.is_empty() {
+        let details: Vec<String> = output
+            .failed
+            .iter()
+            .map(|(relay, reason)| format!("{}: {}", relay, reason))
+            .collect();
+        return Err(format!(
+            "Failed to publish recipe: no relays accepted the event; failures: {}",
+            details.join(", ")
+        ));
+    }
     log::info!("Recipe published: {}", output.id().to_hex());
     let pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
     let naddr =
@@ -615,6 +626,17 @@ pub async fn fork_recipe(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to fork recipe: {}", e))?;
+    if output.success.is_empty() {
+        let details: Vec<String> = output
+            .failed
+            .iter()
+            .map(|(relay, reason)| format!("{}: {}", relay, reason))
+            .collect();
+        return Err(format!(
+            "Failed to fork recipe: no relays accepted the event; failures: {}",
+            details.join(", ")
+        ));
+    }
     log::info!("Recipe forked: {}", output.id().to_hex());
     let pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
     let naddr =
@@ -670,6 +692,17 @@ pub async fn update_recipe(
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to update recipe: {}", e))?;
+    if output.success.is_empty() {
+        let details: Vec<String> = output
+            .failed
+            .iter()
+            .map(|(relay, reason)| format!("{}: {}", relay, reason))
+            .collect();
+        return Err(format!(
+            "Failed to update recipe: no relays accepted the event; failures: {}",
+            details.join(", ")
+        ));
+    }
     log::info!("Recipe updated: {}", output.id().to_hex());
     let pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
     let naddr =
@@ -695,6 +728,17 @@ pub async fn delete_recipe(recipe: &CachedRecipe) -> StdResult<String, String> {
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to delete recipe: {}", e))?;
+    if output.success.is_empty() {
+        let details: Vec<String> = output
+            .failed
+            .iter()
+            .map(|(relay, reason)| format!("{}: {}", relay, reason))
+            .collect();
+        return Err(format!(
+            "Failed to delete recipe: no relays accepted the event; failures: {}",
+            details.join(", ")
+        ));
+    }
     RECIPES_CACHE.write().pop(&recipe.a_tag);
     log::info!("Recipe deleted: {}", output.id().to_hex());
     Ok(output.id().to_hex())
@@ -767,10 +811,21 @@ pub async fn toggle_recipe_bookmark(recipe: &CachedRecipe) -> StdResult<bool, St
         tags.push(Tag::custom(TagKind::a(), vec![bookmark.clone()]));
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_BOOKMARK_LIST), "").tags(tags);
-    client
+    let output = client
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to update bookmarks: {}", e))?;
+    if output.success.is_empty() {
+        let details: Vec<String> = output
+            .failed
+            .iter()
+            .map(|(relay, reason)| format!("{}: {}", relay, reason))
+            .collect();
+        return Err(format!(
+            "Failed to update bookmarks: no relays accepted the event; failures: {}",
+            details.join(", ")
+        ));
+    }
     log::info!("Bookmark toggled for {}: {}", recipe.a_tag, !is_bookmarked);
     Ok(!is_bookmarked)
 }
