@@ -66,7 +66,7 @@ sync_overlay_dir() {
         rel="${path#"$dest_dir"/}"
         skip=0
         for preserve in "$@"; do
-            if [ "$rel" = "$preserve" ] || [[ "$rel" == "$preserve/"* ]]; then
+            if [ "$rel" = "$preserve" ] || [[ "$rel" == "$preserve/"* ]] || [[ "$preserve" == "$rel/"* ]]; then
                 skip=1
                 break
             fi
@@ -166,7 +166,11 @@ write_android_local_properties() {
 
     mkdir -p "$DX_ANDROID"
     {
-        printf 'sdk.dir=%s\n' "$(printf '%s' "$sdk_root" | sed 's/\\/\\\\/g')"
+        if [ -d "$sdk_root" ]; then
+            printf 'sdk.dir=%s\n' "$(printf '%s' "$sdk_root" | sed 's/\\/\\\\/g')"
+        else
+            echo "WARNING: Android SDK root not found, omitting sdk.dir from $local_properties: $sdk_root" >&2
+        fi
         if [ -n "$ndk_dir" ] && [ -d "$ndk_dir" ]; then
             printf 'ndk.dir=%s\n' "$(printf '%s' "$ndk_dir" | sed 's/\\/\\\\/g')"
         fi
@@ -212,42 +216,31 @@ cleanup() {
 }
 
 configure_release_signing() {
-    require_env ANDROID_KEYSTORE_FILE
-    if [ ! -f "$ANDROID_KEYSTORE_FILE" ] || [ ! -r "$ANDROID_KEYSTORE_FILE" ]; then
-        echo "ERROR: ANDROID_KEYSTORE_FILE is not a readable regular file: $ANDROID_KEYSTORE_FILE" >&2
-        exit 1
-    fi
-    require_env ANDROID_KEYSTORE_PASSWORD
-    require_env ANDROID_KEY_ALIAS
-    require_env ANDROID_KEY_PASSWORD
-
     DIOXUS_CONFIG_BACKUP="${DIOXUS_CONFIG}.bak"
     cp "$DIOXUS_CONFIG" "$DIOXUS_CONFIG_BACKUP"
 
-    python3 - "$DIOXUS_CONFIG" <<'PY'
+    local missing_envs=()
+    mapfile -t missing_envs < <(python3 - "$DIOXUS_CONFIG" inspect <<'PY'
 from pathlib import Path
 import json
 import os
 import sys
 
 path = Path(sys.argv[1])
-jks_file = os.environ["ANDROID_KEYSTORE_FILE"]
-jks_password = os.environ["ANDROID_KEYSTORE_PASSWORD"]
-key_alias = os.environ["ANDROID_KEY_ALIAS"]
-key_password = os.environ["ANDROID_KEY_PASSWORD"]
+mode = sys.argv[2]
 
 required_keys = {
-    "jks_file": jks_file,
-    "jks_password": jks_password,
-    "key_alias": key_alias,
-    "key_password": key_password,
+    "jks_file": "ANDROID_KEYSTORE_FILE",
+    "jks_password": "ANDROID_KEYSTORE_PASSWORD",
+    "key_alias": "ANDROID_KEY_ALIAS",
+    "key_password": "ANDROID_KEY_PASSWORD",
 }
 
 text = path.read_text(encoding="utf-8")
 lines = text.splitlines()
 section_start = None
 section_end = len(lines)
-existing_keys = set()
+existing_values = {}
 in_bundle_android = False
 
 for index, line in enumerate(lines):
@@ -261,12 +254,37 @@ for index, line in enumerate(lines):
         section_end = index
         break
     if in_bundle_android:
-        key, sep, _ = stripped.partition("=")
+        key, sep, raw_value = stripped.partition("=")
         if sep:
-            existing_keys.add(key.strip())
+            key = key.strip()
+            try:
+                parsed_value = json.loads(raw_value.strip())
+            except json.JSONDecodeError:
+                parsed_value = raw_value.strip().strip('"').strip("'")
+            existing_values[key] = parsed_value if isinstance(parsed_value, str) else str(parsed_value)
 
-missing_keys = [key for key in required_keys if key not in existing_keys]
-if section_start is not None and not missing_keys:
+resolved_values = {}
+missing_envs = []
+for key, env_name in required_keys.items():
+    existing_value = str(existing_values.get(key, "")).strip()
+    if existing_value:
+        resolved_values[key] = existing_value
+        continue
+    env_value = os.environ.get(env_name, "").strip()
+    if env_value:
+        resolved_values[key] = env_value
+    else:
+        missing_envs.append(env_name)
+
+if mode == "inspect":
+    for env_name in missing_envs:
+        print(env_name)
+    raise SystemExit(0)
+
+if missing_envs:
+    raise SystemExit(f"Missing signing values after validation: {', '.join(missing_envs)}")
+
+if section_start is not None and all(str(existing_values.get(key, "")).strip() for key in required_keys):
     print("INFO: Dioxus.toml already defines complete [bundle.android] signing config")
     raise SystemExit(0)
 
@@ -276,16 +294,106 @@ if section_start is None:
         new_lines.append("")
     new_lines.append("[bundle.android]")
     section_end = len(new_lines)
-else:
-    insertion_index = section_end
-    for key in missing_keys:
-        new_lines.insert(insertion_index, f"{key} = {json.dumps(required_keys[key])}")
-        insertion_index += 1
-    path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+insertion_index = section_end
+for key in required_keys:
+    if str(existing_values.get(key, "")).strip():
+        continue
+    new_lines.insert(insertion_index, f"{key} = {json.dumps(resolved_values[key])}")
+    insertion_index += 1
+
+path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+PY
+    )
+
+    local missing_env
+    for missing_env in "${missing_envs[@]}"; do
+        require_env "$missing_env"
+    done
+
+    if printf '%s\n' "${missing_envs[@]}" | grep -qx 'ANDROID_KEYSTORE_FILE'; then
+        if [ ! -f "$ANDROID_KEYSTORE_FILE" ] || [ ! -r "$ANDROID_KEYSTORE_FILE" ]; then
+            echo "ERROR: ANDROID_KEYSTORE_FILE is not a readable regular file: $ANDROID_KEYSTORE_FILE" >&2
+            exit 1
+        fi
+    fi
+
+    python3 - "$DIOXUS_CONFIG" write <<'PY'
+from pathlib import Path
+import json
+import os
+import sys
+
+path = Path(sys.argv[1])
+mode = sys.argv[2]
+
+required_keys = {
+    "jks_file": "ANDROID_KEYSTORE_FILE",
+    "jks_password": "ANDROID_KEYSTORE_PASSWORD",
+    "key_alias": "ANDROID_KEY_ALIAS",
+    "key_password": "ANDROID_KEY_PASSWORD",
+}
+
+text = path.read_text(encoding="utf-8")
+lines = text.splitlines()
+section_start = None
+section_end = len(lines)
+existing_values = {}
+in_bundle_android = False
+
+for index, line in enumerate(lines):
+    stripped = line.strip()
+    if stripped == "[bundle.android]":
+        section_start = index
+        section_end = len(lines)
+        in_bundle_android = True
+        continue
+    if in_bundle_android and stripped.startswith("[") and stripped.endswith("]"):
+        section_end = index
+        break
+    if in_bundle_android:
+        key, sep, raw_value = stripped.partition("=")
+        if sep:
+            key = key.strip()
+            try:
+                parsed_value = json.loads(raw_value.strip())
+            except json.JSONDecodeError:
+                parsed_value = raw_value.strip().strip('"').strip("'")
+            existing_values[key] = parsed_value if isinstance(parsed_value, str) else str(parsed_value)
+
+resolved_values = {}
+missing_envs = []
+for key, env_name in required_keys.items():
+    existing_value = str(existing_values.get(key, "")).strip()
+    if existing_value:
+        resolved_values[key] = existing_value
+        continue
+    env_value = os.environ.get(env_name, "").strip()
+    if env_value:
+        resolved_values[key] = env_value
+    else:
+        missing_envs.append(env_name)
+
+if missing_envs:
+    raise SystemExit(f"Missing signing values after validation: {', '.join(missing_envs)}")
+
+if section_start is not None and all(str(existing_values.get(key, "")).strip() for key in required_keys):
+    print("INFO: Dioxus.toml already defines complete [bundle.android] signing config")
     raise SystemExit(0)
 
-for key, value in required_keys.items():
-    new_lines.append(f"{key} = {json.dumps(value)}")
+new_lines = list(lines)
+if section_start is None:
+    if new_lines and new_lines[-1].strip():
+        new_lines.append("")
+    new_lines.append("[bundle.android]")
+    section_end = len(new_lines)
+
+insertion_index = section_end
+for key in required_keys:
+    if str(existing_values.get(key, "")).strip():
+        continue
+    new_lines.insert(insertion_index, f"{key} = {json.dumps(resolved_values[key])}")
+    insertion_index += 1
 
 path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
 PY

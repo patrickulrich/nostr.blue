@@ -321,7 +321,13 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
                                             if currently_subscribed {
                                                 match podcast_subscription::remove_subscription(&sub_id).await {
                                                     Ok(()) => log::info!("Unsubscribed from podcast: {}", sub_id),
-                                                    Err(e) => log::error!("Failed to unsubscribe: {}", e),
+                                                    Err(e) => {
+                                                        log::error!("Failed to unsubscribe: {}", e);
+                                                        toast.error(
+                                                            format!("Cannot unsubscribe: {}", e),
+                                                            ToastOptions::new(),
+                                                        );
+                                                    }
                                                 }
                                             } else if let Some(ref guid) = guid {
                                                 match podcast_subscription::add_rss_subscription(

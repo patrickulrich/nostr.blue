@@ -3,6 +3,7 @@
 //! All Dioxus GlobalSignal definitions for wallet state management.
 #![allow(dead_code)]
 use super::types::*;
+use super::utils::normalize_mint_url;
 use dioxus::prelude::*;
 use dioxus_stores::Store;
 use std::collections::{HashMap, HashSet};
@@ -482,14 +483,15 @@ impl Drop for MintOperationGuard {
 /// Try to acquire an operation lock for a mint
 /// Returns None if the mint is already being operated on
 pub fn try_acquire_mint_lock(mint_url: &str) -> Option<MintOperationGuard> {
+    let mint_url = normalize_mint_url(mint_url);
     let mut locks = MINT_OPERATION_LOCK.write();
-    if locks.contains(mint_url) {
+    if locks.contains(&mint_url) {
         log::warn!("Operation already in progress for mint: {}", mint_url);
         None
     } else {
-        locks.insert(mint_url.to_string());
+        locks.insert(mint_url.clone());
         log::debug!("Acquired operation lock for mint: {}", mint_url);
-        Some(MintOperationGuard::new(mint_url.to_string()))
+        Some(MintOperationGuard::new(mint_url))
     }
 }
 /// Clear shared database connection (e.g., on logout)

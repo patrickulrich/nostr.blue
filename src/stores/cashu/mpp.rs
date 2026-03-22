@@ -348,6 +348,12 @@ pub async fn execute_mpp_melt(
                             )
                             .await
                             {
+                                if let Err(sync_err) = sync_wallet_state().await {
+                                    log::warn!(
+                                        "Failed to sync wallet state after MPP token retry queue failure: {}",
+                                        sync_err
+                                    );
+                                }
                                 return Err(format!(
                                     "Failed to queue MPP token event for retry: {}",
                                     queue_err
@@ -379,6 +385,12 @@ pub async fn execute_mpp_melt(
                             )
                             .await
                             {
+                                if let Err(sync_err) = sync_wallet_state().await {
+                                    log::warn!(
+                                        "Failed to sync wallet state after MPP token retry queue failure: {}",
+                                        sync_err
+                                    );
+                                }
                                 return Err(format!(
                                     "Failed to queue MPP token event for retry: {}",
                                     queue_err
@@ -399,30 +411,7 @@ pub async fn execute_mpp_melt(
                 }
             }
         }
-        {
-            let store = WALLET_TOKENS.read();
-            let mut data = store.data();
-            let mut tokens_write = data.write();
-            tokens_write.retain(|t| !all_event_ids_to_delete.contains(&t.event_id));
-            for token in new_tokens {
-                tokens_write.push(token);
-            }
-            drop(tokens_write);
-            super::signals::update_wallet_balances();
-            let new_balance = crate::stores::cashu_cdk_bridge::WALLET_BALANCES
-                .read()
-                .available;
-            log::info!(
-                "MPP melt: local state updated. New balance: {} sats",
-                new_balance
-            );
-            if publish_failures > 0 {
-                log::warn!(
-                    "MPP melt: {} token event(s) queued for retry",
-                    publish_failures
-                );
-            }
-        }
+        let mut deletion_persisted = true;
         if !all_event_ids_to_delete.is_empty() {
             let valid_event_ids: Vec<_> = all_event_ids_to_delete
                 .iter()
@@ -465,6 +454,7 @@ pub async fn execute_mpp_melt(
                                 "Failed to queue MPP deletion event for retry: {}",
                                 queue_err
                             );
+                            deletion_persisted = false;
                         }
                     }
                     Err(e) => {
@@ -484,9 +474,43 @@ pub async fn execute_mpp_melt(
                                 "Failed to queue MPP deletion event for retry: {}",
                                 queue_err
                             );
+                            deletion_persisted = false;
                         }
                     }
                 }
+            }
+        }
+        if !deletion_persisted {
+            if let Err(sync_err) = sync_wallet_state().await {
+                log::warn!(
+                    "Failed to sync wallet state after MPP deletion persistence failure: {}",
+                    sync_err
+                );
+            }
+            return Err("Failed to durably persist MPP deletion event".to_string());
+        }
+        {
+            let store = WALLET_TOKENS.read();
+            let mut data = store.data();
+            let mut tokens_write = data.write();
+            tokens_write.retain(|t| !all_event_ids_to_delete.contains(&t.event_id));
+            for token in new_tokens {
+                tokens_write.push(token);
+            }
+            drop(tokens_write);
+            super::signals::update_wallet_balances();
+            let new_balance = crate::stores::cashu_cdk_bridge::WALLET_BALANCES
+                .read()
+                .available;
+            log::info!(
+                "MPP melt: local state updated. New balance: {} sats",
+                new_balance
+            );
+            if publish_failures > 0 {
+                log::warn!(
+                    "MPP melt: {} token event(s) queued for retry",
+                    publish_failures
+                );
             }
         }
         let valid_destroyed: Vec<String> = all_event_ids_to_delete

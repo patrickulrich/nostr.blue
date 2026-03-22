@@ -134,11 +134,7 @@ async fn drain_publish_client_tag_queue() {
         };
 
         if let Err(e) = save_settings(&settings_to_save).await {
-            let latest_settings = {
-                let mut latest = SETTINGS.read().clone();
-                latest.publish_client_tag = next_enabled;
-                latest
-            };
+            let latest_settings = SETTINGS.read().clone();
             SETTINGS.write().clone_from(&latest_settings);
             cache_settings(&latest_settings);
             log::warn!("Failed to persist client tag setting to Nostr: {}", e);
@@ -178,6 +174,11 @@ pub async fn load_settings() -> Result<(), String> {
     SETTINGS_LOADING.write().clone_from(&true);
     SETTINGS_ERROR.write().clone_from(&None);
     let mut initial_error: Option<String> = None;
+    let clear_loading_with_error = |error: String| {
+        SETTINGS_LOADING.write().clone_from(&false);
+        SETTINGS_ERROR.write().clone_from(&Some(error.clone()));
+        error
+    };
     if !auth_store::is_authenticated() {
         log::info!("Not authenticated, using local settings");
         SETTINGS_LOADING.write().clone_from(&false);
@@ -187,13 +188,16 @@ pub async fn load_settings() -> Result<(), String> {
     let client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
-        .ok_or("Client not initialized")?
+        .ok_or_else(|| clear_loading_with_error("Client not initialized".to_string()))?
         .clone();
     let auth = auth_store::AUTH_STATE.read();
-    let pubkey_str = auth.pubkey.as_ref().ok_or("No pubkey")?;
+    let pubkey_str = auth
+        .pubkey
+        .as_ref()
+        .ok_or_else(|| clear_loading_with_error("No pubkey".to_string()))?;
     let pubkey = nostr_sdk::PublicKey::from_bech32(pubkey_str)
         .or_else(|_| nostr_sdk::PublicKey::from_hex(pubkey_str))
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+        .map_err(|e| clear_loading_with_error(format!("Invalid pubkey: {}", e)))?;
     let filter = Filter::new()
         .author(pubkey)
         .kind(Kind::from(APP_DATA_KIND))

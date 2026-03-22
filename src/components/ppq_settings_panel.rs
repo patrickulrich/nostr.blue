@@ -6,6 +6,7 @@ use crate::stores::ai_provider_store::{
     self, AiProviderState, PpqAccountState, PROVIDER_STATE_SAVE_EVENT,
 };
 use crate::stores::nwc_store;
+use crate::utils::clipboard::copy_to_clipboard;
 use dioxus::prelude::*;
 use qrcode::{render::svg, QrCode};
 
@@ -29,6 +30,8 @@ pub fn PpqSettingsPanel(
     let mut nwc_loading = use_signal(|| false);
     let mut nwc_error = use_signal(|| None::<String>);
     let mut nwc_url = use_signal(String::new);
+    let mut nwc_uri_revealed = use_signal(|| false);
+    let mut nwc_copy_feedback = use_signal(|| None::<String>);
     let mut nwc_threshold = use_signal(|| "10".to_string());
     let mut nwc_topup_amount = use_signal(|| "10".to_string());
     let mut api_keys = use_signal(Vec::<PpqApiKey>::new);
@@ -151,6 +154,9 @@ pub fn PpqSettingsPanel(
         .unwrap_or_default();
     let main_nwc_status = nwc_store::NWC_STATUS.read().clone();
     let main_nwc_uri = nwc_store::current_nwc_uri();
+    let connected_nwc = nwc.read().clone();
+    let nwc_uri_is_revealed = *nwc_uri_revealed.read();
+    let editable_nwc_url = nwc_url.read().trim().to_string();
     let refresh_balance_credit_id = account_credit_id.clone();
     let refresh_keys_credit_id = account_credit_id.clone();
     let refresh_nwc_credit_id = account_credit_id.clone();
@@ -457,8 +463,39 @@ pub fn PpqSettingsPanel(
                                 nwc_store::ConnectionStatus::Disconnected => "No site-wide NWC wallet is connected right now.".to_string(),
                             }
                         }
-                        if let Some(uri) = main_nwc_uri.as_ref() {
-                            p { class: "break-all text-xs text-muted-foreground", "{uri}" }
+                        if let Some(uri) = main_nwc_uri.clone() {
+                            div { class: "space-y-2",
+                                p { class: "break-all text-xs text-muted-foreground",
+                                    if nwc_uri_is_revealed {
+                                        "{uri}"
+                                    } else {
+                                        "{mask_secret_value(&uri)}"
+                                    }
+                                }
+                                div { class: "flex flex-wrap gap-2",
+                                    button {
+                                        class: "rounded-lg border border-border px-3 py-1.5 text-xs transition hover:bg-accent",
+                                        disabled: *nwc_loading.read(),
+                                        onclick: move |_| nwc_uri_revealed.set(!nwc_uri_is_revealed),
+                                        if nwc_uri_is_revealed { "Hide URI" } else { "Reveal URI" }
+                                    }
+                                    button {
+                                        class: "rounded-lg border border-border px-3 py-1.5 text-xs transition hover:bg-accent",
+                                        disabled: *nwc_loading.read(),
+                                        onclick: move |_| {
+                                            let uri_to_copy = uri.clone();
+                                            nwc_copy_feedback.set(None);
+                                            spawn(async move {
+                                                match copy_to_clipboard(&uri_to_copy).await {
+                                                    Ok(()) => nwc_copy_feedback.set(Some("Copied NWC URI".to_string())),
+                                                    Err(err) => nwc_copy_feedback.set(Some(format!("Copy failed: {}", err))),
+                                                }
+                                            });
+                                        },
+                                        "Copy URI"
+                                    }
+                                }
+                            }
                         }
                         button {
                             class: if main_nwc_uri.is_some() && !*nwc_loading.read() {
@@ -479,11 +516,41 @@ pub fn PpqSettingsPanel(
                     div { class: "grid gap-4 md:grid-cols-3",
                         label { class: "space-y-2 md:col-span-3",
                             span { class: "text-sm font-medium text-foreground", "NWC URL" }
-                            input {
-                                class: "h-10 w-full rounded-lg border border-border bg-background px-3 text-sm",
-                                value: "{nwc_url}",
-                                disabled: *nwc_loading.read(),
-                                oninput: move |evt| nwc_url.set(evt.value()),
+                            div { class: "space-y-2",
+                                input {
+                                    r#type: if nwc_uri_is_revealed { "text" } else { "password" },
+                                    class: "h-10 w-full rounded-lg border border-border bg-background px-3 text-sm",
+                                    value: "{nwc_url}",
+                                    disabled: *nwc_loading.read(),
+                                    oninput: move |evt| nwc_url.set(evt.value()),
+                                }
+                                div { class: "flex flex-wrap gap-2",
+                                    button {
+                                        class: "rounded-lg border border-border px-3 py-1.5 text-xs transition hover:bg-accent",
+                                        disabled: *nwc_loading.read() || editable_nwc_url.is_empty(),
+                                        onclick: move |_| nwc_uri_revealed.set(!nwc_uri_is_revealed),
+                                        if nwc_uri_is_revealed { "Hide URI" } else { "Reveal URI" }
+                                    }
+                                    button {
+                                        class: "rounded-lg border border-border px-3 py-1.5 text-xs transition hover:bg-accent",
+                                        disabled: *nwc_loading.read() || editable_nwc_url.is_empty(),
+                                        onclick: move |_| {
+                                            let uri_to_copy = editable_nwc_url.clone();
+                                            if uri_to_copy.is_empty() {
+                                                nwc_copy_feedback.set(Some("Nothing to copy".to_string()));
+                                                return;
+                                            }
+                                            nwc_copy_feedback.set(None);
+                                            spawn(async move {
+                                                match copy_to_clipboard(&uri_to_copy).await {
+                                                    Ok(()) => nwc_copy_feedback.set(Some("Copied NWC URI".to_string())),
+                                                    Err(err) => nwc_copy_feedback.set(Some(format!("Copy failed: {}", err))),
+                                                }
+                                            });
+                                        },
+                                        "Copy URI"
+                                    }
+                                }
                             }
                         }
                         label { class: "space-y-2",
@@ -565,7 +632,10 @@ pub fn PpqSettingsPanel(
                     if let Some(err) = nwc_error.read().as_ref() {
                         p { class: "text-sm text-red-600 dark:text-red-400", "{err}" }
                     }
-                    if let Some(nwc_state) = nwc.read().as_ref() {
+                    if let Some(feedback) = nwc_copy_feedback.read().as_ref() {
+                        p { class: "text-xs text-muted-foreground", "{feedback}" }
+                    }
+                    if let Some(nwc_state) = connected_nwc.as_ref() {
                         div { class: "rounded-lg bg-muted/60 p-3 text-sm space-y-1",
                             p { class: "font-medium text-foreground", "Connected" }
                             p {
@@ -582,8 +652,39 @@ pub fn PpqSettingsPanel(
                                     .map(|value| format!("${:.2}", value))
                                     .unwrap_or_else(|| "Unknown".to_string())}
                             }
-                            if let Some(url) = nwc_state.nwc_url.as_ref() {
-                                p { class: "break-all text-muted-foreground", "{url}" }
+                            if let Some(url) = nwc_state.nwc_url.clone() {
+                                div { class: "space-y-2",
+                                    p { class: "break-all text-muted-foreground",
+                                        if nwc_uri_is_revealed {
+                                            "{url}"
+                                        } else {
+                                            "{mask_secret_value(&url)}"
+                                        }
+                                    }
+                                    div { class: "flex flex-wrap gap-2",
+                                        button {
+                                            class: "rounded-lg border border-border px-3 py-1.5 text-xs transition hover:bg-accent",
+                                            disabled: *nwc_loading.read(),
+                                            onclick: move |_| nwc_uri_revealed.set(!nwc_uri_is_revealed),
+                                            if nwc_uri_is_revealed { "Hide URI" } else { "Reveal URI" }
+                                        }
+                                        button {
+                                            class: "rounded-lg border border-border px-3 py-1.5 text-xs transition hover:bg-accent",
+                                            disabled: *nwc_loading.read(),
+                                            onclick: move |_| {
+                                                let uri_to_copy = url.clone();
+                                                nwc_copy_feedback.set(None);
+                                                spawn(async move {
+                                                    match copy_to_clipboard(&uri_to_copy).await {
+                                                        Ok(()) => nwc_copy_feedback.set(Some("Copied NWC URI".to_string())),
+                                                        Err(err) => nwc_copy_feedback.set(Some(format!("Copy failed: {}", err))),
+                                                    }
+                                                });
+                                            },
+                                            "Copy URI"
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -702,7 +803,7 @@ pub fn PpqSettingsPanel(
                                         ppq::create_api_key(&credit_id, &input).await
                                     };
                                     match result {
-                                        Ok(created_or_updated) => {
+                                        Ok(_created_or_updated) => {
                                             editing_key_id.set(None);
                                             editing_key_original.set(None);
                                             key_name.set(String::new());
@@ -718,17 +819,6 @@ pub fn PpqSettingsPanel(
                                                 credit_id.clone(),
                                                 Some(generation),
                                             );
-                                            if created_or_updated.api_key.is_some() {
-                                                set_active_ppq_key(
-                                                    state,
-                                                    is_saving,
-                                                    save_error,
-                                                    pending_save_snapshot,
-                                                    pending_save_min_event_id,
-                                                    created_or_updated.id.clone(),
-                                                    created_or_updated.api_key.clone().unwrap_or_default(),
-                                                );
-                                            }
                                         }
                                         Err(err) => key_form_error.set(Some(err)),
                                     }
@@ -1219,4 +1309,20 @@ fn patch_field_from_optional<T: PartialEq>(
 fn empty_to_none(input: String) -> Option<String> {
     let trimmed = input.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn mask_secret_value(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let tail: String = trimmed
+        .chars()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("••••••••••••{}", tail)
 }

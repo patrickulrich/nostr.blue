@@ -49,17 +49,16 @@ enum TaggedEventPublishOutcome {
     Published(String),
     Queued(String),
     LocalOnly {
-        event_id: String,
         recovery_pending_id: Option<String>,
         warning: String,
     },
 }
 
 impl TaggedEventPublishOutcome {
-    fn event_id(&self) -> &str {
+    fn stored_event_id(&self) -> Option<&str> {
         match self {
-            Self::Published(event_id) | Self::Queued(event_id) => event_id,
-            Self::LocalOnly { event_id, .. } => event_id,
+            Self::Published(event_id) | Self::Queued(event_id) => Some(event_id),
+            Self::LocalOnly { .. } => None,
         }
     }
 
@@ -78,6 +77,10 @@ impl TaggedEventPublishOutcome {
             } => Some(recovery_pending_id),
             _ => None,
         }
+    }
+
+    fn is_published(&self) -> bool {
+        matches!(self, Self::Published(_))
     }
 }
 
@@ -108,7 +111,7 @@ async fn sign_cashu_event_builder(
 }
 
 async fn send_tagged_event_with_retry(
-    client: &nostr_sdk::Client,
+    client: Option<std::sync::Arc<nostr_sdk::Client>>,
     event: nostr_sdk::Event,
     event_type: PendingEventType,
     pending_token_id: Option<String>,
@@ -117,18 +120,21 @@ async fn send_tagged_event_with_retry(
     async fn queue_signed_event_and_build_outcome(
         event: nostr_sdk::Event,
         event_type: PendingEventType,
+        pending_token_id: Option<String>,
         pending_id: String,
         mint_url: Option<String>,
         event_label: &str,
     ) -> TaggedEventPublishOutcome {
-        let real_event_id = event.id.to_hex();
-        match queue_signed_event_for_retry_result(event, event_type, Some(pending_id.clone()), mint_url)
-            .await
-        {
+        match queue_signed_event_for_retry_result(
+            event,
+            event_type,
+            pending_token_id.clone(),
+            mint_url,
+        )
+        .await {
             Ok(()) => TaggedEventPublishOutcome::Queued(pending_id),
             Err(queue_error) => TaggedEventPublishOutcome::LocalOnly {
-                event_id: real_event_id,
-                recovery_pending_id: Some(pending_id),
+                recovery_pending_id: pending_token_id,
                 warning: format!(
                     "Failed to persist signed {} event for retry: {}",
                     event_label, queue_error
@@ -149,29 +155,45 @@ async fn send_tagged_event_with_retry(
         .clone()
         .unwrap_or_else(|| format!("pending_{}", uuid::Uuid::new_v4()));
 
-    match client.send_event(&event).await {
-        Ok(event_output) if !event_output.success.is_empty() => {
-            TaggedEventPublishOutcome::Published(event_output.id().to_hex())
-        }
-        Ok(_) => {
-            log::warn!(
-                "No relays accepted {} event, queuing for retry",
-                event_label
-            );
+    match client {
+        Some(client) => match client.send_event(&event).await {
+            Ok(event_output) if !event_output.success.is_empty() => {
+                TaggedEventPublishOutcome::Published(event_output.id().to_hex())
+            }
+            Ok(_) => {
+                log::warn!(
+                    "No relays accepted {} event, queuing for retry",
+                    event_label
+                );
+                queue_signed_event_and_build_outcome(
+                    event,
+                    event_type,
+                    pending_token_id,
+                    pending_id,
+                    mint_url,
+                    event_label,
+                )
+                .await
+            }
+            Err(error) => {
+                log::warn!("Failed to publish {} event: {}", event_label, error);
+                queue_signed_event_and_build_outcome(
+                    event,
+                    event_type,
+                    pending_token_id,
+                    pending_id,
+                    mint_url,
+                    event_label,
+                )
+                .await
+            }
+        },
+        None => {
+            log::warn!("Client not initialized for {} event, queuing for retry", event_label);
             queue_signed_event_and_build_outcome(
                 event,
                 event_type,
-                pending_id,
-                mint_url,
-                event_label,
-            )
-            .await
-        }
-        Err(error) => {
-            log::warn!("Failed to publish {} event: {}", event_label, error);
-            queue_signed_event_and_build_outcome(
-                event,
-                event_type,
+                pending_token_id,
                 pending_id,
                 mint_url,
                 event_label,
@@ -467,11 +489,7 @@ pub async fn pay_payment_request(
             let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
             let pubkey =
                 PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
-            let client = nostr_client::NOSTR_CLIENT
-                .read()
-                .as_ref()
-                .ok_or("Client not initialized")?
-                .clone();
+            let client = nostr_client::NOSTR_CLIENT.read().as_ref().cloned();
             let proof_data: Vec<ProofData> =
                 keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
             let extended_proofs: Vec<ExtendedCashuProof> = proof_data
@@ -495,7 +513,7 @@ pub async fn pay_payment_request(
             let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
             Ok(
                 send_tagged_event_with_retry(
-                    &client,
+                    client,
                     event,
                     PendingEventType::TokenEvent,
                     Some(pending_id),
@@ -513,7 +531,10 @@ pub async fn pay_payment_request(
                         warning
                     );
                 }
-                new_event_id = Some(publish_outcome.event_id().to_string());
+                new_event_id = publish_outcome
+                    .stored_event_id()
+                    .map(str::to_string)
+                    .or_else(|| publish_outcome.recovery_pending_id().map(str::to_string));
             }
             Err(err) => {
                 log::warn!(
@@ -527,11 +548,7 @@ pub async fn pay_payment_request(
         let deletion_sync: Result<(), String> = async {
             use nostr::nips::nip09::EventDeletionRequest;
             let signer = crate::stores::signer::get_signer().ok_or("No signer available")?;
-            let client = nostr_client::NOSTR_CLIENT
-                .read()
-                .as_ref()
-                .ok_or("Client not initialized")?
-                .clone();
+            let client = nostr_client::NOSTR_CLIENT.read().as_ref().cloned();
             let mut deletion_request = EventDeletionRequest::new();
             for event_id_str in &event_ids_to_delete {
                 if let Ok(event_id) = EventId::parse(event_id_str) {
@@ -544,7 +561,7 @@ pub async fn pay_payment_request(
             )
             .await?;
             let publish_outcome = send_tagged_event_with_retry(
-                &client,
+                client,
                 event,
                 PendingEventType::DeletionEvent,
                 None,
@@ -742,11 +759,7 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
         let nostr_signer = signer.as_nostr_signer();
         let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
         let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
-        let client = nostr_client::NOSTR_CLIENT
-            .read()
-            .as_ref()
-            .ok_or("Client not initialized")?
-            .clone();
+        let client = nostr_client::NOSTR_CLIENT.read().as_ref().cloned();
         let extended_proofs: Vec<ExtendedCashuProof> = proof_data
             .iter()
             .map(|p| ExtendedCashuProof::from(p.clone()))
@@ -766,7 +779,7 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
         let event = sign_cashu_event_builder(&signer, builder).await?;
         Ok(send_tagged_event_with_retry(
-            &client,
+            client,
             event,
             PendingEventType::TokenEvent,
             Some(pending_id.clone()),
@@ -783,13 +796,10 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
                     warning
                 );
             }
-            let was_published = matches!(&publish_outcome, TaggedEventPublishOutcome::Published(_));
-            let published_event_id = publish_outcome.event_id().to_string();
-            let recovery_pending_id = publish_outcome.recovery_pending_id().map(str::to_string);
-            if was_published {
-                super::events::update_token_event_id(&pending_id, &published_event_id);
-            } else if let Some(recovery_pending_id) = recovery_pending_id {
-                super::events::update_token_event_id(&recovery_pending_id, &published_event_id);
+            if publish_outcome.is_published() {
+                if let Some(published_event_id) = publish_outcome.stored_event_id() {
+                    super::events::update_token_event_id(&pending_id, published_event_id);
+                }
             }
         }
         Err(err) => {

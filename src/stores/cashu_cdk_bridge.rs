@@ -8,6 +8,7 @@ use super::cashu::{
     DleqData, ProofData, ProofState, TokenData, WalletStatus, WalletTokensStoreStoreExt,
     WALLET_STATE, WALLET_STATUS, WALLET_TOKENS,
 };
+use super::cashu::signals::PENDING_NOSTR_EVENTS;
 use cdk::nuts::CurrencyUnit;
 use cdk::wallet::multi_mint_wallet::MultiMintWallet;
 use dioxus::prelude::*;
@@ -179,6 +180,7 @@ pub async fn sync_wallet_state() -> Result<(), String> {
         });
     }
     let existing_tokens = WALLET_TOKENS.read().data().read().clone();
+    let durable_pending_tokens = PENDING_NOSTR_EVENTS.read().clone();
     for token in &mut tokens {
         if let Some(existing) = existing_tokens
             .iter()
@@ -187,7 +189,14 @@ pub async fn sync_wallet_state() -> Result<(), String> {
         {
             token.event_id = existing.event_id.clone();
             token.created_at = existing.created_at;
-            token.pending_publish = existing.pending_publish;
+            token.pending_publish = existing.pending_publish
+                && durable_pending_tokens.iter().any(|pending| {
+                    pending.pending_token_id.as_deref() == Some(existing.event_id.as_str())
+                        && pending
+                            .mint_url
+                            .as_deref()
+                            .is_none_or(|mint| mint == existing.mint)
+                });
         }
     }
     *WALLET_TOKENS.read().data().write() = tokens;

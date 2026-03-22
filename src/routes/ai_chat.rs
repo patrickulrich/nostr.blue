@@ -177,7 +177,12 @@ pub fn AIChat() -> Element {
                         .iter()
                         .any(|provider| provider.id == loaded_state.selected_provider_id)
                     {
-                        loaded_state.selected_provider_id = ppq_provider(None).id;
+                        let ppq_id = ppq_provider(None).id;
+                        loaded_state.selected_provider_id = resolved
+                            .iter()
+                            .find(|provider| provider.id != ppq_id)
+                            .map(|provider| provider.id.clone())
+                            .unwrap_or(ppq_id);
                     }
                     providers.set(resolve_providers(&loaded_state));
                     provider_state.set(loaded_state);
@@ -515,6 +520,12 @@ pub fn AIChat() -> Element {
             else {
                 return;
             };
+
+            if *provider_models_generation.peek() != local_generation
+                || provider_state.read().selected_provider_id != provider.id
+            {
+                return;
+            }
 
             if provider.requires_setup() {
                 models.set(Vec::new());

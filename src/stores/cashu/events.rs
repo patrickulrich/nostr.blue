@@ -96,6 +96,25 @@ pub async fn queue_signed_event_for_retry_result(
     pending_token_id: Option<String>,
     mint_url: Option<String>,
 ) -> Result<(), String> {
+    queue_signed_event_for_retry_with_metadata_result(
+        event,
+        event_type,
+        pending_token_id,
+        mint_url,
+        None,
+        None,
+    )
+    .await
+}
+
+async fn queue_signed_event_for_retry_with_metadata_result(
+    event: nostr_sdk::Event,
+    event_type: PendingEventType,
+    pending_token_id: Option<String>,
+    mint_url: Option<String>,
+    history_amount: Option<u64>,
+    history_type: Option<String>,
+) -> Result<(), String> {
     let event_id = event.id.to_hex();
     let event_json = match serde_json::to_string(&event) {
         Ok(j) => j,
@@ -114,8 +133,8 @@ pub async fn queue_signed_event_for_retry_result(
         last_retry_at: None,
         pending_token_id,
         mint_url,
-        history_amount: None,
-        history_type: None,
+        history_amount,
+        history_type,
         published_event_id: None,
     };
     let pending_event_id = pending_event.id.clone();
@@ -188,51 +207,21 @@ pub async fn publish_signed_event(
 /// in WALLET_TOKENS, allowing the token's event_id to be updated when background
 /// publish succeeds.
 pub async fn queue_token_event_for_retry_with_history(
-    builder: nostr_sdk::EventBuilder,
+    event: nostr_sdk::Event,
     pending_token_id: String,
     mint_url: String,
     history_amount: u64,
     history_type: Option<String>,
 ) -> Result<(), String> {
-    let event = match sign_event_builder(builder).await {
-        Ok(e) => e,
-        Err(e) => {
-            log::error!("Cannot queue token event with history metadata: {}", e);
-            return Err(e);
-        }
-    };
-    let pending_event = PendingNostrEvent {
-        id: uuid::Uuid::new_v4().to_string(),
-        builder_json: match serde_json::to_string(&event) {
-            Ok(j) => j,
-            Err(e) => {
-                let message = format!("Failed to serialize event for queueing: {}", e);
-                log::error!("{}", message);
-                return Err(message);
-            }
-        },
-        event_type: PendingEventType::TokenEvent,
-        created_at: chrono::Utc::now().timestamp() as u64,
-        retry_count: 0,
-        last_retry_at: None,
-        pending_token_id: Some(pending_token_id.clone()),
-        mint_url: Some(mint_url),
-        history_amount: Some(history_amount),
+    queue_signed_event_for_retry_with_metadata_result(
+        event,
+        PendingEventType::TokenEvent,
+        Some(pending_token_id.clone()),
+        Some(mint_url),
+        Some(history_amount),
         history_type,
-        published_event_id: None,
-    };
-    let pending_event_id = pending_event.id.clone();
-    PENDING_NOSTR_EVENTS.write().push(pending_event.clone());
-    if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
-        if let Err(e) = localstore.add_pending_event(&pending_event).await {
-            PENDING_NOSTR_EVENTS
-                .write()
-                .retain(|event| event.id != pending_event_id);
-            let message = format!("Failed to persist pending event: {}", e);
-            log::warn!("{}", message);
-            return Err(message);
-        }
-    }
+    )
+    .await?;
     log::info!(
         "Queued token event for retry with history metadata, pending_id={}",
         pending_token_id

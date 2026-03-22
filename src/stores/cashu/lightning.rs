@@ -232,14 +232,23 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
                     "No relays accepted minted token event, queuing for retry (failed_relays={})",
                     event_output.failed.len()
                 );
-                queue_token_event_for_retry_with_history(
-                    builder.clone(),
+                if let Err(queue_err) = queue_token_event_for_retry_with_history(
+                    signed_event.clone(),
                     pending_id.clone(),
                     mint_url.clone(),
                     amount_minted,
                     Some("lightning_mint".to_string()),
                 )
-                .await?;
+                .await
+                {
+                    return Err(
+                        sync_wallet_state_after_mint_error(format!(
+                            "Failed to queue minted token event for retry: {}",
+                            queue_err
+                        ))
+                        .await,
+                    );
+                }
                 None
             }
             Err(error) => {
@@ -247,27 +256,45 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
                     "Failed to publish minted token event, queuing for retry: {}",
                     error
                 );
-                queue_token_event_for_retry_with_history(
-                    builder.clone(),
+                if let Err(queue_err) = queue_token_event_for_retry_with_history(
+                    signed_event.clone(),
                     pending_id.clone(),
                     mint_url.clone(),
                     amount_minted,
                     Some("lightning_mint".to_string()),
                 )
-                .await?;
+                .await
+                {
+                    return Err(
+                        sync_wallet_state_after_mint_error(format!(
+                            "Failed to queue minted token event for retry: {}",
+                            queue_err
+                        ))
+                        .await,
+                    );
+                }
                 None
             }
         },
         None => {
             log::warn!("Client not initialized during mint finalization, queuing token event");
-            queue_token_event_for_retry_with_history(
-                builder.clone(),
+            if let Err(queue_err) = queue_token_event_for_retry_with_history(
+                signed_event.clone(),
                 pending_id.clone(),
                 mint_url.clone(),
                 amount_minted,
                 Some("lightning_mint".to_string()),
             )
-            .await?;
+            .await
+            {
+                return Err(
+                    sync_wallet_state_after_mint_error(format!(
+                        "Failed to queue minted token event for retry: {}",
+                        queue_err
+                    ))
+                    .await,
+                );
+            }
             None
         }
     };
@@ -734,6 +761,9 @@ async fn publish_melt_events(
             .filter(|id| EventId::from_hex(id).is_ok())
             .collect();
         if !valid_event_ids.is_empty() {
+            let published_token_event = new_event_id
+                .as_ref()
+                .is_some_and(|event_id| !event_id.starts_with("pending_"));
             let mut tags = Vec::new();
             for event_id in &valid_event_ids {
                 tags.push(nostr_sdk::Tag::event(EventId::from_hex(event_id).unwrap()));
@@ -755,34 +785,64 @@ async fn publish_melt_events(
                     }
                     Ok(_) => {
                         log::warn!("No relays accepted deletion event, queuing for retry");
-                        queue_event_for_retry(
+                        if let Err(queue_err) = queue_event_for_retry(
                             deletion_builder,
                             PendingEventType::DeletionEvent,
                             None,
                             None,
                         )
-                        .await?;
+                        .await
+                        {
+                            if published_token_event {
+                                log::warn!(
+                                    "Queued token event was published, but deletion retry persistence failed: {}",
+                                    queue_err
+                                );
+                            } else {
+                                return Err(queue_err);
+                            }
+                        }
                     }
                     Err(e) => {
                         log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
-                        queue_event_for_retry(
+                        if let Err(queue_err) = queue_event_for_retry(
                             deletion_builder,
                             PendingEventType::DeletionEvent,
                             None,
                             None,
                         )
-                        .await?;
+                        .await
+                        {
+                            if published_token_event {
+                                log::warn!(
+                                    "Queued token event was published, but deletion retry persistence failed: {}",
+                                    queue_err
+                                );
+                            } else {
+                                return Err(queue_err);
+                            }
+                        }
                     }
                 }
             } else {
                 log::warn!("Client not initialized, queuing deletion event for retry");
-                queue_event_for_retry(
+                if let Err(queue_err) = queue_event_for_retry(
                     deletion_builder,
                     PendingEventType::DeletionEvent,
                     None,
                     None,
                 )
-                .await?;
+                .await
+                {
+                    if published_token_event {
+                        log::warn!(
+                            "Queued token event was published, but deletion retry persistence failed: {}",
+                            queue_err
+                        );
+                    } else {
+                        return Err(queue_err);
+                    }
+                }
             }
         }
     }

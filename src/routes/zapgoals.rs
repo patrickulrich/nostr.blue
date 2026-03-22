@@ -132,12 +132,14 @@ pub fn ZapGoalsHome() -> Element {
     let toast = consume_toast();
     let navigator = use_navigator();
     let mut refresh_trigger = use_signal(|| 0u32);
-    let default_feed = if crate::stores::auth_store::get_pubkey().is_some() {
-        ZapGoalsFeedType::Following
-    } else {
-        ZapGoalsFeedType::Global
-    };
-    let mut feed_type = use_signal(|| default_feed);
+    let mount_default_feed = use_signal(|| {
+        if crate::stores::auth_store::get_pubkey().is_some() {
+            ZapGoalsFeedType::Following
+        } else {
+            ZapGoalsFeedType::Global
+        }
+    });
+    let mut feed_type = use_signal(|| *mount_default_feed.peek());
     let mut search_query = use_signal(String::new);
     let mut goals = use_signal(Vec::<ZapGoalProgress>::new);
     let mut loading = use_signal(|| false);
@@ -155,7 +157,7 @@ pub fn ZapGoalsHome() -> Element {
         if !has_signer || crate::stores::auth_store::get_pubkey().is_none() {
             return;
         }
-        if *feed_type.read() == default_feed {
+        if *feed_type.read() == *mount_default_feed.peek() {
             feed_type.set(ZapGoalsFeedType::Following);
         }
     });

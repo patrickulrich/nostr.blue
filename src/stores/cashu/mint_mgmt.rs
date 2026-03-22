@@ -136,25 +136,34 @@ async fn publish_or_queue_wallet_snapshot(event: Event) -> Result<(), String> {
         false
     };
 
-    if SHARED_LOCALSTORE.read().as_ref().is_none() {
-        return Err(
-            "Localstore not initialized; cannot persist queued wallet snapshot".to_string(),
-        );
-    }
+    if !_send_succeeded {
+        if SHARED_LOCALSTORE.read().as_ref().is_none() {
+            return Err(
+                "Localstore not initialized; cannot persist queued wallet snapshot".to_string(),
+            );
+        }
 
-    queue_signed_event_for_retry_result(
-        event,
-        super::types::PendingEventType::WalletSnapshot,
-        None,
-        None,
-    )
-    .await?;
+        queue_signed_event_for_retry_result(
+            event,
+            super::types::PendingEventType::WalletSnapshot,
+            None,
+            None,
+        )
+        .await?;
 
-    if let Err(error) = remove_stale_pending_wallet_snapshots(&stale_pending_ids).await {
-        log::error!(
-            "Failed to clean up stale pending wallet snapshots after snapshot replace: {}",
-            error
-        );
+        if let Err(error) = remove_stale_pending_wallet_snapshots(&stale_pending_ids).await {
+            log::error!(
+                "Failed to clean up stale pending wallet snapshots after snapshot replace: {}",
+                error
+            );
+        }
+    } else if !stale_pending_ids.is_empty() {
+        if let Err(error) = remove_stale_pending_wallet_snapshots(&stale_pending_ids).await {
+            log::error!(
+                "Failed to clean up stale pending wallet snapshots after successful publish: {}",
+                error
+            );
+        }
     }
 
     Ok(())

@@ -400,7 +400,8 @@ pub async fn save_provider_state(state: &AiProviderState) -> Result<(), String> 
 
     #[cfg(not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))))]
     {
-        cache_provider_state(state)
+        let _ = state;
+        Ok(())
     }
 }
 

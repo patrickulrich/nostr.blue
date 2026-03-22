@@ -13,12 +13,16 @@ use super::types::{
     ExtendedCashuProof, ExtendedTokenEvent, ProofData, TokenData, TransferProgress, TransferResult,
     WalletTokensStoreStoreExt,
 };
-use super::utils::normalize_mint_url;
+use super::utils::{mint_matches, normalize_mint_url};
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
 use dioxus::prelude::*;
 use nostr_sdk::{EventId, Kind, PublicKey};
 
 async fn reconcile_wallet_after_transfer_queue_failure(context: &str, queue_err: String) -> String {
+    let error = format!("Failed to queue {} for retry: {}", context, queue_err);
+    *TRANSFER_PROGRESS.write() = Some(TransferProgress::Failed {
+        error: error.clone(),
+    });
     if let Err(sync_err) = cashu_cdk_bridge::sync_wallet_state().await {
         log::warn!(
             "Failed to sync wallet state after {} queue failure: {}",
@@ -26,7 +30,7 @@ async fn reconcile_wallet_after_transfer_queue_failure(context: &str, queue_err:
             sync_err
         );
     }
-    format!("Failed to queue {} for retry: {}", context, queue_err)
+    error
 }
 /// Transfer tokens from one mint to another via Lightning
 ///
@@ -150,7 +154,7 @@ pub async fn transfer_between_mints(
         let tokens = data.read();
         let mint_tokens: Vec<_> = tokens
             .iter()
-            .filter(|t| t.mint == source_mint && !t.pending_publish)
+            .filter(|t| mint_matches(&t.mint, &source_mint) && !t.pending_publish)
             .collect();
         let mut all_proofs = Vec::new();
         let mut event_ids = Vec::new();

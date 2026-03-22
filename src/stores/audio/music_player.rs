@@ -953,10 +953,12 @@ pub fn close_player() {
         ));
     }
     drop(state);
-    let generation = next_music_status_generation();
-    spawn(async move {
-        clear_music_status(generation).await;
-    });
+    if !stop_failed {
+        let generation = next_music_status_generation();
+        spawn(async move {
+            clear_music_status(generation).await;
+        });
+    }
 }
 /// Show zap dialog for a specific track (or current track if None)
 pub fn show_zap_dialog_for_track(track: Option<MusicTrack>) {
