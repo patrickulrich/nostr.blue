@@ -514,7 +514,7 @@ async fn publish_swap_events(
                         "Swap token event {} already exists on all relays (duplicate)",
                         event_id_hex
                     );
-                    publish_deletion_events(&client, &valid_del_ids).await;
+                    publish_deletion_events(&client, &valid_del_ids).await?;
                 } else {
                     log::warn!(
                         "No relays accepted swap token event (failed: {:?}), queuing for retry",
@@ -536,7 +536,7 @@ async fn publish_swap_events(
                     output.success.len(),
                     output.success.len() + output.failed.len()
                 );
-                publish_deletion_events(&client, &valid_del_ids).await;
+                publish_deletion_events(&client, &valid_del_ids).await?;
             }
         }
         Err(e) => {
@@ -576,16 +576,19 @@ fn build_deletion_tags(event_ids: &[EventId]) -> Vec<nostr_sdk::Tag> {
 /// published to at least one relay. This prevents the race condition where deletions
 /// could be replayed before the token is accepted. If publishing fails, this function
 /// handles its own retry logic via queue_event_for_retry.
-async fn publish_deletion_events(client: &nostr_sdk::Client, event_ids_to_delete: &[String]) {
+async fn publish_deletion_events(
+    client: &nostr_sdk::Client,
+    event_ids_to_delete: &[String],
+) -> Result<(), String> {
     if event_ids_to_delete.is_empty() {
-        return;
+        return Ok(());
     }
     let valid_event_ids: Vec<EventId> = event_ids_to_delete
         .iter()
         .filter_map(|id| EventId::from_hex(id).ok())
         .collect();
     if valid_event_ids.is_empty() {
-        return;
+        return Ok(());
     }
     let tags = build_deletion_tags(&valid_event_ids);
     let deletion_builder = nostr_sdk::EventBuilder::new(Kind::from(5), "Swapped token").tags(tags);
@@ -602,10 +605,10 @@ async fn publish_deletion_events(client: &nostr_sdk::Client, event_ids_to_delete
                 )
                 .await
                 {
-                    log::error!(
+                    return Err(format!(
                         "Failed to queue swap deletion event for retry: {}",
                         queue_err
-                    );
+                    ));
                 }
             } else {
                 log::info!(
@@ -626,10 +629,10 @@ async fn publish_deletion_events(client: &nostr_sdk::Client, event_ids_to_delete
             )
             .await
             {
-                log::error!(
+                return Err(format!(
                     "Failed to queue swap deletion event for retry: {}",
                     queue_err
-                );
+                ));
             }
         }
     }
@@ -637,6 +640,7 @@ async fn publish_deletion_events(client: &nostr_sdk::Client, event_ids_to_delete
     if invalid_count > 0 {
         log::warn!("Skipped {} invalid event IDs in deletion", invalid_count);
     }
+    Ok(())
 }
 /// Swap all proofs for a mint to optimize denominations
 ///

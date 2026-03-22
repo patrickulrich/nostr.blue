@@ -297,10 +297,24 @@ pub async fn save_preferred_reactions(reactions: Vec<PreferredReaction>) -> Resu
     let failed_count = output.failed.len();
     let total = success_count + failed_count;
     if output.success.is_empty() {
-        let error = format!(
-            "Failed to publish reactions: no relays accepted event {}",
-            output.id().to_hex()
-        );
+        let relay_errors = output
+            .failed
+            .iter()
+            .map(|(relay, error)| format!("{relay}: {error}"))
+            .collect::<Vec<_>>()
+            .join("; ");
+        let error = if relay_errors.is_empty() {
+            format!(
+                "Failed to publish reactions: no relays accepted event {}",
+                output.id().to_hex()
+            )
+        } else {
+            format!(
+                "Failed to publish reactions: no relays accepted event {} ({})",
+                output.id().to_hex(),
+                relay_errors
+            )
+        };
         log::warn!("{}", error);
         *REACTIONS_STATE.write() = Nip78LoadState::Failed(error.clone());
         return Err(error);

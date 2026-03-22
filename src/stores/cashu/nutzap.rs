@@ -468,16 +468,19 @@ pub async fn send_nutzap(
         Ok(out) => out,
         Err(e) => {
             log::warn!("Failed to publish nutzap, queuing for retry: {}", e);
-            if let Err(queue_err) = super::events::queue_event_for_retry(
+            super::events::queue_event_for_retry(
                 builder,
                 super::types::PendingEventType::NutzapEvent,
                 Some(pending_event_id.clone()),
                 Some(mint_url.to_string()),
             )
             .await
-            {
-                log::error!("Failed to queue nutzap event for retry: {}", queue_err);
-            }
+            .map_err(|queue_err| {
+                format!(
+                    "Failed to publish nutzap and persist retry state: {}",
+                    queue_err
+                )
+            })?;
             if let Err(e) = super::events::create_history_event(
                 "out",
                 amount,
@@ -501,16 +504,19 @@ pub async fn send_nutzap(
     };
     let (event_id, is_pending_retry) = if output.success.is_empty() {
         let builder_for_retry = nostr_sdk::EventBuilder::new(Kind::from(9321), content).tags(tags);
-        if let Err(queue_err) = super::events::queue_event_for_retry(
+        super::events::queue_event_for_retry(
             builder_for_retry,
             super::types::PendingEventType::NutzapEvent,
             Some(pending_event_id.clone()),
             Some(mint_url.to_string()),
         )
         .await
-        {
-            log::error!("Failed to queue nutzap event for retry: {}", queue_err);
-        }
+        .map_err(|queue_err| {
+            format!(
+                "Failed to publish nutzap and persist retry state: {}",
+                queue_err
+            )
+        })?;
         log::warn!(
             "Nutzap failed on all relays, queued for retry: {:?}",
             output.failed.keys().collect::<Vec<_>>()

@@ -407,38 +407,34 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
             }
             Ok(_) => {
                 log::warn!("No relays accepted cleanup token event, queuing for retry");
-                if let Err(queue_err) = super::events::queue_event_for_retry(
+                super::events::queue_event_for_retry(
                     builder,
                     super::types::PendingEventType::TokenEvent,
                     synthetic_pending_id.clone(),
                     Some(mint_url.to_string()),
                 )
                 .await
-                {
-                    log::error!(
-                        "Failed to queue cleanup token event for retry: {}",
-                        queue_err
-                    );
-                }
+                .map_err(|queue_err| {
+                    format!("Failed to queue cleanup token event for retry: {}", queue_err)
+                })?;
+                new_event_id = synthetic_pending_id.clone();
             }
             Err(e) => {
                 log::warn!(
                     "Failed to publish cleanup token event, queuing for retry: {}",
                     e
                 );
-                if let Err(queue_err) = super::events::queue_event_for_retry(
+                super::events::queue_event_for_retry(
                     builder,
                     super::types::PendingEventType::TokenEvent,
                     synthetic_pending_id.clone(),
                     Some(mint_url.to_string()),
                 )
                 .await
-                {
-                    log::error!(
-                        "Failed to queue cleanup token event for retry: {}",
-                        queue_err
-                    );
-                }
+                .map_err(|queue_err| {
+                    format!("Failed to queue cleanup token event for retry: {}", queue_err)
+                })?;
+                new_event_id = synthetic_pending_id.clone();
             }
         }
     }
@@ -517,8 +513,9 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
         }]
     } else if !available_proofs.is_empty() {
         let synthetic_id = synthetic_pending_id
-            .unwrap_or_else(|| format!("local_pending_{}", chrono::Utc::now().timestamp_millis()));
-        log::warn!("Publish failed, using synthetic event_id: {}", synthetic_id);
+            .clone()
+            .ok_or_else(|| "Cleanup token event was not published or queued".to_string())?;
+        log::warn!("Publish failed, using queued pending event_id: {}", synthetic_id);
         vec![super::types::TokenData {
             event_id: synthetic_id,
             mint: mint_url.to_string(),

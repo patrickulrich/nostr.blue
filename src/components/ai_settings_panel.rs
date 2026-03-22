@@ -17,7 +17,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
     let mut state = use_signal(AiProviderState::default);
     let mut provider_state_load = use_signal(|| None::<Result<AiProviderState, String>>);
     let mut save_error = use_signal(|| None::<String>);
-    let mut is_saving = use_signal(|| false);
+    let is_saving = use_signal(|| false);
     let mut editing_provider_id = use_signal(|| None::<String>);
     let mut name = use_signal(String::new);
     let mut provider_id = use_signal(String::new);
@@ -298,22 +298,19 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                                         next_state.custom_providers.push(provider.clone());
                                         next_state.selected_provider_id = provider.id.clone();
                                     }
-                                    is_saving.set(true);
-                                    save_error.set(None);
-                                    spawn(async move {
-                                        match ai_provider_store::save_provider_state(&next_state).await {
-                                            Ok(()) => {
-                                                state.set(next_state);
-                                                editing_provider_id.set(None);
-                                                name.set(String::new());
-                                                provider_id.set(String::new());
-                                                base_url.set(String::new());
-                                                api_key.set(String::new());
-                                            }
-                                            Err(e) => save_error.set(Some(e)),
-                                        }
-                                        is_saving.set(false);
-                                    });
+                                    persist_provider_state(
+                                        next_state,
+                                        state,
+                                        is_saving,
+                                        save_error,
+                                        move || {
+                                            editing_provider_id.set(None);
+                                            name.set(String::new());
+                                            provider_id.set(String::new());
+                                            base_url.set(String::new());
+                                            api_key.set(String::new());
+                                        },
+                                    );
                                 }
                                 Err(err) => save_error.set(Some(err)),
                             }

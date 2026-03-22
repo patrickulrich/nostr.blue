@@ -77,7 +77,7 @@ async fn send_tagged_event_with_retry(
     event_type: PendingEventType,
     pending_token_id: Option<String>,
     mint_url: Option<String>,
-) -> String {
+) -> Result<String, String> {
     let event_label = match &event_type {
         PendingEventType::TokenEvent => "token",
         PendingEventType::DeletionEvent => "deletion",
@@ -88,7 +88,7 @@ async fn send_tagged_event_with_retry(
     };
 
     match client.send_event(&event).await {
-        Ok(event_output) if !event_output.success.is_empty() => event_output.id().to_hex(),
+        Ok(event_output) if !event_output.success.is_empty() => Ok(event_output.id().to_hex()),
         Ok(_) => {
             log::warn!(
                 "No relays accepted {} event, queuing for retry",
@@ -97,42 +97,40 @@ async fn send_tagged_event_with_retry(
             let pending_id = pending_token_id
                 .clone()
                 .unwrap_or_else(|| format!("pending_{}", uuid::Uuid::new_v4()));
-            if let Err(queue_error) = queue_signed_event_for_retry_result(
+            queue_signed_event_for_retry_result(
                 event,
                 event_type,
                 Some(pending_id.clone()),
                 mint_url,
             )
             .await
-            {
-                log::warn!(
+            .map_err(|queue_error| {
+                format!(
                     "Failed to persist signed {} event for retry: {}",
-                    event_label,
-                    queue_error
-                );
-            }
-            pending_id
+                    event_label, queue_error
+                )
+            })?;
+            Ok(pending_id)
         }
         Err(error) => {
             log::warn!("Failed to publish {} event: {}", event_label, error);
             let pending_id = pending_token_id
                 .clone()
                 .unwrap_or_else(|| format!("pending_{}", uuid::Uuid::new_v4()));
-            if let Err(queue_error) = queue_signed_event_for_retry_result(
+            queue_signed_event_for_retry_result(
                 event,
                 event_type,
                 Some(pending_id.clone()),
                 mint_url,
             )
             .await
-            {
-                log::warn!(
+            .map_err(|queue_error| {
+                format!(
                     "Failed to persist signed {} event for retry: {}",
-                    event_label,
-                    queue_error
-                );
-            }
-            pending_id
+                    event_label, queue_error
+                )
+            })?;
+            Ok(pending_id)
         }
     }
 }
@@ -454,7 +452,7 @@ pub async fn pay_payment_request(
                 Some(pending_id),
                 Some(mint_url.clone()),
             )
-            .await,
+            .await?,
         );
     } else if !event_ids_to_delete.is_empty() {
         use nostr::nips::nip09::EventDeletionRequest;
@@ -467,14 +465,14 @@ pub async fn pay_payment_request(
         let event =
             sign_cashu_event_builder(&signer, nostr_sdk::EventBuilder::delete(deletion_request))
                 .await?;
-        let _ = send_tagged_event_with_retry(
+        send_tagged_event_with_retry(
             &client,
             event,
             PendingEventType::DeletionEvent,
             None,
             None,
         )
-        .await;
+        .await?;
     }
     {
         let store = WALLET_TOKENS.read();
@@ -664,7 +662,7 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
         Some(pending_id),
         Some(mint_url.to_string()),
     )
-    .await;
+    .await?;
     {
         let store = WALLET_TOKENS.read();
         let mut data = store.data();

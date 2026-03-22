@@ -27,8 +27,16 @@ fn merge_comments(existing: Vec<NostrEvent>, fetched: Vec<NostrEvent>) -> Vec<No
         by_id.insert(event.id, event);
     }
     let mut merged: Vec<NostrEvent> = by_id.into_values().collect();
-    merged.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+    merged.sort_by(|a, b| {
+        a.created_at
+            .cmp(&b.created_at)
+            .then_with(|| a.id.cmp(&b.id))
+    });
     merged
+}
+
+fn insert_comment(existing: Vec<NostrEvent>, event: NostrEvent) -> Vec<NostrEvent> {
+    merge_comments(existing, vec![event])
 }
 
 fn schedule_live_updates_retry(
@@ -159,7 +167,7 @@ pub fn PollView(noteid: String) -> Element {
             let subscription_handoff = Timestamp::now();
             let counts = get_counts_with_count_fallback(&event_id, Duration::from_secs(10)).await;
             if generation_counter.load(Ordering::SeqCst) == generation {
-                reply_total.set(counts.replies);
+                reply_total.with_mut(|total| *total = (*total).max(counts.replies));
             } else {
                 return;
             }
@@ -281,7 +289,11 @@ pub fn PollView(noteid: String) -> Element {
                                             invalidate_thread_tree_cache(&event_id);
                                             comments_error.set(None);
                                             live_updates_warning.set(None);
-                                            comments.write().push((*event).clone());
+                                            let next_comments = insert_comment(
+                                                comments.read().clone(),
+                                                (*event).clone(),
+                                            );
+                                            comments.set(next_comments);
                                             reply_total
                                                 .with_mut(|count| *count = count.saturating_add(1));
                                         }
@@ -382,7 +394,9 @@ pub fn PollView(noteid: String) -> Element {
                                         extract_root_event_id(&comment_event).unwrap_or(event.id);
                                     invalidate_thread_tree_cache(&root_event_id);
                                     comments_error.set(None);
-                                    comments.write().push(comment_event);
+                                    let next_comments =
+                                        insert_comment(comments.read().clone(), comment_event);
+                                    comments.set(next_comments);
                                     reply_total.with_mut(|count| *count = count.saturating_add(1));
                                 }
                             },
@@ -459,7 +473,11 @@ pub fn PollView(noteid: String) -> Element {
                                                     if !already_exists {
                                                         invalidate_thread_tree_cache(&poll_event_id);
                                                         comments_error.set(None);
-                                                        comments.write().push(reply_event);
+                                                        let next_comments = insert_comment(
+                                                            comments.read().clone(),
+                                                            reply_event,
+                                                        );
+                                                        comments.set(next_comments);
                                                         reply_total.with_mut(|count| *count = count.saturating_add(1));
                                                     }
                                                 },

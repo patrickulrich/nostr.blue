@@ -124,7 +124,7 @@ pub async fn create_topup_invoice(
         })),
     )
     .await?;
-    Ok(parse_topup_invoice(&value))
+    parse_topup_invoice(&value)
 }
 
 pub async fn get_topup_status(api_key: &str, invoice_id: &str) -> Result<PpqTopupInvoice, String> {
@@ -138,7 +138,7 @@ pub async fn get_topup_status(api_key: &str, invoice_id: &str) -> Result<PpqTopu
         None,
     )
     .await?;
-    Ok(parse_topup_invoice(&value))
+    parse_topup_invoice(&value)
 }
 
 pub async fn get_nwc_auto_topup(credit_id: &str) -> Result<Option<PpqNwcAutoTopup>, String> {
@@ -209,7 +209,7 @@ pub async fn list_api_keys(credit_id: &str) -> Result<Vec<PpqApiKey>, String> {
     )
     .await?;
     let keys = array_from_value(&value);
-    Ok(keys.iter().map(|value| parse_api_key(value)).collect())
+    keys.iter().map(|value| parse_api_key(value)).collect()
 }
 
 pub async fn get_api_key(
@@ -225,7 +225,7 @@ pub async fn get_api_key(
         None,
     )
     .await?;
-    Ok(parse_api_key(data_or_root(&value)))
+    parse_api_key(data_or_root(&value))
 }
 
 pub async fn create_api_key(credit_id: &str, input: &PpqApiKeyInput) -> Result<PpqApiKey, String> {
@@ -236,7 +236,7 @@ pub async fn create_api_key(credit_id: &str, input: &PpqApiKeyInput) -> Result<P
         Some(api_key_payload(input)),
     )
     .await?;
-    Ok(parse_api_key(data_or_root(&value)))
+    parse_api_key(data_or_root(&value))
 }
 
 pub async fn update_api_key(
@@ -251,7 +251,7 @@ pub async fn update_api_key(
         Some(api_key_payload(input)),
     )
     .await?;
-    Ok(parse_api_key(data_or_root(&value)))
+    parse_api_key(data_or_root(&value))
 }
 
 pub async fn delete_api_key(credit_id: &str, key_id: &str) -> Result<(), String> {
@@ -274,10 +274,12 @@ fn api_key_payload(input: &PpqApiKeyInput) -> Value {
     })
 }
 
-fn parse_topup_invoice(value: &Value) -> PpqTopupInvoice {
+fn parse_topup_invoice(value: &Value) -> Result<PpqTopupInvoice, String> {
     let data = data_or_root(value);
-    PpqTopupInvoice {
-        invoice_id: string_field(data, &["invoice_id", "id", "invoiceId"]).unwrap_or_default(),
+    let invoice_id = string_field(data, &["invoice_id", "id", "invoiceId"])
+        .ok_or_else(|| format!("PPQ topup invoice response missing required id: {}", pretty_json(value)))?;
+    Ok(PpqTopupInvoice {
+        invoice_id,
         status: string_field(data, &["status"]),
         payment_request: string_field(
             data,
@@ -292,12 +294,14 @@ fn parse_topup_invoice(value: &Value) -> PpqTopupInvoice {
         amount: number_field(data, &["amount"]),
         currency: string_field(data, &["currency"]),
         raw_json: pretty_json(value),
-    }
+    })
 }
 
-fn parse_api_key(value: &Value) -> PpqApiKey {
-    PpqApiKey {
-        id: string_field(value, &["_id", "id"]).unwrap_or_default(),
+fn parse_api_key(value: &Value) -> Result<PpqApiKey, String> {
+    let id = string_field(value, &["_id", "id"])
+        .ok_or_else(|| format!("PPQ API key response missing required id: {}", pretty_json(value)))?;
+    Ok(PpqApiKey {
+        id,
         name: string_field(value, &["name"]).unwrap_or_default(),
         api_key: string_field(value, &["api_key", "apiKey"]),
         usage_limit_usd: number_field(value, &["usage_limit_usd", "usageLimitUsd"]),
@@ -315,7 +319,7 @@ fn parse_api_key(value: &Value) -> PpqApiKey {
         created_at: string_field(value, &["created_at", "createdAt"]),
         updated_at: string_field(value, &["updated_at", "updatedAt"]),
         deleted_at: string_field(value, &["deleted_at", "deletedAt"]),
-    }
+    })
 }
 
 fn data_or_root(value: &Value) -> &Value {
@@ -442,7 +446,8 @@ mod tests {
             "usage_limit_usd": "10.5",
             "current_period_usage_usd": 1.25,
             "reset_period": "monthly"
-        }));
+        }))
+        .unwrap();
         assert_eq!(parsed.id, "abc");
         assert_eq!(parsed.usage_limit_usd, Some(10.5));
         assert_eq!(parsed.current_period_usage_usd, Some(1.25));

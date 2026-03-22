@@ -1013,6 +1013,14 @@ fn submit_message(
         return;
     }
 
+    if active_model.kind == ChatModelKind::Image && attached_images.len() > 1 {
+        error.set(Some(
+            "Image generation currently supports only one reference image per request."
+                .to_string(),
+        ));
+        return;
+    }
+
     let user_message = DisplayMessage {
         id: format!("user-{}", crate::platform::timestamp::now_millis()),
         role: DisplayRole::User,
@@ -1180,9 +1188,23 @@ async fn apply_chat_response(
     persisted_messages_dirty.set(true);
 
     let mut follow_up_messages = build_api_messages(&prior_messages);
+    let follow_up_assistant_content = if assistant_images.is_empty() {
+        ChatMessageContent::Text(assistant_content)
+    } else {
+        let mut parts = Vec::new();
+        if !assistant_content.trim().is_empty() {
+            parts.push(ChatMessagePart::Text {
+                text: assistant_content,
+            });
+        }
+        parts.extend(assistant_images.into_iter().map(|image| ChatMessagePart::ImageUrl {
+            image_url: ChatImageUrl { url: image.url },
+        }));
+        ChatMessageContent::Parts(parts)
+    };
     follow_up_messages.push(ChatMessage {
         role: ChatRole::Assistant,
-        content: ChatMessageContent::Text(assistant_content),
+        content: follow_up_assistant_content,
     });
     for tool in executed {
         follow_up_messages.push(ChatMessage {

@@ -755,52 +755,43 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
                     }
                     Ok(_) => {
                         log::warn!("No relays accepted deletion event, queuing for retry");
-                        if let Err(queue_err) = super::events::queue_event_for_retry(
+                        super::events::queue_event_for_retry(
                             deletion_builder,
                             super::types::PendingEventType::DeletionEvent,
                             None,
                             None,
                         )
                         .await
-                        {
-                            log::error!(
-                                "Failed to queue mint deletion event for retry: {}",
-                                queue_err
-                            );
-                        }
+                        .map_err(|queue_err| {
+                            format!("Failed to queue mint deletion event for retry: {}", queue_err)
+                        })?;
                     }
                     Err(e) => {
                         log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
-                        if let Err(queue_err) = super::events::queue_event_for_retry(
+                        super::events::queue_event_for_retry(
                             deletion_builder,
                             super::types::PendingEventType::DeletionEvent,
                             None,
                             None,
                         )
                         .await
-                        {
-                            log::error!(
-                                "Failed to queue mint deletion event for retry: {}",
-                                queue_err
-                            );
-                        }
+                        .map_err(|queue_err| {
+                            format!("Failed to queue mint deletion event for retry: {}", queue_err)
+                        })?;
                     }
                 }
             } else {
                 log::warn!("Client not initialized, queuing deletion event for retry");
-                if let Err(queue_err) = super::events::queue_event_for_retry(
+                super::events::queue_event_for_retry(
                     deletion_builder,
                     super::types::PendingEventType::DeletionEvent,
                     None,
                     None,
                 )
                 .await
-                {
-                    log::error!(
-                        "Failed to queue mint deletion event for retry: {}",
-                        queue_err
-                    );
-                }
+                .map_err(|queue_err| {
+                    format!("Failed to queue mint deletion event for retry: {}", queue_err)
+                })?;
             }
         }
     }

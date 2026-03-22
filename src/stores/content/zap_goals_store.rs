@@ -169,7 +169,10 @@ async fn fetch_zap_goal_events_paginated(
         let seen_before = seen.len();
         for event in page {
             if seen.insert(event.id) {
-                if parse_goal_event(&event).is_some() {
+                if parse_goal_event(&event)
+                    .as_ref()
+                    .is_some_and(goal_is_active)
+                {
                     parsed_count += 1;
                 }
                 events.push(event);
@@ -215,11 +218,8 @@ async fn fetch_zap_receipts_paginated(goal_event_id: EventId) -> Result<Vec<Even
         let oldest_created_at = page.iter().map(|event| event.created_at.as_secs()).min();
         let seen_before = seen.len();
         for receipt in page {
-            if seen.insert(receipt.id) {
+            if seen.insert(receipt.id) && receipt.verify().is_ok() {
                 receipts.push(receipt);
-                if receipts.len() >= SAFETY_MAX_RECEIPTS {
-                    return Ok(receipts);
-                }
             }
         }
 
@@ -243,6 +243,9 @@ pub fn parse_goal_event(event: &Event) -> Option<ZapGoal> {
     if event.kind != Kind::Custom(KIND_ZAP_GOAL) {
         return None;
     }
+    if event.verify().is_err() {
+        return None;
+    }
 
     let amount_msats = parse_u64_tag(event, "amount")?;
     if amount_msats == 0 {
@@ -250,9 +253,6 @@ pub fn parse_goal_event(event: &Event) -> Option<ZapGoal> {
     }
     let relays = parse_relays(event)?;
     let closed_at = parse_u64_tag(event, "closed_at");
-    if closed_at.is_some_and(|timestamp| timestamp <= now_ts()) {
-        return None;
-    }
 
     let author_pubkey = event.pubkey.to_hex();
     let is_project_goal = project_author_hex()
@@ -288,6 +288,10 @@ fn sort_goals(goals: &mut [ZapGoal]) {
             })
             .then_with(|| right.created_at.cmp(&left.created_at))
     });
+}
+
+fn goal_is_active(goal: &ZapGoal) -> bool {
+    goal.closed_at.is_none_or(|closed_at| closed_at > now_ts())
 }
 
 pub fn filter_goals_by_query(goals: &[ZapGoalProgress], query: &str) -> Vec<ZapGoalProgress> {
@@ -343,6 +347,7 @@ pub async fn fetch_goals_for_authors(
         .await?
         .into_iter()
         .filter_map(|event| parse_goal_event(&event))
+        .filter(goal_is_active)
         .collect();
     dedupe_goals(&mut goals);
     sort_goals(&mut goals);
@@ -360,6 +365,7 @@ pub async fn fetch_global_goals(limit: usize, until: Option<u64>) -> Result<Vec<
         .await?
         .into_iter()
         .filter_map(|event| parse_goal_event(&event))
+        .filter(goal_is_active)
         .collect();
     dedupe_goals(&mut goals);
     sort_goals(&mut goals);
@@ -535,6 +541,7 @@ pub async fn fetch_goal_progress(goal: &ZapGoal) -> Result<ZapGoalProgress, Stri
 
     let mut total_sats = 0u64;
     let mut contributors: HashMap<String, ZapGoalContributor> = HashMap::new();
+    let mut validated_receipts = 0usize;
 
     for receipt in receipts {
         let created_at = receipt.created_at.as_secs();
@@ -552,6 +559,10 @@ pub async fn fetch_goal_progress(goal: &ZapGoal) -> Result<ZapGoalProgress, Stri
             Some(amount) if amount > 0 => amount,
             _ => continue,
         };
+        validated_receipts = validated_receipts.saturating_add(1);
+        if validated_receipts > SAFETY_MAX_RECEIPTS {
+            break;
+        }
         total_sats = total_sats.saturating_add(amount_sats);
 
         if let Some(pubkey) = extract_zap_sender(&receipt) {

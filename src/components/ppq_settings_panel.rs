@@ -38,6 +38,7 @@ pub fn PpqSettingsPanel(
     let mut key_form_loading = use_signal(|| false);
     let mut key_form_error = use_signal(|| None::<String>);
     let mut last_loaded_credit_id = use_signal(|| None::<String>);
+    let mut request_generation = use_signal(|| 0u32);
 
     use_effect(move || {
         if !provider_state_ready {
@@ -59,14 +60,34 @@ pub fn PpqSettingsPanel(
         nwc.set(None);
         topup_invoice.set(None);
         topup_error.set(None);
+        let generation = request_generation.peek().wrapping_add(1);
+        request_generation.set(generation);
 
         let Some(credit_id) = current_credit_id else {
             return;
         };
 
-        load_balance(balance, balance_loading, balance_error, credit_id.clone());
-        load_api_keys(api_keys, keys_loading, keys_error, credit_id.clone());
-        load_nwc(nwc, nwc_loading, nwc_error, credit_id);
+        load_balance(
+            balance,
+            balance_loading,
+            balance_error,
+            credit_id.clone(),
+            Some((request_generation, generation)),
+        );
+        load_api_keys(
+            api_keys,
+            keys_loading,
+            keys_error,
+            credit_id.clone(),
+            Some((request_generation, generation)),
+        );
+        load_nwc(
+            nwc,
+            nwc_loading,
+            nwc_error,
+            credit_id,
+            Some((request_generation, generation)),
+        );
     });
 
     let ppq_account = state.read().ppq_account.clone();
@@ -139,6 +160,7 @@ pub fn PpqSettingsPanel(
                                 balance_loading,
                                 balance_error,
                                 refresh_balance_credit_id.clone(),
+                                None,
                             );
                         },
                         "Refresh Balance"
@@ -152,6 +174,7 @@ pub fn PpqSettingsPanel(
                                 keys_loading,
                                 keys_error,
                                 refresh_keys_credit_id.clone(),
+                                None,
                             );
                         },
                         "Refresh Keys"
@@ -165,6 +188,7 @@ pub fn PpqSettingsPanel(
                                 nwc_loading,
                                 nwc_error,
                                 refresh_nwc_credit_id.clone(),
+                                None,
                             );
                         },
                         "Refresh NWC"
@@ -272,7 +296,13 @@ pub fn PpqSettingsPanel(
                                     match ppq::create_topup_invoice(&api_key, "btc-lightning", amount, &currency).await {
                                         Ok(invoice) => {
                                             topup_invoice.set(Some(invoice));
-                                            load_balance(balance, balance_loading, balance_error, credit_id);
+                                            load_balance(
+                                                balance,
+                                                balance_loading,
+                                                balance_error,
+                                                credit_id,
+                                                None,
+                                            );
                                         }
                                         Err(err) => topup_error.set(Some(err)),
                                     }
@@ -299,7 +329,13 @@ pub fn PpqSettingsPanel(
                                     match ppq::get_topup_status(&api_key, &invoice_id).await {
                                         Ok(invoice) => {
                                             topup_invoice.set(Some(invoice));
-                                            load_balance(balance, balance_loading, balance_error, credit_id);
+                                            load_balance(
+                                                balance,
+                                                balance_loading,
+                                                balance_error,
+                                                credit_id,
+                                                None,
+                                            );
                                         }
                                         Err(err) => topup_error.set(Some(err)),
                                     }
@@ -561,7 +597,13 @@ pub fn PpqSettingsPanel(
                                             key_usage_limit.set(String::new());
                                             key_reset_period.set(String::new());
                                             key_expire_at.set(String::new());
-                                            load_api_keys(api_keys, keys_loading, keys_error, credit_id.clone());
+                                            load_api_keys(
+                                                api_keys,
+                                                keys_loading,
+                                                keys_error,
+                                                credit_id.clone(),
+                                                None,
+                                            );
                                             if created_or_updated.api_key.is_some() {
                                                 set_active_ppq_key(
                                                     state,
@@ -709,7 +751,13 @@ pub fn PpqSettingsPanel(
                                                                         if active_key_id_for_revoke.as_deref() == Some(key_id.as_str()) {
                                                                             clear_active_ppq_key(state, is_saving, save_error);
                                                                         }
-                                                                        load_api_keys(api_keys, keys_loading, keys_error, credit_id);
+                                                                        load_api_keys(
+                                                                            api_keys,
+                                                                            keys_loading,
+                                                                            keys_error,
+                                                                            credit_id,
+                                                                            None,
+                                                                        );
                                                                     }
                                                                     Err(err) => keys_error.set(Some(err)),
                                                                 }
@@ -776,15 +824,31 @@ fn load_balance(
     mut balance_loading: Signal<bool>,
     mut balance_error: Signal<Option<String>>,
     credit_id: String,
+    request_generation: Option<(Signal<u32>, u32)>,
 ) {
     balance_loading.set(true);
     balance_error.set(None);
     spawn(async move {
+        let current = || {
+            request_generation
+                .as_ref()
+                .is_none_or(|(signal, generation)| *signal.peek() == *generation)
+        };
         match ppq::get_balance(&credit_id).await {
-            Ok(next_balance) => balance.set(Some(next_balance)),
-            Err(err) => balance_error.set(Some(err)),
+            Ok(next_balance) => {
+                if current() {
+                    balance.set(Some(next_balance));
+                }
+            }
+            Err(err) => {
+                if current() {
+                    balance_error.set(Some(err));
+                }
+            }
         }
-        balance_loading.set(false);
+        if current() {
+            balance_loading.set(false);
+        }
     });
 }
 
@@ -793,15 +857,31 @@ fn load_api_keys(
     mut keys_loading: Signal<bool>,
     mut keys_error: Signal<Option<String>>,
     credit_id: String,
+    request_generation: Option<(Signal<u32>, u32)>,
 ) {
     keys_loading.set(true);
     keys_error.set(None);
     spawn(async move {
+        let current = || {
+            request_generation
+                .as_ref()
+                .is_none_or(|(signal, generation)| *signal.peek() == *generation)
+        };
         match ppq::list_api_keys(&credit_id).await {
-            Ok(keys) => api_keys.set(keys),
-            Err(err) => keys_error.set(Some(err)),
+            Ok(keys) => {
+                if current() {
+                    api_keys.set(keys);
+                }
+            }
+            Err(err) => {
+                if current() {
+                    keys_error.set(Some(err));
+                }
+            }
         }
-        keys_loading.set(false);
+        if current() {
+            keys_loading.set(false);
+        }
     });
 }
 
@@ -810,15 +890,31 @@ fn load_nwc(
     mut nwc_loading: Signal<bool>,
     mut nwc_error: Signal<Option<String>>,
     credit_id: String,
+    request_generation: Option<(Signal<u32>, u32)>,
 ) {
     nwc_loading.set(true);
     nwc_error.set(None);
     spawn(async move {
+        let current = || {
+            request_generation
+                .as_ref()
+                .is_none_or(|(signal, generation)| *signal.peek() == *generation)
+        };
         match ppq::get_nwc_auto_topup(&credit_id).await {
-            Ok(next_nwc) => nwc.set(next_nwc),
-            Err(err) => nwc_error.set(Some(err)),
+            Ok(next_nwc) => {
+                if current() {
+                    nwc.set(next_nwc);
+                }
+            }
+            Err(err) => {
+                if current() {
+                    nwc_error.set(Some(err));
+                }
+            }
         }
-        nwc_loading.set(false);
+        if current() {
+            nwc_loading.set(false);
+        }
     });
 }
 

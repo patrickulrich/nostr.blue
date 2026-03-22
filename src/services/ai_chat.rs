@@ -415,7 +415,7 @@ fn normalize_generated_image_reference(value: &str) -> Option<String> {
 
     if trimmed.starts_with("https://")
         || trimmed.starts_with("http://")
-        || trimmed.starts_with("data:")
+        || trimmed.starts_with("data:image/")
         || trimmed.starts_with("blob:")
     {
         return Some(trimmed.to_string());
@@ -425,7 +425,7 @@ fn normalize_generated_image_reference(value: &str) -> Option<String> {
         return Some(format!("data:image/png;base64,{}", trimmed));
     }
 
-    Some(trimmed.to_string())
+    None
 }
 
 fn looks_like_base64(value: &str) -> bool {
@@ -446,11 +446,15 @@ async fn send_provider_request(
 
     match &provider.auth {
         ProviderAuth::PpqManaged { api_key } => {
-            let Some(api_key) = api_key.as_ref().filter(|key| !key.trim().is_empty()) else {
+            let Some(api_key) = api_key
+                .as_deref()
+                .map(str::trim)
+                .filter(|key| !key.is_empty())
+            else {
                 return Err("PPQ account is not set up yet".to_string());
             };
             let mut request = client.request(method, url);
-            request = request.header("Authorization", format!("Bearer {}", api_key));
+            request = request.header("Authorization", format!("Bearer {api_key}"));
             if let Some(body_bytes) = body {
                 request = request
                     .header("Content-Type", "application/json")

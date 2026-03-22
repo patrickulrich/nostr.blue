@@ -12,6 +12,7 @@ use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use nostr_sdk::PublicKey;
 use std::collections::HashSet;
+use url::Url;
 
 const PAGE_SIZE: usize = 20;
 const PROJECT_PIN_LIMIT: usize = 6;
@@ -494,6 +495,7 @@ pub fn ZapGoalsNew() -> Element {
     let navigator = use_navigator();
     let toast = consume_toast();
     let signed_in = *crate::stores::nostr_client::HAS_SIGNER.read();
+    let client_initialized = *crate::stores::nostr_client::CLIENT_INITIALIZED.read();
     let mut amount_sats = use_signal(|| "21000".to_string());
     let mut summary = use_signal(String::new);
     let mut content = use_signal(String::new);
@@ -507,8 +509,8 @@ pub fn ZapGoalsNew() -> Element {
     let mut error_message = use_signal(|| None::<String>);
 
     use_effect(move || {
-        let _ = *crate::stores::nostr_client::CLIENT_INITIALIZED.read();
-        if *relays_prefilled.read() {
+        let initialized = *crate::stores::nostr_client::CLIENT_INITIALIZED.read();
+        if !initialized || *relays_prefilled.read() {
             return;
         }
         let generation = relays_prefill_generation.peek().wrapping_add(1);
@@ -562,8 +564,13 @@ pub fn ZapGoalsNew() -> Element {
         let relays: Vec<String> = relays_value
             .split(|ch: char| ch == '\n' || ch == ',' || ch.is_whitespace())
             .map(str::trim)
-            .filter(|relay| relay.starts_with("ws://") || relay.starts_with("wss://"))
-            .map(ToString::to_string)
+            .filter_map(|relay| {
+                let parsed = Url::parse(relay).ok()?;
+                matches!(parsed.scheme(), "ws" | "wss")
+                    .then_some(parsed.host_str().is_some())
+                    .filter(|valid| *valid)
+                    .map(|_| parsed.to_string())
+            })
             .collect();
         if relays.is_empty() {
             error_message.set(Some("Add at least one valid relay URL.".to_string()));
@@ -656,6 +663,10 @@ pub fn ZapGoalsNew() -> Element {
                 }
             }
         };
+    }
+
+    if !client_initialized {
+        return rsx! { ClientInitializing {} };
     }
 
     rsx! {
