@@ -568,7 +568,14 @@ pub fn ShopCheckout() -> Element {
                                                                             .map(|b| b.mint_url.clone())
                                                                         {
                                                                             match send_tokens_p2pk(mint, total, merchant_pubkey).await {
-                                                                                Ok(token) => {
+                                                                                Ok(outcome) => {
+                                                                                    let token = outcome.token_string;
+                                                                                    if !outcome.warnings.is_empty() {
+                                                                                        log::warn!(
+                                                                                            "Cashu payment completed with warnings: {}",
+                                                                                            outcome.warnings.join(" ")
+                                                                                        );
+                                                                                    }
                                                                                     log::info!("Payment successful: {}", token);
                                                                                     let shipping = if address.is_empty() {
                                                                                         None

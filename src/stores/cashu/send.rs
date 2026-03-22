@@ -18,6 +18,13 @@ use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
 use dioxus::prelude::*;
 use nostr_sdk::signer::NostrSigner;
 use nostr_sdk::{EventId, Kind, PublicKey};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SendTokensOutcome {
+    pub token_string: String,
+    pub warnings: Vec<String>,
+}
+
 /// Estimate the fee for sending a given amount from a mint
 ///
 /// Returns the estimated fee in sats, or an error if estimation fails.
@@ -68,7 +75,7 @@ pub async fn estimate_send_fee(mint_url: String, amount: u64) -> Result<u64, Str
     Ok(fee)
 }
 /// Send ecash tokens
-pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String> {
+pub async fn send_tokens(mint_url: String, amount: u64) -> Result<SendTokensOutcome, String> {
     let mint_url = normalize_mint_url(&mint_url);
     log::info!("Sending {} sats from {}", amount, mint_url);
     let _lock_guard = try_acquire_mint_lock(&mint_url)
@@ -125,6 +132,7 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
         return Err(e);
     }
     super::signals::remove_in_flight_send_request(&tx_id);
+    let mut warnings = Vec::new();
     let new_event_id = match publish_send_events(
         &mint_url,
         &keep_proofs,
@@ -148,13 +156,18 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
             None
         }
         Err(e) => {
+            warnings.push(format!("Failed to publish send event: {}", e));
             if let Err(sync_err) = cashu_cdk_bridge::sync_wallet_state().await {
                 log::warn!(
                     "Failed to sync wallet state after send publish failure: {}",
                     sync_err
                 );
+                warnings.push(format!(
+                    "Failed to sync wallet state after send publish failure: {}",
+                    sync_err
+                ));
             }
-            return Err(e);
+            None
         }
     };
     let valid_created: Vec<String> = new_event_id
@@ -172,12 +185,17 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
             super::events::create_history_event("out", amount, valid_created, valid_destroyed).await
         {
             log::error!("Failed to create history event: {}", e);
+            warnings.push(format!("Failed to create history event: {}", e));
         }
     }
     if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
         log::warn!("Failed to sync MultiMintWallet state after send: {}", e);
+        warnings.push(format!("Failed to sync MultiMintWallet state after send: {}", e));
     }
-    Ok(token_string)
+    Ok(SendTokensOutcome {
+        token_string,
+        warnings,
+    })
 }
 /// Send ecash tokens locked to a recipient's public key (P2PK / NUT-11)
 ///
@@ -189,7 +207,7 @@ pub async fn send_tokens_p2pk(
     mint_url: String,
     amount: u64,
     recipient_pubkey: String,
-) -> Result<String, String> {
+) -> Result<SendTokensOutcome, String> {
     use cdk::nuts::SpendingConditions;
     let mint_url = normalize_mint_url(&mint_url);
     log::info!(
@@ -254,6 +272,7 @@ pub async fn send_tokens_p2pk(
         return Err(e);
     }
     super::signals::remove_in_flight_send_request(&tx_id);
+    let mut warnings = Vec::new();
     let new_event_id = match publish_send_events(
         &mint_url,
         &keep_proofs,
@@ -277,13 +296,18 @@ pub async fn send_tokens_p2pk(
             None
         }
         Err(e) => {
+            warnings.push(format!("Failed to publish send event: {}", e));
             if let Err(sync_err) = cashu_cdk_bridge::sync_wallet_state().await {
                 log::warn!(
                     "Failed to sync wallet state after send publish failure: {}",
                     sync_err
                 );
+                warnings.push(format!(
+                    "Failed to sync wallet state after send publish failure: {}",
+                    sync_err
+                ));
             }
-            return Err(e);
+            None
         }
     };
     let valid_created: Vec<String> = new_event_id
@@ -301,6 +325,7 @@ pub async fn send_tokens_p2pk(
             super::events::create_history_event("out", amount, valid_created, valid_destroyed).await
         {
             log::error!("Failed to create history event: {}", e);
+            warnings.push(format!("Failed to create history event: {}", e));
         }
     }
     if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
@@ -308,13 +333,20 @@ pub async fn send_tokens_p2pk(
             "Failed to sync MultiMintWallet state after P2PK send: {}",
             e
         );
+        warnings.push(format!(
+            "Failed to sync MultiMintWallet state after P2PK send: {}",
+            e
+        ));
     }
     log::info!(
         "P2PK send complete: {} sats locked to {}",
         amount,
         recipient_pubkey
     );
-    Ok(token_string)
+    Ok(SendTokensOutcome {
+        token_string,
+        warnings,
+    })
 }
 /// Get the wallet's P2PK public key for receiving locked tokens
 ///

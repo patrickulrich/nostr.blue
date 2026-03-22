@@ -17,6 +17,7 @@ use url::Url;
 
 const PAGE_SIZE: usize = 20;
 const PROJECT_PIN_LIMIT: usize = 6;
+const SUSPICIOUS_RELAY_QUERY_KEYS: &[&str] = &["token", "access_token", "auth", "authorization"];
 
 fn sort_progress(items: &mut [ZapGoalProgress]) {
     items.sort_by(|left, right| {
@@ -48,6 +49,46 @@ fn merge_progress(
     let mut merged: Vec<_> = by_id.into_values().collect();
     sort_progress(&mut merged);
     merged
+}
+
+fn relay_url_has_sensitive_parts(parsed: &Url) -> bool {
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return true;
+    }
+
+    parsed.query_pairs().any(|(key, _)| {
+        let normalized = key.trim().to_ascii_lowercase();
+        SUSPICIOUS_RELAY_QUERY_KEYS
+            .iter()
+            .any(|candidate| normalized == *candidate)
+    })
+}
+
+fn sanitize_relay_url(raw: &str) -> Result<String, String> {
+    let parsed = Url::parse(raw).map_err(|_| format!("Invalid relay URL \"{}\": failed to parse", raw))?;
+
+    if !matches!(parsed.scheme(), "ws" | "wss") {
+        return Err(format!(
+            "Invalid relay URL \"{}\": scheme must be ws or wss",
+            raw
+        ));
+    }
+
+    let host = parsed.host_str().ok_or_else(|| {
+        format!("Invalid relay URL \"{}\": missing host", raw)
+    })?;
+
+    let mut sanitized = format!("{}://{}", parsed.scheme(), host);
+    if let Some(port) = parsed.port() {
+        sanitized.push(':');
+        sanitized.push_str(&port.to_string());
+    }
+    let path = parsed.path();
+    if !path.is_empty() && path != "/" {
+        sanitized.push_str(path);
+    }
+
+    Ok(sanitized)
 }
 
 async fn fetch_feed_page(
@@ -279,6 +320,8 @@ pub fn ZapGoalsHome() -> Element {
 
     let filtered_goals =
         zap_goals_store::filter_goals_by_query(&goals.read(), &search_query.read());
+    let has_active_search = !search_query.read().trim().is_empty();
+    let has_any_goals = !goals.read().is_empty();
 
     let mut open_goal_modal = {
         move |goal: ZapGoalProgress| {
@@ -360,6 +403,8 @@ pub fn ZapGoalsHome() -> Element {
                                     "Refresh"
                                 }
                                 select {
+                                    id: "zap-goals-feed-type",
+                                    "aria-label": "Feed type",
                                     class: "rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                                     value: "{feed_type.read().label()}",
                                     onchange: move |evt| {
@@ -382,7 +427,13 @@ pub fn ZapGoalsHome() -> Element {
                             }
                         }
                         div { class: "mt-3",
+                            label {
+                                class: "sr-only",
+                                r#for: "zap-goals-search",
+                                "Search zap goals"
+                            }
                             input {
+                                id: "zap-goals-search",
                                 class: "w-full rounded-xl border border-border bg-background px-4 py-2.5 text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 r#type: "text",
                                 placeholder: "Search goal summaries, descriptions, or authors...",
@@ -413,17 +464,24 @@ pub fn ZapGoalsHome() -> Element {
                         }
                     } else if filtered_goals.is_empty() {
                         div { class: "rounded-2xl border border-dashed border-border bg-card px-6 py-12 text-center",
-                            h2 { class: "text-lg font-semibold text-foreground", "No zap goals to show" }
-                            p { class: "mt-2 text-sm text-muted-foreground",
-                                "{empty_message.read().clone().unwrap_or_else(|| \"Try switching feeds or publish the first goal.\".to_string())}"
-                            }
-                            if *crate::stores::nostr_client::HAS_SIGNER.read() {
-                                button {
-                                    class: "mt-5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90",
-                                    onclick: move |_| {
-                                        navigator.push(Route::ZapGoalsNew {});
-                                    },
-                                    "Create your first zap goal"
+                            if has_active_search || has_any_goals {
+                                h2 { class: "text-lg font-semibold text-foreground", "No results for your search" }
+                                p { class: "mt-2 text-sm text-muted-foreground",
+                                    "Try clearing the search or using different keywords."
+                                }
+                            } else {
+                                h2 { class: "text-lg font-semibold text-foreground", "No zap goals to show" }
+                                p { class: "mt-2 text-sm text-muted-foreground",
+                                    "{empty_message.read().clone().unwrap_or_else(|| \"Try switching feeds or publish the first goal.\".to_string())}"
+                                }
+                                if *crate::stores::nostr_client::HAS_SIGNER.read() {
+                                    button {
+                                        class: "mt-5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90",
+                                        onclick: move |_| {
+                                            navigator.push(Route::ZapGoalsNew {});
+                                        },
+                                        "Create your first zap goal"
+                                    }
                                 }
                             }
                         }
@@ -551,7 +609,7 @@ pub fn ZapGoalsNew() -> Element {
                     .await
                     .into_keys()
                     .take(8)
-                    .map(|relay| relay.to_string())
+                    .filter_map(|relay| sanitize_relay_url(&relay.to_string()).ok())
                     .collect::<Vec<_>>()
                     .join("\n")
             } else {
@@ -598,37 +656,37 @@ pub fn ZapGoalsNew() -> Element {
             return;
         }
 
-        let relays: Vec<String> = relays_value
+        let relays = relays_value
             .split(|ch: char| ch == '\n' || ch == ',' || ch.is_whitespace())
             .map(str::trim)
             .filter(|relay| !relay.is_empty())
-            .map(|relay| relay.to_string())
-            .collect();
-        for relay in &relays {
-            match Url::parse(relay) {
-                Ok(parsed) => {
-                    if !matches!(parsed.scheme(), "ws" | "wss") {
-                        error_message.set(Some(format!(
-                            "Invalid relay URL \"{}\": scheme must be ws or wss",
-                            relay
-                        )));
-                        return;
-                    }
-                    if parsed.host_str().is_none() {
-                        error_message.set(Some(format!(
-                            "Invalid relay URL \"{}\": missing host",
-                            relay
-                        )));
-                        return;
-                    }
+            .map(|relay| {
+                let parsed = Url::parse(relay).map_err(|_| {
+                    format!("Invalid relay URL \"{}\": failed to parse", relay)
+                })?;
+                if relay_url_has_sensitive_parts(&parsed) {
+                    return Err(format!(
+                        "Invalid relay URL \"{}\": remove credentials and token-like query parameters",
+                        relay
+                    ));
                 }
-                Err(_) => {
+                sanitize_relay_url(relay)
+            })
+            .collect::<Result<Vec<_>, _>>();
+        let relays = match relays {
+            Ok(relays) => relays,
+            Err(error) => {
+                error_message.set(Some(error));
+                return;
+            }
+        };
+        for relay in &relays {
+            if Url::parse(relay).is_err() {
                     error_message.set(Some(format!(
                         "Invalid relay URL \"{}\": failed to parse",
                         relay
                     )));
                     return;
-                }
             }
         }
         if relays.is_empty() {
@@ -769,8 +827,9 @@ pub fn ZapGoalsNew() -> Element {
 
                 div { class: "grid gap-6 md:grid-cols-2",
                     div { class: "space-y-2",
-                        label { class: "text-sm font-medium text-foreground", "Target amount (sats)" }
+                        label { class: "text-sm font-medium text-foreground", r#for: "zap-goal-amount", "Target amount (sats)" }
                         input {
+                            id: "zap-goal-amount",
                             class: "w-full rounded-xl border border-border bg-background px-4 py-3 text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "number",
                             min: "1",
@@ -779,8 +838,9 @@ pub fn ZapGoalsNew() -> Element {
                         }
                     }
                     div { class: "space-y-2",
-                        label { class: "text-sm font-medium text-foreground", "Summary" }
+                        label { class: "text-sm font-medium text-foreground", r#for: "zap-goal-summary", "Summary" }
                         input {
+                            id: "zap-goal-summary",
                             class: "w-full rounded-xl border border-border bg-background px-4 py-3 text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "text",
                             placeholder: "Monthly development goal",
@@ -791,8 +851,9 @@ pub fn ZapGoalsNew() -> Element {
                 }
 
                 div { class: "space-y-2",
-                    label { class: "text-sm font-medium text-foreground", "Description" }
+                    label { class: "text-sm font-medium text-foreground", r#for: "zap-goal-description", "Description" }
                     textarea {
+                        id: "zap-goal-description",
                         class: "min-h-44 w-full rounded-xl border border-border bg-background px-4 py-3 text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                         placeholder: "Explain what this goal funds and why it matters.",
                         value: "{content}",
@@ -802,8 +863,9 @@ pub fn ZapGoalsNew() -> Element {
 
                 div { class: "grid gap-6 md:grid-cols-2",
                     div { class: "space-y-2",
-                        label { class: "text-sm font-medium text-foreground", "Image URL" }
+                        label { class: "text-sm font-medium text-foreground", r#for: "zap-goal-image-url", "Image URL" }
                         input {
+                            id: "zap-goal-image-url",
                             class: "w-full rounded-xl border border-border bg-background px-4 py-3 text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "url",
                             placeholder: "https://example.com/goal.png",
@@ -812,8 +874,9 @@ pub fn ZapGoalsNew() -> Element {
                         }
                     }
                     div { class: "space-y-2",
-                        label { class: "text-sm font-medium text-foreground", "Related URL" }
+                        label { class: "text-sm font-medium text-foreground", r#for: "zap-goal-related-url", "Related URL" }
                         input {
+                            id: "zap-goal-related-url",
                             class: "w-full rounded-xl border border-border bg-background px-4 py-3 text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "url",
                             placeholder: "https://github.com/...",
@@ -824,8 +887,9 @@ pub fn ZapGoalsNew() -> Element {
                 }
 
                 div { class: "space-y-2",
-                    label { class: "text-sm font-medium text-foreground", "Close at (optional)" }
+                    label { class: "text-sm font-medium text-foreground", r#for: "zap-goal-close-at", "Close at (optional)" }
                     input {
+                        id: "zap-goal-close-at",
                         class: "w-full rounded-xl border border-border bg-background px-4 py-3 text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                         r#type: "datetime-local",
                         value: "{closed_at}",
@@ -834,8 +898,9 @@ pub fn ZapGoalsNew() -> Element {
                 }
 
                 div { class: "space-y-2",
-                    label { class: "text-sm font-medium text-foreground", "Relay list" }
+                    label { class: "text-sm font-medium text-foreground", r#for: "zap-goal-relay-list", "Relay list" }
                     textarea {
+                        id: "zap-goal-relay-list",
                         class: "min-h-36 w-full rounded-xl border border-border bg-background px-4 py-3 font-mono text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                         placeholder: "One relay per line",
                         value: "{relays_text}",

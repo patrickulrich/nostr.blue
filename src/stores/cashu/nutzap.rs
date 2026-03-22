@@ -1135,7 +1135,7 @@ async fn publish_change_token_event(
                 pending_id.clone(),
                 mint_url.to_string(),
             )
-            .await;
+            .await?;
             return Ok(pending_id);
         }
     };
@@ -1150,7 +1150,7 @@ async fn publish_change_token_event(
             pending_id.clone(),
             mint_url.to_string(),
         )
-        .await;
+        .await?;
         return Ok(pending_id);
     }
     Ok(output.id().to_hex())

@@ -10,6 +10,7 @@ use crate::platform::storage;
 use crate::services::ppq::PPQ_CHAT_BASE_URL;
 
 const STORAGE_KEY: &str = "nostr_blue_ai_provider_state";
+const CACHE_PROVIDER_STATE_ERROR_PREFIX: &str = "Failed to cache AI provider state: ";
 const SHAKESPEARE_PROVIDER_ID: &str = "shakespeare";
 const PPQ_PROVIDER_ID: &str = "ppq";
 static PROVIDER_STATE_SAVE_EVENT_ID: AtomicU64 = AtomicU64::new(0);
@@ -267,6 +268,10 @@ pub fn process_queued_provider_state_saves(initial_snapshot: AiProviderState) {
     });
 }
 
+pub fn is_cache_provider_state_error(error: &str) -> bool {
+    error.starts_with(CACHE_PROVIDER_STATE_ERROR_PREFIX)
+}
+
 #[cfg(test)]
 fn reset_provider_state_save_queue() {
     let mut pending = pending_provider_state_save()
@@ -309,7 +314,7 @@ mod web_db {
             Ok(Self { db: Rc::new(db) })
         }
 
-        pub async fn load_state(&self) -> Result<AiProviderState, String> {
+        pub async fn load_state(&self) -> Result<Option<AiProviderState>, String> {
             let tx = self
                 .db
                 .transaction_on_one_with_mode(STORE_SETTINGS, IdbTransactionMode::Readonly)
@@ -323,14 +328,14 @@ mod web_db {
                 .await
                 .map_err(|e| format!("Get await error: {:?}", e))?;
             let Some(value) = value else {
-                return Ok(AiProviderState::default());
+                return Ok(None);
             };
             let json = value
                 .as_string()
                 .ok_or_else(|| "Stored AI provider state was not a string".to_string())?;
             let state: AiProviderState = serde_json::from_str(&json)
                 .map_err(|e| format!("Failed to parse AI provider state: {}", e))?;
-            Ok(migrate_legacy_state(state))
+            Ok(Some(migrate_legacy_state(state)))
         }
 
         pub async fn save_state(&self, state: &AiProviderState) -> Result<(), String> {
@@ -359,7 +364,8 @@ pub async fn load_provider_state() -> Result<AiProviderState, String> {
     {
         match web_db::AiProviderDb::new().await {
             Ok(db) => match db.load_state().await {
-                Ok(state) => return Ok(state),
+                Ok(Some(state)) => return Ok(state),
+                Ok(None) => {}
                 Err(db_error) => {
                     log::warn!(
                         "Failed to load AI provider state from IndexedDB, falling back to local storage: {}",
@@ -374,14 +380,23 @@ pub async fn load_provider_state() -> Result<AiProviderState, String> {
                 );
             }
         }
-        storage::get(STORAGE_KEY)
-            .map(migrate_legacy_state)
-            .map_err(|storage_error| {
-                format!(
-                    "Failed to load AI provider state from fallback local storage: {}",
-                    storage_error
-                )
-            })
+        match storage::get(STORAGE_KEY) {
+            Ok(state) => Ok(migrate_legacy_state(state)),
+            Err(storage_error) => {
+                let error_text = storage_error.to_string();
+                if error_text.contains("missing")
+                    || error_text.contains("not found")
+                    || error_text.contains("does not exist")
+                {
+                    Ok(AiProviderState::default())
+                } else {
+                    Err(format!(
+                        "Failed to load AI provider state from fallback local storage: {}",
+                        storage_error
+                    ))
+                }
+            }
+        }
     }
 
     #[cfg(not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))))]
@@ -407,6 +422,7 @@ pub async fn save_provider_state(state: &AiProviderState) -> Result<(), String> 
 
 pub fn cache_provider_state(state: &AiProviderState) -> Result<(), String> {
     storage::set(STORAGE_KEY, state)
+        .map_err(|error| format!("{CACHE_PROVIDER_STATE_ERROR_PREFIX}{error}"))
 }
 
 #[cfg(test)]

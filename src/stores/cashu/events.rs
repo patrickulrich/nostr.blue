@@ -76,6 +76,26 @@ pub async fn remove_pending_event(event_id: &str) -> Result<(), String> {
     log::debug!("Removed pending event from queue: {}", event_id);
     Ok(())
 }
+
+async fn remove_pending_nostr_events_by_token_id(pending_token_id: &str) {
+    let matching_ids: Vec<String> = PENDING_NOSTR_EVENTS
+        .read()
+        .iter()
+        .filter(|event| event.pending_token_id.as_deref() == Some(pending_token_id))
+        .map(|event| event.id.clone())
+        .collect();
+
+    for pending_event_id in matching_ids {
+        if let Err(error) = remove_pending_event(&pending_event_id).await {
+            log::warn!(
+                "Failed to remove queued retry {} for token {}: {}",
+                pending_event_id,
+                pending_token_id,
+                error
+            );
+        }
+    }
+}
 /// Queue an already-signed Event for retry when publication fails
 ///
 /// Optional `pending_token_id` and `mint_url` link this pending event to a token
@@ -175,7 +195,7 @@ pub async fn sign_event_builder_with_signer(
         crate::stores::signer::SignerType::Keys(keys) => builder
             .sign_with_keys(&keys)
             .map_err(|e| format!("Failed to sign event: {}", e)),
-        #[cfg(target_family = "wasm")]
+        #[cfg(all(feature = "web", target_family = "wasm"))]
         crate::stores::signer::SignerType::BrowserExtension(browser_signer) => builder
             .sign(&*browser_signer)
             .await
@@ -255,12 +275,12 @@ pub async fn queue_token_event_for_retry(
     builder: nostr_sdk::EventBuilder,
     pending_token_id: String,
     mint_url: String,
-) {
+) -> Result<(), String> {
     let event = match sign_event_builder(builder).await {
         Ok(e) => e,
         Err(e) => {
             log::error!("Cannot queue token event: {}", e);
-            return;
+            return Err(e);
         }
     };
     queue_signed_event_for_retry(
@@ -276,13 +296,6 @@ pub async fn queue_token_event_for_retry(
             pending_token_id
         );
     })
-    .unwrap_or_else(|err| {
-        log::error!(
-            "Failed to queue token event for retry, pending_id={}: {}",
-            pending_token_id,
-            err
-        );
-    });
 }
 /// Get count of pending events waiting to be published
 pub fn get_pending_event_count() -> usize {
@@ -864,6 +877,28 @@ pub async fn process_pending_events() -> Result<usize, String> {
                     if !history_handled {
                         continue;
                     }
+                    if event.history_amount.is_some() {
+                        let mut updated_event = event.clone();
+                        updated_event.published_event_id = Some(nostr_event_id.clone());
+                        updated_event.history_amount = None;
+                        updated_event.history_type = None;
+                        let mut events = PENDING_NOSTR_EVENTS.write();
+                        if let Some(pos) = events.iter().position(|entry| entry.id == event.id) {
+                            events[pos] = updated_event.clone();
+                        }
+                        drop(events);
+                        if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
+                            if let Err(error) = localstore.update_pending_event(&updated_event).await
+                            {
+                                log::warn!(
+                                    "Failed to persist completed history state for pending event {}: {}",
+                                    event.id,
+                                    error
+                                );
+                                continue;
+                            }
+                        }
+                    }
                 }
                 let _ = remove_pending_event(&event.id).await;
                 processed_count += 1;
@@ -1005,6 +1040,7 @@ pub async fn reconcile_pending_event_ids() -> Result<usize, String> {
                 old_event_id
             );
             remove_token_by_event_id(&old_event_id);
+            remove_pending_nostr_events_by_token_id(&old_event_id).await;
             reconciled += 1;
             continue;
         }

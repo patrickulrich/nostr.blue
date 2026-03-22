@@ -76,10 +76,12 @@ fn pending_publish_client_tag_storage_key() -> Option<String> {
         .pubkey
         .clone()
         .filter(|pubkey| !pubkey.trim().is_empty())
+        .and_then(|pubkey| crate::utils::nip19::normalize_pubkey(&pubkey).ok())
         .map(|pubkey| {
             format!(
                 "{}_{}",
-                PUBLISH_CLIENT_TAG_PENDING_LOCAL_STORAGE_KEY_PREFIX, pubkey
+                PUBLISH_CLIENT_TAG_PENDING_LOCAL_STORAGE_KEY_PREFIX,
+                pubkey.to_lowercase()
             )
         })
 }
@@ -134,9 +136,20 @@ async fn drain_publish_client_tag_queue() {
         };
 
         if let Err(e) = save_settings(&settings_to_save).await {
-            let latest_settings = SETTINGS.read().clone();
-            SETTINGS.write().clone_from(&latest_settings);
-            cache_settings(&latest_settings);
+            let pending_enabled = PUBLISH_CLIENT_TAG_SAVE_PENDING
+                .read()
+                .as_ref()
+                .copied()
+                .unwrap_or(next_enabled);
+            let settings_with_pending = {
+                let mut next = SETTINGS.read().clone();
+                next.publish_client_tag = pending_enabled;
+                next
+            };
+            SETTINGS.write().clone_from(&settings_with_pending);
+            cache_settings(&settings_with_pending);
+            *PUBLISH_CLIENT_TAG_SAVE_PENDING.write() = Some(pending_enabled);
+            cache_pending_publish_client_tag(Some(pending_enabled));
             log::warn!("Failed to persist client tag setting to Nostr: {}", e);
             SETTINGS_ERROR.write().clone_from(&Some(e));
             break;

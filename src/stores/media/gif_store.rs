@@ -406,7 +406,7 @@ pub async fn publish_gif_event(
             .sign(&keys)
             .await
             .map_err(|e| format!("Failed to sign event: {}", e))?,
-        #[cfg(target_family = "wasm")]
+        #[cfg(all(feature = "web", target_family = "wasm"))]
         crate::stores::signer::SignerType::BrowserExtension(browser_signer) => builder
             .sign(browser_signer.as_ref())
             .await

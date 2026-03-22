@@ -4,7 +4,7 @@ use crate::platform::Nip55Signer;
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use nostr::{Keys, PublicKey};
-#[cfg(target_family = "wasm")]
+#[cfg(all(feature = "web", target_family = "wasm"))]
 use nostr_browser_signer::BrowserSigner;
 use nostr_connect::client::NostrConnect;
 use serde::{Deserialize, Serialize};
@@ -15,7 +15,7 @@ pub enum SignerType {
     /// Private key signer (nsec)
     Keys(Keys),
     /// Browser extension signer (NIP-07)
-    #[cfg(target_family = "wasm")]
+    #[cfg(all(feature = "web", target_family = "wasm"))]
     BrowserExtension(Arc<BrowserSigner>),
     /// Remote signer (NIP-46)
     NostrConnect(Arc<NostrConnect>),
@@ -28,7 +28,7 @@ impl SignerType {
     pub async fn public_key(&self) -> Result<PublicKey, String> {
         match self {
             SignerType::Keys(keys) => Ok(keys.public_key()),
-            #[cfg(target_family = "wasm")]
+            #[cfg(all(feature = "web", target_family = "wasm"))]
             SignerType::BrowserExtension(signer) => {
                 use nostr::signer::NostrSigner;
                 signer
@@ -57,7 +57,7 @@ impl SignerType {
     pub fn backend_name(&self) -> &'static str {
         match self {
             SignerType::Keys(_) => "Keys",
-            #[cfg(target_family = "wasm")]
+            #[cfg(all(feature = "web", target_family = "wasm"))]
             SignerType::BrowserExtension(_) => "Browser Extension",
             SignerType::NostrConnect(_) => "Remote Signer",
             #[cfg(feature = "mobile")]
@@ -69,7 +69,7 @@ impl SignerType {
     pub fn into_nostr_signer(self) -> Arc<dyn nostr::signer::NostrSigner> {
         match self {
             SignerType::Keys(keys) => Arc::new(keys),
-            #[cfg(target_family = "wasm")]
+            #[cfg(all(feature = "web", target_family = "wasm"))]
             SignerType::BrowserExtension(signer) => signer,
             SignerType::NostrConnect(nostr_connect) => nostr_connect,
             #[cfg(feature = "mobile")]
@@ -80,7 +80,7 @@ impl SignerType {
     pub fn as_nostr_signer(&self) -> Arc<dyn nostr::signer::NostrSigner> {
         match self {
             SignerType::Keys(keys) => Arc::new(keys.clone()),
-            #[cfg(target_family = "wasm")]
+            #[cfg(all(feature = "web", target_family = "wasm"))]
             SignerType::BrowserExtension(signer) => signer.clone(),
             SignerType::NostrConnect(nostr_connect) => nostr_connect.clone(),
             #[cfg(feature = "mobile")]
@@ -98,7 +98,7 @@ pub struct SignerInfo {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SignerBackend {
     Keys,
-    #[cfg(target_family = "wasm")]
+    #[cfg(all(feature = "web", target_family = "wasm"))]
     BrowserExtension,
     RemoteSigner,
     #[cfg(feature = "mobile")]
@@ -109,7 +109,7 @@ impl SignerBackend {
     pub fn as_str(&self) -> &'static str {
         match self {
             SignerBackend::Keys => "keys",
-            #[cfg(target_family = "wasm")]
+            #[cfg(all(feature = "web", target_family = "wasm"))]
             SignerBackend::BrowserExtension => "browser_extension",
             SignerBackend::RemoteSigner => "remote_signer",
             #[cfg(feature = "mobile")]
@@ -127,7 +127,7 @@ pub async fn set_signer(signer: SignerType) -> Result<(), String> {
     let public_key = signer.public_key().await?;
     let backend = match &signer {
         SignerType::Keys(_) => SignerBackend::Keys,
-        #[cfg(target_family = "wasm")]
+        #[cfg(all(feature = "web", target_family = "wasm"))]
         SignerType::BrowserExtension(_) => SignerBackend::BrowserExtension,
         SignerType::NostrConnect(_) => SignerBackend::RemoteSigner,
         #[cfg(feature = "mobile")]
@@ -170,7 +170,7 @@ pub fn has_signer() -> bool {
 pub async fn restore_session() -> Result<(), String> {
     if let Some(info) = get_signer_info() {
         match info.backend {
-            #[cfg(target_family = "wasm")]
+            #[cfg(all(feature = "web", target_family = "wasm"))]
             SignerBackend::BrowserExtension => match BrowserSigner::new() {
                 Ok(signer) => {
                     let signer_type = SignerType::BrowserExtension(Arc::new(signer));

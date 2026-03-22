@@ -227,7 +227,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                         return;
                     }
                 },
-                #[cfg(target_family = "wasm")]
+                #[cfg(all(feature = "web", target_family = "wasm"))]
                 signer::SignerType::BrowserExtension(ref signer) => {
                     #[allow(unused_imports)]
                     use nostr::signer::NostrSigner;

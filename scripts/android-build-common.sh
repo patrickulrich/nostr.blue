@@ -220,7 +220,9 @@ configure_release_signing() {
     cp "$DIOXUS_CONFIG" "$DIOXUS_CONFIG_BACKUP"
 
     local missing_envs=()
-    mapfile -t missing_envs < <(python3 - "$DIOXUS_CONFIG" inspect <<'PY'
+    while IFS= read -r env_name; do
+        missing_envs+=("$env_name")
+    done < <(python3 - "$DIOXUS_CONFIG" inspect <<'PY'
 from pathlib import Path
 import json
 import os
@@ -293,11 +295,41 @@ if section_start is None:
     if new_lines and new_lines[-1].strip():
         new_lines.append("")
     new_lines.append("[bundle.android]")
+    section_start = len(new_lines) - 1
     section_end = len(new_lines)
+else:
+    section_lines = new_lines[section_start + 1:section_end]
+    cleaned_section_lines = []
+    section_keys_present = set()
+    replaced_placeholder_keys = set()
+    for line in section_lines:
+        stripped = line.strip()
+        key, sep, _ = stripped.partition("=")
+        key = key.strip()
+        if sep and key in required_keys:
+            if str(existing_values.get(key, "")).strip():
+                cleaned_section_lines.append(line)
+                section_keys_present.add(key)
+            elif key not in replaced_placeholder_keys:
+                cleaned_section_lines.append(
+                    f"{key} = {json.dumps(resolved_values[key])}"
+                )
+                replaced_placeholder_keys.add(key)
+                section_keys_present.add(key)
+            continue
+        cleaned_section_lines.append(line)
+    new_lines = (
+        new_lines[:section_start + 1]
+        + cleaned_section_lines
+        + new_lines[section_end:]
+    )
+    section_end = section_start + 1 + len(cleaned_section_lines)
 
 insertion_index = section_end
 for key in required_keys:
     if str(existing_values.get(key, "")).strip():
+        continue
+    if section_start is not None and key in section_keys_present:
         continue
     new_lines.insert(insertion_index, f"{key} = {json.dumps(resolved_values[key])}")
     insertion_index += 1
@@ -311,11 +343,40 @@ PY
         require_env "$missing_env"
     done
 
-    if printf '%s\n' "${missing_envs[@]}" | grep -qx 'ANDROID_KEYSTORE_FILE'; then
-        if [ ! -f "$ANDROID_KEYSTORE_FILE" ] || [ ! -r "$ANDROID_KEYSTORE_FILE" ]; then
-            echo "ERROR: ANDROID_KEYSTORE_FILE is not a readable regular file: $ANDROID_KEYSTORE_FILE" >&2
-            exit 1
-        fi
+    if [ -z "${ANDROID_KEYSTORE_FILE:-}" ]; then
+        ANDROID_KEYSTORE_FILE="$(python3 - "$DIOXUS_CONFIG" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+lines = text.splitlines()
+in_bundle_android = False
+
+for line in lines:
+    stripped = line.strip()
+    if stripped == "[bundle.android]":
+        in_bundle_android = True
+        continue
+    if in_bundle_android and stripped.startswith("[") and stripped.endswith("]"):
+        break
+    if in_bundle_android:
+        key, sep, raw_value = stripped.partition("=")
+        if sep and key.strip() == "jks_file":
+            try:
+                parsed_value = json.loads(raw_value.strip())
+            except json.JSONDecodeError:
+                parsed_value = raw_value.strip().strip('"').strip("'")
+            print(parsed_value if isinstance(parsed_value, str) else str(parsed_value))
+            break
+PY
+)"
+    fi
+
+    if [ ! -f "$ANDROID_KEYSTORE_FILE" ] || [ ! -r "$ANDROID_KEYSTORE_FILE" ]; then
+        echo "ERROR: ANDROID_KEYSTORE_FILE is not a readable regular file: $ANDROID_KEYSTORE_FILE" >&2
+        exit 1
     fi
 
     python3 - "$DIOXUS_CONFIG" write <<'PY'
@@ -386,11 +447,41 @@ if section_start is None:
     if new_lines and new_lines[-1].strip():
         new_lines.append("")
     new_lines.append("[bundle.android]")
+    section_start = len(new_lines) - 1
     section_end = len(new_lines)
+else:
+    section_lines = new_lines[section_start + 1:section_end]
+    cleaned_section_lines = []
+    section_keys_present = set()
+    replaced_placeholder_keys = set()
+    for line in section_lines:
+        stripped = line.strip()
+        key, sep, _ = stripped.partition("=")
+        key = key.strip()
+        if sep and key in required_keys:
+            if str(existing_values.get(key, "")).strip():
+                cleaned_section_lines.append(line)
+                section_keys_present.add(key)
+            elif key not in replaced_placeholder_keys:
+                cleaned_section_lines.append(
+                    f"{key} = {json.dumps(resolved_values[key])}"
+                )
+                replaced_placeholder_keys.add(key)
+                section_keys_present.add(key)
+            continue
+        cleaned_section_lines.append(line)
+    new_lines = (
+        new_lines[:section_start + 1]
+        + cleaned_section_lines
+        + new_lines[section_end:]
+    )
+    section_end = section_start + 1 + len(cleaned_section_lines)
 
 insertion_index = section_end
 for key in required_keys:
     if str(existing_values.get(key, "")).strip():
+        continue
+    if section_start is not None and key in section_keys_present:
         continue
     new_lines.insert(insertion_index, f"{key} = {json.dumps(resolved_values[key])}")
     insertion_index += 1

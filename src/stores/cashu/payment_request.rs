@@ -93,7 +93,7 @@ async fn sign_cashu_event_builder(
         SignerType::Keys(keys) => builder
             .sign_with_keys(keys)
             .map_err(|e| format!("Failed to sign event: {}", e)),
-        #[cfg(target_family = "wasm")]
+        #[cfg(all(feature = "web", target_family = "wasm"))]
         SignerType::BrowserExtension(browser_signer) => builder
             .sign(&**browser_signer)
             .await

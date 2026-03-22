@@ -141,9 +141,10 @@ pub fn AIChat() -> Element {
     let mut chat_history_generation = use_signal(|| 0u32);
     let mut persisted_messages_dirty = use_signal(|| false);
     let persisted_messages_save_generation = use_signal(|| 0u32);
-    let persisted_messages_save_in_flight = use_signal(|| false);
+    let mut persisted_messages_save_in_flight = use_signal(|| false);
     let mut persisted_messages_failed_snapshot = use_signal(|| None::<FailedHistorySnapshot>);
     let mut failed_snapshot_retry_generation = use_signal(|| 0u32);
+    let mut last_chat_history_save_event_id = use_signal(|| 0u64);
     let mut provider_models_generation = use_signal(|| 0u32);
     let mut initial_loaded_messages = use_signal(Vec::<PersistedChatMessage>::new);
     let messages_container_id = use_signal(|| "ai-chat-messages".to_string());
@@ -220,6 +221,13 @@ pub fn AIChat() -> Element {
 
         match event.result {
             Ok(()) => {
+                if error
+                    .read()
+                    .as_ref()
+                    .is_some_and(|err| ai_provider_store::is_cache_provider_state_error(err))
+                {
+                    error.set(None);
+                }
                 if matches!(action, PendingProviderSaveAction::BootstrapPpq) {
                     ppq_bootstrap_loading.set(false);
                 }
@@ -228,6 +236,48 @@ pub fn AIChat() -> Element {
                 error.set(Some(err));
                 if matches!(action, PendingProviderSaveAction::BootstrapPpq) {
                     ppq_bootstrap_loading.set(false);
+                }
+            }
+        }
+    });
+
+    use_effect(move || {
+        let Some(event) = ai_chat_store::CHAT_HISTORY_SAVE_EVENT.read().clone() else {
+            return;
+        };
+        if event.event_id <= *last_chat_history_save_event_id.read() {
+            return;
+        }
+        last_chat_history_save_event_id.set(event.event_id);
+
+        if event.account_key != ai_chat_store::current_account_key() {
+            return;
+        }
+
+        persisted_messages_save_in_flight.set(false);
+        let latest_persisted_messages = persisted_messages.read().clone();
+        let snapshot_matches_current = latest_persisted_messages == event.snapshot;
+
+        match event.result {
+            Ok(()) => {
+                if snapshot_matches_current {
+                    persisted_messages_dirty.set(false);
+                    initial_loaded_messages.set(event.snapshot);
+                    persisted_messages_failed_snapshot.set(None);
+                }
+            }
+            Err(err) => {
+                if snapshot_matches_current {
+                    let snapshot_key = history_save_snapshot_key(
+                        &event.account_key,
+                        &event.snapshot,
+                        &initial_loaded_messages.read(),
+                    );
+                    error.set(Some(err));
+                    persisted_messages_failed_snapshot.set(Some(FailedHistorySnapshot {
+                        snapshot_key,
+                        failed_at_ms: crate::platform::timestamp::now_millis(),
+                    }));
                 }
             }
         }
@@ -273,6 +323,8 @@ pub fn AIChat() -> Element {
         chat_history_loaded.set(false);
         chat_history_loading.set(false);
         persisted_messages_dirty.set(false);
+        persisted_messages_save_in_flight.set(false);
+        persisted_messages_failed_snapshot.set(None);
         initial_loaded_messages.set(Vec::new());
         if !AI_CHAT_HISTORY_LOAD_ENABLED && !AI_CHAT_HISTORY_SAVE_ENABLED {
             return;
@@ -422,79 +474,18 @@ pub fn AIChat() -> Element {
             return;
         }
 
-        let mut persisted_messages_dirty_signal = persisted_messages_dirty;
         let mut persisted_messages_save_generation_signal = persisted_messages_save_generation;
         let mut persisted_messages_save_in_flight_signal = persisted_messages_save_in_flight;
-        let persisted_messages_signal = persisted_messages;
-        let chat_history_generation_signal = chat_history_generation;
-        let mut initial_loaded_messages_signal = initial_loaded_messages;
-        let mut persisted_messages_failed_snapshot_signal = persisted_messages_failed_snapshot;
         let generation = persisted_messages_save_generation_signal
             .read()
             .wrapping_add(1);
-        let chat_generation = *chat_history_generation_signal.read();
         persisted_messages_save_in_flight_signal.set(true);
         persisted_messages_save_generation_signal.set(generation);
-        spawn(async move {
-            const MAX_SAVE_ATTEMPTS: u32 = 4;
-
-            for attempt in 0..MAX_SAVE_ATTEMPTS {
-                if *persisted_messages_save_generation_signal.read() != generation
-                    || *chat_history_generation_signal.read() != chat_generation
-                    || ai_chat_store::current_account_key() != account_key
-                {
-                    persisted_messages_save_in_flight_signal.set(false);
-                    return;
-                }
-
-                let result = if persisted_messages_snapshot.is_empty() {
-                    ai_chat_store::clear_chat_history(&account_key).await
-                } else {
-                    ai_chat_store::save_chat_history(&account_key, &persisted_messages_snapshot)
-                        .await
-                };
-
-                match result {
-                    Ok(()) => {
-                        if *persisted_messages_save_generation_signal.read() == generation
-                            && *chat_history_generation_signal.read() == chat_generation
-                            && ai_chat_store::current_account_key() == account_key
-                        {
-                            let latest_persisted_messages =
-                                persisted_messages_signal.read().clone();
-                            if latest_persisted_messages == persisted_messages_snapshot {
-                                persisted_messages_dirty_signal.set(false);
-                                initial_loaded_messages_signal
-                                    .set(persisted_messages_snapshot.clone());
-                            }
-                            persisted_messages_failed_snapshot_signal.set(None);
-                        }
-                        persisted_messages_save_in_flight_signal.set(false);
-                        return;
-                    }
-                    Err(e) => {
-                        if attempt + 1 == MAX_SAVE_ATTEMPTS {
-                            if *persisted_messages_save_generation_signal.read() == generation
-                                && *chat_history_generation_signal.read() == chat_generation
-                                && ai_chat_store::current_account_key() == account_key
-                            {
-                                error.set(Some(e));
-                                persisted_messages_failed_snapshot_signal.set(Some(
-                                    FailedHistorySnapshot {
-                                        snapshot_key: computed_snapshot_key.clone(),
-                                        failed_at_ms: crate::platform::timestamp::now_millis(),
-                                    },
-                                ));
-                            }
-                            persisted_messages_save_in_flight_signal.set(false);
-                            return;
-                        }
-
-                        crate::platform::timer::sleep_ms((attempt + 1) * 100).await;
-                    }
-                }
-            }
-        });
+        if let Some((queued_account_key, queued_snapshot)) =
+            ai_chat_store::queue_chat_history_save(account_key, persisted_messages_snapshot)
+        {
+            ai_chat_store::process_queued_chat_history_saves(queued_account_key, queued_snapshot);
+        }
     });
 
     use_effect(move || {
@@ -729,7 +720,7 @@ pub fn AIChat() -> Element {
                                 }
                                 ppq_bootstrap_loading.set(true);
                                 error.set(None);
-                                spawn(async move {
+                                dioxus::core::spawn_forever(async move {
                                     match ppq::create_account().await {
                                         Ok(account) => {
                                             let mut next_state = provider_state.read().clone();

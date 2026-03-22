@@ -185,13 +185,19 @@ pub fn PpqSettingsPanel(
                     }
                     InfoCard {
                         title: "Balance".to_string(),
-                        value: balance
-                            .read()
-                            .as_ref()
-                            .and_then(|item| item.amount.map(|amount| format!("{:.4} {}", amount, item.currency)))
-                            .unwrap_or_else(|| "Unknown".to_string()),
+                        value: if let Some(err) = balance_error.read().as_ref() {
+                            err.clone()
+                        } else {
+                            balance
+                                .read()
+                                .as_ref()
+                                .and_then(|item| item.amount.map(|amount| format!("{:.4} {}", amount, item.currency)))
+                                .unwrap_or_else(|| "Unknown".to_string())
+                        },
                         subtle: if *balance_loading.read() {
                             "Refreshing balance...".to_string()
+                        } else if balance_error.read().is_some() {
+                            "Balance refresh failed".to_string()
                         } else {
                             "Refresh to query PPQ credits/balance".to_string()
                         },
@@ -365,6 +371,7 @@ pub fn PpqSettingsPanel(
                                     topup_error.set(Some("PPQ account is missing an API key".to_string()));
                                     return;
                                 }
+                                topup_invoice.set(None);
                                 topup_loading.set(true);
                                 topup_error.set(None);
                                 let currency = topup_currency.read().trim().to_uppercase();

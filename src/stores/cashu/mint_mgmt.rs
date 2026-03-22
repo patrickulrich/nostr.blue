@@ -65,7 +65,7 @@ async fn publish_wallet_snapshot(privkey: &str, mints: &[String]) -> Result<Even
         crate::stores::signer::SignerType::Keys(keys) => builder
             .sign_with_keys(&keys)
             .map_err(|e| format!("Failed to sign wallet event: {}", e))?,
-        #[cfg(target_family = "wasm")]
+        #[cfg(all(feature = "web", target_family = "wasm"))]
         crate::stores::signer::SignerType::BrowserExtension(browser_signer) => builder
             .sign(&*browser_signer)
             .await
@@ -88,17 +88,15 @@ async fn publish_or_queue_wallet_snapshot(event: Event) -> Result<(), String> {
     async fn remove_stale_pending_wallet_snapshots(
         stale_pending_ids: &[String],
     ) -> Result<(), String> {
+        let mut errors = Vec::new();
         if let Some(localstore) = SHARED_LOCALSTORE.read().as_ref().cloned() {
             for pending_id in stale_pending_ids {
-                localstore
-                    .remove_pending_event(pending_id)
-                    .await
-                    .map_err(|e| {
-                        format!(
-                            "Failed to replace pending wallet snapshot {}: {}",
-                            pending_id, e
-                        )
-                    })?;
+                if let Err(e) = localstore.remove_pending_event(pending_id).await {
+                    errors.push(format!(
+                        "Failed to replace pending wallet snapshot {}: {}",
+                        pending_id, e
+                    ));
+                }
             }
         }
         if !stale_pending_ids.is_empty() {
@@ -106,7 +104,11 @@ async fn publish_or_queue_wallet_snapshot(event: Event) -> Result<(), String> {
                 .write()
                 .retain(|pending| !stale_pending_ids.contains(&pending.id));
         }
-        Ok(())
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; "))
+        }
     }
 
     let client = nostr_client::NOSTR_CLIENT.read().as_ref().cloned();
@@ -1327,7 +1329,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         );
         let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
         super::events::queue_token_event_for_retry(builder, pending_id.clone(), mint_url.clone())
-            .await;
+            .await?;
         pending_id
     } else {
         log::error!("Non-retryable publish error: {}", last_error);

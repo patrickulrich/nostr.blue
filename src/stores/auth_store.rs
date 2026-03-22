@@ -3,7 +3,7 @@ use crate::stores::signer::{set_signer as store_signer, SignerType};
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use nostr::{Keys, PublicKey};
-#[cfg(target_family = "wasm")]
+#[cfg(all(feature = "web", target_family = "wasm"))]
 use nostr_browser_signer::BrowserSigner;
 use nostr_connect::client::NostrConnect;
 use nostr_sdk::nips::nip46::NostrConnectURI;
@@ -317,7 +317,7 @@ pub async fn login_with_npub(npub: &str) -> Result<(), String> {
 }
 /// Login with NIP-07 browser extension (official implementation)
 pub async fn login_with_browser_extension() -> Result<(), String> {
-    #[cfg(target_family = "wasm")]
+    #[cfg(all(feature = "web", target_family = "wasm"))]
     {
         log::info!("Attempting browser extension login...");
         let browser_signer = BrowserSigner::new()
@@ -345,7 +345,7 @@ pub async fn login_with_browser_extension() -> Result<(), String> {
         run_post_login_init().await;
         Ok(())
     }
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(not(all(feature = "web", target_family = "wasm")))]
     {
         Err("Browser extension login is only available in browser".to_string())
     }
@@ -358,11 +358,11 @@ pub async fn login_with_nip07() -> Result<(), String> {
 }
 /// Check if browser extension (NIP-07) is available
 pub fn is_browser_extension_available() -> bool {
-    #[cfg(target_family = "wasm")]
+    #[cfg(all(feature = "web", target_family = "wasm"))]
     {
         BrowserSigner::new().is_ok()
     }
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(not(all(feature = "web", target_family = "wasm")))]
     {
         false
     }

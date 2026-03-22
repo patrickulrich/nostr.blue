@@ -431,7 +431,7 @@ pub async fn receive_tokens_with_options(
                     pending_id.clone(),
                     mint_url.clone(),
                 )
-                .await;
+                .await?;
                 pending_id
             } else {
                 log::warn!("Permanent error - not queueing for retry: {}", last_error);

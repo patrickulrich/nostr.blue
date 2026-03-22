@@ -131,11 +131,20 @@ pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
                     cashu::send_tokens(mint, amount_sats).await
                 };
                 match result {
-                    Ok(token_string) => {
+                    Ok(outcome) => {
+                        let token_string = outcome.token_string;
                         token_result.set(Some(token_string.clone()));
                         is_sending.set(false);
                         amount.set(String::new());
                         recipient_pubkey.set(String::new());
+                        if outcome.warnings.is_empty() {
+                            error_message.set(None);
+                        } else {
+                            error_message.set(Some(format!(
+                                "Token created with warning: {}",
+                                outcome.warnings.join(" ")
+                            )));
+                        }
 
                         // Only show "Pending" when claim tracking is active
                         match cashu::extract_y_values_from_token(&token_string) {

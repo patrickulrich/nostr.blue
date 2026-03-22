@@ -1,6 +1,11 @@
 use crate::stores::auth_store;
+use dioxus::core::spawn_forever;
+use dioxus::prelude::{GlobalSignal, Signal};
 use dioxus::prelude::ReadableExt;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 #[cfg(not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))))]
 use crate::platform::storage;
@@ -8,6 +13,20 @@ use crate::platform::storage;
 #[cfg(not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))))]
 const STORAGE_KEY_PREFIX: &str = "nostr_blue_ai_chat_history";
 const ANONYMOUS_ACCOUNT_KEY: &str = "anonymous";
+static CHAT_HISTORY_SAVE_EVENT_ID: AtomicU64 = AtomicU64::new(0);
+pub static CHAT_HISTORY_SAVE_EVENT: GlobalSignal<Option<ChatHistorySaveEvent>> =
+    Signal::global(|| None);
+
+#[derive(Default)]
+struct PendingChatHistorySaveQueue {
+    entries: HashMap<String, PendingChatHistorySave>,
+}
+
+#[derive(Default)]
+struct PendingChatHistorySave {
+    in_flight: bool,
+    latest: Option<Vec<PersistedChatMessage>>,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum PersistedChatRole {
@@ -42,6 +61,14 @@ pub struct PersistedChatMessage {
     pub tool_calls: Vec<PersistedToolCall>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChatHistorySaveEvent {
+    pub event_id: u64,
+    pub account_key: String,
+    pub snapshot: Vec<PersistedChatMessage>,
+    pub result: Result<(), String>,
+}
+
 pub fn account_key_for_pubkey(pubkey: Option<&str>) -> String {
     pubkey
         .and_then(|value| crate::utils::nip19::normalize_pubkey(value).ok())
@@ -51,6 +78,88 @@ pub fn account_key_for_pubkey(pubkey: Option<&str>) -> String {
 pub fn current_account_key() -> String {
     let current_pubkey = auth_store::AUTH_STATE.read().pubkey.clone();
     account_key_for_pubkey(current_pubkey.as_deref())
+}
+
+fn pending_chat_history_save_queue() -> &'static Mutex<PendingChatHistorySaveQueue> {
+    static PENDING_SAVE: OnceLock<Mutex<PendingChatHistorySaveQueue>> = OnceLock::new();
+    PENDING_SAVE.get_or_init(|| Mutex::new(PendingChatHistorySaveQueue::default()))
+}
+
+pub fn queue_chat_history_save(
+    account_key: String,
+    snapshot: Vec<PersistedChatMessage>,
+) -> Option<(String, Vec<PersistedChatMessage>)> {
+    let mut pending = pending_chat_history_save_queue()
+        .lock()
+        .expect("chat history save queue poisoned");
+    let entry = pending.entries.entry(account_key.clone()).or_default();
+    entry.latest = Some(snapshot);
+
+    if entry.in_flight {
+        None
+    } else {
+        entry.in_flight = true;
+        entry.latest.take().map(|snapshot| (account_key, snapshot))
+    }
+}
+
+fn finish_chat_history_save(
+    account_key: &str,
+) -> Option<(String, Vec<PersistedChatMessage>)> {
+    let mut pending = pending_chat_history_save_queue()
+        .lock()
+        .expect("chat history save queue poisoned");
+
+    let mut remove_entry = false;
+    let next = if let Some(entry) = pending.entries.get_mut(account_key) {
+        if let Some(snapshot) = entry.latest.take() {
+            Some((account_key.to_string(), snapshot))
+        } else {
+            entry.in_flight = false;
+            remove_entry = true;
+            None
+        }
+    } else {
+        None
+    };
+
+    if remove_entry {
+        pending.entries.remove(account_key);
+    }
+
+    next
+}
+
+fn emit_chat_history_save_event(
+    account_key: String,
+    snapshot: Vec<PersistedChatMessage>,
+    result: Result<(), String>,
+) {
+    let event_id = CHAT_HISTORY_SAVE_EVENT_ID.fetch_add(1, Ordering::SeqCst) + 1;
+    *CHAT_HISTORY_SAVE_EVENT.write() = Some(ChatHistorySaveEvent {
+        event_id,
+        account_key,
+        snapshot,
+        result,
+    });
+}
+
+pub fn process_queued_chat_history_saves(
+    initial_account_key: String,
+    initial_snapshot: Vec<PersistedChatMessage>,
+) {
+    spawn_forever(async move {
+        let mut next_save = Some((initial_account_key, initial_snapshot));
+        while let Some((account_key, snapshot)) = next_save {
+            let result = if snapshot.is_empty() {
+                clear_chat_history(&account_key).await
+            } else {
+                save_chat_history(&account_key, &snapshot).await
+            };
+            emit_chat_history_save_event(account_key.clone(), snapshot, result);
+            next_save = finish_chat_history_save(&account_key);
+        }
+    });
 }
 
 #[cfg(not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))))]
