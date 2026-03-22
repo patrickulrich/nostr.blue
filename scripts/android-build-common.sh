@@ -90,6 +90,64 @@ sync_overlay_dir() {
     done < <(find "$src_dir" -mindepth 1 -print0)
 }
 
+find_wry_android_kotlin_src() {
+    local matches=()
+    local search_root
+    for search_root in "$HOME/.cargo/registry/src" "$HOME/.cargo/git/checkouts"; do
+        [ -d "$search_root" ] || continue
+        while IFS= read -r -d '' path; do
+            matches+=("$path")
+        done < <(find "$search_root" -type d \( -path '*/wry-*/src/android/kotlin' -o -path '*/wry/src/android/kotlin' \) -print0 2>/dev/null)
+    done
+
+    if [ "${#matches[@]}" -eq 0 ]; then
+        echo "ERROR: Unable to locate Wry Android Kotlin sources in Cargo caches" >&2
+        exit 1
+    fi
+
+    printf '%s\n' "${matches[@]}" | sort -V | tail -n1
+}
+
+render_wry_android_kotlin_sources() {
+    local src_dir="$1"
+    local dest_dir="$2"
+    local package_name="$3"
+    local library_name="$4"
+    local wry_file
+
+    mkdir -p "$dest_dir"
+
+    for wry_file in \
+        Ipc.kt \
+        Logger.kt \
+        PermissionHelper.kt \
+        RustWebChromeClient.kt \
+        RustWebView.kt \
+        RustWebViewClient.kt \
+        WryActivity.kt
+    do
+        require_file "$src_dir/$wry_file" "Missing Wry Android Kotlin support source"
+        python3 - "$src_dir/$wry_file" "$dest_dir/$wry_file" "$package_name" "$library_name" <<'PY'
+from pathlib import Path
+import sys
+
+src = Path(sys.argv[1])
+dst = Path(sys.argv[2])
+package_name = sys.argv[3]
+library_name = sys.argv[4]
+
+content = src.read_text(encoding="utf-8")
+content = content.replace("{{package}}", package_name)
+content = content.replace("{{library}}", library_name)
+content = content.replace("{{class-extension}}", "")
+content = content.replace("{{class-init}}", "")
+dst.write_text(content, encoding="utf-8")
+PY
+    done
+
+    echo "Rendered Wry Android Kotlin support sources from $src_dir"
+}
+
 version_field() {
     local field="$1"
     awk -v field="$field" '
@@ -404,8 +462,12 @@ esac
 DX_ANDROID="$PROJECT_ROOT/target/dx/nostrblue/$DX_BUILD_PROFILE/android/app"
 ANDROID_RES_SRC="$PROJECT_ROOT/android/res"
 ANDROID_KOTLIN_SRC="$PROJECT_ROOT/android/kotlin"
+ANDROID_KOTLIN_DEST="$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main"
 DIOXUS_CONFIG="$PROJECT_ROOT/Dioxus.toml"
 APP_ID="com.nostr.blue"
+ANDROID_KOTLIN_PACKAGE="dev.dioxus.main"
+ANDROID_LIBRARY_NAME="nostrblue"
+WRY_ANDROID_KOTLIN_SRC="$(find_wry_android_kotlin_src)"
 CARGO_VERSION="$(version_field version)"
 ANDROID_VERSION_CODE="$(version_code_from_semver "$CARGO_VERSION")"
 GRADLE_APP="$DX_ANDROID/app/build.gradle.kts"
@@ -522,35 +584,65 @@ for pattern, replacement in replacements:
     if count != 1:
         raise SystemExit(f"failed to patch {pattern} in {path}")
 
-kotlin_options_match = re.search(r'(?ms)^\s*kotlinOptions\s*\{\s*(.*?)^\s*\}\s*', content)
-if kotlin_options_match:
-    kotlin_options_block = kotlin_options_match.group(0)
-    updated_block, count = re.subn(
-        r'(?m)^(\s*jvmTarget\s*=\s*)"[^"]+"(\s*)$',
-        r'\1"17"\2',
-        kotlin_options_block,
-        count=1,
-    )
-    if count != 1:
-        raise SystemExit(f"unexpected kotlinOptions format in {path}")
-    content = (
-        content[:kotlin_options_match.start()]
-        + updated_block
-        + content[kotlin_options_match.end():]
-    )
-
 plugins_block = 'plugins {\n    id("com.android.application")\n    id("org.jetbrains.kotlin.android")\n}\n'
-compiler_options_block = '\nkotlin {\n    compilerOptions {\n        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17\n    }\n}\n'
-if kotlin_options_match:
-    if re.search(r'(?m)^\s*kotlinOptions\s*\{', content) and not re.search(
-        r'(?m)^\s*jvmTarget\s*=\s*"17"\s*$',
-        content,
-    ):
-        raise SystemExit(f"unresolved kotlinOptions remains in {path}")
-elif "compilerOptions" not in content:
+kotlin_block = '\nkotlin {\n    compilerOptions {\n        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17\n    }\n}\n'
+compile_options_block = (
+    '    compileOptions {\n'
+    '        sourceCompatibility = JavaVersion.VERSION_17\n'
+    '        targetCompatibility = JavaVersion.VERSION_17\n'
+    '    }\n'
+)
+compatibility_marker_start = '// nostr.blue jvm compatibility begin'
+compatibility_marker_end = '// nostr.blue jvm compatibility end'
+compatibility_block = (
+    '\n'
+    f'{compatibility_marker_start}\n'
+    'tasks.withType<org.gradle.api.tasks.compile.JavaCompile>().configureEach {\n'
+    '    sourceCompatibility = org.gradle.api.JavaVersion.VERSION_17.toString()\n'
+    '    targetCompatibility = org.gradle.api.JavaVersion.VERSION_17.toString()\n'
+    '}\n'
+    '\n'
+    'tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile>().configureEach {\n'
+    '    compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)\n'
+    '}\n'
+    f'{compatibility_marker_end}\n'
+)
+
+content, _ = re.subn(r'(?ms)^\s*kotlinOptions\s*\{.*?^\s*\}\s*', '', content, count=1)
+content, count = re.subn(
+    r'(?ms)^\s*kotlin\s*\{\s*(?:jvmToolchain\(\d+\)\s*)?compilerOptions\s*\{\s*.*?^\s*\}\s*^\s*\}\s*',
+    kotlin_block,
+    content,
+    count=1,
+)
+if count == 0:
     if plugins_block not in content:
         raise SystemExit(f"failed to find plugins block in {path}")
-    content = content.replace(plugins_block, plugins_block + compiler_options_block, 1)
+    content = content.replace(plugins_block, plugins_block + kotlin_block, 1)
+
+content, count = re.subn(
+    r'(?ms)^\s*compileOptions\s*\{\s*.*?^\s*\}\s*',
+    compile_options_block,
+    content,
+    count=1,
+)
+if count == 0:
+    android_end_match = re.search(r'(?m)^}\s*\n\s*dependencies\s*\{', content)
+    if not android_end_match:
+        raise SystemExit(f"failed to find end of android block in {path}")
+    content = (
+        content[:android_end_match.start()]
+        + compile_options_block
+        + content[android_end_match.start():]
+    )
+
+content, _ = re.subn(
+    rf'(?ms)\n{re.escape(compatibility_marker_start)}\n.*?\n{re.escape(compatibility_marker_end)}\n?',
+    '\n',
+    content,
+    count=1,
+)
+content = content.rstrip() + compatibility_block
 
 path.write_text(content)
 PY
@@ -664,9 +756,14 @@ echo ""
 echo "--- Step 4c: Copy Android Kotlin sources ---"
 sync_overlay_dir \
     "$ANDROID_KOTLIN_SRC/dev/dioxus/main" \
-    "$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main" \
+    "$ANDROID_KOTLIN_DEST" \
     "MainActivity.kt"
 echo "Copied native Android Kotlin sources"
+render_wry_android_kotlin_sources \
+    "$WRY_ANDROID_KOTLIN_SRC" \
+    "$ANDROID_KOTLIN_DEST" \
+    "$ANDROID_KOTLIN_PACKAGE" \
+    "$ANDROID_LIBRARY_NAME"
 
 echo ""
 echo "--- Step 4d: Verify Android resource overrides ---"
@@ -679,7 +776,9 @@ require_files \
     "$DX_ANDROID/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png" "generated launcher foreground asset (mdpi)" \
     "$DX_ANDROID/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png" "generated launcher foreground asset (xhdpi)" \
     "$DX_ANDROID/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png" "generated launcher foreground asset (xxhdpi)" \
-    "$DX_ANDROID/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png" "generated launcher foreground asset (xxxhdpi)"
+    "$DX_ANDROID/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png" "generated launcher foreground asset (xxxhdpi)" \
+    "$ANDROID_KOTLIN_DEST/WryActivity.kt" "generated WryActivity support source" \
+    "$ANDROID_KOTLIN_DEST/RustWebView.kt" "generated RustWebView support source"
 
 echo ""
 echo "--- Step 5: Run Gradle packaging ---"

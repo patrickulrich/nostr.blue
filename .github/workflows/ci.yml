@@ -129,7 +129,7 @@ jobs:
         run: cargo test --no-default-features --features desktop
 
   android-build:
-    name: Android APK Build
+    name: Android Release Validation
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -193,16 +193,34 @@ jobs:
       - name: Install Dioxus CLI
         run: cargo install dioxus-cli --version 0.7.3 --locked --force
 
-      - name: Build Android APK
+      - name: Generate temporary Android release keystore
+        run: |
+          mkdir -p .ci-secrets
+          keytool -genkeypair \
+            -keystore .ci-secrets/android-release.jks \
+            -storepass android \
+            -keypass android \
+            -alias ci-release \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 3650 \
+            -dname "CN=nostr.blue CI, O=nostr.blue, C=US"
+
+      - name: Build Android release APK
         run: |
           export GRADLE_USER_HOME="$GITHUB_WORKSPACE/.gradle-home"
           export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
           export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.0.12077973"
+          export ANDROID_BUILD_MODE=release
+          export ANDROID_KEYSTORE_FILE=.ci-secrets/android-release.jks
+          export ANDROID_KEYSTORE_PASSWORD=android
+          export ANDROID_KEY_ALIAS=ci-release
+          export ANDROID_KEY_PASSWORD=android
           ./scripts/build-android.sh
 
-      - name: Verify APK metadata
+      - name: Verify release APK metadata
         run: |
-          APK=nostrblue-debug.apk
+          APK=nostrblue-release.apk
           VERSION="$(sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml | head -n1)"
           AAPT="$ANDROID_SDK_ROOT/build-tools/34.0.0/aapt"
           "$AAPT" dump badging "$APK" > apk-metadata.txt
@@ -210,8 +228,30 @@ jobs:
           grep -q "versionName='$VERSION'" apk-metadata.txt
           grep -q "application-label:'nostr.blue'" apk-metadata.txt
 
-      - name: Upload Android APK
+      - name: Build Android release AAB
+        run: |
+          export GRADLE_USER_HOME="$GITHUB_WORKSPACE/.gradle-home"
+          export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.0.12077973"
+          export ANDROID_BUILD_MODE=release
+          export ANDROID_KEYSTORE_FILE=.ci-secrets/android-release.jks
+          export ANDROID_KEYSTORE_PASSWORD=android
+          export ANDROID_KEY_ALIAS=ci-release
+          export ANDROID_KEY_PASSWORD=android
+          ./scripts/build-android-aab.sh
+
+      - name: Verify release AAB artifact
+        run: |
+          AAB=nostrblue-release.aab
+          test -f "$AAB"
+          unzip -l "$AAB" > aab-contents.txt
+          grep -q "BundleConfig.pb" aab-contents.txt
+          grep -q "base/manifest/AndroidManifest.xml" aab-contents.txt
+
+      - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: nostrblue-debug-apk
-          path: nostrblue-debug.apk
+          name: nostrblue-android-release-validation
+          path: |
+            nostrblue-release.apk
+            nostrblue-release.aab

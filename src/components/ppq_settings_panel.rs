@@ -41,7 +41,9 @@ pub fn PpqSettingsPanel(
     let mut key_form_loading = use_signal(|| false);
     let mut key_form_error = use_signal(|| None::<String>);
     let mut last_loaded_credit_id = use_signal(|| None::<String>);
-    let mut request_generation = use_signal(|| 0u32);
+    let balance_request_generation = use_signal(|| 0u32);
+    let keys_request_generation = use_signal(|| 0u32);
+    let nwc_request_generation = use_signal(|| 0u32);
     let mut pending_save_snapshot = use_signal(|| None::<AiProviderState>);
     let mut pending_save_min_event_id = use_signal(|| 0u64);
 
@@ -65,8 +67,9 @@ pub fn PpqSettingsPanel(
         nwc.set(None);
         topup_invoice.set(None);
         topup_error.set(None);
-        let generation = request_generation.peek().wrapping_add(1);
-        request_generation.set(generation);
+        let balance_generation = next_request_generation(balance_request_generation);
+        let keys_generation = next_request_generation(keys_request_generation);
+        let nwc_generation = next_request_generation(nwc_request_generation);
 
         let Some(credit_id) = current_credit_id else {
             return;
@@ -77,21 +80,21 @@ pub fn PpqSettingsPanel(
             balance_loading,
             balance_error,
             credit_id.clone(),
-            Some((request_generation, generation)),
+            Some(balance_generation),
         );
         load_api_keys(
             api_keys,
             keys_loading,
             keys_error,
             credit_id.clone(),
-            Some((request_generation, generation)),
+            Some(keys_generation),
         );
         load_nwc(
             nwc,
             nwc_loading,
             nwc_error,
             credit_id,
-            Some((request_generation, generation)),
+            Some(nwc_generation),
         );
     });
 
@@ -205,14 +208,13 @@ pub fn PpqSettingsPanel(
                         class: "rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-60",
                         disabled: *account_action_loading.read() || *is_saving.read() || *balance_loading.read(),
                         onclick: move |_| {
-                            let generation = request_generation.peek().wrapping_add(1);
-                            request_generation.set(generation);
+                            let generation = next_request_generation(balance_request_generation);
                             load_balance(
                                 balance,
                                 balance_loading,
                                 balance_error,
                                 refresh_balance_credit_id.clone(),
-                                Some((request_generation, generation)),
+                                Some(generation),
                             );
                         },
                         "Refresh Balance"
@@ -221,14 +223,13 @@ pub fn PpqSettingsPanel(
                         class: "rounded-lg border border-border px-4 py-2 text-sm transition hover:bg-accent disabled:opacity-60",
                         disabled: *account_action_loading.read() || *is_saving.read() || *keys_loading.read(),
                         onclick: move |_| {
-                            let generation = request_generation.peek().wrapping_add(1);
-                            request_generation.set(generation);
+                            let generation = next_request_generation(keys_request_generation);
                             load_api_keys(
                                 api_keys,
                                 keys_loading,
                                 keys_error,
                                 refresh_keys_credit_id.clone(),
-                                Some((request_generation, generation)),
+                                Some(generation),
                             );
                         },
                         "Refresh Keys"
@@ -237,14 +238,13 @@ pub fn PpqSettingsPanel(
                         class: "rounded-lg border border-border px-4 py-2 text-sm transition hover:bg-accent disabled:opacity-60",
                         disabled: *account_action_loading.read() || *is_saving.read() || *nwc_loading.read(),
                         onclick: move |_| {
-                            let generation = request_generation.peek().wrapping_add(1);
-                            request_generation.set(generation);
+                            let generation = next_request_generation(nwc_request_generation);
                             load_nwc(
                                 nwc,
                                 nwc_loading,
                                 nwc_error,
                                 refresh_nwc_credit_id.clone(),
-                                Some((request_generation, generation)),
+                                Some(generation),
                             );
                         },
                         "Refresh NWC"
@@ -368,12 +368,14 @@ pub fn PpqSettingsPanel(
                                     match ppq::create_topup_invoice(&api_key, "btc-lightning", amount, &currency).await {
                                         Ok(invoice) => {
                                             topup_invoice.set(Some(invoice));
+                                            let generation =
+                                                next_request_generation(balance_request_generation);
                                             load_balance(
                                                 balance,
                                                 balance_loading,
                                                 balance_error,
                                                 credit_id,
-                                                None,
+                                                Some(generation),
                                             );
                                         }
                                         Err(err) => topup_error.set(Some(err)),
@@ -401,12 +403,14 @@ pub fn PpqSettingsPanel(
                                     match ppq::get_topup_status(&api_key, &invoice_id).await {
                                         Ok(invoice) => {
                                             topup_invoice.set(Some(invoice));
+                                            let generation =
+                                                next_request_generation(balance_request_generation);
                                             load_balance(
                                                 balance,
                                                 balance_loading,
                                                 balance_error,
                                                 credit_id,
-                                                None,
+                                                Some(generation),
                                             );
                                         }
                                         Err(err) => topup_error.set(Some(err)),
@@ -669,12 +673,14 @@ pub fn PpqSettingsPanel(
                                             key_usage_limit.set(String::new());
                                             key_reset_period.set(String::new());
                                             key_expire_at.set(String::new());
+                                            let generation =
+                                                next_request_generation(keys_request_generation);
                                             load_api_keys(
                                                 api_keys,
                                                 keys_loading,
                                                 keys_error,
                                                 credit_id.clone(),
-                                                None,
+                                                Some(generation),
                                             );
                                             if created_or_updated.api_key.is_some() {
                                                 set_active_ppq_key(
@@ -733,7 +739,6 @@ pub fn PpqSettingsPanel(
                                     let key_for_edit = key.clone();
                                     let key_credit_id_for_use = account.credit_id.clone();
                                     let key_credit_id_for_revoke = account.credit_id.clone();
-                                    let active_key_id_for_revoke = active_key_id.clone();
                                     rsx! {
                                         div { key: "{key.id}", class: "rounded-lg border border-border p-3 space-y-3",
                                             div { class: "flex flex-wrap items-start justify-between gap-3",
@@ -821,15 +826,24 @@ pub fn PpqSettingsPanel(
                                                     }
                                                     button {
                                                         class: "rounded-lg border border-red-500/20 px-3 py-2 text-xs text-red-600 transition hover:bg-red-500/10 dark:text-red-400 disabled:opacity-60",
-                                                        disabled: key.deleted_at.is_some(),
+                                                        disabled: key.deleted_at.is_some()
+                                                            || *is_saving.read()
+                                                            || *key_form_loading.read()
+                                                            || *keys_loading.read(),
                                                         onclick: move |_| {
                                                             let credit_id = key_credit_id_for_revoke.clone();
                                                             let key_id = key.id.clone();
-                                                            let active_key_id_for_revoke = active_key_id_for_revoke.clone();
+                                                            let generation =
+                                                                next_request_generation(keys_request_generation);
                                                             spawn(async move {
                                                                 match ppq::delete_api_key(&credit_id, &key_id).await {
                                                                     Ok(()) => {
-                                                                        if active_key_id_for_revoke.as_deref() == Some(key_id.as_str()) {
+                                                                        let active_key_id_after_delete = state
+                                                                            .read()
+                                                                            .ppq_account
+                                                                            .as_ref()
+                                                                            .and_then(|account| account.active_api_key_id.clone());
+                                                                        if active_key_id_after_delete.as_deref() == Some(key_id.as_str()) {
                                                                             clear_active_ppq_key(
                                                                                 state,
                                                                                 is_saving,
@@ -843,7 +857,7 @@ pub fn PpqSettingsPanel(
                                                                             keys_loading,
                                                                             keys_error,
                                                                             credit_id,
-                                                                            None,
+                                                                            Some(generation),
                                                                         );
                                                                     }
                                                                     Err(err) => keys_error.set(Some(err)),
@@ -1027,6 +1041,12 @@ fn load_nwc(
             nwc_loading.set(false);
         }
     });
+}
+
+fn next_request_generation(mut request_generation: Signal<u32>) -> (Signal<u32>, u32) {
+    let generation = request_generation.peek().wrapping_add(1);
+    request_generation.set(generation);
+    (request_generation, generation)
 }
 
 fn set_active_ppq_key(

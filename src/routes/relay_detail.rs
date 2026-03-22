@@ -294,7 +294,7 @@ pub fn RelayDetail(relay_id: String) -> Element {
             let known_relays = build_known_relay_set(Some(&display_info));
             let (info, metadata_error) = if !known_relays.contains(&normalized_relay_url) {
                 return Err(format!("Unknown relay: {}", relay_url));
-            } else if relay::is_relay_blocked(&relay_url) {
+            } else if relay::is_relay_blocked(&normalized_relay_url) {
                 (
                     None,
                     Some("Relay metadata fetch skipped because this relay is blocked".to_string()),
@@ -334,6 +334,11 @@ pub fn RelayDetail(relay_id: String) -> Element {
                     let metadata_error = data.metadata_error.clone();
                     let relay_url = data.relay_url.clone();
                     let http_url = data.http_url.clone();
+                    let display_name = info
+                        .as_ref()
+                        .and_then(|info| info.name.clone())
+                        .filter(|name| !name.trim().is_empty())
+                        .unwrap_or_else(|| relay_url.clone());
                     let limitation = info.as_ref().and_then(|info| info.limitation.clone());
                     let fees = info.as_ref().and_then(|info| info.fees.clone());
                     let pubkey = info.as_ref().and_then(|info| info.pubkey.clone());
@@ -370,7 +375,7 @@ pub fn RelayDetail(relay_id: String) -> Element {
                                     }
                                     div { class: "min-w-0",
                                         h2 { class: "text-xl font-semibold text-gray-900 dark:text-white",
-                                            "{info.as_ref().and_then(|info| info.name.clone()).unwrap_or_else(|| relay_url.clone())}"
+                                            "{display_name}"
                                         }
                                         p { class: "font-mono text-xs text-muted-foreground break-all", "{relay_url}" }
                                     }
@@ -378,7 +383,7 @@ pub fn RelayDetail(relay_id: String) -> Element {
                             } else {
                                 div { class: "p-6 border-b border-border",
                                     h2 { class: "text-xl font-semibold text-gray-900 dark:text-white",
-                                        "{info.as_ref().and_then(|info| info.name.clone()).unwrap_or_else(|| relay_url.clone())}"
+                                        "{display_name}"
                                     }
                                     p { class: "font-mono text-xs text-muted-foreground break-all mt-1", "{relay_url}" }
                                 }

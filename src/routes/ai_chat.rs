@@ -725,8 +725,6 @@ pub fn AIChat() -> Element {
                                                 ai_provider_store::cache_provider_state(&next_state)
                                             {
                                                 error.set(Some(err));
-                                                ppq_bootstrap_loading.set(false);
-                                                return;
                                             }
                                             providers.set(resolve_providers(&next_state));
                                             provider_state.set(next_state.clone());
@@ -989,18 +987,31 @@ fn MessageBubble(message: DisplayMessage) -> Element {
                 if !message.images.is_empty() {
                     div { class: if message.content.is_empty() { "space-y-3" } else { "mt-3 space-y-3" },
                         for (index, image) in message.images.iter().enumerate() {
-                            if let Some(image_url) = sanitize_chat_image_url(&image.url) {
-                                a {
-                                    key: "{message.id}-image-{index}",
-                                    href: "{image_url}",
-                                    target: "_blank",
-                                    rel: "noreferrer noopener",
-                                    class: "block overflow-hidden rounded-xl border border-border bg-background transition hover:opacity-95",
-                                    img {
-                                        src: "{image_url}",
-                                        alt: "{image.alt}",
-                                        title: "{image.title}",
-                                        class: "max-h-96 w-full object-contain bg-background",
+                            if let Some(image_src) = sanitize_chat_image_src(&image.url) {
+                                if let Some(image_href) = sanitize_chat_image_href(&image.url) {
+                                    a {
+                                        key: "{message.id}-image-{index}",
+                                        href: "{image_href}",
+                                        target: "_blank",
+                                        rel: "noreferrer noopener",
+                                        class: "block overflow-hidden rounded-xl border border-border bg-background transition hover:opacity-95",
+                                        img {
+                                            src: "{image_src}",
+                                            alt: "{image.alt}",
+                                            title: "{image.title}",
+                                            class: "max-h-96 w-full object-contain bg-background",
+                                        }
+                                    }
+                                } else {
+                                    div {
+                                        key: "{message.id}-image-{index}",
+                                        class: "overflow-hidden rounded-xl border border-border bg-background",
+                                        img {
+                                            src: "{image_src}",
+                                            alt: "{image.alt}",
+                                            title: "{image.title}",
+                                            class: "max-h-96 w-full object-contain bg-background",
+                                        }
                                     }
                                 }
                             }
@@ -1227,7 +1238,7 @@ fn submit_message(
                                 .images
                                 .into_iter()
                                 .filter_map(|image| {
-                                    sanitize_chat_image_url(&image.url).map(|url| ChatImage {
+                                    sanitize_chat_image_src(&image.url).map(|url| ChatImage {
                                         url,
                                         alt: "Generated image".to_string(),
                                         title: String::new(),
@@ -1414,7 +1425,7 @@ fn extract_assistant_content(content: Option<AssistantContent>) -> (String, Vec<
                         }
                     }
                     crate::services::ai_chat::AssistantContentPart::ImageUrl { image_url } => {
-                        if let Some(url) = sanitize_chat_image_url(&image_url.url) {
+                        if let Some(url) = sanitize_chat_image_src(&image_url.url) {
                             images.push(ChatImage {
                                 url,
                                 alt: "Generated image".to_string(),
@@ -1430,9 +1441,19 @@ fn extract_assistant_content(content: Option<AssistantContent>) -> (String, Vec<
     }
 }
 
-fn sanitize_chat_image_url(url: &str) -> Option<String> {
+fn sanitize_chat_image_href(url: &str) -> Option<String> {
     let trimmed = url.trim();
     is_valid_http_url(trimmed).then(|| trimmed.to_string())
+}
+
+fn sanitize_chat_image_src(url: &str) -> Option<String> {
+    let trimmed = url.trim();
+    if is_valid_http_url(trimmed) {
+        return Some(trimmed.to_string());
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    lower.starts_with("data:image/").then(|| trimmed.to_string())
 }
 
 fn execute_tool_calls(tool_calls: &[ToolCall]) -> Vec<ExecutedToolCall> {
@@ -1482,7 +1503,7 @@ fn persisted_message_from_display(message: DisplayMessage) -> PersistedChatMessa
             .images
             .into_iter()
             .filter_map(|image| {
-                sanitize_chat_image_url(&image.url).map(|url| PersistedChatImage {
+                sanitize_chat_image_src(&image.url).map(|url| PersistedChatImage {
                     url,
                     alt: image.alt,
                     title: image.title,
@@ -1513,7 +1534,7 @@ fn display_message_from_persisted(message: PersistedChatMessage) -> DisplayMessa
             .images
             .into_iter()
             .filter_map(|image| {
-                sanitize_chat_image_url(&image.url).map(|url| ChatImage {
+                sanitize_chat_image_src(&image.url).map(|url| ChatImage {
                     url,
                     alt: image.alt,
                     title: image.title,
@@ -1548,10 +1569,7 @@ fn persist_selected_model(
     provider_state.set(next_state.clone());
     match ai_provider_store::cache_provider_state(&next_state) {
         Ok(()) => error.set(None),
-        Err(e) => {
-            error.set(Some(e));
-            return;
-        }
+        Err(e) => error.set(Some(e)),
     }
 
     if !AI_CHAT_PROVIDER_PERSISTENCE_ENABLED {
@@ -1578,13 +1596,6 @@ fn resolve_selected_model(
     saved_model_id: Option<&str>,
     available_models: &[ChatModel],
 ) -> String {
-    if available_models
-        .iter()
-        .any(|model| model.id == current_model_id)
-    {
-        return current_model_id.to_string();
-    }
-
     if let Some(saved_model_id) = saved_model_id {
         if available_models
             .iter()
@@ -1592,6 +1603,13 @@ fn resolve_selected_model(
         {
             return saved_model_id.to_string();
         }
+    }
+
+    if available_models
+        .iter()
+        .any(|model| model.id == current_model_id)
+    {
+        return current_model_id.to_string();
     }
 
     available_models
@@ -1614,6 +1632,7 @@ impl From<ImageInsertData> for ChatImage {
 mod tests {
     use super::{
         build_api_messages, history_save_snapshot_key, resolve_selected_model,
+        sanitize_chat_image_href, sanitize_chat_image_src,
         should_suggest_image_model, ChatImage, DisplayMessage, DisplayRole,
     };
     use crate::services::ai_chat::{ChatMessageContent, ChatMessagePart, ChatModel, ChatModelKind};
@@ -1731,7 +1750,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_selected_model_prefers_current_when_valid() {
+    fn resolve_selected_model_prefers_saved_model_when_valid() {
         let models = vec![
             ChatModel {
                 id: "model-a".to_string(),
@@ -1753,7 +1772,7 @@ mod tests {
 
         assert_eq!(
             resolve_selected_model("model-b", Some("model-a"), &models),
-            "model-b"
+            "model-a"
         );
     }
 
@@ -1814,6 +1833,19 @@ mod tests {
     #[test]
     fn resolve_selected_model_returns_empty_without_available_models() {
         assert!(resolve_selected_model("missing", Some("also-missing"), &[]).is_empty());
+    }
+
+    #[test]
+    fn sanitize_chat_image_src_allows_data_images_but_href_rejects_them() {
+        let data_url = "data:image/png;base64,Zm9v";
+
+        assert_eq!(sanitize_chat_image_src(data_url), Some(data_url.to_string()));
+        assert_eq!(sanitize_chat_image_href(data_url), None);
+    }
+
+    #[test]
+    fn sanitize_chat_image_src_rejects_non_image_data_urls() {
+        assert_eq!(sanitize_chat_image_src("data:text/html,<b>x</b>"), None);
     }
 
     #[test]

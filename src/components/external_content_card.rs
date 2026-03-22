@@ -36,30 +36,30 @@ fn extract_podcast_feed_guid(contents: &[(ExternalContentId, Option<String>)]) -
 }
 
 fn map_podcast_items(
-    contents: &[(ExternalContentId, Option<String>)],
-) -> Vec<(ExternalContentId, Option<String>)> {
+    contents: &[(usize, (ExternalContentId, Option<String>))],
+) -> Vec<(usize, ExternalContentId, Option<String>)> {
     let mut feed_guids_after = vec![None; contents.len()];
     let mut next_feed_guid = None;
-    for (index, (content, _)) in contents.iter().enumerate().rev() {
+    for (slot, (_, (content, _))) in contents.iter().enumerate().rev() {
         if let ExternalContentId::PodcastFeed(guid) = content {
             next_feed_guid = Some(guid.clone());
         }
-        feed_guids_after[index] = next_feed_guid.clone();
+        feed_guids_after[slot] = next_feed_guid.clone();
     }
 
     let mut current_feed_guid = None;
     let mut mapped = Vec::new();
-    for (index, (content, _)) in contents.iter().enumerate() {
+    for (slot, (original_index, (content, _))) in contents.iter().enumerate() {
         match content {
             ExternalContentId::PodcastFeed(guid) => {
                 current_feed_guid = Some(guid.clone());
-                mapped.push((content.clone(), None));
+                mapped.push((*original_index, content.clone(), None));
             }
             ExternalContentId::PodcastEpisode(_) => {
                 let feed_guid = current_feed_guid
                     .clone()
-                    .or_else(|| feed_guids_after[index].clone());
-                mapped.push((content.clone(), feed_guid));
+                    .or_else(|| feed_guids_after[slot].clone());
+                mapped.push((*original_index, content.clone(), feed_guid));
             }
             _ => {}
         }
@@ -157,11 +157,10 @@ pub fn ExternalContentList(
                     ExternalContentId::PodcastFeed(_) | ExternalContentId::PodcastEpisode(_)
                 )
             });
-    let podcast_items: Vec<_> = podcasts.into_iter().map(|(_, item)| item).collect();
-    let podcast_cards = map_podcast_items(&podcast_items);
+    let podcast_cards = map_podcast_items(&podcasts);
     rsx! {
         div { class: "flex flex-col gap-2 mt-2",
-            for (index, (content, podcast_guid)) in podcast_cards.iter().enumerate() {
+            for (index, content, podcast_guid) in podcast_cards.iter() {
                 ExternalContentCard {
                     key: "{nip73::get_raw_identifier(content)}:{index}",
                     content: content.clone(),
@@ -271,9 +270,10 @@ mod tests {
             Some("feed-A".to_string())
         );
 
-        let mapped = map_podcast_items(&contents);
-        assert_eq!(mapped[1].1.as_deref(), Some("feed-A"));
-        assert_eq!(mapped[3].1.as_deref(), Some("feed-B"));
+        let enumerated: Vec<_> = contents.into_iter().enumerate().collect();
+        let mapped = map_podcast_items(&enumerated);
+        assert_eq!(mapped[1].2.as_deref(), Some("feed-A"));
+        assert_eq!(mapped[3].2.as_deref(), Some("feed-B"));
     }
 
     #[test]
@@ -289,8 +289,42 @@ mod tests {
             ),
         ];
 
-        let mapped = map_podcast_items(&contents);
-        assert_eq!(mapped[0].1.as_deref(), Some("feed-A"));
+        let enumerated: Vec<_> = contents.into_iter().enumerate().collect();
+        let mapped = map_podcast_items(&enumerated);
+        assert_eq!(mapped[0].2.as_deref(), Some("feed-A"));
+    }
+
+    #[test]
+    fn map_podcast_items_preserves_original_indices_for_keys() {
+        let contents = vec![
+            (
+                ExternalContentId::Book("9780765382030".to_string()),
+                Some("https://example.com/book".to_string()),
+            ),
+            (
+                ExternalContentId::PodcastFeed("feed-A".to_string()),
+                Some("https://example.com/feed-a".to_string()),
+            ),
+            (
+                ExternalContentId::PodcastEpisode("episode-1".to_string()),
+                Some("https://example.com/episode-1".to_string()),
+            ),
+        ];
+
+        let podcasts: Vec<_> = contents
+            .into_iter()
+            .enumerate()
+            .filter(|(_, (content, _))| {
+                matches!(
+                    content,
+                    ExternalContentId::PodcastFeed(_) | ExternalContentId::PodcastEpisode(_)
+                )
+            })
+            .collect();
+
+        let mapped = map_podcast_items(&podcasts);
+        assert_eq!(mapped[0].0, 1);
+        assert_eq!(mapped[1].0, 2);
     }
 }
 

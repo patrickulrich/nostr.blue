@@ -565,15 +565,29 @@ pub fn play_track(
     state.current_time = 0.0;
     state.now_playing = None;
     log::info!("Playing track: {}", track.title);
-    #[cfg(feature = "mobile")]
-    if let Err(e) = android_media::set_queue(&state.playlist, state.current_index, true) {
-        log::error!("Failed to start native Android playback queue: {}", e);
-        state.playback_error = Some(format!("Android playback failed: {}", e));
+    let should_publish_status = {
+        #[cfg(feature = "mobile")]
+        {
+            match android_media::set_queue(&state.playlist, state.current_index, true) {
+                Ok(()) => true,
+                Err(e) => {
+                    log::error!("Failed to start native Android playback queue: {}", e);
+                    state.playback_error = Some(format!("Android playback failed: {}", e));
+                    false
+                }
+            }
+        }
+        #[cfg(not(feature = "mobile"))]
+        {
+            true
+        }
+    };
+    if should_publish_status {
+        let generation = next_music_status_generation();
+        spawn(async move {
+            publish_music_status(&track, generation).await;
+        });
     }
-    let generation = next_music_status_generation();
-    spawn(async move {
-        publish_music_status(&track, generation).await;
-    });
 }
 
 pub fn play_or_toggle_track(
@@ -599,24 +613,41 @@ pub fn play_or_toggle_track(
 pub fn toggle_play() {
     let mut state = MUSIC_PLAYER.write();
     state.is_playing = !state.is_playing;
+    let should_sync_status = {
     #[cfg(feature = "mobile")]
     {
+        let was_playing = !state.is_playing;
         let result = if state.is_playing {
             android_media::play()
         } else {
             android_media::pause()
         };
-        if let Err(e) = result {
-            log::error!("Failed to toggle native Android playback: {}", e);
-            state.playback_error = Some(format!("Android playback failed: {}", e));
+        match result {
+            Ok(()) => true,
+            Err(e) => {
+                state.is_playing = was_playing;
+                log::error!("Failed to toggle native Android playback: {}", e);
+                state.playback_error = Some(format!("Android playback failed: {}", e));
+                false
+            }
         }
     }
+    #[cfg(not(feature = "mobile"))]
+    {
+        true
+    }
+    };
+    if !should_sync_status {
+        return;
+    }
+    let is_playing = state.is_playing;
+    let current_track = state.current_track.clone();
     let generation = next_music_status_generation();
-    if !state.is_playing {
+    if !is_playing {
         spawn(async move {
             clear_music_status(generation).await;
         });
-    } else if let Some(track) = state.current_track.clone() {
+    } else if let Some(track) = current_track {
         spawn(async move {
             publish_music_status(&track, generation).await;
         });
@@ -633,16 +664,30 @@ pub fn next_track() {
     state.is_playing = true;
     state.current_time = 0.0;
     if let Some(track) = state.current_track.clone() {
-        let generation = next_music_status_generation();
         log::info!("Next track: {}", track.title);
-        #[cfg(feature = "mobile")]
-        if let Err(e) = android_media::next_track() {
-            log::error!("Failed to skip to next native Android track: {}", e);
-            state.playback_error = Some(format!("Android playback failed: {}", e));
+        let should_publish_status = {
+            #[cfg(feature = "mobile")]
+            {
+                match android_media::next_track() {
+                    Ok(()) => true,
+                    Err(e) => {
+                        log::error!("Failed to skip to next native Android track: {}", e);
+                        state.playback_error = Some(format!("Android playback failed: {}", e));
+                        false
+                    }
+                }
+            }
+            #[cfg(not(feature = "mobile"))]
+            {
+                true
+            }
+        };
+        if should_publish_status {
+            let generation = next_music_status_generation();
+            spawn(async move {
+                publish_music_status(&track, generation).await;
+            });
         }
-        spawn(async move {
-            publish_music_status(&track, generation).await;
-        });
     }
 }
 /// Play previous track in playlist
@@ -653,16 +698,30 @@ pub fn previous_track() {
     }
     if state.current_time > 3.0 {
         state.current_time = 0.0;
-        #[cfg(feature = "mobile")]
-        if let Err(e) = android_media::seek_to(0.0) {
-            log::error!("Failed to rewind native Android track: {}", e);
-            state.playback_error = Some(format!("Android playback failed: {}", e));
-        }
-        if let Some(track) = state.current_track.clone() {
-            let generation = next_music_status_generation();
-            spawn(async move {
-                publish_music_status(&track, generation).await;
-            });
+        let should_publish_status = {
+            #[cfg(feature = "mobile")]
+            {
+                match android_media::seek_to(0.0) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        log::error!("Failed to rewind native Android track: {}", e);
+                        state.playback_error = Some(format!("Android playback failed: {}", e));
+                        false
+                    }
+                }
+            }
+            #[cfg(not(feature = "mobile"))]
+            {
+                true
+            }
+        };
+        if should_publish_status {
+            if let Some(track) = state.current_track.clone() {
+                let generation = next_music_status_generation();
+                spawn(async move {
+                    publish_music_status(&track, generation).await;
+                });
+            }
         }
         return;
     }
@@ -675,16 +734,30 @@ pub fn previous_track() {
     state.is_playing = true;
     state.current_time = 0.0;
     if let Some(track) = state.current_track.clone() {
-        let generation = next_music_status_generation();
         log::info!("Previous track: {}", track.title);
-        #[cfg(feature = "mobile")]
-        if let Err(e) = android_media::previous_track() {
-            log::error!("Failed to skip to previous native Android track: {}", e);
-            state.playback_error = Some(format!("Android playback failed: {}", e));
+        let should_publish_status = {
+            #[cfg(feature = "mobile")]
+            {
+                match android_media::previous_track() {
+                    Ok(()) => true,
+                    Err(e) => {
+                        log::error!("Failed to skip to previous native Android track: {}", e);
+                        state.playback_error = Some(format!("Android playback failed: {}", e));
+                        false
+                    }
+                }
+            }
+            #[cfg(not(feature = "mobile"))]
+            {
+                true
+            }
+        };
+        if should_publish_status {
+            let generation = next_music_status_generation();
+            spawn(async move {
+                publish_music_status(&track, generation).await;
+            });
         }
-        spawn(async move {
-            publish_music_status(&track, generation).await;
-        });
     }
 }
 /// Set volume (0.0 - 1.0)
@@ -769,11 +842,17 @@ pub fn close_player() {
     state.is_playing = false;
     #[cfg(feature = "mobile")]
     {
+        let mut cleared_native = true;
         if let Err(e) = android_media::stop() {
             log::error!("Failed to stop native Android playback: {}", e);
+            cleared_native = false;
         }
         if let Err(e) = android_media::clear_queue() {
             log::error!("Failed to clear native Android playback queue: {}", e);
+            cleared_native = false;
+        }
+        if !cleared_native {
+            return;
         }
     }
     let generation = next_music_status_generation();
