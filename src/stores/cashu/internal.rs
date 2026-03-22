@@ -370,8 +370,8 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
         .ok_or("Client not initialized")?
         .clone();
     let mut new_event_id: Option<String> = None;
-    let synthetic_pending_id = (!available_proofs.is_empty())
-        .then(|| format!("local_pending_{}", chrono::Utc::now().timestamp_millis()));
+    let synthetic_pending_id =
+        (!available_proofs.is_empty()).then(|| format!("local_pending_{}", uuid::Uuid::new_v4()));
     if !available_proofs.is_empty() {
         use super::types::ExtendedCashuProof;
         use super::types::ExtendedTokenEvent;
@@ -445,6 +445,7 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
         }
     }
     let allow_deletion = available_proofs.is_empty() || new_event_id.is_some();
+    let mut deletion_recorded = !allow_deletion || event_ids_to_delete.is_empty();
     if allow_deletion && !event_ids_to_delete.is_empty() {
         let valid_event_ids: Vec<_> = event_ids_to_delete
             .iter()
@@ -472,40 +473,45 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
                         "Published deletion event for {} token events",
                         valid_event_ids.len()
                     );
+                    deletion_recorded = true;
                 }
                 Ok(_) => {
                     log::warn!("No relays accepted cleanup deletion event, queuing for retry");
-                    if let Err(queue_err) = super::events::queue_event_for_retry(
+                    super::events::queue_event_for_retry(
                         deletion_builder,
                         super::types::PendingEventType::DeletionEvent,
                         None,
                         None,
                     )
                     .await
-                    {
-                        log::error!(
+                    .map_err(|queue_err| {
+                        format!(
                             "Failed to queue cleanup deletion event for retry: {}",
                             queue_err
-                        );
-                    }
+                        )
+                    })?;
+                    deletion_recorded = true;
                 }
                 Err(e) => {
                     log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
-                    if let Err(queue_err) = super::events::queue_event_for_retry(
+                    super::events::queue_event_for_retry(
                         deletion_builder,
                         super::types::PendingEventType::DeletionEvent,
                         None,
                         None,
                     )
                     .await
-                    {
-                        log::error!(
+                    .map_err(|queue_err| {
+                        format!(
                             "Failed to queue cleanup deletion event for retry: {}",
                             queue_err
-                        );
-                    }
+                        )
+                    })?;
+                    deletion_recorded = true;
                 }
             }
+        } else {
+            deletion_recorded = true;
         }
     }
     let available_proofs_is_empty = available_proofs.is_empty();
@@ -537,7 +543,10 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
     } else {
         vec![]
     };
-    if new_event_id.is_some() || available_proofs_is_empty || !tokens_to_add.is_empty() {
+    let can_replace_locally = new_event_id.is_some()
+        || !tokens_to_add.is_empty()
+        || (available_proofs_is_empty && deletion_recorded);
+    if can_replace_locally {
         if let Err(e) = super::signals::atomic_token_replace(tokens_to_add, &event_ids_to_delete) {
             log::error!("Failed atomic token replacement during cleanup: {}", e);
         } else {

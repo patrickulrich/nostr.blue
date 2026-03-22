@@ -6,6 +6,7 @@ use crate::stores::ai_provider_store::{
 };
 use crate::stores::nwc_store;
 use dioxus::prelude::*;
+use qrcode::{render::svg, QrCode};
 
 #[component]
 pub fn PpqSettingsPanel(
@@ -244,29 +245,28 @@ pub fn PpqSettingsPanel(
                                             managed_api_key: None,
                                             active_api_key_id: None,
                                         });
+                                        state.set(next_state.clone());
                                         if let Err(err) =
                                             ai_provider_store::cache_provider_state(&next_state)
                                         {
                                             save_error.set(Some(err));
-                                            account_action_loading.set(false);
-                                            return;
-                                        }
-                                        state.set(next_state.clone());
-                                        is_saving.set(true);
-                                        pending_save_snapshot.set(Some(next_state.clone()));
-                                        pending_save_min_event_id.set(
-                                            PROVIDER_STATE_SAVE_EVENT
-                                                .read()
-                                                .as_ref()
-                                                .map(|event| event.event_id)
-                                                .unwrap_or(0),
-                                        );
-                                        if let Some(snapshot) =
-                                            ai_provider_store::queue_provider_state_save(next_state)
-                                        {
-                                            ai_provider_store::process_queued_provider_state_saves(
-                                                snapshot,
+                                        } else {
+                                            is_saving.set(true);
+                                            pending_save_snapshot.set(Some(next_state.clone()));
+                                            pending_save_min_event_id.set(
+                                                PROVIDER_STATE_SAVE_EVENT
+                                                    .read()
+                                                    .as_ref()
+                                                    .map(|event| event.event_id)
+                                                    .unwrap_or(0),
                                             );
+                                            if let Some(snapshot) =
+                                                ai_provider_store::queue_provider_state_save(next_state)
+                                            {
+                                                ai_provider_store::process_queued_provider_state_saves(
+                                                    snapshot,
+                                                );
+                                            }
                                         }
                                     }
                                     Err(err) => save_error.set(Some(err)),
@@ -851,6 +851,12 @@ fn InfoCard(title: String, value: String, subtle: String) -> Element {
 
 #[component]
 fn InvoiceCard(invoice: PpqTopupInvoice) -> Element {
+    let qr_svg = invoice
+        .payment_request
+        .as_deref()
+        .filter(|payment_request| !payment_request.trim().is_empty())
+        .map(generate_invoice_qr_svg);
+
     rsx! {
         div { class: "rounded-lg bg-muted/60 p-3 text-sm space-y-2",
             p { class: "font-medium text-foreground", "Current Invoice" }
@@ -859,6 +865,12 @@ fn InvoiceCard(invoice: PpqTopupInvoice) -> Element {
                 p { "Status: {status}" }
             }
             if let Some(payment_request) = invoice.payment_request.as_ref() {
+                if let Some(svg) = qr_svg.as_ref() {
+                    div {
+                        class: "flex justify-center rounded-lg bg-white p-4",
+                        dangerous_inner_html: "{svg}",
+                    }
+                }
                 p { class: "break-all", "Payment request: {payment_request}" }
             }
             if let Some(address) = invoice.address.as_ref() {
@@ -875,6 +887,18 @@ fn InvoiceCard(invoice: PpqTopupInvoice) -> Element {
                 pre { class: "mt-2 overflow-x-auto rounded-lg bg-background p-3 text-xs text-muted-foreground", "{invoice.raw_json}" }
             }
         }
+    }
+}
+
+fn generate_invoice_qr_svg(invoice: &str) -> String {
+    match QrCode::new(invoice.trim().to_uppercase()) {
+        Ok(code) => code
+            .render::<svg::Color>()
+            .min_dimensions(220, 220)
+            .dark_color(svg::Color("#000000"))
+            .light_color(svg::Color("#ffffff"))
+            .build(),
+        Err(_) => "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"220\" height=\"220\" viewBox=\"0 0 220 220\"><rect width=\"220\" height=\"220\" fill=\"#ffffff\"/><text x=\"110\" y=\"110\" text-anchor=\"middle\" fill=\"#666666\" font-size=\"14\">QR Error</text></svg>".to_string(),
     }
 }
 

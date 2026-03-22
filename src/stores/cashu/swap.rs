@@ -91,10 +91,7 @@ impl SwapOptions {
 
 #[derive(Debug, Clone)]
 enum SwapPublishOutcome {
-    Published {
-        event_id: String,
-        deletion_follow_up_failed: bool,
-    },
+    Published { event_id: String },
     RetryQueued,
 }
 /// Result of a swap operation
@@ -377,17 +374,8 @@ pub async fn execute_swap_with_nip60(
     )
     .await
     {
-        Ok(SwapPublishOutcome::Published {
-            event_id,
-            deletion_follow_up_failed,
-        }) => {
+        Ok(SwapPublishOutcome::Published { event_id }) => {
             update_token_event_id(&pending_event_id, &event_id);
-            if deletion_follow_up_failed {
-                log::warn!(
-                    "Swap token event {} was published, but deletion follow-up failed",
-                    event_id
-                );
-            }
             event_id
         }
         Ok(SwapPublishOutcome::RetryQueued) => pending_event_id.clone(),
@@ -533,14 +521,13 @@ async fn publish_swap_events(
                         "Swap token event {} already exists on all relays (duplicate)",
                         event_id_hex
                     );
-                    let deletion_follow_up_failed = record_deletion_follow_up(
+                    record_deletion_follow_up(
                         publish_deletion_events(&client, &valid_del_ids).await,
                         pending_event_id,
                         mint_url,
-                    );
+                    )?;
                     Ok(SwapPublishOutcome::Published {
                         event_id: event_id_hex,
-                        deletion_follow_up_failed,
                     })
                 } else {
                     log::warn!(
@@ -563,14 +550,13 @@ async fn publish_swap_events(
                     output.success.len(),
                     output.success.len() + output.failed.len()
                 );
-                let deletion_follow_up_failed = record_deletion_follow_up(
+                record_deletion_follow_up(
                     publish_deletion_events(&client, &valid_del_ids).await,
                     pending_event_id,
                     mint_url,
-                );
+                )?;
                 Ok(SwapPublishOutcome::Published {
                     event_id: event_id_hex,
-                    deletion_follow_up_failed,
                 })
             }
         }
@@ -595,17 +581,16 @@ fn record_deletion_follow_up(
     result: Result<(), String>,
     pending_event_id: &str,
     mint_url: &str,
-) -> bool {
+) -> Result<(), String> {
     if let Err(err) = result {
-        log::error!(
+        let formatted = format!(
             "Swap deletion follow-up failed for pending_event_id={} mint={}: {}",
-            pending_event_id,
-            mint_url,
-            err
+            pending_event_id, mint_url, err
         );
-        true
+        log::error!("{}", formatted);
+        Err(formatted)
     } else {
-        false
+        Ok(())
     }
 }
 /// Build deletion event tags for token events

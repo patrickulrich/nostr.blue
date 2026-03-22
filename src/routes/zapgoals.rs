@@ -532,7 +532,7 @@ pub fn ZapGoalsNew() -> Element {
             };
             if *relays_prefill_generation.peek() != generation
                 || *relays_prefilled.peek()
-                || !relays_text.read().is_empty()
+                || !relays_text.peek().is_empty()
                 || relay_lines.is_empty()
             {
                 return;

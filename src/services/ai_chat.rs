@@ -528,9 +528,7 @@ fn parse_total_cost(pricing: &Value) -> Option<f64> {
 }
 
 fn preview_body(body: &str) -> String {
-    let trimmed = body.trim();
-    let preview_len = trimmed.len().min(200);
-    trimmed[..preview_len].to_string()
+    body.trim().chars().take(200).collect()
 }
 
 #[cfg(test)]
@@ -551,6 +549,14 @@ mod tests {
     fn ignores_non_chat_pricing_shapes() {
         let value = serde_json::json!({ "low_1024": "0.01" });
         assert_eq!(parse_total_cost(&value), None);
+    }
+
+    #[test]
+    fn preview_body_is_utf8_safe_for_multibyte_text() {
+        let body = format!("  {}  ", "🙂".repeat(250));
+        let preview = preview_body(&body);
+        assert_eq!(preview.chars().count(), 200);
+        assert!(preview.chars().all(|ch| ch == '🙂'));
     }
 
     #[test]

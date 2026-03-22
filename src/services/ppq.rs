@@ -427,13 +427,26 @@ async fn parse_response(response: Response) -> Result<Value, String> {
         .await
         .map_err(|e| format!("Failed to read PPQ response: {}", e))?;
     if !status.is_success() {
-        return Err(format!("PPQ request failed ({}): {}", status, body));
+        return Err(format!(
+            "PPQ request failed ({}). {}",
+            status,
+            redacted_response_body(body.as_str())
+        ));
     }
     if body.trim().is_empty() {
         return Ok(Value::Null);
     }
-    serde_json::from_str(&body)
-        .map_err(|e| format!("Failed to parse PPQ response: {}. Body: {}", e, body))
+    serde_json::from_str(&body).map_err(|e| {
+        format!(
+            "Failed to parse PPQ response: {}. {}",
+            e,
+            redacted_response_body(body.as_str())
+        )
+    })
+}
+
+fn redacted_response_body(body: &str) -> String {
+    format!("Response body redacted ({} bytes).", body.len())
 }
 
 #[cfg(test)]
@@ -476,5 +489,16 @@ mod tests {
         assert_eq!(parsed.usage_limit_usd, Some(10.5));
         assert_eq!(parsed.current_period_usage_usd, Some(1.25));
         assert_eq!(parsed.reset_period.as_deref(), Some("monthly"));
+    }
+
+    #[test]
+    fn redacted_response_body_hides_content() {
+        let body = "{\"secret\":\"sk-live-123\"}";
+        let summary = redacted_response_body(body);
+        assert_eq!(
+            summary,
+            format!("Response body redacted ({} bytes).", body.len())
+        );
+        assert!(!summary.contains("sk-live-123"));
     }
 }
