@@ -184,7 +184,8 @@ pub async fn load_settings() -> Result<(), String> {
                         }
                         cache_settings(&settings);
                         SETTINGS.write().clone_from(&settings);
-                        if let Some(pending_publish_client_tag) = load_pending_publish_client_tag() {
+                        if let Some(pending_publish_client_tag) = load_pending_publish_client_tag()
+                        {
                             PUBLISH_CLIENT_TAG_SAVE_PENDING
                                 .write()
                                 .replace(pending_publish_client_tag);

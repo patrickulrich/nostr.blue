@@ -260,8 +260,13 @@ pub fn ShareModal(
                             .iter()
                             .map(|(relay, reason)| format!("{}: {}", relay, reason))
                             .collect();
-                        log::error!("Failed to share to Nostr: no relays accepted (failures: {})", details.join(", "));
-                        nostr_error.set(Some("Failed to post to Nostr: no relays accepted the event".to_string()));
+                        log::error!(
+                            "Failed to share to Nostr: no relays accepted (failures: {})",
+                            details.join(", ")
+                        );
+                        nostr_error.set(Some(
+                            "Failed to post to Nostr: no relays accepted the event".to_string(),
+                        ));
                         is_publishing.set(false);
                     } else {
                         log::info!("Shared to Nostr: {:?}", output.val);

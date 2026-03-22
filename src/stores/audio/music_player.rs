@@ -356,7 +356,9 @@ static VOLUME_PERSIST_GEN: AtomicU64 = AtomicU64::new(0);
 static MUSIC_STATUS_GEN: AtomicU64 = AtomicU64::new(0);
 
 fn next_music_status_generation() -> u64 {
-    MUSIC_STATUS_GEN.fetch_add(1, Ordering::SeqCst).wrapping_add(1)
+    MUSIC_STATUS_GEN
+        .fetch_add(1, Ordering::SeqCst)
+        .wrapping_add(1)
 }
 
 fn is_current_music_status_generation(generation: u64) -> bool {
@@ -537,7 +539,15 @@ async fn clear_music_status(generation: u64) {
     {
         Ok(output) => {
             if output.success.is_empty() {
-                log::warn!("Music status clear: no relays accepted");
+                let details: Vec<String> = output
+                    .failed
+                    .iter()
+                    .map(|(relay, reason)| format!("{}: {}", relay, reason))
+                    .collect();
+                log::warn!(
+                    "Music status clear: no relays accepted (failures: {})",
+                    details.join(", ")
+                );
             } else {
                 log::info!("Music status cleared");
             }
@@ -614,28 +624,28 @@ pub fn toggle_play() {
     let mut state = MUSIC_PLAYER.write();
     state.is_playing = !state.is_playing;
     let should_sync_status = {
-    #[cfg(feature = "mobile")]
-    {
-        let was_playing = !state.is_playing;
-        let result = if state.is_playing {
-            android_media::play()
-        } else {
-            android_media::pause()
-        };
-        match result {
-            Ok(()) => true,
-            Err(e) => {
-                state.is_playing = was_playing;
-                log::error!("Failed to toggle native Android playback: {}", e);
-                state.playback_error = Some(format!("Android playback failed: {}", e));
-                false
+        #[cfg(feature = "mobile")]
+        {
+            let was_playing = !state.is_playing;
+            let result = if state.is_playing {
+                android_media::play()
+            } else {
+                android_media::pause()
+            };
+            match result {
+                Ok(()) => true,
+                Err(e) => {
+                    state.is_playing = was_playing;
+                    log::error!("Failed to toggle native Android playback: {}", e);
+                    state.playback_error = Some(format!("Android playback failed: {}", e));
+                    false
+                }
             }
         }
-    }
-    #[cfg(not(feature = "mobile"))]
-    {
-        true
-    }
+        #[cfg(not(feature = "mobile"))]
+        {
+            true
+        }
     };
     if !should_sync_status {
         return;

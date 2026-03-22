@@ -68,7 +68,10 @@ impl fmt::Debug for PpqTopupInvoice {
         f.debug_struct("PpqTopupInvoice")
             .field("invoice_id", &self.invoice_id)
             .field("status", &self.status)
-            .field("payment_request", &self.payment_request.as_ref().map(|_| "<redacted>"))
+            .field(
+                "payment_request",
+                &self.payment_request.as_ref().map(|_| "<redacted>"),
+            )
             .field("address", &self.address)
             .field("amount", &self.amount)
             .field("currency", &self.currency)

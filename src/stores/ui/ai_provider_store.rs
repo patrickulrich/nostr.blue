@@ -159,7 +159,10 @@ fn migrate_legacy_state(mut state: AiProviderState) -> AiProviderState {
     if state.selected_provider_id == SHAKESPEARE_PROVIDER_ID {
         state.selected_provider_id = PPQ_PROVIDER_ID.to_string();
     }
-    if let Some(model) = state.selected_model_by_provider.remove(SHAKESPEARE_PROVIDER_ID) {
+    if let Some(model) = state
+        .selected_model_by_provider
+        .remove(SHAKESPEARE_PROVIDER_ID)
+    {
         state
             .selected_model_by_provider
             .entry(PPQ_PROVIDER_ID.to_string())

@@ -39,6 +39,7 @@ pub fn PpqSettingsPanel(
     let mut key_reset_period = use_signal(String::new);
     let mut key_expire_at = use_signal(String::new);
     let mut key_form_loading = use_signal(|| false);
+    let mut key_section_loading = use_signal(|| false);
     let mut key_form_error = use_signal(|| None::<String>);
     let mut last_loaded_credit_id = use_signal(|| None::<String>);
     let balance_request_generation = use_signal(|| 0u32);
@@ -89,13 +90,7 @@ pub fn PpqSettingsPanel(
             credit_id.clone(),
             Some(keys_generation),
         );
-        load_nwc(
-            nwc,
-            nwc_loading,
-            nwc_error,
-            credit_id,
-            Some(nwc_generation),
-        );
+        load_nwc(nwc, nwc_loading, nwc_error, credit_id, Some(nwc_generation));
     });
 
     use_effect(move || {
@@ -152,18 +147,23 @@ pub fn PpqSettingsPanel(
         .as_ref()
         .map(|account| account.credit_id.clone())
         .unwrap_or_default();
-    let account_api_key = ppq_account
+    let active_account_api_key = ppq_account
         .as_ref()
-        .map(|account| account.api_key.clone())
+        .map(|account| {
+            account
+                .managed_api_key
+                .clone()
+                .unwrap_or_else(|| account.api_key.clone())
+        })
         .unwrap_or_default();
     let main_nwc_status = nwc_store::NWC_STATUS.read().clone();
     let main_nwc_uri = nwc_store::current_nwc_uri();
     let refresh_balance_credit_id = account_credit_id.clone();
     let refresh_keys_credit_id = account_credit_id.clone();
     let refresh_nwc_credit_id = account_credit_id.clone();
-    let create_topup_api_key = account_api_key.clone();
+    let create_topup_api_key = active_account_api_key.clone();
     let create_topup_credit_id = account_credit_id.clone();
-    let refresh_topup_api_key = account_api_key.clone();
+    let refresh_topup_api_key = active_account_api_key.clone();
     let refresh_topup_credit_id = account_credit_id.clone();
     let connect_nwc_credit_id = account_credit_id.clone();
     let disconnect_nwc_credit_id = account_credit_id.clone();
@@ -221,7 +221,10 @@ pub fn PpqSettingsPanel(
                     }
                     button {
                         class: "rounded-lg border border-border px-4 py-2 text-sm transition hover:bg-accent disabled:opacity-60",
-                        disabled: *account_action_loading.read() || *is_saving.read() || *keys_loading.read(),
+                        disabled: *account_action_loading.read()
+                            || *is_saving.read()
+                            || *keys_loading.read()
+                            || *key_section_loading.read(),
                         onclick: move |_| {
                             let generation = next_request_generation(keys_request_generation);
                             load_api_keys(
@@ -278,23 +281,22 @@ pub fn PpqSettingsPanel(
                                             ai_provider_store::cache_provider_state(&next_state)
                                         {
                                             save_error.set(Some(err));
-                                        } else {
-                                            is_saving.set(true);
-                                            pending_save_snapshot.set(Some(next_state.clone()));
-                                            pending_save_min_event_id.set(
-                                                PROVIDER_STATE_SAVE_EVENT
-                                                    .read()
-                                                    .as_ref()
-                                                    .map(|event| event.event_id)
-                                                    .unwrap_or(0),
+                                        }
+                                        is_saving.set(true);
+                                        pending_save_snapshot.set(Some(next_state.clone()));
+                                        pending_save_min_event_id.set(
+                                            PROVIDER_STATE_SAVE_EVENT
+                                                .read()
+                                                .as_ref()
+                                                .map(|event| event.event_id)
+                                                .unwrap_or(0),
+                                        );
+                                        if let Some(snapshot) =
+                                            ai_provider_store::queue_provider_state_save(next_state)
+                                        {
+                                            ai_provider_store::process_queued_provider_state_saves(
+                                                snapshot,
                                             );
-                                            if let Some(snapshot) =
-                                                ai_provider_store::queue_provider_state_save(next_state)
-                                            {
-                                                ai_provider_store::process_queued_provider_state_saves(
-                                                    snapshot,
-                                                );
-                                            }
                                         }
                                     }
                                     Err(err) => save_error.set(Some(err)),
@@ -631,7 +633,7 @@ pub fn PpqSettingsPanel(
                     div { class: "flex flex-wrap gap-3",
                         button {
                             class: "rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-60",
-                            disabled: *key_form_loading.read(),
+                            disabled: *key_form_loading.read() || *key_section_loading.read(),
                             onclick: move |_| {
                                 let name = key_name.read().trim().to_string();
                                 if name.is_empty() {
@@ -710,7 +712,7 @@ pub fn PpqSettingsPanel(
                         if editing_key_id.read().is_some() {
                             button {
                                 class: "rounded-lg border border-border px-4 py-2 text-sm transition hover:bg-accent",
-                                disabled: *key_form_loading.read(),
+                                disabled: *key_form_loading.read() || *key_section_loading.read(),
                                 onclick: move |_| {
                                     editing_key_id.set(None);
                                     key_name.set(String::new());
@@ -778,7 +780,11 @@ pub fn PpqSettingsPanel(
                                                 div { class: "flex flex-wrap gap-2",
                                                     button {
                                                         class: "rounded-lg border border-border px-3 py-2 text-xs transition hover:bg-accent disabled:opacity-60",
-                                                        disabled: key.deleted_at.is_some() || *is_saving.read(),
+                                                        disabled: key.deleted_at.is_some()
+                                                            || *is_saving.read()
+                                                            || *key_form_loading.read()
+                                                            || *keys_loading.read()
+                                                            || *key_section_loading.read(),
                                                         onclick: move |_| {
                                                             let credit_id = key_credit_id_for_use.clone();
                                                             let key_id = key_clone.id.clone();
@@ -813,7 +819,11 @@ pub fn PpqSettingsPanel(
                                                     }
                                                     button {
                                                         class: "rounded-lg border border-border px-3 py-2 text-xs transition hover:bg-accent disabled:opacity-60",
-                                                        disabled: key.deleted_at.is_some(),
+                                                        disabled: key.deleted_at.is_some()
+                                                            || *is_saving.read()
+                                                            || *key_form_loading.read()
+                                                            || *keys_loading.read()
+                                                            || *key_section_loading.read(),
                                                         onclick: move |_| {
                                                             editing_key_id.set(Some(key_for_edit.id.clone()));
                                                             key_name.set(key_for_edit.name.clone());
@@ -829,8 +839,14 @@ pub fn PpqSettingsPanel(
                                                         disabled: key.deleted_at.is_some()
                                                             || *is_saving.read()
                                                             || *key_form_loading.read()
-                                                            || *keys_loading.read(),
+                                                            || *keys_loading.read()
+                                                            || *key_section_loading.read(),
                                                         onclick: move |_| {
+                                                            if *key_section_loading.read() {
+                                                                return;
+                                                            }
+                                                            key_section_loading.set(true);
+                                                            keys_error.set(None);
                                                             let credit_id = key_credit_id_for_revoke.clone();
                                                             let key_id = key.id.clone();
                                                             let generation =
@@ -859,8 +875,12 @@ pub fn PpqSettingsPanel(
                                                                             credit_id,
                                                                             Some(generation),
                                                                         );
+                                                                        key_section_loading.set(false);
                                                                     }
-                                                                    Err(err) => keys_error.set(Some(err)),
+                                                                    Err(err) => {
+                                                                        key_section_loading.set(false);
+                                                                        keys_error.set(Some(err));
+                                                                    }
                                                                 }
                                                             });
                                                         },
@@ -1108,12 +1128,10 @@ fn persist_state(
 ) {
     is_saving.set(true);
     save_error.set(None);
+    state.set(next_state.clone());
     if let Err(err) = ai_provider_store::cache_provider_state(&next_state) {
         save_error.set(Some(err));
-        is_saving.set(false);
-        return;
     }
-    state.set(next_state.clone());
     pending_save_snapshot.set(Some(next_state.clone()));
     pending_save_min_event_id.set(
         PROVIDER_STATE_SAVE_EVENT

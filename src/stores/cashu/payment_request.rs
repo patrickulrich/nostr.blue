@@ -483,7 +483,10 @@ pub async fn pay_payment_request(
         )
         .await;
         if let Some(warning) = publish_outcome.warning() {
-            log::warn!("Token event publish completed without durable retry state: {}", warning);
+            log::warn!(
+                "Token event publish completed without durable retry state: {}",
+                warning
+            );
         }
         new_event_id = Some(publish_outcome.event_id().to_string());
     } else if !event_ids_to_delete.is_empty() {
@@ -497,9 +500,14 @@ pub async fn pay_payment_request(
         let event =
             sign_cashu_event_builder(&signer, nostr_sdk::EventBuilder::delete(deletion_request))
                 .await?;
-        let publish_outcome =
-            send_tagged_event_with_retry(&client, event, PendingEventType::DeletionEvent, None, None)
-                .await;
+        let publish_outcome = send_tagged_event_with_retry(
+            &client,
+            event,
+            PendingEventType::DeletionEvent,
+            None,
+            None,
+        )
+        .await;
         if let Some(warning) = publish_outcome.warning() {
             log::warn!(
                 "Deletion event publish completed without durable retry state: {}",

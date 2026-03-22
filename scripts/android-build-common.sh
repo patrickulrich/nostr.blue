@@ -66,7 +66,7 @@ sync_overlay_dir() {
         rel="${path#"$dest_dir"/}"
         skip=0
         for preserve in "$@"; do
-            if [ "$rel" = "$preserve" ] || [[ "$preserve" == "$rel/"* ]]; then
+            if [ "$rel" = "$preserve" ] || [[ "$rel" == "$preserve/"* ]]; then
                 skip=1
                 break
             fi
@@ -718,7 +718,17 @@ if [ ! -f "$GRADLE_WRAPPER" ] || [ ! -x "$GRADLE_WRAPPER" ]; then
     echo "ERROR: Gradle wrapper missing or not executable at $GRADLE_WRAPPER; cannot run task $FINAL_GRADLE_TASK" >&2
     exit 1
 fi
-"$GRADLE_WRAPPER" "$FINAL_GRADLE_TASK"
+gradle_output="$(mktemp)"
+if "$GRADLE_WRAPPER" "$FINAL_GRADLE_TASK" >"$gradle_output" 2>&1; then
+    cat "$gradle_output"
+    rm -f "$gradle_output"
+else
+    gradle_exit=$?
+    echo "ERROR: Gradle packaging failed: $GRADLE_WRAPPER $FINAL_GRADLE_TASK" >&2
+    cat "$gradle_output" >&2
+    rm -f "$gradle_output"
+    exit "$gradle_exit"
+fi
 
 echo ""
 echo "--- Step 6: Copy $ARTIFACT_LABEL ---"

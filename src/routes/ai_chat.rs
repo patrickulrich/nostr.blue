@@ -1089,23 +1089,7 @@ fn build_api_messages(messages: &[DisplayMessage]) -> Vec<ChatMessage> {
         content: ChatMessageContent::Text(SYSTEM_PROMPT.to_string()),
     }];
     for message in messages {
-        let content =
-            if !message.images.is_empty() {
-                let mut parts = Vec::new();
-                if !message.content.trim().is_empty() {
-                    parts.push(ChatMessagePart::Text {
-                        text: message.content.clone(),
-                    });
-                }
-                parts.extend(message.images.iter().cloned().map(|image| {
-                    ChatMessagePart::ImageUrl {
-                        image_url: ChatImageUrl { url: image.url },
-                    }
-                }));
-                ChatMessageContent::Parts(parts)
-            } else {
-                ChatMessageContent::Text(message.content.clone())
-            };
+        let content = chat_message_content_for_api(message.role, &message.content, &message.images);
         api_messages.push(ChatMessage {
             role: match message.role {
                 DisplayRole::User => ChatRole::User,
@@ -1115,6 +1099,32 @@ fn build_api_messages(messages: &[DisplayMessage]) -> Vec<ChatMessage> {
         });
     }
     api_messages
+}
+
+fn chat_message_content_for_api(
+    role: DisplayRole,
+    content: &str,
+    images: &[ChatImage],
+) -> ChatMessageContent {
+    if role == DisplayRole::Assistant || images.is_empty() {
+        return ChatMessageContent::Text(content.to_string());
+    }
+
+    let mut parts = Vec::new();
+    if !content.trim().is_empty() {
+        parts.push(ChatMessagePart::Text {
+            text: content.to_string(),
+        });
+    }
+    parts.extend(
+        images
+            .iter()
+            .cloned()
+            .map(|image| ChatMessagePart::ImageUrl {
+                image_url: ChatImageUrl { url: image.url },
+            }),
+    );
+    ChatMessageContent::Parts(parts)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1343,24 +1353,11 @@ async fn apply_chat_response(
     persisted_messages_dirty.set(true);
 
     let mut follow_up_messages = build_api_messages(&prior_messages);
-    let follow_up_assistant_content = if assistant_images.is_empty() {
-        ChatMessageContent::Text(assistant_content)
-    } else {
-        let mut parts = Vec::new();
-        if !assistant_content.trim().is_empty() {
-            parts.push(ChatMessagePart::Text {
-                text: assistant_content,
-            });
-        }
-        parts.extend(
-            assistant_images
-                .into_iter()
-                .map(|image| ChatMessagePart::ImageUrl {
-                    image_url: ChatImageUrl { url: image.url },
-                }),
-        );
-        ChatMessageContent::Parts(parts)
-    };
+    let follow_up_assistant_content = chat_message_content_for_api(
+        DisplayRole::Assistant,
+        &assistant_content,
+        &assistant_images,
+    );
     follow_up_messages.push(ChatMessage {
         role: ChatRole::Assistant,
         content: follow_up_assistant_content,
@@ -1453,7 +1450,9 @@ fn sanitize_chat_image_src(url: &str) -> Option<String> {
     }
 
     let lower = trimmed.to_ascii_lowercase();
-    lower.starts_with("data:image/").then(|| trimmed.to_string())
+    lower
+        .starts_with("data:image/")
+        .then(|| trimmed.to_string())
 }
 
 fn execute_tool_calls(tool_calls: &[ToolCall]) -> Vec<ExecutedToolCall> {
@@ -1632,8 +1631,8 @@ impl From<ImageInsertData> for ChatImage {
 mod tests {
     use super::{
         build_api_messages, history_save_snapshot_key, resolve_selected_model,
-        sanitize_chat_image_href, sanitize_chat_image_src,
-        should_suggest_image_model, ChatImage, DisplayMessage, DisplayRole,
+        sanitize_chat_image_href, sanitize_chat_image_src, should_suggest_image_model, ChatImage,
+        DisplayMessage, DisplayRole,
     };
     use crate::services::ai_chat::{ChatMessageContent, ChatMessagePart, ChatModel, ChatModelKind};
     use crate::stores::ai_chat_store::{
@@ -1839,7 +1838,10 @@ mod tests {
     fn sanitize_chat_image_src_allows_data_images_but_href_rejects_them() {
         let data_url = "data:image/png;base64,Zm9v";
 
-        assert_eq!(sanitize_chat_image_src(data_url), Some(data_url.to_string()));
+        assert_eq!(
+            sanitize_chat_image_src(data_url),
+            Some(data_url.to_string())
+        );
         assert_eq!(sanitize_chat_image_href(data_url), None);
     }
 
@@ -1874,10 +1876,31 @@ mod tests {
     }
 
     #[test]
-    fn build_api_messages_keeps_assistant_images_as_parts() {
+    fn build_api_messages_strips_assistant_images_from_provider_history() {
         let api_messages = build_api_messages(&[DisplayMessage {
             id: "1".to_string(),
             role: DisplayRole::Assistant,
+            content: "See attached".to_string(),
+            images: vec![ChatImage {
+                url: "https://cdn.example.com/image.png".to_string(),
+                alt: String::new(),
+                title: String::new(),
+            }],
+            tool_calls: vec![],
+        }]);
+
+        assert_eq!(api_messages.len(), 2);
+        assert_eq!(
+            api_messages[1].content,
+            ChatMessageContent::Text("See attached".to_string())
+        );
+    }
+
+    #[test]
+    fn build_api_messages_keeps_user_images_as_parts() {
+        let api_messages = build_api_messages(&[DisplayMessage {
+            id: "1".to_string(),
+            role: DisplayRole::User,
             content: "See attached".to_string(),
             images: vec![ChatImage {
                 url: "https://cdn.example.com/image.png".to_string(),
@@ -1905,7 +1928,7 @@ mod tests {
                     }
                 );
             }
-            other => panic!("expected multipart assistant message, got {other:?}"),
+            other => panic!("expected multipart user message, got {other:?}"),
         }
     }
 }

@@ -74,7 +74,7 @@ pub async fn add_webbookmark(
                     details.join(", ")
                 );
                 return Err(
-                    "Failed to publish web bookmark: no relays accepted the event".to_string()
+                    "Failed to publish web bookmark: no relays accepted the event".to_string(),
                 );
             }
             log::info!("Web bookmark published: {}", output.id());
@@ -130,7 +130,7 @@ pub async fn delete_webbookmark(event: &Event) -> Result<(), String> {
                     details.join(", ")
                 );
                 return Err(
-                    "Failed to delete web bookmark: no relays accepted the event".to_string()
+                    "Failed to delete web bookmark: no relays accepted the event".to_string(),
                 );
             }
             log::info!("Web bookmark deleted");

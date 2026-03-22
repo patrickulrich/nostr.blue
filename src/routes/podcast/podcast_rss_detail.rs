@@ -53,7 +53,11 @@ pub fn PodcastRssFeedDetail(props: PodcastRssFeedDetailProps) -> Element {
             if !has_signer {
                 return RssPodcastDetailState::AuthRequired;
             }
-            log::info!("Fetching podcast metadata for ID: {} (refresh: {})", id, refresh);
+            log::info!(
+                "Fetching podcast metadata for ID: {} (refresh: {})",
+                id,
+                refresh
+            );
             match podcast_index::get_podcast_by_id(id).await {
                 Ok(feed) => {
                     log::info!("Successfully loaded podcast: {}", feed.title);

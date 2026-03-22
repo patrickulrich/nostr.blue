@@ -120,7 +120,12 @@ async fn publish_or_queue_wallet_snapshot(event: Event) -> Result<(), String> {
             localstore
                 .remove_pending_event(pending_id)
                 .await
-                .map_err(|e| format!("Failed to replace pending wallet snapshot {}: {}", pending_id, e))?;
+                .map_err(|e| {
+                    format!(
+                        "Failed to replace pending wallet snapshot {}: {}",
+                        pending_id, e
+                    )
+                })?;
         }
     }
     if !stale_pending_ids.is_empty() {

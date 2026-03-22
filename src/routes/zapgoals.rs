@@ -7,13 +7,13 @@ use crate::stores::zap_goals_store::{
     self, fetch_global_goals, fetch_goal_progress_batch, fetch_goals_for_authors,
     fetch_project_goals, publish_zap_goal_tracked, ZapGoal, ZapGoalProgress, ZapGoalsFeedType,
 };
+use crate::utils::validation::is_valid_http_url;
 use chrono::{Local, TimeZone, Utc};
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use nostr_sdk::PublicKey;
 use std::collections::HashSet;
 use url::Url;
-use crate::utils::validation::is_valid_http_url;
 
 const PAGE_SIZE: usize = 20;
 const PROJECT_PIN_LIMIT: usize = 6;
