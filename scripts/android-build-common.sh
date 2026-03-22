@@ -90,64 +90,6 @@ sync_overlay_dir() {
     done < <(find "$src_dir" -mindepth 1 -print0)
 }
 
-find_wry_android_kotlin_src() {
-    local matches=()
-    local search_root
-    for search_root in "$HOME/.cargo/registry/src" "$HOME/.cargo/git/checkouts"; do
-        [ -d "$search_root" ] || continue
-        while IFS= read -r -d '' path; do
-            matches+=("$path")
-        done < <(find "$search_root" -type d \( -path '*/wry-*/src/android/kotlin' -o -path '*/wry/src/android/kotlin' \) -print0 2>/dev/null)
-    done
-
-    if [ "${#matches[@]}" -eq 0 ]; then
-        echo "ERROR: Unable to locate Wry Android Kotlin sources in Cargo caches" >&2
-        exit 1
-    fi
-
-    printf '%s\n' "${matches[@]}" | sort -V | tail -n1
-}
-
-render_wry_android_kotlin_sources() {
-    local src_dir="$1"
-    local dest_dir="$2"
-    local package_name="$3"
-    local library_name="$4"
-    local wry_file
-
-    mkdir -p "$dest_dir"
-
-    for wry_file in \
-        Ipc.kt \
-        Logger.kt \
-        PermissionHelper.kt \
-        RustWebChromeClient.kt \
-        RustWebView.kt \
-        RustWebViewClient.kt \
-        WryActivity.kt
-    do
-        require_file "$src_dir/$wry_file" "Missing Wry Android Kotlin support source"
-        python3 - "$src_dir/$wry_file" "$dest_dir/$wry_file" "$package_name" "$library_name" <<'PY'
-from pathlib import Path
-import sys
-
-src = Path(sys.argv[1])
-dst = Path(sys.argv[2])
-package_name = sys.argv[3]
-library_name = sys.argv[4]
-
-content = src.read_text(encoding="utf-8")
-content = content.replace("{{package}}", package_name)
-content = content.replace("{{library}}", library_name)
-content = content.replace("{{class-extension}}", "")
-content = content.replace("{{class-init}}", "")
-dst.write_text(content, encoding="utf-8")
-PY
-    done
-
-    echo "Rendered Wry Android Kotlin support sources from $src_dir"
-}
-
 version_field() {
     local field="$1"
     awk -v field="$field" '
@@ -465,9 +407,6 @@ ANDROID_KOTLIN_SRC="$PROJECT_ROOT/android/kotlin"
 ANDROID_KOTLIN_DEST="$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main"
 DIOXUS_CONFIG="$PROJECT_ROOT/Dioxus.toml"
 APP_ID="com.nostr.blue"
-ANDROID_KOTLIN_PACKAGE="dev.dioxus.main"
-ANDROID_LIBRARY_NAME="nostrblue"
-WRY_ANDROID_KOTLIN_SRC="$(find_wry_android_kotlin_src)"
 CARGO_VERSION="$(version_field version)"
 ANDROID_VERSION_CODE="$(version_code_from_semver "$CARGO_VERSION")"
 GRADLE_APP="$DX_ANDROID/app/build.gradle.kts"
@@ -535,10 +474,8 @@ else
     echo "ERROR: Failed to pre-copy file_paths.xml into $DX_ANDROID/app/src/main/res/xml/" >&2
     exit 1
 fi
-if sync_overlay_dir \
-    "$ANDROID_KOTLIN_SRC/dev/dioxus/main" \
-    "$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main" \
-    "MainActivity.kt"
+if mkdir -p "$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main" \
+    && cp "$ANDROID_KOTLIN_SRC/dev/dioxus/main/"*.kt "$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main/"
 then
     echo "Pre-copied Android Kotlin sources"
 else
@@ -754,16 +691,9 @@ fi
 
 echo ""
 echo "--- Step 4c: Copy Android Kotlin sources ---"
-sync_overlay_dir \
-    "$ANDROID_KOTLIN_SRC/dev/dioxus/main" \
-    "$ANDROID_KOTLIN_DEST" \
-    "MainActivity.kt"
+mkdir -p "$ANDROID_KOTLIN_DEST"
+cp "$ANDROID_KOTLIN_SRC/dev/dioxus/main/"*.kt "$ANDROID_KOTLIN_DEST/"
 echo "Copied native Android Kotlin sources"
-render_wry_android_kotlin_sources \
-    "$WRY_ANDROID_KOTLIN_SRC" \
-    "$ANDROID_KOTLIN_DEST" \
-    "$ANDROID_KOTLIN_PACKAGE" \
-    "$ANDROID_LIBRARY_NAME"
 
 echo ""
 echo "--- Step 4d: Verify Android resource overrides ---"
