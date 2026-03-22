@@ -764,6 +764,7 @@ pub async fn comment_on_recipe(recipe: &CachedRecipe, content: &str) -> StdResul
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to post comment: {}", e))?;
+    crate::utils::relay_output::ensure_publish_accepted(&output, "Failed to post recipe comment")?;
     log::info!("Comment posted: {}", output.id().to_hex());
     Ok(output.id().to_hex())
 }

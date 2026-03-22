@@ -35,7 +35,13 @@ pub fn format_bytes(bytes: u64) -> String {
     if unit_index == 0 {
         format!("{} {}", bytes, units[unit_index])
     } else {
-        format!("{value:.1} {}", units[unit_index])
+        let mut rounded = (value * 10.0).round() / 10.0;
+        if rounded >= 1024.0 && unit_index < units.len() - 1 {
+            value /= 1024.0;
+            unit_index += 1;
+            rounded = (value * 10.0).round() / 10.0;
+        }
+        format!("{rounded:.1} {}", units[unit_index])
     }
 }
 /// Format satoshi amount with thousands separator (e.g., 1,234,567)
@@ -109,6 +115,16 @@ pub fn truncate_commit(hash: &str) -> String {
         return hash.to_string();
     }
     hash[..7].to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_bytes;
+
+    #[test]
+    fn format_bytes_rolls_over_after_rounding() {
+        assert_eq!(format_bytes(1_048_575), "1.0 MB");
+    }
 }
 /// Truncates text at a word boundary to avoid breaking words
 /// Returns text with "..." suffix if truncated

@@ -148,8 +148,7 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
             None
         }
         Err(e) => {
-            log::warn!("Nostr publish failed: {}", e);
-            Some(pending_event_id.clone())
+            return Err(e);
         }
     };
     let valid_created: Vec<String> = new_event_id
@@ -272,8 +271,7 @@ pub async fn send_tokens_p2pk(
             None
         }
         Err(e) => {
-            log::warn!("Nostr P2PK publish failed: {}", e);
-            Some(pending_event_id.clone())
+            return Err(e);
         }
     };
     let valid_created: Vec<String> = new_event_id

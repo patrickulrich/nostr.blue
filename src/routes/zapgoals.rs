@@ -13,6 +13,7 @@ use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use nostr_sdk::PublicKey;
 use std::collections::HashSet;
 use url::Url;
+use crate::utils::validation::is_valid_http_url;
 
 const PAGE_SIZE: usize = 20;
 const PROJECT_PIN_LIMIT: usize = 6;
@@ -560,6 +561,14 @@ pub fn ZapGoalsNew() -> Element {
         };
         if content_value.is_empty() {
             error_message.set(Some("Add a description for your zap goal.".to_string()));
+            return;
+        }
+        if !image_value.is_empty() && !is_valid_http_url(&image_value) {
+            error_message.set(Some("Use a valid HTTP(S) image URL.".to_string()));
+            return;
+        }
+        if !url_value.is_empty() && !is_valid_http_url(&url_value) {
+            error_message.set(Some("Use a valid HTTP(S) related URL.".to_string()));
             return;
         }
 

@@ -338,8 +338,12 @@ fn model_kind(
         }
     }
 
+    let model_id = model.id.trim().to_ascii_lowercase();
     let model_type = model.model_type.trim().to_ascii_lowercase();
     if model_type.is_empty() {
+        if matches_image_model_id(&model_id) {
+            return Some(ChatModelKind::Image);
+        }
         return Some(ChatModelKind::Chat);
     }
     if model_type == "image" || model_type == "images" || model_type == "image_generation" {
@@ -356,6 +360,12 @@ fn model_kind(
     }
 
     None
+}
+
+fn matches_image_model_id(model_id: &str) -> bool {
+    model_id.starts_with("dall-e-")
+        || model_id.starts_with("gpt-image-")
+        || model_id.starts_with("image-")
 }
 
 fn model_supports_image_input(model: &WireModel) -> bool {
@@ -657,6 +667,36 @@ mod tests {
                 pricing: None,
             }
         ));
+    }
+
+    #[test]
+    fn infers_openai_compatible_image_models_from_model_id() {
+        let provider = AiProviderConfig {
+            id: "custom".to_string(),
+            name: "Custom".to_string(),
+            base_url: "https://example.com/v1".to_string(),
+            provider_kind: AiProviderKind::OpenAiCompatible,
+            auth: ProviderAuth::BearerToken("secret".to_string()),
+            is_builtin: false,
+        };
+
+        for model_id in ["dall-e-3", "gpt-image-1", "image-alpha"] {
+            let model = WireModel {
+                id: model_id.to_string(),
+                name: String::new(),
+                description: String::new(),
+                model_type: String::new(),
+                image_input: None,
+                capabilities: None,
+                input_modalities: None,
+                pricing: None,
+            };
+
+            assert_eq!(
+                model_kind(&provider, "models", &model),
+                Some(ChatModelKind::Image)
+            );
+        }
     }
 
     #[test]

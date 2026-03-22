@@ -109,6 +109,26 @@ async fn publish_or_queue_wallet_snapshot(event: Event) -> Result<(), String> {
         );
     }
 
+    let stale_pending_ids: Vec<String> = PENDING_NOSTR_EVENTS
+        .read()
+        .iter()
+        .filter(|pending| pending.event_type == super::types::PendingEventType::WalletSnapshot)
+        .map(|pending| pending.id.clone())
+        .collect();
+    if let Some(localstore) = SHARED_LOCALSTORE.read().as_ref().cloned() {
+        for pending_id in &stale_pending_ids {
+            localstore
+                .remove_pending_event(pending_id)
+                .await
+                .map_err(|e| format!("Failed to replace pending wallet snapshot {}: {}", pending_id, e))?;
+        }
+    }
+    if !stale_pending_ids.is_empty() {
+        PENDING_NOSTR_EVENTS
+            .write()
+            .retain(|pending| !stale_pending_ids.contains(&pending.id));
+    }
+
     queue_signed_event_for_retry_result(
         event,
         super::types::PendingEventType::WalletSnapshot,

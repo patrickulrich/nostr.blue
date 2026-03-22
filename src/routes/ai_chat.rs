@@ -17,6 +17,7 @@ use crate::stores::ai_provider_store::{
 };
 use crate::stores::{nostr_client, theme_store};
 use crate::utils::markdown::render_markdown;
+use crate::utils::validation::is_valid_http_url;
 use dioxus::document;
 use dioxus::prelude::*;
 use serde_json::json;
@@ -988,17 +989,19 @@ fn MessageBubble(message: DisplayMessage) -> Element {
                 if !message.images.is_empty() {
                     div { class: if message.content.is_empty() { "space-y-3" } else { "mt-3 space-y-3" },
                         for (index, image) in message.images.iter().enumerate() {
-                            a {
-                                key: "{message.id}-image-{index}",
-                                href: "{image.url}",
-                                target: "_blank",
-                                rel: "noreferrer noopener",
-                                class: "block overflow-hidden rounded-xl border border-border bg-background transition hover:opacity-95",
-                                img {
-                                    src: "{image.url}",
-                                    alt: "{image.alt}",
-                                    title: "{image.title}",
-                                    class: "max-h-96 w-full object-contain bg-background",
+                            if let Some(image_url) = sanitize_chat_image_url(&image.url) {
+                                a {
+                                    key: "{message.id}-image-{index}",
+                                    href: "{image_url}",
+                                    target: "_blank",
+                                    rel: "noreferrer noopener",
+                                    class: "block overflow-hidden rounded-xl border border-border bg-background transition hover:opacity-95",
+                                    img {
+                                        src: "{image_url}",
+                                        alt: "{image.alt}",
+                                        title: "{image.title}",
+                                        class: "max-h-96 w-full object-contain bg-background",
+                                    }
                                 }
                             }
                         }
@@ -1223,10 +1226,12 @@ fn submit_message(
                             images: response
                                 .images
                                 .into_iter()
-                                .map(|image| ChatImage {
-                                    url: image.url,
-                                    alt: "Generated image".to_string(),
-                                    title: String::new(),
+                                .filter_map(|image| {
+                                    sanitize_chat_image_url(&image.url).map(|url| ChatImage {
+                                        url,
+                                        alt: "Generated image".to_string(),
+                                        title: String::new(),
+                                    })
                                 })
                                 .collect(),
                             tool_calls: Vec::new(),
@@ -1409,11 +1414,13 @@ fn extract_assistant_content(content: Option<AssistantContent>) -> (String, Vec<
                         }
                     }
                     crate::services::ai_chat::AssistantContentPart::ImageUrl { image_url } => {
-                        images.push(ChatImage {
-                            url: image_url.url,
-                            alt: "Generated image".to_string(),
-                            title: String::new(),
-                        });
+                        if let Some(url) = sanitize_chat_image_url(&image_url.url) {
+                            images.push(ChatImage {
+                                url,
+                                alt: "Generated image".to_string(),
+                                title: String::new(),
+                            });
+                        }
                     }
                 }
             }
@@ -1421,6 +1428,11 @@ fn extract_assistant_content(content: Option<AssistantContent>) -> (String, Vec<
         }
         None => (String::new(), Vec::new()),
     }
+}
+
+fn sanitize_chat_image_url(url: &str) -> Option<String> {
+    let trimmed = url.trim();
+    is_valid_http_url(trimmed).then(|| trimmed.to_string())
 }
 
 fn execute_tool_calls(tool_calls: &[ToolCall]) -> Vec<ExecutedToolCall> {
@@ -1469,10 +1481,12 @@ fn persisted_message_from_display(message: DisplayMessage) -> PersistedChatMessa
         images: message
             .images
             .into_iter()
-            .map(|image| PersistedChatImage {
-                url: image.url,
-                alt: image.alt,
-                title: image.title,
+            .filter_map(|image| {
+                sanitize_chat_image_url(&image.url).map(|url| PersistedChatImage {
+                    url,
+                    alt: image.alt,
+                    title: image.title,
+                })
             })
             .collect(),
         tool_calls: message
@@ -1498,10 +1512,12 @@ fn display_message_from_persisted(message: PersistedChatMessage) -> DisplayMessa
         images: message
             .images
             .into_iter()
-            .map(|image| ChatImage {
-                url: image.url,
-                alt: image.alt,
-                title: image.title,
+            .filter_map(|image| {
+                sanitize_chat_image_url(&image.url).map(|url| ChatImage {
+                    url,
+                    alt: image.alt,
+                    title: image.title,
+                })
             })
             .collect(),
         tool_calls: message

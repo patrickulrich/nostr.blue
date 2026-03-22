@@ -480,7 +480,7 @@ pub fn RelayDetail(relay_id: String) -> Element {
 
                                 if let Some(stats) = stats {
                                     div {
-                                        h3 { class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-2", "Live Connection Stats" }
+                                        h3 { class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-2", "Connection Stats Snapshot" }
                                         div { class: "grid gap-3 md:grid-cols-2 text-sm",
                                             div { class: "rounded-lg bg-gray-50 dark:bg-gray-700 p-3",
                                                 p { class: "font-medium text-gray-900 dark:text-white", "Status" }

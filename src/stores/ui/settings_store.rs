@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 /// localStorage key for settings cache
 const SETTINGS_LOCAL_STORAGE_KEY: &str = "nostr_blue_settings";
+const PUBLISH_CLIENT_TAG_PENDING_LOCAL_STORAGE_KEY: &str = "nostr_blue_publish_client_tag_pending";
 /// App settings stored on Nostr via NIP-78
 /// Note: Relay configuration is now stored via NIP-65 (kind 10002) and NIP-17 (kind 10050)
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -68,8 +69,24 @@ fn cache_settings(settings: &AppSettings) {
     let _ = storage::set(SETTINGS_LOCAL_STORAGE_KEY, settings);
 }
 
+fn load_pending_publish_client_tag() -> Option<bool> {
+    storage::get::<bool>(PUBLISH_CLIENT_TAG_PENDING_LOCAL_STORAGE_KEY).ok()
+}
+
+fn cache_pending_publish_client_tag(value: Option<bool>) {
+    match value {
+        Some(enabled) => {
+            let _ = storage::set(PUBLISH_CLIENT_TAG_PENDING_LOCAL_STORAGE_KEY, &enabled);
+        }
+        None => {
+            let _ = storage::delete(PUBLISH_CLIENT_TAG_PENDING_LOCAL_STORAGE_KEY);
+        }
+    }
+}
+
 async fn drain_publish_client_tag_queue() {
-    if !auth_store::is_authenticated() || *SETTINGS_LOADING.read() {
+    let has_pending = PUBLISH_CLIENT_TAG_SAVE_PENDING.read().is_some();
+    if !has_pending || !auth_store::is_authenticated() || *SETTINGS_LOADING.read() {
         return;
     }
 
@@ -100,6 +117,7 @@ async fn drain_publish_client_tag_queue() {
             let mut pending = PUBLISH_CLIENT_TAG_SAVE_PENDING.write();
             if pending.as_ref() == Some(&next_enabled) {
                 pending.take();
+                cache_pending_publish_client_tag(None);
             }
         }
     }
@@ -118,6 +136,7 @@ pub fn init_settings_from_cache() {
             log::debug!("No settings cache found or failed to parse");
         }
     }
+    *PUBLISH_CLIENT_TAG_SAVE_PENDING.write() = load_pending_publish_client_tag();
 }
 /// Load settings from Nostr relays (NIP-78)
 pub async fn load_settings() -> Result<(), String> {
@@ -165,6 +184,11 @@ pub async fn load_settings() -> Result<(), String> {
                         }
                         cache_settings(&settings);
                         SETTINGS.write().clone_from(&settings);
+                        if let Some(pending_publish_client_tag) = load_pending_publish_client_tag() {
+                            PUBLISH_CLIENT_TAG_SAVE_PENDING
+                                .write()
+                                .replace(pending_publish_client_tag);
+                        }
                         SETTINGS_LOADING.write().clone_from(&false);
                         drain_publish_client_tag_queue().await;
                         return Ok(());
@@ -277,6 +301,7 @@ pub async fn update_publish_client_tag(enabled: bool) {
     };
     cache_settings(&settings);
     PUBLISH_CLIENT_TAG_SAVE_PENDING.write().replace(enabled);
+    cache_pending_publish_client_tag(Some(enabled));
     if !auth_store::is_authenticated() {
         return;
     }

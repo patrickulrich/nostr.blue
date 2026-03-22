@@ -965,7 +965,10 @@ pub async fn reconcile_pending_event_ids() -> Result<usize, String> {
             let tokens = data.read();
             tokens
                 .iter()
-                .filter(|t| !t.event_id.starts_with("pending_"))
+                .filter(|t| {
+                    !t.event_id.starts_with("pending_")
+                        && !t.event_id.starts_with("local_pending_")
+                })
                 .find(|t| {
                     let t_secrets: std::collections::HashSet<&str> =
                         t.proofs.iter().map(|p| p.secret.as_str()).collect();

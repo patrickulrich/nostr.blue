@@ -353,6 +353,15 @@ const STORAGE_KEY_VOLUME: &str = "music_player_volume";
 const STORAGE_KEY_MUTED: &str = "music_player_muted";
 const STORAGE_KEY_PLAYBACK_SPEED: &str = "music_player_playback_speed";
 static VOLUME_PERSIST_GEN: AtomicU64 = AtomicU64::new(0);
+static MUSIC_STATUS_GEN: AtomicU64 = AtomicU64::new(0);
+
+fn next_music_status_generation() -> u64 {
+    MUSIC_STATUS_GEN.fetch_add(1, Ordering::SeqCst).wrapping_add(1)
+}
+
+fn is_current_music_status_generation(generation: u64) -> bool {
+    MUSIC_STATUS_GEN.load(Ordering::SeqCst) == generation
+}
 /// Initialize music player from localStorage
 pub fn init_player() {
     let mut state = MusicPlayerState::default();
@@ -369,7 +378,10 @@ pub fn init_player() {
     log::info!("Music player initialized");
 }
 /// Publish NIP-38 music status (Kind 30315)
-async fn publish_music_status(track: &MusicTrack) {
+async fn publish_music_status(track: &MusicTrack, generation: u64) {
+    if !is_current_music_status_generation(generation) {
+        return;
+    }
     if !auth_store::is_authenticated() {
         return;
     }
@@ -469,6 +481,9 @@ async fn publish_music_status(track: &MusicTrack) {
                 Some(Timestamp::now() + std::time::Duration::from_secs(duration as u64));
         }
     }
+    if !is_current_music_status_generation(generation) {
+        return;
+    }
     let builder = EventBuilder::live_status(status, content);
     match client
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
@@ -500,7 +515,10 @@ async fn publish_music_status(track: &MusicTrack) {
     }
 }
 /// Clear music status (publish empty status)
-async fn clear_music_status() {
+async fn clear_music_status(generation: u64) {
+    if !is_current_music_status_generation(generation) {
+        return;
+    }
     if !auth_store::is_authenticated() {
         return;
     }
@@ -510,6 +528,9 @@ async fn clear_music_status() {
     };
     let status = LiveStatus::new(StatusType::Music);
     let builder = EventBuilder::live_status(status, "");
+    if !is_current_music_status_generation(generation) {
+        return;
+    }
     match client
         .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
@@ -549,8 +570,9 @@ pub fn play_track(
         log::error!("Failed to start native Android playback queue: {}", e);
         state.playback_error = Some(format!("Android playback failed: {}", e));
     }
+    let generation = next_music_status_generation();
     spawn(async move {
-        publish_music_status(&track).await;
+        publish_music_status(&track, generation).await;
     });
 }
 
@@ -589,13 +611,14 @@ pub fn toggle_play() {
             state.playback_error = Some(format!("Android playback failed: {}", e));
         }
     }
+    let generation = next_music_status_generation();
     if !state.is_playing {
         spawn(async move {
-            clear_music_status().await;
+            clear_music_status(generation).await;
         });
     } else if let Some(track) = state.current_track.clone() {
         spawn(async move {
-            publish_music_status(&track).await;
+            publish_music_status(&track, generation).await;
         });
     }
 }
@@ -610,6 +633,7 @@ pub fn next_track() {
     state.is_playing = true;
     state.current_time = 0.0;
     if let Some(track) = state.current_track.clone() {
+        let generation = next_music_status_generation();
         log::info!("Next track: {}", track.title);
         #[cfg(feature = "mobile")]
         if let Err(e) = android_media::next_track() {
@@ -617,7 +641,7 @@ pub fn next_track() {
             state.playback_error = Some(format!("Android playback failed: {}", e));
         }
         spawn(async move {
-            publish_music_status(&track).await;
+            publish_music_status(&track, generation).await;
         });
     }
 }
@@ -635,8 +659,9 @@ pub fn previous_track() {
             state.playback_error = Some(format!("Android playback failed: {}", e));
         }
         if let Some(track) = state.current_track.clone() {
+            let generation = next_music_status_generation();
             spawn(async move {
-                publish_music_status(&track).await;
+                publish_music_status(&track, generation).await;
             });
         }
         return;
@@ -650,6 +675,7 @@ pub fn previous_track() {
     state.is_playing = true;
     state.current_time = 0.0;
     if let Some(track) = state.current_track.clone() {
+        let generation = next_music_status_generation();
         log::info!("Previous track: {}", track.title);
         #[cfg(feature = "mobile")]
         if let Err(e) = android_media::previous_track() {
@@ -657,7 +683,7 @@ pub fn previous_track() {
             state.playback_error = Some(format!("Android playback failed: {}", e));
         }
         spawn(async move {
-            publish_music_status(&track).await;
+            publish_music_status(&track, generation).await;
         });
     }
 }
@@ -750,8 +776,9 @@ pub fn close_player() {
             log::error!("Failed to clear native Android playback queue: {}", e);
         }
     }
+    let generation = next_music_status_generation();
     spawn(async move {
-        clear_music_status().await;
+        clear_music_status(generation).await;
     });
 }
 /// Show zap dialog for a specific track (or current track if None)

@@ -118,6 +118,28 @@ pub fn PpqSettingsPanel(
         }
     });
 
+    use_effect(move || {
+        if let Some(current) = nwc.read().clone() {
+            nwc_url.set(current.nwc_url.unwrap_or_default());
+            nwc_threshold.set(
+                current
+                    .threshold_usd
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+            );
+            nwc_topup_amount.set(
+                current
+                    .topup_amount_usd
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+            );
+        } else {
+            nwc_url.set(String::new());
+            nwc_threshold.set("10".to_string());
+            nwc_topup_amount.set("10".to_string());
+        }
+    });
+
     let ppq_account = state.read().ppq_account.clone();
     let active_key_id = ppq_account
         .as_ref()
@@ -181,42 +203,48 @@ pub fn PpqSettingsPanel(
                 div { class: "flex flex-wrap gap-3",
                     button {
                         class: "rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-60",
-                        disabled: *account_action_loading.read() || *is_saving.read(),
+                        disabled: *account_action_loading.read() || *is_saving.read() || *balance_loading.read(),
                         onclick: move |_| {
+                            let generation = request_generation.peek().wrapping_add(1);
+                            request_generation.set(generation);
                             load_balance(
                                 balance,
                                 balance_loading,
                                 balance_error,
                                 refresh_balance_credit_id.clone(),
-                                None,
+                                Some((request_generation, generation)),
                             );
                         },
                         "Refresh Balance"
                     }
                     button {
                         class: "rounded-lg border border-border px-4 py-2 text-sm transition hover:bg-accent disabled:opacity-60",
-                        disabled: *account_action_loading.read() || *is_saving.read(),
+                        disabled: *account_action_loading.read() || *is_saving.read() || *keys_loading.read(),
                         onclick: move |_| {
+                            let generation = request_generation.peek().wrapping_add(1);
+                            request_generation.set(generation);
                             load_api_keys(
                                 api_keys,
                                 keys_loading,
                                 keys_error,
                                 refresh_keys_credit_id.clone(),
-                                None,
+                                Some((request_generation, generation)),
                             );
                         },
                         "Refresh Keys"
                     }
                     button {
                         class: "rounded-lg border border-border px-4 py-2 text-sm transition hover:bg-accent disabled:opacity-60",
-                        disabled: *account_action_loading.read() || *is_saving.read(),
+                        disabled: *account_action_loading.read() || *is_saving.read() || *nwc_loading.read(),
                         onclick: move |_| {
+                            let generation = request_generation.peek().wrapping_add(1);
+                            request_generation.set(generation);
                             load_nwc(
                                 nwc,
                                 nwc_loading,
                                 nwc_error,
                                 refresh_nwc_credit_id.clone(),
-                                None,
+                                Some((request_generation, generation)),
                             );
                         },
                         "Refresh NWC"

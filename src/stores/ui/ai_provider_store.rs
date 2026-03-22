@@ -159,6 +159,12 @@ fn migrate_legacy_state(mut state: AiProviderState) -> AiProviderState {
     if state.selected_provider_id == SHAKESPEARE_PROVIDER_ID {
         state.selected_provider_id = PPQ_PROVIDER_ID.to_string();
     }
+    if let Some(model) = state.selected_model_by_provider.remove(SHAKESPEARE_PROVIDER_ID) {
+        state
+            .selected_model_by_provider
+            .entry(PPQ_PROVIDER_ID.to_string())
+            .or_insert(model);
+    }
     state
 }
 
@@ -407,6 +413,27 @@ mod tests {
             ppq_account: None,
         });
         assert_eq!(migrated.selected_provider_id, PPQ_PROVIDER_ID);
+    }
+
+    #[test]
+    fn migrates_shakespeare_model_selection_to_ppq() {
+        let mut selected_model_by_provider = HashMap::new();
+        selected_model_by_provider.insert("shakespeare".to_string(), "model-a".to_string());
+
+        let migrated = migrate_legacy_state(AiProviderState {
+            selected_provider_id: "shakespeare".to_string(),
+            selected_model_by_provider,
+            custom_providers: vec![],
+            ppq_account: None,
+        });
+
+        assert_eq!(
+            migrated.selected_model_by_provider.get(PPQ_PROVIDER_ID),
+            Some(&"model-a".to_string())
+        );
+        assert!(!migrated
+            .selected_model_by_provider
+            .contains_key(SHAKESPEARE_PROVIDER_ID));
     }
 
     #[test]

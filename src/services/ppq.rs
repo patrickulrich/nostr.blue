@@ -1,6 +1,7 @@
 use crate::platform::http::http_client;
 use reqwest::{Method, Response};
 use serde_json::{json, Value};
+use std::fmt;
 use url::Url;
 
 pub const PPQ_API_ROOT: &str = "https://api.ppq.ai";
@@ -19,20 +20,39 @@ fn build_ppq_url(segments: &[&str]) -> Result<String, String> {
     Ok(url.to_string())
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct PpqAccount {
     pub credit_id: String,
     pub api_key: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+impl fmt::Debug for PpqAccount {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PpqAccount")
+            .field("credit_id", &self.credit_id)
+            .field("api_key", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq)]
 pub struct PpqBalance {
     pub amount: Option<f64>,
     pub currency: String,
     pub raw_json: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+impl fmt::Debug for PpqBalance {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PpqBalance")
+            .field("amount", &self.amount)
+            .field("currency", &self.currency)
+            .field("raw_json", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq)]
 pub struct PpqTopupInvoice {
     pub invoice_id: String,
     pub status: Option<String>,
@@ -43,7 +63,21 @@ pub struct PpqTopupInvoice {
     pub raw_json: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+impl fmt::Debug for PpqTopupInvoice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PpqTopupInvoice")
+            .field("invoice_id", &self.invoice_id)
+            .field("status", &self.status)
+            .field("payment_request", &self.payment_request.as_ref().map(|_| "<redacted>"))
+            .field("address", &self.address)
+            .field("amount", &self.amount)
+            .field("currency", &self.currency)
+            .field("raw_json", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq)]
 pub struct PpqNwcAutoTopup {
     pub nwc_url: Option<String>,
     pub threshold_usd: Option<f64>,
@@ -51,7 +85,18 @@ pub struct PpqNwcAutoTopup {
     pub raw_json: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+impl fmt::Debug for PpqNwcAutoTopup {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PpqNwcAutoTopup")
+            .field("nwc_url", &self.nwc_url.as_ref().map(|_| "<redacted>"))
+            .field("threshold_usd", &self.threshold_usd)
+            .field("topup_amount_usd", &self.topup_amount_usd)
+            .field("raw_json", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq)]
 pub struct PpqApiKey {
     pub id: String,
     pub name: String,
@@ -65,6 +110,25 @@ pub struct PpqApiKey {
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
     pub deleted_at: Option<String>,
+}
+
+impl fmt::Debug for PpqApiKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PpqApiKey")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
+            .field("usage_limit_usd", &self.usage_limit_usd)
+            .field("current_period_usage_usd", &self.current_period_usage_usd)
+            .field("total_usage_all_time_usd", &self.total_usage_all_time_usd)
+            .field("reset_period", &self.reset_period)
+            .field("reset_at", &self.reset_at)
+            .field("expire_at", &self.expire_at)
+            .field("created_at", &self.created_at)
+            .field("updated_at", &self.updated_at)
+            .field("deleted_at", &self.deleted_at)
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -267,7 +331,7 @@ pub async fn update_api_key(
         Method::PATCH,
         &url,
         Some(vec![("x-credit-id".to_string(), credit_id.to_string())]),
-        Some(api_key_payload(input)),
+        Some(api_key_patch_payload(input)),
     )
     .await?;
     parse_api_key(data_or_root(&value))
@@ -292,6 +356,21 @@ fn api_key_payload(input: &PpqApiKeyInput) -> Value {
         "reset_period": input.reset_period,
         "expire_at": input.expire_at,
     })
+}
+
+fn api_key_patch_payload(input: &PpqApiKeyInput) -> Value {
+    let mut object = serde_json::Map::new();
+    object.insert("name".to_string(), json!(input.name));
+    if let Some(limit) = input.usage_limit_usd {
+        object.insert("usage_limit_usd".to_string(), json!(limit));
+    }
+    if let Some(reset_period) = input.reset_period.as_deref() {
+        object.insert("reset_period".to_string(), json!(reset_period));
+    }
+    if let Some(expire_at) = input.expire_at.as_deref() {
+        object.insert("expire_at".to_string(), json!(expire_at));
+    }
+    Value::Object(object)
 }
 
 fn parse_topup_invoice(value: &Value) -> Result<PpqTopupInvoice, String> {
@@ -498,5 +577,20 @@ mod tests {
             format!("Response body redacted ({} bytes).", body.len())
         );
         assert!(!summary.contains("sk-live-123"));
+    }
+
+    #[test]
+    fn patch_payload_omits_none_fields() {
+        let payload = api_key_patch_payload(&PpqApiKeyInput {
+            name: "Renamed".to_string(),
+            usage_limit_usd: None,
+            reset_period: None,
+            expire_at: Some("2027-01-01T00:00:00Z".to_string()),
+        });
+
+        assert_eq!(payload["name"], json!("Renamed"));
+        assert!(payload.get("usage_limit_usd").is_none());
+        assert!(payload.get("reset_period").is_none());
+        assert_eq!(payload["expire_at"], json!("2027-01-01T00:00:00Z"));
     }
 }
