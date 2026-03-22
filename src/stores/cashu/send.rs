@@ -693,7 +693,10 @@ async fn publish_send_events(
                     )
                     .await
                     .map_err(|queue_err| {
-                        format!("Failed to queue send deletion event for retry: {}", queue_err)
+                        format!(
+                            "Failed to queue send deletion event for retry: {}",
+                            queue_err
+                        )
                     })?;
                 }
                 Err(e) => {
@@ -706,7 +709,10 @@ async fn publish_send_events(
                     )
                     .await
                     .map_err(|queue_err| {
-                        format!("Failed to queue send deletion event for retry: {}", queue_err)
+                        format!(
+                            "Failed to queue send deletion event for retry: {}",
+                            queue_err
+                        )
                     })?;
                 }
             }

@@ -13,10 +13,10 @@ use crate::stores::ai_chat_store::{
 };
 use crate::stores::ai_provider_store::{
     self, ppq_provider, resolve_providers, AiProviderConfig, AiProviderState, PpqAccountState,
+    PROVIDER_STATE_SAVE_EVENT,
 };
 use crate::stores::{nostr_client, theme_store};
 use crate::utils::markdown::render_markdown;
-use dioxus::core::spawn_forever;
 use dioxus::document;
 use dioxus::prelude::*;
 use serde_json::json;
@@ -69,6 +69,13 @@ struct ThemeToolArgs {
     theme: String,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum PendingProviderSaveAction {
+    #[default]
+    None,
+    BootstrapPpq,
+}
+
 fn history_save_snapshot_key(
     account_key: &str,
     persisted_messages: &[PersistedChatMessage],
@@ -118,6 +125,9 @@ pub fn AIChat() -> Element {
     let mut initial_loaded_messages = use_signal(Vec::<PersistedChatMessage>::new);
     let messages_container_id = use_signal(|| "ai-chat-messages".to_string());
     let mut last_account_key = use_signal(|| None::<String>);
+    let mut pending_provider_save_snapshot = use_signal(|| None::<AiProviderState>);
+    let mut pending_provider_save_min_event_id = use_signal(|| 0u64);
+    let mut pending_provider_save_action = use_signal(PendingProviderSaveAction::default);
     let persisted_messages = use_memo(move || {
         messages
             .read()
@@ -162,6 +172,40 @@ pub fn AIChat() -> Element {
     });
 
     use_effect(move || {
+        let pending_snapshot = pending_provider_save_snapshot.read().clone();
+        let Some(pending_snapshot) = pending_snapshot else {
+            return;
+        };
+        let Some(event) = PROVIDER_STATE_SAVE_EVENT.read().clone() else {
+            return;
+        };
+        if event.event_id <= *pending_provider_save_min_event_id.read()
+            || event.snapshot != pending_snapshot
+        {
+            return;
+        }
+
+        let action = *pending_provider_save_action.read();
+        pending_provider_save_snapshot.set(None);
+        pending_provider_save_min_event_id.set(event.event_id);
+        pending_provider_save_action.set(PendingProviderSaveAction::None);
+
+        match event.result {
+            Ok(()) => {
+                if matches!(action, PendingProviderSaveAction::BootstrapPpq) {
+                    ppq_bootstrap_loading.set(false);
+                }
+            }
+            Err(err) => {
+                error.set(Some(err));
+                if matches!(action, PendingProviderSaveAction::BootstrapPpq) {
+                    ppq_bootstrap_loading.set(false);
+                }
+            }
+        }
+    });
+
+    use_effect(move || {
         let _ = messages.read().len();
         let id = messages_container_id.read().clone();
         spawn(async move {
@@ -171,6 +215,19 @@ pub fn AIChat() -> Element {
             );
             let _ = document::eval(&script).await;
         });
+    });
+
+    use_effect(move || {
+        let selected = selected_model.read().clone();
+        let active_model = current_model(&models.read(), &selected);
+        if active_model
+            .as_ref()
+            .is_some_and(|model| model.supports_image_input)
+            || pending_images.read().is_empty()
+        {
+            return;
+        }
+        pending_images.set(Vec::new());
     });
 
     use_effect(move || {
@@ -461,6 +518,9 @@ pub fn AIChat() -> Element {
                                 next_model,
                                 provider_state,
                                 error,
+                                pending_provider_save_snapshot,
+                                pending_provider_save_min_event_id,
+                                pending_provider_save_action,
                             );
                         }
                     } else {
@@ -491,12 +551,17 @@ pub fn AIChat() -> Element {
     let active_model = current_model(&models.read(), selected_model.read().as_str());
     let supports_image_attachments = active_model
         .as_ref()
-        .map(|model| model.supports_image_input || model.kind == ChatModelKind::Image)
+        .map(|model| model.supports_image_input)
         .unwrap_or(false);
+    let has_pending_images = !pending_images.read().is_empty();
     let can_submit = match active_model.as_ref().map(|model| model.kind) {
         Some(ChatModelKind::Image) => !input.read().trim().is_empty(),
         Some(ChatModelKind::Chat) => {
-            !input.read().trim().is_empty() || !pending_images.read().is_empty()
+            !input.read().trim().is_empty()
+                || (has_pending_images
+                    && active_model
+                        .as_ref()
+                        .is_some_and(|m| m.supports_image_input))
         }
         None => false,
     };
@@ -533,6 +598,9 @@ pub fn AIChat() -> Element {
                                     value,
                                     provider_state,
                                     error,
+                                    pending_provider_save_snapshot,
+                                    pending_provider_save_min_event_id,
+                                    pending_provider_save_action,
                                 );
                             },
                             if models.read().is_empty() {
@@ -629,16 +697,27 @@ pub fn AIChat() -> Element {
                                             }
                                             providers.set(resolve_providers(&next_state));
                                             provider_state.set(next_state.clone());
-                                            match ai_provider_store::save_provider_state(&next_state)
-                                                .await
+                                            pending_provider_save_snapshot
+                                                .set(Some(next_state.clone()));
+                                            pending_provider_save_min_event_id.set(
+                                                PROVIDER_STATE_SAVE_EVENT
+                                                    .read()
+                                                    .as_ref()
+                                                    .map(|event| event.event_id)
+                                                    .unwrap_or(0),
+                                            );
+                                            pending_provider_save_action
+                                                .set(PendingProviderSaveAction::BootstrapPpq);
+                                            if let Some(snapshot) =
+                                                ai_provider_store::queue_provider_state_save(
+                                                    next_state,
+                                                )
                                             {
-                                                Ok(()) => {}
-                                                Err(err) => error.set(Some(err)),
+                                                ai_provider_store::process_queued_provider_state_saves(snapshot);
                                             }
                                         }
                                         Err(err) => error.set(Some(err)),
                                     }
-                                    ppq_bootstrap_loading.set(false);
                                 });
                             }
                         }
@@ -948,22 +1027,23 @@ fn build_api_messages(messages: &[DisplayMessage]) -> Vec<ChatMessage> {
         content: ChatMessageContent::Text(SYSTEM_PROMPT.to_string()),
     }];
     for message in messages {
-        let content = if !message.images.is_empty() {
-            let mut parts = Vec::new();
-            if !message.content.trim().is_empty() {
-                parts.push(ChatMessagePart::Text {
-                    text: message.content.clone(),
-                });
-            }
-            parts.extend(message.images.iter().cloned().map(|image| {
-                ChatMessagePart::ImageUrl {
-                    image_url: ChatImageUrl { url: image.url },
+        let content =
+            if !message.images.is_empty() {
+                let mut parts = Vec::new();
+                if !message.content.trim().is_empty() {
+                    parts.push(ChatMessagePart::Text {
+                        text: message.content.clone(),
+                    });
                 }
-            }));
-            ChatMessageContent::Parts(parts)
-        } else {
-            ChatMessageContent::Text(message.content.clone())
-        };
+                parts.extend(message.images.iter().cloned().map(|image| {
+                    ChatMessagePart::ImageUrl {
+                        image_url: ChatImageUrl { url: image.url },
+                    }
+                }));
+                ChatMessageContent::Parts(parts)
+            } else {
+                ChatMessageContent::Text(message.content.clone())
+            };
         api_messages.push(ChatMessage {
             role: match message.role {
                 DisplayRole::User => ChatRole::User,
@@ -1015,10 +1095,16 @@ fn submit_message(
         return;
     }
 
+    if !attached_images.is_empty() && !active_model.supports_image_input {
+        error.set(Some(
+            "The selected model does not support image input. Remove attached images or choose a model that supports images.".to_string(),
+        ));
+        return;
+    }
+
     if active_model.kind == ChatModelKind::Image && attached_images.len() > 1 {
         error.set(Some(
-            "Image generation currently supports only one reference image per request."
-                .to_string(),
+            "Image generation currently supports only one reference image per request.".to_string(),
         ));
         return;
     }
@@ -1199,9 +1285,13 @@ async fn apply_chat_response(
                 text: assistant_content,
             });
         }
-        parts.extend(assistant_images.into_iter().map(|image| ChatMessagePart::ImageUrl {
-            image_url: ChatImageUrl { url: image.url },
-        }));
+        parts.extend(
+            assistant_images
+                .into_iter()
+                .map(|image| ChatMessagePart::ImageUrl {
+                    image_url: ChatImageUrl { url: image.url },
+                }),
+        );
         ChatMessageContent::Parts(parts)
     };
     follow_up_messages.push(ChatMessage {
@@ -1380,6 +1470,9 @@ fn persist_selected_model(
     model_id: String,
     mut provider_state: Signal<AiProviderState>,
     mut error: Signal<Option<String>>,
+    mut pending_provider_save_snapshot: Signal<Option<AiProviderState>>,
+    mut pending_provider_save_min_event_id: Signal<u64>,
+    mut pending_provider_save_action: Signal<PendingProviderSaveAction>,
 ) {
     let mut next_state = provider_state.read().clone();
     next_state
@@ -1398,16 +1491,18 @@ fn persist_selected_model(
         return;
     }
 
+    pending_provider_save_snapshot.set(Some(next_state.clone()));
+    pending_provider_save_min_event_id.set(
+        PROVIDER_STATE_SAVE_EVENT
+            .read()
+            .as_ref()
+            .map(|event| event.event_id)
+            .unwrap_or(0),
+    );
+    pending_provider_save_action.set(PendingProviderSaveAction::None);
+
     if let Some(snapshot) = ai_provider_store::queue_provider_state_save(next_state) {
-        spawn_forever(async move {
-            let mut next_snapshot = Some(snapshot);
-            while let Some(current_snapshot) = next_snapshot {
-                if let Err(e) = ai_provider_store::save_provider_state(&current_snapshot).await {
-                    error.set(Some(e));
-                }
-                next_snapshot = ai_provider_store::finish_provider_state_save();
-            }
-        });
+        ai_provider_store::process_queued_provider_state_saves(snapshot);
     }
 }
 
@@ -1454,9 +1549,7 @@ mod tests {
         build_api_messages, history_save_snapshot_key, resolve_selected_model, ChatImage,
         DisplayMessage, DisplayRole,
     };
-    use crate::services::ai_chat::{
-        ChatMessageContent, ChatMessagePart, ChatModel, ChatModelKind,
-    };
+    use crate::services::ai_chat::{ChatMessageContent, ChatMessagePart, ChatModel, ChatModelKind};
     use crate::stores::ai_chat_store::{
         PersistedChatMessage, PersistedChatRole, PersistedToolCall,
     };

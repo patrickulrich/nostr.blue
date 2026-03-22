@@ -173,7 +173,10 @@ pub fn PollView(noteid: String) -> Element {
             let mut live_since = cached_max
                 .map(|timestamp| std::cmp::min(subscription_handoff, timestamp))
                 .unwrap_or(subscription_handoff);
-            let filter = Filter::new().kind(Kind::Comment).event(event_id).limit(500);
+            let filter = Filter::new()
+                .kinds([Kind::Comment, Kind::TextNote])
+                .event(event_id)
+                .limit(500);
             match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
                 Ok(comment_events) => {
                     if generation_counter.load(Ordering::SeqCst) == generation {
@@ -211,7 +214,7 @@ pub fn PollView(noteid: String) -> Element {
 
             if let Some(client) = nostr_client::get_client() {
                 let filter = Filter::new()
-                    .kind(Kind::Comment)
+                    .kinds([Kind::Comment, Kind::TextNote])
                     .event(event_id)
                     .since(live_since);
                 let mut notifications = client.notifications();

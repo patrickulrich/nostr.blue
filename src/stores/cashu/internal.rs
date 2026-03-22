@@ -415,7 +415,10 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
                 )
                 .await
                 .map_err(|queue_err| {
-                    format!("Failed to queue cleanup token event for retry: {}", queue_err)
+                    format!(
+                        "Failed to queue cleanup token event for retry: {}",
+                        queue_err
+                    )
                 })?;
                 new_event_id = synthetic_pending_id.clone();
             }
@@ -432,7 +435,10 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
                 )
                 .await
                 .map_err(|queue_err| {
-                    format!("Failed to queue cleanup token event for retry: {}", queue_err)
+                    format!(
+                        "Failed to queue cleanup token event for retry: {}",
+                        queue_err
+                    )
                 })?;
                 new_event_id = synthetic_pending_id.clone();
             }
@@ -517,7 +523,10 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
         let synthetic_id = synthetic_pending_id
             .clone()
             .ok_or_else(|| "Cleanup token event was not published or queued".to_string())?;
-        log::warn!("Publish failed, using queued pending event_id: {}", synthetic_id);
+        log::warn!(
+            "Publish failed, using queued pending event_id: {}",
+            synthetic_id
+        );
         vec![super::types::TokenData {
             event_id: synthetic_id,
             mint: mint_url.to_string(),

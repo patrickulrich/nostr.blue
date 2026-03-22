@@ -276,7 +276,10 @@ pub async fn transfer_between_mints(
                 )
                 .await
                 .map_err(|queue_err| {
-                    format!("Failed to queue source token event for retry: {}", queue_err)
+                    format!(
+                        "Failed to queue source token event for retry: {}",
+                        queue_err
+                    )
                 })?;
                 source_new_event_id = Some(pending_id);
             }
@@ -291,7 +294,10 @@ pub async fn transfer_between_mints(
                 )
                 .await
                 .map_err(|queue_err| {
-                    format!("Failed to queue source token event for retry: {}", queue_err)
+                    format!(
+                        "Failed to queue source token event for retry: {}",
+                        queue_err
+                    )
                 })?;
                 source_new_event_id = Some(pending_id);
             }
@@ -317,7 +323,10 @@ pub async fn transfer_between_mints(
                 queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None)
                     .await
                     .map_err(|queue_err| {
-                        format!("Failed to queue transfer deletion event for retry: {}", queue_err)
+                        format!(
+                            "Failed to queue transfer deletion event for retry: {}",
+                            queue_err
+                        )
                     })?;
             }
             Err(e) => {
@@ -325,7 +334,10 @@ pub async fn transfer_between_mints(
                 queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None)
                     .await
                     .map_err(|queue_err| {
-                        format!("Failed to queue transfer deletion event for retry: {}", queue_err)
+                        format!(
+                            "Failed to queue transfer deletion event for retry: {}",
+                            queue_err
+                        )
                     })?;
             }
         }
@@ -372,7 +384,10 @@ pub async fn transfer_between_mints(
                 )
                 .await
                 .map_err(|queue_err| {
-                    format!("Failed to queue target token event for retry: {}", queue_err)
+                    format!(
+                        "Failed to queue target token event for retry: {}",
+                        queue_err
+                    )
                 })?;
                 pending_id
             }
@@ -387,7 +402,10 @@ pub async fn transfer_between_mints(
                 )
                 .await
                 .map_err(|queue_err| {
-                    format!("Failed to queue target token event for retry: {}", queue_err)
+                    format!(
+                        "Failed to queue target token event for retry: {}",
+                        queue_err
+                    )
                 })?;
                 pending_id
             }

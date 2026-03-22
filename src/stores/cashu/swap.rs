@@ -30,9 +30,7 @@
 //! Currently marked as dead_code - functions not yet wired to UI.
 #![allow(dead_code)]
 use super::denomination::DenominationStrategy;
-use super::events::{
-    queue_signed_event_for_retry, queue_signed_event_for_retry_result, update_token_event_id,
-};
+use super::events::{queue_signed_event_for_retry_result, update_token_event_id};
 use super::internal::get_or_create_wallet;
 use super::proofs::{
     cdk_proof_to_proof_data, get_event_ids_for_proofs, proof_data_to_cdk_proof,
@@ -392,9 +390,7 @@ pub async fn execute_swap_with_nip60(
             }
             event_id
         }
-        Ok(SwapPublishOutcome::RetryQueued) => {
-            pending_event_id.clone()
-        }
+        Ok(SwapPublishOutcome::RetryQueued) => pending_event_id.clone(),
         Err(e) => {
             log::warn!("Nostr publish failed: {}", e);
             pending_event_id.clone()
@@ -583,13 +579,13 @@ async fn publish_swap_events(
                 "Failed to publish swap token event, queuing for retry: {}",
                 e
             );
-            queue_signed_event_for_retry(
+            queue_signed_event_for_retry_result(
                 signed_event,
                 PendingEventType::TokenEvent,
                 Some(pending_event_id.to_string()),
                 Some(mint_url.to_string()),
             )
-            .await;
+            .await?;
             Ok(SwapPublishOutcome::RetryQueued)
         }
     }

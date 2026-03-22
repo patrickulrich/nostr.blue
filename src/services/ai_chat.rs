@@ -358,7 +358,12 @@ fn model_supports_image_input(model: &WireModel) -> bool {
         .flatten()
         .chain(model.input_modalities.iter().flatten())
         .map(|value| value.trim().to_ascii_lowercase())
-        .any(|value| matches!(value.as_str(), "image" | "images" | "image_input" | "vision"))
+        .any(|value| {
+            matches!(
+                value.as_str(),
+                "image" | "images" | "image_input" | "vision"
+            )
+        })
 }
 
 fn model_kind_rank(kind: ChatModelKind) -> u8 {
@@ -428,9 +433,14 @@ async fn parse_image_generation_response(
         .collect::<Vec<_>>();
 
     if images.is_empty() {
+        let safe_preview: String = serde_json::to_string(&value)
+            .unwrap_or_default()
+            .chars()
+            .take(200)
+            .collect();
         return Err(format!(
             "Image response did not include any images: {}",
-            preview_body(&serde_json::to_string(&value).unwrap_or_default())
+            preview_body(&safe_preview)
         ));
     }
 

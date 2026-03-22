@@ -465,14 +465,8 @@ pub async fn pay_payment_request(
         let event =
             sign_cashu_event_builder(&signer, nostr_sdk::EventBuilder::delete(deletion_request))
                 .await?;
-        send_tagged_event_with_retry(
-            &client,
-            event,
-            PendingEventType::DeletionEvent,
-            None,
-            None,
-        )
-        .await?;
+        send_tagged_event_with_retry(&client, event, PendingEventType::DeletionEvent, None, None)
+            .await?;
     }
     {
         let store = WALLET_TOKENS.read();

@@ -1,5 +1,8 @@
+use dioxus::core::spawn_forever;
+use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use crate::platform::storage;
@@ -8,6 +11,9 @@ use crate::services::ppq::PPQ_CHAT_BASE_URL;
 const STORAGE_KEY: &str = "nostr_blue_ai_provider_state";
 const SHAKESPEARE_PROVIDER_ID: &str = "shakespeare";
 const PPQ_PROVIDER_ID: &str = "ppq";
+static PROVIDER_STATE_SAVE_EVENT_ID: AtomicU64 = AtomicU64::new(0);
+pub static PROVIDER_STATE_SAVE_EVENT: GlobalSignal<Option<ProviderStateSaveEvent>> =
+    Signal::global(|| None);
 
 #[derive(Default)]
 struct PendingProviderStateSave {
@@ -49,6 +55,13 @@ pub struct AiProviderState {
     pub custom_providers: Vec<CustomAiProvider>,
     #[serde(default)]
     pub ppq_account: Option<PpqAccountState>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProviderStateSaveEvent {
+    pub event_id: u64,
+    pub snapshot: AiProviderState,
+    pub result: Result<(), String>,
 }
 
 impl Default for AiProviderState {
@@ -179,6 +192,26 @@ pub fn finish_provider_state_save() -> Option<AiProviderState> {
         pending.in_flight = false;
         None
     }
+}
+
+fn emit_provider_state_save_event(snapshot: AiProviderState, result: Result<(), String>) {
+    let event_id = PROVIDER_STATE_SAVE_EVENT_ID.fetch_add(1, Ordering::SeqCst) + 1;
+    *PROVIDER_STATE_SAVE_EVENT.write() = Some(ProviderStateSaveEvent {
+        event_id,
+        snapshot,
+        result,
+    });
+}
+
+pub fn process_queued_provider_state_saves(initial_snapshot: AiProviderState) {
+    spawn_forever(async move {
+        let mut next_snapshot = Some(initial_snapshot);
+        while let Some(current_snapshot) = next_snapshot {
+            let result = save_provider_state(&current_snapshot).await;
+            emit_provider_state_save_event(current_snapshot, result);
+            next_snapshot = finish_provider_state_save();
+        }
+    });
 }
 
 #[cfg(test)]

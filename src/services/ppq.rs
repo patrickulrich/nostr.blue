@@ -1,9 +1,23 @@
 use crate::platform::http::http_client;
 use reqwest::{Method, Response};
 use serde_json::{json, Value};
+use url::Url;
 
 pub const PPQ_API_ROOT: &str = "https://api.ppq.ai";
 pub const PPQ_CHAT_BASE_URL: &str = "https://api.ppq.ai/v1";
+
+fn build_ppq_url(segments: &[&str]) -> Result<String, String> {
+    let mut url = Url::parse(PPQ_API_ROOT).map_err(|e| format!("Invalid PPQ API root: {}", e))?;
+    {
+        let mut path_segments = url
+            .path_segments_mut()
+            .map_err(|_| "PPQ API root cannot be a base URL".to_string())?;
+        for segment in segments {
+            path_segments.push(segment);
+        }
+    }
+    Ok(url.to_string())
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PpqAccount {
@@ -111,9 +125,10 @@ pub async fn create_topup_invoice(
     amount: f64,
     currency: &str,
 ) -> Result<PpqTopupInvoice, String> {
+    let url = build_ppq_url(&["topup", "create", method])?;
     let value = send_request(
         Method::POST,
-        &format!("{PPQ_API_ROOT}/topup/create/{method}"),
+        &url,
         Some(vec![(
             "Authorization".to_string(),
             format!("Bearer {api_key}"),
@@ -128,9 +143,10 @@ pub async fn create_topup_invoice(
 }
 
 pub async fn get_topup_status(api_key: &str, invoice_id: &str) -> Result<PpqTopupInvoice, String> {
+    let url = build_ppq_url(&["topup", "status", invoice_id])?;
     let value = send_request(
         Method::GET,
-        &format!("{PPQ_API_ROOT}/topup/status/{invoice_id}"),
+        &url,
         Some(vec![(
             "Authorization".to_string(),
             format!("Bearer {api_key}"),
@@ -217,10 +233,14 @@ pub async fn get_api_key(
     key_id: &str,
     show_key: bool,
 ) -> Result<PpqApiKey, String> {
-    let show_key_param = if show_key { "?show_key=true" } else { "" };
+    let mut url = Url::parse(&build_ppq_url(&["keys", key_id])?)
+        .map_err(|e| format!("Invalid PPQ API url: {}", e))?;
+    if show_key {
+        url.query_pairs_mut().append_pair("show_key", "true");
+    }
     let value = send_request(
         Method::GET,
-        &format!("{PPQ_API_ROOT}/keys/{key_id}{show_key_param}"),
+        url.as_ref(),
         Some(vec![("x-credit-id".to_string(), credit_id.to_string())]),
         None,
     )
@@ -244,9 +264,10 @@ pub async fn update_api_key(
     key_id: &str,
     input: &PpqApiKeyInput,
 ) -> Result<PpqApiKey, String> {
+    let url = build_ppq_url(&["keys", key_id])?;
     let value = send_request(
         Method::PATCH,
-        &format!("{PPQ_API_ROOT}/keys/{key_id}"),
+        &url,
         Some(vec![("x-credit-id".to_string(), credit_id.to_string())]),
         Some(api_key_payload(input)),
     )
@@ -255,9 +276,10 @@ pub async fn update_api_key(
 }
 
 pub async fn delete_api_key(credit_id: &str, key_id: &str) -> Result<(), String> {
+    let url = build_ppq_url(&["keys", key_id])?;
     let _ = send_request(
         Method::DELETE,
-        &format!("{PPQ_API_ROOT}/keys/{key_id}"),
+        &url,
         Some(vec![("x-credit-id".to_string(), credit_id.to_string())]),
         None,
     )
@@ -276,8 +298,9 @@ fn api_key_payload(input: &PpqApiKeyInput) -> Value {
 
 fn parse_topup_invoice(value: &Value) -> Result<PpqTopupInvoice, String> {
     let data = data_or_root(value);
-    let invoice_id = string_field(data, &["invoice_id", "id", "invoiceId"])
-        .ok_or_else(|| "PPQ topup invoice response missing required id (<redacted response>)".to_string())?;
+    let invoice_id = string_field(data, &["invoice_id", "id", "invoiceId"]).ok_or_else(|| {
+        "PPQ topup invoice response missing required id (<redacted response>)".to_string()
+    })?;
     Ok(PpqTopupInvoice {
         invoice_id,
         status: string_field(data, &["status"]),
@@ -298,8 +321,9 @@ fn parse_topup_invoice(value: &Value) -> Result<PpqTopupInvoice, String> {
 }
 
 fn parse_api_key(value: &Value) -> Result<PpqApiKey, String> {
-    let id = string_field(value, &["_id", "id"])
-        .ok_or_else(|| "PPQ API key response missing required id (<redacted response>)".to_string())?;
+    let id = string_field(value, &["_id", "id"]).ok_or_else(|| {
+        "PPQ API key response missing required id (<redacted response>)".to_string()
+    })?;
     Ok(PpqApiKey {
         id,
         name: string_field(value, &["name"]).unwrap_or_default(),

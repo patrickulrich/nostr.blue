@@ -1,7 +1,9 @@
 use crate::services::ppq::{
     self, PpqApiKey, PpqApiKeyInput, PpqBalance, PpqNwcAutoTopup, PpqTopupInvoice,
 };
-use crate::stores::ai_provider_store::{self, AiProviderState, PpqAccountState};
+use crate::stores::ai_provider_store::{
+    self, AiProviderState, PpqAccountState, PROVIDER_STATE_SAVE_EVENT,
+};
 use crate::stores::nwc_store;
 use dioxus::prelude::*;
 
@@ -39,6 +41,8 @@ pub fn PpqSettingsPanel(
     let mut key_form_error = use_signal(|| None::<String>);
     let mut last_loaded_credit_id = use_signal(|| None::<String>);
     let mut request_generation = use_signal(|| 0u32);
+    let mut pending_save_snapshot = use_signal(|| None::<AiProviderState>);
+    let mut pending_save_min_event_id = use_signal(|| 0u64);
 
     use_effect(move || {
         if !provider_state_ready {
@@ -88,6 +92,29 @@ pub fn PpqSettingsPanel(
             credit_id,
             Some((request_generation, generation)),
         );
+    });
+
+    use_effect(move || {
+        let pending_snapshot = pending_save_snapshot.read().clone();
+        let Some(pending_snapshot) = pending_snapshot else {
+            return;
+        };
+        let Some(event) = PROVIDER_STATE_SAVE_EVENT.read().clone() else {
+            return;
+        };
+        if event.event_id <= *pending_save_min_event_id.read() || event.snapshot != pending_snapshot
+        {
+            return;
+        }
+
+        pending_save_snapshot.set(None);
+        pending_save_min_event_id.set(event.event_id);
+        is_saving.set(false);
+
+        match event.result {
+            Ok(()) => save_error.set(None),
+            Err(err) => save_error.set(Some(err)),
+        }
     });
 
     let ppq_account = state.read().ppq_account.clone();
@@ -217,12 +244,29 @@ pub fn PpqSettingsPanel(
                                             managed_api_key: None,
                                             active_api_key_id: None,
                                         });
-                                        state.set(next_state.clone());
-                                        match ai_provider_store::save_provider_state(&next_state)
-                                            .await
+                                        if let Err(err) =
+                                            ai_provider_store::cache_provider_state(&next_state)
                                         {
-                                            Ok(()) => {}
-                                            Err(err) => save_error.set(Some(err)),
+                                            save_error.set(Some(err));
+                                            account_action_loading.set(false);
+                                            return;
+                                        }
+                                        state.set(next_state.clone());
+                                        is_saving.set(true);
+                                        pending_save_snapshot.set(Some(next_state.clone()));
+                                        pending_save_min_event_id.set(
+                                            PROVIDER_STATE_SAVE_EVENT
+                                                .read()
+                                                .as_ref()
+                                                .map(|event| event.event_id)
+                                                .unwrap_or(0),
+                                        );
+                                        if let Some(snapshot) =
+                                            ai_provider_store::queue_provider_state_save(next_state)
+                                        {
+                                            ai_provider_store::process_queued_provider_state_saves(
+                                                snapshot,
+                                            );
                                         }
                                     }
                                     Err(err) => save_error.set(Some(err)),
@@ -609,6 +653,8 @@ pub fn PpqSettingsPanel(
                                                     state,
                                                     is_saving,
                                                     save_error,
+                                                    pending_save_snapshot,
+                                                    pending_save_min_event_id,
                                                     created_or_updated.id.clone(),
                                                     created_or_updated.api_key.clone().unwrap_or_default(),
                                                 );
@@ -713,6 +759,8 @@ pub fn PpqSettingsPanel(
                                                                                 state,
                                                                                 is_saving,
                                                                                 save_error,
+                                                                                pending_save_snapshot,
+                                                                                pending_save_min_event_id,
                                                                                 full_key.id.clone(),
                                                                                 api_key.clone(),
                                                                             );
@@ -754,7 +802,13 @@ pub fn PpqSettingsPanel(
                                                                 match ppq::delete_api_key(&credit_id, &key_id).await {
                                                                     Ok(()) => {
                                                                         if active_key_id_for_revoke.as_deref() == Some(key_id.as_str()) {
-                                                                            clear_active_ppq_key(state, is_saving, save_error);
+                                                                            clear_active_ppq_key(
+                                                                                state,
+                                                                                is_saving,
+                                                                                save_error,
+                                                                                pending_save_snapshot,
+                                                                                pending_save_min_event_id,
+                                                                            );
                                                                         }
                                                                         load_api_keys(
                                                                             api_keys,
@@ -927,6 +981,8 @@ fn set_active_ppq_key(
     state: Signal<AiProviderState>,
     is_saving: Signal<bool>,
     mut save_error: Signal<Option<String>>,
+    pending_save_snapshot: Signal<Option<AiProviderState>>,
+    pending_save_min_event_id: Signal<u64>,
     key_id: String,
     api_key: String,
 ) {
@@ -937,13 +993,22 @@ fn set_active_ppq_key(
     };
     account.active_api_key_id = Some(key_id);
     account.managed_api_key = Some(api_key);
-    persist_state(next_state, state, is_saving, save_error);
+    persist_state(
+        next_state,
+        state,
+        is_saving,
+        save_error,
+        pending_save_snapshot,
+        pending_save_min_event_id,
+    );
 }
 
 fn clear_active_ppq_key(
     state: Signal<AiProviderState>,
     is_saving: Signal<bool>,
     save_error: Signal<Option<String>>,
+    pending_save_snapshot: Signal<Option<AiProviderState>>,
+    pending_save_min_event_id: Signal<u64>,
 ) {
     let mut next_state = state.read().clone();
     let Some(account) = next_state.ppq_account.as_mut() else {
@@ -951,7 +1016,14 @@ fn clear_active_ppq_key(
     };
     account.active_api_key_id = None;
     account.managed_api_key = None;
-    persist_state(next_state, state, is_saving, save_error);
+    persist_state(
+        next_state,
+        state,
+        is_saving,
+        save_error,
+        pending_save_snapshot,
+        pending_save_min_event_id,
+    );
 }
 
 fn persist_state(
@@ -959,6 +1031,8 @@ fn persist_state(
     mut state: Signal<AiProviderState>,
     mut is_saving: Signal<bool>,
     mut save_error: Signal<Option<String>>,
+    mut pending_save_snapshot: Signal<Option<AiProviderState>>,
+    mut pending_save_min_event_id: Signal<u64>,
 ) {
     is_saving.set(true);
     save_error.set(None);
@@ -967,21 +1041,33 @@ fn persist_state(
         is_saving.set(false);
         return;
     }
-    spawn(async move {
-        match ai_provider_store::save_provider_state(&next_state).await {
-            Ok(()) => state.set(next_state),
-            Err(err) => save_error.set(Some(err)),
-        }
-        is_saving.set(false);
-    });
+    state.set(next_state.clone());
+    pending_save_snapshot.set(Some(next_state.clone()));
+    pending_save_min_event_id.set(
+        PROVIDER_STATE_SAVE_EVENT
+            .read()
+            .as_ref()
+            .map(|event| event.event_id)
+            .unwrap_or(0),
+    );
+    if let Some(snapshot) = ai_provider_store::queue_provider_state_save(next_state) {
+        ai_provider_store::process_queued_provider_state_saves(snapshot);
+    }
 }
 
-fn parse_optional_f64(input: &str) -> Result<Option<f64>, std::num::ParseFloatError> {
+fn parse_optional_f64(input: &str) -> Result<Option<f64>, String> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
         Ok(None)
     } else {
-        trimmed.parse::<f64>().map(Some)
+        let value = trimmed
+            .parse::<f64>()
+            .map_err(|_| "value must be a valid number".to_string())?;
+        if value.is_finite() {
+            Ok(Some(value))
+        } else {
+            Err("non-finite float".to_string())
+        }
     }
 }
 

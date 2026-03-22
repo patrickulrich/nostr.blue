@@ -1,9 +1,8 @@
 use crate::components::ppq_settings_panel::PpqSettingsPanel;
 use crate::stores::ai_provider_store::{
     self, normalize_base_url, ppq_provider, resolve_providers, sanitize_provider_input,
-    AiProviderKind, AiProviderState, CustomAiProvider, ProviderAuth,
+    AiProviderKind, AiProviderState, CustomAiProvider, ProviderAuth, PROVIDER_STATE_SAVE_EVENT,
 };
-use dioxus::core::spawn_forever;
 use dioxus::prelude::*;
 use regex::Regex;
 use std::net::IpAddr;
@@ -13,17 +12,27 @@ use url::Url;
 static LEADING_CREDENTIALS_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[^/@]+@").expect("valid credential-stripping regex"));
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum PendingSaveAction {
+    #[default]
+    None,
+    ResetEditor,
+}
+
 #[component]
 pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
     let mut state = use_signal(AiProviderState::default);
     let mut provider_state_load = use_signal(|| None::<Result<AiProviderState, String>>);
     let mut save_error = use_signal(|| None::<String>);
-    let is_saving = use_signal(|| false);
+    let mut is_saving = use_signal(|| false);
     let mut editing_provider_id = use_signal(|| None::<String>);
     let mut name = use_signal(String::new);
     let mut provider_id = use_signal(String::new);
     let mut base_url = use_signal(String::new);
     let mut api_key = use_signal(String::new);
+    let mut pending_save_snapshot = use_signal(|| None::<AiProviderState>);
+    let mut pending_save_action = use_signal(PendingSaveAction::default);
+    let mut pending_save_min_event_id = use_signal(|| 0u64);
     let provider_state_ready = matches!(provider_state_load.read().as_ref(), Some(Ok(_)));
 
     use_effect(move || {
@@ -62,6 +71,40 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
             Err(e) => {
                 save_error.set(Some(e));
             }
+        }
+    });
+
+    use_effect(move || {
+        let pending_snapshot = pending_save_snapshot.read().clone();
+        let Some(pending_snapshot) = pending_snapshot else {
+            return;
+        };
+        let Some(event) = PROVIDER_STATE_SAVE_EVENT.read().clone() else {
+            return;
+        };
+        if event.event_id <= *pending_save_min_event_id.read() || event.snapshot != pending_snapshot
+        {
+            return;
+        }
+
+        let action = *pending_save_action.read();
+        pending_save_snapshot.set(None);
+        pending_save_action.set(PendingSaveAction::None);
+        pending_save_min_event_id.set(event.event_id);
+        is_saving.set(false);
+
+        match event.result {
+            Ok(()) => {
+                save_error.set(None);
+                if matches!(action, PendingSaveAction::ResetEditor) {
+                    editing_provider_id.set(None);
+                    name.set(String::new());
+                    provider_id.set(String::new());
+                    base_url.set(String::new());
+                    api_key.set(String::new());
+                }
+            }
+            Err(err) => save_error.set(Some(err)),
         }
     });
 
@@ -125,7 +168,10 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                                                         state,
                                                         is_saving,
                                                         save_error,
-                                                        || {},
+                                                        pending_save_snapshot,
+                                                        pending_save_action,
+                                                        pending_save_min_event_id,
+                                                        PendingSaveAction::None,
                                                     );
                                                 },
                                                 "Use"
@@ -167,15 +213,13 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                                                         state,
                                                         is_saving,
                                                         save_error,
-                                                        move || {
-                                                            if should_reset_editor {
-                                                                editing_provider_id.set(None);
-                                                                name.set(String::new());
-                                                                provider_id.set(String::new());
-                                                                base_url.set(String::new());
-                                                                api_key.set(String::new());
-                                                                save_error.set(None);
-                                                            }
+                                                        pending_save_snapshot,
+                                                        pending_save_action,
+                                                        pending_save_min_event_id,
+                                                        if should_reset_editor {
+                                                            PendingSaveAction::ResetEditor
+                                                        } else {
+                                                            PendingSaveAction::None
                                                         },
                                                     );
                                                 },
@@ -304,13 +348,10 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                                         state,
                                         is_saving,
                                         save_error,
-                                        move || {
-                                            editing_provider_id.set(None);
-                                            name.set(String::new());
-                                            provider_id.set(String::new());
-                                            base_url.set(String::new());
-                                            api_key.set(String::new());
-                                        },
+                                        pending_save_snapshot,
+                                        pending_save_action,
+                                        pending_save_min_event_id,
+                                        PendingSaveAction::ResetEditor,
                                     );
                                 }
                                 Err(err) => save_error.set(Some(err)),
@@ -346,12 +387,16 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn persist_provider_state(
     next_state: AiProviderState,
     mut state: Signal<AiProviderState>,
     mut is_saving: Signal<bool>,
     mut save_error: Signal<Option<String>>,
-    on_success: impl FnOnce() + 'static,
+    mut pending_save_snapshot: Signal<Option<AiProviderState>>,
+    mut pending_save_action: Signal<PendingSaveAction>,
+    mut pending_save_min_event_id: Signal<u64>,
+    success_action: PendingSaveAction,
 ) {
     is_saving.set(true);
     save_error.set(None);
@@ -361,28 +406,18 @@ fn persist_provider_state(
         return;
     }
     state.set(next_state.clone());
+    pending_save_snapshot.set(Some(next_state.clone()));
+    pending_save_action.set(success_action);
+    pending_save_min_event_id.set(
+        PROVIDER_STATE_SAVE_EVENT
+            .read()
+            .as_ref()
+            .map(|event| event.event_id)
+            .unwrap_or(0),
+    );
 
     if let Some(snapshot) = ai_provider_store::queue_provider_state_save(next_state) {
-        spawn_forever(async move {
-            let mut next_snapshot = Some(snapshot);
-            let mut completed_without_error = true;
-
-            while let Some(current_snapshot) = next_snapshot {
-                if let Err(e) = ai_provider_store::save_provider_state(&current_snapshot).await {
-                    completed_without_error = false;
-                    save_error.set(Some(e));
-                }
-                next_snapshot = ai_provider_store::finish_provider_state_save();
-            }
-
-            if completed_without_error {
-                on_success();
-            }
-            is_saving.set(false);
-        });
-    } else {
-        on_success();
-        is_saving.set(false);
+        ai_provider_store::process_queued_provider_state_saves(snapshot);
     }
 }
 

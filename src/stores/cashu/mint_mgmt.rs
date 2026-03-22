@@ -763,7 +763,10 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
                         )
                         .await
                         .map_err(|queue_err| {
-                            format!("Failed to queue mint deletion event for retry: {}", queue_err)
+                            format!(
+                                "Failed to queue mint deletion event for retry: {}",
+                                queue_err
+                            )
                         })?;
                     }
                     Err(e) => {
@@ -776,7 +779,10 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
                         )
                         .await
                         .map_err(|queue_err| {
-                            format!("Failed to queue mint deletion event for retry: {}", queue_err)
+                            format!(
+                                "Failed to queue mint deletion event for retry: {}",
+                                queue_err
+                            )
                         })?;
                     }
                 }
@@ -790,7 +796,10 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
                 )
                 .await
                 .map_err(|queue_err| {
-                    format!("Failed to queue mint deletion event for retry: {}", queue_err)
+                    format!(
+                        "Failed to queue mint deletion event for retry: {}",
+                        queue_err
+                    )
                 })?;
             }
         }

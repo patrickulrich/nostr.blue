@@ -224,6 +224,7 @@ pub fn ZapGoalsHome() -> Element {
         let generation = request_generation.peek().wrapping_add(1);
         request_generation.set(generation);
         pagination_loading.set(true);
+        error_message.set(None);
         spawn(async move {
             match fetch_feed_page(current_feed_type, until).await {
                 Ok((next_goals, _)) => {
@@ -237,6 +238,7 @@ pub fn ZapGoalsHome() -> Element {
                             if *request_generation.peek() != generation {
                                 return;
                             }
+                            error_message.set(None);
                             let existing = goals.read().clone();
                             goals.set(merge_progress(&existing, progress));
                         }
