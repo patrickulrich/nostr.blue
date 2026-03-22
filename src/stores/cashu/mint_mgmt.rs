@@ -4,10 +4,12 @@
 //! Includes counter backup/restore for mint re-addition.
 #![allow(dead_code)]
 use super::errors::CashuResult;
+use super::events::queue_signed_event_for_retry_result;
 use super::internal::create_ephemeral_wallet;
 use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof};
 use super::signals::{
-    try_acquire_mint_lock, COUNTER_BACKUPS, SHARED_LOCALSTORE, WALLET_STATE, WALLET_TOKENS,
+    try_acquire_mint_lock, COUNTER_BACKUPS, PENDING_NOSTR_EVENTS, SHARED_LOCALSTORE, WALLET_STATE,
+    WALLET_TOKENS,
 };
 use super::types::{
     ConsolidationResult, CounterBackup, DiscoveredMint, ExtendedCashuProof, ExtendedTokenEvent,
@@ -17,9 +19,10 @@ use super::types::{
 use super::utils::{mint_matches, normalize_mint_url, now_secs};
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
-use nostr_sdk::{Filter, Kind, PublicKey};
+use nostr_sdk::{Event, Filter, Kind, PublicKey};
 use std::collections::HashMap;
 use std::str::FromStr;
+use std::sync::OnceLock;
 use std::time::Duration;
 /// Maximum number of proofs to swap in a single batch (CDK pattern)
 /// Mints may reject requests with too many input proofs
@@ -29,6 +32,107 @@ const PERSISTENCE_RETRY_DELAYS_MS: [u32; 3] = [1000, 2000, 4000];
 /// Maximum jitter to add to retry delays (prevents synchronized retries)
 const PERSISTENCE_RETRY_JITTER_MS: u32 = 200;
 use super::signals::InFlightGuard;
+static WALLET_SNAPSHOT_PUBLISH_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+
+fn wallet_snapshot_publish_lock() -> &'static tokio::sync::Mutex<()> {
+    WALLET_SNAPSHOT_PUBLISH_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+async fn publish_wallet_snapshot(privkey: &str, mints: &[String]) -> Result<Event, String> {
+    use nostr_sdk::signer::NostrSigner;
+
+    let signer = crate::stores::signer::get_signer().ok_or("No signer available")?;
+    let nostr_signer = signer.as_nostr_signer();
+    let pubkey = signer
+        .public_key()
+        .await
+        .map_err(|e| format!("Failed to get signer public key: {}", e))?;
+    let mut content_array: Vec<Vec<&str>> = vec![vec!["privkey", privkey]];
+    for mint in mints {
+        content_array.push(vec!["mint", mint.as_str()]);
+    }
+    let json_content = serde_json::to_string(&content_array)
+        .map_err(|e| format!("Failed to serialize wallet data: {}", e))?;
+    let encrypted = nostr_signer
+        .nip44_encrypt(&pubkey, &json_content)
+        .await
+        .map_err(|e| format!("Failed to encrypt: {}", e))?;
+    let builder = crate::utils::nips::nip89::tag_event_builder(nostr_sdk::EventBuilder::new(
+        Kind::CashuWallet,
+        encrypted,
+    ));
+    let event = match signer {
+        crate::stores::signer::SignerType::Keys(keys) => builder
+            .sign_with_keys(&keys)
+            .map_err(|e| format!("Failed to sign wallet event: {}", e))?,
+        #[cfg(target_family = "wasm")]
+        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => builder
+            .sign(&*browser_signer)
+            .await
+            .map_err(|e| format!("Failed to sign wallet event: {}", e))?,
+        crate::stores::signer::SignerType::NostrConnect(remote_signer) => builder
+            .sign(&*remote_signer)
+            .await
+            .map_err(|e| format!("Failed to sign wallet event: {}", e))?,
+        #[cfg(feature = "mobile")]
+        crate::stores::signer::SignerType::AndroidSigner(android_signer) => builder
+            .sign(&*android_signer)
+            .await
+            .map_err(|e| format!("Failed to sign wallet event: {}", e))?,
+    };
+
+    Ok(event)
+}
+
+async fn publish_or_queue_wallet_snapshot(event: Event) -> Result<(), String> {
+    let client = nostr_client::NOSTR_CLIENT.read().as_ref().cloned();
+    if let Some(client) = client {
+        match client.send_event(&event).await {
+            Ok(output) if !output.success.is_empty() => return Ok(()),
+            Ok(_) => {
+                log::warn!("No relays accepted wallet event, queueing for retry");
+            }
+            Err(error) => {
+                log::warn!(
+                    "Failed to publish wallet event, queueing for retry: {}",
+                    error
+                );
+            }
+        }
+    } else {
+        log::warn!("Client not initialized, queueing wallet snapshot for retry");
+    }
+
+    if SHARED_LOCALSTORE.read().as_ref().is_none() {
+        return Err(
+            "Localstore not initialized; cannot persist queued wallet snapshot".to_string(),
+        );
+    }
+
+    queue_signed_event_for_retry_result(
+        event,
+        super::types::PendingEventType::WalletSnapshot,
+        None,
+        None,
+    )
+    .await
+}
+
+async fn queue_mint_deletion_event_durably(builder: nostr_sdk::EventBuilder) -> Result<(), String> {
+    if SHARED_LOCALSTORE.read().as_ref().is_none() {
+        return Err(
+            "Localstore not initialized; cannot persist queued mint deletion event".to_string(),
+        );
+    }
+
+    super::events::queue_event_for_retry(
+        builder,
+        super::types::PendingEventType::DeletionEvent,
+        None,
+        None,
+    )
+    .await
+}
 /// Result of keyset collision check
 #[derive(Debug, Clone)]
 pub struct KeysetCollision {
@@ -428,7 +532,6 @@ pub fn get_counter_backup(mint_url: &str) -> Option<CounterBackup> {
 /// 4. Restores counters if we previously had this mint
 /// 5. Runs background proof restoration
 pub async fn add_mint(mint_url: &str) -> Result<(), String> {
-    use nostr_sdk::signer::NostrSigner;
     use url::Url;
     let mint_url = normalize_mint_url(mint_url);
     log::info!("Adding mint: {}", mint_url);
@@ -476,64 +579,44 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
             log::warn!("Could not check for keyset collisions: {}", e);
         }
     }
-    {
-        let mut state = WALLET_STATE.write();
-        if let Some(ref mut wallet_state) = *state {
+    let _wallet_snapshot_guard = wallet_snapshot_publish_lock().lock().await;
+    let (privkey, staged_mints) = {
+        let state = WALLET_STATE.read();
+        let wallet_state = state.as_ref().ok_or("Wallet not initialized")?;
+        let normalized_existing: Vec<String> = wallet_state
+            .mints
+            .iter()
+            .map(|m| normalize_mint_url(m))
+            .collect();
+        if normalized_existing.contains(&mint_url) {
+            return Err("Mint already exists in wallet".to_string());
+        }
+        let privkey = wallet_state
+            .privkey
+            .clone()
+            .ok_or("Wallet private key not available")?;
+        let mut staged_mints = wallet_state.mints.clone();
+        staged_mints.push(mint_url.clone());
+        (privkey, staged_mints)
+    };
+    let wallet_snapshot_event = publish_wallet_snapshot(privkey.as_str(), &staged_mints).await?;
+    match publish_or_queue_wallet_snapshot(wallet_snapshot_event).await {
+        Ok(()) => {
+            let mut state = WALLET_STATE.write();
+            let wallet_state = state.as_mut().ok_or("Wallet not initialized")?;
             let normalized_existing: Vec<String> = wallet_state
                 .mints
                 .iter()
                 .map(|m| normalize_mint_url(m))
                 .collect();
-            if normalized_existing.contains(&mint_url) {
-                return Err("Mint already exists in wallet".to_string());
+            if !normalized_existing.contains(&mint_url) {
+                wallet_state.mints.push(mint_url.clone());
             }
-            wallet_state.mints.push(mint_url.clone());
-        } else {
-            return Err("Wallet not initialized".to_string());
+            log::info!("Published updated wallet event with new mint");
         }
-    }
-    let wallet_state = WALLET_STATE
-        .read()
-        .clone()
-        .ok_or("Wallet state not available")?;
-    let privkey = wallet_state
-        .privkey
-        .as_ref()
-        .ok_or("Wallet private key not available")?;
-    let signer = crate::stores::signer::get_signer()
-        .ok_or("No signer available")?
-        .as_nostr_signer();
-    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let client = nostr_client::NOSTR_CLIENT
-        .read()
-        .as_ref()
-        .ok_or("Client not initialized")?
-        .clone();
-    let mut content_array: Vec<Vec<&str>> = vec![vec!["privkey", privkey]];
-    for mint in wallet_state.mints.iter() {
-        content_array.push(vec!["mint", mint.as_str()]);
-    }
-    let json_content = serde_json::to_string(&content_array)
-        .map_err(|e| format!("Failed to serialize wallet data: {}", e))?;
-    let encrypted = signer
-        .nip44_encrypt(&pubkey, &json_content)
-        .await
-        .map_err(|e| format!("Failed to encrypt: {}", e))?;
-    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWallet, encrypted);
-    match client.send_event_builder(builder).await {
-        Ok(_) => log::info!("Published updated wallet event with new mint"),
         Err(e) => {
-            log::error!("Failed to publish wallet event: {}", e);
-            {
-                let mut state = WALLET_STATE.write();
-                if let Some(ref mut wallet_state) = *state {
-                    wallet_state
-                        .mints
-                        .retain(|m| normalize_mint_url(m) != mint_url);
-                }
-            }
-            return Err(format!("Failed to publish wallet event: {}", e));
+            log::error!("{e}");
+            return Err(e);
         }
     }
     log::info!("Successfully added mint: {}", mint_url);
@@ -605,18 +688,29 @@ pub async fn restore_proofs_from_mint(mint_url: &str) -> CashuResult<u64> {
 ///
 /// Returns (event_count, total_amount) on success.
 pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
-    use nostr_sdk::signer::NostrSigner;
-    if let Err(e) = backup_mint_counters(mint_url).await {
-        log::warn!("Failed to backup counters for {}: {}", mint_url, e);
+    let normalized_mint_url = normalize_mint_url(mint_url);
+    let _mint_lock_guard = try_acquire_mint_lock(&normalized_mint_url).ok_or_else(|| {
+        format!(
+            "Operation already in progress for mint: {}",
+            normalized_mint_url
+        )
+    })?;
+    if let Err(e) = backup_mint_counters(&normalized_mint_url).await {
+        log::warn!(
+            "Failed to backup counters for {}: {}",
+            normalized_mint_url,
+            e
+        );
     }
-    log::info!("Removing mint: {}", mint_url);
+    log::info!("Removing mint: {}", normalized_mint_url);
+    let _wallet_snapshot_guard = wallet_snapshot_publish_lock().lock().await;
     let (event_ids_to_delete, total_amount, token_count) = {
         let store = WALLET_TOKENS.read();
         let data = store.data();
         let tokens = data.read();
         let mint_tokens: Vec<_> = tokens
             .iter()
-            .filter(|t| mint_matches(&t.mint, mint_url))
+            .filter(|t| mint_matches(&t.mint, &normalized_mint_url))
             .collect();
         let event_ids: Vec<String> = mint_tokens.iter().map(|t| t.event_id.clone()).collect();
         let amount: u64 = mint_tokens
@@ -631,84 +725,140 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
         token_count,
         total_amount
     );
-    {
-        let store = WALLET_TOKENS.read();
-        let mut data = store.data();
-        let mut tokens_write = data.write();
-        tokens_write.retain(|t| !mint_matches(&t.mint, mint_url));
-    }
-    {
-        let mut state_write = WALLET_STATE.write();
-        if let Some(ref mut state) = *state_write {
-            state.mints.retain(|m| !mint_matches(m, mint_url));
-        }
-    }
+    let (wallet_privkey, remaining_mints) = {
+        let state_read = WALLET_STATE.read();
+        let wallet_state = state_read.as_ref().ok_or("Wallet not initialized")?;
+        let privkey = wallet_state
+            .privkey
+            .clone()
+            .ok_or("Wallet private key not available")?;
+        let mut remaining_mints = wallet_state.mints.clone();
+        remaining_mints.retain(|m| !mint_matches(m, &normalized_mint_url));
+        (privkey, remaining_mints)
+    };
+    let client = nostr_client::NOSTR_CLIENT.read().as_ref().cloned();
+    let wallet_snapshot_event =
+        publish_wallet_snapshot(wallet_privkey.as_str(), &remaining_mints).await?;
+    publish_or_queue_wallet_snapshot(wallet_snapshot_event).await?;
+    log::info!("Published or queued updated wallet event after mint removal");
     if !event_ids_to_delete.is_empty() {
         let mut tags = Vec::new();
         for event_id in &event_ids_to_delete {
-            tags.push(nostr_sdk::Tag::event(
-                nostr_sdk::EventId::parse(event_id)
-                    .map_err(|e| format!("Invalid event ID: {}", e))?,
-            ));
+            match nostr_sdk::EventId::parse(event_id) {
+                Ok(parsed) => tags.push(nostr_sdk::Tag::event(parsed)),
+                Err(error) => {
+                    log::debug!(
+                        "Skipping non-Nostr token event ID {} during mint removal deletion tagging: {}",
+                        event_id,
+                        error
+                    );
+                }
+            }
         }
-        tags.push(nostr_sdk::Tag::custom(
-            nostr_sdk::TagKind::custom("k"),
-            ["7375"],
-        ));
-        let deletion_builder =
-            nostr_sdk::EventBuilder::new(Kind::from(5), format!("Removed mint: {}", mint_url))
-                .tags(tags);
-        let client = nostr_client::NOSTR_CLIENT
-            .read()
-            .as_ref()
-            .ok_or("Client not initialized")?
-            .clone();
-        client
-            .send_event_builder(deletion_builder)
-            .await
-            .map_err(|e| format!("Failed to publish deletion event: {}", e))?;
-        log::info!(
-            "Published deletion event for {} token events",
-            event_ids_to_delete.len()
-        );
+        if !tags.is_empty() {
+            tags.push(nostr_sdk::Tag::custom(
+                nostr_sdk::TagKind::custom("k"),
+                ["7375"],
+            ));
+            let deletion_builder = nostr_sdk::EventBuilder::new(
+                Kind::from(5),
+                format!("Removed mint: {}", normalized_mint_url),
+            )
+            .tags(tags);
+            if let Some(client) = client.as_ref() {
+                match client
+                    .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+                        deletion_builder.clone(),
+                    ))
+                    .await
+                {
+                    Ok(output) if !output.success.is_empty() => {
+                        log::info!(
+                            "Published deletion event for {} token events",
+                            event_ids_to_delete.len()
+                        );
+                    }
+                    Ok(_) => {
+                        log::warn!("No relays accepted deletion event, queuing for retry");
+                        queue_mint_deletion_event_durably(deletion_builder)
+                            .await
+                            .map_err(|queue_err| {
+                                format!(
+                                    "Failed to queue mint deletion event for retry: {}",
+                                    queue_err
+                                )
+                            })?;
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
+                        queue_mint_deletion_event_durably(deletion_builder)
+                            .await
+                            .map_err(|queue_err| {
+                                format!(
+                                    "Failed to queue mint deletion event for retry: {}",
+                                    queue_err
+                                )
+                            })?;
+                    }
+                }
+            } else {
+                log::warn!("Client not initialized, queuing deletion event for retry");
+                queue_mint_deletion_event_durably(deletion_builder)
+                    .await
+                    .map_err(|queue_err| {
+                        format!(
+                            "Failed to queue mint deletion event for retry: {}",
+                            queue_err
+                        )
+                    })?;
+            }
+        }
+    }
+    let pending_event_ids_to_remove: Vec<String> = PENDING_NOSTR_EVENTS
+        .read()
+        .iter()
+        .filter(|event| {
+            event
+                .mint_url
+                .as_ref()
+                .is_some_and(|mint| mint_matches(mint, &normalized_mint_url))
+        })
+        .map(|event| event.id.clone())
+        .collect();
+    if let Some(localstore) = SHARED_LOCALSTORE.read().as_ref().cloned() {
+        for event_id in &pending_event_ids_to_remove {
+            localstore
+                .remove_pending_event(event_id)
+                .await
+                .map_err(|e| format!("Failed to remove pending mint event {}: {}", event_id, e))?;
+        }
     }
     {
-        let wallet_state = WALLET_STATE.read().clone();
-        if let Some(ref state) = wallet_state {
-            let Some(ref privkey) = state.privkey else {
-                log::warn!("Cannot update wallet event: no private key available");
-                return Ok((token_count, total_amount));
-            };
-            let signer = crate::stores::signer::get_signer()
-                .ok_or("No signer available")?
-                .as_nostr_signer();
-            let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-            let pubkey =
-                PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
-            let client = nostr_client::NOSTR_CLIENT
-                .read()
+        PENDING_NOSTR_EVENTS.write().retain(|event| {
+            !event
+                .mint_url
                 .as_ref()
-                .ok_or("Client not initialized")?
-                .clone();
-            let mut content_array: Vec<Vec<&str>> = vec![vec!["privkey", privkey]];
-            for mint in state.mints.iter() {
-                content_array.push(vec!["mint", mint.as_str()]);
-            }
-            let json_content = serde_json::to_string(&content_array)
-                .map_err(|e| format!("Failed to serialize wallet data: {}", e))?;
-            let encrypted = signer
-                .nip44_encrypt(&pubkey, &json_content)
-                .await
-                .map_err(|e| format!("Failed to encrypt: {}", e))?;
-            let builder = nostr_sdk::EventBuilder::new(Kind::CashuWallet, encrypted);
-            match client.send_event_builder(builder).await {
-                Ok(_) => log::info!("Published updated wallet event after mint removal"),
-                Err(e) => log::warn!("Failed to publish wallet event: {}", e),
-            }
-        }
+                .is_some_and(|mint| mint_matches(mint, &normalized_mint_url))
+        });
+        let store = WALLET_TOKENS.read();
+        let mut data = store.data();
+        let mut tokens_write = data.write();
+        tokens_write.retain(|t| !mint_matches(&t.mint, &normalized_mint_url));
     }
+    {
+        let mut state_write = WALLET_STATE.write();
+        let wallet_state = state_write.as_mut().ok_or("Wallet not initialized")?;
+        wallet_state
+            .mints
+            .retain(|m| !mint_matches(m, &normalized_mint_url));
+    }
+    super::proofs::rebuild_proof_event_map();
     super::signals::update_wallet_balances();
-    log::info!("Removed mint {} ({} sats)", mint_url, total_amount);
+    log::info!(
+        "Removed mint {} ({} sats)",
+        normalized_mint_url,
+        total_amount
+    );
     Ok((token_count, total_amount))
 }
 /// Consolidate proofs for a mint via swap
@@ -1060,7 +1210,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         .await
         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-    let mut unsigned = builder.clone().build(pubkey);
+    let mut unsigned = crate::utils::nips::nip89::tag_event_builder(builder.clone()).build(pubkey);
     let pre_signed_event_id = unsigned.id().to_hex();
     let signed_event = unsigned
         .sign(&signer)
@@ -1200,9 +1350,48 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
             deletion_request = deletion_request.id(event_id);
         }
     }
-    let delete_builder = nostr_sdk::EventBuilder::delete(deletion_request);
-    if let Err(e) = client.send_event_builder(delete_builder).await {
-        log::warn!("Failed to publish deletion event: {}", e);
+    if !deletion_request.ids.is_empty() {
+        let delete_builder = nostr_sdk::EventBuilder::delete(deletion_request);
+        match client
+            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+                delete_builder.clone(),
+            ))
+            .await
+        {
+            Ok(output) if !output.success.is_empty() => {}
+            Ok(_) => {
+                log::warn!("Failed to publish deletion event: no relays accepted the event");
+                if let Err(queue_err) = super::events::queue_event_for_retry(
+                    delete_builder,
+                    super::types::PendingEventType::DeletionEvent,
+                    None,
+                    None,
+                )
+                .await
+                {
+                    log::error!(
+                        "Failed to queue deletion event for retry after consolidation: {}",
+                        queue_err
+                    );
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to publish deletion event: {}", e);
+                if let Err(queue_err) = super::events::queue_event_for_retry(
+                    delete_builder,
+                    super::types::PendingEventType::DeletionEvent,
+                    None,
+                    None,
+                )
+                .await
+                {
+                    log::error!(
+                        "Failed to queue deletion event for retry after consolidation: {}",
+                        queue_err
+                    );
+                }
+            }
+        }
     }
     super::signals::update_wallet_balances();
     if let Err(e) = crate::stores::cashu_cdk_bridge::sync_wallet_state().await {

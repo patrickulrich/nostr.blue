@@ -90,7 +90,10 @@ async fn publish_checked_at_if_enabled(timestamp: i64) {
         }
     };
     let builder = notification_nip78::create_checked_at_event(timestamp);
-    match client.send_event_builder(builder).await {
+    match client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+        .await
+    {
         Ok(output) => {
             log::info!(
                 "Published notification checked_at to NIP-78: {}",

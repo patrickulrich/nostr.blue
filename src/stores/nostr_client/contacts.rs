@@ -276,7 +276,7 @@ async fn publish_enriched_contacts(
     );
     let builder = nostr::EventBuilder::contact_list(contact_list);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish contact list: {}", e))?;
     let result = PublishResult::from_output(output);

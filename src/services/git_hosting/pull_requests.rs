@@ -5,11 +5,25 @@
 use crate::stores::code_store::{cache_pr_events, get_cached_pr, update_pr_statuses};
 use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
 use crate::utils::nip34::{decode_event_id, GitComment, IssueStatus, PullRequest};
+use crate::utils::relay_output::ensure_publish_accepted;
 use dioxus::signals::ReadableExt;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
 /// Default timeout for fetching events
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
+
+async fn send_and_ensure_published(
+    client: &Client,
+    builder: EventBuilder,
+    action: &str,
+) -> Result<EventId, String> {
+    let output = client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+        .await
+        .map_err(|e| format!("{action}: {e}"))?;
+    ensure_publish_accepted(&output, action)?;
+    Ok(*output.id())
+}
 
 /// Fetch status events for a set of PR event IDs and apply them to the cache
 async fn fetch_and_apply_pr_statuses(event_ids: &[EventId]) {
@@ -208,11 +222,7 @@ pub async fn publish_patch(
             [name],
         ));
     }
-    let output = client
-        .send_event_builder(builder)
-        .await
-        .map_err(|e| format!("Failed to publish: {}", e))?;
-    let event_id = *output.id();
+    let event_id = send_and_ensure_published(&client, builder, "Failed to publish").await?;
     let filter = Filter::new().id(event_id);
     if let Ok(events) = fetch_events_aggregated(filter, Duration::from_secs(2)).await {
         cache_pr_events(&events);
@@ -250,11 +260,7 @@ pub async fn publish_pr_update(
             [hash],
         ));
     }
-    let output = client
-        .send_event_builder(builder)
-        .await
-        .map_err(|e| format!("Failed to publish PR update: {}", e))?;
-    Ok(*output.id())
+    send_and_ensure_published(&client, builder, "Failed to publish PR update").await
 }
 
 /// Publish a PR update by event ID and naddr strings
@@ -281,11 +287,7 @@ pub async fn update_pr_status(pr_id: EventId, status: IssueStatus) -> Result<Eve
     }
     let kind = status.to_kind();
     let builder = EventBuilder::new(kind, "").tag(Tag::event(pr_id));
-    let output = client
-        .send_event_builder(builder)
-        .await
-        .map_err(|e| format!("Failed to publish status: {}", e))?;
-    let event_id = *output.id();
+    let event_id = send_and_ensure_published(&client, builder, "Failed to publish status").await?;
     let filter = Filter::new().id(event_id);
     if let Ok(events) = fetch_events_aggregated(filter, Duration::from_secs(2)).await {
         update_pr_statuses(&events);
@@ -309,11 +311,7 @@ pub async fn publish_pr_comment(
     if let Some(coord) = repository {
         builder = builder.tag(Tag::coordinate(coord.clone(), None));
     }
-    let output = client
-        .send_event_builder(builder)
-        .await
-        .map_err(|e| format!("Failed to publish comment: {}", e))?;
-    Ok(*output.id())
+    send_and_ensure_published(&client, builder, "Failed to publish comment").await
 }
 /// Fetch comments for a PR
 pub async fn fetch_pr_comments(pr_id: EventId) -> Result<Vec<GitComment>, String> {
@@ -425,11 +423,7 @@ pub async fn publish_line_comment(
             TagKind::Custom(std::borrow::Cow::Borrowed("line")),
             [line_number.to_string()],
         ));
-    let output = client
-        .send_event_builder(builder)
-        .await
-        .map_err(|e| format!("Failed to publish line comment: {}", e))?;
-    Ok(*output.id())
+    send_and_ensure_published(&client, builder, "Failed to publish line comment").await
 }
 
 /// Fetch line comments for a PR

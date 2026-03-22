@@ -383,7 +383,7 @@ pub async fn publish_embedding(
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_EMBEDDING), "").tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish embedding: {}", e))?;
     log::info!("Embedding published: {}", output.id().to_hex());

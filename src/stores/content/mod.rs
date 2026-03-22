@@ -4,3 +4,4 @@ pub mod draft_store;
 pub mod publication_store;
 pub mod recipe_store;
 pub mod wiki_store;
+pub mod zap_goals_store;

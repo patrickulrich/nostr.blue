@@ -504,10 +504,13 @@ async fn create_new_curation_list(name: String, event_id: String) -> Result<(), 
         Tag::event(target_event_id),
     ];
     let builder = EventBuilder::new(Kind::from(30004), "").tags(tags);
-    client
-        .send_event_builder(builder)
+    let event_output = client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to create list: {}", e))?;
+    if event_output.success.is_empty() {
+        return Err("No relays accepted event".to_string());
+    }
     log::info!("Created new curation list: {}", name);
     Ok(())
 }
@@ -530,7 +533,8 @@ async fn add_to_existing_list(list_event_id: String, event_id: String) -> Result
         }
     };
     let existing_content = list_event.content.clone();
-    let mut tags: Vec<Tag> = list_event.tags.into_iter().collect();
+    let mut tags: Vec<Tag> =
+        crate::utils::nips::nip89::strip_client_tags(list_event.tags.into_iter().collect());
     let normalized_event_id = target_event_id.to_hex();
     let already_exists = tags.iter().any(|tag| {
         tag.kind() == nostr_sdk::TagKind::e()
@@ -544,10 +548,13 @@ async fn add_to_existing_list(list_event_id: String, event_id: String) -> Result
     }
     tags.push(Tag::event(target_event_id));
     let builder = EventBuilder::new(Kind::from(30004), existing_content).tags(tags);
-    client
-        .send_event_builder(builder)
+    let event_output = client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to update list: {}", e))?;
+    if event_output.success.is_empty() {
+        return Err("No relays accepted event".to_string());
+    }
     log::info!("Added event to existing list");
     Ok(())
 }

@@ -147,7 +147,7 @@ async fn create_repo_zap_invoice(
         None,
     );
     let zap_request = client
-        .sign_event_builder(builder)
+        .sign_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to sign zap request: {}", e))?;
 

@@ -127,7 +127,7 @@ pub async fn publish_article_tracked(
     }
     let builder = nostr::EventBuilder::new(nostr::Kind::LongFormTextNote, content).tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish article: {}", e))?;
     let result = PublishResult::from_output(output);

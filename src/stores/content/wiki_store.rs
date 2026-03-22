@@ -510,9 +510,12 @@ pub async fn publish_wiki_page(
     tags.extend(wikilinks_to_tags(&wikilinks));
     let builder = EventBuilder::new(Kind::Custom(KIND_WIKI_ARTICLE), content).tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish wiki page: {}", e))?;
+    if output.success.is_empty() {
+        return Err("Failed to publish wiki page: no relays accepted the event".to_string());
+    }
     log::info!("Wiki page published: {}", output.id().to_hex());
     Ok(output.id().to_hex())
 }
@@ -549,9 +552,12 @@ pub async fn fork_wiki_page(
     tags.extend(wikilinks_to_tags(&wikilinks));
     let builder = EventBuilder::new(Kind::Custom(KIND_WIKI_ARTICLE), new_content).tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to fork wiki page: {}", e))?;
+    if output.success.is_empty() {
+        return Err("Failed to fork wiki page: no relays accepted the event".to_string());
+    }
     log::info!("Wiki page forked: {}", output.id().to_hex());
     Ok(output.id().to_hex())
 }
@@ -572,9 +578,12 @@ pub async fn publish_wiki_redirect(
     ];
     let builder = EventBuilder::new(Kind::Custom(KIND_WIKI_REDIRECT), "").tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish redirect: {}", e))?;
+    if output.success.is_empty() {
+        return Err("Failed to publish redirect: no relays accepted the event".to_string());
+    }
     cache_redirect(&source_normalized, &target_normalized);
     log::info!(
         "Wiki redirect published: {} -> {}",
@@ -606,9 +615,12 @@ pub async fn publish_merge_request(
     let content = reason.unwrap_or("");
     let builder = EventBuilder::new(Kind::Custom(KIND_MERGE_REQUEST), content).tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish merge request: {}", e))?;
+    if output.success.is_empty() {
+        return Err("Failed to publish merge request: no relays accepted the event".to_string());
+    }
     log::info!("Merge request published: {}", output.id().to_hex());
     Ok(output.id().to_hex())
 }

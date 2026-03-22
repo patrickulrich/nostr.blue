@@ -352,7 +352,7 @@ pub async fn create_badge_definition(
     }
     let event = EventBuilder::new(Kind::Custom(KIND_BADGE_DEFINITION), "").tags(tags);
     let output = client
-        .send_event_builder(event)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(event))
         .await
         .map_err(|e| format!("Failed to publish badge: {}", e))?;
     Ok(output.id().to_hex())
@@ -385,7 +385,7 @@ pub async fn award_badge(
     }
     let event = EventBuilder::new(Kind::Custom(KIND_BADGE_AWARD), "").tags(tags);
     let output = client
-        .send_event_builder(event)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(event))
         .await
         .map_err(|e| format!("Failed to award badge: {}", e))?;
     Ok(output.id().to_hex())
@@ -430,7 +430,7 @@ pub async fn accept_badge(
     ));
     let event = EventBuilder::new(Kind::Custom(KIND_PROFILE_BADGES), "").tags(tags);
     let output = client
-        .send_event_builder(event)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(event))
         .await
         .map_err(|e| format!("Failed to accept badge: {}", e))?;
     Ok(output.id().to_hex())
@@ -462,7 +462,7 @@ pub async fn reject_badge(definition_coordinate: &str) -> Result<String, String>
     }
     let event = EventBuilder::new(Kind::Custom(KIND_PROFILE_BADGES), "").tags(tags);
     let output = client
-        .send_event_builder(event)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(event))
         .await
         .map_err(|e| format!("Failed to reject badge: {}", e))?;
     Ok(output.id().to_hex())

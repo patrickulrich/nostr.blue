@@ -110,6 +110,15 @@ fn load_nwc_uri() -> Option<String> {
 fn delete_nwc_uri() {
     let _ = crate::platform::storage::delete(STORAGE_KEY_NWC_URI);
 }
+
+/// Return the current reusable NWC URI from storage.
+///
+/// This is intended for features that need to reuse the user's configured
+/// wallet connection, such as PPQ auto-topup setup.
+pub fn current_nwc_uri() -> Option<String> {
+    load_nwc_uri_secure().or_else(load_nwc_uri)
+}
+
 /// Connect to NWC using a connection URI
 /// If remember_wallet is true, the URI will be stored securely
 pub async fn connect_nwc(

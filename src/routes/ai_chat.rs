@@ -1,34 +1,48 @@
-use crate::components::icons::{SendIcon, SettingsIcon, SparklesIcon, TrashIcon};
-use crate::components::ClientInitializing;
+use crate::components::icons::{CameraIcon, SendIcon, SettingsIcon, SparklesIcon, TrashIcon};
+use crate::components::{ClientInitializing, ImageInsertData, ImageUploadDialog};
 use crate::routes::Route;
 use crate::services::ai_chat::{
-    get_available_models, send_chat_message, ChatCompletionRequest, ChatCompletionResponse,
-    ChatMessage, ChatModel, ChatRole, ToolCall, ToolDefinition, ToolFunction,
+    generate_images, get_available_models, send_chat_message, AssistantContent,
+    ChatCompletionRequest, ChatCompletionResponse, ChatImageUrl, ChatMessage, ChatMessageContent,
+    ChatMessagePart, ChatModel, ChatModelKind, ChatRole, ImageGenerationRequest, ToolCall,
+    ToolDefinition, ToolFunction,
 };
+use crate::services::ppq;
 use crate::stores::ai_chat_store::{
-    self, PersistedChatMessage, PersistedChatRole, PersistedToolCall,
+    self, PersistedChatImage, PersistedChatMessage, PersistedChatRole, PersistedToolCall,
 };
 use crate::stores::ai_provider_store::{
-    self, resolve_providers, shakespeare_provider, AiProviderConfig, AiProviderState,
+    self, ppq_provider, resolve_providers, AiProviderConfig, AiProviderState, PpqAccountState,
+    PROVIDER_STATE_SAVE_EVENT,
 };
 use crate::stores::{nostr_client, theme_store};
 use crate::utils::markdown::render_markdown;
 use dioxus::document;
 use dioxus::prelude::*;
 use serde_json::json;
+use std::hash::{Hash, Hasher};
 
 const SYSTEM_PROMPT: &str = "You are Nostrich, an AI assistant inside nostr.blue. Be concise and helpful for the user. Your personality is a fun ostrich that represents the nostr community.";
 const THEME_TOOL_NAME: &str = "set_theme";
 const AI_CHAT_PROVIDER_PERSISTENCE_ENABLED: bool = true;
 const AI_CHAT_HISTORY_LOAD_ENABLED: bool = true;
 const AI_CHAT_HISTORY_SAVE_ENABLED: bool = true;
+const AI_CHAT_HISTORY_SAVE_FAILURE_COOLDOWN_MS: u64 = 5_000;
 
 #[derive(Clone, Debug, PartialEq)]
 struct DisplayMessage {
     id: String,
     role: DisplayRole,
     content: String,
+    images: Vec<ChatImage>,
     tool_calls: Vec<ExecutedToolCall>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct ChatImage {
+    url: String,
+    alt: String,
+    title: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -44,9 +58,65 @@ struct ExecutedToolCall {
     result: String,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct FailedHistorySnapshot {
+    snapshot_key: String,
+    failed_at_ms: u64,
+}
+
+fn is_current_chat_history_request(
+    generation_signal: Signal<u32>,
+    account_key: &str,
+    captured_generation: u32,
+) -> bool {
+    *generation_signal.read() == captured_generation
+        && ai_chat_store::current_account_key() == account_key
+}
+
+fn should_suggest_image_model(
+    active_model: &ChatModel,
+    attached_images: &[ChatImage],
+    image_models_available: bool,
+    text: &str,
+) -> bool {
+    active_model.kind != ChatModelKind::Image
+        && attached_images.is_empty()
+        && image_models_available
+        && looks_like_image_generation_prompt(text)
+}
+
 #[derive(Clone, serde::Deserialize)]
 struct ThemeToolArgs {
     theme: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum PendingProviderSaveAction {
+    #[default]
+    None,
+    BootstrapPpq,
+}
+
+fn history_save_snapshot_key(
+    account_key: &str,
+    persisted_messages: &[PersistedChatMessage],
+    initial_loaded_messages: &[PersistedChatMessage],
+) -> String {
+    fn hash_messages(messages: &[PersistedChatMessage]) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        messages.len().hash(&mut hasher);
+        for message in messages {
+            message.hash(&mut hasher);
+        }
+        hasher.finish()
+    }
+
+    format!(
+        "{}:{:016x}:{:016x}",
+        account_key,
+        hash_messages(persisted_messages),
+        hash_messages(initial_loaded_messages),
+    )
 }
 
 #[component]
@@ -55,24 +125,31 @@ pub fn AIChat() -> Element {
     let mut input = use_signal(String::new);
     let loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
+    let mut compose_notice = use_signal(|| None::<String>);
     let mut models = use_signal(Vec::<ChatModel>::new);
     let mut selected_model = use_signal(String::new);
+    let mut pending_images = use_signal(Vec::<ChatImage>::new);
+    let mut show_image_upload = use_signal(|| false);
     let mut provider_state = use_signal(AiProviderState::default);
-    let mut providers = use_signal(|| vec![shakespeare_provider()]);
+    let mut providers = use_signal(|| vec![ppq_provider(None)]);
     let mut provider_state_loaded = use_signal(|| false);
     let mut provider_state_loading = use_signal(|| false);
+    let mut ppq_bootstrap_loading = use_signal(|| false);
     let mut chat_history_loaded = use_signal(|| false);
     let mut chat_history_loading = use_signal(|| false);
     let mut chat_history_generation = use_signal(|| 0u32);
     let mut persisted_messages_dirty = use_signal(|| false);
     let persisted_messages_save_generation = use_signal(|| 0u32);
     let persisted_messages_save_in_flight = use_signal(|| false);
-    let provider_state_save_generation = use_signal(|| 0u32);
-    let mut provider_state_save_in_flight = use_signal(|| false);
+    let mut persisted_messages_failed_snapshot = use_signal(|| None::<FailedHistorySnapshot>);
+    let mut failed_snapshot_retry_generation = use_signal(|| 0u32);
     let mut provider_models_generation = use_signal(|| 0u32);
     let mut initial_loaded_messages = use_signal(Vec::<PersistedChatMessage>::new);
     let messages_container_id = use_signal(|| "ai-chat-messages".to_string());
     let mut last_account_key = use_signal(|| None::<String>);
+    let mut pending_provider_save_snapshot = use_signal(|| None::<AiProviderState>);
+    let mut pending_provider_save_min_event_id = use_signal(|| 0u64);
+    let mut pending_provider_save_action = use_signal(PendingProviderSaveAction::default);
     let persisted_messages = use_memo(move || {
         messages
             .read()
@@ -99,7 +176,7 @@ pub fn AIChat() -> Element {
                         .iter()
                         .any(|provider| provider.id == loaded_state.selected_provider_id)
                     {
-                        loaded_state.selected_provider_id = shakespeare_provider().id;
+                        loaded_state.selected_provider_id = ppq_provider(None).id;
                     }
                     providers.set(resolve_providers(&loaded_state));
                     provider_state.set(loaded_state);
@@ -117,6 +194,40 @@ pub fn AIChat() -> Element {
     });
 
     use_effect(move || {
+        let pending_snapshot = pending_provider_save_snapshot.read().clone();
+        let Some(pending_snapshot) = pending_snapshot else {
+            return;
+        };
+        let Some(event) = PROVIDER_STATE_SAVE_EVENT.read().clone() else {
+            return;
+        };
+        if event.event_id <= *pending_provider_save_min_event_id.read()
+            || event.snapshot != pending_snapshot
+        {
+            return;
+        }
+
+        let action = *pending_provider_save_action.read();
+        pending_provider_save_snapshot.set(None);
+        pending_provider_save_min_event_id.set(event.event_id);
+        pending_provider_save_action.set(PendingProviderSaveAction::None);
+
+        match event.result {
+            Ok(()) => {
+                if matches!(action, PendingProviderSaveAction::BootstrapPpq) {
+                    ppq_bootstrap_loading.set(false);
+                }
+            }
+            Err(err) => {
+                error.set(Some(err));
+                if matches!(action, PendingProviderSaveAction::BootstrapPpq) {
+                    ppq_bootstrap_loading.set(false);
+                }
+            }
+        }
+    });
+
+    use_effect(move || {
         let _ = messages.read().len();
         let id = messages_container_id.read().clone();
         spawn(async move {
@@ -126,6 +237,19 @@ pub fn AIChat() -> Element {
             );
             let _ = document::eval(&script).await;
         });
+    });
+
+    use_effect(move || {
+        let selected = selected_model.read().clone();
+        let active_model = current_model(&models.read(), &selected);
+        if active_model
+            .as_ref()
+            .is_some_and(|model| model.supports_image_input)
+            || pending_images.read().is_empty()
+        {
+            return;
+        }
+        pending_images.set(Vec::new());
     });
 
     use_effect(move || {
@@ -147,6 +271,48 @@ pub fn AIChat() -> Element {
     });
 
     use_effect(move || {
+        let failed_snapshot = persisted_messages_failed_snapshot.read().clone();
+        let Some(failed_snapshot) = failed_snapshot else {
+            return;
+        };
+        let account_key = ai_chat_store::current_account_key();
+        let snapshot_key = history_save_snapshot_key(
+            &account_key,
+            &persisted_messages.read(),
+            &initial_loaded_messages.read(),
+        );
+        if failed_snapshot.snapshot_key != snapshot_key {
+            persisted_messages_failed_snapshot.set(None);
+            return;
+        }
+        let generation = failed_snapshot_retry_generation.with_mut(|value| {
+            *value = value.wrapping_add(1);
+            *value
+        });
+        let elapsed =
+            crate::platform::timestamp::now_millis().saturating_sub(failed_snapshot.failed_at_ms);
+        let remaining_ms = AI_CHAT_HISTORY_SAVE_FAILURE_COOLDOWN_MS.saturating_sub(elapsed);
+        spawn(async move {
+            if remaining_ms > 0 {
+                crate::platform::timer::sleep_ms(remaining_ms as u32).await;
+            }
+            if *failed_snapshot_retry_generation.read() != generation {
+                return;
+            }
+            if persisted_messages_failed_snapshot
+                .read()
+                .as_ref()
+                .is_some_and(|current| {
+                    current.snapshot_key == failed_snapshot.snapshot_key
+                        && current.failed_at_ms == failed_snapshot.failed_at_ms
+                })
+            {
+                persisted_messages_failed_snapshot.set(None);
+            }
+        });
+    });
+
+    use_effect(move || {
         if !AI_CHAT_HISTORY_LOAD_ENABLED {
             chat_history_loaded.set(true);
             return;
@@ -164,12 +330,23 @@ pub fn AIChat() -> Element {
         spawn(async move {
             match ai_chat_store::load_chat_history(&account_key).await {
                 Ok(history) => {
-                    if *chat_history_generation.read() != generation
-                        || ai_chat_store::current_account_key() != account_key
-                    {
+                    if !is_current_chat_history_request(
+                        chat_history_generation,
+                        &account_key,
+                        generation,
+                    ) {
                         return;
                     }
                     if *persisted_messages_dirty.read() || !messages.read().is_empty() {
+                        if is_current_chat_history_request(
+                            chat_history_generation,
+                            &account_key,
+                            generation,
+                        ) {
+                            initial_loaded_messages.set(history);
+                            chat_history_loaded.set(true);
+                            chat_history_loading.set(false);
+                        }
                         return;
                     }
                     initial_loaded_messages.set(history.clone());
@@ -182,20 +359,20 @@ pub fn AIChat() -> Element {
                     );
                 }
                 Err(e) => {
-                    if *chat_history_generation.read() != generation
-                        || ai_chat_store::current_account_key() != account_key
-                    {
+                    if !is_current_chat_history_request(
+                        chat_history_generation,
+                        &account_key,
+                        generation,
+                    ) {
                         return;
                     }
                     error.set(Some(e));
                 }
             }
-            if *chat_history_generation.read() == generation
-                && ai_chat_store::current_account_key() == account_key
-            {
+            if is_current_chat_history_request(chat_history_generation, &account_key, generation) {
                 chat_history_loaded.set(true);
+                chat_history_loading.set(false);
             }
-            chat_history_loading.set(false);
         });
     });
 
@@ -211,11 +388,25 @@ pub fn AIChat() -> Element {
         let persisted_messages_dirty_value = *persisted_messages_dirty.read();
         let initial_loaded_messages_snapshot = initial_loaded_messages.read().clone();
         let persisted_messages_snapshot = persisted_messages.read().clone();
+        let computed_snapshot_key = history_save_snapshot_key(
+            &account_key,
+            &persisted_messages_snapshot,
+            &initial_loaded_messages_snapshot,
+        );
+        let failed_snapshot_cooldown_active = persisted_messages_failed_snapshot
+            .read()
+            .as_ref()
+            .is_some_and(|failed| {
+                failed.snapshot_key == computed_snapshot_key
+                    && crate::platform::timestamp::now_millis().saturating_sub(failed.failed_at_ms)
+                        <= AI_CHAT_HISTORY_SAVE_FAILURE_COOLDOWN_MS
+            });
 
         if !chat_history_ready
             || !persisted_messages_dirty_value
             || persisted_messages_snapshot == initial_loaded_messages_snapshot
             || ai_chat_store::current_account_key() != account_key
+            || failed_snapshot_cooldown_active
         {
             return;
         }
@@ -226,28 +417,30 @@ pub fn AIChat() -> Element {
         let persisted_messages_signal = persisted_messages;
         let chat_history_generation_signal = chat_history_generation;
         let mut initial_loaded_messages_signal = initial_loaded_messages;
+        let mut persisted_messages_failed_snapshot_signal = persisted_messages_failed_snapshot;
         let generation = persisted_messages_save_generation_signal
             .read()
             .wrapping_add(1);
-            let chat_generation = *chat_history_generation_signal.read();
-            persisted_messages_save_in_flight_signal.set(true);
-            persisted_messages_save_generation_signal.set(generation);
-            spawn(async move {
-                const MAX_SAVE_ATTEMPTS: u32 = 4;
+        let chat_generation = *chat_history_generation_signal.read();
+        persisted_messages_save_in_flight_signal.set(true);
+        persisted_messages_save_generation_signal.set(generation);
+        spawn(async move {
+            const MAX_SAVE_ATTEMPTS: u32 = 4;
 
-                for attempt in 0..MAX_SAVE_ATTEMPTS {
-                    if *persisted_messages_save_generation_signal.read() != generation
-                        || *chat_history_generation_signal.read() != chat_generation
-                        || ai_chat_store::current_account_key() != account_key
-                    {
-                        persisted_messages_save_in_flight_signal.set(false);
-                        return;
-                    }
+            for attempt in 0..MAX_SAVE_ATTEMPTS {
+                if *persisted_messages_save_generation_signal.read() != generation
+                    || *chat_history_generation_signal.read() != chat_generation
+                    || ai_chat_store::current_account_key() != account_key
+                {
+                    persisted_messages_save_in_flight_signal.set(false);
+                    return;
+                }
 
                 let result = if persisted_messages_snapshot.is_empty() {
                     ai_chat_store::clear_chat_history(&account_key).await
                 } else {
-                    ai_chat_store::save_chat_history(&account_key, &persisted_messages_snapshot).await
+                    ai_chat_store::save_chat_history(&account_key, &persisted_messages_snapshot)
+                        .await
                 };
 
                 match result {
@@ -256,27 +449,35 @@ pub fn AIChat() -> Element {
                             && *chat_history_generation_signal.read() == chat_generation
                             && ai_chat_store::current_account_key() == account_key
                         {
-                            let latest_persisted_messages = persisted_messages_signal.read().clone();
+                            let latest_persisted_messages =
+                                persisted_messages_signal.read().clone();
                             if latest_persisted_messages == persisted_messages_snapshot {
                                 persisted_messages_dirty_signal.set(false);
                                 initial_loaded_messages_signal
                                     .set(persisted_messages_snapshot.clone());
                             }
+                            persisted_messages_failed_snapshot_signal.set(None);
                         }
                         persisted_messages_save_in_flight_signal.set(false);
                         return;
                     }
-                        Err(e) => {
-                            if attempt + 1 == MAX_SAVE_ATTEMPTS {
-                                if *persisted_messages_save_generation_signal.read() == generation
+                    Err(e) => {
+                        if attempt + 1 == MAX_SAVE_ATTEMPTS {
+                            if *persisted_messages_save_generation_signal.read() == generation
                                 && *chat_history_generation_signal.read() == chat_generation
                                 && ai_chat_store::current_account_key() == account_key
-                                {
-                                    error.set(Some(e));
-                                }
-                                persisted_messages_save_in_flight_signal.set(false);
-                                return;
+                            {
+                                error.set(Some(e));
+                                persisted_messages_failed_snapshot_signal.set(Some(
+                                    FailedHistorySnapshot {
+                                        snapshot_key: computed_snapshot_key.clone(),
+                                        failed_at_ms: crate::platform::timestamp::now_millis(),
+                                    },
+                                ));
                             }
+                            persisted_messages_save_in_flight_signal.set(false);
+                            return;
+                        }
 
                         crate::platform::timer::sleep_ms((attempt + 1) * 100).await;
                     }
@@ -286,42 +487,8 @@ pub fn AIChat() -> Element {
     });
 
     use_effect(move || {
-        if !AI_CHAT_PROVIDER_PERSISTENCE_ENABLED {
-            return;
-        }
-        let save_generation = *provider_state_save_generation.read();
-        if save_generation == 0 || *provider_state_save_in_flight.peek() {
-            return;
-        }
-
-        provider_state_save_in_flight.set(true);
-        spawn(async move {
-            loop {
-                let generation = *provider_state_save_generation.peek();
-                let snapshot = provider_state.read().clone();
-                match ai_provider_store::save_provider_state(&snapshot).await {
-                    Ok(()) => {
-                        if *provider_state_save_generation.peek() == generation {
-                            provider_state_save_in_flight.set(false);
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        error.set(Some(e));
-                        if *provider_state_save_generation.peek() == generation {
-                            provider_state_save_in_flight.set(false);
-                            break;
-                        }
-                    }
-                }
-            }
-        });
-    });
-
-    use_effect(move || {
         let provider_state_ready = *provider_state_loaded.read();
         let selected_provider_id = provider_state.read().selected_provider_id.clone();
-        let has_signer = *nostr_client::HAS_SIGNER.read();
 
         if !provider_state_ready {
             return;
@@ -340,7 +507,7 @@ pub fn AIChat() -> Element {
                 return;
             };
 
-            if provider.requires_signer() && !has_signer {
+            if provider.requires_setup() {
                 models.set(Vec::new());
                 selected_model.set(String::new());
                 error.set(None);
@@ -359,29 +526,19 @@ pub fn AIChat() -> Element {
                         .selected_model_by_provider
                         .get(&provider.id)
                         .cloned();
-                    let selected_is_valid = available_models
-                        .iter()
-                        .any(|model| model.id == *selected_model.read());
-                    let saved_is_valid = saved_model
-                        .as_ref()
-                        .map(|saved| available_models.iter().any(|model| model.id == *saved))
-                        .unwrap_or(false);
-                    let next_model = if selected_is_valid {
-                        selected_model.read().clone()
-                    } else if saved_is_valid {
-                        saved_model.clone().unwrap_or_default()
-                    } else {
-                        available_models
-                            .first()
-                            .map(|model| model.id.clone())
-                            .unwrap_or_default()
-                    };
+                    let next_model = resolve_selected_model(
+                        &selected_model.read(),
+                        saved_model.as_deref(),
+                        &available_models,
+                    );
 
                     if *provider_models_generation.peek() != local_generation
                         || provider_state.read().selected_provider_id != provider.id
                     {
                         return;
                     }
+
+                    models.set(available_models);
 
                     if !next_model.is_empty() {
                         selected_model.set(next_model.clone());
@@ -390,14 +547,15 @@ pub fn AIChat() -> Element {
                                 provider.id.clone(),
                                 next_model,
                                 provider_state,
-                                provider_state_save_generation,
                                 error,
+                                pending_provider_save_snapshot,
+                                pending_provider_save_min_event_id,
+                                pending_provider_save_action,
                             );
                         }
                     } else {
                         selected_model.set(String::new());
                     }
-                    models.set(available_models);
                     error.set(None);
                 }
                 Err(e) => {
@@ -419,8 +577,24 @@ pub fn AIChat() -> Element {
     }
 
     let active_provider = current_provider(&providers.read(), &provider_state.read());
-    let shakespeare_blocked =
-        active_provider.requires_signer() && !*nostr_client::HAS_SIGNER.read();
+    let ppq_blocked = active_provider.requires_setup();
+    let active_model = current_model(&models.read(), selected_model.read().as_str());
+    let supports_image_attachments = active_model
+        .as_ref()
+        .map(|model| model.supports_image_input)
+        .unwrap_or(false);
+    let has_pending_images = !pending_images.read().is_empty();
+    let can_submit = match active_model.as_ref().map(|model| model.kind) {
+        Some(ChatModelKind::Image) => !input.read().trim().is_empty(),
+        Some(ChatModelKind::Chat) => {
+            !input.read().trim().is_empty()
+                || (has_pending_images
+                    && active_model
+                        .as_ref()
+                        .is_some_and(|m| m.supports_image_input))
+        }
+        None => false,
+    };
 
     let provider_for_keydown = active_provider.clone();
     let provider_for_click = active_provider.clone();
@@ -442,32 +616,52 @@ pub fn AIChat() -> Element {
                     }
                     div { class: "flex items-center gap-2",
                         select {
+                            key: "{active_provider.id}:{models.read().len()}:{selected_model}",
                             class: "h-10 rounded-lg border border-border bg-card px-3 text-sm text-foreground focus:outline-hidden",
                             value: "{selected_model}",
-                            disabled: models.read().is_empty() || *loading.read() || shakespeare_blocked,
+                            disabled: models.read().is_empty() || *loading.read() || ppq_blocked,
                             onchange: move |evt| {
                                 let value = evt.value();
                                 selected_model.set(value.clone());
+                                compose_notice.set(None);
                                 persist_selected_model(
                                     active_provider.id.clone(),
                                     value,
                                     provider_state,
-                                    provider_state_save_generation,
                                     error,
+                                    pending_provider_save_snapshot,
+                                    pending_provider_save_min_event_id,
+                                    pending_provider_save_action,
                                 );
                             },
                             if models.read().is_empty() {
-                                option { value: "", if shakespeare_blocked { "Sign in for Shakespeare models" } else { "Loading models..." } }
+                                option {
+                                    value: "",
+                                    selected: selected_model.read().is_empty(),
+                                    if ppq_blocked { "Set up PPQ or switch providers" } else { "Loading models..." }
+                                }
                             } else {
                                 for model in models.read().iter() {
                                     {
-                                        let label = if model.total_cost == Some(0.0) {
-                                            format!("{} · FREE", model.name)
-                                        } else {
-                                            model.name.clone()
+                                        let kind_label = match model.kind {
+                                            ChatModelKind::Chat => None,
+                                            ChatModelKind::Image => Some("🖼️"),
+                                        };
+                                        let label = match (kind_label, model.total_cost) {
+                                            (Some(kind), Some(0.0)) => {
+                                                format!("{} · {} · FREE", model.name, kind)
+                                            }
+                                            (Some(kind), _) => format!("{} · {}", model.name, kind),
+                                            (None, Some(0.0)) => format!("{} · FREE", model.name),
+                                            (None, _) => model.name.clone(),
                                         };
                                         rsx! {
-                                            option { key: "{model.id}", value: "{model.id}", "{label}" }
+                                            option {
+                                                key: "{model.id}",
+                                                value: "{model.id}",
+                                                selected: *selected_model.read() == model.id,
+                                                "{label}"
+                                            }
                                         }
                                     }
                                 }
@@ -485,6 +679,7 @@ pub fn AIChat() -> Element {
                                 messages.set(Vec::new());
                                 persisted_messages_dirty.set(true);
                                 error.set(None);
+                                compose_notice.set(None);
                             },
                             TrashIcon { class: "w-4 h-4".to_string() }
                         }
@@ -505,8 +700,62 @@ pub fn AIChat() -> Element {
                 id: "{messages_container_id}",
                 class: "flex-1 overflow-y-auto",
                 div { class: "mx-auto flex max-w-5xl flex-col gap-6 px-4 py-6",
-                    if shakespeare_blocked {
-                        SignInGate {}
+                    if ppq_blocked {
+                        PpqSetupGate {
+                            loading: ppq_bootstrap_loading,
+                            on_create_account: move |_| {
+                                if *ppq_bootstrap_loading.read() {
+                                    return;
+                                }
+                                ppq_bootstrap_loading.set(true);
+                                error.set(None);
+                                spawn(async move {
+                                    match ppq::create_account().await {
+                                        Ok(account) => {
+                                            let mut next_state = provider_state.read().clone();
+                                            next_state.selected_provider_id = ppq_provider(None).id;
+                                            next_state.ppq_account = Some(PpqAccountState {
+                                                credit_id: account.credit_id,
+                                                api_key: account.api_key,
+                                                managed_api_key: None,
+                                                active_api_key_id: None,
+                                            });
+                                            if let Err(err) =
+                                                ai_provider_store::cache_provider_state(&next_state)
+                                            {
+                                                error.set(Some(err));
+                                                ppq_bootstrap_loading.set(false);
+                                                return;
+                                            }
+                                            providers.set(resolve_providers(&next_state));
+                                            provider_state.set(next_state.clone());
+                                            pending_provider_save_snapshot
+                                                .set(Some(next_state.clone()));
+                                            pending_provider_save_min_event_id.set(
+                                                PROVIDER_STATE_SAVE_EVENT
+                                                    .read()
+                                                    .as_ref()
+                                                    .map(|event| event.event_id)
+                                                    .unwrap_or(0),
+                                            );
+                                            pending_provider_save_action
+                                                .set(PendingProviderSaveAction::BootstrapPpq);
+                                            if let Some(snapshot) =
+                                                ai_provider_store::queue_provider_state_save(
+                                                    next_state,
+                                                )
+                                            {
+                                                ai_provider_store::process_queued_provider_state_saves(snapshot);
+                                            }
+                                        }
+                                        Err(err) => {
+                                            error.set(Some(err));
+                                            ppq_bootstrap_loading.set(false);
+                                        }
+                                    }
+                                });
+                            }
+                        }
                     } else if messages.read().is_empty() {
                         EmptyState { provider_name: active_provider.name.clone() }
                     } else {
@@ -526,32 +775,75 @@ pub fn AIChat() -> Element {
                             "{err}"
                         }
                     }
+
+                    if let Some(notice) = compose_notice.read().as_ref() {
+                        div { class: "max-w-3xl rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300",
+                            "{notice}"
+                        }
+                    }
                 }
             }
 
             div { class: "border-t border-border bg-background",
                 div { class: "mx-auto max-w-5xl px-4 py-4",
                     div { class: "rounded-2xl border border-border bg-card p-3 shadow-sm",
+                        if !pending_images.read().is_empty() {
+                            div { class: "mb-3 flex flex-wrap gap-3",
+                                for (index, image) in pending_images.read().iter().enumerate() {
+                                    div {
+                                        key: "pending-image-{index}",
+                                        class: "relative overflow-hidden rounded-xl border border-border bg-background",
+                                        img {
+                                            src: "{image.url}",
+                                            alt: "{image.alt}",
+                                            title: "{image.title}",
+                                            class: "h-24 w-24 object-cover",
+                                        }
+                                        button {
+                                            class: "absolute right-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded-full bg-background/90 text-foreground shadow-sm transition hover:bg-background",
+                                            title: "Remove image",
+                                            onclick: move |_| {
+                                                compose_notice.set(None);
+                                                pending_images.with_mut(|images| {
+                                                    if index < images.len() {
+                                                        images.remove(index);
+                                                    }
+                                                });
+                                            },
+                                            "×"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         textarea {
                             class: "min-h-[96px] w-full resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden disabled:cursor-not-allowed disabled:opacity-60",
-                            placeholder: if shakespeare_blocked {
-                                "Open AI settings to switch providers or sign in for Shakespeare..."
+                            placeholder: if ppq_blocked {
+                                "Create a PPQ account here or open AI settings to switch to a custom provider..."
+                            } else if active_model.as_ref().is_some_and(|model| model.kind == ChatModelKind::Image) {
+                                "Describe the image you want to generate..."
                             } else if selected_model.read().is_empty() {
                                 "Select a model first..."
                             } else {
                                 "Send a message..."
                             },
                             value: "{input}",
-                            disabled: selected_model.read().is_empty() || *loading.read() || shakespeare_blocked,
-                            oninput: move |evt| input.set(evt.value()),
+                            disabled: selected_model.read().is_empty() || *loading.read() || ppq_blocked,
+                            oninput: move |evt| {
+                                compose_notice.set(None);
+                                input.set(evt.value());
+                            },
                             onkeydown: move |evt| {
                                 if evt.key() == Key::Enter && !evt.modifiers().shift() {
                                     evt.prevent_default();
                                     submit_message(
                                         input,
+                                        models,
                                         selected_model,
+                                        pending_images,
                                         loading,
                                         error,
+                                        compose_notice,
                                         messages,
                                         persisted_messages_dirty,
                                         provider_for_keydown.clone(),
@@ -560,20 +852,44 @@ pub fn AIChat() -> Element {
                             },
                         }
                         div { class: "mt-3 flex items-center justify-between gap-3",
-                            p { class: "text-xs text-muted-foreground", "Enter to send. Shift+Enter for newline." }
+                            div { class: "flex items-center gap-3",
+                                if supports_image_attachments {
+                                    button {
+                                        class: if selected_model.read().is_empty() || *loading.read() || ppq_blocked {
+                                            "inline-flex h-11 w-11 items-center justify-center rounded-xl border border-border text-muted-foreground opacity-50"
+                                        } else {
+                                            "inline-flex h-11 w-11 items-center justify-center rounded-xl border border-border text-muted-foreground transition hover:bg-accent"
+                                        },
+                                        title: "Attach image",
+                                        disabled: selected_model.read().is_empty() || *loading.read() || ppq_blocked,
+                                        onclick: move |_| show_image_upload.set(true),
+                                        CameraIcon { class: "w-4 h-4".to_string() }
+                                    }
+                                }
+                                p { class: "text-xs text-muted-foreground",
+                                    if active_model.as_ref().is_some_and(|model| model.kind == ChatModelKind::Image) {
+                                        "Enter to generate. Shift+Enter for newline."
+                                    } else {
+                                        "Enter to send. Shift+Enter for newline."
+                                    }
+                                }
+                            }
                             button {
-                                class: if input.read().trim().is_empty() || selected_model.read().is_empty() || *loading.read() || shakespeare_blocked {
+                                class: if !can_submit || selected_model.read().is_empty() || *loading.read() || ppq_blocked {
                                     "inline-flex h-11 w-11 items-center justify-center rounded-xl bg-muted text-muted-foreground cursor-not-allowed"
                                 } else {
                                     "inline-flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-primary-foreground transition hover:bg-primary/90"
                                 },
-                                disabled: input.read().trim().is_empty() || selected_model.read().is_empty() || *loading.read() || shakespeare_blocked,
+                                disabled: !can_submit || selected_model.read().is_empty() || *loading.read() || ppq_blocked,
                                 onclick: move |_| {
                                     submit_message(
                                         input,
+                                        models,
                                         selected_model,
+                                        pending_images,
                                         loading,
                                         error,
+                                        compose_notice,
                                         messages,
                                         persisted_messages_dirty,
                                         provider_for_click.clone(),
@@ -585,21 +901,43 @@ pub fn AIChat() -> Element {
                     }
                 }
             }
+            ImageUploadDialog {
+                open: show_image_upload,
+                on_insert: move |data: ImageInsertData| {
+                    compose_notice.set(None);
+                    pending_images.with_mut(|images| images.push(data.into()));
+                },
+            }
         }
     }
 }
 
 #[component]
-fn SignInGate() -> Element {
+fn PpqSetupGate(loading: Signal<bool>, on_create_account: EventHandler<MouseEvent>) -> Element {
     rsx! {
         div { class: "flex min-h-[50vh] items-center justify-center p-6",
             div { class: "max-w-md w-full rounded-2xl border border-border bg-card p-8 text-center shadow-sm",
                 div { class: "mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary",
                     SparklesIcon { class: "w-7 h-7".to_string() }
                 }
-                h2 { class: "text-2xl font-semibold", "Sign in to use Shakespeare" }
+                h2 { class: "text-2xl font-semibold", "Set Up PPQ to Use AI Chat" }
                 p { class: "mt-2 text-sm text-muted-foreground",
-                    "Shakespeare uses NIP-98 authenticated requests. Sign in, or open AI settings and switch to a custom provider with your own API key."
+                    "PPQ is the default built-in AI provider. Create a PPQ account here, or open AI settings and switch to your own custom OpenAI-compatible provider."
+                }
+                div { class: "mt-5 flex flex-col gap-3 sm:flex-row sm:justify-center",
+                    button {
+                        class: "rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-60",
+                        disabled: *loading.read(),
+                        onclick: move |evt| on_create_account.call(evt),
+                        if *loading.read() { "Creating PPQ Account..." } else { "Create PPQ Account" }
+                    }
+                    button {
+                        class: "rounded-lg border border-border px-4 py-2 text-sm transition hover:bg-accent",
+                        onclick: move |_| {
+                            navigator().push(Route::SettingsAi {});
+                        },
+                        "Use Custom Provider Instead"
+                    }
                 }
             }
         }
@@ -647,6 +985,25 @@ fn MessageBubble(message: DisplayMessage) -> Element {
                         dangerous_inner_html: "{rendered}",
                     }
                 }
+                if !message.images.is_empty() {
+                    div { class: if message.content.is_empty() { "space-y-3" } else { "mt-3 space-y-3" },
+                        for (index, image) in message.images.iter().enumerate() {
+                            a {
+                                key: "{message.id}-image-{index}",
+                                href: "{image.url}",
+                                target: "_blank",
+                                rel: "noreferrer noopener",
+                                class: "block overflow-hidden rounded-xl border border-border bg-background transition hover:opacity-95",
+                                img {
+                                    src: "{image.url}",
+                                    alt: "{image.alt}",
+                                    title: "{image.title}",
+                                    class: "max-h-96 w-full object-contain bg-background",
+                                }
+                            }
+                        }
+                    }
+                }
                 if !message.tool_calls.is_empty() {
                     div { class: "mt-4 space-y-2 border-t border-border pt-3",
                         for call in message.tool_calls.iter() {
@@ -667,31 +1024,94 @@ fn current_provider(providers: &[AiProviderConfig], state: &AiProviderState) -> 
         .iter()
         .find(|provider| provider.id == state.selected_provider_id)
         .cloned()
-        .unwrap_or_else(shakespeare_provider)
+        .unwrap_or_else(|| ppq_provider(state.ppq_account.as_ref()))
+}
+
+fn current_model(models: &[ChatModel], selected_model_id: &str) -> Option<ChatModel> {
+    models
+        .iter()
+        .find(|model| model.id == selected_model_id)
+        .cloned()
+}
+
+fn has_image_models(models: &[ChatModel]) -> bool {
+    models
+        .iter()
+        .any(|model| model.kind == ChatModelKind::Image)
+}
+
+fn looks_like_image_generation_prompt(text: &str) -> bool {
+    let normalized = text.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return false;
+    }
+
+    [
+        "generate an image",
+        "generate a picture",
+        "generate a photo",
+        "generate art",
+        "create an image",
+        "create a picture",
+        "create a photo",
+        "make an image",
+        "make a picture",
+        "make a photo",
+        "draw ",
+        "render ",
+        "illustrate ",
+        "image of",
+        "picture of",
+        "photo of",
+        "logo for",
+    ]
+    .iter()
+    .any(|needle| normalized.contains(needle))
 }
 
 fn build_api_messages(messages: &[DisplayMessage]) -> Vec<ChatMessage> {
     let mut api_messages = vec![ChatMessage {
         role: ChatRole::System,
-        content: SYSTEM_PROMPT.to_string(),
+        content: ChatMessageContent::Text(SYSTEM_PROMPT.to_string()),
     }];
     for message in messages {
+        let content =
+            if !message.images.is_empty() {
+                let mut parts = Vec::new();
+                if !message.content.trim().is_empty() {
+                    parts.push(ChatMessagePart::Text {
+                        text: message.content.clone(),
+                    });
+                }
+                parts.extend(message.images.iter().cloned().map(|image| {
+                    ChatMessagePart::ImageUrl {
+                        image_url: ChatImageUrl { url: image.url },
+                    }
+                }));
+                ChatMessageContent::Parts(parts)
+            } else {
+                ChatMessageContent::Text(message.content.clone())
+            };
         api_messages.push(ChatMessage {
             role: match message.role {
                 DisplayRole::User => ChatRole::User,
                 DisplayRole::Assistant => ChatRole::Assistant,
             },
-            content: message.content.clone(),
+            content,
         });
     }
     api_messages
 }
 
+#[allow(clippy::too_many_arguments)]
 fn submit_message(
     mut input: Signal<String>,
+    models: Signal<Vec<ChatModel>>,
     selected_model: Signal<String>,
+    mut pending_images: Signal<Vec<ChatImage>>,
     mut loading: Signal<bool>,
     mut error: Signal<Option<String>>,
+    mut compose_notice: Signal<Option<String>>,
     mut messages: Signal<Vec<DisplayMessage>>,
     mut persisted_messages_dirty: Signal<bool>,
     provider: AiProviderConfig,
@@ -701,14 +1121,50 @@ fn submit_message(
     }
     let text = input.read().trim().to_string();
     let model = selected_model.read().clone();
-    if text.is_empty() || model.is_empty() {
+    let Some(active_model) = current_model(&models.read(), &model) else {
+        return;
+    };
+    let image_models_available = has_image_models(&models.read());
+    let attached_images = pending_images.read().clone();
+    if model.is_empty()
+        || (text.is_empty() && attached_images.is_empty())
+        || (active_model.kind == ChatModelKind::Image && text.is_empty())
+    {
+        return;
+    }
+
+    if should_suggest_image_model(
+        &active_model,
+        &attached_images,
+        image_models_available,
+        &text,
+    ) {
+        compose_notice.set(Some(
+            "The selected model is text-only. Choose an IMAGE model from the model picker to generate images.".to_string(),
+        ));
+    } else {
+        compose_notice.set(None);
+    }
+
+    if !attached_images.is_empty() && !active_model.supports_image_input {
+        error.set(Some(
+            "The selected model does not support image input. Remove attached images or choose a model that supports images.".to_string(),
+        ));
+        return;
+    }
+
+    if active_model.kind == ChatModelKind::Image && attached_images.len() > 1 {
+        error.set(Some(
+            "Image generation currently supports only one reference image per request.".to_string(),
+        ));
         return;
     }
 
     let user_message = DisplayMessage {
         id: format!("user-{}", crate::platform::timestamp::now_millis()),
         role: DisplayRole::User,
-        content: text,
+        content: text.clone(),
+        images: attached_images.clone(),
         tool_calls: Vec::new(),
     };
     let mut next_messages = messages.read().clone();
@@ -716,31 +1172,72 @@ fn submit_message(
     messages.set(next_messages.clone());
     persisted_messages_dirty.set(true);
     input.set(String::new());
+    pending_images.set(Vec::new());
     error.set(None);
     loading.set(true);
 
     spawn(async move {
-        let base_request = ChatCompletionRequest {
-            model: model.clone(),
-            messages: build_api_messages(&next_messages),
-            tools: provider.supports_tools().then(theme_tool_definitions),
-        };
+        match active_model.kind {
+            ChatModelKind::Chat => {
+                let base_request = ChatCompletionRequest {
+                    model: model.clone(),
+                    messages: build_api_messages(&next_messages),
+                    tools: provider.supports_tools().then(theme_tool_definitions),
+                };
 
-        match send_chat_message(&provider, &base_request).await {
-            Ok(response) => {
-                apply_chat_response(
-                    response,
-                    next_messages,
-                    model,
-                    provider,
-                    messages,
-                    error,
-                    persisted_messages_dirty,
-                )
-                .await;
+                match send_chat_message(&provider, &base_request).await {
+                    Ok(response) => {
+                        apply_chat_response(
+                            response,
+                            next_messages,
+                            model,
+                            provider,
+                            messages,
+                            error,
+                            persisted_messages_dirty,
+                        )
+                        .await;
+                    }
+                    Err(e) => {
+                        error.set(Some(e));
+                    }
+                }
             }
-            Err(e) => {
-                error.set(Some(e));
+            ChatModelKind::Image => {
+                let request = ImageGenerationRequest {
+                    model: model.clone(),
+                    prompt: text,
+                    image_url: attached_images.first().map(|image| image.url.clone()),
+                };
+
+                match generate_images(&provider, &request).await {
+                    Ok(response) => {
+                        let mut final_messages = next_messages;
+                        final_messages.push(DisplayMessage {
+                            id: format!(
+                                "assistant-image-{}",
+                                crate::platform::timestamp::now_millis()
+                            ),
+                            role: DisplayRole::Assistant,
+                            content: String::new(),
+                            images: response
+                                .images
+                                .into_iter()
+                                .map(|image| ChatImage {
+                                    url: image.url,
+                                    alt: "Generated image".to_string(),
+                                    title: String::new(),
+                                })
+                                .collect(),
+                            tool_calls: Vec::new(),
+                        });
+                        messages.set(final_messages);
+                        persisted_messages_dirty.set(true);
+                    }
+                    Err(e) => {
+                        error.set(Some(e));
+                    }
+                }
             }
         }
         loading.set(false);
@@ -785,13 +1282,14 @@ async fn apply_chat_response(
         return;
     };
 
-    let assistant_content = choice.message.content.unwrap_or_default();
+    let (assistant_content, assistant_images) = extract_assistant_content(choice.message.content);
     if !provider.supports_tools() {
         let mut next_messages = prior_messages;
         next_messages.push(DisplayMessage {
             id: format!("assistant-{}", crate::platform::timestamp::now_millis()),
             role: DisplayRole::Assistant,
             content: assistant_content,
+            images: assistant_images,
             tool_calls: Vec::new(),
         });
         messages.set(next_messages);
@@ -805,6 +1303,7 @@ async fn apply_chat_response(
             id: format!("assistant-{}", crate::platform::timestamp::now_millis()),
             role: DisplayRole::Assistant,
             content: assistant_content,
+            images: assistant_images,
             tool_calls: Vec::new(),
         });
         messages.set(next_messages);
@@ -821,20 +1320,42 @@ async fn apply_chat_response(
         ),
         role: DisplayRole::Assistant,
         content: assistant_content.clone(),
+        images: assistant_images.clone(),
         tool_calls: executed.clone(),
     });
     messages.set(intermediate_messages.clone());
     persisted_messages_dirty.set(true);
 
     let mut follow_up_messages = build_api_messages(&prior_messages);
+    let follow_up_assistant_content = if assistant_images.is_empty() {
+        ChatMessageContent::Text(assistant_content)
+    } else {
+        let mut parts = Vec::new();
+        if !assistant_content.trim().is_empty() {
+            parts.push(ChatMessagePart::Text {
+                text: assistant_content,
+            });
+        }
+        parts.extend(
+            assistant_images
+                .into_iter()
+                .map(|image| ChatMessagePart::ImageUrl {
+                    image_url: ChatImageUrl { url: image.url },
+                }),
+        );
+        ChatMessageContent::Parts(parts)
+    };
     follow_up_messages.push(ChatMessage {
         role: ChatRole::Assistant,
-        content: assistant_content,
+        content: follow_up_assistant_content,
     });
     for tool in executed {
         follow_up_messages.push(ChatMessage {
             role: ChatRole::User,
-            content: format!("[Tool \"{}\" returned: {}]", tool.name, tool.result),
+            content: ChatMessageContent::Text(format!(
+                "[Tool \"{}\" returned: {}]",
+                tool.name, tool.result
+            )),
         });
     }
 
@@ -847,6 +1368,8 @@ async fn apply_chat_response(
     match send_chat_message(&provider, &follow_up_request).await {
         Ok(follow_up_response) => {
             if let Some(follow_up_choice) = follow_up_response.choices.into_iter().next() {
+                let (follow_up_content, follow_up_images) =
+                    extract_assistant_content(follow_up_choice.message.content);
                 let mut final_messages = intermediate_messages;
                 final_messages.push(DisplayMessage {
                     id: format!(
@@ -854,7 +1377,8 @@ async fn apply_chat_response(
                         crate::platform::timestamp::now_millis()
                     ),
                     role: DisplayRole::Assistant,
-                    content: follow_up_choice.message.content.unwrap_or_default(),
+                    content: follow_up_content,
+                    images: follow_up_images,
                     tool_calls: Vec::new(),
                 });
                 messages.set(final_messages);
@@ -868,6 +1392,34 @@ async fn apply_chat_response(
         Err(e) => {
             error.set(Some(e));
         }
+    }
+}
+
+fn extract_assistant_content(content: Option<AssistantContent>) -> (String, Vec<ChatImage>) {
+    match content {
+        Some(AssistantContent::Text(text)) => (text, Vec::new()),
+        Some(AssistantContent::Parts(parts)) => {
+            let mut text_parts = Vec::new();
+            let mut images = Vec::new();
+            for part in parts {
+                match part {
+                    crate::services::ai_chat::AssistantContentPart::Text { text } => {
+                        if !text.is_empty() {
+                            text_parts.push(text);
+                        }
+                    }
+                    crate::services::ai_chat::AssistantContentPart::ImageUrl { image_url } => {
+                        images.push(ChatImage {
+                            url: image_url.url,
+                            alt: "Generated image".to_string(),
+                            title: String::new(),
+                        });
+                    }
+                }
+            }
+            (text_parts.join("\n\n"), images)
+        }
+        None => (String::new(), Vec::new()),
     }
 }
 
@@ -914,6 +1466,15 @@ fn persisted_message_from_display(message: DisplayMessage) -> PersistedChatMessa
             DisplayRole::Assistant => PersistedChatRole::Assistant,
         },
         content: message.content,
+        images: message
+            .images
+            .into_iter()
+            .map(|image| PersistedChatImage {
+                url: image.url,
+                alt: image.alt,
+                title: image.title,
+            })
+            .collect(),
         tool_calls: message
             .tool_calls
             .into_iter()
@@ -934,6 +1495,15 @@ fn display_message_from_persisted(message: PersistedChatMessage) -> DisplayMessa
             PersistedChatRole::Assistant => DisplayRole::Assistant,
         },
         content: message.content,
+        images: message
+            .images
+            .into_iter()
+            .map(|image| ChatImage {
+                url: image.url,
+                alt: image.alt,
+                title: image.title,
+            })
+            .collect(),
         tool_calls: message
             .tool_calls
             .into_iter()
@@ -950,15 +1520,344 @@ fn persist_selected_model(
     provider_id: String,
     model_id: String,
     mut provider_state: Signal<AiProviderState>,
-    mut provider_state_save_generation: Signal<u32>,
     mut error: Signal<Option<String>>,
+    mut pending_provider_save_snapshot: Signal<Option<AiProviderState>>,
+    mut pending_provider_save_min_event_id: Signal<u64>,
+    mut pending_provider_save_action: Signal<PendingProviderSaveAction>,
 ) {
     let mut next_state = provider_state.read().clone();
     next_state
         .selected_model_by_provider
-        .insert(provider_id, model_id);
+        .insert(provider_id.clone(), model_id.clone());
     provider_state.set(next_state.clone());
-    let next_generation = provider_state_save_generation.read().wrapping_add(1);
-    provider_state_save_generation.set(next_generation);
-    error.set(None);
+    match ai_provider_store::cache_provider_state(&next_state) {
+        Ok(()) => error.set(None),
+        Err(e) => {
+            error.set(Some(e));
+            return;
+        }
+    }
+
+    if !AI_CHAT_PROVIDER_PERSISTENCE_ENABLED {
+        return;
+    }
+
+    pending_provider_save_snapshot.set(Some(next_state.clone()));
+    pending_provider_save_min_event_id.set(
+        PROVIDER_STATE_SAVE_EVENT
+            .read()
+            .as_ref()
+            .map(|event| event.event_id)
+            .unwrap_or(0),
+    );
+    pending_provider_save_action.set(PendingProviderSaveAction::None);
+
+    if let Some(snapshot) = ai_provider_store::queue_provider_state_save(next_state) {
+        ai_provider_store::process_queued_provider_state_saves(snapshot);
+    }
+}
+
+fn resolve_selected_model(
+    current_model_id: &str,
+    saved_model_id: Option<&str>,
+    available_models: &[ChatModel],
+) -> String {
+    if available_models
+        .iter()
+        .any(|model| model.id == current_model_id)
+    {
+        return current_model_id.to_string();
+    }
+
+    if let Some(saved_model_id) = saved_model_id {
+        if available_models
+            .iter()
+            .any(|model| model.id == saved_model_id)
+        {
+            return saved_model_id.to_string();
+        }
+    }
+
+    available_models
+        .first()
+        .map(|model| model.id.clone())
+        .unwrap_or_default()
+}
+
+impl From<ImageInsertData> for ChatImage {
+    fn from(value: ImageInsertData) -> Self {
+        Self {
+            url: value.url,
+            alt: value.alt,
+            title: value.title,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        build_api_messages, history_save_snapshot_key, resolve_selected_model,
+        should_suggest_image_model, ChatImage, DisplayMessage, DisplayRole,
+    };
+    use crate::services::ai_chat::{ChatMessageContent, ChatMessagePart, ChatModel, ChatModelKind};
+    use crate::stores::ai_chat_store::{
+        PersistedChatMessage, PersistedChatRole, PersistedToolCall,
+    };
+
+    #[test]
+    fn history_snapshot_key_is_deterministic() {
+        let messages = vec![PersistedChatMessage {
+            id: "1".to_string(),
+            role: PersistedChatRole::User,
+            content: "hello".to_string(),
+            images: vec![],
+            tool_calls: vec![],
+        }];
+        let initial_loaded_messages = messages.clone();
+
+        let first = history_save_snapshot_key("account", &messages, &initial_loaded_messages);
+        let second = history_save_snapshot_key(
+            "account",
+            &messages.clone(),
+            &initial_loaded_messages.clone(),
+        );
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn history_snapshot_key_changes_when_message_content_changes() {
+        let messages = vec![PersistedChatMessage {
+            id: "1".to_string(),
+            role: PersistedChatRole::Assistant,
+            content: "before".to_string(),
+            images: vec![],
+            tool_calls: vec![PersistedToolCall {
+                id: "tool-1".to_string(),
+                name: "set_theme".to_string(),
+                result: "{\"success\":true}".to_string(),
+            }],
+        }];
+        let mut edited_messages = messages.clone();
+        edited_messages[0].content = "after".to_string();
+
+        assert_ne!(
+            history_save_snapshot_key("account", &messages, &messages),
+            history_save_snapshot_key("account", &edited_messages, &messages),
+        );
+    }
+
+    #[test]
+    fn history_snapshot_key_changes_when_tool_calls_change() {
+        let messages = vec![PersistedChatMessage {
+            id: "1".to_string(),
+            role: PersistedChatRole::Assistant,
+            content: "hello".to_string(),
+            images: vec![],
+            tool_calls: vec![],
+        }];
+        let mut with_tool_call = messages.clone();
+        with_tool_call[0].tool_calls.push(PersistedToolCall {
+            id: "tool-1".to_string(),
+            name: "set_theme".to_string(),
+            result: "{\"success\":true}".to_string(),
+        });
+
+        assert_ne!(
+            history_save_snapshot_key("account", &messages, &messages),
+            history_save_snapshot_key("account", &with_tool_call, &messages),
+        );
+    }
+
+    #[test]
+    fn history_snapshot_key_changes_when_account_key_changes() {
+        let messages = vec![PersistedChatMessage {
+            id: "1".to_string(),
+            role: PersistedChatRole::Assistant,
+            content: "hello".to_string(),
+            images: vec![],
+            tool_calls: vec![PersistedToolCall {
+                id: "tool-1".to_string(),
+                name: "set_theme".to_string(),
+                result: "{\"success\":true}".to_string(),
+            }],
+        }];
+
+        assert_ne!(
+            history_save_snapshot_key("account-a", &messages, &messages),
+            history_save_snapshot_key("account-b", &messages, &messages),
+        );
+    }
+
+    #[test]
+    fn history_snapshot_key_changes_when_initial_loaded_messages_change() {
+        let messages = vec![PersistedChatMessage {
+            id: "1".to_string(),
+            role: PersistedChatRole::User,
+            content: "hello".to_string(),
+            images: vec![],
+            tool_calls: vec![],
+        }];
+        let mut different_initial_loaded_messages = messages.clone();
+        different_initial_loaded_messages.push(PersistedChatMessage {
+            id: "2".to_string(),
+            role: PersistedChatRole::Assistant,
+            content: "welcome".to_string(),
+            images: vec![],
+            tool_calls: vec![],
+        });
+
+        assert_ne!(
+            history_save_snapshot_key("account", &messages, &messages),
+            history_save_snapshot_key("account", &messages, &different_initial_loaded_messages,),
+        );
+    }
+
+    #[test]
+    fn resolve_selected_model_prefers_current_when_valid() {
+        let models = vec![
+            ChatModel {
+                id: "model-a".to_string(),
+                name: "Model A".to_string(),
+                description: String::new(),
+                kind: ChatModelKind::Chat,
+                supports_image_input: true,
+                total_cost: None,
+            },
+            ChatModel {
+                id: "model-b".to_string(),
+                name: "Model B".to_string(),
+                description: String::new(),
+                kind: ChatModelKind::Chat,
+                supports_image_input: true,
+                total_cost: None,
+            },
+        ];
+
+        assert_eq!(
+            resolve_selected_model("model-b", Some("model-a"), &models),
+            "model-b"
+        );
+    }
+
+    #[test]
+    fn resolve_selected_model_falls_back_to_saved_model() {
+        let models = vec![
+            ChatModel {
+                id: "model-a".to_string(),
+                name: "Model A".to_string(),
+                description: String::new(),
+                kind: ChatModelKind::Chat,
+                supports_image_input: true,
+                total_cost: None,
+            },
+            ChatModel {
+                id: "model-b".to_string(),
+                name: "Model B".to_string(),
+                description: String::new(),
+                kind: ChatModelKind::Chat,
+                supports_image_input: true,
+                total_cost: None,
+            },
+        ];
+
+        assert_eq!(
+            resolve_selected_model("missing", Some("model-b"), &models),
+            "model-b"
+        );
+    }
+
+    #[test]
+    fn resolve_selected_model_defaults_to_first_available_model() {
+        let models = vec![
+            ChatModel {
+                id: "model-a".to_string(),
+                name: "Model A".to_string(),
+                description: String::new(),
+                kind: ChatModelKind::Chat,
+                supports_image_input: true,
+                total_cost: None,
+            },
+            ChatModel {
+                id: "model-b".to_string(),
+                name: "Model B".to_string(),
+                description: String::new(),
+                kind: ChatModelKind::Chat,
+                supports_image_input: true,
+                total_cost: None,
+            },
+        ];
+
+        assert_eq!(
+            resolve_selected_model("missing", Some("also-missing"), &models),
+            "model-a"
+        );
+    }
+
+    #[test]
+    fn resolve_selected_model_returns_empty_without_available_models() {
+        assert!(resolve_selected_model("missing", Some("also-missing"), &[]).is_empty());
+    }
+
+    #[test]
+    fn suggests_image_model_without_blocking_conditions() {
+        let active_model = ChatModel {
+            id: "text-model".to_string(),
+            name: "Text Model".to_string(),
+            description: String::new(),
+            kind: ChatModelKind::Chat,
+            supports_image_input: false,
+            total_cost: None,
+        };
+
+        assert!(should_suggest_image_model(
+            &active_model,
+            &[],
+            true,
+            "Generate a photorealistic sunset over mountains"
+        ));
+        assert!(!should_suggest_image_model(
+            &active_model,
+            &[ChatImage::default()],
+            true,
+            "Generate a photorealistic sunset over mountains"
+        ));
+    }
+
+    #[test]
+    fn build_api_messages_keeps_assistant_images_as_parts() {
+        let api_messages = build_api_messages(&[DisplayMessage {
+            id: "1".to_string(),
+            role: DisplayRole::Assistant,
+            content: "See attached".to_string(),
+            images: vec![ChatImage {
+                url: "https://cdn.example.com/image.png".to_string(),
+                alt: String::new(),
+                title: String::new(),
+            }],
+            tool_calls: vec![],
+        }]);
+
+        assert_eq!(api_messages.len(), 2);
+        match &api_messages[1].content {
+            ChatMessageContent::Parts(parts) => {
+                assert_eq!(
+                    parts[0],
+                    ChatMessagePart::Text {
+                        text: "See attached".to_string()
+                    }
+                );
+                assert_eq!(
+                    parts[1],
+                    ChatMessagePart::ImageUrl {
+                        image_url: crate::services::ai_chat::ChatImageUrl {
+                            url: "https://cdn.example.com/image.png".to_string()
+                        }
+                    }
+                );
+            }
+            other => panic!("expected multipart assistant message, got {other:?}"),
+        }
+    }
 }

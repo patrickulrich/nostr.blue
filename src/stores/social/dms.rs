@@ -320,7 +320,11 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<Publis
                 .to_string(),
         );
     }
-    let rumor = EventBuilder::private_msg_rumor(recipient_pk, content.clone()).build(sender_pk);
+    let rumor = crate::utils::nips::nip89::tag_event_builder(EventBuilder::private_msg_rumor(
+        recipient_pk,
+        content.clone(),
+    ))
+    .build(sender_pk);
     let receiver_gift_wrap = EventBuilder::gift_wrap(&signer, &recipient_pk, rumor.clone(), [])
         .await
         .map_err(|e| format!("Failed to create receiver gift wrap: {}", e))?;

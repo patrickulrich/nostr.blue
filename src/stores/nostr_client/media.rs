@@ -153,7 +153,7 @@ pub async fn publish_picture_tracked(
     }
     let builder = nostr::EventBuilder::new(nostr::Kind::from(20), caption).tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish picture: {}", e))?;
     let result = PublishResult::from_output(output);
@@ -272,7 +272,7 @@ pub async fn publish_video_tracked(
     let content = description;
     let builder = nostr::EventBuilder::new(nostr::Kind::from(kind), content).tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish video: {}", e))?;
     let result = PublishResult::from_output(output);
@@ -354,7 +354,7 @@ pub async fn publish_voice_message_tracked(
     }
     builder = builder.tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish voice message: {}", e))?;
     let result = PublishResult::from_output(output);
@@ -470,7 +470,7 @@ pub async fn publish_voice_message_reply_tracked(
     }
     builder = builder.tags(tags);
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to publish voice message reply: {}", e))?;
     let result = PublishResult::from_output(output);

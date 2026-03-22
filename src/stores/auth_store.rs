@@ -560,6 +560,7 @@ pub async fn logout() -> Result<(), String> {
         crate::platform::storage::delete(storage_key)
             .map_err(|e| format!("Failed to delete {} during logout: {}", label, e))?;
     }
+    crate::stores::nwc_store::disconnect_nwc(false);
     clear_auth();
     *PASSWORD_PROMPT.write() = PasswordPromptState::default();
     Ok(())

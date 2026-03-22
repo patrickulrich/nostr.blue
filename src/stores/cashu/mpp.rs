@@ -315,8 +315,13 @@ pub async fn execute_mpp_melt(
                         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
                     let builder =
                         nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-                    match client.send_event_builder(builder.clone()).await {
-                        Ok(event_output) => {
+                    match client
+                        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+                            builder.clone(),
+                        ))
+                        .await
+                    {
+                        Ok(event_output) if !event_output.success.is_empty() => {
                             let real_id = event_output.id().to_hex();
                             log::info!("Published MPP token event for {}: {}", mint_url, real_id);
                             new_event_ids.push(real_id.clone());
@@ -328,6 +333,34 @@ pub async fn execute_mpp_melt(
                                 created_at: super::proofs::now_secs(),
                             });
                         }
+                        Ok(_) => {
+                            log::warn!(
+                                "No relays accepted MPP token event for {}, queuing for retry",
+                                mint_url
+                            );
+                            let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+                            if let Err(queue_err) = queue_event_for_retry(
+                                builder,
+                                PendingEventType::TokenEvent,
+                                Some(pending_id.clone()),
+                                Some(mint_url.clone()),
+                            )
+                            .await
+                            {
+                                log::error!(
+                                    "Failed to queue MPP token event for retry: {}",
+                                    queue_err
+                                );
+                            }
+                            new_tokens.push(TokenData {
+                                event_id: pending_id,
+                                mint: mint_url.clone(),
+                                unit: "sat".to_string(),
+                                proofs: proof_data,
+                                created_at: super::proofs::now_secs(),
+                            });
+                            publish_failures += 1;
+                        }
                         Err(e) => {
                             log::warn!(
                                 "Failed to publish MPP token event for {}, queuing for retry: {}",
@@ -335,13 +368,19 @@ pub async fn execute_mpp_melt(
                                 e
                             );
                             let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                            queue_event_for_retry(
+                            if let Err(queue_err) = queue_event_for_retry(
                                 builder,
                                 PendingEventType::TokenEvent,
                                 Some(pending_id.clone()),
                                 Some(mint_url.clone()),
                             )
-                            .await;
+                            .await
+                            {
+                                log::error!(
+                                    "Failed to queue MPP token event for retry: {}",
+                                    queue_err
+                                );
+                            }
                             new_tokens.push(TokenData {
                                 event_id: pending_id,
                                 mint: mint_url.clone(),
@@ -395,25 +434,52 @@ pub async fn execute_mpp_melt(
                 ));
                 let deletion_builder =
                     nostr_sdk::EventBuilder::new(Kind::from(5), "MPP melted tokens").tags(tags);
-                match client.send_event_builder(deletion_builder.clone()).await {
-                    Ok(_) => {
+                match client
+                    .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+                        deletion_builder.clone(),
+                    ))
+                    .await
+                {
+                    Ok(output) if !output.success.is_empty() => {
                         log::info!(
                             "Published MPP deletion events for {} token events",
                             valid_event_ids.len()
                         );
+                    }
+                    Ok(_) => {
+                        log::warn!("No relays accepted MPP deletion event, will queue for retry");
+                        if let Err(queue_err) = queue_event_for_retry(
+                            deletion_builder,
+                            PendingEventType::DeletionEvent,
+                            None,
+                            None,
+                        )
+                        .await
+                        {
+                            log::error!(
+                                "Failed to queue MPP deletion event for retry: {}",
+                                queue_err
+                            );
+                        }
                     }
                     Err(e) => {
                         log::warn!(
                             "Failed to publish MPP deletion event, will queue for retry: {}",
                             e
                         );
-                        queue_event_for_retry(
+                        if let Err(queue_err) = queue_event_for_retry(
                             deletion_builder,
                             PendingEventType::DeletionEvent,
                             None,
                             None,
                         )
-                        .await;
+                        .await
+                        {
+                            log::error!(
+                                "Failed to queue MPP deletion event for retry: {}",
+                                queue_err
+                            );
+                        }
                     }
                 }
             }

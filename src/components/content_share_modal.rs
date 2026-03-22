@@ -257,8 +257,17 @@ pub fn ContentShareModal(
                 }
             };
             let builder = EventBuilder::text_note(&text).tags(build_custom_emoji_tags(&text));
-            match client.send_event_builder(builder).await {
+            match client
+                .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+                .await
+            {
                 Ok(output) => {
+                    if output.success.is_empty() {
+                        log::warn!("All relays rejected content share event");
+                        nostr_error.set(Some("All relays rejected the event".to_string()));
+                        is_publishing.set(false);
+                        return;
+                    }
                     log::info!("Shared to Nostr: {:?}", output.val);
                     nostr_error.set(None);
                     nostr_text.set(String::new());

@@ -165,12 +165,22 @@ pub async fn request_content_feed(provider: Option<PublicKey>) -> Result<Vec<Eve
         log::info!("No signer available, fetching recent DVM results instead");
         return fetch_recent_dvm_results(target_pubkey).await;
     }
-    let output = client.send_event_builder(builder).await.map_err(|e| {
+    let output = client
+        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+        .await
+        .map_err(|e| {
+            *DVM_FEED_EVENTS.write() = Vec::new();
+            *DVM_FEED_LOADING.write() = false;
+            *DVM_FEED_ERROR.write() = Some(format!("Failed to submit job: {}", e));
+            format!("Failed to submit job: {}", e)
+        })?;
+    if output.success.is_empty() {
+        let error = "No relays accepted DVM request".to_string();
         *DVM_FEED_EVENTS.write() = Vec::new();
         *DVM_FEED_LOADING.write() = false;
-        *DVM_FEED_ERROR.write() = Some(format!("Failed to submit job: {}", e));
-        format!("Failed to submit job: {}", e)
-    })?;
+        *DVM_FEED_ERROR.write() = Some(error.clone());
+        return Err(error);
+    }
     let request_id = *output.id();
     log::info!(
         "Content discovery request submitted: {}",

@@ -17,7 +17,7 @@ pub fn NwcSetupModal(
             connection_error.set(None);
             connection_success.set(false);
             let uri = nwc_uri.read().clone();
-            match nwc_store::connect_nwc(&uri, false).await {
+            match nwc_store::connect_nwc(&uri, true).await {
                 Ok(()) => {
                     log::info!("NWC connected successfully");
                     connection_success.set(true);
@@ -127,7 +127,7 @@ pub fn NwcSetupModal(
                 div { class: "mt-4 p-3 bg-blue-50 dark:bg-blue-900/30 border border-blue-200
                             dark:border-blue-800 rounded-lg",
                     p { class: "text-xs text-blue-800 dark:text-blue-200",
-                        "🔒 Your wallet connection is session-only and never sent to our servers. Reconnect after a refresh or app restart."
+                        "🔒 Your wallet connection is stored on this device for future sessions and is never sent to our servers. It will remain until you disconnect it or sign out."
                     }
                 }
             }

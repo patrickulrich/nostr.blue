@@ -345,7 +345,7 @@ pub async fn send_channel_message(
     let builder = EventBuilder::channel_msg(channel_id, relay_url, content)
         .tags(build_custom_emoji_tags(content));
     let event = client
-        .sign_event_builder(builder)
+        .sign_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;
     client
@@ -372,7 +372,7 @@ pub async fn create_channel(
     }
     let builder = EventBuilder::channel(&metadata);
     let event = client
-        .sign_event_builder(builder)
+        .sign_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;
     client

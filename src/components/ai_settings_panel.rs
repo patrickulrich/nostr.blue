@@ -1,6 +1,7 @@
+use crate::components::ppq_settings_panel::PpqSettingsPanel;
 use crate::stores::ai_provider_store::{
-    self, normalize_base_url, resolve_providers, sanitize_provider_input, shakespeare_provider,
-    AiProviderKind, AiProviderState, CustomAiProvider, ProviderAuth,
+    self, normalize_base_url, ppq_provider, resolve_providers, sanitize_provider_input,
+    AiProviderKind, AiProviderState, CustomAiProvider, ProviderAuth, PROVIDER_STATE_SAVE_EVENT,
 };
 use dioxus::prelude::*;
 use regex::Regex;
@@ -10,6 +11,13 @@ use url::Url;
 
 static LEADING_CREDENTIALS_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[^/@]+@").expect("valid credential-stripping regex"));
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum PendingSaveAction {
+    #[default]
+    None,
+    ResetEditor,
+}
 
 #[component]
 pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
@@ -22,6 +30,9 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
     let mut provider_id = use_signal(String::new);
     let mut base_url = use_signal(String::new);
     let mut api_key = use_signal(String::new);
+    let mut pending_save_snapshot = use_signal(|| None::<AiProviderState>);
+    let mut pending_save_action = use_signal(PendingSaveAction::default);
+    let mut pending_save_min_event_id = use_signal(|| 0u64);
     let provider_state_ready = matches!(provider_state_load.read().as_ref(), Some(Ok(_)));
 
     use_effect(move || {
@@ -37,7 +48,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                         .iter()
                         .any(|provider| provider.id == loaded_state.selected_provider_id)
                     {
-                        loaded_state.selected_provider_id = shakespeare_provider().id;
+                        loaded_state.selected_provider_id = ppq_provider(None).id;
                     }
                     provider_state_load.set(Some(Ok(loaded_state)));
                 }
@@ -60,6 +71,40 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
             Err(e) => {
                 save_error.set(Some(e));
             }
+        }
+    });
+
+    use_effect(move || {
+        let pending_snapshot = pending_save_snapshot.read().clone();
+        let Some(pending_snapshot) = pending_snapshot else {
+            return;
+        };
+        let Some(event) = PROVIDER_STATE_SAVE_EVENT.read().clone() else {
+            return;
+        };
+        if event.event_id <= *pending_save_min_event_id.read() || event.snapshot != pending_snapshot
+        {
+            return;
+        }
+
+        let action = *pending_save_action.read();
+        pending_save_snapshot.set(None);
+        pending_save_action.set(PendingSaveAction::None);
+        pending_save_min_event_id.set(event.event_id);
+        is_saving.set(false);
+
+        match event.result {
+            Ok(()) => {
+                save_error.set(None);
+                if matches!(action, PendingSaveAction::ResetEditor) {
+                    editing_provider_id.set(None);
+                    name.set(String::new());
+                    provider_id.set(String::new());
+                    base_url.set(String::new());
+                    api_key.set(String::new());
+                }
+            }
+            Err(err) => save_error.set(Some(err)),
         }
     });
 
@@ -123,7 +168,10 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                                                         state,
                                                         is_saving,
                                                         save_error,
-                                                        || {},
+                                                        pending_save_snapshot,
+                                                        pending_save_action,
+                                                        pending_save_min_event_id,
+                                                        PendingSaveAction::None,
                                                     );
                                                 },
                                                 "Use"
@@ -141,7 +189,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                                                     base_url.set(provider_clone.base_url.clone());
                                                     api_key.set(match &provider_clone.auth {
                                                         ProviderAuth::BearerToken(value) => value.clone(),
-                                                        ProviderAuth::Nip98 => String::new(),
+                                                        ProviderAuth::PpqManaged { .. } => String::new(),
                                                     });
                                                     save_error.set(None);
                                                 },
@@ -156,7 +204,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                                                     next_state.custom_providers.retain(|item| item.id != provider_id_for_delete);
                                                     next_state.selected_model_by_provider.remove(&provider_id_for_delete);
                                                     if next_state.selected_provider_id == provider_id_for_delete {
-                                                        next_state.selected_provider_id = shakespeare_provider().id;
+                                                        next_state.selected_provider_id = ppq_provider(None).id;
                                                     }
                                                     let should_reset_editor = editing_provider_id.read().as_deref()
                                                         == Some(provider_id_for_delete.as_str());
@@ -165,15 +213,13 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                                                         state,
                                                         is_saving,
                                                         save_error,
-                                                        move || {
-                                                            if should_reset_editor {
-                                                                editing_provider_id.set(None);
-                                                                name.set(String::new());
-                                                                provider_id.set(String::new());
-                                                                base_url.set(String::new());
-                                                                api_key.set(String::new());
-                                                                save_error.set(None);
-                                                            }
+                                                        pending_save_snapshot,
+                                                        pending_save_action,
+                                                        pending_save_min_event_id,
+                                                        if should_reset_editor {
+                                                            PendingSaveAction::ResetEditor
+                                                        } else {
+                                                            PendingSaveAction::None
                                                         },
                                                     );
                                                 },
@@ -186,6 +232,13 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                         }
                     }
                 }
+            }
+
+            PpqSettingsPanel {
+                state,
+                is_saving,
+                save_error,
+                provider_state_ready,
             }
 
             div { class: "rounded-xl border border-border bg-card p-6",
@@ -290,22 +343,16 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                                         next_state.custom_providers.push(provider.clone());
                                         next_state.selected_provider_id = provider.id.clone();
                                     }
-                                    is_saving.set(true);
-                                    save_error.set(None);
-                                    spawn(async move {
-                                        match ai_provider_store::save_provider_state(&next_state).await {
-                                            Ok(()) => {
-                                                state.set(next_state);
-                                                editing_provider_id.set(None);
-                                                name.set(String::new());
-                                                provider_id.set(String::new());
-                                                base_url.set(String::new());
-                                                api_key.set(String::new());
-                                            }
-                                            Err(e) => save_error.set(Some(e)),
-                                        }
-                                        is_saving.set(false);
-                                    });
+                                    persist_provider_state(
+                                        next_state,
+                                        state,
+                                        is_saving,
+                                        save_error,
+                                        pending_save_snapshot,
+                                        pending_save_action,
+                                        pending_save_min_event_id,
+                                        PendingSaveAction::ResetEditor,
+                                    );
                                 }
                                 Err(err) => save_error.set(Some(err)),
                             }
@@ -340,25 +387,38 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn persist_provider_state(
     next_state: AiProviderState,
     mut state: Signal<AiProviderState>,
     mut is_saving: Signal<bool>,
     mut save_error: Signal<Option<String>>,
-    on_success: impl FnOnce() + 'static,
+    mut pending_save_snapshot: Signal<Option<AiProviderState>>,
+    mut pending_save_action: Signal<PendingSaveAction>,
+    mut pending_save_min_event_id: Signal<u64>,
+    success_action: PendingSaveAction,
 ) {
     is_saving.set(true);
     save_error.set(None);
-    spawn(async move {
-        match ai_provider_store::save_provider_state(&next_state).await {
-            Ok(()) => {
-                state.set(next_state);
-                on_success();
-            }
-            Err(e) => save_error.set(Some(e)),
-        }
+    if let Err(e) = ai_provider_store::cache_provider_state(&next_state) {
+        save_error.set(Some(e));
         is_saving.set(false);
-    });
+        return;
+    }
+    state.set(next_state.clone());
+    pending_save_snapshot.set(Some(next_state.clone()));
+    pending_save_action.set(success_action);
+    pending_save_min_event_id.set(
+        PROVIDER_STATE_SAVE_EVENT
+            .read()
+            .as_ref()
+            .map(|event| event.event_id)
+            .unwrap_or(0),
+    );
+
+    if let Some(snapshot) = ai_provider_store::queue_provider_state_save(next_state) {
+        ai_provider_store::process_queued_provider_state_saves(snapshot);
+    }
 }
 
 fn build_custom_provider(
@@ -380,8 +440,8 @@ fn build_custom_provider(
     if provider_id.is_empty() {
         return Err("ID is required".to_string());
     }
-    if provider_id == shakespeare_provider().id {
-        return Err("ID is reserved for the built-in Shakespeare provider".to_string());
+    if provider_id == ppq_provider(None).id {
+        return Err("ID is reserved for the built-in PPQ provider".to_string());
     }
     if base_url.is_empty() {
         return Err("Base URL is required".to_string());
@@ -395,9 +455,10 @@ fn build_custom_provider(
         Some(original) => original != provider_id,
         None => true,
     };
-    let duplicate = state.custom_providers.iter().any(|provider| {
-        provider.id == provider_id && is_different_original
-    });
+    let duplicate = state
+        .custom_providers
+        .iter()
+        .any(|provider| provider.id == provider_id && is_different_original);
     if duplicate {
         return Err("ID must be unique across custom providers".to_string());
     }

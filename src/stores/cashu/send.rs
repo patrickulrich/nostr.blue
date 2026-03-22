@@ -610,7 +610,8 @@ async fn publish_send_events(
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-        let mut unsigned = builder.clone().build(pubkey);
+        let mut unsigned =
+            crate::utils::nips::nip89::tag_event_builder(builder.clone()).build(pubkey);
         let event_id_hex = unsigned.id().to_hex();
         let signed_event = unsigned
             .sign(&signer)
@@ -670,12 +671,33 @@ async fn publish_send_events(
             ));
             let deletion_builder =
                 nostr_sdk::EventBuilder::new(Kind::from(5), "Spent token").tags(tags);
-            match client.send_event_builder(deletion_builder.clone()).await {
-                Ok(_) => {
+            match client
+                .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
+                    deletion_builder.clone(),
+                ))
+                .await
+            {
+                Ok(response) if !response.success.is_empty() => {
                     log::info!(
                         "Published deletion events for {} token events",
                         valid_event_ids.len()
                     );
+                }
+                Ok(_) => {
+                    log::warn!("No relays accepted deletion event, queuing for retry");
+                    queue_event_for_retry(
+                        deletion_builder,
+                        PendingEventType::DeletionEvent,
+                        None,
+                        None,
+                    )
+                    .await
+                    .map_err(|queue_err| {
+                        format!(
+                            "Failed to queue send deletion event for retry: {}",
+                            queue_err
+                        )
+                    })?;
                 }
                 Err(e) => {
                     log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
@@ -685,7 +707,13 @@ async fn publish_send_events(
                         None,
                         None,
                     )
-                    .await;
+                    .await
+                    .map_err(|queue_err| {
+                        format!(
+                            "Failed to queue send deletion event for retry: {}",
+                            queue_err
+                        )
+                    })?;
                 }
             }
         }

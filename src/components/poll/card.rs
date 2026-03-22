@@ -1,6 +1,6 @@
 use super::timer::PollTimer;
 use crate::components::icons::{BookmarkIcon, MessageCircleIcon, Repeat2Icon, ShareIcon, ZapIcon};
-use crate::components::{ConfirmModal, ReactionButton, ZapModal};
+use crate::components::{CommentComposer, ConfirmModal, ReactionButton, ZapModal};
 use crate::hooks::use_reaction;
 use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
@@ -27,6 +27,8 @@ use std::time::Duration;
 pub fn PollCard(
     event: NostrEvent,
     #[props(default = None)] precomputed_counts: Option<InteractionCounts>,
+    #[props(default = None)] replies_count: Option<usize>,
+    #[props(default = None)] on_comment_created: Option<EventHandler<NostrEvent>>,
 ) -> Element {
     let author_pubkey = event.pubkey.to_string();
     let author_pubkey_for_metadata = author_pubkey.clone();
@@ -57,6 +59,7 @@ pub fn PollCard(
     let mut show_undo_repost_confirm = use_signal(|| false);
     let mut is_zapped = use_signal(|| false);
     let mut show_zap_modal = use_signal(|| false);
+    let mut show_comment_composer = use_signal(|| false);
     let mut is_bookmarking = use_signal(|| false);
     let is_bookmarked = bookmarks::is_bookmarked(&event_id_str);
     let has_signer = *HAS_SIGNER.read();
@@ -520,18 +523,21 @@ pub fn PollCard(
             }
             // Interaction bar
             div { class: "flex items-center justify-between max-w-md mt-2 -ml-2",
-                Link {
-                    to: Route::PollView {
-                        noteid: event_id_str.clone(),
-                    },
+                button {
+                    r#type: "button",
+                    aria_label: "Comment",
                     class: "flex items-center gap-1 hover:text-blue-500 hover:bg-blue-500/10 transition px-2 py-1.5 rounded text-muted-foreground",
+                    onclick: move |e: MouseEvent| {
+                        e.stop_propagation();
+                        show_comment_composer.set(true);
+                    },
                     MessageCircleIcon {
                         class: "h-4 w-4".to_string(),
                         filled: false,
                     }
                     span { class: "text-xs",
                         {
-                            let count = *reply_count.read();
+                            let count = replies_count.unwrap_or(*reply_count.read());
                             if count > 500 {
                                 "500+".to_string()
                             } else if count > 0 {
@@ -759,9 +765,28 @@ pub fn PollCard(
                     }
                 }
             }
-        }
-        if *show_undo_repost_confirm.read() {
-            ConfirmModal {
+            }
+            if *show_comment_composer.read() {
+                CommentComposer {
+                    comment_on: event.clone(),
+                    parent_comment: None,
+                    on_close: move |_| {
+                        show_comment_composer.set(false);
+                    },
+                    on_success: move |comment_event: NostrEvent| {
+                        if on_comment_created.is_none() {
+                            let current = *reply_count.read();
+                            reply_count.set((current + 1).min(501));
+                        }
+                        if let Some(handler) = on_comment_created.as_ref() {
+                            handler.call(comment_event);
+                        }
+                        show_comment_composer.set(false);
+                    },
+                }
+            }
+            if *show_undo_repost_confirm.read() {
+                ConfirmModal {
                 title: "Undo Repost".to_string(),
                 message: "Are you sure you want to undo this repost?".to_string(),
                 confirm_text: Some("Undo".to_string()),

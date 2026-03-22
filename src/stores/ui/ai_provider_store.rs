@@ -1,16 +1,29 @@
+use dioxus::core::spawn_forever;
+use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 
-#[cfg(not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))))]
 use crate::platform::storage;
+use crate::services::ppq::PPQ_CHAT_BASE_URL;
 
-#[cfg(not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))))]
 const STORAGE_KEY: &str = "nostr_blue_ai_provider_state";
 const SHAKESPEARE_PROVIDER_ID: &str = "shakespeare";
+const PPQ_PROVIDER_ID: &str = "ppq";
+static PROVIDER_STATE_SAVE_EVENT_ID: AtomicU64 = AtomicU64::new(0);
+pub static PROVIDER_STATE_SAVE_EVENT: GlobalSignal<Option<ProviderStateSaveEvent>> =
+    Signal::global(|| None);
+
+#[derive(Default)]
+struct PendingProviderStateSave {
+    in_flight: bool,
+    latest: Option<AiProviderState>,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AiProviderKind {
-    Shakespeare,
+    Ppq,
     OpenAiCompatible,
 }
 
@@ -23,6 +36,16 @@ pub struct CustomAiProvider {
     pub provider_kind: AiProviderKind,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PpqAccountState {
+    pub credit_id: String,
+    pub api_key: String,
+    #[serde(default)]
+    pub managed_api_key: Option<String>,
+    #[serde(default)]
+    pub active_api_key_id: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AiProviderState {
     pub selected_provider_id: String,
@@ -30,21 +53,31 @@ pub struct AiProviderState {
     pub selected_model_by_provider: HashMap<String, String>,
     #[serde(default)]
     pub custom_providers: Vec<CustomAiProvider>,
+    #[serde(default)]
+    pub ppq_account: Option<PpqAccountState>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProviderStateSaveEvent {
+    pub event_id: u64,
+    pub snapshot: AiProviderState,
+    pub result: Result<(), String>,
 }
 
 impl Default for AiProviderState {
     fn default() -> Self {
         Self {
-            selected_provider_id: SHAKESPEARE_PROVIDER_ID.to_string(),
+            selected_provider_id: PPQ_PROVIDER_ID.to_string(),
             selected_model_by_provider: HashMap::new(),
             custom_providers: Vec::new(),
+            ppq_account: None,
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProviderAuth {
-    Nip98,
+    PpqManaged { api_key: Option<String> },
     BearerToken(String),
 }
 
@@ -59,35 +92,45 @@ pub struct AiProviderConfig {
 }
 
 impl AiProviderConfig {
-    pub fn requires_signer(&self) -> bool {
-        matches!(self.auth, ProviderAuth::Nip98)
+    pub fn requires_setup(&self) -> bool {
+        matches!(&self.auth, ProviderAuth::PpqManaged { api_key } if api_key.as_deref().unwrap_or("").trim().is_empty())
     }
 
     pub fn supports_tools(&self) -> bool {
-        matches!(self.provider_kind, AiProviderKind::Shakespeare)
+        !matches!(self.provider_kind, AiProviderKind::Ppq)
     }
 
     pub fn authentication_label(&self) -> &'static str {
         match self.auth {
-            ProviderAuth::Nip98 => "NIP-98",
+            ProviderAuth::PpqManaged { .. } => "Managed API Key",
             ProviderAuth::BearerToken(_) => "API Key",
         }
     }
 }
 
-pub fn shakespeare_provider() -> AiProviderConfig {
+pub fn ppq_provider(account: Option<&PpqAccountState>) -> AiProviderConfig {
     AiProviderConfig {
-        id: SHAKESPEARE_PROVIDER_ID.to_string(),
-        name: "Shakespeare".to_string(),
-        base_url: "https://ai.shakespeare.diy/v1".to_string(),
-        provider_kind: AiProviderKind::Shakespeare,
-        auth: ProviderAuth::Nip98,
+        id: PPQ_PROVIDER_ID.to_string(),
+        name: "PPQ".to_string(),
+        base_url: PPQ_CHAT_BASE_URL.to_string(),
+        provider_kind: AiProviderKind::Ppq,
+        auth: ProviderAuth::PpqManaged {
+            api_key: account.and_then(|account| {
+                let selected_key = account
+                    .managed_api_key
+                    .as_deref()
+                    .filter(|key| !key.trim().is_empty())
+                    .unwrap_or(account.api_key.as_str());
+                let trimmed = selected_key.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            }),
+        },
         is_builtin: true,
     }
 }
 
 pub fn resolve_providers(state: &AiProviderState) -> Vec<AiProviderConfig> {
-    let mut providers = vec![shakespeare_provider()];
+    let mut providers = vec![ppq_provider(state.ppq_account.as_ref())];
     providers.extend(
         state
             .custom_providers
@@ -112,9 +155,83 @@ pub fn normalize_base_url(input: &str) -> String {
     input.trim().trim_end_matches('/').to_string()
 }
 
+fn migrate_legacy_state(mut state: AiProviderState) -> AiProviderState {
+    if state.selected_provider_id == SHAKESPEARE_PROVIDER_ID {
+        state.selected_provider_id = PPQ_PROVIDER_ID.to_string();
+    }
+    state
+}
+
+fn pending_provider_state_save() -> &'static Mutex<PendingProviderStateSave> {
+    static PENDING_SAVE: OnceLock<Mutex<PendingProviderStateSave>> = OnceLock::new();
+    PENDING_SAVE.get_or_init(|| Mutex::new(PendingProviderStateSave::default()))
+}
+
+pub fn queue_provider_state_save(state: AiProviderState) -> Option<AiProviderState> {
+    let mut pending = pending_provider_state_save()
+        .lock()
+        .expect("provider state save queue poisoned");
+    pending.latest = Some(state);
+
+    if pending.in_flight {
+        None
+    } else {
+        pending.in_flight = true;
+        pending.latest.take()
+    }
+}
+
+pub fn finish_provider_state_save() -> Option<AiProviderState> {
+    let mut pending = pending_provider_state_save()
+        .lock()
+        .expect("provider state save queue poisoned");
+
+    if let Some(next_state) = pending.latest.take() {
+        Some(next_state)
+    } else {
+        pending.in_flight = false;
+        None
+    }
+}
+
+fn emit_provider_state_save_event(snapshot: AiProviderState, result: Result<(), String>) {
+    let event_id = PROVIDER_STATE_SAVE_EVENT_ID.fetch_add(1, Ordering::SeqCst) + 1;
+    *PROVIDER_STATE_SAVE_EVENT.write() = Some(ProviderStateSaveEvent {
+        event_id,
+        snapshot,
+        result,
+    });
+}
+
+pub fn process_queued_provider_state_saves(initial_snapshot: AiProviderState) {
+    spawn_forever(async move {
+        let mut next_snapshot = Some(initial_snapshot);
+        while let Some(current_snapshot) = next_snapshot {
+            let result = save_provider_state(&current_snapshot).await;
+            emit_provider_state_save_event(current_snapshot, result);
+            next_snapshot = finish_provider_state_save();
+        }
+    });
+}
+
+#[cfg(test)]
+fn reset_provider_state_save_queue() {
+    let mut pending = pending_provider_state_save()
+        .lock()
+        .expect("provider state save queue poisoned");
+    pending.in_flight = false;
+    pending.latest = None;
+}
+
+#[cfg(test)]
+fn provider_state_save_test_lock() -> &'static Mutex<()> {
+    static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    TEST_LOCK.get_or_init(|| Mutex::new(()))
+}
+
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 mod web_db {
-    use super::AiProviderState;
+    use super::{migrate_legacy_state, AiProviderState};
     use crate::stores::ui::ai_web_db::{open_ai_db_with_schema, STORE_SETTINGS};
     use indexed_db_futures::prelude::*;
     use std::rc::Rc;
@@ -158,8 +275,9 @@ mod web_db {
             let json = value
                 .as_string()
                 .ok_or_else(|| "Stored AI provider state was not a string".to_string())?;
-            serde_json::from_str(&json)
-                .map_err(|e| format!("Failed to parse AI provider state: {}", e))
+            let state: AiProviderState = serde_json::from_str(&json)
+                .map_err(|e| format!("Failed to parse AI provider state: {}", e))?;
+            Ok(migrate_legacy_state(state))
         }
 
         pub async fn save_state(&self, state: &AiProviderState) -> Result<(), String> {
@@ -186,12 +304,17 @@ mod web_db {
 pub async fn load_provider_state() -> Result<AiProviderState, String> {
     #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
     {
+        if let Ok(cached_state) = storage::get(STORAGE_KEY) {
+            return Ok(migrate_legacy_state(cached_state));
+        }
         return web_db::AiProviderDb::new().await?.load_state().await;
     }
 
     #[cfg(not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))))]
     {
-        Ok(storage::get(STORAGE_KEY).unwrap_or_default())
+        Ok(migrate_legacy_state(
+            storage::get(STORAGE_KEY).unwrap_or_default(),
+        ))
     }
 }
 
@@ -203,8 +326,13 @@ pub async fn save_provider_state(state: &AiProviderState) -> Result<(), String> 
 
     #[cfg(not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))))]
     {
-        storage::set(STORAGE_KEY, state)
+        let _ = state;
+        Ok(())
     }
+}
+
+pub fn cache_provider_state(state: &AiProviderState) -> Result<(), String> {
+    storage::set(STORAGE_KEY, state)
 }
 
 #[cfg(test)]
@@ -231,31 +359,54 @@ mod tests {
                 api_key: "secret".to_string(),
                 provider_kind: AiProviderKind::OpenAiCompatible,
             }],
+            ppq_account: Some(PpqAccountState {
+                credit_id: "credit-123".to_string(),
+                api_key: "sk-managed".to_string(),
+                managed_api_key: None,
+                active_api_key_id: Some("key-1".to_string()),
+            }),
         };
 
         let providers = resolve_providers(&state);
         assert_eq!(providers.len(), 2);
-        assert_eq!(providers[0].id, SHAKESPEARE_PROVIDER_ID);
+        assert_eq!(providers[0].id, PPQ_PROVIDER_ID);
         assert_eq!(providers[1].id, "custom");
+        assert!(matches!(
+            providers[0].auth,
+            ProviderAuth::PpqManaged { api_key: Some(_) }
+        ));
         assert!(matches!(providers[1].auth, ProviderAuth::BearerToken(_)));
     }
 
     #[test]
-    fn only_shakespeare_supports_tools() {
-        let providers = resolve_providers(&AiProviderState {
-            selected_provider_id: "custom".to_string(),
-            selected_model_by_provider: HashMap::new(),
-            custom_providers: vec![CustomAiProvider {
-                id: "custom".to_string(),
-                name: "Custom".to_string(),
-                base_url: "https://example.com/v1".to_string(),
-                api_key: "secret".to_string(),
-                provider_kind: AiProviderKind::OpenAiCompatible,
-            }],
-        });
+    fn ppq_provider_requires_setup_without_key() {
+        let provider = ppq_provider(None);
+        assert!(provider.requires_setup());
+        assert!(!provider.supports_tools());
+    }
 
-        assert!(providers[0].supports_tools());
-        assert!(!providers[1].supports_tools());
+    #[test]
+    fn custom_provider_supports_tools() {
+        let provider = AiProviderConfig {
+            id: "custom".to_string(),
+            name: "Custom".to_string(),
+            base_url: "https://example.com/v1".to_string(),
+            provider_kind: AiProviderKind::OpenAiCompatible,
+            auth: ProviderAuth::BearerToken("secret".to_string()),
+            is_builtin: false,
+        };
+        assert!(provider.supports_tools());
+    }
+
+    #[test]
+    fn migrates_shakespeare_selection_to_ppq() {
+        let migrated = migrate_legacy_state(AiProviderState {
+            selected_provider_id: "shakespeare".to_string(),
+            selected_model_by_provider: HashMap::new(),
+            custom_providers: vec![],
+            ppq_account: None,
+        });
+        assert_eq!(migrated.selected_provider_id, PPQ_PROVIDER_ID);
     }
 
     #[test]
@@ -263,5 +414,75 @@ mod tests {
         let json = r#"{"selected_provider_id":"shakespeare","custom_providers":[]}"#;
         let state: AiProviderState = serde_json::from_str(json).unwrap();
         assert!(state.selected_model_by_provider.is_empty());
+        assert_eq!(
+            migrate_legacy_state(state).selected_provider_id,
+            PPQ_PROVIDER_ID
+        );
+    }
+
+    #[test]
+    fn queues_latest_provider_state_save_snapshot() {
+        let _test_lock = provider_state_save_test_lock()
+            .lock()
+            .expect("provider state save test lock poisoned");
+        reset_provider_state_save_queue();
+
+        let mut first = AiProviderState::default();
+        first
+            .selected_model_by_provider
+            .insert("ppq".to_string(), "model-a".to_string());
+
+        let mut second = first.clone();
+        second
+            .selected_model_by_provider
+            .insert("ppq".to_string(), "model-b".to_string());
+
+        let queued_first = queue_provider_state_save(first.clone());
+        assert_eq!(queued_first, Some(first));
+        assert_eq!(queue_provider_state_save(second.clone()), None);
+        assert_eq!(finish_provider_state_save(), Some(second));
+        assert_eq!(finish_provider_state_save(), None);
+
+        reset_provider_state_save_queue();
+    }
+
+    #[test]
+    fn queued_provider_state_save_keeps_latest_custom_provider_snapshot() {
+        let _test_lock = provider_state_save_test_lock()
+            .lock()
+            .expect("provider state save test lock poisoned");
+        reset_provider_state_save_queue();
+
+        let first = AiProviderState {
+            selected_provider_id: "custom-a".to_string(),
+            selected_model_by_provider: HashMap::new(),
+            custom_providers: vec![CustomAiProvider {
+                id: "custom-a".to_string(),
+                name: "Custom A".to_string(),
+                base_url: "https://example.com/v1".to_string(),
+                api_key: "secret-a".to_string(),
+                provider_kind: AiProviderKind::OpenAiCompatible,
+            }],
+            ppq_account: None,
+        };
+        let second = AiProviderState {
+            selected_provider_id: "custom-b".to_string(),
+            selected_model_by_provider: HashMap::new(),
+            custom_providers: vec![CustomAiProvider {
+                id: "custom-b".to_string(),
+                name: "Custom B".to_string(),
+                base_url: "https://example.net/v1".to_string(),
+                api_key: "secret-b".to_string(),
+                provider_kind: AiProviderKind::OpenAiCompatible,
+            }],
+            ppq_account: None,
+        };
+
+        assert_eq!(queue_provider_state_save(first.clone()), Some(first));
+        assert_eq!(queue_provider_state_save(second.clone()), None);
+        assert_eq!(finish_provider_state_save(), Some(second));
+        assert_eq!(finish_provider_state_save(), None);
+
+        reset_provider_state_save_queue();
     }
 }
