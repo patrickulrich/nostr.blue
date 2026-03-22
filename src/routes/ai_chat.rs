@@ -343,6 +343,8 @@ pub fn AIChat() -> Element {
                             &account_key,
                             generation,
                         ) {
+                            initial_loaded_messages.set(history);
+                            chat_history_loaded.set(true);
                             chat_history_loading.set(false);
                         }
                         return;
@@ -746,7 +748,10 @@ pub fn AIChat() -> Element {
                                                 ai_provider_store::process_queued_provider_state_saves(snapshot);
                                             }
                                         }
-                                        Err(err) => error.set(Some(err)),
+                                        Err(err) => {
+                                            error.set(Some(err));
+                                            ppq_bootstrap_loading.set(false);
+                                        }
                                     }
                                 });
                             }

@@ -91,7 +91,13 @@ impl SwapOptions {
 
 #[derive(Debug, Clone)]
 enum SwapPublishOutcome {
-    Published { event_id: String },
+    Published {
+        event_id: String,
+    },
+    PublishedWithFollowUpError {
+        event_id: String,
+        follow_up_err: String,
+    },
     RetryQueued,
 }
 /// Result of a swap operation
@@ -366,7 +372,7 @@ pub async fn execute_swap_with_nip60(
     )?;
     in_flight_guard.dismiss();
     super::signals::remove_in_flight_send_request(&tx_id);
-    let final_event_id = match publish_swap_events(
+    let publish_outcome = match publish_swap_events(
         &mint_url,
         &output_proofs,
         &event_ids_to_delete,
@@ -376,18 +382,33 @@ pub async fn execute_swap_with_nip60(
     {
         Ok(SwapPublishOutcome::Published { event_id }) => {
             update_token_event_id(&pending_event_id, &event_id);
-            event_id
+            SwapPublishOutcome::Published { event_id }
         }
-        Ok(SwapPublishOutcome::RetryQueued) => pending_event_id.clone(),
+        Ok(SwapPublishOutcome::PublishedWithFollowUpError {
+            event_id,
+            follow_up_err,
+        }) => {
+            update_token_event_id(&pending_event_id, &event_id);
+            SwapPublishOutcome::PublishedWithFollowUpError {
+                event_id,
+                follow_up_err,
+            }
+        }
+        Ok(SwapPublishOutcome::RetryQueued) => SwapPublishOutcome::RetryQueued,
         Err(e) => {
             log::warn!("Nostr publish failed: {}", e);
-            pending_event_id.clone()
+            SwapPublishOutcome::RetryQueued
         }
+    };
+    let final_event_id = match &publish_outcome {
+        SwapPublishOutcome::Published { event_id }
+        | SwapPublishOutcome::PublishedWithFollowUpError { event_id, .. } => event_id.clone(),
+        SwapPublishOutcome::RetryQueued => pending_event_id.clone(),
     };
     let valid_created: Vec<String> = if final_event_id.starts_with("pending_") {
         vec![]
     } else {
-        vec![final_event_id]
+        vec![final_event_id.clone()]
     };
     let valid_destroyed: Vec<String> = event_ids_to_delete
         .iter()
@@ -395,12 +416,50 @@ pub async fn execute_swap_with_nip60(
         .cloned()
         .collect();
     if !valid_created.is_empty() {
-        if let Err(e) =
-            super::events::create_history_event("in", output_value, valid_created, valid_destroyed)
-                .await
+        if let Err(e) = super::events::create_history_event(
+            "in",
+            output_value,
+            valid_created.clone(),
+            valid_destroyed.clone(),
+        )
+        .await
         {
             log::error!("Failed to create history event: {}", e);
         }
+    }
+    let publish_outcome = match publish_outcome {
+        SwapPublishOutcome::Published { event_id } if !valid_created.is_empty() => {
+            if let Some(client) = nostr_client::NOSTR_CLIENT.read().as_ref().cloned() {
+                match record_deletion_follow_up(
+                    publish_deletion_events(&client, &valid_destroyed).await,
+                    &pending_event_id,
+                    &mint_url,
+                ) {
+                    Ok(()) => SwapPublishOutcome::Published { event_id },
+                    Err(follow_up_err) => SwapPublishOutcome::PublishedWithFollowUpError {
+                        event_id,
+                        follow_up_err,
+                    },
+                }
+            } else {
+                SwapPublishOutcome::PublishedWithFollowUpError {
+                    event_id,
+                    follow_up_err: "Client not initialized for swap deletion follow-up".to_string(),
+                }
+            }
+        }
+        outcome => outcome,
+    };
+    if let SwapPublishOutcome::PublishedWithFollowUpError {
+        event_id,
+        follow_up_err,
+    } = &publish_outcome
+    {
+        log::warn!(
+            "Swap token event {} was published, but deletion follow-up failed: {}",
+            event_id,
+            follow_up_err
+        );
     }
     if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
         log::warn!("Failed to sync wallet state: {}", e);
@@ -521,11 +580,6 @@ async fn publish_swap_events(
                         "Swap token event {} already exists on all relays (duplicate)",
                         event_id_hex
                     );
-                    record_deletion_follow_up(
-                        publish_deletion_events(&client, &valid_del_ids).await,
-                        pending_event_id,
-                        mint_url,
-                    )?;
                     Ok(SwapPublishOutcome::Published {
                         event_id: event_id_hex,
                     })
@@ -550,11 +604,6 @@ async fn publish_swap_events(
                     output.success.len(),
                     output.success.len() + output.failed.len()
                 );
-                record_deletion_follow_up(
-                    publish_deletion_events(&client, &valid_del_ids).await,
-                    pending_event_id,
-                    mint_url,
-                )?;
                 Ok(SwapPublishOutcome::Published {
                     event_id: event_id_hex,
                 })

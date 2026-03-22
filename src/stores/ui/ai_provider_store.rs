@@ -223,6 +223,12 @@ fn reset_provider_state_save_queue() {
     pending.latest = None;
 }
 
+#[cfg(test)]
+fn provider_state_save_test_lock() -> &'static Mutex<()> {
+    static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    TEST_LOCK.get_or_init(|| Mutex::new(()))
+}
+
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 mod web_db {
     use super::{migrate_legacy_state, AiProviderState};
@@ -416,6 +422,9 @@ mod tests {
 
     #[test]
     fn queues_latest_provider_state_save_snapshot() {
+        let _test_lock = provider_state_save_test_lock()
+            .lock()
+            .expect("provider state save test lock poisoned");
         reset_provider_state_save_queue();
 
         let mut first = AiProviderState::default();
@@ -439,6 +448,9 @@ mod tests {
 
     #[test]
     fn queued_provider_state_save_keeps_latest_custom_provider_snapshot() {
+        let _test_lock = provider_state_save_test_lock()
+            .lock()
+            .expect("provider state save test lock poisoned");
         reset_provider_state_save_queue();
 
         let first = AiProviderState {

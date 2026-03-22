@@ -8,7 +8,8 @@ use super::events::queue_signed_event_for_retry_result;
 use super::internal::create_ephemeral_wallet;
 use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof};
 use super::signals::{
-    try_acquire_mint_lock, COUNTER_BACKUPS, SHARED_LOCALSTORE, WALLET_STATE, WALLET_TOKENS,
+    try_acquire_mint_lock, COUNTER_BACKUPS, PENDING_NOSTR_EVENTS, SHARED_LOCALSTORE, WALLET_STATE,
+    WALLET_TOKENS,
 };
 use super::types::{
     ConsolidationResult, CounterBackup, DiscoveredMint, ExtendedCashuProof, ExtendedTokenEvent,
@@ -111,6 +112,22 @@ async fn publish_or_queue_wallet_snapshot(event: Event) -> Result<(), String> {
     queue_signed_event_for_retry_result(
         event,
         super::types::PendingEventType::WalletSnapshot,
+        None,
+        None,
+    )
+    .await
+}
+
+async fn queue_mint_deletion_event_durably(builder: nostr_sdk::EventBuilder) -> Result<(), String> {
+    if SHARED_LOCALSTORE.read().as_ref().is_none() {
+        return Err(
+            "Localstore not initialized; cannot persist queued mint deletion event".to_string(),
+        );
+    }
+
+    super::events::queue_event_for_retry(
+        builder,
+        super::types::PendingEventType::DeletionEvent,
         None,
         None,
     )
@@ -672,6 +689,12 @@ pub async fn restore_proofs_from_mint(mint_url: &str) -> CashuResult<u64> {
 /// Returns (event_count, total_amount) on success.
 pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
     let normalized_mint_url = normalize_mint_url(mint_url);
+    let _mint_lock_guard = try_acquire_mint_lock(&normalized_mint_url).ok_or_else(|| {
+        format!(
+            "Operation already in progress for mint: {}",
+            normalized_mint_url
+        )
+    })?;
     if let Err(e) = backup_mint_counters(&normalized_mint_url).await {
         log::warn!(
             "Failed to backup counters for {}: {}",
@@ -757,56 +780,66 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
                     }
                     Ok(_) => {
                         log::warn!("No relays accepted deletion event, queuing for retry");
-                        super::events::queue_event_for_retry(
-                            deletion_builder,
-                            super::types::PendingEventType::DeletionEvent,
-                            None,
-                            None,
-                        )
-                        .await
-                        .map_err(|queue_err| {
-                            format!(
-                                "Failed to queue mint deletion event for retry: {}",
-                                queue_err
-                            )
-                        })?;
+                        queue_mint_deletion_event_durably(deletion_builder)
+                            .await
+                            .map_err(|queue_err| {
+                                format!(
+                                    "Failed to queue mint deletion event for retry: {}",
+                                    queue_err
+                                )
+                            })?;
                     }
                     Err(e) => {
                         log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
-                        super::events::queue_event_for_retry(
-                            deletion_builder,
-                            super::types::PendingEventType::DeletionEvent,
-                            None,
-                            None,
-                        )
-                        .await
-                        .map_err(|queue_err| {
-                            format!(
-                                "Failed to queue mint deletion event for retry: {}",
-                                queue_err
-                            )
-                        })?;
+                        queue_mint_deletion_event_durably(deletion_builder)
+                            .await
+                            .map_err(|queue_err| {
+                                format!(
+                                    "Failed to queue mint deletion event for retry: {}",
+                                    queue_err
+                                )
+                            })?;
                     }
                 }
             } else {
                 log::warn!("Client not initialized, queuing deletion event for retry");
-                super::events::queue_event_for_retry(
-                    deletion_builder,
-                    super::types::PendingEventType::DeletionEvent,
-                    None,
-                    None,
-                )
-                .await
-                .map_err(|queue_err| {
-                    format!(
-                        "Failed to queue mint deletion event for retry: {}",
-                        queue_err
-                    )
-                })?;
+                queue_mint_deletion_event_durably(deletion_builder)
+                    .await
+                    .map_err(|queue_err| {
+                        format!(
+                            "Failed to queue mint deletion event for retry: {}",
+                            queue_err
+                        )
+                    })?;
             }
         }
     }
+    let pending_event_ids_to_remove: Vec<String> = PENDING_NOSTR_EVENTS
+        .read()
+        .iter()
+        .filter(|event| {
+            event
+                .mint_url
+                .as_ref()
+                .is_some_and(|mint| mint_matches(mint, &normalized_mint_url))
+        })
+        .map(|event| event.id.clone())
+        .collect();
+    if let Some(localstore) = SHARED_LOCALSTORE.read().as_ref().cloned() {
+        for event_id in &pending_event_ids_to_remove {
+            localstore
+                .remove_pending_event(event_id)
+                .await
+                .map_err(|e| format!("Failed to remove pending mint event {}: {}", event_id, e))?;
+        }
+    }
     {
+        PENDING_NOSTR_EVENTS.write().retain(|event| {
+            !event
+                .mint_url
+                .as_ref()
+                .is_some_and(|mint| mint_matches(mint, &normalized_mint_url))
+        });
         let store = WALLET_TOKENS.read();
         let mut data = store.data();
         let mut tokens_write = data.write();

@@ -170,7 +170,12 @@ pub async fn get_available_models(provider: &AiProviderConfig) -> Result<Vec<Cha
         match fetch_models_from_endpoint(provider, "models?type=image").await {
             Ok(mut image_models) => models.append(&mut image_models),
             Err(err) if err.starts_with("404:") => {}
-            Err(err) => return Err(err.trim_start_matches("request_failed:").to_string()),
+            Err(err) => {
+                log::warn!(
+                    "Failed to fetch PPQ image models: {}",
+                    err.trim_start_matches("request_failed:").trim()
+                );
+            }
         }
     }
     sort_and_dedup_models(&mut models);
@@ -257,13 +262,19 @@ async fn fetch_models_from_endpoint(
 }
 
 fn sort_and_dedup_models(models: &mut Vec<ChatModel>) {
+    fn dedup_key(model: &ChatModel) -> String {
+        let kind = match model.kind {
+            ChatModelKind::Chat => "chat",
+            ChatModelKind::Image => "image",
+        };
+        format!("{}:{kind}", model.id)
+    }
+
     let mut deduped = std::collections::BTreeMap::<String, ChatModel>::new();
     for model in models.drain(..) {
-        match deduped.get_mut(&model.id) {
+        let key = dedup_key(&model);
+        match deduped.get_mut(&key) {
             Some(existing) => {
-                if model_kind_rank(model.kind) > model_kind_rank(existing.kind) {
-                    existing.kind = model.kind;
-                }
                 if existing.description.is_empty() && !model.description.is_empty() {
                     existing.description = model.description.clone();
                 }
@@ -278,7 +289,7 @@ fn sort_and_dedup_models(models: &mut Vec<ChatModel>) {
                 }
             }
             None => {
-                deduped.insert(model.id.clone(), model);
+                deduped.insert(key, model);
             }
         }
     }
@@ -560,6 +571,36 @@ mod tests {
     }
 
     #[test]
+    fn sort_and_dedup_models_keeps_distinct_kinds_for_same_id() {
+        let mut models = vec![
+            ChatModel {
+                id: "google/gemini-2.5-flash".to_string(),
+                name: "Gemini Chat".to_string(),
+                description: String::new(),
+                kind: ChatModelKind::Chat,
+                supports_image_input: false,
+                total_cost: None,
+            },
+            ChatModel {
+                id: "google/gemini-2.5-flash".to_string(),
+                name: "Gemini Image".to_string(),
+                description: "image".to_string(),
+                kind: ChatModelKind::Image,
+                supports_image_input: false,
+                total_cost: None,
+            },
+        ];
+
+        sort_and_dedup_models(&mut models);
+
+        assert_eq!(models.len(), 2);
+        assert!(models.iter().any(|model| model.kind == ChatModelKind::Chat));
+        assert!(models
+            .iter()
+            .any(|model| model.kind == ChatModelKind::Image));
+    }
+
+    #[test]
     fn keeps_chat_and_image_models_for_ppq() {
         let provider = ppq_provider(None);
         assert!(is_supported_model(
@@ -692,8 +733,11 @@ mod tests {
         ];
 
         sort_and_dedup_models(&mut models);
-        assert_eq!(models.len(), 1);
-        assert_eq!(models[0].kind, ChatModelKind::Image);
+        assert_eq!(models.len(), 2);
+        assert!(models.iter().any(|model| model.kind == ChatModelKind::Chat));
+        assert!(models
+            .iter()
+            .any(|model| model.kind == ChatModelKind::Image));
     }
 
     #[test]

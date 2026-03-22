@@ -194,13 +194,11 @@ pub async fn connect_nwc_auto_topup(
         })),
     )
     .await?;
+    let data = data_or_root(&value);
     Ok(PpqNwcAutoTopup {
-        nwc_url: string_field(data_or_root(&value), &["nwc_url", "nwcUrl"]),
-        threshold_usd: number_field(data_or_root(&value), &["threshold_usd", "thresholdUsd"]),
-        topup_amount_usd: number_field(
-            data_or_root(&value),
-            &["topup_amount_usd", "topupAmountUsd"],
-        ),
+        nwc_url: string_field(data, &["nwc_url", "nwcUrl"]),
+        threshold_usd: number_field(data, &["threshold_usd", "thresholdUsd"]),
+        topup_amount_usd: number_field(data, &["topup_amount_usd", "topupAmountUsd"]),
         raw_json: pretty_json(&value),
     })
 }
