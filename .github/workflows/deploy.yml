@@ -336,9 +336,13 @@ jobs:
         env:
           GRADLE_USER_HOME: ${{ github.workspace }}/.gradle-home
         run: |
-          BUNDLETOOL="$(find "$GRADLE_USER_HOME" "$HOME/.gradle" "$HOME/.cache" -type f -name 'bundletool*.jar' 2>/dev/null | head -n1)"
+          BUNDLETOOL="$(find "$GRADLE_USER_HOME" "$HOME/.gradle" "$HOME/.cache" -type f \( -name 'bundletool-all*.jar' -o -name 'bundletool*.jar' \) 2>/dev/null | head -n1)"
           if [ -n "$BUNDLETOOL" ]; then
-            java -jar "$BUNDLETOOL" validate --bundle=nostrblue-release.aab
+            if unzip -p "$BUNDLETOOL" META-INF/MANIFEST.MF 2>/dev/null | grep -q '^Main-Class:'; then
+              java -jar "$BUNDLETOOL" validate --bundle=nostrblue-release.aab
+            else
+              echo "bundletool cache artifact is not executable; skipping explicit validation"
+            fi
           else
             echo "bundletool not found in cache; skipping explicit validation"
           fi
