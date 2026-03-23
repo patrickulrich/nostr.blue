@@ -570,6 +570,7 @@ pub async fn logout() -> Result<(), String> {
 fn clear_auth() {
     *AUTH_STATE.write() = AuthState::default();
     *KEYS.write() = None;
+    crate::stores::signer::clear_signer();
 }
 /// Restore session by decrypting stored ncryptsec with password
 ///

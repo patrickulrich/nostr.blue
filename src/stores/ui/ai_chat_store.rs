@@ -1,7 +1,7 @@
 use crate::stores::auth_store;
 use dioxus::core::spawn_forever;
-use dioxus::prelude::{GlobalSignal, Signal};
 use dioxus::prelude::ReadableExt;
+use dioxus::prelude::{GlobalSignal, Signal};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -103,9 +103,7 @@ pub fn queue_chat_history_save(
     }
 }
 
-fn finish_chat_history_save(
-    account_key: &str,
-) -> Option<(String, Vec<PersistedChatMessage>)> {
+fn finish_chat_history_save(account_key: &str) -> Option<(String, Vec<PersistedChatMessage>)> {
     let mut pending = pending_chat_history_save_queue()
         .lock()
         .expect("chat history save queue poisoned");

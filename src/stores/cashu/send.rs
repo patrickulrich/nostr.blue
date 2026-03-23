@@ -190,7 +190,10 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<SendTokensOutc
     }
     if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
         log::warn!("Failed to sync MultiMintWallet state after send: {}", e);
-        warnings.push(format!("Failed to sync MultiMintWallet state after send: {}", e));
+        warnings.push(format!(
+            "Failed to sync MultiMintWallet state after send: {}",
+            e
+        ));
     }
     Ok(SendTokensOutcome {
         token_string,

@@ -69,15 +69,16 @@ pub async fn queue_nostr_event(
 pub async fn remove_pending_event(event_id: &str) -> Result<(), String> {
     PENDING_NOSTR_EVENTS.write().retain(|e| e.id != event_id);
     if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
-        if let Err(e) = localstore.remove_pending_event(event_id).await {
-            log::warn!("Failed to remove pending event from IndexedDB: {}", e);
-        }
+        localstore
+            .remove_pending_event(event_id)
+            .await
+            .map_err(|e| format!("Failed to remove pending event from IndexedDB: {}", e))?;
     }
     log::debug!("Removed pending event from queue: {}", event_id);
     Ok(())
 }
 
-async fn remove_pending_nostr_events_by_token_id(pending_token_id: &str) {
+async fn remove_pending_nostr_events_by_token_id(pending_token_id: &str) -> Result<(), String> {
     let matching_ids: Vec<String> = PENDING_NOSTR_EVENTS
         .read()
         .iter()
@@ -86,15 +87,17 @@ async fn remove_pending_nostr_events_by_token_id(pending_token_id: &str) {
         .collect();
 
     for pending_event_id in matching_ids {
-        if let Err(error) = remove_pending_event(&pending_event_id).await {
-            log::warn!(
-                "Failed to remove queued retry {} for token {}: {}",
-                pending_event_id,
-                pending_token_id,
-                error
-            );
-        }
+        remove_pending_event(&pending_event_id)
+            .await
+            .map_err(|error| {
+                format!(
+                    "Failed to remove queued retry {} for token {}: {}",
+                    pending_event_id, pending_token_id, error
+                )
+            })?;
     }
+
+    Ok(())
 }
 /// Queue an already-signed Event for retry when publication fails
 ///
@@ -888,14 +891,14 @@ pub async fn process_pending_events() -> Result<usize, String> {
                         }
                         drop(events);
                         if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
-                            if let Err(error) = localstore.update_pending_event(&updated_event).await
+                            if let Err(error) =
+                                localstore.update_pending_event(&updated_event).await
                             {
                                 log::warn!(
                                     "Failed to persist completed history state for pending event {}: {}",
                                     event.id,
                                     error
                                 );
-                                continue;
                             }
                         }
                     }
@@ -969,6 +972,7 @@ pub(crate) fn remove_token_by_event_id(event_id: &str) {
         return;
     }
     rebuild_proof_event_map();
+    super::signals::update_wallet_balances();
 }
 /// Reconcile tokens with pending event IDs
 ///
@@ -1040,7 +1044,7 @@ pub async fn reconcile_pending_event_ids() -> Result<usize, String> {
                 old_event_id
             );
             remove_token_by_event_id(&old_event_id);
-            remove_pending_nostr_events_by_token_id(&old_event_id).await;
+            remove_pending_nostr_events_by_token_id(&old_event_id).await?;
             reconciled += 1;
             continue;
         }

@@ -426,13 +426,23 @@ pub async fn receive_tokens_with_options(
                 let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
                 let retry_builder =
                     nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted.clone());
-                super::events::queue_token_event_for_retry(
+                if let Err(error) = super::events::queue_token_event_for_retry(
                     retry_builder,
                     pending_id.clone(),
                     mint_url.clone(),
                 )
-                .await?;
-                pending_id
+                .await
+                {
+                    log::warn!(
+                        "Failed to persist retry queue entry for received token {} at {}: {}. Storing locally without pending retry state.",
+                        pending_id,
+                        mint_url,
+                        error
+                    );
+                    format!("local_{}", uuid::Uuid::new_v4())
+                } else {
+                    pending_id
+                }
             } else {
                 log::warn!("Permanent error - not queueing for retry: {}", last_error);
                 format!("local_{}", uuid::Uuid::new_v4())

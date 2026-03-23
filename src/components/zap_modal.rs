@@ -90,6 +90,8 @@ pub struct ZapModalProps {
     pub initial_amount: Option<u64>,
     #[props(default)]
     pub relay_hints: Option<Vec<String>>,
+    #[props(default)]
+    pub on_success: Option<EventHandler<()>>,
     pub on_close: EventHandler<()>,
 }
 #[component]
@@ -358,6 +360,9 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                                                 .duration(Duration::from_secs(3))
                                                 .permanent(false),
                                         );
+                                        if let Some(on_success) = props.on_success.as_ref() {
+                                            on_success.call(());
+                                        }
                                         props.on_close.call(());
                                         return;
                                     }
@@ -392,6 +397,9 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                                         .duration(Duration::from_secs(2))
                                         .permanent(false),
                                 );
+                                if let Some(on_success) = props.on_success.as_ref() {
+                                    on_success.call(());
+                                }
                                 props.on_close.call(());
                                 return;
                             }
@@ -414,6 +422,9 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                                     .duration(Duration::from_secs(2))
                                     .permanent(false),
                             );
+                            if let Some(on_success) = props.on_success.as_ref() {
+                                on_success.call(());
+                            }
                             props.on_close.call(());
                             return;
                         }
@@ -449,6 +460,9 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                                         .duration(Duration::from_secs(2))
                                         .permanent(false),
                                 );
+                                if let Some(on_success) = props.on_success.as_ref() {
+                                    on_success.call(());
+                                }
                                 props.on_close.call(());
                                 return;
                             }
@@ -472,6 +486,9 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                                     .duration(Duration::from_secs(2))
                                     .permanent(false),
                             );
+                            if let Some(on_success) = props.on_success.as_ref() {
+                                on_success.call(());
+                            }
                             props.on_close.call(());
                             return;
                         }
@@ -499,6 +516,9 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                                     .duration(Duration::from_secs(2))
                                     .permanent(false),
                             );
+                            if let Some(on_success) = props.on_success.as_ref() {
+                                on_success.call(());
+                            }
                             props.on_close.call(());
                             return;
                         }

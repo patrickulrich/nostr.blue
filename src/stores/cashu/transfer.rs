@@ -294,13 +294,11 @@ pub async fn transfer_between_mints(
                 )
                 .await
                 {
-                    return Err(
-                        reconcile_wallet_after_transfer_queue_failure(
-                            "source token event",
-                            queue_err,
-                        )
-                        .await,
-                    );
+                    return Err(reconcile_wallet_after_transfer_queue_failure(
+                        "source token event",
+                        queue_err,
+                    )
+                    .await);
                 }
                 source_new_event_id = Some(pending_id);
             }
@@ -315,13 +313,11 @@ pub async fn transfer_between_mints(
                 )
                 .await
                 {
-                    return Err(
-                        reconcile_wallet_after_transfer_queue_failure(
-                            "source token event",
-                            queue_err,
-                        )
-                        .await,
-                    );
+                    return Err(reconcile_wallet_after_transfer_queue_failure(
+                        "source token event",
+                        queue_err,
+                    )
+                    .await);
                 }
                 source_new_event_id = Some(pending_id);
             }
@@ -348,13 +344,11 @@ pub async fn transfer_between_mints(
                     queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None)
                         .await
                 {
-                    return Err(
-                        reconcile_wallet_after_transfer_queue_failure(
-                            "transfer deletion event",
-                            queue_err,
-                        )
-                        .await,
-                    );
+                    return Err(reconcile_wallet_after_transfer_queue_failure(
+                        "transfer deletion event",
+                        queue_err,
+                    )
+                    .await);
                 }
             }
             Err(e) => {
@@ -363,13 +357,11 @@ pub async fn transfer_between_mints(
                     queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None)
                         .await
                 {
-                    return Err(
-                        reconcile_wallet_after_transfer_queue_failure(
-                            "transfer deletion event",
-                            queue_err,
-                        )
-                        .await,
-                    );
+                    return Err(reconcile_wallet_after_transfer_queue_failure(
+                        "transfer deletion event",
+                        queue_err,
+                    )
+                    .await);
                 }
             }
         }
@@ -416,13 +408,11 @@ pub async fn transfer_between_mints(
                 )
                 .await
                 {
-                    return Err(
-                        reconcile_wallet_after_transfer_queue_failure(
-                            "target token event",
-                            queue_err,
-                        )
-                        .await,
-                    );
+                    return Err(reconcile_wallet_after_transfer_queue_failure(
+                        "target token event",
+                        queue_err,
+                    )
+                    .await);
                 }
                 pending_id
             }
@@ -437,13 +427,11 @@ pub async fn transfer_between_mints(
                 )
                 .await
                 {
-                    return Err(
-                        reconcile_wallet_after_transfer_queue_failure(
-                            "target token event",
-                            queue_err,
-                        )
-                        .await,
-                    );
+                    return Err(reconcile_wallet_after_transfer_queue_failure(
+                        "target token event",
+                        queue_err,
+                    )
+                    .await);
                 }
                 pending_id
             }

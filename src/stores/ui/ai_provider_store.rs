@@ -69,10 +69,7 @@ impl fmt::Debug for PpqAccountState {
                 "managed_api_key",
                 &self.managed_api_key.as_ref().map(|_| "<redacted>"),
             )
-            .field(
-                "active_api_key_id",
-                &self.active_api_key_id.as_ref().map(|_| "<redacted>"),
-            )
+            .field("active_api_key_id", &self.active_api_key_id)
             .finish()
     }
 }
@@ -513,7 +510,7 @@ mod tests {
         assert!(!provider_debug.contains("secret-api-key"));
         assert!(!account_debug.contains("secret-account-key"));
         assert!(!account_debug.contains("secret-managed-key"));
-        assert!(!account_debug.contains("key-123"));
+        assert!(account_debug.contains("key-123"));
         assert!(!auth_debug.contains("secret-bearer-key"));
     }
 

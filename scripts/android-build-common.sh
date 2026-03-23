@@ -291,6 +291,7 @@ if section_start is not None and all(str(existing_values.get(key, "")).strip() f
     raise SystemExit(0)
 
 new_lines = list(lines)
+section_keys_present = set()
 if section_start is None:
     if new_lines and new_lines[-1].strip():
         new_lines.append("")
@@ -443,6 +444,7 @@ if section_start is not None and all(str(existing_values.get(key, "")).strip() f
     raise SystemExit(0)
 
 new_lines = list(lines)
+section_keys_present = set()
 if section_start is None:
     if new_lines and new_lines[-1].strip():
         new_lines.append("")
@@ -615,6 +617,10 @@ ANDROID_KOTLIN_DEST="$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main"
 DIOXUS_CONFIG="$PROJECT_ROOT/Dioxus.toml"
 APP_ID="com.nostr.blue"
 CARGO_VERSION="$(version_field version)"
+if [ -z "$CARGO_VERSION" ]; then
+    echo "ERROR: CARGO_VERSION is empty because version_field version did not find a valid version in Cargo.toml; ensure Cargo.toml has a well-formed [package] section with a version field before calling version_code_from_semver" >&2
+    exit 1
+fi
 ANDROID_VERSION_CODE="$(version_code_from_semver "$CARGO_VERSION")"
 GRADLE_APP="$DX_ANDROID/app/build.gradle.kts"
 GENERATED_MAIN_ACTIVITY="$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main/MainActivity.kt"

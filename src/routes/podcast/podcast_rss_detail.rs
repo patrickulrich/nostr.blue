@@ -204,30 +204,29 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
     }
 
     // Load more callback - only runs after initial load is complete
-    let load_more =
-        {
-            let feed = feed.clone();
-            move || {
-                // Don't load more until initial load is complete
-                if !*initial_load_complete.read() || *loading_more.read() || !*has_more.read() {
-                    return;
-                }
-                let current_count = episodes.peek().len();
-                log::info!("Loading more episodes, skip: {}", current_count);
-                load_episode_page(
-                    podcast_id,
-                    feed.clone(),
-                    Some(current_count),
-                    false,
-                    false,
-                    episodes,
-                    has_more,
-                    loading_more,
-                    initial_load_complete,
-                    episode_error,
-                );
+    let load_more = {
+        let feed = feed.clone();
+        move || {
+            // Don't load more until initial load is complete
+            if !*initial_load_complete.read() || *loading_more.read() || !*has_more.read() {
+                return;
             }
-        };
+            let current_count = episodes.peek().len();
+            log::info!("Loading more episodes, skip: {}", current_count);
+            load_episode_page(
+                podcast_id,
+                feed.clone(),
+                Some(current_count),
+                false,
+                false,
+                episodes,
+                has_more,
+                loading_more,
+                initial_load_complete,
+                episode_error,
+            );
+        }
+    };
 
     let sentinel_id = use_infinite_scroll(load_more, has_more, loading_more);
 

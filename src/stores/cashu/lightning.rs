@@ -180,38 +180,34 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
     let signer = signer_type.as_nostr_signer();
     let pubkey_str = match auth_store::get_pubkey() {
         Some(pubkey_str) => pubkey_str,
-        None => return Err(sync_wallet_state_after_mint_error("Not authenticated".to_string()).await),
+        None => {
+            return Err(sync_wallet_state_after_mint_error("Not authenticated".to_string()).await)
+        }
     };
     let pubkey = match PublicKey::parse(&pubkey_str) {
         Ok(pubkey) => pubkey,
         Err(e) => {
-            return Err(
-                sync_wallet_state_after_mint_error(format!("Invalid pubkey: {}", e)).await,
-            )
+            return Err(sync_wallet_state_after_mint_error(format!("Invalid pubkey: {}", e)).await)
         }
     };
     let json_content = match serde_json::to_string(&token_event_data) {
         Ok(json_content) => json_content,
         Err(e) => {
-            return Err(
-                sync_wallet_state_after_mint_error(format!(
-                    "Failed to serialize token event: {}",
-                    e
-                ))
-                .await,
-            )
+            return Err(sync_wallet_state_after_mint_error(format!(
+                "Failed to serialize token event: {}",
+                e
+            ))
+            .await)
         }
     };
     let encrypted = match signer.nip44_encrypt(&pubkey, &json_content).await {
         Ok(encrypted) => encrypted,
         Err(e) => {
-            return Err(
-                sync_wallet_state_after_mint_error(format!(
-                    "Failed to encrypt token event: {}",
-                    e
-                ))
-                .await,
-            )
+            return Err(sync_wallet_state_after_mint_error(format!(
+                "Failed to encrypt token event: {}",
+                e
+            ))
+            .await)
         }
     };
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
@@ -241,13 +237,11 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
                 )
                 .await
                 {
-                    return Err(
-                        sync_wallet_state_after_mint_error(format!(
-                            "Failed to queue minted token event for retry: {}",
-                            queue_err
-                        ))
-                        .await,
-                    );
+                    return Err(sync_wallet_state_after_mint_error(format!(
+                        "Failed to queue minted token event for retry: {}",
+                        queue_err
+                    ))
+                    .await);
                 }
                 None
             }
@@ -265,13 +259,11 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
                 )
                 .await
                 {
-                    return Err(
-                        sync_wallet_state_after_mint_error(format!(
-                            "Failed to queue minted token event for retry: {}",
-                            queue_err
-                        ))
-                        .await,
-                    );
+                    return Err(sync_wallet_state_after_mint_error(format!(
+                        "Failed to queue minted token event for retry: {}",
+                        queue_err
+                    ))
+                    .await);
                 }
                 None
             }
@@ -287,13 +279,11 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
             )
             .await
             {
-                return Err(
-                    sync_wallet_state_after_mint_error(format!(
-                        "Failed to queue minted token event for retry: {}",
-                        queue_err
-                    ))
-                    .await,
-                );
+                return Err(sync_wallet_state_after_mint_error(format!(
+                    "Failed to queue minted token event for retry: {}",
+                    queue_err
+                ))
+                .await);
             }
             None
         }

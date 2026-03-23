@@ -65,7 +65,8 @@ fn relay_url_has_sensitive_parts(parsed: &Url) -> bool {
 }
 
 fn sanitize_relay_url(raw: &str) -> Result<String, String> {
-    let parsed = Url::parse(raw).map_err(|_| format!("Invalid relay URL \"{}\": failed to parse", raw))?;
+    let parsed =
+        Url::parse(raw).map_err(|_| format!("Invalid relay URL \"{}\": failed to parse", raw))?;
 
     if !matches!(parsed.scheme(), "ws" | "wss") {
         return Err(format!(
@@ -74,9 +75,9 @@ fn sanitize_relay_url(raw: &str) -> Result<String, String> {
         ));
     }
 
-    let host = parsed.host_str().ok_or_else(|| {
-        format!("Invalid relay URL \"{}\": missing host", raw)
-    })?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| format!("Invalid relay URL \"{}\": missing host", raw))?;
 
     let mut sanitized = format!("{}://{}", parsed.scheme(), host);
     if let Some(port) = parsed.port() {
@@ -192,15 +193,20 @@ pub fn ZapGoalsHome() -> Element {
     let mut selected_goal = use_signal(|| None::<ZapGoalProgress>);
     let mut open_goal_request = use_signal(|| 0u32);
     let mut request_generation = use_signal(|| 0u32);
+    let mut auth_feed_promotion_checked = use_signal(|| false);
 
     use_effect(move || {
         let has_signer = *crate::stores::nostr_client::HAS_SIGNER.read();
-        if !has_signer || crate::stores::auth_store::get_pubkey().is_none() {
+        if !has_signer
+            || crate::stores::auth_store::get_pubkey().is_none()
+            || *auth_feed_promotion_checked.read()
+        {
             return;
         }
-        if *feed_type.read() == *mount_default_feed.peek() {
+        if *feed_type.peek() == *mount_default_feed.peek() {
             feed_type.set(ZapGoalsFeedType::Following);
         }
+        auth_feed_promotion_checked.set(true);
     });
 
     use_effect(move || {
@@ -563,10 +569,12 @@ pub fn ZapGoalsHome() -> Element {
                                 event_id: Some(goal.goal.event_id.clone()),
                                 initial_amount: Some(21),
                                 relay_hints: Some(goal.goal.relays.clone()),
-                                on_close: move |_| {
-                                    selected_goal.set(None);
+                                on_success: move |_| {
                                     let next = refresh_trigger.read().wrapping_add(1);
                                     refresh_trigger.set(next);
+                                },
+                                on_close: move |_| {
+                                    selected_goal.set(None);
                                 },
                             }
                         }
@@ -682,11 +690,11 @@ pub fn ZapGoalsNew() -> Element {
         };
         for relay in &relays {
             if Url::parse(relay).is_err() {
-                    error_message.set(Some(format!(
-                        "Invalid relay URL \"{}\": failed to parse",
-                        relay
-                    )));
-                    return;
+                error_message.set(Some(format!(
+                    "Invalid relay URL \"{}\": failed to parse",
+                    relay
+                )));
+                return;
             }
         }
         if relays.is_empty() {

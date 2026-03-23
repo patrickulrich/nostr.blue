@@ -4,11 +4,11 @@
 //! It provides synchronization between CDK's internal state and Dioxus GlobalSignals
 //! for UI reactivity.
 #![allow(dead_code)]
+use super::cashu::signals::PENDING_NOSTR_EVENTS;
 use super::cashu::{
     DleqData, ProofData, ProofState, TokenData, WalletStatus, WalletTokensStoreStoreExt,
     WALLET_STATE, WALLET_STATUS, WALLET_TOKENS,
 };
-use super::cashu::signals::PENDING_NOSTR_EVENTS;
 use cdk::nuts::CurrencyUnit;
 use cdk::wallet::multi_mint_wallet::MultiMintWallet;
 use dioxus::prelude::*;

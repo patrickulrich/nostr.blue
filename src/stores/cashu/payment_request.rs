@@ -134,9 +134,9 @@ async fn send_tagged_event_with_retry(
         .await {
             Ok(()) => TaggedEventPublishOutcome::Queued(pending_id),
             Err(queue_error) => TaggedEventPublishOutcome::LocalOnly {
-                recovery_pending_id: pending_token_id,
+                recovery_pending_id: None,
                 warning: format!(
-                    "Failed to persist signed {} event for retry: {}",
+                    "Failed to persist signed {} event for retry: {}. Keeping proofs locally without a pending retry lock.",
                     event_label, queue_error
                 ),
             },
@@ -189,7 +189,10 @@ async fn send_tagged_event_with_retry(
             }
         },
         None => {
-            log::warn!("Client not initialized for {} event, queuing for retry", event_label);
+            log::warn!(
+                "Client not initialized for {} event, queuing for retry",
+                event_label
+            );
             queue_signed_event_and_build_outcome(
                 event,
                 event_type,
@@ -511,16 +514,14 @@ pub async fn pay_payment_request(
             let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
             let event = sign_cashu_event_builder(&signer, builder).await?;
             let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-            Ok(
-                send_tagged_event_with_retry(
-                    client,
-                    event,
-                    PendingEventType::TokenEvent,
-                    Some(pending_id),
-                    Some(mint_url.clone()),
-                )
-                .await,
+            Ok(send_tagged_event_with_retry(
+                client,
+                event,
+                PendingEventType::TokenEvent,
+                Some(pending_id),
+                Some(mint_url.clone()),
             )
+            .await)
         }
         .await;
         match publish_result {
