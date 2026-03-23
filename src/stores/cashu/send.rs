@@ -19,6 +19,14 @@ use dioxus::prelude::*;
 use nostr_sdk::signer::NostrSigner;
 use nostr_sdk::{EventId, Kind, PublicKey};
 
+fn relay_failures_are_all_duplicates(output: &nostr_relay_pool::Output<EventId>) -> bool {
+    !output.failed.is_empty()
+        && output.failed.values().all(|error| {
+            let error = error.to_lowercase();
+            error.starts_with("duplicate:") || error.contains("already exists")
+        })
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SendTokensOutcome {
     pub token_string: String,
@@ -675,6 +683,13 @@ async fn publish_send_events(
                         output.success.len()
                     );
                     new_event_id = Some(event_id_hex);
+                } else if relay_failures_are_all_duplicates(&output) {
+                    super::events::update_token_event_id(pending_event_id, &event_id_hex);
+                    log::info!(
+                        "Token event {} already exists on relays, using pre-signed ID",
+                        event_id_hex
+                    );
+                    new_event_id = Some(event_id_hex);
                 } else {
                     log::warn!(
                         "No relays accepted token event (failed: {}), queuing for retry",
@@ -737,8 +752,17 @@ async fn publish_send_events(
                         valid_event_ids.len()
                     );
                 }
-                Ok(_) => {
-                    log::warn!("No relays accepted deletion event, queuing for retry");
+                Ok(response) if relay_failures_are_all_duplicates(&response) => {
+                    log::info!(
+                        "Deletion event already exists on relays for {} token events",
+                        valid_event_ids.len()
+                    );
+                }
+                Ok(response) => {
+                    log::warn!(
+                        "No relays accepted deletion event (failed: {}), queuing for retry",
+                        response.failed.len()
+                    );
                     queue_event_for_retry(
                         deletion_builder,
                         PendingEventType::DeletionEvent,

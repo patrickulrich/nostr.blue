@@ -688,15 +688,6 @@ pub fn ZapGoalsNew() -> Element {
                 return;
             }
         };
-        for relay in &relays {
-            if Url::parse(relay).is_err() {
-                error_message.set(Some(format!(
-                    "Invalid relay URL \"{}\": failed to parse",
-                    relay
-                )));
-                return;
-            }
-        }
         if relays.is_empty() {
             error_message.set(Some("Add at least one valid relay URL.".to_string()));
             return;

@@ -481,11 +481,7 @@ pub fn AIChat() -> Element {
             .wrapping_add(1);
         persisted_messages_save_in_flight_signal.set(true);
         persisted_messages_save_generation_signal.set(generation);
-        if let Some((queued_account_key, queued_snapshot)) =
-            ai_chat_store::queue_chat_history_save(account_key, persisted_messages_snapshot)
-        {
-            ai_chat_store::process_queued_chat_history_saves(queued_account_key, queued_snapshot);
-        }
+        ai_chat_store::enqueue_chat_history_save(account_key, persisted_messages_snapshot);
     });
 
     use_effect(move || {

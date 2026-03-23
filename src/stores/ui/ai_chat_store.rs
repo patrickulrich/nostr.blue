@@ -85,7 +85,7 @@ fn pending_chat_history_save_queue() -> &'static Mutex<PendingChatHistorySaveQue
     PENDING_SAVE.get_or_init(|| Mutex::new(PendingChatHistorySaveQueue::default()))
 }
 
-pub fn queue_chat_history_save(
+fn queue_chat_history_save(
     account_key: String,
     snapshot: Vec<PersistedChatMessage>,
 ) -> Option<(String, Vec<PersistedChatMessage>)> {
@@ -142,7 +142,7 @@ fn emit_chat_history_save_event(
     });
 }
 
-pub fn process_queued_chat_history_saves(
+fn process_queued_chat_history_saves(
     initial_account_key: String,
     initial_snapshot: Vec<PersistedChatMessage>,
 ) {
@@ -158,6 +158,14 @@ pub fn process_queued_chat_history_saves(
             next_save = finish_chat_history_save(&account_key);
         }
     });
+}
+
+pub fn enqueue_chat_history_save(account_key: String, snapshot: Vec<PersistedChatMessage>) {
+    if let Some((queued_account_key, queued_snapshot)) =
+        queue_chat_history_save(account_key, snapshot)
+    {
+        process_queued_chat_history_saves(queued_account_key, queued_snapshot);
+    }
 }
 
 #[cfg(not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))))]

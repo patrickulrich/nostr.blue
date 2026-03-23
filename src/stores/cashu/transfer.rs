@@ -18,6 +18,14 @@ use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
 use dioxus::prelude::*;
 use nostr_sdk::{EventId, Kind, PublicKey};
 
+fn relay_failures_are_all_duplicates(output: &nostr_relay_pool::Output<EventId>) -> bool {
+    !output.failed.is_empty()
+        && output.failed.values().all(|error| {
+            let error = error.to_lowercase();
+            error.starts_with("duplicate:") || error.contains("already exists")
+        })
+}
+
 async fn reconcile_wallet_after_transfer_queue_failure(context: &str, queue_err: String) -> String {
     let error = format!("Failed to queue {} for retry: {}", context, queue_err);
     *TRANSFER_PROGRESS.write() = Some(TransferProgress::Failed {
@@ -283,8 +291,19 @@ pub async fn transfer_between_mints(
                 source_new_event_id = Some(event_output.id().to_hex());
                 log::info!("Published source token event: {:?}", source_new_event_id);
             }
-            Ok(_) => {
-                log::warn!("No relays accepted source token event");
+            Ok(event_output) if relay_failures_are_all_duplicates(&event_output) => {
+                let event_id = event_output.id().to_hex();
+                log::info!(
+                    "Source token event already exists on relays, using {}",
+                    event_id
+                );
+                source_new_event_id = Some(event_id);
+            }
+            Ok(event_output) => {
+                log::warn!(
+                    "No relays accepted source token event (failed: {})",
+                    event_output.failed.len()
+                );
                 let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
                 if let Err(queue_err) = queue_event_for_retry(
                     builder,
@@ -338,8 +357,14 @@ pub async fn transfer_between_mints(
             .await
         {
             Ok(event_output) if !event_output.success.is_empty() => {}
-            Ok(_) => {
-                log::warn!("No relays accepted deletion event");
+            Ok(event_output) if relay_failures_are_all_duplicates(&event_output) => {
+                log::info!("Transfer deletion event already exists on relays");
+            }
+            Ok(event_output) => {
+                log::warn!(
+                    "No relays accepted deletion event (failed: {})",
+                    event_output.failed.len()
+                );
                 if let Err(queue_err) =
                     queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None)
                         .await
@@ -397,8 +422,19 @@ pub async fn transfer_between_mints(
                 log::info!("Published target token event: {}", event_id);
                 event_id
             }
-            Ok(_) => {
-                log::warn!("No relays accepted target token event");
+            Ok(event_output) if relay_failures_are_all_duplicates(&event_output) => {
+                let event_id = event_output.id().to_hex();
+                log::info!(
+                    "Target token event already exists on relays, using {}",
+                    event_id
+                );
+                event_id
+            }
+            Ok(event_output) => {
+                log::warn!(
+                    "No relays accepted target token event (failed: {})",
+                    event_output.failed.len()
+                );
                 let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
                 if let Err(queue_err) = queue_event_for_retry(
                     builder,

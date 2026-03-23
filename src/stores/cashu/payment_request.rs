@@ -593,8 +593,8 @@ pub async fn pay_payment_request(
         if !keep_proofs.is_empty() {
             let proof_data: Vec<ProofData> =
                 keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
-            let event_id =
-                new_event_id.unwrap_or_else(|| format!("local-{}", chrono::Utc::now().timestamp()));
+            let event_id = new_event_id
+                .unwrap_or_else(|| format!("local_pending_{}", chrono::Utc::now().timestamp()));
             tokens.push(TokenData {
                 event_id: event_id.clone(),
                 pending_publish: super::types::token_publish_pending(&event_id),

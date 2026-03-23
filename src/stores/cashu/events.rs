@@ -40,17 +40,14 @@ pub async fn queue_nostr_event(
         history_type: None,
         published_event_id: None,
     };
-    PENDING_NOSTR_EVENTS.write().push(pending.clone());
-    if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
+    if let Some(localstore) = SHARED_LOCALSTORE.read().as_ref().cloned() {
         if let Err(e) = localstore.add_pending_event(&pending).await {
-            PENDING_NOSTR_EVENTS
-                .write()
-                .retain(|event| event.id != event_id);
             let message = format!("Failed to persist pending event to IndexedDB: {}", e);
             log::warn!("{}", message);
             return Err(message);
         }
     }
+    PENDING_NOSTR_EVENTS.write().push(pending.clone());
     log::debug!(
         "Queued {} event: {}",
         match event_type {
@@ -67,14 +64,35 @@ pub async fn queue_nostr_event(
 }
 /// Remove a pending event from the queue and IndexedDB
 pub async fn remove_pending_event(event_id: &str) -> Result<(), String> {
-    PENDING_NOSTR_EVENTS.write().retain(|e| e.id != event_id);
-    if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
+    if let Some(localstore) = SHARED_LOCALSTORE.read().as_ref().cloned() {
         localstore
             .remove_pending_event(event_id)
             .await
             .map_err(|e| format!("Failed to remove pending event from IndexedDB: {}", e))?;
     }
+    PENDING_NOSTR_EVENTS.write().retain(|e| e.id != event_id);
     log::debug!("Removed pending event from queue: {}", event_id);
+    Ok(())
+}
+
+async fn store_pending_event_update(updated_event: &PendingNostrEvent) -> Result<(), String> {
+    if let Some(localstore) = SHARED_LOCALSTORE.read().as_ref().cloned() {
+        localstore
+            .update_pending_event(updated_event)
+            .await
+            .map_err(|error| {
+                format!(
+                    "Failed to persist pending event {} update: {}",
+                    updated_event.id, error
+                )
+            })?;
+    }
+
+    let mut events = PENDING_NOSTR_EVENTS.write();
+    if let Some(pos) = events.iter().position(|entry| entry.id == updated_event.id) {
+        events[pos] = updated_event.clone();
+    }
+
     Ok(())
 }
 
@@ -160,18 +178,14 @@ async fn queue_signed_event_for_retry_with_metadata_result(
         history_type,
         published_event_id: None,
     };
-    let pending_event_id = pending_event.id.clone();
-    PENDING_NOSTR_EVENTS.write().push(pending_event.clone());
-    if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
+    if let Some(localstore) = SHARED_LOCALSTORE.read().as_ref().cloned() {
         if let Err(e) = localstore.add_pending_event(&pending_event).await {
-            PENDING_NOSTR_EVENTS
-                .write()
-                .retain(|event| event.id != pending_event_id);
             let message = format!("Failed to persist pending event: {}", e);
             log::warn!("{}", message);
             return Err(message);
         }
     }
+    PENDING_NOSTR_EVENTS.write().push(pending_event.clone());
     log::info!(
         "Queued signed event {} for retry: {}",
         event_id,
@@ -865,15 +879,7 @@ pub async fn process_pending_events() -> Result<usize, String> {
                             // Update retry metadata so history-only retries respect MAX_RETRIES
                             updated_event.retry_count += 1;
                             updated_event.last_retry_at = Some(now);
-                            let mut events = PENDING_NOSTR_EVENTS.write();
-                            if let Some(pos) = events.iter().position(|entry| entry.id == event.id)
-                            {
-                                events[pos] = updated_event.clone();
-                            }
-                            drop(events);
-                            if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
-                                let _ = localstore.update_pending_event(&updated_event).await;
-                            }
+                            store_pending_event_update(&updated_event).await?;
                             history_handled = false;
                         }
                     }
@@ -885,25 +891,10 @@ pub async fn process_pending_events() -> Result<usize, String> {
                         updated_event.published_event_id = Some(nostr_event_id.clone());
                         updated_event.history_amount = None;
                         updated_event.history_type = None;
-                        let mut events = PENDING_NOSTR_EVENTS.write();
-                        if let Some(pos) = events.iter().position(|entry| entry.id == event.id) {
-                            events[pos] = updated_event.clone();
-                        }
-                        drop(events);
-                        if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
-                            if let Err(error) =
-                                localstore.update_pending_event(&updated_event).await
-                            {
-                                log::warn!(
-                                    "Failed to persist completed history state for pending event {}: {}",
-                                    event.id,
-                                    error
-                                );
-                            }
-                        }
+                        store_pending_event_update(&updated_event).await?;
                     }
                 }
-                let _ = remove_pending_event(&event.id).await;
+                remove_pending_event(&event.id).await?;
                 processed_count += 1;
             }
             Err(e) => {
@@ -911,14 +902,7 @@ pub async fn process_pending_events() -> Result<usize, String> {
                 let mut updated_event = event.clone();
                 updated_event.retry_count += 1;
                 updated_event.last_retry_at = Some(now);
-                let mut events = PENDING_NOSTR_EVENTS.write();
-                if let Some(pos) = events.iter().position(|e| e.id == event.id) {
-                    events[pos] = updated_event.clone();
-                }
-                drop(events);
-                if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
-                    let _ = localstore.update_pending_event(&updated_event).await;
-                }
+                store_pending_event_update(&updated_event).await?;
             }
         }
     }

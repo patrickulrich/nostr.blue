@@ -3,7 +3,8 @@
 //! Functions for mint/melt operations (lightning topup and withdrawal).
 use super::events::{
     publish_quote_event, publish_signed_event, queue_event_for_retry,
-    queue_token_event_for_retry_with_history, sign_event_builder, sign_event_builder_with_signer,
+    queue_signed_event_for_retry_result, queue_token_event_for_retry_with_history,
+    sign_event_builder, sign_event_builder_with_signer,
 };
 use super::internal::{
     cleanup_spent_proofs_internal, create_ephemeral_wallet, is_token_spent_error_string,
@@ -699,7 +700,7 @@ async fn publish_melt_events(
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-        let signed_event = sign_event_builder_with_signer(builder.clone(), signer_type).await?;
+        let signed_event = sign_event_builder_with_signer(builder, signer_type).await?;
         if let Some(client) = client.as_ref() {
             match publish_signed_event(client, &signed_event).await {
                 Ok(event_output) if !event_output.success.is_empty() => {
@@ -710,8 +711,8 @@ async fn publish_melt_events(
                 Ok(_) => {
                     log::warn!("No relays accepted token event, queuing for retry");
                     let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                    queue_event_for_retry(
-                        builder,
+                    queue_signed_event_for_retry_result(
+                        signed_event,
                         PendingEventType::TokenEvent,
                         Some(pending_id.clone()),
                         Some(mint_url.to_string()),
@@ -722,8 +723,8 @@ async fn publish_melt_events(
                 Err(e) => {
                     log::warn!("Failed to publish token event, queuing for retry: {}", e);
                     let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                    queue_event_for_retry(
-                        builder,
+                    queue_signed_event_for_retry_result(
+                        signed_event,
                         PendingEventType::TokenEvent,
                         Some(pending_id.clone()),
                         Some(mint_url.to_string()),
@@ -735,8 +736,8 @@ async fn publish_melt_events(
         } else {
             log::warn!("Client not initialized, queuing token event for retry");
             let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-            queue_event_for_retry(
-                builder,
+            queue_signed_event_for_retry_result(
+                signed_event,
                 PendingEventType::TokenEvent,
                 Some(pending_id.clone()),
                 Some(mint_url.to_string()),
