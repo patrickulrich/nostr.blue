@@ -54,6 +54,7 @@ yarn-error.log*
 
 # Android build output
 *.apk
+*.aab
 *.jks
 *.keystore
 android-release-credentials.txt
