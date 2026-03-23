@@ -602,22 +602,22 @@ pub fn AIChat() -> Element {
     rsx! {
         div { class: "min-h-screen flex flex-col bg-background",
             div { class: "sticky top-0 z-20 border-b border-border bg-background/90 backdrop-blur-sm",
-                div { class: "mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-4",
-                    div { class: "flex items-center gap-3",
+                div { class: "mx-auto flex max-w-5xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between",
+                    div { class: "flex min-w-0 items-center gap-3",
                         div { class: "flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary",
                             SparklesIcon { class: "w-5 h-5".to_string() }
                         }
-                        div {
+                        div { class: "min-w-0",
                             h1 { class: "text-xl font-semibold", "AI Chat" }
-                            p { class: "text-sm text-muted-foreground",
+                            p { class: "truncate text-sm text-muted-foreground",
                                 "Provider: {active_provider.name}"
                             }
                         }
                     }
-                    div { class: "flex items-center gap-2",
+                    div { class: "flex w-full min-w-0 items-center gap-2 sm:w-auto sm:justify-end",
                         select {
                             key: "{active_provider.id}:{models.read().len()}:{selected_model}",
-                            class: "h-10 rounded-lg border border-border bg-card px-3 text-sm text-foreground focus:outline-hidden",
+                            class: "h-10 min-w-0 flex-1 rounded-lg border border-border bg-card px-3 text-sm text-foreground focus:outline-hidden sm:w-[18rem] sm:flex-none",
                             value: "{selected_model}",
                             disabled: models.read().is_empty() || *loading.read() || ppq_blocked,
                             onchange: move |evt| {
@@ -669,9 +669,9 @@ pub fn AIChat() -> Element {
                         }
                         button {
                             class: if messages.read().is_empty() {
-                                "flex h-10 w-10 items-center justify-center rounded-lg border border-border text-muted-foreground opacity-50"
+                                "shrink-0 flex h-10 w-10 items-center justify-center rounded-lg border border-border text-muted-foreground opacity-50"
                             } else {
-                                "flex h-10 w-10 items-center justify-center rounded-lg border border-border text-muted-foreground transition hover:bg-accent"
+                                "shrink-0 flex h-10 w-10 items-center justify-center rounded-lg border border-border text-muted-foreground transition hover:bg-accent"
                             },
                             disabled: messages.read().is_empty() || *loading.read(),
                             title: "Clear conversation",
@@ -684,7 +684,7 @@ pub fn AIChat() -> Element {
                             TrashIcon { class: "w-4 h-4".to_string() }
                         }
                         button {
-                            class: "flex h-10 w-10 items-center justify-center rounded-lg border border-border text-muted-foreground transition hover:bg-accent",
+                            class: "shrink-0 flex h-10 w-10 items-center justify-center rounded-lg border border-border text-muted-foreground transition hover:bg-accent",
                             disabled: *loading.read(),
                             title: "AI settings",
                             onclick: move |_| {

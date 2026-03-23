@@ -90,6 +90,29 @@ sync_overlay_dir() {
     done < <(find "$src_dir" -mindepth 1 -print0)
 }
 
+copy_overlay_dir() {
+    local src_dir="$1"
+    local dest_dir="$2"
+
+    mkdir -p "$dest_dir"
+
+    if command -v rsync >/dev/null 2>&1; then
+        rsync --archive "$src_dir"/ "$dest_dir"/
+        return
+    fi
+
+    local path rel
+    while IFS= read -r -d '' path; do
+        rel="${path#"$src_dir"/}"
+        if [ -d "$path" ]; then
+            mkdir -p "$dest_dir/$rel"
+        else
+            mkdir -p "$dest_dir/$(dirname "$rel")"
+            cp "$path" "$dest_dir/$rel"
+        fi
+    done < <(find "$src_dir" -mindepth 1 -print0)
+}
+
 version_field() {
     local field="$1"
     awk -v field="$field" '
@@ -473,10 +496,9 @@ else
     echo "ERROR: Failed to pre-copy file_paths.xml into $DX_ANDROID/app/src/main/res/xml/" >&2
     exit 1
 fi
-if sync_overlay_dir \
+if copy_overlay_dir \
     "$ANDROID_KOTLIN_SRC/dev/dioxus/main" \
-    "$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main" \
-    "MainActivity.kt"
+    "$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main"
 then
     echo "Pre-copied Android Kotlin sources"
 else
@@ -538,6 +560,55 @@ if kotlin_options_match:
         + updated_block
         + content[kotlin_options_match.end():]
     )
+
+compile_options_match = re.search(r'(?ms)^\s*compileOptions\s*\{\s*(.*?)^\s*\}\s*', content)
+compile_options_block = (
+    '    compileOptions {\n'
+    '        sourceCompatibility = JavaVersion.VERSION_17\n'
+    '        targetCompatibility = JavaVersion.VERSION_17\n'
+    '    }\n'
+)
+if compile_options_match:
+    compile_options_body = compile_options_match.group(0)
+    if re.search(r'(?m)^\s*sourceCompatibility\s*=', compile_options_body):
+        compile_options_body = re.sub(
+            r'(?m)^(\s*sourceCompatibility\s*=\s*)[^\n]+$',
+            r'\1JavaVersion.VERSION_17',
+            compile_options_body,
+            count=1,
+        )
+    else:
+        compile_options_body = compile_options_body.replace(
+            "    }\n",
+            "        sourceCompatibility = JavaVersion.VERSION_17\n    }\n",
+            1,
+        )
+    if re.search(r'(?m)^\s*targetCompatibility\s*=', compile_options_body):
+        compile_options_body = re.sub(
+            r'(?m)^(\s*targetCompatibility\s*=\s*)[^\n]+$',
+            r'\1JavaVersion.VERSION_17',
+            compile_options_body,
+            count=1,
+        )
+    else:
+        compile_options_body = compile_options_body.replace(
+            "    }\n",
+            "        targetCompatibility = JavaVersion.VERSION_17\n    }\n",
+            1,
+        )
+    content = (
+        content[:compile_options_match.start()]
+        + compile_options_body
+        + content[compile_options_match.end():]
+    )
+else:
+    insertion_targets = ("    kotlinOptions {", "    buildFeatures {")
+    for target in insertion_targets:
+        if target in content:
+            content = content.replace(target, compile_options_block + target, 1)
+            break
+    else:
+        raise SystemExit(f"failed to find insertion point for compileOptions in {path}")
 
 plugins_block = 'plugins {\n    id("com.android.application")\n    id("org.jetbrains.kotlin.android")\n}\n'
 compiler_options_block = '\nkotlin {\n    compilerOptions {\n        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17\n    }\n}\n'
@@ -651,10 +722,9 @@ fi
 echo ""
 echo "--- Step 4: Overlay Android resources ---"
 if [ -d "$ANDROID_RES_SRC" ]; then
-    sync_overlay_dir \
+    copy_overlay_dir \
         "$ANDROID_RES_SRC" \
-        "$DX_ANDROID/app/src/main/res" \
-        "values/strings.xml"
+        "$DX_ANDROID/app/src/main/res"
     echo "Copied repo-owned Android resources from android/res"
 else
     echo "WARNING: $ANDROID_RES_SRC not found, skipping Android resource overlay"
@@ -662,10 +732,9 @@ fi
 
 echo ""
 echo "--- Step 4c: Copy Android Kotlin sources ---"
-sync_overlay_dir \
+copy_overlay_dir \
     "$ANDROID_KOTLIN_SRC/dev/dioxus/main" \
-    "$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main" \
-    "MainActivity.kt"
+    "$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main"
 echo "Copied native Android Kotlin sources"
 
 echo ""
