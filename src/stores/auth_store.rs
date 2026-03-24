@@ -533,7 +533,7 @@ pub fn get_login_method() -> Option<LoginMethod> {
 pub async fn logout() -> Result<(), String> {
     log::info!("Logging out...");
     let ai_chat_account_key = crate::stores::ai_chat_store::current_account_key();
-    crate::stores::ai_chat_store::clear_chat_history(&ai_chat_account_key)
+    crate::stores::ai_chat_store::clear_chat_state(&ai_chat_account_key)
         .await
         .map_err(|e| format!("Failed to clear AI chat history during logout: {}", e))?;
     crate::stores::notifications::stop_realtime_subscription().await;

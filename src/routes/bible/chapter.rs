@@ -1,14 +1,18 @@
 //! Bible Chapter Reading View
 //! Displays a chapter with verse selection and highlighting
 use crate::components::content_share_modal::{ContentShareModal, ContentType};
+use crate::components::icons::SparklesIcon;
 use crate::components::HighlightModal;
+use crate::routes::Route;
 use crate::services::bible_api::format_selected_verses_reference;
 use crate::services::bible_api::verse_to_plain_text;
+use crate::stores::ai_chat_seed_store::{queue_ai_chat_seed, AiChatSeedPayload, AiChatSeedSource};
 use crate::stores::auth_store;
 use crate::stores::bible_store::{self, ChapterContent, VerseContent};
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use std::collections::HashMap;
+
 /// Build a HashMap mapping verse numbers to plain text for efficient lookup
 fn build_verse_text_map(content: &[ChapterContent]) -> HashMap<u32, String> {
     content
@@ -26,6 +30,28 @@ fn build_verse_text_map(content: &[ChapterContent]) -> HashMap<u32, String> {
         })
         .collect()
 }
+
+fn format_bible_context_for_ai(
+    reference: &str,
+    verses: &[u32],
+    verse_text_map: &HashMap<u32, String>,
+) -> String {
+    let verse_lines = verses
+        .iter()
+        .filter_map(|verse| {
+            verse_text_map
+                .get(verse)
+                .map(|text| format!("{verse} {text}"))
+        })
+        .collect::<Vec<_>>();
+
+    if verse_lines.is_empty() {
+        format!("Bible passage: {reference}")
+    } else {
+        format!("Bible passage: {reference}\n\n{}", verse_lines.join("\n"))
+    }
+}
+
 /// Parse a Bible API link to extract translation, book, and chapter
 /// Format: https://bible.helloao.org/api/{translation}/{book}/{chapter}.json
 fn parse_chapter_api_link(api_link: &str) -> Option<(String, String, u32)> {
@@ -48,8 +74,15 @@ fn parse_chapter_api_link(api_link: &str) -> Option<(String, String, u32)> {
 #[component]
 pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element {
     let translation_for_copy = translation.clone();
+    let translation_for_ai = translation.clone();
     let translation_for_highlight = translation.clone();
+    let translation_for_display = translation.clone();
+    let translation_for_verse_lookup = translation.clone();
+    let translation_for_share = translation.clone();
+    let book_for_display = book.clone();
     let book_for_highlight = book.clone();
+    let book_for_verse_lookup = book.clone();
+    let book_for_share = book.clone();
     let mut selected_verses = use_signal(Vec::<u32>::new);
     let mut show_toolbar = use_signal(|| false);
     let mut show_share_modal = use_signal(|| false);
@@ -201,10 +234,10 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                             match &*chapter_data.read() {
                                 Some(Ok(data)) => rsx! {
                                     h1 { class: "text-xl font-bold", "{data.book.common_name} {chapter}" }
-                                    p { class: "text-sm text-muted-foreground", "{translation}" }
+                                    p { class: "text-sm text-muted-foreground", "{translation_for_display}" }
                                 },
                                 _ => rsx! {
-                                    h1 { class: "text-xl font-bold", "{book} {chapter}" }
+                                    h1 { class: "text-xl font-bold", "{book_for_display} {chapter}" }
                                 },
                             }
                         }
@@ -312,8 +345,8 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                                 let verse_num = *number;
                                                 let is_selected = selected_verses.read().contains(&verse_num);
                                                 let is_highlighted = bible_store::is_verse_highlighted(
-                                                    &translation,
-                                                    &book,
+                                                    &translation_for_verse_lookup,
+                                                    &book_for_verse_lookup,
                                                     chapter,
                                                     verse_num,
                                                 );
@@ -412,6 +445,37 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                 }
                             }
                         }
+                        button {
+                            class: "p-2 hover:bg-muted rounded-lg transition",
+                            title: "Ask AI about these verses",
+                            onclick: move |_| {
+                                if let Some(Ok(ref data)) = *chapter_data.read() {
+                                    let verses = selected_verses.read().clone();
+                                    if verses.is_empty() {
+                                        return;
+                                    }
+
+                                    let book_name = &data.book.common_name;
+                                    let verse_text_map = build_verse_text_map(&data.chapter.content);
+                                    let reference = format_selected_verses_reference(
+                                        book_name,
+                                        chapter,
+                                        &verses,
+                                        &translation_for_ai,
+                                    );
+                                    let message =
+                                        format_bible_context_for_ai(&reference, &verses, &verse_text_map);
+
+                                    queue_ai_chat_seed(AiChatSeedPayload {
+                                        source: AiChatSeedSource::Bible,
+                                        title_hint: Some(reference),
+                                        message,
+                                    });
+                                    navigator().push(Route::AIChat {});
+                                }
+                            },
+                            SparklesIcon { class: "w-5 h-5".to_string() }
+                        }
                         if is_authenticated {
                             button {
                                 class: "p-2 hover:bg-muted rounded-lg transition",
@@ -447,12 +511,12 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                             book_name,
                                             chapter,
                                             &verses,
-                                            &translation,
+                                            &translation_for_share,
                                         );
                                         let url = format!(
                                             "https://nostr.blue/bible/{}/{}/{}",
-                                            urlencoding::encode(&translation),
-                                            urlencoding::encode(&book),
+                                            urlencoding::encode(&translation_for_share),
+                                            urlencoding::encode(&book_for_share),
                                             chapter,
                                         );
                                         share_title.set(reference);
@@ -568,6 +632,27 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_bible_context_for_ai;
+    use std::collections::HashMap;
+
+    #[test]
+    fn formats_bible_context_for_ai_with_reference_and_numbered_verses() {
+        let mut verse_text_map = HashMap::new();
+        verse_text_map.insert(16, "For God so loved the world".to_string());
+        verse_text_map.insert(17, "For God did not send His Son".to_string());
+
+        let formatted =
+            format_bible_context_for_ai("John 3:16-17 (BSB)", &[16, 17], &verse_text_map);
+
+        assert_eq!(
+            formatted,
+            "Bible passage: John 3:16-17 (BSB)\n\n16 For God so loved the world\n17 For God did not send His Son"
+        );
     }
 }
 /// Helper function to render verse content

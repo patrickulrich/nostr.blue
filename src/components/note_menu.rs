@@ -1,6 +1,8 @@
 use crate::components::board::item_selector::PinToBoardModal;
 use crate::components::icons::MoreHorizontalIcon;
 use crate::components::{AddToListModal, ReportModal};
+use crate::routes::Route;
+use crate::stores::ai_chat_seed_store::{queue_ai_chat_seed, AiChatSeedPayload, AiChatSeedSource};
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::pin_boards_store::{PinContentType, PinReference};
 use crate::stores::pinned_notes;
@@ -11,6 +13,28 @@ use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use nostr_sdk::nips::nip19::{FromBech32, ToBech32};
 use nostr_sdk::prelude::*;
 use std::time::Duration;
+
+fn format_note_context_for_ai(event: &nostr_sdk::Event) -> String {
+    let author = event
+        .pubkey
+        .to_bech32()
+        .unwrap_or_else(|_| event.pubkey.to_string());
+    let event_id = event
+        .id
+        .to_bech32()
+        .unwrap_or_else(|_| event.id.to_string());
+    let content = if event.content.trim().is_empty() {
+        "(no content)".to_string()
+    } else {
+        event.content.clone()
+    };
+
+    format!(
+        "Note for discussion\nAuthor: {author}\nCreated: {}\nEvent ID: {event_id}\n\nContent:\n{content}",
+        event.created_at.to_human_datetime()
+    )
+}
+
 #[derive(Props, Clone, PartialEq)]
 pub struct NoteMenuProps {
     /// Public key of the note author
@@ -313,6 +337,21 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                         },
                         span { class: "text-sm", "Copy Note ID" }
                     }
+                    button {
+                        class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
+                        onclick: move |e: MouseEvent| {
+                            e.stop_propagation();
+                            is_open.set(false);
+
+                            queue_ai_chat_seed(AiChatSeedPayload {
+                                source: AiChatSeedSource::Note,
+                                title_hint: Some("Note discussion".to_string()),
+                                message: format_note_context_for_ai(&event),
+                            });
+                            navigator().push(Route::AIChat {});
+                        },
+                        span { class: "text-sm", "AI Chat" }
+                    }
                     if is_own_note {
                         button {
                             class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
@@ -469,5 +508,27 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                 on_close: move |_| show_pin_to_board_modal.set(false),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_note_context_for_ai;
+    use nostr_sdk::{EventBuilder, Keys, Kind, Timestamp};
+
+    #[test]
+    fn formats_note_context_for_ai_with_bech32_and_metadata() {
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::TextNote, "hello from nostr.blue")
+            .custom_created_at(Timestamp::from(1_700_000_000))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        let formatted = format_note_context_for_ai(&event);
+
+        assert!(formatted.starts_with("Note for discussion\nAuthor: npub"));
+        assert!(formatted.contains("\nCreated: "));
+        assert!(formatted.contains("\nEvent ID: note1"));
+        assert!(formatted.ends_with("\n\nContent:\nhello from nostr.blue"));
     }
 }

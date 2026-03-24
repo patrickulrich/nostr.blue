@@ -1,3 +1,4 @@
+pub mod ai_chat_seed_store;
 pub mod ai_chat_store;
 pub mod ai_provider_store;
 pub(crate) mod ai_web_db;
