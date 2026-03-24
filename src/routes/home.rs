@@ -2057,6 +2057,27 @@ fn build_global_feed_filter(until: Option<u64>) -> Filter {
     filter
 }
 
+const FOLLOWING_INITIAL_WINDOW_SECS: u64 = 86400;
+
+fn build_following_feed_filter(
+    authors: Vec<PublicKey>,
+    until: Option<u64>,
+    now: Timestamp,
+) -> Filter {
+    let mut filter = Filter::new()
+        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
+        .authors(authors)
+        .limit(50);
+
+    if let Some(until_ts) = until {
+        filter = filter.until(Timestamp::from(until_ts));
+    } else {
+        filter = filter.since(now - Duration::from_secs(FOLLOWING_INITIAL_WINDOW_SECS));
+    }
+
+    filter
+}
+
 async fn sync_global_feed_page(until: Option<u64>) {
     let Some(client) = nostr_client::get_client() else {
         log::debug!("Skipping global feed negentropy sync: client unavailable");
@@ -2127,13 +2148,7 @@ async fn load_following_feed(until: Option<u64>) -> Result<(Vec<FeedItem>, bool)
         let global = load_global_feed(until).await?;
         return Ok((global, true));
     }
-    let mut filter = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
-        .authors(authors)
-        .limit(50);
-    if let Some(until_ts) = until {
-        filter = filter.until(Timestamp::from(until_ts));
-    }
+    let filter = build_following_feed_filter(authors, until, Timestamp::now());
     log::info!(
         "Fetching events from {} followed accounts",
         filter.authors.as_ref().map(|a| a.len()).unwrap_or(0)
@@ -2246,13 +2261,7 @@ where
         let global = load_global_feed(until).await?;
         return Ok((global, true));
     }
-    let mut filter = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
-        .authors(authors)
-        .limit(50);
-    if let Some(until_ts) = until {
-        filter = filter.until(Timestamp::from(until_ts));
-    }
+    let filter = build_following_feed_filter(authors, until, Timestamp::now());
     let mut all_items: Vec<FeedItem> = Vec::new();
     let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
     // Use immediate streaming for faster time-to-first-post
@@ -2587,10 +2596,43 @@ mod tests {
         FeedItem::OriginalPost(event)
     }
 
+    fn test_author() -> PublicKey {
+        Keys::generate().public_key()
+    }
+
     #[test]
     fn exclusive_cursor_uses_saturating_sub() {
         let item = test_post(10, "hello");
         assert_eq!(exclusive_pagination_cursor(Some(&item)), Some(9));
+    }
+
+    #[test]
+    fn following_filter_initial_load_uses_recent_window() {
+        let now = Timestamp::from(200_000);
+        let author = test_author();
+
+        let filter = build_following_feed_filter(vec![author], None, now);
+
+        assert_eq!(filter.authors.as_ref().map(|a| a.len()), Some(1));
+        assert_eq!(filter.limit, Some(50));
+        assert_eq!(
+            filter.since,
+            Some(now - Duration::from_secs(FOLLOWING_INITIAL_WINDOW_SECS))
+        );
+        assert_eq!(filter.until, None);
+    }
+
+    #[test]
+    fn following_filter_paginated_load_uses_until_without_since() {
+        let now = Timestamp::from(200_000);
+        let author = test_author();
+
+        let filter = build_following_feed_filter(vec![author], Some(123_456), now);
+
+        assert_eq!(filter.authors.as_ref().map(|a| a.len()), Some(1));
+        assert_eq!(filter.limit, Some(50));
+        assert_eq!(filter.until, Some(Timestamp::from(123_456)));
+        assert_eq!(filter.since, None);
     }
 
     #[test]
