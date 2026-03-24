@@ -171,6 +171,8 @@ pub fn AIChat() -> Element {
         conversations: conversations.read().clone(),
         active_conversation_id: active_conversation_id.read().clone(),
     });
+    let active_conversation_id_value = active_conversation_id.read().clone();
+    let persisted_messages_value = persisted_messages.read().clone();
 
     use_effect(move || {
         if !AI_CHAT_PROVIDER_PERSISTENCE_ENABLED {
@@ -252,17 +254,18 @@ pub fn AIChat() -> Element {
         });
     });
 
-    use_effect(move || {
-        let active_id = active_conversation_id.read().clone();
-        let persisted_messages = persisted_messages.read().clone();
-        if active_id.is_none() {
-            return;
-        }
+    use_effect(use_reactive(
+        (&active_conversation_id_value, &persisted_messages_value),
+        move |(active_id, persisted_messages)| {
+            if active_id.is_none() {
+                return;
+            }
 
-        conversations.with_mut(|items| {
-            sync_active_conversation_state(items, active_id.as_deref(), &persisted_messages);
-        });
-    });
+            conversations.with_mut(|items| {
+                sync_active_conversation_state(items, active_id.as_deref(), &persisted_messages);
+            });
+        },
+    ));
 
     use_effect(move || {
         let selected = selected_model.read().clone();
@@ -1475,12 +1478,17 @@ fn derive_conversation_title(
     }
 
     let Some(first_user_message) = persisted_messages.iter().find(|message| {
-        message.role == PersistedChatRole::User && !message.content.trim().is_empty()
+        message.role == PersistedChatRole::User
+            && (!message.content.trim().is_empty() || !message.images.is_empty())
     }) else {
         return current_title.to_string();
     };
 
     let normalized = first_user_message.content.trim();
+    if normalized.is_empty() {
+        return "Image".to_string();
+    }
+
     if normalized.chars().count() <= 48 {
         normalized.to_string()
     } else {
@@ -1525,11 +1533,7 @@ fn delete_conversation_state(
         .collect::<Vec<_>>();
 
     if next_conversations.is_empty() {
-        let conversation = new_conversation();
-        let next_messages = Vec::new();
-        let next_active_id = Some(conversation.id.clone());
-        next_conversations.push(conversation);
-        return (next_conversations, next_active_id, next_messages);
+        return (next_conversations, None, Vec::new());
     }
 
     next_conversations.sort_by_key(|conversation| std::cmp::Reverse(conversation.updated_at_ms));
@@ -2150,14 +2154,14 @@ impl From<ImageInsertData> for ChatImage {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_api_messages, history_save_snapshot_key, resolve_selected_model,
-        seeded_conversation_with_timestamp, should_suggest_image_model, ChatImage, DisplayMessage,
-        DisplayRole,
+        build_api_messages, delete_conversation_state, derive_conversation_title,
+        history_save_snapshot_key, resolve_selected_model, seeded_conversation_with_timestamp,
+        should_suggest_image_model, ChatImage, DisplayMessage, DisplayRole,
     };
     use crate::services::ai_chat::{ChatMessageContent, ChatMessagePart, ChatModel, ChatModelKind};
     use crate::stores::ai_chat_store::{
-        PersistedChatMessage, PersistedChatRole, PersistedChatState, PersistedConversation,
-        PersistedToolCall,
+        PersistedChatImage, PersistedChatMessage, PersistedChatRole, PersistedChatState,
+        PersistedConversation, PersistedToolCall,
     };
 
     fn state_with_messages(messages: Vec<PersistedChatMessage>) -> PersistedChatState {
@@ -2304,6 +2308,82 @@ mod tests {
         let conversation = seeded_conversation_with_timestamp(42, Some("   "), "Seeded message");
 
         assert_eq!(conversation.title, "New Chat");
+    }
+
+    #[test]
+    fn derive_conversation_title_uses_image_fallback_for_image_only_first_message() {
+        let title = derive_conversation_title(
+            "New Chat",
+            &[PersistedChatMessage {
+                id: "1".to_string(),
+                role: PersistedChatRole::User,
+                content: String::new(),
+                images: vec![PersistedChatImage {
+                    url: "https://cdn.example.com/image.png".to_string(),
+                    alt: String::new(),
+                    title: String::new(),
+                }],
+                tool_calls: vec![],
+            }],
+        );
+
+        assert_eq!(title, "Image");
+    }
+
+    #[test]
+    fn delete_conversation_state_returns_empty_state_when_last_conversation_is_removed() {
+        let conversation = PersistedConversation {
+            id: "conversation-1".to_string(),
+            title: "New Chat".to_string(),
+            messages: vec![PersistedChatMessage {
+                id: "message-1".to_string(),
+                role: PersistedChatRole::User,
+                content: "hello".to_string(),
+                images: vec![],
+                tool_calls: vec![],
+            }],
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        };
+
+        let (conversations, active_id, messages) =
+            delete_conversation_state(&[conversation], "conversation-1");
+
+        assert!(conversations.is_empty());
+        assert!(active_id.is_none());
+        assert!(messages.is_empty());
+    }
+
+    #[test]
+    fn delete_conversation_state_selects_most_recent_remaining_conversation() {
+        let older = PersistedConversation {
+            id: "conversation-1".to_string(),
+            title: "Older".to_string(),
+            messages: vec![],
+            created_at_ms: 1,
+            updated_at_ms: 5,
+        };
+        let newer = PersistedConversation {
+            id: "conversation-2".to_string(),
+            title: "Newer".to_string(),
+            messages: vec![PersistedChatMessage {
+                id: "message-1".to_string(),
+                role: PersistedChatRole::Assistant,
+                content: "welcome".to_string(),
+                images: vec![],
+                tool_calls: vec![],
+            }],
+            created_at_ms: 2,
+            updated_at_ms: 10,
+        };
+
+        let (conversations, active_id, messages) =
+            delete_conversation_state(&[older, newer.clone()], "conversation-1");
+
+        assert_eq!(conversations.len(), 1);
+        assert_eq!(active_id, Some("conversation-2".to_string()));
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, newer.messages[0].content);
     }
 
     #[test]

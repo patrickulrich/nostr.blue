@@ -1,14 +1,8 @@
 use dioxus::prelude::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AiChatSeedSource {
-    Bible,
-    Note,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AiChatSeedPayload {
-    pub source: AiChatSeedSource,
+    pub source: String,
     pub title_hint: Option<String>,
     pub message: String,
 }
@@ -33,14 +27,14 @@ pub fn take_ai_chat_seed() -> Option<AiChatSeedPayload> {
 
 #[cfg(test)]
 mod tests {
-    use super::{store_pending_seed, take_pending_seed, AiChatSeedPayload, AiChatSeedSource};
+    use super::{store_pending_seed, take_pending_seed, AiChatSeedPayload};
 
     #[test]
     fn queued_seed_is_consumed_once() {
         let mut pending = None;
 
         let payload = AiChatSeedPayload {
-            source: AiChatSeedSource::Bible,
+            source: "bible".to_string(),
             title_hint: Some("John 3:16".to_string()),
             message: "Bible passage: John 3:16".to_string(),
         };

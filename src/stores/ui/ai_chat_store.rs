@@ -130,6 +130,20 @@ pub fn current_account_key() -> String {
     account_key_for_pubkey(current_pubkey.as_deref())
 }
 
+pub fn has_saved_conversation_context(state: &PersistedChatState) -> bool {
+    if let Some(active_id) = state.active_conversation_id.as_deref() {
+        if state
+            .conversations
+            .iter()
+            .any(|conversation| conversation.id == active_id)
+        {
+            return true;
+        }
+    }
+
+    !state.conversations.is_empty()
+}
+
 #[cfg(not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))))]
 fn storage_key(account_key: &str) -> String {
     format!("{}_{}", STORAGE_KEY_PREFIX, account_key)
@@ -344,5 +358,44 @@ mod tests {
 
         assert!(state.conversations.is_empty());
         assert!(state.active_conversation_id.is_none());
+    }
+
+    #[test]
+    fn saved_conversation_context_is_true_for_valid_active_conversation() {
+        let state = PersistedChatState {
+            active_conversation_id: Some("conversation-1".to_string()),
+            conversations: vec![PersistedConversation {
+                id: "conversation-1".to_string(),
+                title: "New Chat".to_string(),
+                messages: vec![],
+                created_at_ms: 1,
+                updated_at_ms: 1,
+            }],
+        };
+
+        assert!(has_saved_conversation_context(&state));
+    }
+
+    #[test]
+    fn saved_conversation_context_is_true_when_conversations_exist_without_active_id() {
+        let state = PersistedChatState {
+            active_conversation_id: None,
+            conversations: vec![PersistedConversation {
+                id: "conversation-1".to_string(),
+                title: "New Chat".to_string(),
+                messages: vec![],
+                created_at_ms: 1,
+                updated_at_ms: 1,
+            }],
+        };
+
+        assert!(has_saved_conversation_context(&state));
+    }
+
+    #[test]
+    fn saved_conversation_context_is_false_for_empty_state() {
+        assert!(!has_saved_conversation_context(
+            &PersistedChatState::default()
+        ));
     }
 }

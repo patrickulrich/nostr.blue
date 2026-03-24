@@ -2,13 +2,13 @@
 //! Displays a chapter with verse selection and highlighting
 use crate::components::content_share_modal::{ContentShareModal, ContentType};
 use crate::components::icons::SparklesIcon;
-use crate::components::HighlightModal;
+use crate::components::{ConfirmModal, HighlightModal};
 use crate::routes::Route;
 use crate::services::bible_api::format_selected_verses_reference;
 use crate::services::bible_api::verse_to_plain_text;
-use crate::stores::ai_chat_seed_store::{queue_ai_chat_seed, AiChatSeedPayload, AiChatSeedSource};
-use crate::stores::auth_store;
+use crate::stores::ai_chat_seed_store::{queue_ai_chat_seed, AiChatSeedPayload};
 use crate::stores::bible_store::{self, ChapterContent, VerseContent};
+use crate::stores::{ai_chat_store, auth_store};
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use std::collections::HashMap;
@@ -73,6 +73,7 @@ fn parse_chapter_api_link(api_link: &str) -> Option<(String, String, u32)> {
 /// Bible Chapter Reading View
 #[component]
 pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element {
+    let navigator = navigator();
     let translation_for_copy = translation.clone();
     let translation_for_ai = translation.clone();
     let translation_for_highlight = translation.clone();
@@ -93,6 +94,8 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
     let mut show_highlight_modal = use_signal(|| false);
     let mut pending_highlight_text = use_signal(String::new);
     let mut pending_highlight_reference = use_signal(String::new);
+    let mut show_ai_chat_confirm = use_signal(|| false);
+    let mut pending_ai_chat_seed = use_signal(|| None::<AiChatSeedPayload>);
     let is_authenticated = auth_store::is_authenticated();
     let toast = consume_toast();
     let current_key = format!("{}/{}/{}", translation, book, chapter);
@@ -465,13 +468,34 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                     );
                                     let message =
                                         format_bible_context_for_ai(&reference, &verses, &verse_text_map);
-
-                                    queue_ai_chat_seed(AiChatSeedPayload {
-                                        source: AiChatSeedSource::Bible,
+                                    let payload = AiChatSeedPayload {
+                                        source: "bible".to_string(),
                                         title_hint: Some(reference),
                                         message,
+                                    };
+                                    let nav = navigator;
+                                    spawn(async move {
+                                        let account_key = ai_chat_store::current_account_key();
+                                        match ai_chat_store::load_chat_state(&account_key).await {
+                                            Ok(state)
+                                                if ai_chat_store::has_saved_conversation_context(&state) =>
+                                            {
+                                                pending_ai_chat_seed.set(Some(payload));
+                                                show_ai_chat_confirm.set(true);
+                                            }
+                                            Ok(_) => {
+                                                queue_ai_chat_seed(payload);
+                                                nav.push(Route::AIChat {});
+                                            }
+                                            Err(err) => {
+                                                log::warn!(
+                                                    "Failed to load AI chat state before Bible seed: {err}"
+                                                );
+                                                queue_ai_chat_seed(payload);
+                                                nav.push(Route::AIChat {});
+                                            }
+                                        }
                                     });
-                                    navigator().push(Route::AIChat {});
                                 }
                             },
                             SparklesIcon { class: "w-5 h-5".to_string() }
@@ -576,6 +600,26 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                     image_url: None,
                     content: Some(share_content.read().clone()),
                     on_close: move |_| show_share_modal.set(false),
+                }
+            }
+            if *show_ai_chat_confirm.read() {
+                ConfirmModal {
+                    title: "Start a new AI chat?".to_string(),
+                    message: "This opens AI Chat with the selected verses as context and switches away from your current saved conversation.".to_string(),
+                    confirm_text: Some("Start new chat".to_string()),
+                    cancel_text: Some("Cancel".to_string()),
+                    on_confirm: move |_| {
+                        if let Some(payload) = pending_ai_chat_seed.read().clone() {
+                            queue_ai_chat_seed(payload);
+                            navigator.push(Route::AIChat {});
+                        }
+                        pending_ai_chat_seed.set(None);
+                        show_ai_chat_confirm.set(false);
+                    },
+                    on_cancel: move |_| {
+                        pending_ai_chat_seed.set(None);
+                        show_ai_chat_confirm.set(false);
+                    },
                 }
             }
             if *show_highlight_modal.read() {

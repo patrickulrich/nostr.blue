@@ -224,3 +224,11 @@
   color: var(--secondary-color-5);
   font-size: 0.875rem;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet,
+  .sheet-root {
+    animation: none !important;
+    transition: none !important;
+  }
+}
