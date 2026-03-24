@@ -40,6 +40,7 @@ pub use ui::emoji_store;
 pub use ui::notifications;
 pub use ui::settings_store;
 pub use ui::sidebar_store;
+pub use ui::sync_store;
 pub use ui::theme_store;
 
 pub mod auth_store;

@@ -126,6 +126,35 @@ fn call_static_string_method(
     Ok(result_str.to_string_lossy().into_owned())
 }
 
+fn call_static_string_method_with_string_arg(
+    env: &mut jni::JNIEnv,
+    class: &jni::objects::JClass,
+    method_name: &str,
+    arg: &str,
+) -> Result<String, String> {
+    use jni::objects::JValue;
+
+    let context =
+        unsafe { jni::objects::JObject::from_raw(ndk_context::android_context().context().cast()) };
+    let j_arg = env.new_string(arg).map_err(|e| e.to_string())?;
+
+    let result = env
+        .call_static_method(
+            class,
+            method_name,
+            "(Landroid/content/Context;Ljava/lang/String;)Ljava/lang/String;",
+            &[JValue::Object(&context), JValue::Object(&j_arg)],
+        )
+        .map_err(|e| e.to_string())?
+        .l()
+        .map_err(|e| e.to_string())?;
+
+    let result_str = env
+        .get_string((&result).into())
+        .map_err(|e| e.to_string())?;
+    Ok(result_str.to_string_lossy().into_owned())
+}
+
 fn call_static_void_method(
     env: &mut jni::JNIEnv,
     class: &jni::objects::JClass,
@@ -158,6 +187,30 @@ pub fn finish_app() -> Result<(), String> {
         .ok_or("Failed to find MainActivity class")?;
 
     call_static_void_method(&mut env, &class, "finishApp")
+}
+
+pub fn open_lightning_uri(uri: &str) -> Result<(), String> {
+    let vm = get_jvm().ok_or("Failed to get JavaVM")?;
+    let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
+
+    let ctx = ndk_context::android_context();
+    let context = unsafe { jni::objects::JObject::from_raw(ctx.context().cast()) };
+
+    let class = find_app_class(&mut env, &context, "dev.dioxus.main.MainActivity")
+        .ok_or("Failed to find MainActivity class")?;
+
+    let result =
+        call_static_string_method_with_string_arg(&mut env, &class, "openLightningUri", uri)?;
+
+    if result.starts_with("error:") {
+        return Err(result);
+    }
+
+    if result != "launched" {
+        return Err(format!("Unexpected lightning open result: {result}"));
+    }
+
+    Ok(())
 }
 
 pub async fn pick_file() -> Result<(Vec<u8>, String), String> {

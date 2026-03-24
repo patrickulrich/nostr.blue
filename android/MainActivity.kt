@@ -334,6 +334,46 @@ class MainActivity : WryActivity() {
             }
         }
 
+        @JvmStatic
+        fun openLightningUri(@Suppress("UNUSED_PARAMETER") context: Context, uri: String): String {
+            return try {
+                val activity = synchronized(lock) { instance }
+                if (activity == null) {
+                    Log.e(TAG, "openLightningUri: no Activity instance")
+                    return "error:no_instance"
+                }
+
+                val lightningUri = Uri.parse(uri)
+                val intent = Intent(Intent.ACTION_VIEW, lightningUri).apply {
+                    addCategory(Intent.CATEGORY_BROWSABLE)
+                }
+
+                val hasHandler = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    context.packageManager.queryIntentActivities(
+                        intent,
+                        PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong())
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+                }.isNotEmpty()
+
+                if (!hasHandler) {
+                    Log.w(TAG, "openLightningUri: no handler for $uri")
+                    return "error:no_handler"
+                }
+
+                activity.runOnUiThread {
+                    val chooser = Intent.createChooser(intent, "Open Lightning payment")
+                    activity.startActivity(chooser)
+                }
+                "launched"
+            } catch (e: Exception) {
+                Log.e(TAG, "openLightningUri failed for $uri", e)
+                "error:${e.message}"
+            }
+        }
+
         private fun querySignerPackages(context: Context): Set<String> {
             val intent = Intent().apply {
                 action = Intent.ACTION_VIEW
