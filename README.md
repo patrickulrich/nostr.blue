@@ -291,7 +291,7 @@ dx serve --platform desktop --no-default-features --features desktop
 | [NIP-59](https://github.com/nostr-protocol/nips/blob/master/59.md) | Gift Wrap | ✅ |
 | [NIP-60](https://github.com/nostr-protocol/nips/blob/master/60.md) | Cashu Wallet | ✅ |
 | [NIP-61](https://github.com/nostr-protocol/nips/blob/master/61.md) | Nutzaps | ✅ |
-| [NIP-62](https://github.com/nostr-protocol/nips/blob/master/62.md) | Request to Vanish | ❌ |
+| [NIP-62](https://github.com/nostr-protocol/nips/blob/master/62.md) | Request to Vanish | ✅ |
 | [NIP-64](https://github.com/nostr-protocol/nips/blob/master/64.md) | Chess (PGN) | ❌ |
 | [NIP-65](https://github.com/nostr-protocol/nips/blob/master/65.md) | Relay List Metadata | ✅ |
 | [NIP-66](https://github.com/nostr-protocol/nips/blob/master/66.md) | Relay Discovery | ❌ |

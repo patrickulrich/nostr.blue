@@ -6,9 +6,30 @@ use crate::stores::{
     auth_store, blossom_store, nostr_client, nwc_store, reactions_store, relay, settings_store,
     sync_store, theme_store,
 };
-use crate::utils::{format_relative_time_or, time::format_relative_time_ex};
+use crate::utils::{format_relative_time_or, relay as relay_utils, time::format_relative_time_ex};
 use dioxus::prelude::*;
 use nostr_sdk::{Timestamp, ToBech32};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum VanishRelayScope {
+    AllRelays,
+    SelectedRelays,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum VanishModalStep {
+    Warning,
+    Configure,
+    Result,
+}
+
+#[derive(Clone)]
+struct VanishPublishSummary {
+    success_count: usize,
+    total_attempted: usize,
+    failed_count: usize,
+}
+
 #[component]
 pub fn Settings() -> Element {
     let theme = theme_store::THEME.read();
@@ -801,6 +822,9 @@ pub fn Settings() -> Element {
                     }
                 }
             }
+            if auth.is_authenticated {
+                DangerZoneSection {}
+            }
         }
         if *show_nwc_modal.read() {
             NwcSetupModal { on_close: move |_| show_nwc_modal.set(false) }
@@ -1019,6 +1043,400 @@ fn render_account_info() -> Element {
             if let Some(error) = logout_error.read().as_ref() {
                 div { class: "rounded-lg bg-red-100 p-3 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-300",
                     "{error}"
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn DangerZoneSection() -> Element {
+    let mut show_vanish_modal = use_signal(|| false);
+
+    rsx! {
+        div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-red-200 dark:border-red-800",
+            div { class: "flex items-start justify-between gap-4 mb-4",
+                div {
+                    h3 { class: "text-xl font-semibold text-red-900 dark:text-red-200",
+                        "Danger Zone"
+                    }
+                    p { class: "mt-2 text-sm text-red-800 dark:text-red-300",
+                        "Delete Account publishes a NIP-62 vanish request to your relay universe and removes local auth state once at least one relay accepts it."
+                    }
+                }
+                span { class: "text-xs text-red-700 dark:text-red-300 whitespace-nowrap",
+                    "NIP-62"
+                }
+            }
+            button {
+                class: "w-full px-4 py-3 border border-red-300 dark:border-red-700 text-red-700 dark:text-red-200 rounded-lg font-medium transition hover:bg-red-100 dark:hover:bg-red-900/30",
+                onclick: move |_| show_vanish_modal.set(true),
+                "Delete Account"
+            }
+        }
+        if *show_vanish_modal.read() {
+            VanishAccountModal {
+                on_close: move |_| show_vanish_modal.set(false),
+            }
+        }
+    }
+}
+
+#[component]
+fn VanishAccountModal(on_close: EventHandler<()>) -> Element {
+    let relay_candidates = relay_utils::vanish_relay_urls();
+    let select_all_relay_candidates = relay_candidates.clone();
+    let publish_all_relay_candidates = relay_candidates.clone();
+    let relay_count = relay_candidates.len();
+    let mut step = use_signal(|| VanishModalStep::Warning);
+    let mut scope = use_signal(|| VanishRelayScope::AllRelays);
+    let mut selected_relays = use_signal(Vec::<String>::new);
+    let mut reason = use_signal(String::new);
+    let mut publish_error = use_signal(|| None::<String>);
+    let mut logout_error = use_signal(|| None::<String>);
+    let mut publish_summary = use_signal(|| None::<VanishPublishSummary>);
+    let mut is_publishing = use_signal(|| false);
+    let mut is_logging_out = use_signal(|| false);
+
+    let selected_count = selected_relays.read().len();
+    let targeted_count = if *scope.read() == VanishRelayScope::AllRelays {
+        relay_count
+    } else {
+        selected_count
+    };
+    let can_publish = !*is_publishing.read()
+        && relay_count > 0
+        && match *scope.read() {
+            VanishRelayScope::AllRelays => true,
+            VanishRelayScope::SelectedRelays => selected_count > 0,
+        };
+    let modal_title = match *step.read() {
+        VanishModalStep::Warning => "Delete Account",
+        VanishModalStep::Configure => "Request To Vanish",
+        VanishModalStep::Result => "Relay Delivery Results",
+    };
+
+    rsx! {
+        div { class: "fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4",
+            div {
+                class: "bg-white dark:bg-gray-900 border border-border rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto",
+                role: "dialog",
+                aria_modal: "true",
+                div { class: "p-6 border-b border-border",
+                    h2 { class: "text-xl font-semibold text-gray-900 dark:text-white",
+                        "{modal_title}"
+                    }
+                    p { class: "mt-2 text-sm text-gray-600 dark:text-gray-400",
+                        "This flow publishes a kind 62 event to the relays configured for this account."
+                    }
+                }
+                div { class: "p-6 space-y-5",
+                    match *step.read() {
+                        VanishModalStep::Warning => rsx! {
+                            div { class: "rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-4 space-y-3",
+                                p { class: "text-sm text-red-900 dark:text-red-200 font-medium",
+                                    "This action is irreversible."
+                                }
+                                p { class: "text-sm text-red-800 dark:text-red-300",
+                                    "Participating relays will be asked to delete all of your events up to the timestamp of this request."
+                                }
+                                p { class: "text-sm text-red-800 dark:text-red-300",
+                                    "Your keys are not destroyed. Anyone with those keys can publish again later."
+                                }
+                            }
+                            div { class: "rounded-xl border border-border bg-muted/40 p-4",
+                                p { class: "text-sm text-gray-700 dark:text-gray-300",
+                                    if relay_count > 0 {
+                                        {format!("Current relay universe: {} relay(s) from your user and app-managed relay sets.", relay_count)}
+                                    } else {
+                                        {"No relay targets are available right now. Add relays in Settings before sending a vanish request.".to_string()}
+                                    }
+                                }
+                            }
+                        },
+                        VanishModalStep::Configure => rsx! {
+                            div { class: "space-y-4",
+                                div { class: "grid gap-3 md:grid-cols-2",
+                                    button {
+                                        class: if *scope.read() == VanishRelayScope::AllRelays {
+                                            "rounded-xl border-2 border-red-500 bg-red-50 dark:bg-red-900/20 p-4 text-left"
+                                        } else {
+                                            "rounded-xl border border-border bg-muted/30 p-4 text-left hover:bg-muted/50 transition"
+                                        },
+                                        onclick: move |_| {
+                                            scope.set(VanishRelayScope::AllRelays);
+                                            publish_error.set(None);
+                                            logout_error.set(None);
+                                        },
+                                        p { class: "font-medium text-gray-900 dark:text-white", "All Relays" }
+                                        p { class: "mt-1 text-sm text-gray-600 dark:text-gray-400",
+                                            "Use your general, DM, search, local, and broadcast relay sets, excluding blocked relays."
+                                        }
+                                    }
+                                    button {
+                                        class: if *scope.read() == VanishRelayScope::SelectedRelays {
+                                            "rounded-xl border-2 border-red-500 bg-red-50 dark:bg-red-900/20 p-4 text-left"
+                                        } else {
+                                            "rounded-xl border border-border bg-muted/30 p-4 text-left hover:bg-muted/50 transition"
+                                        },
+                                        onclick: move |_| {
+                                            scope.set(VanishRelayScope::SelectedRelays);
+                                            publish_error.set(None);
+                                            logout_error.set(None);
+                                        },
+                                        p { class: "font-medium text-gray-900 dark:text-white", "Selected Relays" }
+                                        p { class: "mt-1 text-sm text-gray-600 dark:text-gray-400",
+                                            "Choose a subset from the same relay universe."
+                                        }
+                                    }
+                                }
+                                div { class: "rounded-xl border border-border bg-muted/30 p-4",
+                                    p { class: "text-sm font-medium text-gray-900 dark:text-white",
+                                        "Target Summary"
+                                    }
+                                    p { class: "mt-1 text-sm text-gray-600 dark:text-gray-400",
+                                        {format!("{} relay(s) will receive this request.", targeted_count)}
+                                    }
+                                }
+                                if *scope.read() == VanishRelayScope::SelectedRelays {
+                                    div { class: "space-y-3",
+                                        div { class: "flex items-center justify-between gap-3",
+                                            p { class: "text-sm font-medium text-gray-900 dark:text-white",
+                                                "Select relays"
+                                            }
+                                            div { class: "flex gap-2",
+                                                button {
+                                                    class: "px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-accent transition",
+                                                    onclick: move |_| selected_relays.set(select_all_relay_candidates.clone()),
+                                                    disabled: relay_candidates.is_empty(),
+                                                    "Select All"
+                                                }
+                                                button {
+                                                    class: "px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-accent transition",
+                                                    onclick: move |_| selected_relays.set(Vec::new()),
+                                                    disabled: selected_count == 0,
+                                                    "Clear"
+                                                }
+                                            }
+                                        }
+                                        div { class: "max-h-64 overflow-y-auto space-y-2 pr-1",
+                                            if relay_candidates.is_empty() {
+                                                p { class: "text-sm text-gray-600 dark:text-gray-400",
+                                                    "No relay targets are available."
+                                                }
+                                            } else {
+                                                {relay_candidates.iter().map(|relay_url| {
+                                                    let relay_url_value = relay_url.clone();
+                                                    let relay_is_selected = selected_relays.read().contains(&relay_url_value);
+                                                    rsx! {
+                                                        button {
+                                                            key: "{relay_url_value}",
+                                                            class: if relay_is_selected {
+                                                                "w-full rounded-xl border-2 border-red-500 bg-red-50 dark:bg-red-900/20 px-4 py-3 text-left"
+                                                            } else {
+                                                                "w-full rounded-xl border border-border bg-muted/30 px-4 py-3 text-left hover:bg-muted/50 transition"
+                                                            },
+                                                            onclick: move |_| {
+                                                                let mut relays = selected_relays.write();
+                                                                if let Some(index) = relays.iter().position(|url| url == &relay_url_value) {
+                                                                    relays.remove(index);
+                                                                } else {
+                                                                    relays.push(relay_url_value.clone());
+                                                                }
+                                                            },
+                                                            div { class: "flex items-center justify-between gap-3",
+                                                                p { class: "font-mono text-xs text-gray-900 dark:text-white break-all",
+                                                                    "{relay_url}"
+                                                                }
+                                                                span { class: if relay_is_selected { "text-xs font-medium text-red-700 dark:text-red-300" } else { "text-xs text-gray-500 dark:text-gray-400" },
+                                                                    if relay_is_selected { "Selected" } else { "Select" }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                })}
+                                            }
+                                        }
+                                    }
+                                }
+                                div { class: "space-y-2",
+                                    label { class: "text-sm font-medium text-gray-900 dark:text-white",
+                                        "Optional reason"
+                                    }
+                                    textarea {
+                                        class: "w-full min-h-28 rounded-xl border border-border bg-background px-4 py-3 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500",
+                                        placeholder: "Optional reason to include in the vanish request",
+                                        value: "{reason}",
+                                        oninput: move |evt| reason.set(evt.value()),
+                                    }
+                                }
+                            }
+                        },
+                        VanishModalStep::Result => rsx! {
+                            if let Some(summary) = publish_summary.read().as_ref() {
+                                div { class: "space-y-4",
+                                    div { class: if summary.success_count > 0 {
+                                        "rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-4"
+                                    } else {
+                                        "rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-4"
+                                    },
+                                        p { class: "text-sm font-medium text-gray-900 dark:text-white",
+                                            if summary.success_count > 0 {
+                                                if summary.failed_count > 0 {
+                                                    "Vanish request partially delivered."
+                                                } else {
+                                                    "Vanish request delivered."
+                                                }
+                                            } else {
+                                                "No relay accepted the vanish request."
+                                            }
+                                        }
+                                        p { class: "mt-1 text-sm text-gray-700 dark:text-gray-300",
+                                            {format!(
+                                                "Accepted by {}/{} relay(s).",
+                                                summary.success_count,
+                                                summary.total_attempted
+                                            )}
+                                        }
+                                        if summary.failed_count > 0 {
+                                            p { class: "mt-1 text-sm text-gray-700 dark:text-gray-300",
+                                                {format!("{} relay(s) rejected or missed the request.", summary.failed_count)}
+                                            }
+                                        }
+                                    }
+                                    if summary.success_count > 0 {
+                                        p { class: "text-sm text-gray-600 dark:text-gray-400",
+                                            "The remote request has been sent. Continue to clear local auth state and log out of this device."
+                                        }
+                                    } else {
+                                        p { class: "text-sm text-gray-600 dark:text-gray-400",
+                                            "You are still signed in so you can adjust the relay selection and retry."
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                    }
+                    if let Some(error) = publish_error.read().as_ref() {
+                        div { class: "rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-4 text-sm text-red-700 dark:text-red-300",
+                            "{error}"
+                        }
+                    }
+                    if let Some(error) = logout_error.read().as_ref() {
+                        div { class: "rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-4 text-sm text-red-700 dark:text-red-300",
+                            "{error}"
+                        }
+                    }
+                }
+                div { class: "p-6 border-t border-border flex flex-col-reverse gap-3 sm:flex-row sm:justify-end",
+                    match *step.read() {
+                        VanishModalStep::Warning => rsx! {
+                            button {
+                                class: "px-4 py-2 rounded-lg border border-border hover:bg-accent transition",
+                                onclick: move |_| on_close.call(()),
+                                "Cancel"
+                            }
+                            button {
+                                class: "px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition disabled:opacity-50 disabled:cursor-not-allowed",
+                                onclick: move |_| step.set(VanishModalStep::Configure),
+                                disabled: relay_count == 0,
+                                "Continue"
+                            }
+                        },
+                        VanishModalStep::Configure => rsx! {
+                            button {
+                                class: "px-4 py-2 rounded-lg border border-border hover:bg-accent transition",
+                                onclick: move |_| step.set(VanishModalStep::Warning),
+                                disabled: *is_publishing.read(),
+                                "Back"
+                            }
+                            button {
+                                class: "px-4 py-2 rounded-lg border border-border hover:bg-accent transition",
+                                onclick: move |_| on_close.call(()),
+                                disabled: *is_publishing.read(),
+                                "Cancel"
+                            }
+                            button {
+                                class: "px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition disabled:opacity-50 disabled:cursor-not-allowed",
+                                disabled: !can_publish,
+                                onclick: move |_| {
+                                    let relay_urls = match *scope.read() {
+                                        VanishRelayScope::AllRelays => publish_all_relay_candidates.clone(),
+                                        VanishRelayScope::SelectedRelays => selected_relays.read().clone(),
+                                    };
+                                    let reason_value = reason.read().trim().to_string();
+                                    publish_error.set(None);
+                                    logout_error.set(None);
+                                    publish_summary.set(None);
+                                    is_publishing.set(true);
+                                    spawn(async move {
+                                        match nostr_client::publish_vanish_request_to_relays(relay_urls, reason_value).await {
+                                            Ok(result) => {
+                                                publish_summary.set(Some(VanishPublishSummary {
+                                                    success_count: result.success_count(),
+                                                    total_attempted: result.total_attempted(),
+                                                    failed_count: result.failed_relays.len(),
+                                                }));
+                                                step.set(VanishModalStep::Result);
+                                            }
+                                            Err(e) => {
+                                                log::error!("Failed to publish vanish request: {}", e);
+                                                publish_error.set(Some(e));
+                                            }
+                                        }
+                                        is_publishing.set(false);
+                                    });
+                                },
+                                if *is_publishing.read() {
+                                    "Publishing..."
+                                } else {
+                                    "Publish Vanish Request"
+                                }
+                            }
+                        },
+                        VanishModalStep::Result => rsx! {
+                            if publish_summary.read().as_ref().is_some_and(|summary| summary.success_count > 0) {
+                                button {
+                                    class: "px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition disabled:opacity-50 disabled:cursor-not-allowed",
+                                    disabled: *is_logging_out.read(),
+                                    onclick: move |_| {
+                                        let nav = navigator();
+                                        logout_error.set(None);
+                                        is_logging_out.set(true);
+                                        spawn(async move {
+                                            match auth_store::logout().await {
+                                                Ok(()) => {
+                                                    on_close.call(());
+                                                    nav.push(Route::Home { list: String::new() });
+                                                }
+                                                Err(e) => {
+                                                    log::error!("Failed to log out after vanish request: {}", e);
+                                                    logout_error.set(Some(e));
+                                                    is_logging_out.set(false);
+                                                }
+                                            }
+                                        });
+                                    },
+                                    if *is_logging_out.read() {
+                                        "Clearing Local State..."
+                                    } else {
+                                        "Delete Local Data And Log Out"
+                                    }
+                                }
+                            } else {
+                                button {
+                                    class: "px-4 py-2 rounded-lg border border-border hover:bg-accent transition",
+                                    onclick: move |_| on_close.call(()),
+                                    "Close"
+                                }
+                                button {
+                                    class: "px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition",
+                                    onclick: move |_| step.set(VanishModalStep::Configure),
+                                    "Adjust Relays And Retry"
+                                }
+                            }
+                        },
+                    }
                 }
             }
         }

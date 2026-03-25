@@ -123,6 +123,47 @@ pub async fn publish_reaction_to_relays(
     }
     Ok(result)
 }
+
+/// Publish a NIP-62 vanish request to specific relays only.
+pub async fn publish_vanish_request_to_relays(
+    relay_urls: Vec<String>,
+    reason: String,
+) -> std::result::Result<PublishResult, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+    if !*HAS_SIGNER.read() {
+        return Err("No signer attached".to_string());
+    }
+
+    let urls = parse_relay_urls(&relay_urls)?
+        .into_iter()
+        .filter(|relay_url| !relay::is_relay_blocked(relay_url.as_str()))
+        .collect::<Vec<_>>();
+    if urls.is_empty() {
+        return Err("No unblocked relay URLs provided".to_string());
+    }
+
+    let target = VanishTarget::relays(urls.clone());
+    let builder = EventBuilder::request_vanish_with_reason(target, reason.trim().to_string())
+        .map_err(|e| format!("Failed to build vanish request: {}", e))?;
+
+    let output = client
+        .send_event_builder_to(urls, builder)
+        .await
+        .map_err(|e| format!("Failed to publish vanish request: {}", e))?;
+    let result = PublishResult::from_output(output).ignoring_duplicate_event_failures();
+    log::info!(
+        "Vanish request published: {} ({}/{} relays succeeded)",
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
+    );
+    if result.has_failures() {
+        for (relay, error) in &result.failed_relays {
+            log::warn!("Relay {} failed vanish request: {}", relay, error);
+        }
+    }
+    Ok(result)
+}
 /// Send a pre-signed event to specific relays
 ///
 /// Takes an already-signed Event and sends it directly to the specified relays,
