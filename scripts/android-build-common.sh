@@ -127,6 +127,22 @@ version_field() {
     ' "$PROJECT_ROOT/Cargo.toml"
 }
 
+dioxus_config_field() {
+    local section="$1"
+    local field="$2"
+    awk -v section="$section" -v field="$field" '
+        $0 == "[" section "]" { in_section = 1; next }
+        /^\[/ && in_section { exit }
+        in_section && $0 ~ ("^" field " = ") {
+            value = $0
+            sub("^" field " = ", "", value)
+            gsub(/^"|"$/, "", value)
+            print value
+            exit
+        }
+    ' "$DIOXUS_CONFIG"
+}
+
 version_code_from_semver() {
     local version="$1"
     version="${version%%+*}"
@@ -431,6 +447,24 @@ DIOXUS_CONFIG="$PROJECT_ROOT/Dioxus.toml"
 APP_ID="com.nostr.blue"
 CARGO_VERSION="$(version_field version)"
 ANDROID_VERSION_CODE="$(version_code_from_semver "$CARGO_VERSION")"
+ANDROID_MIN_SDK="$(dioxus_config_field android min_sdk)"
+if [ -z "$ANDROID_MIN_SDK" ]; then
+    ANDROID_MIN_SDK="$(dioxus_config_field application android_min_sdk_version)"
+fi
+ANDROID_TARGET_SDK="$(dioxus_config_field android target_sdk)"
+ANDROID_COMPILE_SDK="$(dioxus_config_field android compile_sdk)"
+if ! [[ "$ANDROID_MIN_SDK" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: Could not determine numeric Android min SDK from $DIOXUS_CONFIG" >&2
+    exit 1
+fi
+if ! [[ "$ANDROID_TARGET_SDK" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: Could not determine numeric Android target SDK from $DIOXUS_CONFIG" >&2
+    exit 1
+fi
+if ! [[ "$ANDROID_COMPILE_SDK" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: Could not determine numeric Android compile SDK from $DIOXUS_CONFIG" >&2
+    exit 1
+fi
 GRADLE_APP="$DX_ANDROID/app/build.gradle.kts"
 GENERATED_MAIN_ACTIVITY="$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main/MainActivity.kt"
 GRADLE_USER_HOME="${GRADLE_USER_HOME:-$PROJECT_ROOT/.gradle-home}"
@@ -459,6 +493,7 @@ echo "Project: $PROJECT_ROOT"
 echo "Package format: $ANDROID_PACKAGE_FORMAT"
 echo "NDK: $ANDROID_NDK_HOME"
 echo "Version: $CARGO_VERSION ($ANDROID_VERSION_CODE)"
+echo "Android SDKs: min=$ANDROID_MIN_SDK target=$ANDROID_TARGET_SDK compile=$ANDROID_COMPILE_SDK"
 echo "Gradle variant: $ANDROID_GRADLE_VARIANT"
 echo "Rust profile: $DX_BUILD_PROFILE"
 echo "Gradle home: $GRADLE_USER_HOME"
@@ -523,7 +558,7 @@ echo "--- Step 2b.i: Normalize Android metadata ---"
 require_file "$GRADLE_APP" "Generated Android Gradle config not found"
 require_file "$GENERATED_MAIN_ACTIVITY" "Generated Android MainActivity not found"
 normalize_gradle_properties
-python3 - "$GRADLE_APP" "$APP_ID" "$CARGO_VERSION" "$ANDROID_VERSION_CODE" <<'PY'
+python3 - "$GRADLE_APP" "$APP_ID" "$CARGO_VERSION" "$ANDROID_VERSION_CODE" "$ANDROID_MIN_SDK" "$ANDROID_TARGET_SDK" "$ANDROID_COMPILE_SDK" <<'PY'
 from pathlib import Path
 import re
 import sys
@@ -532,10 +567,16 @@ path = Path(sys.argv[1])
 app_id = sys.argv[2]
 version_name = sys.argv[3]
 version_code = sys.argv[4]
+min_sdk = sys.argv[5]
+target_sdk = sys.argv[6]
+compile_sdk = sys.argv[7]
 content = path.read_text()
 replacements = [
     (r'namespace\s*=\s*"[^"]*"', f'namespace="{app_id}"'),
+    (r'compileSdk\s*=\s*\d+', f'compileSdk = {compile_sdk}'),
     (r'applicationId = "[^"]*"', f'applicationId = "{app_id}"'),
+    (r'minSdk\s*=\s*\d+', f'minSdk = {min_sdk}'),
+    (r'targetSdk\s*=\s*\d+', f'targetSdk = {target_sdk}'),
     (r'versionName = "[^"]*"', f'versionName = "{version_name}"'),
     (r'versionCode = \d+', f'versionCode = {version_code}'),
 ]
@@ -645,6 +686,9 @@ path.write_text(content)
 PY
 verify_gradle_value "applicationId" "$APP_ID" '^[[:space:]]*applicationId = "\([^\"]*\)"$'
 verify_gradle_value "namespace" "$APP_ID" '^[[:space:]]*namespace[[:space:]]*=[[:space:]]*"\([^\"]*\)"$'
+verify_gradle_value "compileSdk" "$ANDROID_COMPILE_SDK" '^[[:space:]]*compileSdk[[:space:]]*=[[:space:]]*\([0-9][0-9]*\)$'
+verify_gradle_value "minSdk" "$ANDROID_MIN_SDK" '^[[:space:]]*minSdk[[:space:]]*=[[:space:]]*\([0-9][0-9]*\)$'
+verify_gradle_value "targetSdk" "$ANDROID_TARGET_SDK" '^[[:space:]]*targetSdk[[:space:]]*=[[:space:]]*\([0-9][0-9]*\)$'
 verify_gradle_value "versionName" "$CARGO_VERSION" '^[[:space:]]*versionName = "\([^\"]*\)"$'
 verify_gradle_value "versionCode" "$ANDROID_VERSION_CODE" '^[[:space:]]*versionCode = \([0-9][0-9]*\)$'
 echo "Normalized Gradle metadata for $APP_ID"

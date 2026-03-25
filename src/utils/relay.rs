@@ -131,6 +131,67 @@ pub fn normalize_known_relay_url(url: &str) -> String {
         .unwrap_or_else(|_| url.to_string())
 }
 
+fn collect_vanish_relay_urls_from_sources(
+    general_relays: impl IntoIterator<Item = String>,
+    dm_relays: impl IntoIterator<Item = String>,
+    search_relays: impl IntoIterator<Item = String>,
+    local_relays: impl IntoIterator<Item = String>,
+    broadcast_relays: impl IntoIterator<Item = String>,
+    blocked_relays: impl IntoIterator<Item = String>,
+) -> Vec<String> {
+    let blocked_relays: HashSet<String> = blocked_relays
+        .into_iter()
+        .map(|url| normalize_known_relay_url(&url))
+        .collect();
+    let mut seen = HashSet::new();
+    let mut collected = Vec::new();
+    let mut extend_unique = |urls: Vec<String>| {
+        for url in urls {
+            let normalized = normalize_known_relay_url(&url);
+            if blocked_relays.contains(&normalized) || !seen.insert(normalized.clone()) {
+                continue;
+            }
+            collected.push(normalized);
+        }
+    };
+
+    extend_unique(general_relays.into_iter().collect());
+    extend_unique(dm_relays.into_iter().collect());
+    extend_unique(search_relays.into_iter().collect());
+    extend_unique(local_relays.into_iter().collect());
+    extend_unique(broadcast_relays.into_iter().collect());
+
+    collected
+}
+
+pub fn vanish_relay_urls() -> Vec<String> {
+    let general_relays = relay::USER_RELAY_METADATA
+        .read()
+        .as_ref()
+        .map(|metadata| {
+            metadata
+                .relays
+                .iter()
+                .map(|relay| relay.url.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let dm_relays = relay::USER_RELAY_METADATA
+        .read()
+        .as_ref()
+        .map(|metadata| metadata.dm_relays.clone())
+        .unwrap_or_default();
+
+    collect_vanish_relay_urls_from_sources(
+        general_relays,
+        dm_relays,
+        relay::SEARCH_RELAYS.read().clone(),
+        relay::LOCAL_RELAYS.read().clone(),
+        relay::BROADCAST_RELAYS.read().clone(),
+        relay::BLOCKED_RELAYS.read().clone(),
+    )
+}
+
 pub fn build_persisted_relay_set() -> HashSet<String> {
     let mut known_relays = HashSet::new();
     if let Some(metadata) = relay::USER_RELAY_METADATA.read().as_ref() {
@@ -194,5 +255,31 @@ mod tests {
     fn relay_http_url_converts_insecure_ws() {
         let http = relay_http_url("ws://relay.example.com:8080").expect("should convert");
         assert_eq!(http, "http://relay.example.com:8080/");
+    }
+
+    #[test]
+    fn collect_vanish_relay_urls_deduplicates_and_excludes_blocked_relays() {
+        let urls = collect_vanish_relay_urls_from_sources(
+            vec![
+                "wss://relay.one/".to_string(),
+                "wss://relay.two/".to_string(),
+                "wss://relay.one".to_string(),
+            ],
+            vec!["wss://relay.dm/".to_string()],
+            vec!["wss://relay.search/".to_string()],
+            vec!["ws://localhost:8080/".to_string()],
+            vec!["wss://relay.broadcast/".to_string()],
+            vec!["wss://relay.two".to_string(), "wss://relay.broadcast".to_string()],
+        );
+
+        assert_eq!(
+            urls,
+            vec![
+                "wss://relay.one/".to_string(),
+                "wss://relay.dm/".to_string(),
+                "wss://relay.search/".to_string(),
+                "ws://localhost:8080/".to_string(),
+            ]
+        );
     }
 }
