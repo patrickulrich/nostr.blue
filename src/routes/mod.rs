@@ -125,7 +125,9 @@ use shop::{
 use terms::Terms;
 use topics::{TopicFeed, TopicNewPost, TopicPostDetail, TopicsBrowse, TopicsHome, TopicsPopular};
 use trending::Trending;
-use video::{LiveStreamDetail, LiveStreamNew, VideoDetail, Videos, VideosLive, VideosLiveTag};
+use video::{
+    LiveStreamDetail, LiveStreamNew, VideoDetail, Videos, VideosLive, VideosLiveTag, VideosVerts,
+};
 use video_new_landscape::VideoNewLandscape;
 use video_new_portrait::VideoNewPortrait;
 use voice::{VoiceMessageDetail, VoiceMessageNew, VoiceMessages};
@@ -152,6 +154,8 @@ pub enum Route {
     ArticleDetail { naddr: String },
     #[route("/videos")]
     Videos {},
+    #[route("/videos/verts")]
+    VideosVerts {},
     #[route("/videos/:video_id")]
     VideoDetail { video_id: String },
     #[route("/videos/live")]
@@ -588,9 +592,10 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         Route::ZapGoalsHome {} => Some(Route::About {}),
         Route::ZapGoalsNew {} => Some(Route::ZapGoalsHome {}),
         Route::ArticleDetail { .. } | Route::ArticleNew {} => Some(Route::Articles {}),
-        Route::VideoDetail { .. } | Route::VideoNewLandscape {} | Route::VideoNewPortrait {} => {
-            Some(Route::Videos {})
-        }
+        Route::VideosVerts {}
+        | Route::VideoDetail { .. }
+        | Route::VideoNewLandscape {}
+        | Route::VideoNewPortrait {} => Some(Route::Videos {}),
         Route::VideosLiveTag { .. } | Route::LiveStreamDetail { .. } | Route::LiveStreamNew {} => {
             Some(Route::VideosLive {})
         }
@@ -797,6 +802,7 @@ fn Layout() -> Element {
     let is_videos_page = matches!(
         current_route,
         Route::Videos {}
+            | Route::VideosVerts {}
             | Route::VideoDetail { .. }
             | Route::VideosLive {}
             | Route::VideosLiveTag { .. }

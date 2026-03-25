@@ -851,11 +851,16 @@ fn InfoCard(title: String, value: String, subtle: String) -> Element {
 
 #[component]
 fn InvoiceCard(invoice: PpqTopupInvoice) -> Element {
-    let qr_svg = invoice
+    let payment_request = invoice
         .payment_request
         .as_deref()
-        .filter(|payment_request| !payment_request.trim().is_empty())
-        .map(generate_invoice_qr_svg);
+        .map(str::trim)
+        .filter(|payment_request| !payment_request.is_empty())
+        .map(str::to_string);
+    let qr_svg = payment_request.as_deref().map(generate_invoice_qr_svg);
+    let mut action_status = use_signal(|| None::<String>);
+    let mut action_error = use_signal(|| None::<String>);
+    let mut action_loading = use_signal(|| false);
 
     rsx! {
         div { class: "rounded-lg bg-muted/60 p-3 text-sm space-y-2",
@@ -864,7 +869,7 @@ fn InvoiceCard(invoice: PpqTopupInvoice) -> Element {
             if let Some(status) = invoice.status.as_ref() {
                 p { "Status: {status}" }
             }
-            if let Some(payment_request) = invoice.payment_request.as_ref() {
+            if let Some(payment_request) = payment_request.as_ref() {
                 if let Some(svg) = qr_svg.as_ref() {
                     div {
                         class: "flex justify-center rounded-lg bg-white p-4",
@@ -881,6 +886,59 @@ fn InvoiceCard(invoice: PpqTopupInvoice) -> Element {
             }
             if let Some(currency) = invoice.currency.as_ref() {
                 p { "Currency: {currency}" }
+            }
+            if let Some(payment_request) = payment_request.as_ref() {
+                div { class: "flex w-full items-center gap-2 text-xs font-medium",
+                    button {
+                        class: "inline-flex flex-1 items-center justify-center rounded-md border border-border bg-background px-2.5 py-1.5 text-foreground transition hover:bg-accent disabled:opacity-60",
+                        disabled: *action_loading.read(),
+                        onclick: {
+                            let payment_request = payment_request.clone();
+                            move |_| {
+                                action_loading.set(true);
+                                action_status.set(None);
+                                action_error.set(None);
+                                let payment_request = payment_request.clone();
+                                spawn(async move {
+                                    match crate::platform::clipboard::copy_to_clipboard(&payment_request).await {
+                                        Ok(()) => action_status.set(Some("Invoice copied".to_string())),
+                                        Err(error) => action_error.set(Some(error)),
+                                    }
+                                    action_loading.set(false);
+                                });
+                            }
+                        },
+                        "Copy"
+                    }
+                    span { class: "text-muted-foreground", "|" }
+                    button {
+                        class: "inline-flex flex-1 items-center justify-center rounded-md border border-border bg-background px-2.5 py-1.5 text-foreground transition hover:bg-accent disabled:opacity-60",
+                        disabled: *action_loading.read(),
+                        onclick: {
+                            let payment_request = payment_request.clone();
+                            move |_| {
+                                action_loading.set(true);
+                                action_status.set(None);
+                                action_error.set(None);
+                                let payment_request = payment_request.clone();
+                                spawn(async move {
+                                    match crate::platform::open_lightning_invoice(&payment_request).await {
+                                        Ok(()) => action_status.set(Some("Opening Lightning wallet...".to_string())),
+                                        Err(error) => action_error.set(Some(error)),
+                                    }
+                                    action_loading.set(false);
+                                });
+                            }
+                        },
+                        "Open"
+                    }
+                }
+            }
+            if let Some(status) = action_status.read().as_ref() {
+                p { class: "text-xs text-muted-foreground", "{status}" }
+            }
+            if let Some(error) = action_error.read().as_ref() {
+                p { class: "text-xs text-red-600 dark:text-red-400 break-all", "{error}" }
             }
             details {
                 summary { class: "cursor-pointer text-xs text-muted-foreground", "Raw response" }

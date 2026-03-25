@@ -18,7 +18,7 @@ web = [
     "dep:serde-wasm-bindgen", "dep:wasm-logger", "dep:console_error_panic_hook",
     "chrono/wasmbind", "uuid/js", "getrandom/js", "instant/wasm-bindgen",
 ]
-desktop = ["dioxus/desktop", "native", "dep:arboard", "dep:rfd"]
+desktop = ["dioxus/desktop", "native", "dep:arboard", "dep:rfd", "dep:webbrowser"]
 mobile = ["dioxus/mobile", "native", "dep:jni", "dep:ndk-context"]
 native = [
     "dep:nostr-ndb", "dep:cdk-sqlite", "dep:git2",
@@ -170,6 +170,7 @@ dirs = { version = "6.0.0", optional = true }
 git2 = { version = "0.19", optional = true }
 arboard = { version = "3.4", optional = true }
 rfd = { version = "0.15", optional = true }
+webbrowser = { version = "1.0", optional = true }
 
 # Android-only (NIP-55 signer via JNI)
 jni = { version = "0.21", optional = true }

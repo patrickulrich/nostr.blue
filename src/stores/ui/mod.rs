@@ -1,3 +1,4 @@
+pub mod ai_chat_seed_store;
 pub mod ai_chat_store;
 pub mod ai_provider_store;
 pub(crate) mod ai_web_db;
@@ -6,4 +7,5 @@ pub mod emoji_store;
 pub mod notifications;
 pub mod settings_store;
 pub mod sidebar_store;
+pub mod sync_store;
 pub mod theme_store;

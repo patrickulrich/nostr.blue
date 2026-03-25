@@ -16,6 +16,9 @@ short_description = "Decentralized social client for Nostr"
 [android]
 identifier = "com.nostr.blue"
 icon = ["public/icons/icon-512.png", "public/icons/icon-192.png"]
+min_sdk = 24
+target_sdk = 35
+compile_sdk = 35
 
 [web.app]
 title = "nostr.blue - Decentralized Social Network"

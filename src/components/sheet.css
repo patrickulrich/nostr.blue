@@ -1,0 +1,234 @@
+.sheet-root {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  background: rgb(0 0 0 / 40%);
+  opacity: 0;
+  will-change: opacity;
+}
+
+.sheet-root[data-state="open"] {
+  animation: sheet-backdrop-in 180ms ease-out forwards;
+}
+
+.sheet-root[data-state="closed"] {
+  animation: sheet-backdrop-out 150ms ease-in forwards;
+  pointer-events: none;
+}
+
+@keyframes sheet-backdrop-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes sheet-backdrop-out {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+.sheet {
+  position: fixed;
+  z-index: 1001;
+  display: flex;
+  box-sizing: border-box;
+  flex-direction: column;
+  border: 1px solid var(--primary-color-6);
+  margin: 0;
+  background: var(--color-background);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 18%);
+  color: var(--color-foreground);
+  gap: 1rem;
+  will-change: transform;
+}
+
+.sheet[data-side="left"],
+.sheet[data-side="right"] {
+  top: 0;
+  bottom: 0;
+  width: min(28rem, calc(100vw - 1.5rem));
+}
+
+.sheet[data-side="left"] {
+  left: 0;
+  border-left: none;
+  transform: translateX(-100%);
+}
+
+.sheet[data-side="right"] {
+  right: 0;
+  border-right: none;
+  transform: translateX(100%);
+}
+
+.sheet[data-side="top"],
+.sheet[data-side="bottom"] {
+  right: 0;
+  left: 0;
+}
+
+.sheet[data-side="top"] {
+  top: 0;
+  border-top: none;
+  transform: translateY(-100%);
+}
+
+.sheet[data-side="bottom"] {
+  bottom: 0;
+  border-bottom: none;
+  transform: translateY(100%);
+}
+
+.sheet-root[data-state="open"] .sheet[data-side="left"] {
+  animation: sheet-slide-in-left 220ms ease-out forwards;
+}
+
+.sheet-root[data-state="open"] .sheet[data-side="right"] {
+  animation: sheet-slide-in-right 220ms ease-out forwards;
+}
+
+.sheet-root[data-state="open"] .sheet[data-side="top"] {
+  animation: sheet-slide-in-top 220ms ease-out forwards;
+}
+
+.sheet-root[data-state="open"] .sheet[data-side="bottom"] {
+  animation: sheet-slide-in-bottom 220ms ease-out forwards;
+}
+
+.sheet-root[data-state="closed"] .sheet[data-side="left"] {
+  animation: sheet-slide-out-left 180ms ease-in forwards;
+}
+
+.sheet-root[data-state="closed"] .sheet[data-side="right"] {
+  animation: sheet-slide-out-right 180ms ease-in forwards;
+}
+
+.sheet-root[data-state="closed"] .sheet[data-side="top"] {
+  animation: sheet-slide-out-top 180ms ease-in forwards;
+}
+
+.sheet-root[data-state="closed"] .sheet[data-side="bottom"] {
+  animation: sheet-slide-out-bottom 180ms ease-in forwards;
+}
+
+@keyframes sheet-slide-in-left {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes sheet-slide-out-left {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes sheet-slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes sheet-slide-out-right {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes sheet-slide-in-top {
+  from {
+    transform: translateY(-100%);
+  }
+
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes sheet-slide-out-top {
+  from {
+    transform: translateY(0);
+  }
+
+  to {
+    transform: translateY(-100%);
+  }
+}
+
+@keyframes sheet-slide-in-bottom {
+  from {
+    transform: translateY(100%);
+  }
+
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes sheet-slide-out-bottom {
+  from {
+    transform: translateY(0);
+  }
+
+  to {
+    transform: translateY(100%);
+  }
+}
+
+.sheet-header {
+  padding: 1.25rem 1.25rem 0;
+}
+
+.sheet-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0 1.25rem 1.25rem;
+  margin-top: auto;
+}
+
+.sheet-title {
+  margin: 0;
+  color: var(--secondary-color-4);
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.sheet-description {
+  margin: 0.35rem 0 0;
+  color: var(--secondary-color-5);
+  font-size: 0.875rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet,
+  .sheet-root {
+    animation: none !important;
+    transition: none !important;
+  }
+}

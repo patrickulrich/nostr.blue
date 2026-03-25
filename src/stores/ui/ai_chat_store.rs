@@ -42,6 +42,83 @@ pub struct PersistedChatMessage {
     pub tool_calls: Vec<PersistedToolCall>,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct PersistedConversation {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub messages: Vec<PersistedChatMessage>,
+    pub created_at_ms: u64,
+    pub updated_at_ms: u64,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct PersistedChatState {
+    #[serde(default)]
+    pub conversations: Vec<PersistedConversation>,
+    #[serde(default)]
+    pub active_conversation_id: Option<String>,
+}
+
+#[cfg_attr(
+    not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))),
+    allow(dead_code)
+)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+enum StoredChatData {
+    State(PersistedChatState),
+    LegacyMessages(Vec<PersistedChatMessage>),
+}
+
+#[cfg_attr(
+    not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))),
+    allow(dead_code)
+)]
+impl StoredChatData {
+    fn into_state(self) -> PersistedChatState {
+        match self {
+            Self::State(state) => state,
+            Self::LegacyMessages(messages) => migrate_legacy_messages(messages),
+        }
+    }
+}
+
+fn migrate_legacy_messages(messages: Vec<PersistedChatMessage>) -> PersistedChatState {
+    if messages.is_empty() {
+        return PersistedChatState::default();
+    }
+
+    let timestamp = fallback_now_millis();
+    let conversation = PersistedConversation {
+        id: format!("conversation-{timestamp}"),
+        title: "New Chat".to_string(),
+        messages,
+        created_at_ms: timestamp,
+        updated_at_ms: timestamp,
+    };
+
+    PersistedChatState {
+        active_conversation_id: Some(conversation.id.clone()),
+        conversations: vec![conversation],
+    }
+}
+
+fn fallback_now_millis() -> u64 {
+    #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
+    {
+        crate::platform::timestamp::now_millis()
+    }
+
+    #[cfg(not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))))]
+    {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0)
+    }
+}
+
 pub fn account_key_for_pubkey(pubkey: Option<&str>) -> String {
     pubkey
         .and_then(|value| crate::utils::nip19::normalize_pubkey(value).ok())
@@ -53,6 +130,20 @@ pub fn current_account_key() -> String {
     account_key_for_pubkey(current_pubkey.as_deref())
 }
 
+pub fn has_saved_conversation_context(state: &PersistedChatState) -> bool {
+    if let Some(active_id) = state.active_conversation_id.as_deref() {
+        if state
+            .conversations
+            .iter()
+            .any(|conversation| conversation.id == active_id)
+        {
+            return true;
+        }
+    }
+
+    !state.conversations.is_empty()
+}
+
 #[cfg(not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))))]
 fn storage_key(account_key: &str) -> String {
     format!("{}_{}", STORAGE_KEY_PREFIX, account_key)
@@ -60,7 +151,7 @@ fn storage_key(account_key: &str) -> String {
 
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 mod web_db {
-    use super::PersistedChatMessage;
+    use super::{PersistedChatState, StoredChatData};
     use crate::stores::ui::ai_web_db::{open_ai_db_with_schema, STORE_CHAT_HISTORY};
     use indexed_db_futures::prelude::*;
     use std::cell::RefCell;
@@ -88,7 +179,7 @@ mod web_db {
         pub async fn load_chat_history(
             &self,
             account_key: &str,
-        ) -> Result<Vec<PersistedChatMessage>, String> {
+        ) -> Result<PersistedChatState, String> {
             let tx = self
                 .db
                 .transaction_on_one_with_mode(STORE_CHAT_HISTORY, IdbTransactionMode::Readonly)
@@ -102,19 +193,20 @@ mod web_db {
                 .await
                 .map_err(|e| format!("Get await error: {:?}", e))?;
             let Some(value) = value else {
-                return Ok(Vec::new());
+                return Ok(PersistedChatState::default());
             };
             let json = value
                 .as_string()
                 .ok_or_else(|| "Stored AI chat history was not a string".to_string())?;
-            serde_json::from_str(&json)
+            serde_json::from_str::<StoredChatData>(&json)
+                .map(StoredChatData::into_state)
                 .map_err(|e| format!("Failed to parse AI chat history: {}", e))
         }
 
         pub async fn save_chat_history(
             &self,
             account_key: &str,
-            messages: &[PersistedChatMessage],
+            state: &PersistedChatState,
         ) -> Result<(), String> {
             let tx = self
                 .db
@@ -123,7 +215,7 @@ mod web_db {
             let store = tx
                 .object_store(STORE_CHAT_HISTORY)
                 .map_err(|e| format!("Store error: {:?}", e))?;
-            let json = serde_json::to_string(messages)
+            let json = serde_json::to_string(state)
                 .map_err(|e| format!("Failed to serialize AI chat history: {}", e))?;
             store
                 .put_key_val(&JsValue::from_str(account_key), &JsValue::from_str(&json))
@@ -165,7 +257,7 @@ mod web_db {
     }
 }
 
-pub async fn load_chat_history(account_key: &str) -> Result<Vec<PersistedChatMessage>, String> {
+pub async fn load_chat_state(account_key: &str) -> Result<PersistedChatState, String> {
     #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
     {
         return web_db::get_cached_db()
@@ -176,29 +268,32 @@ pub async fn load_chat_history(account_key: &str) -> Result<Vec<PersistedChatMes
 
     #[cfg(not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))))]
     {
-        Ok(storage::get(&storage_key(account_key)).unwrap_or_default())
+        match storage::get::<PersistedChatState>(&storage_key(account_key)) {
+            Ok(state) => Ok(state),
+            Err(_) => match storage::get::<Vec<PersistedChatMessage>>(&storage_key(account_key)) {
+                Ok(messages) => Ok(migrate_legacy_messages(messages)),
+                Err(_) => Ok(PersistedChatState::default()),
+            },
+        }
     }
 }
 
-pub async fn save_chat_history(
-    account_key: &str,
-    messages: &[PersistedChatMessage],
-) -> Result<(), String> {
+pub async fn save_chat_state(account_key: &str, state: &PersistedChatState) -> Result<(), String> {
     #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
     {
         return web_db::get_cached_db()
             .await?
-            .save_chat_history(account_key, messages)
+            .save_chat_history(account_key, state)
             .await;
     }
 
     #[cfg(not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))))]
     {
-        storage::set(&storage_key(account_key), messages)
+        storage::set(&storage_key(account_key), state)
     }
 }
 
-pub async fn clear_chat_history(account_key: &str) -> Result<(), String> {
+pub async fn clear_chat_state(account_key: &str) -> Result<(), String> {
     #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
     {
         return web_db::get_cached_db()
@@ -236,5 +331,71 @@ mod tests {
     #[test]
     fn falls_back_to_anonymous_for_invalid_pubkey() {
         assert_eq!(account_key_for_pubkey(Some("invalid")), "anonymous");
+    }
+
+    #[test]
+    fn migrates_legacy_messages_into_single_conversation() {
+        let state = migrate_legacy_messages(vec![PersistedChatMessage {
+            id: "msg-1".to_string(),
+            role: PersistedChatRole::User,
+            content: "hello".to_string(),
+            images: vec![],
+            tool_calls: vec![],
+        }]);
+
+        assert_eq!(state.conversations.len(), 1);
+        assert_eq!(state.conversations[0].title, "New Chat");
+        assert_eq!(state.conversations[0].messages.len(), 1);
+        assert_eq!(
+            state.active_conversation_id,
+            Some(state.conversations[0].id.clone())
+        );
+    }
+
+    #[test]
+    fn empty_legacy_messages_migrate_to_empty_state() {
+        let state = migrate_legacy_messages(Vec::new());
+
+        assert!(state.conversations.is_empty());
+        assert!(state.active_conversation_id.is_none());
+    }
+
+    #[test]
+    fn saved_conversation_context_is_true_for_valid_active_conversation() {
+        let state = PersistedChatState {
+            active_conversation_id: Some("conversation-1".to_string()),
+            conversations: vec![PersistedConversation {
+                id: "conversation-1".to_string(),
+                title: "New Chat".to_string(),
+                messages: vec![],
+                created_at_ms: 1,
+                updated_at_ms: 1,
+            }],
+        };
+
+        assert!(has_saved_conversation_context(&state));
+    }
+
+    #[test]
+    fn saved_conversation_context_is_true_when_conversations_exist_without_active_id() {
+        let state = PersistedChatState {
+            active_conversation_id: None,
+            conversations: vec![PersistedConversation {
+                id: "conversation-1".to_string(),
+                title: "New Chat".to_string(),
+                messages: vec![],
+                created_at_ms: 1,
+                updated_at_ms: 1,
+            }],
+        };
+
+        assert!(has_saved_conversation_context(&state));
+    }
+
+    #[test]
+    fn saved_conversation_context_is_false_for_empty_state() {
+        assert!(!has_saved_conversation_context(
+            &PersistedChatState::default()
+        ));
     }
 }

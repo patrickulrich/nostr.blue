@@ -42,4 +42,5 @@ pub mod github_nips;
 pub mod openlibrary;
 pub mod profile_stats;
 pub mod scheduler;
+pub mod sync;
 pub mod wavlake;

@@ -1,19 +1,15 @@
 use crate::components::{ClientInitializing, MiniLiveStreamCard};
+use crate::routes::video::live_discovery::{
+    filter_live_streams_by_status, load_following_live_streams, load_global_live_streams,
+    stream_matches_following, LiveStreamStatusFilter,
+};
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
-use nostr_sdk::{
-    Event, Filter, Kind, PublicKey, RelayPoolNotification, SubscriptionId, TagKind, Timestamp,
-};
+use nostr_sdk::{Event, Filter, Kind, RelayPoolNotification, SubscriptionId, TagKind, Timestamp};
 use std::collections::HashSet;
-use std::time::Duration;
-#[derive(Clone, Copy, PartialEq, Debug)]
-enum StatusFilter {
-    Live,
-    Upcoming,
-    All,
-}
+
 #[component]
 pub fn VideosLive() -> Element {
     let mut following_streams = use_signal(Vec::<Event>::new);
@@ -26,12 +22,12 @@ pub fn VideosLive() -> Element {
     let mut has_more_global = use_signal(|| true);
     let mut oldest_timestamp_global = use_signal(|| None::<u64>);
     let mut error_global = use_signal(|| None::<String>);
-    let mut status_filter = use_signal(|| StatusFilter::Live);
+    let mut status_filter = use_signal(|| LiveStreamStatusFilter::Live);
     let mut refresh_trigger = use_signal(|| 0);
     let mut request_id_following = use_signal(|| 0u32);
     let mut request_id_global = use_signal(|| 0u32);
-    let mut last_loaded_following = use_signal(|| (0u32, StatusFilter::Live));
-    let mut last_loaded_global = use_signal(|| (0u32, StatusFilter::Live));
+    let mut last_loaded_following = use_signal(|| (0u32, LiveStreamStatusFilter::Live));
+    let mut last_loaded_global = use_signal(|| (0u32, LiveStreamStatusFilter::Live));
     let mut stream_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
     let mut followed_pubkeys_cache: Signal<Option<HashSet<String>>> = use_signal(|| None);
     use_effect(move || {
@@ -63,7 +59,7 @@ pub fn VideosLive() -> Element {
                 log::debug!("Discarding stale following streams request {}", current_id);
                 return;
             }
-            match load_following_streams(None, current_status).await {
+            match load_following_live_streams(None, current_status).await {
                 Ok((events, next_until, hit_limit, did_fallback, followed_pks)) => {
                     if did_fallback {
                         log::info!("No contacts, hiding Following streams section");
@@ -115,7 +111,7 @@ pub fn VideosLive() -> Element {
                 log::debug!("Discarding stale global streams request {}", current_id);
                 return;
             }
-            match load_global_streams(None, current_status).await {
+            match load_global_live_streams(None, current_status).await {
                 Ok((events, next_until, hit_limit)) => {
                     oldest_timestamp_global.set(next_until);
                     has_more_global.set(hit_limit);
@@ -175,7 +171,7 @@ pub fn VideosLive() -> Element {
 
                                     // Upsert into following (if followed)
                                     if let Some(ref followed_set) = followed {
-                                        if followed_set.contains(&event.pubkey.to_hex()) {
+                                        if stream_matches_following(&event, followed_set) {
                                             upsert_stream_event(
                                                 &mut following_streams,
                                                 (*event).clone(),
@@ -211,7 +207,7 @@ pub fn VideosLive() -> Element {
         let current_status = *status_filter.read();
         loading_following.set(true);
         spawn(async move {
-            match load_following_streams(until, current_status).await {
+            match load_following_live_streams(until, current_status).await {
                 Ok((new_events, next_until, hit_limit, _did_fallback, _followed_pks)) => {
                     let existing_ids: std::collections::HashSet<_> = {
                         let current = following_streams.read();
@@ -245,7 +241,7 @@ pub fn VideosLive() -> Element {
         let current_status = *status_filter.read();
         loading_global.set(true);
         spawn(async move {
-            match load_global_streams(until, current_status).await {
+            match load_global_live_streams(until, current_status).await {
                 Ok((new_events, next_until, hit_limit)) => {
                     let existing_ids: std::collections::HashSet<_> = {
                         let current = global_streams.read();
@@ -322,18 +318,18 @@ pub fn VideosLive() -> Element {
                 } else {
                     div { class: "flex gap-2 mb-6",
                         button {
-                            class: if *status_filter.read() == StatusFilter::Live { "px-4 py-2 bg-red-600 text-white font-medium rounded-lg" } else { "px-4 py-2 bg-accent hover:bg-accent/80 font-medium rounded-lg transition" },
-                            onclick: move |_| status_filter.set(StatusFilter::Live),
+                            class: if *status_filter.read() == LiveStreamStatusFilter::Live { "px-4 py-2 bg-red-600 text-white font-medium rounded-lg" } else { "px-4 py-2 bg-accent hover:bg-accent/80 font-medium rounded-lg transition" },
+                            onclick: move |_| status_filter.set(LiveStreamStatusFilter::Live),
                             "🔴 Live"
                         }
                         button {
-                            class: if *status_filter.read() == StatusFilter::Upcoming { "px-4 py-2 bg-blue-600 text-white font-medium rounded-lg" } else { "px-4 py-2 bg-accent hover:bg-accent/80 font-medium rounded-lg transition" },
-                            onclick: move |_| status_filter.set(StatusFilter::Upcoming),
+                            class: if *status_filter.read() == LiveStreamStatusFilter::Upcoming { "px-4 py-2 bg-blue-600 text-white font-medium rounded-lg" } else { "px-4 py-2 bg-accent hover:bg-accent/80 font-medium rounded-lg transition" },
+                            onclick: move |_| status_filter.set(LiveStreamStatusFilter::Upcoming),
                             "Upcoming"
                         }
                         button {
-                            class: if *status_filter.read() == StatusFilter::All { "px-4 py-2 bg-primary text-white font-medium rounded-lg" } else { "px-4 py-2 bg-accent hover:bg-accent/80 font-medium rounded-lg transition" },
-                            onclick: move |_| status_filter.set(StatusFilter::All),
+                            class: if *status_filter.read() == LiveStreamStatusFilter::All { "px-4 py-2 bg-primary text-white font-medium rounded-lg" } else { "px-4 py-2 bg-accent hover:bg-accent/80 font-medium rounded-lg transition" },
+                            onclick: move |_| status_filter.set(LiveStreamStatusFilter::All),
                             "All"
                         }
                     }
@@ -420,133 +416,6 @@ pub fn VideosLive() -> Element {
         }
     }
 }
-/// Returns (events, next_until, hit_limit, did_fallback, followed_pubkeys)
-async fn load_following_streams(
-    until: Option<u64>,
-    status: StatusFilter,
-) -> Result<(Vec<Event>, Option<u64>, bool, bool, Option<HashSet<String>>), String> {
-    let pubkey_str = auth_store::AUTH_STATE
-        .read()
-        .pubkey
-        .clone()
-        .ok_or("Not authenticated")?;
-    let contacts = match nostr_client::fetch_contacts(pubkey_str.clone()).await {
-        Ok(contacts) => contacts,
-        Err(e) => {
-            log::warn!(
-                "Failed to fetch contacts: {}, falling back to global feed",
-                e
-            );
-            let (events, next_until, hit_limit) = load_global_streams(until, status).await?;
-            return Ok((events, next_until, hit_limit, true, None));
-        }
-    };
-    if contacts.is_empty() {
-        log::info!("User doesn't follow anyone, showing global streams");
-        let (events, next_until, hit_limit) = load_global_streams(until, status).await?;
-        return Ok((events, next_until, hit_limit, true, None));
-    }
-    let followed_pubkeys: std::collections::HashSet<String> = contacts
-        .iter()
-        .filter_map(|contact| PublicKey::parse(contact).ok().map(|pk| pk.to_string()))
-        .collect();
-    if followed_pubkeys.is_empty() {
-        log::warn!("No valid contact pubkeys, falling back to global feed");
-        let (events, next_until, hit_limit) = load_global_streams(until, status).await?;
-        return Ok((events, next_until, hit_limit, true, None));
-    }
-    let mut filter = Filter::new().kind(Kind::Custom(30311)).limit(100);
-    if let Some(until_ts) = until {
-        filter = filter.until(Timestamp::from(until_ts));
-    }
-    let mut events = Vec::new();
-    nostr_client::stream_events_immediate(filter, Duration::from_secs(10), |event| {
-        events.push(event);
-    })
-    .await
-    .map_err(|e| format!("Failed to fetch streams: {}", e))?;
-    let mut seen = std::collections::HashSet::new();
-    events.retain(|e| seen.insert(e.id));
-    events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    let next_until = events.last().map(|e| e.created_at.as_secs());
-    let hit_limit = events.len() >= 50;
-    let following_events: Vec<Event> = events
-        .into_iter()
-        .filter(|event| {
-            if followed_pubkeys.contains(&event.pubkey.to_string()) {
-                return true;
-            }
-            for tag in event.tags.iter() {
-                let tag_vec = tag.clone().to_vec();
-                if tag_vec.first().map(|s| s.as_str()) == Some("p") {
-                    if let Some(creator_pk) = tag_vec.get(1) {
-                        if followed_pubkeys.contains(creator_pk) {
-                            return true;
-                        }
-                    }
-                    break;
-                }
-            }
-            false
-        })
-        .collect();
-    let filtered_events = filter_by_status(following_events, status);
-    Ok((
-        filtered_events,
-        next_until,
-        hit_limit,
-        false,
-        Some(followed_pubkeys),
-    ))
-}
-async fn load_global_streams(
-    until: Option<u64>,
-    status: StatusFilter,
-) -> Result<(Vec<Event>, Option<u64>, bool), String> {
-    let mut filter = Filter::new().kind(Kind::Custom(30311)).limit(50);
-    if let Some(until_ts) = until {
-        filter = filter.until(Timestamp::from(until_ts));
-    }
-    let mut all_events = Vec::new();
-    nostr_client::stream_events_immediate(filter, Duration::from_secs(10), |event| {
-        all_events.push(event);
-    })
-    .await
-    .map_err(|e| format!("Failed to fetch streams: {}", e))?;
-    let mut seen = std::collections::HashSet::new();
-    all_events.retain(|e| seen.insert(e.id));
-    all_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    let next_until = all_events.last().map(|e| e.created_at.as_secs());
-    let hit_limit = all_events.len() >= 50;
-    let filtered_events = filter_by_status(all_events, status);
-    Ok((filtered_events, next_until, hit_limit))
-}
-fn filter_by_status(events: Vec<Event>, status: StatusFilter) -> Vec<Event> {
-    match status {
-        StatusFilter::All => events,
-        StatusFilter::Live => events
-            .into_iter()
-            .filter(|event| {
-                event.tags.iter().any(|tag| {
-                    let tag_vec = tag.clone().to_vec();
-                    tag_vec.first().map(|s| s.as_str()) == Some("status")
-                        && tag_vec.get(1).map(|s| s.to_lowercase()) == Some("live".to_string())
-                })
-            })
-            .collect(),
-        StatusFilter::Upcoming => events
-            .into_iter()
-            .filter(|event| {
-                event.tags.iter().any(|tag| {
-                    let tag_vec = tag.clone().to_vec();
-                    tag_vec.first().map(|s| s.as_str()) == Some("status")
-                        && tag_vec.get(1).map(|s| s.to_lowercase()) == Some("planned".to_string())
-                })
-            })
-            .collect(),
-    }
-}
-
 fn get_stream_d_tag(event: &Event) -> Option<String> {
     event
         .tags
@@ -558,10 +427,10 @@ fn get_stream_d_tag(event: &Event) -> Option<String> {
 fn upsert_stream_event(
     streams: &mut Signal<Vec<Event>>,
     new_event: Event,
-    status_filter: StatusFilter,
+    status_filter: LiveStreamStatusFilter,
 ) {
     // First check if it passes the current filter
-    let filtered_events = filter_by_status(vec![new_event.clone()], status_filter);
+    let filtered_events = filter_live_streams_by_status(vec![new_event.clone()], status_filter);
     let filtered_event = match filtered_events.into_iter().next() {
         Some(e) => e,
         None => {

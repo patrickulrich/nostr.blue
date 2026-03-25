@@ -49,6 +49,11 @@ pub fn is_vertical_video(kind: u16) -> bool {
     kind == VIDEO_VERTICAL || kind == VIDEO_VERTICAL_ADDR
 }
 
+/// Check if a kind represents a horizontal/landscape video
+pub fn is_horizontal_video(kind: u16) -> bool {
+    kind == VIDEO_HORIZONTAL || kind == VIDEO_HORIZONTAL_ADDR
+}
+
 /// Check if a kind represents an addressable video
 pub fn is_addressable_video(kind: u16) -> bool {
     kind == VIDEO_HORIZONTAL_ADDR || kind == VIDEO_VERTICAL_ADDR

@@ -16,6 +16,7 @@ use crate::utils::{
     extract_reposted_event, get_item_count, process_events_to_feed_items, DataState, FeedItem,
 };
 use dioxus::prelude::*;
+use nostr_relay_pool::{SyncDirection, SyncOptions};
 use nostr_sdk::{Filter, Kind, PublicKey, Timestamp};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -331,7 +332,7 @@ pub fn Home(list: String) -> Element {
                                 cache_key.clone()
                             };
                             if let Some(last_item) = feed_items.last() {
-                                oldest_timestamp.set(Some(last_item.sort_timestamp().as_secs()));
+                                oldest_timestamp.set(exclusive_pagination_cursor(Some(last_item)));
                             }
                             has_more.set(true);
                             feed_state.set(DataState::Loaded(feed_items.clone()));
@@ -466,7 +467,7 @@ pub fn Home(list: String) -> Element {
                                 cache_key.clone()
                             };
                             if let Some(last_item) = feed_items.last() {
-                                oldest_timestamp.set(Some(last_item.sort_timestamp().as_secs()));
+                                oldest_timestamp.set(exclusive_pagination_cursor(Some(last_item)));
                             }
                             has_more.set(true);
                             feed_state.set(DataState::Loaded(feed_items.clone()));
@@ -576,7 +577,7 @@ pub fn Home(list: String) -> Element {
                     match result {
                         Ok(feed_items) => {
                             if let Some(last_item) = feed_items.last() {
-                                oldest_timestamp.set(Some(last_item.sort_timestamp().as_secs()));
+                                oldest_timestamp.set(exclusive_pagination_cursor(Some(last_item)));
                             }
                             has_more.set(true);
                             feed_state.set(DataState::Loaded(feed_items.clone()));
@@ -701,7 +702,7 @@ pub fn Home(list: String) -> Element {
                     match result {
                         Ok(feed_items) => {
                             if let Some(last_item) = feed_items.last() {
-                                oldest_timestamp.set(Some(last_item.sort_timestamp().as_secs()));
+                                oldest_timestamp.set(exclusive_pagination_cursor(Some(last_item)));
                             }
                             has_more.set(true);
                             feed_state.set(DataState::Loaded(feed_items.clone()));
@@ -1090,7 +1091,7 @@ pub fn Home(list: String) -> Element {
                     }
                     Err(e) => Err(e),
                 },
-                FeedType::Global => load_global_feed(until).await,
+                FeedType::Global => load_paginated_global_feed(until).await,
                 FeedType::PeopleList(list) => load_people_list_feed(&list, until).await,
             };
             match fetch_result {
@@ -1980,29 +1981,21 @@ async fn append_paginated_items(
         pagination_loading.set(false);
         return;
     }
+    let fetched_count = new_items.len();
     let current_state = feed_state.read().clone();
     if let DataState::Loaded(current) = current_state {
-        let existing_ids: std::collections::HashSet<_> =
-            current.iter().map(|item| item.event().id).collect();
-        let unique_items: Vec<_> = new_items
-            .iter()
-            .filter(|item| !existing_ids.contains(&item.event().id))
-            .cloned()
-            .collect();
+        let (updated, unique_items, next_cursor) = merge_paginated_feed_items(current, new_items);
         log::info!(
             "Deduplication: {} total, {} unique items after filtering",
-            new_items.len(),
+            fetched_count,
             unique_items.len()
         );
-        if let Some(last_item) = new_items.last() {
-            let ts = last_item.sort_timestamp().as_secs().saturating_sub(1);
-            oldest_timestamp.set(Some(ts));
+        if let Some(cursor) = next_cursor {
+            oldest_timestamp.set(Some(cursor));
         }
         if !unique_items.is_empty() {
             let prefetch_items = unique_items.clone();
             let items_for_counts = unique_items.clone();
-            let mut updated = current;
-            updated.extend(unique_items);
             feed_state.set(DataState::Loaded(updated));
             spawn(async move {
                 prefetch_author_metadata(&prefetch_items).await;
@@ -2026,6 +2019,94 @@ async fn append_paginated_items(
         }
     }
     pagination_loading.set(false);
+}
+
+fn exclusive_pagination_cursor(item: Option<&FeedItem>) -> Option<u64> {
+    item.map(|entry| entry.sort_timestamp().as_secs().saturating_sub(1))
+}
+
+fn merge_paginated_feed_items(
+    current: Vec<FeedItem>,
+    fetched_page: Vec<FeedItem>,
+) -> (Vec<FeedItem>, Vec<FeedItem>, Option<u64>) {
+    let next_cursor = fetched_page
+        .iter()
+        .min_by_key(|item| item.sort_timestamp())
+        .and_then(|item| exclusive_pagination_cursor(Some(item)));
+    let existing_ids: HashSet<_> = current.iter().map(|item| item.event().id).collect();
+    let unique_items: Vec<FeedItem> = fetched_page
+        .into_iter()
+        .filter(|item| !existing_ids.contains(&item.event().id))
+        .collect();
+    let mut updated = current;
+    updated.extend(unique_items.iter().cloned());
+    updated.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
+    (updated, unique_items, next_cursor)
+}
+
+fn build_global_feed_filter(until: Option<u64>) -> Filter {
+    let mut filter = Filter::new()
+        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
+        .limit(50);
+    if let Some(until_ts) = until {
+        filter = filter.until(Timestamp::from(until_ts));
+    } else {
+        let since = Timestamp::now() - Duration::from_secs(86400);
+        filter = filter.since(since);
+    }
+    filter
+}
+
+const FOLLOWING_INITIAL_WINDOW_SECS: u64 = 86400;
+
+fn build_following_feed_filter(
+    authors: Vec<PublicKey>,
+    until: Option<u64>,
+    now: Timestamp,
+) -> Filter {
+    let mut filter = Filter::new()
+        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
+        .authors(authors)
+        .limit(50);
+
+    if let Some(until_ts) = until {
+        filter = filter.until(Timestamp::from(until_ts));
+    } else {
+        filter = filter.since(now - Duration::from_secs(FOLLOWING_INITIAL_WINDOW_SECS));
+    }
+
+    filter
+}
+
+async fn sync_global_feed_page(until: Option<u64>) {
+    let Some(client) = nostr_client::get_client() else {
+        log::debug!("Skipping global feed negentropy sync: client unavailable");
+        return;
+    };
+    let filter = build_global_feed_filter(until);
+    let sync_opts = SyncOptions::default()
+        .direction(SyncDirection::Down)
+        .initial_timeout(Duration::from_secs(5));
+    match client.sync(filter, &sync_opts).await {
+        Ok(output) => {
+            log::info!(
+                "Global feed negentropy sync complete: {} received, {} sent",
+                output.val.received.len(),
+                output.val.sent.len()
+            );
+        }
+        Err(e) => {
+            log::warn!(
+                "Global feed negentropy sync failed, continuing with DB read: {}",
+                e
+            );
+        }
+    }
+}
+
+async fn load_paginated_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, NostrBlueError> {
+    sync_global_feed_page(until).await;
+    load_global_feed(until).await
 }
 /// Load following feed (non-streaming version, used for pagination)
 /// Returns (feed_items, did_fallback) where did_fallback indicates if we fell back to global.
@@ -2067,13 +2148,7 @@ async fn load_following_feed(until: Option<u64>) -> Result<(Vec<FeedItem>, bool)
         let global = load_global_feed(until).await?;
         return Ok((global, true));
     }
-    let mut filter = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
-        .authors(authors)
-        .limit(50);
-    if let Some(until_ts) = until {
-        filter = filter.until(Timestamp::from(until_ts));
-    }
+    let filter = build_following_feed_filter(authors, until, Timestamp::now());
     log::info!(
         "Fetching events from {} followed accounts",
         filter.authors.as_ref().map(|a| a.len()).unwrap_or(0)
@@ -2186,13 +2261,7 @@ where
         let global = load_global_feed(until).await?;
         return Ok((global, true));
     }
-    let mut filter = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
-        .authors(authors)
-        .limit(50);
-    if let Some(until_ts) = until {
-        filter = filter.until(Timestamp::from(until_ts));
-    }
+    let filter = build_following_feed_filter(authors, until, Timestamp::now());
     let mut all_items: Vec<FeedItem> = Vec::new();
     let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
     // Use immediate streaming for faster time-to-first-post
@@ -2357,15 +2426,7 @@ async fn load_following_with_replies(
 }
 async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, NostrBlueError> {
     log::info!("Loading global feed (until: {:?})...", until);
-    let mut filter = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
-        .limit(50);
-    if let Some(until_ts) = until {
-        filter = filter.until(Timestamp::from(until_ts));
-    } else {
-        let since = Timestamp::now() - Duration::from_secs(86400);
-        filter = filter.since(since);
-    }
+    let filter = build_global_feed_filter(until);
     log::info!("Fetching events with filter: {:?}", filter);
     match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
@@ -2518,5 +2579,94 @@ async fn load_people_list_feed(
             );
             Err(NostrBlueError::Other(format!("Failed to load feed: {}", e)))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nostr_sdk::{EventBuilder, Keys};
+
+    fn test_post(secs: u64, content: &str) -> FeedItem {
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::TextNote, content)
+            .custom_created_at(Timestamp::from(secs))
+            .sign_with_keys(&keys)
+            .expect("signed test note");
+        FeedItem::OriginalPost(event)
+    }
+
+    fn test_author() -> PublicKey {
+        Keys::generate().public_key()
+    }
+
+    #[test]
+    fn exclusive_cursor_uses_saturating_sub() {
+        let item = test_post(10, "hello");
+        assert_eq!(exclusive_pagination_cursor(Some(&item)), Some(9));
+    }
+
+    #[test]
+    fn following_filter_initial_load_uses_recent_window() {
+        let now = Timestamp::from(200_000);
+        let author = test_author();
+
+        let filter = build_following_feed_filter(vec![author], None, now);
+
+        assert_eq!(filter.authors.as_ref().map(|a| a.len()), Some(1));
+        assert_eq!(filter.limit, Some(50));
+        assert_eq!(
+            filter.since,
+            Some(now - Duration::from_secs(FOLLOWING_INITIAL_WINDOW_SECS))
+        );
+        assert_eq!(filter.until, None);
+    }
+
+    #[test]
+    fn following_filter_paginated_load_uses_until_without_since() {
+        let now = Timestamp::from(200_000);
+        let author = test_author();
+
+        let filter = build_following_feed_filter(vec![author], Some(123_456), now);
+
+        assert_eq!(filter.authors.as_ref().map(|a| a.len()), Some(1));
+        assert_eq!(filter.limit, Some(50));
+        assert_eq!(filter.until, Some(Timestamp::from(123_456)));
+        assert_eq!(filter.since, None);
+    }
+
+    #[test]
+    fn merge_paginated_feed_items_dedupes_and_sorts_descending() {
+        let newest = test_post(200, "newest");
+        let middle = test_post(150, "middle");
+        let existing = vec![newest.clone(), middle.clone()];
+        let fetched = vec![middle, test_post(125, "older"), test_post(175, "between")];
+
+        let (merged, unique, next_cursor) = merge_paginated_feed_items(existing, fetched);
+
+        assert_eq!(unique.len(), 2);
+        let timestamps: Vec<u64> = merged
+            .iter()
+            .map(|item| item.sort_timestamp().as_secs())
+            .collect();
+        assert_eq!(timestamps, vec![200, 175, 150, 125]);
+        assert_eq!(next_cursor, Some(124));
+    }
+
+    #[test]
+    fn duplicate_boundary_item_advances_cursor() {
+        let boundary = test_post(100, "boundary");
+        let existing = vec![test_post(120, "fresh"), boundary.clone()];
+        let fetched = vec![boundary, test_post(90, "older")];
+
+        let (merged, unique, next_cursor) = merge_paginated_feed_items(existing, fetched);
+
+        assert_eq!(unique.len(), 1);
+        let timestamps: Vec<u64> = merged
+            .iter()
+            .map(|item| item.sort_timestamp().as_secs())
+            .collect();
+        assert_eq!(timestamps, vec![120, 100, 90]);
+        assert_eq!(next_cursor, Some(89));
     }
 }

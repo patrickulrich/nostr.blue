@@ -18,9 +18,15 @@ use wasm_bindgen::JsCast;
 #[cfg(feature = "web")]
 use web_sys::HtmlVideoElement;
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum FeedType {
+pub(crate) enum FeedType {
     Following,
     Global,
+}
+
+enum ShortsLoadResult {
+    Ready(Vec<Event>),
+    Empty(String),
+    Error(String),
 }
 #[component]
 pub fn VideoDetail(video_id: String) -> Element {
@@ -78,6 +84,8 @@ pub fn VideoDetail(video_id: String) -> Element {
                         initial_video_id: clean_video_id_for_shorts.clone(),
                         feed_type,
                         initial_event: Some(event.clone()),
+                        fallback_to_global_on_empty: true,
+                        title: "Shorts",
                     }
                 } else {
                     LandscapePlayer { event: event.clone() }
@@ -362,60 +370,92 @@ fn LandscapePlayer(event: Event) -> Element {
     }
 }
 #[component]
-fn ShortsPlayer(
+pub(crate) fn ShortsPlayer(
     initial_video_id: String,
     feed_type: FeedType,
     initial_event: Option<Event>,
+    fallback_to_global_on_empty: bool,
+    title: &'static str,
 ) -> Element {
     let mut events = use_signal(Vec::<Event>::new);
     let mut loading = use_signal(|| false);
+    let mut load_error = use_signal(|| None::<String>);
+    let mut empty_message = use_signal(|| None::<String>);
     let mut current_video_index = use_signal(|| 0usize);
     let mut is_muted = use_signal(|| false);
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
-    use_effect(move || {
-        let id = initial_video_id.clone();
-        let initial_evt = initial_event.clone();
-        let has_initial = initial_evt.is_some();
-        loading.set(true);
-        spawn(async move {
-            let result = match feed_type {
-                FeedType::Following => load_shorts_following(None).await,
-                FeedType::Global => load_shorts_global(None).await,
-            };
-            match result {
-                Ok(mut video_events) => {
-                    if let Some(evt) = initial_evt {
-                        video_events.retain(|e| e.id != evt.id);
-                        video_events.insert(0, evt);
-                        log::info!(
-                            "Inserted initial video at position 0, total videos: {}",
-                            video_events.len()
-                        );
-                    }
-                    if let Some(last_event) = video_events.last() {
-                        oldest_timestamp.set(Some(last_event.created_at.as_secs()));
-                    }
-                    has_more.set(video_events.len() >= 50);
-                    let initial_index = if has_initial {
-                        0
-                    } else {
-                        video_events
-                            .iter()
-                            .position(|e| e.id.to_hex() == id)
-                            .unwrap_or(0)
-                    };
-                    events.set(video_events);
-                    current_video_index.set(initial_index);
-                    loading.set(false);
+    let mut touch_start_y = use_signal(|| None::<f64>);
+    let mut wheel_accumulator = use_signal(|| 0.0f64);
+    let mut request_generation = use_signal(|| 0u64);
+    let initial_event_id = initial_event.as_ref().map(|event| event.id);
+
+    use_effect(use_reactive(
+        (&feed_type, &initial_video_id, &initial_event_id),
+        move |(current_feed_type, id, _)| {
+            let initial_evt = initial_event.clone();
+            let has_initial = initial_evt.is_some();
+            let current_request = *request_generation.peek() + 1;
+            request_generation.set(current_request);
+            events.set(Vec::new());
+            current_video_index.set(0);
+            has_more.set(true);
+            oldest_timestamp.set(None);
+            empty_message.set(None);
+            load_error.set(None);
+            wheel_accumulator.set(0.0);
+            touch_start_y.set(None);
+            loading.set(true);
+            spawn(async move {
+                let result =
+                    load_shorts_feed(current_feed_type, None, fallback_to_global_on_empty).await;
+                if *request_generation.peek() != current_request {
+                    log::debug!(
+                        "Discarding stale shorts feed load {} after feed switch",
+                        current_request
+                    );
+                    return;
                 }
-                Err(e) => {
-                    log::error!("Failed to load shorts: {}", e);
-                    loading.set(false);
+                match result {
+                    ShortsLoadResult::Ready(mut video_events) => {
+                        if let Some(evt) = initial_evt {
+                            video_events.retain(|e| e.id != evt.id);
+                            video_events.insert(0, evt);
+                            log::info!(
+                                "Inserted initial video at position 0, total videos: {}",
+                                video_events.len()
+                            );
+                        }
+                        if let Some(last_event) = video_events.last() {
+                            oldest_timestamp.set(Some(last_event.created_at.as_secs()));
+                        }
+                        has_more.set(video_events.len() >= 50);
+                        let initial_index = if has_initial {
+                            0
+                        } else {
+                            video_events
+                                .iter()
+                                .position(|e| e.id.to_hex() == id)
+                                .unwrap_or(0)
+                        };
+                        events.set(video_events);
+                        current_video_index.set(initial_index);
+                        loading.set(false);
+                    }
+                    ShortsLoadResult::Empty(message) => {
+                        has_more.set(false);
+                        empty_message.set(Some(message));
+                        loading.set(false);
+                    }
+                    ShortsLoadResult::Error(message) => {
+                        has_more.set(false);
+                        load_error.set(Some(message));
+                        loading.set(false);
+                    }
                 }
-            }
-        });
-    });
+            });
+        },
+    ));
     let mut next_video = move || {
         let current = *current_video_index.read();
         let total = events.read().len();
@@ -423,14 +463,22 @@ fn ShortsPlayer(
             current_video_index.set(current + 1);
         } else if *has_more.read() && !*loading.read() {
             let until = *oldest_timestamp.read();
+            let current_request = *request_generation.peek() + 1;
+            request_generation.set(current_request);
             loading.set(true);
+            load_error.set(None);
+            empty_message.set(None);
             spawn(async move {
-                let result = match feed_type {
-                    FeedType::Following => load_shorts_following(until).await,
-                    FeedType::Global => load_shorts_global(until).await,
-                };
+                let result = load_shorts_feed(feed_type, until, fallback_to_global_on_empty).await;
+                if *request_generation.peek() != current_request {
+                    log::debug!(
+                        "Discarding stale shorts pagination request {} after feed switch",
+                        current_request
+                    );
+                    return;
+                }
                 match result {
-                    Ok(new_events) => {
+                    ShortsLoadResult::Ready(new_events) => {
                         let existing_ids: std::collections::HashSet<_> = {
                             let current = events.read();
                             current.iter().map(|e| e.id).collect()
@@ -456,8 +504,14 @@ fn ShortsPlayer(
                             loading.set(false);
                         }
                     }
-                    Err(e) => {
-                        log::error!("Failed to load more shorts: {}", e);
+                    ShortsLoadResult::Empty(message) => {
+                        log::info!("No more shorts for current feed: {}", message);
+                        has_more.set(false);
+                        loading.set(false);
+                    }
+                    ShortsLoadResult::Error(message) => {
+                        log::error!("Failed to load more shorts: {}", message);
+                        has_more.set(false);
                         loading.set(false);
                     }
                 }
@@ -471,7 +525,43 @@ fn ShortsPlayer(
         }
     };
     rsx! {
-        div { class: "fixed inset-0 bg-black overflow-hidden",
+        div {
+            class: "fixed inset-0 bg-black overflow-hidden touch-pan-y",
+            ontouchstart: move |evt| {
+                if let Some(touch) = evt.touches().first() {
+                    touch_start_y.set(Some(touch.client_coordinates().y));
+                }
+            },
+            ontouchend: move |evt| {
+                let start_y = match *touch_start_y.read() {
+                    Some(value) => value,
+                    None => return,
+                };
+                touch_start_y.set(None);
+                let changed_touches = evt.touches_changed();
+                let Some(touch) = changed_touches.first() else {
+                    return;
+                };
+                let delta_y = touch.client_coordinates().y - start_y;
+                if delta_y <= -70.0 {
+                    next_video();
+                } else if delta_y >= 70.0 {
+                    prev_video();
+                }
+            },
+            onwheel: move |evt: WheelEvent| {
+                evt.prevent_default();
+                let accumulated = *wheel_accumulator.read() + evt.delta().strip_units().y;
+                if accumulated <= -90.0 {
+                    wheel_accumulator.set(0.0);
+                    prev_video();
+                } else if accumulated >= 90.0 {
+                    wheel_accumulator.set(0.0);
+                    next_video();
+                } else {
+                    wheel_accumulator.set(accumulated);
+                }
+            },
             div { class: "absolute top-0 left-0 right-0 z-50 bg-gradient-to-b from-black/60 to-transparent",
                 div { class: "px-4 py-3 flex items-center justify-between",
                     Link {
@@ -479,17 +569,39 @@ fn ShortsPlayer(
                         class: "w-10 h-10 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center text-white transition",
                         crate::components::icons::ArrowLeftIcon { class: "w-5 h-5" }
                     }
-                    h2 { class: "text-white font-bold", "Shorts" }
+                    h2 { class: "text-white font-bold", "{title}" }
                     div { class: "w-10 h-10" }
                 }
             }
-            if events.read().is_empty() && !*loading.read() {
+            if *loading.read() && events.read().is_empty() {
+                div { class: "flex h-full items-center justify-center text-white",
+                    div { class: "text-center",
+                        div { class: "mb-4 flex justify-center" ,
+                            span { class: "inline-block h-10 w-10 rounded-full border-4 border-white/30 border-t-white animate-spin" }
+                        }
+                        p { class: "text-sm text-white/70", "Loading videos..." }
+                    }
+                }
+            } else if let Some(err) = load_error.read().as_ref() {
+                div { class: "flex items-center justify-center h-full px-6 text-white",
+                    div { class: "max-w-sm text-center",
+                        div { class: "mb-4 flex justify-center",
+                            crate::components::icons::AlertTriangleIcon { class: "w-24 h-24 text-red-400" }
+                        }
+                        h3 { class: "text-2xl font-semibold", "Unable to load this feed" }
+                        p { class: "mt-2 text-sm text-white/70", "{err}" }
+                    }
+                }
+            } else if events.read().is_empty() && !*loading.read() {
                 div { class: "flex items-center justify-center h-full text-white",
                     div { class: "text-center",
                         div { class: "mb-4 flex justify-center",
                             crate::components::icons::VideoIcon { class: "w-24 h-24 text-gray-500" }
                         }
                         h3 { class: "text-2xl font-semibold", "No shorts available" }
+                        if let Some(message) = empty_message.read().as_ref() {
+                            p { class: "mt-2 text-sm text-white/70", "{message}" }
+                        }
                     }
                 }
             } else if let Some(event) = events.read().get(*current_video_index.read()) {
@@ -526,8 +638,10 @@ fn ShortsPlayer(
                     }
                 }
             }
-            div { class: "absolute bottom-4 left-4 text-white text-sm font-medium bg-black/50 px-3 py-2 rounded-full backdrop-blur-sm",
-                "{*current_video_index.read() + 1} / {events.read().len()}"
+            if !events.read().is_empty() {
+                div { class: "absolute bottom-4 left-4 text-white text-sm font-medium bg-black/50 px-3 py-2 rounded-full backdrop-blur-sm",
+                    "{*current_video_index.read() + 1} / {events.read().len()}"
+                }
             }
         }
     }
@@ -1377,17 +1491,63 @@ async fn load_video_by_id(video_id: &str) -> std::result::Result<Event, NostrBlu
         .next()
         .ok_or_else(|| NostrBlueError::Other("Video not found".into()))
 }
-async fn load_shorts_following(until: Option<u64>) -> std::result::Result<Vec<Event>, String> {
-    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
+async fn load_shorts_feed(
+    feed_type: FeedType,
+    until: Option<u64>,
+    fallback_to_global_on_empty: bool,
+) -> ShortsLoadResult {
+    match feed_type {
+        FeedType::Following => load_shorts_following(until, fallback_to_global_on_empty).await,
+        FeedType::Global => match load_shorts_global(until).await {
+            Ok(events) => ShortsLoadResult::Ready(events),
+            Err(e) => ShortsLoadResult::Error(e),
+        },
+    }
+}
+
+async fn load_shorts_following(
+    until: Option<u64>,
+    fallback_to_global_on_empty: bool,
+) -> ShortsLoadResult {
+    let Some(pubkey_str) = auth_store::get_pubkey() else {
+        return if fallback_to_global_on_empty {
+            match load_shorts_global(until).await {
+                Ok(events) => ShortsLoadResult::Ready(events),
+                Err(e) => ShortsLoadResult::Error(e),
+            }
+        } else {
+            ShortsLoadResult::Empty(
+                "Sign in to browse vertical videos from people you follow.".to_string(),
+            )
+        };
+    };
     let contacts = match nostr_client::fetch_contacts(pubkey_str.clone()).await {
         Ok(contacts) => contacts,
         Err(e) => {
-            log::warn!("Failed to fetch contacts: {}, falling back to global", e);
-            return load_shorts_global(until).await;
+            log::warn!("Failed to fetch contacts for following shorts: {}", e);
+            return if fallback_to_global_on_empty {
+                match load_shorts_global(until).await {
+                    Ok(events) => ShortsLoadResult::Ready(events),
+                    Err(global_err) => ShortsLoadResult::Error(global_err),
+                }
+            } else {
+                ShortsLoadResult::Error(
+                    "Failed to load people you follow for vertical videos.".to_string(),
+                )
+            };
         }
     };
     if contacts.is_empty() {
-        return load_shorts_global(until).await;
+        return if fallback_to_global_on_empty {
+            match load_shorts_global(until).await {
+                Ok(events) => ShortsLoadResult::Ready(events),
+                Err(e) => ShortsLoadResult::Error(e),
+            }
+        } else {
+            ShortsLoadResult::Empty(
+                "Follow some accounts to see their vertical videos here.".to_string(),
+            )
+        };
     }
     let mut authors = Vec::new();
     for contact in contacts.iter() {
@@ -1396,7 +1556,16 @@ async fn load_shorts_following(until: Option<u64>) -> std::result::Result<Vec<Ev
         }
     }
     if authors.is_empty() {
-        return load_shorts_global(until).await;
+        return if fallback_to_global_on_empty {
+            match load_shorts_global(until).await {
+                Ok(events) => ShortsLoadResult::Ready(events),
+                Err(e) => ShortsLoadResult::Error(e),
+            }
+        } else {
+            ShortsLoadResult::Empty(
+                "Your follow list does not include any valid authors yet.".to_string(),
+            )
+        };
     }
     let mut filter = Filter::new()
         .kinds(vertical_kinds())
@@ -1410,13 +1579,31 @@ async fn load_shorts_following(until: Option<u64>) -> std::result::Result<Vec<Ev
             let mut event_vec: Vec<Event> = events.into_iter().collect();
             event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
             if event_vec.is_empty() {
-                return load_shorts_global(until).await;
+                return if fallback_to_global_on_empty {
+                    match load_shorts_global(until).await {
+                        Ok(events) => ShortsLoadResult::Ready(events),
+                        Err(e) => ShortsLoadResult::Error(e),
+                    }
+                } else {
+                    ShortsLoadResult::Empty(
+                        "No vertical videos from people you follow right now.".to_string(),
+                    )
+                };
             }
-            Ok(event_vec)
+            ShortsLoadResult::Ready(event_vec)
         }
         Err(e) => {
             log::error!("Failed to fetch following shorts: {}", e);
-            load_shorts_global(until).await
+            if fallback_to_global_on_empty {
+                match load_shorts_global(until).await {
+                    Ok(events) => ShortsLoadResult::Ready(events),
+                    Err(global_err) => ShortsLoadResult::Error(global_err),
+                }
+            } else {
+                ShortsLoadResult::Error(
+                    "Failed to load vertical videos from people you follow.".to_string(),
+                )
+            }
         }
     }
 }
