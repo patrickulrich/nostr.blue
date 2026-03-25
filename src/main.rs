@@ -40,6 +40,7 @@ fn main() {
 #[component]
 fn App() -> Element {
     services::scheduler::use_background_scheduler();
+    services::sync::use_sync_service();
     use_effect(move || {
         theme_store::init_theme();
         auth_store::init_auth();

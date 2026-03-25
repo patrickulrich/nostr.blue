@@ -41,6 +41,7 @@ pub mod rich_content;
 pub mod right_discovery_sidebar;
 pub mod search_input;
 pub mod share_modal;
+pub mod sheet;
 pub mod shop;
 pub mod threaded_comment;
 pub mod token_list;
@@ -74,6 +75,11 @@ pub use ppq_settings_panel::PpqSettingsPanel;
 pub use reply_composer::ReplyComposer;
 pub use rich_content::RichContent;
 pub use search_input::SearchInput;
+#[allow(unused_imports)]
+pub use sheet::{
+    Sheet, SheetClose, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetSide,
+    SheetTitle,
+};
 pub use threaded_comment::ThreadedComment;
 pub use video_card::VideoCard;
 pub use webbookmark_card::{WebBookmarkCard, WebBookmarkCardSkeleton};

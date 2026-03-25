@@ -1,9 +1,12 @@
 use crate::components::{ClientInitializing, MiniLiveStreamCard};
+use crate::routes::video::live_discovery::{
+    load_following_live_streams, load_global_live_streams, LiveStreamStatusFilter,
+};
 use crate::stores::feed_cache::FeedCacheKey;
 use crate::stores::{auth_store, feed_cache, nostr_client};
 use crate::utils::format::{format_relative_time_or, truncate_pubkey};
 use crate::utils::video_kinds::{
-    all_video_kinds, dedupe_videos_by_url, horizontal_kinds, is_vertical_video, vertical_kinds,
+    dedupe_videos_by_url, horizontal_kinds, is_horizontal_video, vertical_kinds,
 };
 use crate::utils::FeedItem;
 use dioxus::prelude::*;
@@ -30,6 +33,8 @@ pub fn Videos() -> Element {
     let mut loading_featured = use_signal(|| false);
     let mut recent_verts = use_signal(Vec::<Event>::new);
     let mut loading_recent_verts = use_signal(|| false);
+    let mut recent_live_streams = use_signal(Vec::<Event>::new);
+    let mut loading_recent_live_streams = use_signal(|| false);
     let mut feed_events = use_signal(Vec::<Event>::new);
     let mut loading_feed = use_signal(|| false);
     let mut feed_type = use_signal(|| FeedType::Following);
@@ -55,6 +60,25 @@ pub fn Videos() -> Element {
                 Err(e) => {
                     log::error!("Failed to load featured landscape videos: {}", e);
                     loading_featured.set(false);
+                }
+            }
+        });
+    });
+    use_effect(move || {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            return;
+        }
+        loading_recent_live_streams.set(true);
+        spawn(async move {
+            match load_recent_live_streams().await {
+                Ok(streams) => {
+                    recent_live_streams.set(streams);
+                    loading_recent_live_streams.set(false);
+                }
+                Err(e) => {
+                    log::error!("Failed to load recent live streams: {}", e);
+                    loading_recent_live_streams.set(false);
                 }
             }
         });
@@ -157,8 +181,11 @@ pub fn Videos() -> Element {
             }
             if !cached_items.is_empty() {
                 log::info!("Loaded {} videos from cache", cached_items.len());
-                let cached_events: Vec<Event> =
-                    cached_items.iter().map(|i| i.event().clone()).collect();
+                let cached_events: Vec<Event> = cached_items
+                    .iter()
+                    .map(|i| i.event().clone())
+                    .filter(|event| is_horizontal_video(event.kind.as_u16()))
+                    .collect();
                 if let Some(oldest) = cached_events.iter().map(|e| e.created_at).min() {
                     oldest_timestamp.set(Some(oldest.as_secs().saturating_sub(1)));
                 }
@@ -166,16 +193,12 @@ pub fn Videos() -> Element {
             }
             let result = match current_feed_type {
                 FeedType::Following => {
-                    load_following_videos(None, |batch| {
+                    load_following_horizontal_videos(None, |batch| {
                         if *request_id.peek() != current_id {
                             return;
                         }
                         let mut current = feed_events.cloned();
-                        let filtered: Vec<_> = batch
-                            .into_iter()
-                            .filter(|e| e.kind != Kind::Custom(30311) || is_live_stream(e))
-                            .collect();
-                        current.extend(filtered);
+                        current.extend(batch);
                         current.sort_by(|a, b| b.created_at.cmp(&a.created_at));
                         let deduped = dedupe_videos_by_url(current);
                         feed_events.set(deduped);
@@ -183,16 +206,12 @@ pub fn Videos() -> Element {
                     })
                     .await
                 }
-                FeedType::Global => load_global_videos(None, |batch| {
+                FeedType::Global => load_global_horizontal_videos(None, |batch| {
                     if *request_id.peek() != current_id {
                         return;
                     }
                     let mut current = feed_events.cloned();
-                    let filtered: Vec<_> = batch
-                        .into_iter()
-                        .filter(|e| e.kind != Kind::Custom(30311) || is_live_stream(e))
-                        .collect();
-                    current.extend(filtered);
+                    current.extend(batch);
                     current.sort_by(|a, b| b.created_at.cmp(&a.created_at));
                     let deduped = dedupe_videos_by_url(current);
                     feed_events.set(deduped);
@@ -257,10 +276,10 @@ pub fn Videos() -> Element {
         loading_feed.set(true);
         spawn(async move {
             let result = match current_feed_type {
-                FeedType::Following => load_following_videos(until, |_| {})
+                FeedType::Following => load_following_horizontal_videos(until, |_| {})
                     .await
                     .map(|(e, h, _)| (e, h)),
-                FeedType::Global => load_global_videos(until, |_| {}).await,
+                FeedType::Global => load_global_horizontal_videos(until, |_| {}).await,
             };
             match result {
                 Ok((new_events, page_has_more)) => {
@@ -313,13 +332,20 @@ pub fn Videos() -> Element {
                     }
                     button {
                         class: "p-2 hover:bg-accent rounded-full transition disabled:opacity-50",
-                        disabled: *loading_featured.read() || *loading_recent_verts.read() || *loading_feed.read(),
+                        disabled: *loading_featured.read()
+                            || *loading_recent_verts.read()
+                            || *loading_recent_live_streams.read()
+                            || *loading_feed.read(),
                         onclick: move |_| {
                             let current = *refresh_trigger.read();
                             refresh_trigger.set(current + 1);
                         },
                         title: "Refresh",
-                        if *loading_featured.read() || *loading_recent_verts.read() || *loading_feed.read() {
+                        if *loading_featured.read()
+                            || *loading_recent_verts.read()
+                            || *loading_recent_live_streams.read()
+                            || *loading_feed.read()
+                        {
                             span { class: "inline-block w-5 h-5 border-2 border-foreground border-t-transparent rounded-full animate-spin" }
                         } else {
                             crate::components::icons::RefreshIcon { class: "w-5 h-5" }
@@ -333,7 +359,7 @@ pub fn Videos() -> Element {
                 } else {
                     if !featured_landscape.read().is_empty() {
                         div { class: "mb-8",
-                            h2 { class: "text-xl font-semibold mb-4", "Recent Videos" }
+                            h2 { class: "text-xl font-semibold mb-4", "Featured Videos" }
                             div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4",
                                 for event in featured_landscape.read().iter().take(3) {
                                     LandscapeVideoCard {
@@ -347,7 +373,14 @@ pub fn Videos() -> Element {
                     }
                     if !recent_verts.read().is_empty() {
                         div { class: "mb-8",
-                            h2 { class: "text-xl font-semibold mb-4", "Recent Verts" }
+                            div { class: "mb-4 flex items-center justify-between gap-4",
+                                h2 { class: "text-xl font-semibold", "Recent Verts" }
+                                Link {
+                                    to: crate::routes::Route::VideosVerts {},
+                                    class: "text-sm font-medium text-primary hover:text-primary/80 transition",
+                                    "More ->"
+                                }
+                            }
                             div { class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3",
                                 for event in recent_verts.read().iter().take(5) {
                                     VertsVideoCard {
@@ -359,9 +392,26 @@ pub fn Videos() -> Element {
                             }
                         }
                     }
+                    if !recent_live_streams.read().is_empty() {
+                        div { class: "mb-8",
+                            div { class: "mb-4 flex items-center justify-between gap-4",
+                                h2 { class: "text-xl font-semibold", "Live Now" }
+                                Link {
+                                    to: crate::routes::Route::VideosLive {},
+                                    class: "text-sm font-medium text-primary hover:text-primary/80 transition",
+                                    "More ->"
+                                }
+                            }
+                            div { class: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4",
+                                for event in recent_live_streams.read().iter().take(4) {
+                                    MiniLiveStreamCard { key: "{event.id}", event: event.clone() }
+                                }
+                            }
+                        }
+                    }
                     div { class: "mt-8",
                         div { class: "flex items-center justify-between mb-4",
-                            h2 { class: "text-xl font-semibold", "All Videos" }
+                            h2 { class: "text-xl font-semibold", "More Videos" }
                             div { class: "relative",
                                 button {
                                     class: "flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent/80 rounded-lg transition",
@@ -424,22 +474,13 @@ pub fn Videos() -> Element {
                                 div { class: "mb-4 flex justify-center",
                                     crate::components::icons::VideoIcon { class: "w-24 h-24 text-muted-foreground" }
                                 }
-                                h3 { class: "text-xl font-semibold mb-2", "No videos yet" }
-                                p { class: "text-muted-foreground", "Videos will appear here" }
+                                h3 { class: "text-xl font-semibold mb-2", "No horizontal videos yet" }
+                                p { class: "text-muted-foreground", "Landscape videos will appear here" }
                             }
                         } else {
                             div { class: "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4",
                                 for event in feed_events.read().iter() {
-                                    if event.kind == Kind::Custom(30311) {
-                                        MiniLiveStreamCard { key: "{event.id}", event: event.clone() }
-                                    } else if is_vertical_video(event.kind.as_u16()) {
-                                        VertsVideoCard {
-                                            key: "{event.id}",
-                                            event: event.clone(),
-                                            feed_type: *feed_type.read(),
-                                        }
-                                    } else {
-                                        // Horizontal videos (kinds 21, 34235)
+                                    if is_horizontal_video(event.kind.as_u16()) {
                                         LandscapeVideoCard {
                                             key: "{event.id}",
                                             event: event.clone(),
@@ -691,14 +732,6 @@ struct VideoMeta {
     duration: Option<String>,
     dimensions: Option<String>,
 }
-/// Check if a livestream event (kind 30311) has status "live"
-fn is_live_stream(event: &Event) -> bool {
-    event.tags.iter().any(|tag| {
-        let slice = tag.as_slice();
-        slice.first().map(|s| s.as_str()) == Some("status")
-            && slice.get(1).map(|s| s.eq_ignore_ascii_case("live")) == Some(true)
-    })
-}
 fn parse_video_meta(event: &Event) -> VideoMeta {
     let mut meta = VideoMeta {
         url: None,
@@ -790,7 +823,9 @@ async fn load_featured_content() -> Result<Vec<Event>, String> {
 }
 async fn load_recent_verts() -> Result<Vec<Event>, String> {
     log::info!("Loading recent verts videos from Following feed...");
-    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
+    let Some(pubkey_str) = auth_store::get_pubkey() else {
+        return Ok(Vec::new());
+    };
     match nostr_client::fetch_contacts(pubkey_str).await {
         Ok(contacts) if !contacts.is_empty() => {
             let mut authors = Vec::new();
@@ -832,20 +867,34 @@ async fn load_recent_verts() -> Result<Vec<Event>, String> {
     }
     Ok(Vec::new())
 }
-/// Load following videos (Kind 21 & 22 from followed users)
-/// Returns (events, has_more, did_fallback) where:
-/// - has_more is true if either query hit its limit
-/// - did_fallback is true if we fell back to global feed
-async fn load_following_videos<F>(
+async fn load_recent_live_streams() -> Result<Vec<Event>, String> {
+    let following_live = load_following_live_streams(None, LiveStreamStatusFilter::Live)
+        .await
+        .map(|(events, _, _, _, _)| events)
+        .unwrap_or_default();
+    if !following_live.is_empty() {
+        return Ok(following_live.into_iter().take(4).collect());
+    }
+
+    let (global_live, _, _) = load_global_live_streams(None, LiveStreamStatusFilter::Live).await?;
+    Ok(global_live.into_iter().take(4).collect())
+}
+
+/// Load following horizontal videos from followed users.
+/// Returns (events, has_more, did_fallback).
+async fn load_following_horizontal_videos<F>(
     until: Option<u64>,
     mut on_batch: F,
 ) -> Result<(Vec<Event>, bool, bool), String>
 where
     F: FnMut(Vec<Event>),
 {
-    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
+    let Some(pubkey_str) = auth_store::get_pubkey() else {
+        let (events, has_more) = load_global_horizontal_videos(until, |_| {}).await?;
+        return Ok((events, has_more, true));
+    };
     log::info!(
-        "Loading following videos feed for {} (until: {:?})",
+        "Loading following horizontal videos feed for {} (until: {:?})",
         pubkey_str,
         until
     );
@@ -856,13 +905,13 @@ where
                 "Failed to fetch contacts: {}, falling back to global feed",
                 e
             );
-            let (events, has_more) = load_global_videos(until, |_| {}).await?;
+            let (events, has_more) = load_global_horizontal_videos(until, |_| {}).await?;
             return Ok((events, has_more, true));
         }
     };
     if contacts.is_empty() {
-        log::info!("User doesn't follow anyone, showing global videos");
-        let (events, has_more) = load_global_videos(until, |_| {}).await?;
+        log::info!("User doesn't follow anyone, showing global horizontal videos");
+        let (events, has_more) = load_global_horizontal_videos(until, |_| {}).await?;
         return Ok((events, has_more, true));
     }
     log::info!("User follows {} accounts", contacts.len());
@@ -874,12 +923,13 @@ where
     }
     if authors.is_empty() {
         log::warn!("No valid contact pubkeys, falling back to global feed");
-        let (events, has_more) = load_global_videos(until, |_| {}).await?;
+        let (events, has_more) = load_global_horizontal_videos(until, |_| {}).await?;
         return Ok((events, has_more, true));
     }
-    let mut kinds = all_video_kinds();
-    kinds.push(Kind::Custom(30311)); // livestreams
-    let mut filter = Filter::new().kinds(kinds).authors(authors).limit(50);
+    let mut filter = Filter::new()
+        .kinds(horizontal_kinds())
+        .authors(authors)
+        .limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts.saturating_sub(1)));
     }
@@ -894,33 +944,33 @@ where
         },
     )
     .await
-    .map_err(|e| format!("Failed to stream following videos: {}", e))?;
+    .map_err(|e| format!("Failed to stream following horizontal videos: {}", e))?;
     if events.is_empty() {
-        log::info!("No videos from followed users");
+        log::info!("No horizontal videos from followed users");
         return Ok((Vec::new(), false, false));
     }
     events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    // Remove ended livestreams (only show live ones on the videos page)
-    events.retain(|e| e.kind != Kind::Custom(30311) || is_live_stream(e));
     let deduped = dedupe_videos_by_url(events);
     log::info!(
-        "Loaded {} video events from following (after dedup)",
+        "Loaded {} horizontal video events from following (after dedup)",
         deduped.len()
     );
     let has_more = count >= 50;
     Ok((deduped, has_more, false))
 }
-async fn load_global_videos<F>(
+
+async fn load_global_horizontal_videos<F>(
     until: Option<u64>,
     mut on_batch: F,
 ) -> Result<(Vec<Event>, bool), String>
 where
     F: FnMut(Vec<Event>),
 {
-    log::info!("Loading global videos feed (until: {:?})...", until);
-    let mut kinds = all_video_kinds();
-    kinds.push(Kind::Custom(30311));
-    let mut filter = Filter::new().kinds(kinds).limit(50);
+    log::info!(
+        "Loading global horizontal videos feed (until: {:?})...",
+        until
+    );
+    let mut filter = Filter::new().kinds(horizontal_kinds()).limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts.saturating_sub(1)));
     }
@@ -935,15 +985,16 @@ where
         },
     )
     .await
-    .map_err(|e| format!("Failed to stream global videos: {}", e))?;
+    .map_err(|e| format!("Failed to stream global horizontal videos: {}", e))?;
     if events.is_empty() {
         return Err("Failed to load any content".to_string());
     }
     events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    // Remove ended livestreams (only show live ones on the videos page)
-    events.retain(|e| e.kind != Kind::Custom(30311) || is_live_stream(e));
     let deduped = dedupe_videos_by_url(events);
-    log::info!("Loaded {} global video events (after dedup)", deduped.len());
+    log::info!(
+        "Loaded {} global horizontal video events (after dedup)",
+        deduped.len()
+    );
     let has_more = count >= 50;
     Ok((deduped, has_more))
 }

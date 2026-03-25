@@ -32,6 +32,7 @@ pub use media::gif_store;
 pub use media::nip96_store;
 
 pub mod ui;
+pub use ui::ai_chat_seed_store;
 pub use ui::ai_chat_store;
 pub use ui::ai_provider_store;
 pub use ui::back_navigation;
@@ -39,6 +40,7 @@ pub use ui::emoji_store;
 pub use ui::notifications;
 pub use ui::settings_store;
 pub use ui::sidebar_store;
+pub use ui::sync_store;
 pub use ui::theme_store;
 
 pub mod auth_store;

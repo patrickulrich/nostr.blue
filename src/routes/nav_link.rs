@@ -33,7 +33,9 @@ pub(super) fn NavLink(
         | (Route::MusicHome {}, Route::MusicPlaylistDetail { .. }) => true,
         (Route::Bookmarks {}, Route::Bookmarks {}) => true,
         (Route::Videos {}, Route::Videos {}) => true,
+        (Route::Videos {}, Route::VideosVerts {}) => true,
         (Route::Videos {}, Route::VideoDetail { .. }) => true,
+        (Route::VideosVerts {}, Route::VideosVerts {}) => true,
         (Route::VideoDetail { video_id: v1 }, Route::VideoDetail { video_id: v2 }) => v1 == v2,
         (Route::VideosLive {}, Route::VideosLive {})
         | (Route::VideosLive {}, Route::VideosLiveTag { .. })

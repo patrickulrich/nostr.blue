@@ -15,10 +15,13 @@ pub mod clipboard;
 pub mod download;
 pub mod future;
 pub(crate) mod http;
+pub mod lightning;
 pub mod spawn;
 pub mod storage;
 pub mod timer;
 pub mod timestamp;
+
+pub use lightning::open_lightning_invoice;
 
 #[cfg(feature = "mobile")]
 pub mod android_signer;

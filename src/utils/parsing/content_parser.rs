@@ -824,6 +824,7 @@ fn extract_nostr_blue(url: &str) -> Option<ContentToken> {
     }
     if path.starts_with("/videos/")
         && !path.starts_with("/videos/live")
+        && !path.starts_with("/videos/verts")
         && !path.starts_with("/videos/new")
     {
         return extract_id_from_path(path, "/videos/").map(ContentToken::NostrBlueVideo);

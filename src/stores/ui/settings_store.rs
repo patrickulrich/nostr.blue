@@ -25,6 +25,10 @@ pub struct AppSettings {
     pub mempool_endpoint: String,
     #[serde(default = "default_publish_client_tag")]
     pub publish_client_tag: bool,
+    #[serde(default = "default_enable_negentropy_sync")]
+    pub enable_negentropy_sync: bool,
+    #[serde(default = "default_negentropy_sync_interval_minutes")]
+    pub negentropy_sync_interval_minutes: u32,
     #[serde(default)]
     pub cashu_wallet_auto_load: bool,
     #[serde(default)]
@@ -36,6 +40,15 @@ fn default_mempool_endpoint() -> String {
 fn default_publish_client_tag() -> bool {
     true
 }
+
+fn default_enable_negentropy_sync() -> bool {
+    true
+}
+
+fn default_negentropy_sync_interval_minutes() -> u32 {
+    5
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -45,8 +58,10 @@ impl Default for AppSettings {
             payment_method_preference: "nwc_first".to_string(),
             mempool_endpoint: default_mempool_endpoint(),
             publish_client_tag: default_publish_client_tag(),
+            enable_negentropy_sync: default_enable_negentropy_sync(),
+            negentropy_sync_interval_minutes: default_negentropy_sync_interval_minutes(),
             cashu_wallet_auto_load: false,
-            version: 6,
+            version: 7,
         }
     }
 }
@@ -282,6 +297,31 @@ pub async fn update_publish_client_tag(enabled: bool) {
     }
     drain_publish_client_tag_queue().await;
 }
+
+/// Update negentropy sync enabled setting and save to Nostr
+pub async fn update_negentropy_sync_enabled(enabled: bool) {
+    let settings = {
+        let mut w = SETTINGS.write();
+        w.enable_negentropy_sync = enabled;
+        w.clone()
+    };
+    if let Err(e) = save_settings(&settings).await {
+        log::error!("Failed to save negentropy sync enabled setting: {}", e);
+    }
+}
+
+/// Update negentropy sync interval setting and save to Nostr
+pub async fn update_negentropy_sync_interval_minutes(interval_minutes: u32) {
+    let settings = {
+        let mut w = SETTINGS.write();
+        w.negentropy_sync_interval_minutes = interval_minutes.clamp(1, 1440);
+        w.clone()
+    };
+    if let Err(e) = save_settings(&settings).await {
+        log::error!("Failed to save negentropy sync interval setting: {}", e);
+    }
+}
+
 /// Get current mempool endpoint (returns default if empty)
 pub fn get_mempool_endpoint() -> String {
     let settings = SETTINGS.read();
@@ -347,5 +387,13 @@ mod tests {
         let settings: AppSettings =
             serde_json::from_str(r#"{"theme":"system","version":5}"#).expect("valid settings");
         assert!(settings.publish_client_tag);
+    }
+
+    #[test]
+    fn negentropy_sync_defaults_when_missing() {
+        let settings: AppSettings =
+            serde_json::from_str(r#"{"theme":"system","version":6}"#).expect("valid settings");
+        assert!(settings.enable_negentropy_sync);
+        assert_eq!(settings.negentropy_sync_interval_minutes, 5);
     }
 }

@@ -1,5 +1,8 @@
 use crate::components::icons::{CameraIcon, SendIcon, SettingsIcon, SparklesIcon, TrashIcon};
-use crate::components::{ClientInitializing, ImageInsertData, ImageUploadDialog};
+use crate::components::{
+    ClientInitializing, ImageInsertData, ImageUploadDialog, Sheet, SheetContent, SheetDescription,
+    SheetFooter, SheetHeader, SheetSide, SheetTitle,
+};
 use crate::routes::Route;
 use crate::services::ai_chat::{
     generate_images, get_available_models, send_chat_message, AssistantContent,
@@ -8,8 +11,10 @@ use crate::services::ai_chat::{
     ToolDefinition, ToolFunction,
 };
 use crate::services::ppq;
+use crate::stores::ai_chat_seed_store;
 use crate::stores::ai_chat_store::{
-    self, PersistedChatImage, PersistedChatMessage, PersistedChatRole, PersistedToolCall,
+    self, PersistedChatImage, PersistedChatMessage, PersistedChatRole, PersistedChatState,
+    PersistedConversation, PersistedToolCall,
 };
 use crate::stores::ai_provider_store::{
     self, ppq_provider, resolve_providers, AiProviderConfig, AiProviderState, PpqAccountState,
@@ -28,6 +33,7 @@ const AI_CHAT_PROVIDER_PERSISTENCE_ENABLED: bool = true;
 const AI_CHAT_HISTORY_LOAD_ENABLED: bool = true;
 const AI_CHAT_HISTORY_SAVE_ENABLED: bool = true;
 const AI_CHAT_HISTORY_SAVE_FAILURE_COOLDOWN_MS: u64 = 5_000;
+const DEFAULT_CONVERSATION_TITLE: &str = "New Chat";
 
 #[derive(Clone, Debug, PartialEq)]
 struct DisplayMessage {
@@ -99,29 +105,28 @@ enum PendingProviderSaveAction {
 
 fn history_save_snapshot_key(
     account_key: &str,
-    persisted_messages: &[PersistedChatMessage],
-    initial_loaded_messages: &[PersistedChatMessage],
+    persisted_state: &PersistedChatState,
+    initial_loaded_state: &PersistedChatState,
 ) -> String {
-    fn hash_messages(messages: &[PersistedChatMessage]) -> u64 {
+    fn hash_state(state: &PersistedChatState) -> u64 {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        messages.len().hash(&mut hasher);
-        for message in messages {
-            message.hash(&mut hasher);
-        }
+        state.hash(&mut hasher);
         hasher.finish()
     }
 
     format!(
         "{}:{:016x}:{:016x}",
         account_key,
-        hash_messages(persisted_messages),
-        hash_messages(initial_loaded_messages),
+        hash_state(persisted_state),
+        hash_state(initial_loaded_state),
     )
 }
 
 #[component]
 pub fn AIChat() -> Element {
     let mut messages = use_signal(Vec::<DisplayMessage>::new);
+    let mut conversations = use_signal(Vec::<PersistedConversation>::new);
+    let mut active_conversation_id = use_signal(|| None::<String>);
     let mut input = use_signal(String::new);
     let loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
@@ -130,6 +135,10 @@ pub fn AIChat() -> Element {
     let mut selected_model = use_signal(String::new);
     let mut pending_images = use_signal(Vec::<ChatImage>::new);
     let mut show_image_upload = use_signal(|| false);
+    let mut show_conversation_sheet = use_signal(|| false);
+    let mut editing_conversation_id = use_signal(|| None::<String>);
+    let mut editing_conversation_title = use_signal(String::new);
+    let mut confirm_delete_conversation_id = use_signal(|| None::<String>);
     let mut provider_state = use_signal(AiProviderState::default);
     let mut providers = use_signal(|| vec![ppq_provider(None)]);
     let mut provider_state_loaded = use_signal(|| false);
@@ -144,7 +153,7 @@ pub fn AIChat() -> Element {
     let mut persisted_messages_failed_snapshot = use_signal(|| None::<FailedHistorySnapshot>);
     let mut failed_snapshot_retry_generation = use_signal(|| 0u32);
     let mut provider_models_generation = use_signal(|| 0u32);
-    let mut initial_loaded_messages = use_signal(Vec::<PersistedChatMessage>::new);
+    let mut initial_loaded_state = use_signal(PersistedChatState::default);
     let messages_container_id = use_signal(|| "ai-chat-messages".to_string());
     let mut last_account_key = use_signal(|| None::<String>);
     let mut pending_provider_save_snapshot = use_signal(|| None::<AiProviderState>);
@@ -158,6 +167,12 @@ pub fn AIChat() -> Element {
             .map(persisted_message_from_display)
             .collect::<Vec<PersistedChatMessage>>()
     });
+    let persisted_chat_state = use_memo(move || PersistedChatState {
+        conversations: conversations.read().clone(),
+        active_conversation_id: active_conversation_id.read().clone(),
+    });
+    let active_conversation_id_value = active_conversation_id.read().clone();
+    let persisted_messages_value = persisted_messages.read().clone();
 
     use_effect(move || {
         if !AI_CHAT_PROVIDER_PERSISTENCE_ENABLED {
@@ -239,6 +254,19 @@ pub fn AIChat() -> Element {
         });
     });
 
+    use_effect(use_reactive(
+        (&active_conversation_id_value, &persisted_messages_value),
+        move |(active_id, persisted_messages)| {
+            if active_id.is_none() {
+                return;
+            }
+
+            conversations.with_mut(|items| {
+                sync_active_conversation_state(items, active_id.as_deref(), &persisted_messages);
+            });
+        },
+    ));
+
     use_effect(move || {
         let selected = selected_model.read().clone();
         let active_model = current_model(&models.read(), &selected);
@@ -259,10 +287,16 @@ pub fn AIChat() -> Element {
         }
         last_account_key.set(Some(account_key));
         messages.set(Vec::new());
+        conversations.set(Vec::new());
+        active_conversation_id.set(None);
         chat_history_loaded.set(false);
         chat_history_loading.set(false);
         persisted_messages_dirty.set(false);
-        initial_loaded_messages.set(Vec::new());
+        initial_loaded_state.set(PersistedChatState::default());
+        show_conversation_sheet.set(false);
+        editing_conversation_id.set(None);
+        editing_conversation_title.set(String::new());
+        confirm_delete_conversation_id.set(None);
         if !AI_CHAT_HISTORY_LOAD_ENABLED && !AI_CHAT_HISTORY_SAVE_ENABLED {
             return;
         }
@@ -278,8 +312,8 @@ pub fn AIChat() -> Element {
         let account_key = ai_chat_store::current_account_key();
         let snapshot_key = history_save_snapshot_key(
             &account_key,
-            &persisted_messages.read(),
-            &initial_loaded_messages.read(),
+            &persisted_chat_state.read(),
+            &initial_loaded_state.read(),
         );
         if failed_snapshot.snapshot_key != snapshot_key {
             persisted_messages_failed_snapshot.set(None);
@@ -328,8 +362,8 @@ pub fn AIChat() -> Element {
 
         chat_history_loading.set(true);
         spawn(async move {
-            match ai_chat_store::load_chat_history(&account_key).await {
-                Ok(history) => {
+            match ai_chat_store::load_chat_state(&account_key).await {
+                Ok(state) => {
                     if !is_current_chat_history_request(
                         chat_history_generation,
                         &account_key,
@@ -343,20 +377,38 @@ pub fn AIChat() -> Element {
                             &account_key,
                             generation,
                         ) {
-                            initial_loaded_messages.set(history);
+                            initial_loaded_state.set(state);
                             chat_history_loaded.set(true);
                             chat_history_loading.set(false);
                         }
                         return;
                     }
-                    initial_loaded_messages.set(history.clone());
+                    let resolved_active_id = resolve_active_conversation_id(&state);
+                    let active_messages = resolved_active_id
+                        .as_deref()
+                        .and_then(|id| {
+                            state
+                                .conversations
+                                .iter()
+                                .find(|conversation| conversation.id == id)
+                        })
+                        .map(|conversation| {
+                            conversation
+                                .messages
+                                .iter()
+                                .cloned()
+                                .map(display_message_from_persisted)
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    initial_loaded_state.set(PersistedChatState {
+                        conversations: state.conversations.clone(),
+                        active_conversation_id: resolved_active_id.clone(),
+                    });
                     persisted_messages_dirty.set(false);
-                    messages.set(
-                        history
-                            .into_iter()
-                            .map(display_message_from_persisted)
-                            .collect(),
-                    );
+                    conversations.set(state.conversations);
+                    active_conversation_id.set(resolved_active_id);
+                    messages.set(active_messages);
                 }
                 Err(e) => {
                     if !is_current_chat_history_request(
@@ -377,6 +429,46 @@ pub fn AIChat() -> Element {
     });
 
     use_effect(move || {
+        if !*chat_history_loaded.read() {
+            return;
+        }
+
+        let Some(seed_payload) = ai_chat_seed_store::take_ai_chat_seed() else {
+            return;
+        };
+
+        let merged = merged_conversations_snapshot(
+            &conversations.read(),
+            active_conversation_id.read().as_deref(),
+            &persisted_messages.read(),
+        );
+        let new_conversation =
+            seeded_conversation(seed_payload.title_hint.as_deref(), &seed_payload.message);
+        let next_messages = new_conversation
+            .messages
+            .iter()
+            .cloned()
+            .map(display_message_from_persisted)
+            .collect::<Vec<_>>();
+        let next_active_id = new_conversation.id.clone();
+        let mut next_conversations = merged;
+        next_conversations.push(new_conversation);
+
+        conversations.set(next_conversations);
+        active_conversation_id.set(Some(next_active_id));
+        messages.set(next_messages);
+        input.set(String::new());
+        pending_images.set(Vec::new());
+        compose_notice.set(None);
+        error.set(None);
+        show_conversation_sheet.set(false);
+        editing_conversation_id.set(None);
+        editing_conversation_title.set(String::new());
+        confirm_delete_conversation_id.set(None);
+        persisted_messages_dirty.set(true);
+    });
+
+    use_effect(move || {
         if !AI_CHAT_HISTORY_SAVE_ENABLED {
             return;
         }
@@ -386,12 +478,12 @@ pub fn AIChat() -> Element {
         let account_key = ai_chat_store::current_account_key();
         let chat_history_ready = *chat_history_loaded.read();
         let persisted_messages_dirty_value = *persisted_messages_dirty.read();
-        let initial_loaded_messages_snapshot = initial_loaded_messages.read().clone();
-        let persisted_messages_snapshot = persisted_messages.read().clone();
+        let initial_loaded_state_snapshot = initial_loaded_state.read().clone();
+        let persisted_state_snapshot = persisted_chat_state.read().clone();
         let computed_snapshot_key = history_save_snapshot_key(
             &account_key,
-            &persisted_messages_snapshot,
-            &initial_loaded_messages_snapshot,
+            &persisted_state_snapshot,
+            &initial_loaded_state_snapshot,
         );
         let failed_snapshot_cooldown_active = persisted_messages_failed_snapshot
             .read()
@@ -404,7 +496,7 @@ pub fn AIChat() -> Element {
 
         if !chat_history_ready
             || !persisted_messages_dirty_value
-            || persisted_messages_snapshot == initial_loaded_messages_snapshot
+            || persisted_state_snapshot == initial_loaded_state_snapshot
             || ai_chat_store::current_account_key() != account_key
             || failed_snapshot_cooldown_active
         {
@@ -414,9 +506,9 @@ pub fn AIChat() -> Element {
         let mut persisted_messages_dirty_signal = persisted_messages_dirty;
         let mut persisted_messages_save_generation_signal = persisted_messages_save_generation;
         let mut persisted_messages_save_in_flight_signal = persisted_messages_save_in_flight;
-        let persisted_messages_signal = persisted_messages;
+        let persisted_state_signal = persisted_chat_state;
         let chat_history_generation_signal = chat_history_generation;
-        let mut initial_loaded_messages_signal = initial_loaded_messages;
+        let mut initial_loaded_state_signal = initial_loaded_state;
         let mut persisted_messages_failed_snapshot_signal = persisted_messages_failed_snapshot;
         let generation = persisted_messages_save_generation_signal
             .read()
@@ -436,11 +528,10 @@ pub fn AIChat() -> Element {
                     return;
                 }
 
-                let result = if persisted_messages_snapshot.is_empty() {
-                    ai_chat_store::clear_chat_history(&account_key).await
+                let result = if persisted_state_snapshot.conversations.is_empty() {
+                    ai_chat_store::clear_chat_state(&account_key).await
                 } else {
-                    ai_chat_store::save_chat_history(&account_key, &persisted_messages_snapshot)
-                        .await
+                    ai_chat_store::save_chat_state(&account_key, &persisted_state_snapshot).await
                 };
 
                 match result {
@@ -449,12 +540,10 @@ pub fn AIChat() -> Element {
                             && *chat_history_generation_signal.read() == chat_generation
                             && ai_chat_store::current_account_key() == account_key
                         {
-                            let latest_persisted_messages =
-                                persisted_messages_signal.read().clone();
-                            if latest_persisted_messages == persisted_messages_snapshot {
+                            let latest_persisted_state = persisted_state_signal.read().clone();
+                            if latest_persisted_state == persisted_state_snapshot {
                                 persisted_messages_dirty_signal.set(false);
-                                initial_loaded_messages_signal
-                                    .set(persisted_messages_snapshot.clone());
+                                initial_loaded_state_signal.set(persisted_state_snapshot.clone());
                             }
                             persisted_messages_failed_snapshot_signal.set(None);
                         }
@@ -595,22 +684,261 @@ pub fn AIChat() -> Element {
         }
         None => false,
     };
+    let conversation_items = sorted_conversations(&conversations.read());
+    let active_conversation_title = active_conversation_id
+        .read()
+        .as_deref()
+        .and_then(|id| {
+            conversation_items
+                .iter()
+                .find(|conversation| conversation.id == id)
+        })
+        .map(|conversation| conversation.title.clone());
 
     let provider_for_keydown = active_provider.clone();
     let provider_for_click = active_provider.clone();
 
     rsx! {
         div { class: "min-h-screen flex flex-col bg-background",
+            Sheet {
+                open: show_conversation_sheet(),
+                on_open_change: move |open| {
+                    show_conversation_sheet.set(open);
+                    if !open {
+                        editing_conversation_id.set(None);
+                        editing_conversation_title.set(String::new());
+                        confirm_delete_conversation_id.set(None);
+                    }
+                },
+                SheetContent {
+                    side: SheetSide::Left,
+                    class: "border-r border-border bg-background",
+                    SheetHeader {
+                        SheetTitle { "Conversations" }
+                        SheetDescription {
+                            if conversation_items.is_empty() {
+                                "Create separate chats for different topics and switch between them later."
+                            } else {
+                                "{conversation_items.len()} saved conversation(s)"
+                            }
+                        }
+                    }
+                    div { class: "flex-1 overflow-y-auto px-3 pb-3",
+                        if conversation_items.is_empty() {
+                            div { class: "rounded-xl border border-dashed border-border bg-card/60 px-4 py-5 text-sm text-muted-foreground",
+                                "No saved conversations yet."
+                            }
+                        } else {
+                            for conversation in conversation_items.iter() {
+                                {
+                                    let is_active = active_conversation_id.read().as_deref()
+                                        == Some(conversation.id.as_str());
+                                    let is_editing = editing_conversation_id.read().as_deref()
+                                        == Some(conversation.id.as_str());
+                                    let confirm_delete = confirm_delete_conversation_id.read().as_deref()
+                                        == Some(conversation.id.as_str());
+                                    let preview = conversation_preview(conversation);
+                                    let timestamp = format_relative_timestamp(conversation.updated_at_ms);
+                                    let select_conversation_id = conversation.id.clone();
+                                    let rename_keydown_conversation_id = conversation.id.clone();
+                                    let rename_blur_conversation_id = conversation.id.clone();
+                                    let begin_rename_conversation_id = conversation.id.clone();
+                                    let begin_delete_conversation_id = conversation.id.clone();
+                                    let delete_conversation_id = conversation.id.clone();
+                                    let conversation_title = conversation.title.clone();
+                                    let conversation_messages = conversation.messages.clone();
+
+                                    rsx! {
+                                        div {
+                                            key: "{conversation.id}",
+                                            class: if is_active {
+                                                "mb-3 rounded-2xl border border-primary/30 bg-primary/5 p-3"
+                                            } else {
+                                                "mb-3 rounded-2xl border border-border bg-card p-3"
+                                            },
+                                            div { class: "flex items-start gap-3",
+                                                button {
+                                                    class: "min-w-0 flex-1 text-left",
+                                                    onclick: move |_| {
+                                                        let merged = merged_conversations_snapshot(
+                                                            &conversations.read(),
+                                                            active_conversation_id.read().as_deref(),
+                                                            &persisted_messages.read(),
+                                                        );
+                                                        let next_messages = conversation_messages
+                                                            .iter()
+                                                            .cloned()
+                                                            .map(display_message_from_persisted)
+                                                            .collect::<Vec<_>>();
+                                                        conversations.set(merged);
+                                                        active_conversation_id.set(Some(select_conversation_id.clone()));
+                                                        messages.set(next_messages);
+                                                        input.set(String::new());
+                                                        pending_images.set(Vec::new());
+                                                        compose_notice.set(None);
+                                                        error.set(None);
+                                                        persisted_messages_dirty.set(true);
+                                                        show_conversation_sheet.set(false);
+                                                        confirm_delete_conversation_id.set(None);
+                                                        editing_conversation_id.set(None);
+                                                        editing_conversation_title.set(String::new());
+                                                    },
+                                                    if is_editing {
+                                                        input {
+                                                            class: "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground focus:outline-hidden",
+                                                            value: "{editing_conversation_title}",
+                                                            oninput: move |evt| editing_conversation_title.set(evt.value()),
+                                                            onkeydown: move |evt| {
+                                                                if evt.key() == Key::Enter {
+                                                                    evt.prevent_default();
+                                                                    rename_conversation(
+                                                                        conversations,
+                                                                        &rename_keydown_conversation_id,
+                                                                        editing_conversation_title.read().as_str(),
+                                                                    );
+                                                                    editing_conversation_id.set(None);
+                                                                    editing_conversation_title.set(String::new());
+                                                                    persisted_messages_dirty.set(true);
+                                                                } else if evt.key() == Key::Escape {
+                                                                    editing_conversation_id.set(None);
+                                                                    editing_conversation_title.set(String::new());
+                                                                }
+                                                            },
+                                                            onblur: move |_| {
+                                                                rename_conversation(
+                                                                    conversations,
+                                                                    &rename_blur_conversation_id,
+                                                                    editing_conversation_title.read().as_str(),
+                                                                );
+                                                                editing_conversation_id.set(None);
+                                                                editing_conversation_title.set(String::new());
+                                                                persisted_messages_dirty.set(true);
+                                                            },
+                                                        }
+                                                    } else {
+                                                        div { class: "flex items-center gap-2",
+                                                            p { class: "truncate text-sm font-medium text-foreground", "{conversation.title}" }
+                                                            if is_active {
+                                                                span { class: "rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary", "Active" }
+                                                            }
+                                                        }
+                                                        p { class: "mt-1 line-clamp-2 text-xs text-muted-foreground", "{preview}" }
+                                                        p { class: "mt-2 text-[11px] uppercase tracking-[0.08em] text-muted-foreground", "{timestamp}" }
+                                                    }
+                                                }
+                                                div { class: "flex shrink-0 items-center gap-2",
+                                                    button {
+                                                        class: "inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted-foreground transition hover:bg-accent",
+                                                        title: "Rename conversation",
+                                                        onclick: move |_| {
+                                                            editing_conversation_id.set(Some(begin_rename_conversation_id.clone()));
+                                                            editing_conversation_title.set(conversation_title.clone());
+                                                            confirm_delete_conversation_id.set(None);
+                                                        },
+                                                        "✎"
+                                                    }
+                                                    button {
+                                                        class: "inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted-foreground transition hover:bg-accent",
+                                                        title: "Delete conversation",
+                                                        onclick: move |_| {
+                                                            confirm_delete_conversation_id.set(Some(begin_delete_conversation_id.clone()));
+                                                            editing_conversation_id.set(None);
+                                                            editing_conversation_title.set(String::new());
+                                                        },
+                                                        TrashIcon { class: "h-4 w-4".to_string() }
+                                                    }
+                                                }
+                                            }
+                                            if confirm_delete {
+                                                div { class: "mt-3 flex items-center justify-between gap-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400",
+                                                    span { "Delete this conversation?" }
+                                                    div { class: "flex items-center gap-2",
+                                                        button {
+                                                            class: "rounded-lg border border-red-500/30 px-2.5 py-1 font-medium transition hover:bg-red-500/10",
+                                                            onclick: move |_| {
+                                                                let (next_conversations, next_active_id, next_messages) = delete_conversation_state(
+                                                                    &merged_conversations_snapshot(
+                                                                        &conversations.read(),
+                                                                        active_conversation_id.read().as_deref(),
+                                                                        &persisted_messages.read(),
+                                                                    ),
+                                                                    &delete_conversation_id,
+                                                                );
+                                                                conversations.set(next_conversations);
+                                                                active_conversation_id.set(next_active_id);
+                                                                messages.set(next_messages);
+                                                                input.set(String::new());
+                                                                pending_images.set(Vec::new());
+                                                                compose_notice.set(None);
+                                                                error.set(None);
+                                                                confirm_delete_conversation_id.set(None);
+                                                                editing_conversation_id.set(None);
+                                                                editing_conversation_title.set(String::new());
+                                                                persisted_messages_dirty.set(true);
+                                                            },
+                                                            "Delete"
+                                                        }
+                                                        button {
+                                                            class: "rounded-lg border border-border px-2.5 py-1 text-foreground transition hover:bg-background",
+                                                            onclick: move |_| confirm_delete_conversation_id.set(None),
+                                                            "Cancel"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    SheetFooter {
+                        button {
+                            class: "rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90",
+                            onclick: move |_| {
+                                let merged = merged_conversations_snapshot(
+                                    &conversations.read(),
+                                    active_conversation_id.read().as_deref(),
+                                    &persisted_messages.read(),
+                                );
+                                let new_conversation = new_conversation();
+                                let mut next_conversations = merged;
+                                next_conversations.push(new_conversation.clone());
+                                conversations.set(next_conversations);
+                                active_conversation_id.set(Some(new_conversation.id.clone()));
+                                messages.set(Vec::new());
+                                input.set(String::new());
+                                pending_images.set(Vec::new());
+                                compose_notice.set(None);
+                                error.set(None);
+                                editing_conversation_id.set(None);
+                                editing_conversation_title.set(String::new());
+                                confirm_delete_conversation_id.set(None);
+                                persisted_messages_dirty.set(true);
+                                show_conversation_sheet.set(false);
+                            },
+                            "New Chat"
+                        }
+                    }
+                }
+            }
             div { class: "sticky top-0 z-20 border-b border-border bg-background/90 backdrop-blur-sm",
                 div { class: "mx-auto flex max-w-5xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between",
                     div { class: "flex min-w-0 items-center gap-3",
-                        div { class: "flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary",
+                        button {
+                            class: "flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary transition hover:bg-primary/15",
+                            title: "Open conversations",
+                            onclick: move |_| show_conversation_sheet.set(true),
                             SparklesIcon { class: "w-5 h-5".to_string() }
                         }
                         div { class: "min-w-0",
                             h1 { class: "text-xl font-semibold", "AI Chat" }
                             p { class: "truncate text-sm text-muted-foreground",
-                                "Provider: {active_provider.name}"
+                                if let Some(title) = active_conversation_title.as_ref() {
+                                    "{title} · Provider: {active_provider.name}"
+                                } else {
+                                    "Provider: {active_provider.name}"
+                                }
                             }
                         }
                     }
@@ -845,6 +1173,8 @@ pub fn AIChat() -> Element {
                                         error,
                                         compose_notice,
                                         messages,
+                                        conversations,
+                                        active_conversation_id,
                                         persisted_messages_dirty,
                                         provider_for_keydown.clone(),
                                     );
@@ -891,6 +1221,8 @@ pub fn AIChat() -> Element {
                                         error,
                                         compose_notice,
                                         messages,
+                                        conversations,
+                                        active_conversation_id,
                                         persisted_messages_dirty,
                                         provider_for_click.clone(),
                                     )
@@ -1034,6 +1366,224 @@ fn current_model(models: &[ChatModel], selected_model_id: &str) -> Option<ChatMo
         .cloned()
 }
 
+fn resolve_active_conversation_id(state: &PersistedChatState) -> Option<String> {
+    if let Some(active_id) = state.active_conversation_id.as_deref() {
+        if state
+            .conversations
+            .iter()
+            .any(|conversation| conversation.id == active_id)
+        {
+            return Some(active_id.to_string());
+        }
+    }
+
+    state
+        .conversations
+        .iter()
+        .max_by_key(|conversation| conversation.updated_at_ms)
+        .map(|conversation| conversation.id.clone())
+}
+
+fn new_conversation() -> PersistedConversation {
+    let timestamp = crate::platform::timestamp::now_millis();
+    PersistedConversation {
+        id: format!("conversation-{timestamp}"),
+        title: DEFAULT_CONVERSATION_TITLE.to_string(),
+        messages: Vec::new(),
+        created_at_ms: timestamp,
+        updated_at_ms: timestamp,
+    }
+}
+
+fn seeded_conversation(title_hint: Option<&str>, message: &str) -> PersistedConversation {
+    seeded_conversation_with_timestamp(
+        crate::platform::timestamp::now_millis(),
+        title_hint,
+        message,
+    )
+}
+
+fn seeded_conversation_with_timestamp(
+    timestamp: u64,
+    title_hint: Option<&str>,
+    message: &str,
+) -> PersistedConversation {
+    PersistedConversation {
+        id: format!("conversation-{timestamp}"),
+        title: title_hint
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+            .unwrap_or(DEFAULT_CONVERSATION_TITLE)
+            .to_string(),
+        messages: vec![PersistedChatMessage {
+            id: format!("seed-{timestamp}"),
+            role: PersistedChatRole::User,
+            content: message.to_string(),
+            images: vec![],
+            tool_calls: vec![],
+        }],
+        created_at_ms: timestamp,
+        updated_at_ms: timestamp,
+    }
+}
+
+fn sync_active_conversation_state(
+    conversations: &mut [PersistedConversation],
+    active_id: Option<&str>,
+    persisted_messages: &[PersistedChatMessage],
+) {
+    let Some(active_id) = active_id else {
+        return;
+    };
+    let Some(conversation) = conversations
+        .iter_mut()
+        .find(|conversation| conversation.id == active_id)
+    else {
+        return;
+    };
+
+    let next_title = derive_conversation_title(&conversation.title, persisted_messages);
+    let messages_changed = conversation.messages != persisted_messages;
+    let title_changed = conversation.title != next_title;
+
+    if !messages_changed && !title_changed {
+        return;
+    }
+
+    if messages_changed {
+        conversation.messages = persisted_messages.to_vec();
+        conversation.updated_at_ms = crate::platform::timestamp::now_millis();
+    }
+    if title_changed {
+        conversation.title = next_title;
+    }
+}
+
+fn merged_conversations_snapshot(
+    conversations: &[PersistedConversation],
+    active_id: Option<&str>,
+    persisted_messages: &[PersistedChatMessage],
+) -> Vec<PersistedConversation> {
+    let mut merged = conversations.to_vec();
+    sync_active_conversation_state(&mut merged, active_id, persisted_messages);
+    merged
+}
+
+fn derive_conversation_title(
+    current_title: &str,
+    persisted_messages: &[PersistedChatMessage],
+) -> String {
+    if current_title != DEFAULT_CONVERSATION_TITLE {
+        return current_title.to_string();
+    }
+
+    let Some(first_user_message) = persisted_messages.iter().find(|message| {
+        message.role == PersistedChatRole::User
+            && (!message.content.trim().is_empty() || !message.images.is_empty())
+    }) else {
+        return current_title.to_string();
+    };
+
+    let normalized = first_user_message.content.trim();
+    if normalized.is_empty() {
+        return "Image".to_string();
+    }
+
+    if normalized.chars().count() <= 48 {
+        normalized.to_string()
+    } else {
+        format!("{}...", normalized.chars().take(45).collect::<String>())
+    }
+}
+
+fn rename_conversation(
+    mut conversations: Signal<Vec<PersistedConversation>>,
+    conversation_id: &str,
+    title: &str,
+) {
+    let next_title = if title.trim().is_empty() {
+        DEFAULT_CONVERSATION_TITLE.to_string()
+    } else {
+        title.trim().to_string()
+    };
+
+    conversations.with_mut(|items| {
+        if let Some(conversation) = items
+            .iter_mut()
+            .find(|conversation| conversation.id == conversation_id)
+        {
+            conversation.title = next_title.clone();
+            conversation.updated_at_ms = crate::platform::timestamp::now_millis();
+        }
+    });
+}
+
+fn delete_conversation_state(
+    conversations: &[PersistedConversation],
+    conversation_id: &str,
+) -> (
+    Vec<PersistedConversation>,
+    Option<String>,
+    Vec<DisplayMessage>,
+) {
+    let mut next_conversations = conversations
+        .iter()
+        .filter(|conversation| conversation.id != conversation_id)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    if next_conversations.is_empty() {
+        return (next_conversations, None, Vec::new());
+    }
+
+    next_conversations.sort_by_key(|conversation| std::cmp::Reverse(conversation.updated_at_ms));
+    let next_active = next_conversations[0].id.clone();
+    let next_messages = next_conversations[0]
+        .messages
+        .iter()
+        .cloned()
+        .map(display_message_from_persisted)
+        .collect();
+
+    (next_conversations, Some(next_active), next_messages)
+}
+
+fn sorted_conversations(conversations: &[PersistedConversation]) -> Vec<PersistedConversation> {
+    let mut items = conversations.to_vec();
+    items.sort_by_key(|conversation| std::cmp::Reverse(conversation.updated_at_ms));
+    items
+}
+
+fn conversation_preview(conversation: &PersistedConversation) -> String {
+    conversation
+        .messages
+        .iter()
+        .rev()
+        .find_map(|message| {
+            if !message.content.trim().is_empty() {
+                Some(message.content.trim().to_string())
+            } else if !message.images.is_empty() {
+                Some("Image".to_string())
+            } else if !message.tool_calls.is_empty() {
+                Some("Tool activity".to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "Empty conversation".to_string())
+}
+
+fn format_relative_timestamp(timestamp_ms: u64) -> String {
+    let now = crate::platform::timestamp::now_millis();
+    let elapsed = now.saturating_sub(timestamp_ms);
+    match elapsed {
+        0..=59_999 => "just now".to_string(),
+        60_000..=3_599_999 => format!("{}m ago", elapsed / 60_000),
+        3_600_000..=86_399_999 => format!("{}h ago", elapsed / 3_600_000),
+        _ => format!("{}d ago", elapsed / 86_400_000),
+    }
+}
+
 fn has_image_models(models: &[ChatModel]) -> bool {
     models
         .iter()
@@ -1113,6 +1663,8 @@ fn submit_message(
     mut error: Signal<Option<String>>,
     mut compose_notice: Signal<Option<String>>,
     mut messages: Signal<Vec<DisplayMessage>>,
+    mut conversations: Signal<Vec<PersistedConversation>>,
+    mut active_conversation_id: Signal<Option<String>>,
     mut persisted_messages_dirty: Signal<bool>,
     provider: AiProviderConfig,
 ) {
@@ -1167,6 +1719,11 @@ fn submit_message(
         images: attached_images.clone(),
         tool_calls: Vec::new(),
     };
+    if active_conversation_id.read().is_none() {
+        let conversation = new_conversation();
+        active_conversation_id.set(Some(conversation.id.clone()));
+        conversations.with_mut(|items| items.push(conversation));
+    }
     let mut next_messages = messages.read().clone();
     next_messages.push(user_message);
     messages.set(next_messages.clone());
@@ -1597,13 +2154,28 @@ impl From<ImageInsertData> for ChatImage {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_api_messages, history_save_snapshot_key, resolve_selected_model,
+        build_api_messages, delete_conversation_state, derive_conversation_title,
+        history_save_snapshot_key, resolve_selected_model, seeded_conversation_with_timestamp,
         should_suggest_image_model, ChatImage, DisplayMessage, DisplayRole,
     };
     use crate::services::ai_chat::{ChatMessageContent, ChatMessagePart, ChatModel, ChatModelKind};
     use crate::stores::ai_chat_store::{
-        PersistedChatMessage, PersistedChatRole, PersistedToolCall,
+        PersistedChatImage, PersistedChatMessage, PersistedChatRole, PersistedChatState,
+        PersistedConversation, PersistedToolCall,
     };
+
+    fn state_with_messages(messages: Vec<PersistedChatMessage>) -> PersistedChatState {
+        PersistedChatState {
+            active_conversation_id: Some("conversation-1".to_string()),
+            conversations: vec![PersistedConversation {
+                id: "conversation-1".to_string(),
+                title: "New Chat".to_string(),
+                messages,
+                created_at_ms: 1,
+                updated_at_ms: 1,
+            }],
+        }
+    }
 
     #[test]
     fn history_snapshot_key_is_deterministic() {
@@ -1614,14 +2186,12 @@ mod tests {
             images: vec![],
             tool_calls: vec![],
         }];
-        let initial_loaded_messages = messages.clone();
+        let state = state_with_messages(messages.clone());
+        let initial_loaded_state = state_with_messages(messages);
 
-        let first = history_save_snapshot_key("account", &messages, &initial_loaded_messages);
-        let second = history_save_snapshot_key(
-            "account",
-            &messages.clone(),
-            &initial_loaded_messages.clone(),
-        );
+        let first = history_save_snapshot_key("account", &state, &initial_loaded_state);
+        let second =
+            history_save_snapshot_key("account", &state.clone(), &initial_loaded_state.clone());
 
         assert_eq!(first, second);
     }
@@ -1641,10 +2211,12 @@ mod tests {
         }];
         let mut edited_messages = messages.clone();
         edited_messages[0].content = "after".to_string();
+        let messages_state = state_with_messages(messages);
+        let edited_state = state_with_messages(edited_messages);
 
         assert_ne!(
-            history_save_snapshot_key("account", &messages, &messages),
-            history_save_snapshot_key("account", &edited_messages, &messages),
+            history_save_snapshot_key("account", &messages_state, &messages_state),
+            history_save_snapshot_key("account", &edited_state, &messages_state),
         );
     }
 
@@ -1663,10 +2235,12 @@ mod tests {
             name: "set_theme".to_string(),
             result: "{\"success\":true}".to_string(),
         });
+        let messages_state = state_with_messages(messages);
+        let with_tool_call_state = state_with_messages(with_tool_call);
 
         assert_ne!(
-            history_save_snapshot_key("account", &messages, &messages),
-            history_save_snapshot_key("account", &with_tool_call, &messages),
+            history_save_snapshot_key("account", &messages_state, &messages_state),
+            history_save_snapshot_key("account", &with_tool_call_state, &messages_state),
         );
     }
 
@@ -1683,10 +2257,11 @@ mod tests {
                 result: "{\"success\":true}".to_string(),
             }],
         }];
+        let messages_state = state_with_messages(messages);
 
         assert_ne!(
-            history_save_snapshot_key("account-a", &messages, &messages),
-            history_save_snapshot_key("account-b", &messages, &messages),
+            history_save_snapshot_key("account-a", &messages_state, &messages_state),
+            history_save_snapshot_key("account-b", &messages_state, &messages_state),
         );
     }
 
@@ -1707,11 +2282,108 @@ mod tests {
             images: vec![],
             tool_calls: vec![],
         });
+        let messages_state = state_with_messages(messages);
+        let different_initial_state = state_with_messages(different_initial_loaded_messages);
 
         assert_ne!(
-            history_save_snapshot_key("account", &messages, &messages),
-            history_save_snapshot_key("account", &messages, &different_initial_loaded_messages,),
+            history_save_snapshot_key("account", &messages_state, &messages_state),
+            history_save_snapshot_key("account", &messages_state, &different_initial_state,),
         );
+    }
+
+    #[test]
+    fn seeded_conversation_uses_title_hint_and_creates_user_message() {
+        let conversation =
+            seeded_conversation_with_timestamp(42, Some("Bible: John 3:16"), "Bible passage text");
+
+        assert_eq!(conversation.title, "Bible: John 3:16");
+        assert_eq!(conversation.id, "conversation-42");
+        assert_eq!(conversation.messages.len(), 1);
+        assert_eq!(conversation.messages[0].role, PersistedChatRole::User);
+        assert_eq!(conversation.messages[0].content, "Bible passage text");
+    }
+
+    #[test]
+    fn seeded_conversation_falls_back_to_default_title() {
+        let conversation = seeded_conversation_with_timestamp(42, Some("   "), "Seeded message");
+
+        assert_eq!(conversation.title, "New Chat");
+    }
+
+    #[test]
+    fn derive_conversation_title_uses_image_fallback_for_image_only_first_message() {
+        let title = derive_conversation_title(
+            "New Chat",
+            &[PersistedChatMessage {
+                id: "1".to_string(),
+                role: PersistedChatRole::User,
+                content: String::new(),
+                images: vec![PersistedChatImage {
+                    url: "https://cdn.example.com/image.png".to_string(),
+                    alt: String::new(),
+                    title: String::new(),
+                }],
+                tool_calls: vec![],
+            }],
+        );
+
+        assert_eq!(title, "Image");
+    }
+
+    #[test]
+    fn delete_conversation_state_returns_empty_state_when_last_conversation_is_removed() {
+        let conversation = PersistedConversation {
+            id: "conversation-1".to_string(),
+            title: "New Chat".to_string(),
+            messages: vec![PersistedChatMessage {
+                id: "message-1".to_string(),
+                role: PersistedChatRole::User,
+                content: "hello".to_string(),
+                images: vec![],
+                tool_calls: vec![],
+            }],
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        };
+
+        let (conversations, active_id, messages) =
+            delete_conversation_state(&[conversation], "conversation-1");
+
+        assert!(conversations.is_empty());
+        assert!(active_id.is_none());
+        assert!(messages.is_empty());
+    }
+
+    #[test]
+    fn delete_conversation_state_selects_most_recent_remaining_conversation() {
+        let older = PersistedConversation {
+            id: "conversation-1".to_string(),
+            title: "Older".to_string(),
+            messages: vec![],
+            created_at_ms: 1,
+            updated_at_ms: 5,
+        };
+        let newer = PersistedConversation {
+            id: "conversation-2".to_string(),
+            title: "Newer".to_string(),
+            messages: vec![PersistedChatMessage {
+                id: "message-1".to_string(),
+                role: PersistedChatRole::Assistant,
+                content: "welcome".to_string(),
+                images: vec![],
+                tool_calls: vec![],
+            }],
+            created_at_ms: 2,
+            updated_at_ms: 10,
+        };
+
+        let (conversations, active_id, messages) =
+            delete_conversation_state(&[older, newer.clone()], "conversation-1");
+
+        assert_eq!(conversations.len(), 1);
+        assert_eq!(active_id, Some("conversation-2".to_string()));
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, newer.messages[0].content);
     }
 
     #[test]

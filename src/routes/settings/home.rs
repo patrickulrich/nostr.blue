@@ -4,10 +4,11 @@ use crate::routes::Route;
 use crate::stores::blossom_store::BlossomServersStoreStoreExt;
 use crate::stores::{
     auth_store, blossom_store, nostr_client, nwc_store, reactions_store, relay, settings_store,
-    theme_store,
+    sync_store, theme_store,
 };
+use crate::utils::{format_relative_time_or, time::format_relative_time_ex};
 use dioxus::prelude::*;
-use nostr_sdk::ToBech32;
+use nostr_sdk::{Timestamp, ToBech32};
 #[component]
 pub fn Settings() -> Element {
     let theme = theme_store::THEME.read();
@@ -267,6 +268,7 @@ pub fn Settings() -> Element {
                     }
                 }
             }
+            NegentropySyncSection {}
             div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
                 div { class: "flex items-center justify-between mb-4",
                     h3 { class: "text-xl font-semibold text-gray-900 dark:text-white",
@@ -1017,6 +1019,175 @@ fn render_account_info() -> Element {
             if let Some(error) = logout_error.read().as_ref() {
                 div { class: "rounded-lg bg-red-100 p-3 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-300",
                     "{error}"
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn NegentropySyncSection() -> Element {
+    let auth = auth_store::AUTH_STATE.read();
+    let settings = settings_store::SETTINGS.read().clone();
+    let sync_state = sync_store::SYNC_SERVICE_STATE.read().clone();
+    let (status_text, status_class) = match sync_state.phase {
+        sync_store::SyncPhase::Idle => ("Idle", "text-gray-500 dark:text-gray-400"),
+        sync_store::SyncPhase::Waiting => ("Waiting", "text-amber-600 dark:text-amber-400"),
+        sync_store::SyncPhase::Running => ("Running", "text-blue-600 dark:text-blue-400"),
+        sync_store::SyncPhase::Succeeded => ("Healthy", "text-green-600 dark:text-green-400"),
+        sync_store::SyncPhase::Failed => ("Failed", "text-red-600 dark:text-red-400"),
+    };
+    let next_run = sync_state
+        .next_scheduled_at
+        .map(|ts| format_relative_time_ex(Timestamp::from(ts), true, true))
+        .unwrap_or_else(|| "Not scheduled".to_string());
+    let last_success = sync_state
+        .last_success_at
+        .map(|ts| format_relative_time_or(ts, "just now"))
+        .unwrap_or_else(|| "Never".to_string());
+    let last_started = sync_state
+        .last_started_at
+        .map(|ts| format_relative_time_or(ts, "just now"))
+        .unwrap_or_else(|| "Never".to_string());
+
+    rsx! {
+        div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+            div { class: "flex items-center justify-between mb-4",
+                h3 { class: "text-xl font-semibold text-gray-900 dark:text-white",
+                    "🔄 Negentropy Sync"
+                }
+                span { class: "text-xs text-gray-500 dark:text-gray-400", "NIP-77" }
+            }
+            p { class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
+                if auth.is_authenticated {
+                    "Keep your following feed and relay list reconciled in the background on startup, reconnect, and a repeating interval."
+                } else {
+                    "Login to enable background following-feed and relay-list sync."
+                }
+            }
+            div { class: "flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between",
+                div { class: "flex items-center gap-3",
+                    label { class: "relative inline-flex items-center cursor-pointer",
+                        input {
+                            r#type: "checkbox",
+                            class: "sr-only peer",
+                            checked: settings.enable_negentropy_sync,
+                            disabled: !auth.is_authenticated,
+                            onchange: move |evt| {
+                                let enabled = evt.checked();
+                                spawn(async move {
+                                    settings_store::update_negentropy_sync_enabled(enabled).await;
+                                });
+                            },
+                        }
+                        div { class: "w-11 h-6 bg-gray-300 dark:bg-gray-700 peer-focus:outline-hidden peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600" }
+                    }
+                    span { class: "text-sm font-medium text-gray-900 dark:text-white",
+                        if settings.enable_negentropy_sync { "Enabled" } else { "Disabled" }
+                    }
+                }
+                div { class: "flex items-center gap-3",
+                    label { class: "text-sm font-medium text-gray-900 dark:text-white",
+                        "Interval"
+                    }
+                    input {
+                        class: "w-24 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-white",
+                        r#type: "number",
+                        min: "1",
+                        max: "1440",
+                        value: "{settings.negentropy_sync_interval_minutes}",
+                        disabled: !auth.is_authenticated,
+                        onchange: move |evt| {
+                            if let Ok(interval) = evt.value().parse::<u32>() {
+                                spawn(async move {
+                                    settings_store::update_negentropy_sync_interval_minutes(interval).await;
+                                });
+                            }
+                        },
+                    }
+                    span { class: "text-sm text-gray-500 dark:text-gray-400", "minutes" }
+                }
+            }
+            div { class: "mt-4 grid gap-3 md:grid-cols-2",
+                div { class: "rounded-lg bg-gray-50 dark:bg-gray-700/50 p-4",
+                    div { class: "flex items-center justify-between",
+                        span { class: "text-sm font-medium text-gray-900 dark:text-white", "Status" }
+                        span { class: format!("text-sm font-medium {}", status_class), "{status_text}" }
+                    }
+                    p { class: "mt-2 text-xs text-gray-600 dark:text-gray-400",
+                        {sync_state.waiting_reason.clone().unwrap_or_else(|| "No sync has run yet".to_string())}
+                    }
+                    if let Some(target) = sync_state.active_target {
+                        p { class: "mt-2 text-xs text-gray-500 dark:text-gray-400",
+                            "Active target: "
+                            {
+                                match target {
+                                    sync_store::SyncTarget::FollowingFeed => "Following feed",
+                                    sync_store::SyncTarget::RelayList => "Relay list",
+                                }
+                            }
+                        }
+                    }
+                    if let Some(progress) = sync_state.progress {
+                        p { class: "mt-2 text-xs text-gray-500 dark:text-gray-400",
+                            "Progress: {progress.current}/{progress.total}"
+                        }
+                    }
+                }
+                div { class: "rounded-lg bg-gray-50 dark:bg-gray-700/50 p-4 space-y-2",
+                    div { class: "flex items-center justify-between text-sm",
+                        span { class: "text-gray-600 dark:text-gray-400", "Last success" }
+                        span { class: "text-gray-900 dark:text-white", "{last_success}" }
+                    }
+                    div { class: "flex items-center justify-between text-sm",
+                        span { class: "text-gray-600 dark:text-gray-400", "Last start" }
+                        span { class: "text-gray-900 dark:text-white", "{last_started}" }
+                    }
+                    div { class: "flex items-center justify-between text-sm",
+                        span { class: "text-gray-600 dark:text-gray-400", "Next run" }
+                        span { class: "text-gray-900 dark:text-white", "{next_run}" }
+                    }
+                }
+            }
+            if let Some(error) = sync_state.last_error.as_ref() {
+                div { class: "mt-4 rounded-lg bg-red-100 p-3 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-300",
+                    "Last error: {error}"
+                }
+            }
+            div { class: "mt-4 grid gap-3 xl:grid-cols-2",
+                div { class: "rounded-lg border border-gray-200 dark:border-gray-700 p-4",
+                    div { class: "flex items-center justify-between mb-2",
+                        h4 { class: "text-sm font-semibold text-gray-900 dark:text-white",
+                            "Following Feed"
+                        }
+                        span { class: "text-xs text-gray-500 dark:text-gray-400",
+                            {
+                                sync_state.following_feed.last_success_at
+                                    .map(|ts| format_relative_time_or(ts, "just now"))
+                                    .unwrap_or_else(|| "Never".to_string())
+                            }
+                        }
+                    }
+                    p { class: "text-xs text-gray-600 dark:text-gray-400",
+                        "Received {sync_state.following_feed.received_count} · Local {sync_state.following_feed.local_count} · Remote {sync_state.following_feed.remote_count} · Sent {sync_state.following_feed.sent_count} · Failures {sync_state.following_feed.send_failure_count}"
+                    }
+                }
+                div { class: "rounded-lg border border-gray-200 dark:border-gray-700 p-4",
+                    div { class: "flex items-center justify-between mb-2",
+                        h4 { class: "text-sm font-semibold text-gray-900 dark:text-white",
+                            "Relay List"
+                        }
+                        span { class: "text-xs text-gray-500 dark:text-gray-400",
+                            {
+                                sync_state.relay_list.last_success_at
+                                    .map(|ts| format_relative_time_or(ts, "just now"))
+                                    .unwrap_or_else(|| "Never".to_string())
+                            }
+                        }
+                    }
+                    p { class: "text-xs text-gray-600 dark:text-gray-400",
+                        "Received {sync_state.relay_list.received_count} · Local {sync_state.relay_list.local_count} · Remote {sync_state.relay_list.remote_count} · Sent {sync_state.relay_list.sent_count} · Failures {sync_state.relay_list.send_failure_count}"
+                    }
                 }
             }
         }

@@ -302,7 +302,7 @@ dx serve --platform desktop --no-default-features --features desktop
 | [NIP-72](https://github.com/nostr-protocol/nips/blob/master/72.md) | Moderated Communities | ✅ |
 | [NIP-73](https://github.com/nostr-protocol/nips/blob/master/73.md) | External Content IDs | ✅ |
 | [NIP-75](https://github.com/nostr-protocol/nips/blob/master/75.md) | Zap Goals | ✅ |
-| [NIP-77](https://github.com/nostr-protocol/nips/blob/master/77.md) | Negentropy Syncing | ❌ |
+| [NIP-77](https://github.com/nostr-protocol/nips/blob/master/77.md) | Negentropy Syncing | ✅ |
 | [NIP-78](https://github.com/nostr-protocol/nips/blob/master/78.md) | App-specific data | ✅ |
 | [NIP-7D](https://github.com/nostr-protocol/nips/blob/master/7D.md) | Threads | ❌ |
 | [NIP-84](https://github.com/nostr-protocol/nips/blob/master/84.md) | Highlights | ✅ |
