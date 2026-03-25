@@ -189,6 +189,13 @@ pub fn About() -> Element {
                                 "Cookie Policy"
                             }
                         }
+                        li {
+                            Link {
+                                to: crate::routes::Route::Csae {},
+                                class: "text-blue-500 hover:underline",
+                                "Child Safety Standards"
+                            }
+                        }
                     }
                 }
                 section { class: "space-y-4",

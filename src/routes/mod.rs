@@ -17,6 +17,7 @@ pub mod citations;
 pub mod code;
 pub mod community;
 pub mod cookies;
+pub mod csae;
 pub mod dms;
 pub mod dvm;
 pub mod events;
@@ -82,6 +83,7 @@ use code::{
 };
 use community::{Communities, CommunityNew, CommunityPage};
 use cookies::Cookies;
+use csae::Csae;
 use dms::DMs;
 use dvm::DVM;
 use events::{Calendar, CalendarEventDetail, CalendarEventNew, Events};
@@ -490,6 +492,8 @@ pub enum Route {
     Privacy {},
     #[route("/cookies")]
     Cookies {},
+    #[route("/csae")]
+    Csae {},
     #[route("/about")]
     About {},
     #[route("/about/donate")]
@@ -584,6 +588,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::Terms {}
         | Route::Privacy {}
         | Route::Cookies {}
+        | Route::Csae {}
         | Route::About {}
         | Route::Nip19Handler { .. } => Some(Route::Home {
             list: String::new(),
@@ -1457,12 +1462,6 @@ fn Layout() -> Element {
                                     to: Route::Privacy {},
                                     class: "hover:underline",
                                     "Privacy Policy"
-                                }
-                                span { "·" }
-                                Link {
-                                    to: Route::Cookies {},
-                                    class: "hover:underline",
-                                    "Cookie Policy"
                                 }
                                 span { "·" }
                                 Link {

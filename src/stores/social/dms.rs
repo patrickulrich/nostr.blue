@@ -33,6 +33,37 @@ fn get_decrypt_cache() -> &'static Mutex<LruCache<EventId, DecryptResult>> {
 
 const RETRY_COOLDOWN_SECS: u64 = 10;
 
+async fn recipient_has_inbox_relays(client: &nostr_sdk::Client, recipient_pk: PublicKey) -> bool {
+    let filter = Filter::new()
+        .author(recipient_pk)
+        .kind(Kind::InboxRelays)
+        .limit(1);
+
+    let cached_events = client
+        .database()
+        .query(filter.clone())
+        .await
+        .unwrap_or_default();
+
+    if !cached_events.is_empty() {
+        if let Some(event) = cached_events.into_iter().next() {
+            return nip17::extract_relay_list(&event).next().is_some();
+        }
+        return false;
+    }
+
+    match client.fetch_events(filter, Duration::from_secs(3)).await {
+        Ok(events) if !events.is_empty() => {
+            if let Some(event) = events.into_iter().next() {
+                nip17::extract_relay_list(&event).next().is_some()
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
+}
+
 /// Clear DM caches (called on logout/account switch)
 pub fn clear_caches() {
     CONVERSATIONS.read().data().write().clear();
@@ -285,33 +316,7 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<Publis
         recipient_pubkey
     );
     nostr_client::ensure_relays_ready(&client).await;
-    let filter = Filter::new()
-        .author(recipient_pk)
-        .kind(Kind::InboxRelays)
-        .limit(1);
-    let cached_events = client
-        .database()
-        .query(filter.clone())
-        .await
-        .unwrap_or_default();
-    let has_inbox_relays = if !cached_events.is_empty() {
-        if let Some(event) = cached_events.into_iter().next() {
-            nip17::extract_relay_list(&event).next().is_some()
-        } else {
-            false
-        }
-    } else {
-        match client.fetch_events(filter, Duration::from_secs(3)).await {
-            Ok(events) if !events.is_empty() => {
-                if let Some(event) = events.into_iter().next() {
-                    nip17::extract_relay_list(&event).next().is_some()
-                } else {
-                    false
-                }
-            }
-            _ => false,
-        }
-    };
+    let has_inbox_relays = recipient_has_inbox_relays(&client, recipient_pk).await;
     if !has_inbox_relays {
         return Err(
             "Recipient has no inbox relays configured (NIP-17 kind 10050). \
@@ -413,6 +418,72 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<Publis
         );
     }
     Ok(combined_result)
+}
+
+/// Send an encrypted DM using a temporary generated key instead of the current
+/// app signer. This is useful for one-off contact/reporting flows that should
+/// work even when the user is not signed in.
+pub async fn send_dm_with_temporary_keys(
+    recipient_pubkey: String,
+    content: String,
+) -> Result<PublishResult, String> {
+    use nostr::Keys;
+    use nostr_sdk::EventBuilder;
+
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
+        .as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
+    let recipient_pk = PublicKey::parse(&recipient_pubkey)
+        .map_err(|e| format!("Invalid recipient pubkey: {}", e))?;
+
+    nostr_client::ensure_relays_ready(&client).await;
+    let has_inbox_relays = recipient_has_inbox_relays(&client, recipient_pk).await;
+    if !has_inbox_relays {
+        return Err(
+            "Recipient has no inbox relays configured (NIP-17 kind 10050). \
+                   They may not be able to receive private messages."
+                .to_string(),
+        );
+    }
+
+    let temp_keys = Keys::generate();
+    let sender_pk = temp_keys.public_key();
+    log::info!(
+        "Sending DM from temporary key {} to {}",
+        sender_pk.to_hex(),
+        recipient_pubkey
+    );
+
+    let rumor = crate::utils::nips::nip89::tag_event_builder(EventBuilder::private_msg_rumor(
+        recipient_pk,
+        content,
+    ))
+    .build(sender_pk);
+    let receiver_gift_wrap = EventBuilder::gift_wrap(&temp_keys, &recipient_pk, rumor, [])
+        .await
+        .map_err(|e| format!("Failed to create receiver gift wrap: {}", e))?;
+
+    let receiver_output = client
+        .send_event(&receiver_gift_wrap)
+        .await
+        .map_err(|e| format!("Failed to send to receiver: {}", e))?;
+    if receiver_output.success.is_empty() {
+        return Err(
+            "Failed to deliver DM to any relay for the recipient. \
+                   You can also contact abuse@nostr.blue by email."
+                .to_string(),
+        );
+    }
+
+    let result = PublishResult::from_output(receiver_output);
+    log::info!(
+        "Temporary-key DM sent: {} success, {} failed",
+        result.success_count(),
+        result.failed_relays.len()
+    );
+    Ok(result)
 }
 /// Decrypt a DM message (supports NIP-04 and NIP-17)
 /// NIP-04 results are cached to avoid repeated signer popup spam.
