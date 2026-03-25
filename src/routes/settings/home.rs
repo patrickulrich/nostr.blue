@@ -8,6 +8,10 @@ use crate::stores::{
 };
 use crate::utils::{format_relative_time_or, relay as relay_utils, time::format_relative_time_ex};
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
+use dioxus_core::use_drop;
+#[cfg(feature = "web")]
+use gloo_events::EventListener;
 use nostr_sdk::{Timestamp, ToBech32};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1084,12 +1088,12 @@ fn DangerZoneSection() -> Element {
 
 #[component]
 fn VanishAccountModal(on_close: EventHandler<()>) -> Element {
-    let relay_candidates = relay_utils::vanish_relay_urls();
-    let select_all_relay_candidates = relay_candidates.clone();
-    let publish_all_relay_candidates = relay_candidates.clone();
-    let relay_count = relay_candidates.len();
     let mut step = use_signal(|| VanishModalStep::Warning);
     let mut scope = use_signal(|| VanishRelayScope::AllRelays);
+    let mut relay_candidates = use_signal(relay_utils::vanish_relay_urls);
+    #[cfg(feature = "web")]
+    let mut relay_refresh_listeners =
+        use_signal(|| None::<(EventListener, EventListener)>);
     let mut selected_relays = use_signal(Vec::<String>::new);
     let mut reason = use_signal(String::new);
     let mut publish_error = use_signal(|| None::<String>);
@@ -1098,6 +1102,64 @@ fn VanishAccountModal(on_close: EventHandler<()>) -> Element {
     let mut is_publishing = use_signal(|| false);
     let mut is_logging_out = use_signal(|| false);
 
+    use_effect(move || {
+        let _ = relay::USER_RELAY_METADATA.read();
+        let _ = relay::SEARCH_RELAYS.read();
+        let _ = relay::LOCAL_RELAYS.read();
+        let _ = relay::BROADCAST_RELAYS.read();
+        let _ = relay::BLOCKED_RELAYS.read();
+
+        let current_candidates = relay_utils::vanish_relay_urls();
+        selected_relays
+            .write()
+            .retain(|relay_url| current_candidates.contains(relay_url));
+        relay_candidates.set(current_candidates);
+    });
+
+    #[cfg(feature = "web")]
+    use_effect(move || {
+        if relay_refresh_listeners.read().is_some() {
+            return;
+        }
+
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        let Some(document) = window.document() else {
+            return;
+        };
+
+        *relay::LOCAL_RELAYS.write() = relay::load_local_relays();
+        *relay::BROADCAST_RELAYS.write() = relay::load_broadcast_relays();
+
+        let focus_listener = EventListener::new(&window, "focus", move |_| {
+            *relay::LOCAL_RELAYS.write() = relay::load_local_relays();
+            *relay::BROADCAST_RELAYS.write() = relay::load_broadcast_relays();
+        });
+        let visibility_listener = EventListener::new(&document, "visibilitychange", move |_| {
+            let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+                return;
+            };
+            if document.hidden() {
+                return;
+            }
+
+            *relay::LOCAL_RELAYS.write() = relay::load_local_relays();
+            *relay::BROADCAST_RELAYS.write() = relay::load_broadcast_relays();
+        });
+
+        relay_refresh_listeners.set(Some((focus_listener, visibility_listener)));
+    });
+
+    #[cfg(feature = "web")]
+    use_drop(move || {
+        relay_refresh_listeners.set(None);
+    });
+
+    let relay_candidates = relay_candidates.read().clone();
+    let select_all_relay_candidates = relay_candidates.clone();
+    let publish_all_relay_candidates = relay_candidates.clone();
+    let relay_count = relay_candidates.len();
     let selected_count = selected_relays.read().len();
     let targeted_count = if *scope.read() == VanishRelayScope::AllRelays {
         relay_count

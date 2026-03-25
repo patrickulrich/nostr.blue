@@ -2,6 +2,7 @@ use crate::stores::{auth_store, dms, nostr_client};
 use dioxus::prelude::*;
 
 const CSAE_CONTACT_NPUB: &str = "npub10vz2md22xl8arjprqysn8f7j2guewzunaktnn94c55hlwcwyyu4qm6ac8k";
+const SEND_COOLDOWN_MS: u32 = 5_000;
 
 #[component]
 pub fn Csae() -> Element {
@@ -9,9 +10,9 @@ pub fn Csae() -> Element {
     let mut details = use_signal(String::new);
     let mut follow_up = use_signal(String::new);
     let mut sending = use_signal(|| false);
+    let mut send_cooldown = use_signal(|| false);
     let mut send_feedback = use_signal(|| None::<(bool, String)>);
 
-    let has_signer = *nostr_client::HAS_SIGNER.read();
     let current_pubkey = auth_store::get_pubkey();
 
     let send_child_safety_message = move |_| {
@@ -19,7 +20,7 @@ pub fn Csae() -> Element {
         let details_value = details.read().trim().to_string();
         let follow_up_value = follow_up.read().trim().to_string();
 
-        if details_value.is_empty() || *sending.read() {
+        if details_value.is_empty() || *sending.read() || *send_cooldown.read() {
             return;
         }
 
@@ -57,7 +58,7 @@ pub fn Csae() -> Element {
             message_parts.push("Details:".to_string());
             message_parts.push(details_value);
 
-            let send_result = if has_signer {
+            let send_result = if nostr_client::has_signer() {
                 dms::send_dm(recipient, message_parts.join("\n\n")).await
             } else {
                 dms::send_dm_with_temporary_keys(recipient, message_parts.join("\n\n")).await
@@ -70,6 +71,11 @@ pub fn Csae() -> Element {
                         summary.set(String::new());
                         details.set(String::new());
                         follow_up.set(String::new());
+                        send_cooldown.set(true);
+                        spawn(async move {
+                            crate::platform::timer::sleep_ms(SEND_COOLDOWN_MS).await;
+                            send_cooldown.set(false);
+                        });
                         if result.has_failures() {
                             send_feedback.set(Some((
                                 true,
@@ -223,7 +229,9 @@ pub fn Csae() -> Element {
 
                             div { class: "flex items-center justify-between gap-3",
                                 p { class: "text-xs text-muted-foreground",
-                                    if has_signer {
+                                    if *send_cooldown.read() {
+                                        "Please wait a few seconds before sending another report."
+                                    } else if *nostr_client::HAS_SIGNER.read() {
                                         "This uses your current signer and nostr.blue's NIP-17 direct-message flow."
                                     } else {
                                         "This uses a temporary locally generated key and sends a NIP-17 receiver-only message."
@@ -231,10 +239,14 @@ pub fn Csae() -> Element {
                                 }
                                 button {
                                     class: "rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed",
-                                    disabled: details.read().trim().is_empty() || *sending.read(),
+                                    disabled: details.read().trim().is_empty()
+                                        || *sending.read()
+                                        || *send_cooldown.read(),
                                     onclick: send_child_safety_message,
                                     if *sending.read() {
                                         "Sending..."
+                                    } else if *send_cooldown.read() {
+                                        "Please Wait..."
                                     } else {
                                         "Send Message"
                                     }
