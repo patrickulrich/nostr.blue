@@ -4697,7 +4697,7 @@ dependencies = [
 
 [[package]]
 name = "nostrblue"
-version = "0.8.3"
+version = "0.8.4"
 dependencies = [
  "ammonia",
  "arboard",

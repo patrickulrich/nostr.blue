@@ -115,6 +115,7 @@ pub use profile::{
 pub use reactions::{publish_reaction, publish_reaction_tracked};
 pub use relay_publishing::{
     broadcast_presigned_event, publish_note_to_relays, publish_reaction_to_relays,
+    publish_vanish_request_to_relays,
     send_presigned_event_to_relays,
 };
 pub use reposts::{delete_repost, publish_repost, publish_repost_tracked};
