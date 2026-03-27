@@ -1027,7 +1027,11 @@ fn Layout() -> Element {
     };
     rsx! {
         div {
-            class: "min-h-screen bg-background transition-colors",
+            class: "min-h-dynamic-screen bg-background transition-colors",
+            style: format!(
+                "--persistent-player-offset: {}; --mobile-shell-header-height: calc(var(--safe-area-top) + 57px);",
+                if music_player_visible { "6rem" } else { "0px" }
+            ),
             onclick: move |_| {
                 if *sidebar_page.read() != 0 {
                     *sidebar_page.write() = 0;
@@ -1408,16 +1412,12 @@ fn Layout() -> Element {
                     }
                 }
                 main {
-                    class: match (is_wide_page, music_player_visible) {
-                        (true, true) => {
-                            "w-full flex-1 min-w-0 overflow-x-hidden border-r border-border pb-24"
-                        }
-                        (true, false) => "w-full flex-1 min-w-0 overflow-x-hidden border-r border-border",
-                        (false, true) => "w-full max-w-[600px] shrink grow border-r border-border pb-24",
-                        (false, false) => "w-full max-w-[600px] shrink grow border-r border-border",
+                    class: match is_wide_page {
+                        true => "w-full flex-1 min-w-0 overflow-x-hidden border-r border-border pb-safe-player",
+                        false => "w-full max-w-[600px] shrink grow border-r border-border pb-safe-player",
                     },
-                    div { class: "sticky top-0 z-30 bg-background/80 backdrop-blur-sm border-b border-border p-4 lg:hidden",
-                        div { class: "flex items-center justify-between",
+                    div { class: "sticky top-0 z-30 bg-background/80 backdrop-blur-sm border-b border-border lg:hidden pt-safe-top",
+                        div { class: "flex items-center justify-between p-4",
                             button {
                                 class: "p-2 hover:bg-accent rounded-lg",
                                 onclick: move |_| *sidebar_open.write() = true,

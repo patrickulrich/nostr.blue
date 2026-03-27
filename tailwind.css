@@ -55,9 +55,41 @@
   }
 }
 
+@utility min-h-dynamic-screen {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+@utility min-h-mobile-shell {
+  min-height: calc(100vh - var(--mobile-shell-header-height, 57px));
+  min-height: calc(100dvh - var(--mobile-shell-header-height, 57px));
+}
+
+@utility pt-safe-top {
+  padding-top: var(--safe-area-top);
+}
+
+@utility pb-safe-bottom {
+  padding-bottom: var(--safe-area-bottom);
+}
+
+@utility pb-safe-controls {
+  padding-bottom: calc(1rem + var(--safe-area-bottom));
+}
+
+@utility pb-safe-player {
+  padding-bottom: calc(var(--safe-area-bottom) + var(--persistent-player-offset, 0px));
+}
+
+@utility bottom-safe-banner {
+  bottom: calc(var(--safe-area-bottom) + var(--persistent-player-offset, 0px) + 1rem);
+}
+
 /* Base layer - CSS variable definitions for light/dark modes */
 @layer base {
   :root {
+    --safe-area-top: env(safe-area-inset-top, 0px);
+    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
     --card: 0 0% 100%;
@@ -266,4 +298,3 @@
 .citation-loading {
   @apply opacity-60 animate-pulse;
 }
-

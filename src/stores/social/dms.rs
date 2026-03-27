@@ -470,11 +470,9 @@ pub async fn send_dm_with_temporary_keys(
         .await
         .map_err(|e| format!("Failed to send to receiver: {}", e))?;
     if receiver_output.success.is_empty() {
-        return Err(
-            "Failed to deliver DM to any relay for the recipient. \
+        return Err("Failed to deliver DM to any relay for the recipient. \
                    You can also contact abuse@nostr.blue by email."
-                .to_string(),
-        );
+            .to_string());
     }
 
     let result = PublishResult::from_output(receiver_output);

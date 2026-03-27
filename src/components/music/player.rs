@@ -704,7 +704,7 @@ pub fn PersistentMusicPlayer() -> Element {
         div {
             class: "fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur border-t border-border shadow-lg z-50",
             style: "backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);",
-            div { class: "flex items-center justify-between w-full py-4 px-4 gap-3",
+            div { class: "flex items-center justify-between w-full pt-4 px-4 gap-3 pb-safe-controls",
                 div { class: "flex items-center gap-3 min-w-0 w-80",
                     div { class: "w-12 h-12 rounded-lg overflow-hidden bg-muted shrink-0",
                         if let Some(art_url) = &track.album_art_url {

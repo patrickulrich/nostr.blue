@@ -1092,8 +1092,7 @@ fn VanishAccountModal(on_close: EventHandler<()>) -> Element {
     let mut scope = use_signal(|| VanishRelayScope::AllRelays);
     let mut relay_candidates = use_signal(relay_utils::vanish_relay_urls);
     #[cfg(feature = "web")]
-    let mut relay_refresh_listeners =
-        use_signal(|| None::<(EventListener, EventListener)>);
+    let mut relay_refresh_listeners = use_signal(|| None::<(EventListener, EventListener)>);
     let mut selected_relays = use_signal(Vec::<String>::new);
     let mut reason = use_signal(String::new);
     let mut publish_error = use_signal(|| None::<String>);
