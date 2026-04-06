@@ -1,11 +1,10 @@
 use dioxus::prelude::*;
-use dioxus_core::use_drop;
 use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 use std::time::Duration;
 
 use crate::components::{ClientInitializing, NoteCard, ThreadedComment, VoiceMessageCard};
-use crate::hooks::use_mute_block_cache;
+use crate::hooks::{use_mute_block_cache, use_relay_subscription};
 use crate::routes::Route;
 use crate::stores::back_navigation;
 use crate::stores::nostr_client;
@@ -103,7 +102,6 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
     let mut loading_parents = use_signal(|| false);
     let mut loading_replies = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
-    let mut reply_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
 
     use_effect(use_reactive!(|note_id| {
@@ -194,64 +192,32 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
             loading.set(false);
             loading_parents.set(false);
             loading_replies.set(false);
-
-            // Set up real-time subscription for new replies
-            if let Some(client) = nostr_client::get_client() {
-                let filter = Filter::new()
-                    .kinds(vec![Kind::TextNote, Kind::Comment, Kind::VoiceMessageReply])
-                    .event(event_id)
-                    .since(Timestamp::now())
-                    .limit(0);
-
-                match client.subscribe(filter, None).await {
-                    Ok(output) => {
-                        let subscription_id = output.val;
-                        reply_sub_id.set(Some(subscription_id.clone()));
-                        log::debug!("Subscribed for new replies on note {}", event_id.to_hex());
-
-                        spawn(async move {
-                            let mut notifications = client.notifications();
-                            while let Ok(notification) = notifications.recv().await {
-                                if let RelayPoolNotification::Event {
-                                    subscription_id: sub_id,
-                                    event,
-                                    ..
-                                } = notification
-                                {
-                                    if sub_id == subscription_id {
-                                        let already_exists =
-                                            replies.read().iter().any(|e| e.id == event.id);
-                                        if !already_exists {
-                                            log::info!(
-                                                "New reply received via streaming: {}",
-                                                event.id.to_hex()
-                                            );
-                                            replies.write().push((*event).clone());
-                                        }
-                                    }
-                                }
-                            }
-                        });
-                    }
-                    Err(e) => {
-                        log::error!("Failed to subscribe for replies: {}", e);
-                    }
-                }
-            }
         });
     }));
 
-    // Cleanup subscription on unmount
+    {
+        let reply_filter = note_data.read().as_ref().map(|event| {
+            Filter::new()
+                .kinds(vec![Kind::TextNote, Kind::Comment, Kind::VoiceMessageReply])
+                .event(event.id)
+                .since(Timestamp::now())
+                .limit(0)
+        });
+        use_relay_subscription(reply_filter, move |event: &nostr::Event| {
+            let already_exists = replies.read().iter().any(|e| e.id == event.id);
+            if !already_exists {
+                log::info!(
+                    "New reply received via streaming: {}",
+                    event.id.to_hex()
+                );
+                replies.write().push(event.clone());
+            }
+        });
+    }
+
+    // Cleanup back navigation on unmount
     use_drop(move || {
         back_navigation::clear_active_note_back_context(&note_id);
-        if let Some(sub_id) = reply_sub_id.peek().clone() {
-            spawn(async move {
-                if let Some(client) = nostr_client::get_client() {
-                    client.unsubscribe(&sub_id).await;
-                    log::debug!("Cleaned up reply subscription");
-                }
-            });
-        }
     });
 
     rsx! {

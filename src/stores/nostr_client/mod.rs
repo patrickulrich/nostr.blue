@@ -74,9 +74,10 @@ mod types;
 pub use crate::stores::relay::display::RelayDisplayInfo;
 pub use crate::stores::relay::pool::DEFAULT_RELAYS;
 pub use crate::stores::relay::{
-    wait_for_user_relays, RelayInfo, RelayPoolStoreStoreExt, RelayStatus, RELAY_CONNECTED,
+    wait_for_user_relays, RelayInfo, RelayPoolStoreStoreExt, RELAY_CONNECTED,
     RELAY_POOL, USER_RELAYS_APPLIED,
 };
+pub use nostr_relay_pool::RelayStatus;
 pub use articles::{
     fetch_articles, fetch_event_by_coordinate, fetch_event_by_coordinate_with_relays,
     publish_article, publish_article_tracked,
@@ -151,7 +152,6 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
         .verify_subscriptions(true)
         .ban_relay_on_mismatch(true)
         .adjust_retry_interval(true)
-        .retry_interval(Duration::from_secs(10))
         .reconnect(true);
     #[cfg(target_arch = "wasm32")]
     let client = {
@@ -163,10 +163,21 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
         let gossip = nostr_gossip_memory::store::NostrGossipMemory::bounded(
             NonZeroUsize::new(10_000).expect("10_000 is non-zero"),
         );
+        let gossip_limits = GossipRelayLimits {
+            read_relays_per_user: 5,
+            write_relays_per_user: 3,
+            hint_relays_per_user: 2,
+            ..Default::default()
+        };
         let client_opts = ClientOptions::new()
             .verify_subscriptions(true)
             .ban_relay_on_mismatch(true)
-            .max_avg_latency(Duration::from_secs(2));
+            .max_avg_latency(Duration::from_secs(2))
+            .sleep_when_idle(SleepWhenIdle::Enabled {
+                timeout: Duration::from_secs(30),
+            })
+            .gossip(GossipOptions::default().limits(gossip_limits))
+            .pool(RelayPoolOptions::new().max_relays(Some(50)));
         Client::builder()
             .database(database)
             .gossip(gossip)
@@ -185,10 +196,21 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
         let gossip = nostr_gossip_memory::store::NostrGossipMemory::bounded(
             NonZeroUsize::new(10_000).expect("10_000 is non-zero"),
         );
+        let gossip_limits = GossipRelayLimits {
+            read_relays_per_user: 5,
+            write_relays_per_user: 3,
+            hint_relays_per_user: 2,
+            ..Default::default()
+        };
         let client_opts = ClientOptions::new()
             .verify_subscriptions(true)
             .ban_relay_on_mismatch(true)
-            .max_avg_latency(Duration::from_secs(2));
+            .max_avg_latency(Duration::from_secs(2))
+            .sleep_when_idle(SleepWhenIdle::Enabled {
+                timeout: Duration::from_secs(30),
+            })
+            .gossip(GossipOptions::default().limits(gossip_limits))
+            .pool(RelayPoolOptions::new().max_relays(Some(50)));
         Client::builder()
             .database(database)
             .gossip(gossip)
@@ -257,6 +279,7 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
         });
     }
     *CLIENT_INITIALIZED.write() = true;
+    relay::start_health_poll(client.clone());
     log::info!("Nostr client initialized with relays ready");
     Ok(client)
 }

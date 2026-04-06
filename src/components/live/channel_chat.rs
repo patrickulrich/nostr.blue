@@ -1,7 +1,8 @@
 use crate::components::icons::{MaximizeIcon, XIcon};
 use crate::components::{EmojiPicker, RichContent};
+use crate::hooks::use_relay_subscription;
 use crate::routes::Route;
-use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
+use crate::stores::nostr_client::{fetch_events_aggregated, HAS_SIGNER};
 use crate::stores::profiles;
 use crate::stores::social::channel_store::{
     cache_channel, cache_channel_metadata, channel_creation_by_id_filter, channel_messages_filter,
@@ -14,9 +15,7 @@ use crate::utils::profile_prefetch;
 use crate::utils::truncate_pubkey;
 use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
-use dioxus_core::use_drop;
-use dioxus_core::Task;
-use nostr_sdk::{Event, PublicKey, RelayPoolNotification, RelayUrl, SubscriptionId};
+use nostr_sdk::{Event, PublicKey, RelayUrl};
 use std::time::Duration;
 #[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
@@ -53,12 +52,9 @@ pub fn ChannelChat(channel_id: String) -> Element {
     let mut message_input = use_signal(String::new);
     let mut sending = use_signal(|| false);
     let mut expanded = use_signal(|| false);
-    let mut chat_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
-    let mut realtime_task: Signal<Option<Task>> = use_signal(|| None);
     let mut channel_info: Signal<Option<Channel>> = use_signal(|| None);
     let mut relay_url_for_send: Signal<Option<RelayUrl>> = use_signal(|| None);
     let has_signer = use_memo(move || *HAS_SIGNER.read());
-    let mut request_id = use_signal(|| 0u32);
 
     let channel_id_for_effect = channel_id.clone();
     let channel_id_for_send = channel_id.clone();
@@ -69,29 +65,13 @@ pub fn ChannelChat(channel_id: String) -> Element {
         channel_id.chars().take(8).collect::<String>()
     );
 
-    // Load channel info + messages + set up realtime subscription
+    // Load channel info + historical messages
     use_effect(use_reactive(&channel_id_for_effect, move |cid| {
-        let current_id = request_id.peek().wrapping_add(1);
-        request_id.set(current_id);
+        messages.write().clear();
+        channel_info.set(None);
+        relay_url_for_send.set(None);
+        loading.set(true);
         spawn(async move {
-            let is_stale = || *request_id.peek() != current_id;
-
-            // Cancel previous realtime listener
-            if let Some(old_task) = *realtime_task.peek() {
-                old_task.cancel();
-            }
-            // Unsubscribe previous subscription
-            if let Some(old_sub) = chat_sub_id.peek().clone() {
-                if let Some(client) = get_client() {
-                    client.unsubscribe(&old_sub).await;
-                }
-            }
-
-            messages.write().clear();
-            channel_info.set(None);
-            relay_url_for_send.set(None);
-            loading.set(true);
-
             let (event_id, relay_hints) = match decode_channel_id(&cid) {
                 Ok(v) => v,
                 Err(e) => {
@@ -101,14 +81,9 @@ pub fn ChannelChat(channel_id: String) -> Element {
                 }
             };
 
-            // Resolve relay URL for sending
             let relay = get_channel_relay_url(&relay_hints).await;
-            if is_stale() {
-                return;
-            }
             relay_url_for_send.set(Some(relay));
 
-            // Fetch channel creation event (kind 40)
             if let Some(cached) = get_cached_channel(&event_id.to_hex()) {
                 channel_info.set(Some(cached));
             } else {
@@ -119,9 +94,6 @@ pub fn ChannelChat(channel_id: String) -> Element {
                 .await
                 {
                     Ok(events) => {
-                        if is_stale() {
-                            return;
-                        }
                         if let Some(event) = events.first() {
                             if let Some(ch) = parse_channel_creation(event) {
                                 cache_channel(ch.clone());
@@ -133,7 +105,6 @@ pub fn ChannelChat(channel_id: String) -> Element {
                 }
             }
 
-            // Fetch latest metadata (kind 41) if we have channel info
             if let Some(ref ch) = *channel_info.peek() {
                 match fetch_events_aggregated(
                     channel_metadata_filter(event_id),
@@ -142,9 +113,6 @@ pub fn ChannelChat(channel_id: String) -> Element {
                 .await
                 {
                     Ok(events) => {
-                        if is_stale() {
-                            return;
-                        }
                         if let Some(event) = events.first() {
                             if let Some(meta) = parse_channel_metadata(event, &ch.pubkey) {
                                 cache_channel_metadata(meta);
@@ -155,7 +123,6 @@ pub fn ChannelChat(channel_id: String) -> Element {
                 }
             }
 
-            // Fetch initial messages (kind 42)
             match fetch_events_aggregated(
                 channel_messages_filter(event_id, 200),
                 Duration::from_secs(10),
@@ -163,9 +130,6 @@ pub fn ChannelChat(channel_id: String) -> Element {
             .await
             {
                 Ok(events) => {
-                    if is_stale() {
-                        return;
-                    }
                     let mut sorted = events;
                     sorted.sort_by(|a, b| a.created_at.cmp(&b.created_at));
                     messages.set(sorted);
@@ -174,60 +138,31 @@ pub fn ChannelChat(channel_id: String) -> Element {
                 Err(e) => log::error!("Failed to fetch channel messages: {}", e),
             }
 
-            if is_stale() {
-                return;
-            }
             loading.set(false);
+        });
+    }));
 
-            // Set up real-time subscription
-            if let Some(client) = get_client() {
-                let realtime_filter = channel_messages_realtime_filter(event_id);
-                match client.subscribe(realtime_filter, None).await {
-                    Ok(output) => {
-                        if is_stale() {
-                            let sub_id = output.val;
-                            let _ = client.unsubscribe(&sub_id).await;
-                            return;
-                        }
-                        let subscription_id = output.val;
-                        chat_sub_id.set(Some(subscription_id.clone()));
-                        log::debug!("Subscribed to channel chat {}", event_id.to_hex());
-
-                        let task = spawn(async move {
-                            let mut notifications = client.notifications();
-                            while let Ok(notification) = notifications.recv().await {
-                                if let RelayPoolNotification::Event {
-                                    subscription_id: recv_sub_id,
-                                    event,
-                                    ..
-                                } = notification
-                                {
-                                    if recv_sub_id == subscription_id {
-                                        let already_exists =
-                                            messages.read().iter().any(|e| e.id == event.id);
-                                        if !already_exists {
-                                            log::info!(
-                                                "New channel message: {}",
-                                                event.id.to_hex()
-                                            );
-                                            let mut msgs = messages.write();
-                                            msgs.push((*event).clone());
-                                            let len = msgs.len();
-                                            if len > 200 {
-                                                msgs.drain(0..(len - 200));
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        });
-                        realtime_task.set(Some(task));
-                    }
-                    Err(e) => log::error!("Failed to subscribe to channel: {}", e),
+    {
+        let realtime_filter = decode_channel_id(&channel_id)
+            .ok()
+            .map(|(event_id, _)| channel_messages_realtime_filter(event_id));
+        use_relay_subscription(realtime_filter, move |event: &nostr::Event| {
+            let already_exists = messages.read().iter().any(|e| e.id == event.id);
+            if !already_exists {
+                log::info!("New channel message: {}", event.id.to_hex());
+                let mut msgs = messages.write();
+                let insert_at = msgs
+                    .iter()
+                    .position(|msg| msg.created_at > event.created_at)
+                    .unwrap_or(msgs.len());
+                msgs.insert(insert_at, event.clone());
+                let len = msgs.len();
+                if len > 200 {
+                    msgs.drain(0..(len - 200));
                 }
             }
         });
-    }));
+    }
 
     // Auto-scroll
     let chat_container_id_for_scroll = chat_container_id.clone();
@@ -294,20 +229,6 @@ pub fn ChannelChat(channel_id: String) -> Element {
         });
     });
 
-    // Cleanup subscription on unmount
-    use_drop(move || {
-        if let Some(task) = *realtime_task.peek() {
-            task.cancel();
-        }
-        if let Some(sub_id) = chat_sub_id.peek().clone() {
-            spawn(async move {
-                if let Some(client) = get_client() {
-                    client.unsubscribe(&sub_id).await;
-                    log::debug!("Cleaned up channel chat subscription");
-                }
-            });
-        }
-    });
 
     // Profile prefetch
     use_effect(move || {

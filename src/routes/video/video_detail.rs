@@ -2,6 +2,7 @@ use crate::components::{
     icons::MessageCircleIcon, ClientInitializing, CommentComposer, ShareModal, ThreadedComment,
 };
 use crate::error::NostrBlueError;
+use crate::hooks::use_relay_subscription;
 use crate::stores::signer::SIGNER_INFO;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::build_thread_tree;
@@ -9,7 +10,6 @@ use crate::utils::format::{format_relative_time_or, truncate_pubkey};
 use crate::utils::format_sats_compact;
 use crate::utils::video_kinds::{all_video_kinds, is_vertical_video, vertical_kinds};
 use dioxus::prelude::*;
-use dioxus_core::use_drop;
 use nostr_sdk::prelude::*;
 use nostr_sdk::{Event, EventId, PublicKey};
 use std::time::Duration;
@@ -112,7 +112,6 @@ fn LandscapePlayer(event: Event) -> Element {
     let mut comments = use_signal(Vec::<Event>::new);
     let mut loading_comments = use_signal(|| false);
     let mut show_comment_composer = use_signal(|| false);
-    let mut comment_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
     let event_id = event.id;
     use_effect(move || {
         spawn(async move {
@@ -146,64 +145,29 @@ fn LandscapePlayer(event: Event) -> Element {
             sorted_comments.sort_by(|a, b| a.created_at.cmp(&b.created_at));
             comments.set(sorted_comments);
             loading_comments.set(false);
-
-            // Set up real-time subscription for new comments
-            if let Some(client) = nostr_client::get_client() {
-                let filter = Filter::new()
-                    .kinds(vec![Kind::TextNote, Kind::Comment])
-                    .event(event_id)
-                    .since(Timestamp::now())
-                    .limit(0);
-
-                match client.subscribe(filter, None).await {
-                    Ok(output) => {
-                        let subscription_id = output.val;
-                        comment_sub_id.set(Some(subscription_id.clone()));
-                        log::debug!("Subscribed for new comments on video {}", event_id.to_hex());
-
-                        spawn(async move {
-                            let mut notifications = client.notifications();
-                            while let Ok(notification) = notifications.recv().await {
-                                if let RelayPoolNotification::Event {
-                                    subscription_id: sub_id,
-                                    event,
-                                    ..
-                                } = notification
-                                {
-                                    if sub_id == subscription_id {
-                                        let already_exists =
-                                            comments.read().iter().any(|e| e.id == event.id);
-                                        if !already_exists {
-                                            log::info!(
-                                                "New comment received via streaming: {}",
-                                                event.id.to_hex()
-                                            );
-                                            comments.write().push((*event).clone());
-                                        }
-                                    }
-                                }
-                            }
-                        });
-                    }
-                    Err(e) => {
-                        log::error!("Failed to subscribe for comments: {}", e);
-                    }
-                }
-            }
         });
     });
 
-    // Cleanup subscription on unmount
-    use_drop(move || {
-        if let Some(sub_id) = comment_sub_id.peek().clone() {
-            spawn(async move {
-                if let Some(client) = nostr_client::get_client() {
-                    client.unsubscribe(&sub_id).await;
-                    log::debug!("Cleaned up video comment subscription");
-                }
-            });
-        }
-    });
+    {
+        let comment_filter = Some(
+            Filter::new()
+                .kinds(vec![Kind::TextNote, Kind::Comment])
+                .event(event_id)
+                .since(Timestamp::now())
+                .limit(0),
+        );
+        use_relay_subscription(comment_filter, move |event: &nostr::Event| {
+            let already_exists = comments.read().iter().any(|e| e.id == event.id);
+            if !already_exists {
+                log::info!(
+                    "New comment received via streaming: {}",
+                    event.id.to_hex()
+                );
+                comments.write().push(event.clone());
+            }
+        });
+    }
+
     let video_meta = parse_video_meta(&event);
     rsx! {
         div { class: "min-h-screen bg-background",
