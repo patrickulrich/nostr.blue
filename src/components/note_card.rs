@@ -509,6 +509,7 @@ pub fn NoteCard(
         && !*show_hidden_anyway.read();
     rsx! {
         article {
+            "data-event-id": "{event.id}",
             class: "border-b border-border p-4 hover:bg-accent/50 transition-colors cursor-pointer",
             onclick: move |_evt: MouseEvent| {
                 #[cfg(feature = "web")]

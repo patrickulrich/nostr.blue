@@ -237,12 +237,20 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                 } else {
                     "Post"
                 };
+                let nav = use_navigator();
+                let fallback_route = back_route.clone();
                 rsx! {
                     div { class: "sticky top-0 z-10 bg-background/80 backdrop-blur-sm border-b border-border",
                         div { class: "flex items-center gap-4 p-4",
-                            Link {
-                                to: back_route,
+                            button {
                                 class: "hover:bg-accent rounded-full p-2 transition",
+                                onclick: move |_| {
+                                    if nav.can_go_back() {
+                                        nav.go_back();
+                                    } else {
+                                        nav.push(fallback_route.clone());
+                                    }
+                                },
                                 svg {
                                     xmlns: "http://www.w3.org/2000/svg",
                                     width: "20",

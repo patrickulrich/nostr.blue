@@ -9,6 +9,7 @@ pub mod use_mute_block_cache;
 pub mod use_reaction;
 pub mod use_relay_subscription;
 pub mod use_unsaved_changes;
+pub mod use_viewport_engagement;
 pub use use_author_metadata::use_author_metadata;
 pub use use_fetch_event_by_coordinate::use_fetch_event_by_coordinate_with_message;
 pub use use_fetch_event_by_id::use_fetch_event_by_id;
