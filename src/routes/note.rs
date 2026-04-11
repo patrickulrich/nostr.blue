@@ -1,13 +1,18 @@
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use crate::components::{ClientInitializing, NoteCard, ThreadedComment, VoiceMessageCard};
 use crate::hooks::{use_mute_block_cache, use_relay_subscription};
 use crate::routes::Route;
+use crate::services::aggregation::{
+    fetch_interaction_counts_batch, InteractionCounts,
+};
 use crate::stores::back_navigation;
 use crate::stores::nostr_client;
+use crate::stores::relay;
 use crate::utils::{build_thread_tree, event::is_voice_message};
 
 async fn fetch_main_note(event_id: EventId) -> std::result::Result<NostrEvent, String> {
@@ -20,7 +25,6 @@ async fn fetch_main_note(event_id: EventId) -> std::result::Result<NostrEvent, S
         .ok_or("Event not found".to_string())
 }
 
-/// Extract parent event IDs from note tags (NIP-10 lowercase 'e' and NIP-22 uppercase 'E')
 fn extract_parent_ids(note: &NostrEvent) -> Vec<EventId> {
     let mut ids: Vec<EventId> = note.tags.event_ids().cloned().collect();
     let upper_e = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
@@ -38,24 +42,125 @@ fn extract_parent_ids(note: &NostrEvent) -> Vec<EventId> {
     ids
 }
 
-/// Fetch parent events by their IDs
-async fn fetch_parents_by_ids(
-    parent_ids: Vec<EventId>,
-) -> std::result::Result<Vec<NostrEvent>, String> {
-    if parent_ids.is_empty() {
-        return Ok(Vec::new());
-    }
-    let filter = Filter::new().ids(parent_ids).kinds(vec![
-        Kind::TextNote,
-        Kind::VoiceMessage,
-        Kind::VoiceMessageReply,
-        Kind::Comment,
-    ]);
-    nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await
+fn extract_relay_hints(note: &NostrEvent) -> Vec<(EventId, Option<String>)> {
+    note.tags
+        .iter()
+        .filter_map(|tag| {
+            if let Some(tag_std) = tag.as_standardized() {
+                match tag_std {
+                    TagStandard::Event {
+                        event_id,
+                        relay_url,
+                        ..
+                    } => {
+                        let url = relay_url.as_ref().map(|u| u.to_string());
+                        Some((*event_id, url))
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
-async fn fetch_replies(event_id: EventId) -> std::result::Result<Vec<NostrEvent>, String> {
+async fn fetch_parents_with_hints(
+    initial_ids: Vec<EventId>,
+    clicked_note: &NostrEvent,
+    max_depth: usize,
+) -> std::result::Result<Vec<NostrEvent>, String> {
+    let mut all_parents = Vec::new();
+    let mut fetched_ids: HashSet<EventId> = HashSet::new();
+    fetched_ids.insert(clicked_note.id);
+
+    let hints = extract_relay_hints(clicked_note);
+    let hint_map: HashMap<EventId, String> = hints
+        .into_iter()
+        .filter_map(|(id, url)| url.map(|u| (id, u)))
+        .collect();
+
+    let mut ids_to_fetch: Vec<EventId> = initial_ids
+        .into_iter()
+        .filter(|id| !fetched_ids.contains(id))
+        .collect();
+
+    for _ in 0..max_depth {
+        if ids_to_fetch.is_empty() {
+            break;
+        }
+
+        let mut hinted_grouped: HashMap<String, Vec<EventId>> = HashMap::new();
+        let mut unhinted_ids = Vec::new();
+
+        for id in &ids_to_fetch {
+            if let Some(url) = hint_map.get(id) {
+                hinted_grouped
+                    .entry(url.clone())
+                    .or_default()
+                    .push(*id);
+            } else {
+                unhinted_ids.push(*id);
+            }
+        }
+
+        let mut new_events = Vec::new();
+
+        for (relay_url, ids) in &hinted_grouped {
+            let filter = Filter::new().ids(ids.clone()).kinds(vec![
+                Kind::TextNote,
+                Kind::VoiceMessage,
+                Kind::VoiceMessageReply,
+                Kind::Comment,
+            ]);
+            if let Ok(events) = relay::connection::fetch_events_from_relays(
+                &nostr_client::get_client().unwrap(),
+                filter,
+                vec![relay_url.clone()],
+                Duration::from_secs(5),
+            )
+            .await
+            {
+                new_events.extend(events);
+            }
+        }
+
+        if !unhinted_ids.is_empty() {
+            let filter = Filter::new().ids(unhinted_ids).kinds(vec![
+                Kind::TextNote,
+                Kind::VoiceMessage,
+                Kind::VoiceMessageReply,
+                Kind::Comment,
+            ]);
+            if let Ok(events) =
+                nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await
+            {
+                new_events.extend(events);
+            }
+        }
+
+        for id in &ids_to_fetch {
+            fetched_ids.insert(*id);
+        }
+
+        ids_to_fetch = new_events
+            .iter()
+            .flat_map(extract_parent_ids)
+            .filter(|id| !fetched_ids.contains(id))
+            .collect();
+
+        all_parents.extend(new_events);
+    }
+
+    Ok(all_parents)
+}
+
+async fn fetch_replies(
+    event_id: EventId,
+    root_author_pubkey: Option<PublicKey>,
+) -> std::result::Result<Vec<NostrEvent>, String> {
     let event_id_hex = event_id.to_hex();
+
     let filter_lower = Filter::new()
         .kinds(vec![
             Kind::TextNote,
@@ -64,6 +169,7 @@ async fn fetch_replies(event_id: EventId) -> std::result::Result<Vec<NostrEvent>
         ])
         .event(event_id)
         .limit(100);
+
     let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
     let filter_upper = Filter::new()
         .kinds(vec![
@@ -73,17 +179,44 @@ async fn fetch_replies(event_id: EventId) -> std::result::Result<Vec<NostrEvent>
         ])
         .custom_tag(upper_e_tag, event_id_hex)
         .limit(100);
+
     let mut all_replies = Vec::new();
+
     let (lower_result, upper_result) = tokio::join!(
         nostr_client::fetch_events_aggregated_outbox(filter_lower, Duration::from_secs(10)),
         nostr_client::fetch_events_aggregated_outbox(filter_upper, Duration::from_secs(10))
     );
+
     if let Ok(lower_replies) = lower_result {
         all_replies.extend(lower_replies);
     }
     if let Ok(upper_replies) = upper_result {
         all_replies.extend(upper_replies);
     }
+
+    if let Some(author_pk) = root_author_pubkey {
+        let author_relays =
+            crate::stores::relay::coverage::get_relays_for_pubkey(&author_pk.to_hex());
+        if !author_relays.is_empty() {
+            let reply_filter = Filter::new()
+                .kinds(vec![Kind::TextNote, Kind::Comment])
+                .event(event_id)
+                .limit(100);
+            if let Some(client) = nostr_client::get_client() {
+                if let Ok(events) = relay::connection::fetch_events_from_relays(
+                    &client,
+                    reply_filter,
+                    author_relays,
+                    Duration::from_secs(5),
+                )
+                .await
+                {
+                    all_replies.extend(events);
+                }
+            }
+        }
+    }
+
     let mut seen_ids = std::collections::HashSet::new();
     let unique_replies: Vec<NostrEvent> = all_replies
         .into_iter()
@@ -95,13 +228,14 @@ async fn fetch_replies(event_id: EventId) -> std::result::Result<Vec<NostrEvent>
 #[component]
 pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
     let initial_is_voice = from_voice.as_ref().is_some_and(|v| v == "true");
-    let mut note_data = use_signal(|| None::<NostrEvent>);
+    let mut note_data: Signal<Option<NostrEvent>> = use_signal(|| None);
     let mut parent_events = use_signal(Vec::<NostrEvent>::new);
     let mut replies = use_signal(Vec::<NostrEvent>::new);
     let mut loading = use_signal(|| true);
     let mut loading_parents = use_signal(|| false);
-    let mut loading_replies = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
+    let interaction_counts: Signal<HashMap<String, InteractionCounts>> =
+        use_signal(HashMap::new);
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
 
     use_effect(use_reactive!(|note_id| {
@@ -119,9 +253,7 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
         spawn(async move {
             loading.set(true);
             loading_parents.set(true);
-            loading_replies.set(true);
             error.set(None);
-            crate::stores::profiles::PROFILE_CACHE.write().clear();
 
             let event_id = match EventId::from_bech32(&note_id_str)
                 .or_else(|_| EventId::from_hex(&note_id_str))
@@ -131,7 +263,6 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                     error.set(Some(format!("Invalid note ID: {}", e)));
                     loading.set(false);
                     loading_parents.set(false);
-                    loading_replies.set(false);
                     return;
                 }
             };
@@ -152,13 +283,17 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                     error.set(Some(e.clone()));
                     loading.set(false);
                     loading_parents.set(false);
-                    loading_replies.set(false);
                     return;
                 }
             };
 
-            let (parents_result, replies_result) =
-                tokio::join!(fetch_parents_by_ids(parent_ids), fetch_replies(event_id));
+            let clicked_note = note_result.as_ref().unwrap().clone();
+            let root_author = clicked_note.pubkey;
+
+            let (parents_result, replies_result) = tokio::join!(
+                fetch_parents_with_hints(parent_ids, &clicked_note, 5),
+                fetch_replies(event_id, Some(root_author))
+            );
 
             if let Ok(mut parents) = parents_result {
                 parents.sort_by(|a, b| a.created_at.cmp(&b.created_at));
@@ -171,9 +306,8 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
             }
             if let Ok(mut reply_vec) = replies_result {
                 reply_vec.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-                let count = reply_vec.len();
+                log::info!("Loaded {} replies", reply_vec.len());
                 replies.set(reply_vec);
-                log::info!("Loaded {} replies", count);
             }
 
             use crate::utils::profile_prefetch;
@@ -184,14 +318,23 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
             all_events.extend(parent_events.read().iter().cloned());
             all_events.extend(replies.read().iter().cloned());
             if !all_events.is_empty() {
+                let mut ic = interaction_counts;
+                let ids_for_counts: Vec<EventId> = all_events.iter().map(|e| e.id).collect();
                 spawn(async move {
                     profile_prefetch::prefetch_event_authors(&all_events).await;
                 });
+                if !ids_for_counts.is_empty() {
+                    if let Ok(counts) =
+                        fetch_interaction_counts_batch(ids_for_counts, Duration::from_secs(5))
+                            .await
+                    {
+                        ic.set(counts);
+                    }
+                }
             }
 
             loading.set(false);
             loading_parents.set(false);
-            loading_replies.set(false);
         });
     }));
 
@@ -215,7 +358,6 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
         });
     }
 
-    // Cleanup back navigation on unmount
     use_drop(move || {
         back_navigation::clear_active_note_back_context(&note_id);
     });
@@ -293,6 +435,7 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                                     NoteCard {
                                         key: "{parent.id}",
                                         event: parent.clone(),
+                                        precomputed_counts: interaction_counts.read().get(&parent.id.to_hex()).cloned(),
                                         collapsible: true,
                                         cached_muted_posts: cached_muted_posts.read().clone(),
                                         cached_blocked_users: cached_blocked_users.read().clone(),
@@ -315,11 +458,11 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                             NoteCard {
                                 key: "{event.id}",
                                 event: event.clone(),
+                                precomputed_counts: interaction_counts.read().get(&event.id.to_hex()).cloned(),
                                 collapsible: false,
                                 cached_muted_posts: cached_muted_posts.read().clone(),
                                 cached_blocked_users: cached_blocked_users.read().clone(),
                                 on_reply: move |reply_event: NostrEvent| {
-                                    // Add the reply optimistically
                                     let already_exists = replies.read().iter().any(|e| e.id == reply_event.id);
                                     if !already_exists {
                                         log::info!("Adding reply optimistically from main note: {}", reply_event.id.to_hex());
@@ -332,18 +475,18 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                     }
                 }
                 div { class: "border-b border-border" }
-                if *loading_replies.read() {
+                if *loading_parents.read() && parent_events.read().is_empty() && replies.read().is_empty() {
                     div { class: "flex items-center justify-center py-10",
                         div { class: "text-center",
                             div { class: "animate-spin text-4xl mb-2", "⚡" }
-                            p { class: "text-muted-foreground", "Loading replies..." }
+                            p { class: "text-muted-foreground", "Loading..." }
                         }
                     }
                 } else {{
                     let reply_vec = replies.read().clone();
                     let thread_tree = build_thread_tree(reply_vec, &event.id);
                     let root_event_id = event.id;
-                    if thread_tree.is_empty() {
+                    if thread_tree.is_empty() && !*loading_parents.read() {
                         rsx! {
                             div { class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
                                 p { "No replies yet" }
@@ -358,14 +501,12 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                                         key: "{node.event.id}",
                                         node: node.clone(),
                                         depth: 0,
+                                        precomputed_counts: interaction_counts.read().get(&node.event.id.to_hex()).cloned(),
                                         on_reply: move |reply_event: NostrEvent| {
-                                            // Add the reply optimistically
-                                            // nostr-sdk excludes self-published events from RelayPoolNotification::Event
                                             let already_exists = replies.read().iter().any(|e| e.id == reply_event.id);
                                             if !already_exists {
                                                 log::info!("Adding reply optimistically: {}", reply_event.id.to_hex());
                                                 replies.write().push(reply_event);
-                                                // Invalidate thread tree cache
                                                 crate::utils::thread_tree::invalidate_thread_tree_cache(&root_event_id);
                                             }
                                         },
