@@ -36,7 +36,7 @@ fn format_note_context_for_ai(event: &nostr_sdk::Event) -> String {
     };
 
     format!(
-        "Note for discussion\nAuthor: {author}\nCreated: {}\nEvent ID: {event_id}\n\nContent:\n{content}",
+        "Note for discussion\nAuthor: {author}\nCreated: {}\nEvent ID: {event_id}\n\nContent:\n{content}\n\nYou have nostr tools available. Use get_profile to learn about the author, get_interaction_counts to see replies/likes/zaps for this note, get_contact_list to see who the author follows, and other tools to provide richer context.",
         event.created_at.to_human_datetime()
     )
 }
@@ -356,8 +356,19 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                                 title_hint: Some("Note discussion".to_string()),
                                 message: format_note_context_for_ai(&event),
                             };
+                            let event_for_prefetch = event.clone();
                             let nav = navigator;
                             spawn(async move {
+                                let author_hex = event_for_prefetch.pubkey.to_hex();
+                                let event_id = event_for_prefetch.id;
+                                spawn(async move {
+                                    let _ = crate::stores::profiles::fetch_profile(author_hex).await;
+                                    let _ = crate::services::aggregation::fetch_interaction_counts_batch(
+                                        vec![event_id],
+                                        std::time::Duration::from_secs(5),
+                                    )
+                                    .await;
+                                });
                                 let account_key = ai_chat_store::current_account_key();
                                 match ai_chat_store::load_chat_state(&account_key).await {
                                     Ok(state) if ai_chat_store::has_saved_conversation_context(&state) => {
@@ -575,7 +586,8 @@ mod tests {
         assert!(formatted.starts_with("Note for discussion\nAuthor: npub"));
         assert!(formatted.contains("\nCreated: "));
         assert!(formatted.contains("\nEvent ID: note1"));
-        assert!(formatted.ends_with("\n\nContent:\nhello from nostr.blue"));
+        assert!(formatted.contains("\n\nContent:\nhello from nostr.blue"));
+        assert!(formatted.contains("get_interaction_counts"));
     }
 
     #[test]
@@ -590,6 +602,7 @@ mod tests {
 
         let formatted = format_note_context_for_ai(&event);
 
-        assert!(formatted.ends_with(&format!("\n\nContent:\n{expected}")));
+        assert!(formatted.contains(&format!("\n\nContent:\n{expected}")));
+        assert!(formatted.contains("get_interaction_counts"));
     }
 }

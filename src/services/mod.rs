@@ -29,6 +29,7 @@ compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature
 pub mod admission_policy;
 pub mod aggregation;
 pub mod ai_chat;
+pub mod ai_tools;
 pub mod bible_api;
 pub mod geocoding;
 pub mod git_hosting;
