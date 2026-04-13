@@ -1,5 +1,8 @@
+#[cfg(feature = "cashu")]
 use crate::stores::{auth_store, cashu, nostr_client};
 use dioxus::prelude::*;
+
+#[cfg(feature = "cashu")]
 #[component]
 pub fn CashuWallet() -> Element {
     let auth = auth_store::AUTH_STATE.read();
@@ -276,6 +279,23 @@ pub fn CashuWallet() -> Element {
             }
             if *show_nutzap_inbox_modal.read() {
                 crate::components::cashu::NutzapInbox { on_close: move |_| show_nutzap_inbox_modal.set(false) }
+            }
+        }
+    }
+}
+
+#[cfg(not(feature = "cashu"))]
+#[component]
+pub fn CashuWallet() -> Element {
+    use dioxus::prelude::*;
+    rsx! {
+        div { class: "min-h-screen bg-background flex items-center justify-center",
+            div { class: "text-center py-12 px-4",
+                div { class: "text-6xl mb-4", "🔒" }
+                h3 { class: "text-xl font-semibold mb-2", "Not Available" }
+                p { class: "text-muted-foreground",
+                    "Wallet is not available on this platform."
+                }
             }
         }
     }

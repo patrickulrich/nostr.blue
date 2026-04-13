@@ -130,6 +130,7 @@ pub fn truncate_with_word_break(text: &str, max_chars: usize) -> String {
 }
 /// Shortens a URL for display by stripping protocol and truncating
 /// Uses UTF-8 safe character-based slicing to avoid panic on multi-byte chars
+#[cfg(feature = "cashu")]
 pub fn shorten_url(url: &str, max_len: usize) -> String {
     let url = url
         .trim_start_matches("https://")

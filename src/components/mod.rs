@@ -3,6 +3,7 @@ pub mod article_card;
 pub mod article_content;
 pub mod badge_detail_modal;
 pub mod book_picker_modal;
+#[cfg(feature = "cashu")]
 pub mod cashu;
 pub mod citation;
 pub mod client_initializing;
@@ -44,11 +45,14 @@ pub mod share_modal;
 pub mod sheet;
 pub mod shop;
 pub mod threaded_comment;
+#[cfg(feature = "cashu")]
 pub mod token_list;
+#[cfg(feature = "cashu")]
 pub mod transaction_history;
 pub mod trending_notes;
 pub mod video_card;
 pub mod virtual_list;
+#[cfg(feature = "cashu")]
 pub mod wallet_balance_card;
 pub mod webbookmark_card;
 pub mod webbookmark_modal;
@@ -110,6 +114,7 @@ pub use mention_autocomplete::MentionAutocomplete;
 pub use share_modal::ShareModal;
 pub use sidebar_customizer_modal::SidebarCustomizerModal;
 pub mod content_share_modal;
+#[cfg(feature = "cashu")]
 pub use cashu::{
     CashuAddMintModal, CashuCreateRequestModal, CashuMintDiscoveryModal, CashuOptimizeModal,
     CashuPayRequestModal, CashuReceiveLightningModal, CashuReceiveModal, CashuSendLightningModal,
@@ -123,8 +128,11 @@ pub use nwc_setup_modal::NwcSetupModal;
 pub use radial_menu::RadialMenu;
 pub use report_modal::ReportModal;
 pub use right_discovery_sidebar::RightDiscoverySidebar;
+#[cfg(feature = "cashu")]
 pub use token_list::TokenList;
+#[cfg(feature = "cashu")]
 pub use transaction_history::TransactionHistory;
+#[cfg(feature = "cashu")]
 pub use wallet_balance_card::WalletBalanceCard;
 pub mod dialog;
 pub mod modal;

@@ -24,6 +24,7 @@ use nostr_blue_renderers::{
     NostrBlueVoiceRenderer, NostrBlueWikiRenderer,
 };
 
+#[cfg(feature = "cashu")]
 use crate::components::CashuTokenCard;
 use crate::routes::Route;
 use crate::stores::media::{self, LightboxImage};
@@ -313,7 +314,10 @@ fn token_key(token: &ContentToken, idx: usize) -> String {
         ContentToken::ZapCookingRecipe(naddr) => {
             format!("zapcooking-{}-{:x}", idx, hash_str(naddr))
         }
+        #[cfg(feature = "cashu")]
         ContentToken::CashuToken(token) => format!("cashu-{}-{:x}", idx, hash_str(token)),
+        #[cfg(not(feature = "cashu"))]
+        ContentToken::CashuToken(token) => format!("token-{}-{:x}", idx, hash_str(token)),
         ContentToken::Isbn(isbn) => format!("isbn-{}-{}", idx, isbn),
         ContentToken::Doi(doi) => format!("doi-{}-{:x}", idx, hash_str(doi)),
         ContentToken::Isan(isan) => format!("isan-{}-{}", idx, isan),
@@ -393,6 +397,16 @@ fn token_key(token: &ContentToken, idx: usize) -> String {
         }
     }
 }
+#[cfg(feature = "cashu")]
+fn render_cashu_token(token: &str) -> Element {
+    rsx! { CashuTokenCard { token: token.to_string() } }
+}
+
+#[cfg(not(feature = "cashu"))]
+fn render_cashu_token(token: &str) -> Element {
+    rsx! { span { class: "text-xs text-muted-foreground font-mono break-all", "{token}" } }
+}
+
 fn render_token(token: &ContentToken, emoji_map: &HashMap<String, String>) -> Element {
     match token {
         ContentToken::Text(text) => {
@@ -588,11 +602,7 @@ fn render_token(token: &ContentToken, emoji_map: &HashMap<String, String>) -> El
                 ZapCookingRecipeRenderer { naddr: naddr.clone() }
             }
         }
-        ContentToken::CashuToken(token) => {
-            rsx! {
-                CashuTokenCard { token: token.clone() }
-            }
-        }
+        ContentToken::CashuToken(token) => render_cashu_token(token),
         ContentToken::Isbn(isbn) => {
             rsx! {
                 IsbnRenderer { isbn: isbn.clone() }
@@ -792,6 +802,7 @@ mod tests {
             ContentToken::Tidal("https://embed.tidal.com/track/123".to_string()),
             ContentToken::ZapStream("naddr1test".to_string()),
             ContentToken::ZapCookingRecipe("naddr1test".to_string()),
+            #[cfg(feature = "cashu")]
             ContentToken::CashuToken("cashuAtest".to_string()),
             ContentToken::Isbn("9780765382030".to_string()),
             ContentToken::Doi("10.1000/182".to_string()),
@@ -827,9 +838,16 @@ mod tests {
             ContentToken::NostrBlueRssPodcastEpisode("podcast123".to_string(), "ep456".to_string()),
             ContentToken::NostrBlueRssPodcastShow("podcast123".to_string()),
         ];
+        #[cfg(feature = "cashu")]
         assert_eq!(
             test_cases.len(),
             61,
+            "Test cases should cover all ContentToken variants. If you added a new variant, add it to this test.",
+        );
+        #[cfg(not(feature = "cashu"))]
+        assert_eq!(
+            test_cases.len(),
+            60,
             "Test cases should cover all ContentToken variants. If you added a new variant, add it to this test.",
         );
         for (idx, token) in test_cases.iter().enumerate() {

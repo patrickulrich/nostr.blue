@@ -1,7 +1,7 @@
-use ::url::Url;
 use nostr_sdk::prelude::*;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use ::url::Url;
 /// Minimum length for npub identifiers to be considered valid for display
 const MIN_NPUB_LENGTH: usize = 16;
 /// Minimum length for naddr identifiers to be considered valid
@@ -20,6 +20,7 @@ static NOSTR_URI_PATTERN: Lazy<Regex> = Lazy::new(|| {
 });
 static HASHTAG_PATTERN: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"#(\w+)").expect("Failed to compile hashtag regex"));
+#[cfg(feature = "cashu")]
 static CASHU_PATTERN: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"cashu[AB][A-Za-z0-9_=-]+").expect("Failed to compile cashu regex"));
 static ISBN_PATTERN: Lazy<Regex> =
@@ -76,6 +77,7 @@ pub enum ContentToken {
     Tidal(String),
     ZapStream(String),
     ZapCookingRecipe(String),
+    #[allow(dead_code)]
     CashuToken(String),
     Isbn(String),
     Doi(String),
@@ -200,6 +202,7 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
         let hashtag = mat.as_str()[1..].to_string();
         matches.push((mat.start(), mat.end(), ContentToken::Hashtag(hashtag)));
     }
+    #[cfg(feature = "cashu")]
     for mat in CASHU_PATTERN.find_iter(content) {
         let token_str = mat.as_str().to_string();
         matches.push((mat.start(), mat.end(), ContentToken::CashuToken(token_str)));
@@ -1000,18 +1003,21 @@ mod tests {
         assert_eq!(image_count, 3);
     }
     #[test]
+    #[cfg(feature = "cashu")]
     fn test_parse_cashu_token_v3() {
         let tokens = parse_content("cashuAeyJwYXlsb2FkIjp7fX0=", &[]);
         assert_eq!(tokens.len(), 1);
         assert!(matches!(&tokens[0], ContentToken::CashuToken(t) if t.starts_with("cashuA")),);
     }
     #[test]
+    #[cfg(feature = "cashu")]
     fn test_parse_cashu_token_v4() {
         let tokens = parse_content("cashuBeyJwYXlsb2FkIjp7fX0=", &[]);
         assert_eq!(tokens.len(), 1);
         assert!(matches!(&tokens[0], ContentToken::CashuToken(t) if t.starts_with("cashuB")),);
     }
     #[test]
+    #[cfg(feature = "cashu")]
     fn test_parse_cashu_token_in_content() {
         let tokens = parse_content(
             "Check this token cashuAeyJwYXlsb2FkIjp7fX0= for payment",

@@ -45,6 +45,7 @@ pub(super) fn NavLink(
             n1 == n2
         }
         (Route::LiveStreamNew {}, Route::LiveStreamNew {}) => true,
+        #[cfg(feature = "cashu")]
         (Route::CashuWallet {}, Route::CashuWallet {}) => true,
         (Route::Settings {}, Route::Settings {}) => true,
         (Route::BlossomPage {}, Route::BlossomPage {}) => true,

@@ -432,54 +432,60 @@ pub fn Settings() -> Element {
                         }
                     }
                 }
-                div { class: "mt-6 pt-6 border-t border-gray-200 dark:border-gray-700",
-                    div { class: "flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg",
-                        div {
-                            div { class: "text-sm font-medium text-gray-900 dark:text-white",
-                                "Auto-load Cashu Wallet"
-                            }
-                            p { class: "text-xs text-gray-600 dark:text-gray-400 mt-1",
-                                "Initialize Cashu wallet automatically on app startup for ecash payments"
-                            }
-                        }
-                        label { class: "relative inline-flex items-center cursor-pointer",
-                            input {
-                                r#type: "checkbox",
-                                class: "sr-only peer",
-                                checked: settings_store::SETTINGS.read().cashu_wallet_auto_load,
-                                onchange: move |evt| {
-                                    let enabled = evt.checked();
-                                    spawn(async move {
-                                        settings_store::update_cashu_wallet_auto_load(enabled).await;
-                                        if !enabled {
-                                            let current_pref = settings_store::SETTINGS
-                                                .read()
-                                                .payment_method_preference
-                                                .clone();
-                                            if current_pref == "cashu_first" {
-                                                let new_pref = if nwc_store::is_connected() {
-                                                    "nwc_first"
-                                                } else {
-                                                    "always_ask"
-                                                };
-                                                settings_store::update_payment_method_preference(
-                                                        new_pref.to_string(),
-                                                    )
-                                                    .await;
-                                                log::info!(
-                                                    "Reset payment preference from cashu_first to {}", new_pref
-                                                );
-                                            }
+                {
+                    #[cfg(feature = "cashu")]
+                    {
+                        rsx! {
+                            div { class: "mt-6 pt-6 border-t border-gray-200 dark:border-gray-700",
+                                div { class: "flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg",
+                                    div {
+                                        div { class: "text-sm font-medium text-gray-900 dark:text-white",
+                                            "Auto-load Cashu Wallet"
                                         }
-                                    });
-                                },
+                                        p { class: "text-xs text-gray-600 dark:text-gray-400 mt-1",
+                                            "Initialize Cashu wallet automatically on app startup for ecash payments"
+                                        }
+                                    }
+                                    label { class: "relative inline-flex items-center cursor-pointer",
+                                        input {
+                                            r#type: "checkbox",
+                                            class: "sr-only peer",
+                                            checked: settings_store::SETTINGS.read().cashu_wallet_auto_load,
+                                            onchange: move |evt| {
+                                                let enabled = evt.checked();
+                                                spawn(async move {
+                                                    settings_store::update_cashu_wallet_auto_load(enabled).await;
+                                                    if !enabled {
+                                                        let current_pref = settings_store::SETTINGS
+                                                            .read()
+                                                            .payment_method_preference
+                                                            .clone();
+                                                        if current_pref == "cashu_first" {
+                                                            let new_pref = if nwc_store::is_connected() {
+                                                                "nwc_first"
+                                                            } else {
+                                                                "always_ask"
+                                                            };
+                                                            settings_store::update_payment_method_preference(
+                                                                    new_pref.to_string(),
+                                                                )
+                                                                .await;
+                                                            log::info!(
+                                                                "Reset payment preference from cashu_first to {}", new_pref
+                                                            );
+                                                        }
+                                                    }
+                                                });
+                                            },
+                                        }
+                                        div { class: "w-11 h-6 bg-gray-300 dark:bg-gray-600 peer-focus:outline-hidden peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600" }
+                                    }
+                                }
                             }
-                            div { class: "w-11 h-6 bg-gray-300 dark:bg-gray-600 peer-focus:outline-hidden peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600" }
                         }
                     }
                 }
                 if matches!(nwc_status, nwc_store::ConnectionStatus::Connected)
-                    || settings_store::SETTINGS.read().cashu_wallet_auto_load
                 {
                     div { class: "mt-6 pt-6 border-t border-gray-200 dark:border-gray-700",
                         h4 { class: "text-sm font-medium text-gray-900 dark:text-white mb-3",
@@ -489,27 +495,34 @@ pub fn Settings() -> Element {
                             "Choose how you want to pay when zapping content"
                         }
                         div { class: "space-y-2",
-                            if settings_store::SETTINGS.read().cashu_wallet_auto_load {
-                                label { class: "flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-pointer
-                                            hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors",
-                                    input {
-                                        r#type: "radio",
-                                        name: "payment_method",
-                                        value: "cashu_first",
-                                        checked: settings_store::SETTINGS.read().payment_method_preference == "cashu_first",
-                                        onchange: move |_| {
-                                            spawn(async move {
-                                                settings_store::update_payment_method_preference("cashu_first".to_string())
-                                                    .await;
-                                            });
-                                        },
-                                    }
-                                    div {
-                                        div { class: "text-sm font-medium text-gray-900 dark:text-white",
-                                            "Cashu First (Nutzaps)"
-                                        }
-                                        p { class: "text-xs text-gray-600 dark:text-gray-400 mt-1",
-                                            "Send ecash via Nostr if recipient supports, fallback to Lightning"
+                            {
+                                #[cfg(feature = "cashu")]
+                                {
+                                    rsx! {
+                                        if settings_store::SETTINGS.read().cashu_wallet_auto_load {
+                                            label { class: "flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-pointer
+                                                        hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors",
+                                                input {
+                                                    r#type: "radio",
+                                                    name: "payment_method",
+                                                    value: "cashu_first",
+                                                    checked: settings_store::SETTINGS.read().payment_method_preference == "cashu_first",
+                                                    onchange: move |_| {
+                                                        spawn(async move {
+                                                            settings_store::update_payment_method_preference("cashu_first".to_string())
+                                                                .await;
+                                                        });
+                                                    },
+                                                }
+                                                div {
+                                                    div { class: "text-sm font-medium text-gray-900 dark:text-white",
+                                                        "Cashu First (Nutzaps)"
+                                                    }
+                                                    p { class: "text-xs text-gray-600 dark:text-gray-400 mt-1",
+                                                        "Send ecash via Nostr if recipient supports, fallback to Lightning"
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }

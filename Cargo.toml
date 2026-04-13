@@ -9,6 +9,8 @@ license = "MIT"
 
 [features]
 default = ["web"]
+cashu = ["dep:cdk", "dep:cdk-common", "nostr/nip60"]
+playstore = []
 web = [
     "dioxus/web",
     "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys",
@@ -17,8 +19,9 @@ web = [
     "dep:nostr-indexeddb", "dep:nostr-browser-signer",
     "dep:serde-wasm-bindgen", "dep:wasm-logger", "dep:console_error_panic_hook",
     "chrono/wasmbind", "uuid/js", "getrandom/js", "instant/wasm-bindgen",
+    "cashu",
 ]
-desktop = ["dioxus/desktop", "native", "dep:arboard", "dep:rfd", "dep:webbrowser"]
+desktop = ["dioxus/desktop", "native", "dep:arboard", "dep:rfd", "dep:webbrowser", "cashu"]
 mobile = ["dioxus/mobile", "native", "dep:jni", "dep:ndk-context"]
 native = [
     "dep:nostr-ndb", "dep:cdk-sqlite", "dep:git2",
@@ -32,7 +35,7 @@ dioxus = { version = "0.7.3", default-features = false, features = ["router", "l
 dioxus-stores = "0.7.3"
 
 # Nostr protocol
-nostr = { version = "0.44.1", default-features = false, features = ["std", "nip47", "nip49", "nip57", "nip60", "nip98"] }
+nostr = { version = "0.44.1", default-features = false, features = ["std", "nip47", "nip49", "nip57", "nip98"] }
 nostr-sdk = { version = "0.44.1", default-features = false, features = ["nip44", "nip59", "nip57"] }
 nostr-database = { version = "0.44.0", default-features = false }
 nostr-indexeddb = { version = "0.44.0", optional = true }
@@ -44,9 +47,9 @@ nostr-relay-pool = { version = "0.44.0" }
 nwc = { version = "0.44.0" }
 nostr-ndb = { version = "0.44.0", optional = true }
 
-# Cashu ecash protocol
-cdk = { version = "0.14.2", default-features = false, features = ["wallet", "auth"] }
-cdk-common = { version = "0.14.2", default-features = false, features = ["wallet", "auth"] }
+# Cashu ecash protocol (optional, gated by "cashu" feature)
+cdk = { version = "0.14.2", default-features = false, features = ["wallet", "auth"], optional = true }
+cdk-common = { version = "0.14.2", default-features = false, features = ["wallet", "auth"], optional = true }
 cdk-sqlite = { version = "0.14.2", default-features = false, features = ["wallet"], optional = true }
 
 # Image processing for Blossom uploads

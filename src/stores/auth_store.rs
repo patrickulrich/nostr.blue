@@ -538,6 +538,7 @@ pub async fn logout() -> Result<(), String> {
         .map_err(|e| format!("Failed to clear AI chat history during logout: {}", e))?;
     crate::stores::notifications::stop_realtime_subscription().await;
     crate::stores::relay::stop_relay_list_subscription().await;
+    #[cfg(feature = "cashu")]
     crate::stores::cashu_cdk_bridge::clear_multi_wallet();
     crate::stores::shop_store::clear_caches();
     crate::stores::dms::clear_caches();

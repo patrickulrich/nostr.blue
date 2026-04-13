@@ -1568,6 +1568,7 @@ pub fn RadioIcon(props: IconProps) -> Element {
     }
 }
 /// Wallet icon
+#[cfg(feature = "cashu")]
 #[component]
 pub fn WalletIcon(props: IconProps) -> Element {
     rsx! {

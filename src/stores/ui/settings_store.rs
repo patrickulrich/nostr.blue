@@ -363,6 +363,7 @@ pub async fn reset_mempool_endpoint() {
     update_mempool_endpoint(default_mempool_endpoint()).await;
 }
 /// Update Cashu wallet auto-load setting and save to Nostr
+#[cfg(feature = "cashu")]
 pub async fn update_cashu_wallet_auto_load(enabled: bool) {
     let settings = {
         let mut w = SETTINGS.write();

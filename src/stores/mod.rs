@@ -47,7 +47,9 @@ pub mod auth_store;
 pub mod bible_store;
 pub mod bookmarks;
 pub mod calendar_store;
+#[cfg(feature = "cashu")]
 pub mod cashu;
+#[cfg(feature = "cashu")]
 pub mod cashu_cdk_bridge;
 pub mod directory_store;
 pub mod dvm_store;
@@ -55,13 +57,16 @@ pub mod embedding_store;
 pub mod feed_cache;
 pub mod feed_cache_db;
 pub mod grasp_servers;
+#[cfg(feature = "cashu")]
 pub mod indexeddb_database;
 pub mod nostr_client;
 pub mod nwc_store;
 pub mod profiles;
 pub mod relay;
+pub mod shop_database;
 pub mod shop_store;
 pub mod signer;
 pub mod subscription_manager;
+#[cfg(feature = "cashu")]
 pub mod wallet_database;
 pub mod webbookmarks;

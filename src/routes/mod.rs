@@ -813,7 +813,10 @@ fn Layout() -> Element {
             | Route::VideosLiveTag { .. }
             | Route::LiveStreamDetail { .. }
     );
+    #[cfg(feature = "cashu")]
     let is_wallet_page = matches!(current_route, Route::CashuWallet {});
+    #[cfg(not(feature = "cashu"))]
+    let is_wallet_page = false;
     let is_music_page = matches!(
         current_route,
         Route::MusicHome {}

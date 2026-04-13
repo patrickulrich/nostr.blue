@@ -90,10 +90,15 @@ pub(super) fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 crate::components::icons::RadioIcon { class: class.to_string() }
             }
         }
+        #[cfg(feature = "cashu")]
         SidebarItem::Wallet => {
             rsx! {
                 crate::components::icons::WalletIcon { class: class.to_string() }
             }
+        }
+        #[cfg(not(feature = "cashu"))]
+        SidebarItem::Wallet => {
+            rsx! { div {} }
         }
         SidebarItem::P2PTrading => {
             rsx! {

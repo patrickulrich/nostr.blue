@@ -33,27 +33,27 @@ pub async fn init_shop_store() -> Result<()> {
         return Ok(());
     }
     log::info!("Initializing shop store...");
-    match IndexedDbDatabase::new().await {
+    match ShopDatabase::new().await {
         Ok(db) => {
             let db_arc = Arc::new(db);
             *SHOP_DB.write() = Some(db_arc.clone());
-            log::info!("Shop IndexedDB initialized");
+            log::info!("Shop database initialized");
             match restore_orders_from_db(&db_arc).await {
                 Ok(true) => {
                     use std::sync::atomic::Ordering;
                     ORDERS_LOADED_FROM_DB.store(true, Ordering::SeqCst);
-                    log::info!("Orders restored from IndexedDB, flag set");
+                    log::info!("Orders restored from database, flag set");
                 }
                 Ok(false) => {
                     log::debug!("Order restore skipped (no auth), will retry on auth");
                 }
                 Err(e) => {
-                    log::warn!("Failed to restore orders from IndexedDB: {}", e);
+                    log::warn!("Failed to restore orders from database: {}", e);
                 }
             }
         }
         Err(e) => {
-            log::warn!("Failed to initialize shop IndexedDB: {:?}", e);
+            log::warn!("Failed to initialize shop database: {:?}", e);
         }
     }
     *SHOP_INITIALIZED.write() = true;
@@ -62,8 +62,8 @@ pub async fn init_shop_store() -> Result<()> {
 
 /// Restore orders from IndexedDB into memory signals
 /// Returns true if orders were actually processed (or none exist), false if skipped due to missing auth
-async fn restore_orders_from_db(db: &IndexedDbDatabase) -> Result<bool> {
-    log::info!("Restoring orders from IndexedDB...");
+async fn restore_orders_from_db(db: &ShopDatabase) -> Result<bool> {
+    log::info!("Restoring orders from database...");
     let orders = db
         .get_all_orders()
         .await

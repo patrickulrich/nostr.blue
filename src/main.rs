@@ -1,9 +1,11 @@
 #![allow(non_snake_case)]
 use dioxus::prelude::*;
 use stores::{
-    auth_store, cashu, feed_cache, music_player, nostr_client, nwc_store, reactions_store, relay,
+    auth_store, feed_cache, music_player, nostr_client, nwc_store, reactions_store, relay,
     settings_store, shop_store, sidebar_store, theme_store,
 };
+#[cfg(feature = "cashu")]
+use stores::cashu;
 
 #[cfg(all(feature = "web", feature = "native"))]
 compile_error!("Cannot enable both 'web' and 'native' features simultaneously");
@@ -70,6 +72,7 @@ fn App() -> Element {
                         },
                         async {
                             let settings = settings_store::SETTINGS.read().clone();
+                            #[cfg(feature = "cashu")]
                             if settings.cashu_wallet_auto_load {
                                 if auth_store::get_pubkey().is_none() {
                                     log::debug!("Skipping Cashu auto-load: not authenticated");
@@ -92,6 +95,7 @@ fn App() -> Element {
                                     }
                                 }
                             }
+                            let _ = settings;
                         },
                     );
                 }

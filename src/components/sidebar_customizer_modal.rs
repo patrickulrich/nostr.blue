@@ -515,21 +515,30 @@ fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
             }
         }
         SidebarItem::Wallet => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "M21 12V7H5a2 2 0 0 1 0-4h14v4" }
-                    path { d: "M3 5v14a2 2 0 0 0 2 2h16v-5" }
-                    path { d: "M18 12a2 2 0 0 0 0 4h4v-4Z" }
+            {
+                #[cfg(feature = "cashu")]
+                {
+                    rsx! {
+                        svg {
+                            class: "{class}",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            width: "24",
+                            height: "24",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            path { d: "M21 12V7H5a2 2 0 0 1 0-4h14v4" }
+                            path { d: "M3 5v14a2 2 0 0 0 2 2h16v-5" }
+                            path { d: "M18 12a2 2 0 0 0 0 4h4v-4Z" }
+                        }
+                    }
+                }
+                #[cfg(not(feature = "cashu"))]
+                {
+                    rsx! { div {} }
                 }
             }
         }
