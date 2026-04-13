@@ -256,9 +256,7 @@ pub async fn send_order_message(
         .signer()
         .await
         .map_err(|e| format!("Failed to get signer: {}", e))?;
-    let sender_pk = signer
-        .get_public_key()
-        .await
+    let sender_pk = crate::stores::nostr_client::get_cached_pubkey()
         .map_err(|e| format!("Failed to get sender pubkey: {}", e))?;
     let message_json = serde_json::to_string(&content)
         .map_err(|e| format!("Failed to serialize order message: {}", e))?;
@@ -310,9 +308,7 @@ pub async fn send_payment_receipt(
         .signer()
         .await
         .map_err(|e| format!("Failed to get signer: {}", e))?;
-    let sender_pk = signer
-        .get_public_key()
-        .await
+    let sender_pk = crate::stores::nostr_client::get_cached_pubkey()
         .map_err(|e| format!("Failed to get sender pubkey: {}", e))?;
     let content = format!(
         "Payment receipt for order {} - {} sats via {}",
@@ -728,13 +724,7 @@ pub async fn listen_for_order_updates() -> Result<()> {
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("No signer: {}", e))?;
-    let my_pubkey = signer
-        .get_public_key()
-        .await
+    let my_pubkey = crate::stores::nostr_client::get_cached_pubkey()
         .map_err(|e| format!("Failed to get pubkey: {}", e))?;
     let filter = Filter::new()
         .kind(Kind::GiftWrap)

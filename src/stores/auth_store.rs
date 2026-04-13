@@ -543,6 +543,11 @@ pub async fn logout() -> Result<(), String> {
     crate::stores::shop_store::clear_caches();
     crate::stores::dms::clear_caches();
     crate::stores::shop_store::reset_orders_loaded_flag();
+    #[cfg(feature = "cashu")]
+    {
+        crate::stores::cashu::internal::clear_seed_cache();
+        crate::stores::cashu::internal::clear_nip44_decrypt_cache();
+    }
     spawn(async move {
         crate::services::search_relays::invalidate_search_relay_cache().await;
     });

@@ -306,9 +306,7 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<Publis
         .signer()
         .await
         .map_err(|e| format!("Failed to get signer: {}", e))?;
-    let sender_pk = signer
-        .get_public_key()
-        .await
+    let sender_pk = crate::stores::nostr_client::get_cached_pubkey()
         .map_err(|e| format!("Failed to get sender pubkey: {}", e))?;
     log::info!(
         "Sending DM from {} to {}",

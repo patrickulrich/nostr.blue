@@ -779,9 +779,7 @@ pub async fn delete_product(product_naddr: &str, d_tag: &str) -> Result<()> {
         .signer()
         .await
         .map_err(|e| format!("Failed to get signer: {}", e))?;
-    let pubkey = signer
-        .get_public_key()
-        .await
+    let pubkey = crate::stores::nostr_client::get_cached_pubkey()
         .map_err(|e| format!("Failed to get pubkey: {}", e))?;
     let coordinate = format!("{}:{}:{}", KIND_PRODUCT, pubkey.to_hex(), d_tag);
     let tags = vec![Tag::custom(TagKind::custom("a"), vec![coordinate])];

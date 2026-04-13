@@ -18,7 +18,80 @@ use cdk::nuts::{CurrencyUnit, State};
 use cdk::Wallet;
 use cdk_common::database::WalletDatabase;
 use dioxus::prelude::*;
-use std::sync::Arc;
+use lru::LruCache;
+use nostr_sdk::EventId;
+use std::num::NonZeroUsize;
+use std::sync::{Arc, Mutex, OnceLock};
+static CACHED_SEED: OnceLock<std::sync::Mutex<Option<[u8; 64]>>> = OnceLock::new();
+
+fn get_seed_cache() -> &'static std::sync::Mutex<Option<[u8; 64]>> {
+    CACHED_SEED.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+pub fn clear_seed_cache() {
+    let cache = get_seed_cache();
+    let mut guard = cache
+        .lock()
+        .unwrap_or_else(|e: std::sync::PoisonError<std::sync::MutexGuard<Option<[u8; 64]>>>| {
+            e.into_inner()
+        });
+    *guard = None;
+}
+
+const MAX_NIP44_DECRYPT_CACHE_SIZE: usize = 500;
+
+static NIP44_DECRYPT_CACHE: OnceLock<std::sync::Mutex<LruCache<EventId, String>>> = OnceLock::new();
+
+fn get_nip44_decrypt_cache() -> &'static std::sync::Mutex<LruCache<EventId, String>> {
+    NIP44_DECRYPT_CACHE.get_or_init(|| {
+        std::sync::Mutex::new(LruCache::new(
+            NonZeroUsize::new(MAX_NIP44_DECRYPT_CACHE_SIZE).unwrap(),
+        ))
+    })
+}
+
+pub fn clear_nip44_decrypt_cache() {
+    get_nip44_decrypt_cache()
+        .lock()
+        .unwrap_or_else(|e: std::sync::PoisonError<std::sync::MutexGuard<LruCache<EventId, String>>>| {
+            e.into_inner()
+        })
+        .clear();
+}
+
+pub(crate) async fn nip44_decrypt_cached(
+    signer: Arc<dyn nostr::signer::NostrSigner>,
+    event_id: EventId,
+    pubkey: nostr::PublicKey,
+    ciphertext: String,
+) -> Result<String, String> {
+    let cache = get_nip44_decrypt_cache();
+    {
+        let mut guard = cache
+            .lock()
+            .unwrap_or_else(|e: std::sync::PoisonError<std::sync::MutexGuard<LruCache<EventId, String>>>| {
+                e.into_inner()
+            });
+        if let Some(cached) = guard.get(&event_id) {
+            return Ok(cached.clone());
+        }
+    }
+    match signer.nip44_decrypt(&pubkey, &ciphertext).await {
+        Ok(decrypted) => {
+            {
+                let mut guard = cache
+                    .lock()
+                    .unwrap_or_else(|e: std::sync::PoisonError<std::sync::MutexGuard<LruCache<EventId, String>>>| {
+                        e.into_inner()
+                    });
+                guard.put(event_id, decrypted.clone());
+            }
+            Ok(decrypted)
+        }
+        Err(e) => Err(format!("Failed to decrypt: {}", e)),
+    }
+}
+
 /// Get or create the shared IndexedDB localstore
 ///
 /// Uses double-checked locking to prevent race conditions where multiple
@@ -153,8 +226,15 @@ pub(crate) async fn create_ephemeral_wallet(
 /// Derive deterministic wallet seed from Nostr private key or signer
 #[cfg(feature = "web")]
 pub(crate) async fn derive_wallet_seed() -> Result<[u8; 64], String> {
+    {
+        let guard = get_seed_cache().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(cached) = &*guard {
+            log::debug!("Using cached wallet seed");
+            return Ok(*cached);
+        }
+    }
     use sha2::{Digest, Sha256};
-    if let Some(keys) = auth_store::get_keys() {
+    let seed = if let Some(keys) = auth_store::get_keys() {
         log::info!("Deriving seed from private key (nsec login)");
         let secret_key = keys.secret_key();
         let mut hasher = Sha256::new();
@@ -168,23 +248,29 @@ pub(crate) async fn derive_wallet_seed() -> Result<[u8; 64], String> {
         hasher.update(b"cashu-wallet-seed-v1-ext");
         let hash2 = hasher.finalize();
         seed[32..].copy_from_slice(&hash2);
-        return Ok(seed);
+        seed
+    } else {
+        log::info!("Using browser extension - deriving seed from NIP-07 signature");
+        let signer = crate::stores::signer::get_signer()
+            .ok_or("No signer available for extension user")?
+            .as_nostr_signer();
+        let challenge_content = "nostr.blue Cashu Wallet Seed Derivation - Sign this message to derive your wallet encryption key";
+        use nostr_sdk::{EventBuilder, Timestamp};
+        let challenge_event = EventBuilder::text_note(challenge_content)
+            .custom_created_at(Timestamp::from(1700000000))
+            .sign(&signer)
+            .await
+            .map_err(|e| format!("Failed to sign challenge for wallet derivation: {}", e))?;
+        let sig_bytes = challenge_event.sig.serialize();
+        let mut seed = [0u8; 64];
+        seed.copy_from_slice(&sig_bytes);
+        log::info!("Wallet seed derived from NIP-07 signature");
+        seed
+    };
+    {
+        let mut guard = get_seed_cache().lock().unwrap_or_else(|e| e.into_inner());
+        *guard = Some(seed);
     }
-    log::info!("Using browser extension - deriving seed from NIP-07 signature");
-    let signer = crate::stores::signer::get_signer()
-        .ok_or("No signer available for extension user")?
-        .as_nostr_signer();
-    let challenge_content = "nostr.blue Cashu Wallet Seed Derivation - Sign this message to derive your wallet encryption key";
-    use nostr_sdk::{EventBuilder, Timestamp};
-    let challenge_event = EventBuilder::text_note(challenge_content)
-        .custom_created_at(Timestamp::from(1700000000))
-        .sign(&signer)
-        .await
-        .map_err(|e| format!("Failed to sign challenge for wallet derivation: {}", e))?;
-    let sig_bytes = challenge_event.sig.serialize();
-    let mut seed = [0u8; 64];
-    seed.copy_from_slice(&sig_bytes);
-    log::info!("Wallet seed derived from NIP-07 signature");
     Ok(seed)
 }
 #[cfg(not(feature = "web"))]
@@ -718,7 +804,6 @@ pub(crate) async fn inject_nip60_proofs_to_cdk() -> Result<(), String> {
 }
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
-use std::sync::Mutex;
 /// Per-mint recovery state - combines lock flag and pending queue atomically
 /// CDK pattern: single lock per wallet, but we need per-mint for parallel recovery
 #[derive(Default)]

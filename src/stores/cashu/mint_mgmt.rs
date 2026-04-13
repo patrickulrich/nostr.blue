@@ -43,10 +43,8 @@ async fn publish_wallet_snapshot(privkey: &str, mints: &[String]) -> Result<Even
 
     let signer = crate::stores::signer::get_signer().ok_or("No signer available")?;
     let nostr_signer = signer.as_nostr_signer();
-    let pubkey = signer
-        .public_key()
-        .await
-        .map_err(|e| format!("Failed to get signer public key: {}", e))?;
+    let pubkey = crate::stores::nostr_client::get_cached_pubkey()
+        .map_err(|e| format!("Failed to get pubkey: {}", e))?;
     let mut content_array: Vec<Vec<&str>> = vec![vec!["privkey", privkey]];
     for mint in mints {
         content_array.push(vec!["mint", mint.as_str()]);
