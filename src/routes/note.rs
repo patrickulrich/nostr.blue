@@ -234,27 +234,40 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
     let mut loading = use_signal(|| true);
     let mut loading_parents = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
-    let interaction_counts: Signal<HashMap<String, InteractionCounts>> =
+    let mut interaction_counts: Signal<HashMap<String, InteractionCounts>> =
         use_signal(HashMap::new);
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
+    let mut load_generation = use_signal(|| 0u32);
 
     use_effect(use_reactive!(|note_id| {
         let note_id_str = note_id.clone();
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        let this_generation = load_generation.peek().wrapping_add(1);
+        load_generation.set(this_generation);
+
+        note_data.set(None);
+        replies.set(Vec::new());
+        parent_events.set(Vec::new());
+        interaction_counts.set(HashMap::new());
+        loading.set(true);
+        loading_parents.set(true);
+        error.set(None);
+
         back_navigation::set_active_note_back_context(
             note_id_str.clone(),
             Vec::new(),
             initial_is_voice,
         );
+
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             log::info!("Waiting for client initialization before loading note...");
+            loading.set(false);
+            loading_parents.set(false);
             return;
         }
-        spawn(async move {
-            loading.set(true);
-            loading_parents.set(true);
-            error.set(None);
 
+        spawn(async move {
             let event_id = match EventId::from_bech32(&note_id_str)
                 .or_else(|_| EventId::from_hex(&note_id_str))
             {
@@ -268,6 +281,10 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
             };
 
             let note_result = fetch_main_note(event_id).await;
+            if *load_generation.peek() != this_generation {
+                return;
+            }
+
             let parent_ids = match &note_result {
                 Ok(event) => {
                     note_data.set(Some(event.clone()));
@@ -295,12 +312,16 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                 fetch_replies(event_id, Some(root_author))
             );
 
+            if *load_generation.peek() != this_generation {
+                return;
+            }
+
             if let Ok(mut parents) = parents_result {
                 parents.sort_by(|a, b| a.created_at.cmp(&b.created_at));
                 back_navigation::set_active_note_back_context(
                     note_id_str.clone(),
                     parents.iter().map(|event| event.id.to_hex()).collect(),
-                    note_data.read().as_ref().is_some_and(is_voice_message),
+                    note_data.peek().as_ref().is_some_and(is_voice_message),
                 );
                 parent_events.set(parents);
             }
@@ -312,11 +333,11 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
 
             use crate::utils::profile_prefetch;
             let mut all_events = Vec::new();
-            if let Some(note) = note_data.read().as_ref() {
+            if let Some(note) = note_data.peek().as_ref() {
                 all_events.push(note.clone());
             }
-            all_events.extend(parent_events.read().iter().cloned());
-            all_events.extend(replies.read().iter().cloned());
+            all_events.extend(parent_events.peek().iter().cloned());
+            all_events.extend(replies.peek().iter().cloned());
             if !all_events.is_empty() {
                 let mut ic = interaction_counts;
                 let ids_for_counts: Vec<EventId> = all_events.iter().map(|e| e.id).collect();
@@ -328,6 +349,9 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                         fetch_interaction_counts_batch(ids_for_counts, Duration::from_secs(5))
                             .await
                     {
+                        if *load_generation.peek() != this_generation {
+                            return;
+                        }
                         ic.set(counts);
                     }
                 }
