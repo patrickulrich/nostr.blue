@@ -70,3 +70,6 @@ pub mod subscription_manager;
 #[cfg(feature = "cashu")]
 pub mod wallet_database;
 pub mod webbookmarks;
+pub mod blobbi;
+pub use blobbi::blobbi_store;
+pub use blobbi::blobbi_profile_store;

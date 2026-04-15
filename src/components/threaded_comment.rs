@@ -30,6 +30,7 @@ pub fn ThreadedComment(
     depth: usize,
     #[props(default)] on_reply: Option<EventHandler<NostrEvent>>,
     #[props(default)] precomputed_counts: Option<InteractionCounts>,
+    #[props(default = None)] root_event: Option<NostrEvent>,
 ) -> Element {
     let event = &node.event;
     let children = &node.children;
@@ -608,6 +609,7 @@ pub fn ThreadedComment(
                             key: "{child.event.id}",
                             node: child.clone(),
                             depth: depth + 1,
+                            root_event: root_event.clone(),
                             on_reply,
                         }
                     }
@@ -628,6 +630,7 @@ pub fn ThreadedComment(
         if *show_reply_modal.read() {
             ReplyComposer {
                 reply_to: event.clone(),
+                root_event: root_event.clone(),
                 on_close: move |_| {
                     show_reply_modal.set(false);
                 },

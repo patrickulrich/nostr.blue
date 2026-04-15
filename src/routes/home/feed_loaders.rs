@@ -2,12 +2,22 @@ use crate::error::NostrBlueError;
 use crate::hooks::UserList;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::list_encryption::get_all_list_members;
+use crate::utils::nip_bb::KIND_BLOBBI_STATE;
 use crate::utils::{extract_reposted_event, process_events_to_feed_items, FeedItem};
 use dioxus::prelude::*;
 use nostr_relay_pool::{SyncDirection, SyncOptions};
 use nostr_sdk::{Filter, Kind, PublicKey, Timestamp};
 use std::collections::HashSet;
 use std::time::Duration;
+
+fn feed_kinds() -> Vec<Kind> {
+    vec![
+        Kind::TextNote,
+        Kind::Repost,
+        Kind::Comment,
+        Kind::Custom(KIND_BLOBBI_STATE),
+    ]
+}
 
 const FOLLOWING_INITIAL_WINDOW_SECS: u64 = 86400;
 
@@ -45,7 +55,7 @@ pub fn merge_paginated_feed_items(
 
 pub fn build_global_feed_filter(until: Option<u64>) -> Filter {
     let mut filter = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
+        .kinds(feed_kinds())
         .limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
@@ -63,7 +73,7 @@ pub fn build_following_feed_filter(
 ) -> Filter {
     let author_count = authors.len();
     let mut filter = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
+        .kinds(feed_kinds())
         .authors(authors)
         .limit(50);
 
@@ -189,6 +199,8 @@ pub async fn load_following_feed(
                     if !is_reply {
                         feed_items.push(FeedItem::OriginalPost(event));
                     }
+                } else if event.kind.as_u16() == KIND_BLOBBI_STATE {
+                    feed_items.push(FeedItem::OriginalPost(event));
                 }
             }
             feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
@@ -355,7 +367,7 @@ pub async fn load_following_with_replies(
         return Ok((global, true));
     }
     let mut filter = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
+        .kinds(feed_kinds())
         .authors(authors.clone())
         .limit(50);
     if let Some(until_ts) = until {
@@ -460,7 +472,7 @@ pub async fn fetch_quick_global_posts(
 ) -> Result<Vec<FeedItem>, crate::error::NostrBlueError> {
     log::info!("Fetching {} quick global posts...", limit);
     let filter = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
+        .kinds(feed_kinds())
         .limit(limit);
 
     let events = nostr_client::fetch_events_from_connected_relays(
@@ -520,7 +532,7 @@ pub async fn load_people_list_feed(
     }
     log::info!("People list '{}' has {} members", list.name, members.len());
     let mut filter = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
+        .kinds(feed_kinds())
         .authors(members)
         .limit(50);
     if let Some(until_ts) = until {

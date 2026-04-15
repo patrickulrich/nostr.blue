@@ -57,6 +57,7 @@ pub mod voice;
 pub mod webbookmarks;
 pub mod wiki;
 pub mod zapgoals;
+pub mod blobbi;
 use about::About;
 use about_donate::AboutDonate;
 use ai_chat::AIChat;
@@ -136,6 +137,7 @@ use voice::{VoiceMessageDetail, VoiceMessageNew, VoiceMessages};
 use webbookmarks::WebBookmarks;
 use wiki::{WikiAuthor, WikiDetail, WikiHome, WikiNew};
 use zapgoals::{ZapGoalsHome, ZapGoalsNew};
+use blobbi::BlobbiHome;
 /// App routes
 #[derive(Clone, Routable, Debug, PartialEq)]
 #[rustfmt::skip]
@@ -474,6 +476,8 @@ pub enum Route {
     Highlights {},
     #[route("/ai-chat")]
     AIChat {},
+    #[route("/blobbi")]
+    BlobbiHome {},
     #[route("/settings")]
     Settings {},
     #[route("/settings/ai")]
@@ -580,6 +584,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::BibleHome {}
         | Route::Highlights {}
         | Route::AIChat {}
+        | Route::BlobbiHome {}
         | Route::Settings {}
         | Route::WebBookmarks {} => None,
         Route::Search { .. }
@@ -1022,7 +1027,7 @@ fn Layout() -> Element {
         || is_topics_page
         || matches!(
             current_route,
-            Route::AboutDonate {} | Route::ZapGoalsHome {} | Route::ZapGoalsNew {}
+            Route::AboutDonate {} | Route::ZapGoalsHome {} | Route::ZapGoalsNew {} | Route::BlobbiHome {}
         );
     let music_player_visible = {
         let state = MUSIC_PLAYER.read();
@@ -1485,6 +1490,9 @@ fn Layout() -> Element {
             crate::components::PwaUpdateBanner {}
             if *sidebar_customizer_open.read() {
                 crate::components::SidebarCustomizerModal { on_close: move |_| *sidebar_customizer_open.write() = false }
+            }
+            if auth.is_authenticated && crate::components::blobbi::companion::companion_visible() {
+                crate::components::blobbi::companion::CompanionLayer {}
             }
         }
     }

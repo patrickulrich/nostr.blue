@@ -54,6 +54,7 @@ pub(super) fn NavLink(
         | (Route::BibleHome {}, Route::BibleChapter { .. })
         | (Route::BibleHome {}, Route::BibleSearch {}) => true,
         (Route::Highlights {}, Route::Highlights {}) => true,
+        (Route::BlobbiHome {}, Route::BlobbiHome {}) => true,
         // Packs group
         (Route::PacksHome {}, Route::PacksHome {})
         | (Route::PacksHome {}, Route::PackNew {})

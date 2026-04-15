@@ -2,31 +2,28 @@ use crate::components::icons::{BarChartIcon, CameraIcon};
 use crate::components::{
     EmojiPicker, GifPicker, MediaUploader, MentionAutocomplete, PollCreatorModal, RichContent,
 };
-use crate::stores::nostr_client::{get_client, HAS_SIGNER};
+use crate::stores::nostr_client::{get_client, send_presigned_event_to_relays, HAS_SIGNER};
 use crate::stores::relay;
 use crate::utils::custom_emoji::{build_custom_emoji_tags, EmojiSelection};
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
+use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
+use std::time::Duration;
 
-/// Extract relay hint for reply tagging (NIP-10)
-/// First tries to find a relay hint from parent's e-tags, then falls back to user's write relays
 fn get_relay_hint_for_reply(parent_tags: &nostr_sdk::Tags) -> String {
     for tag in parent_tags.iter() {
         let tag_vec = tag.clone().to_vec();
         if tag_vec.len() >= 3 && tag_vec[0] == "e" && !tag_vec[2].is_empty() {
-            log::debug!("Found relay hint from parent e-tag: {}", tag_vec[2]);
             return tag_vec[2].clone();
         }
     }
-    let write_relays = relay::nip65::get_write_relays();
-    let hint = write_relays.first().cloned().unwrap_or_default();
-    if !hint.is_empty() {
-        log::debug!("Using user's write relay as hint: {}", hint);
-    }
-    hint
+    relay::nip65::get_write_relays()
+        .first()
+        .cloned()
+        .unwrap_or_default()
 }
 
 const MAX_LENGTH: usize = 5000;
@@ -34,6 +31,7 @@ const MAX_LENGTH: usize = 5000;
 #[component]
 pub fn ReplyComposer(
     reply_to: NostrEvent,
+    #[props(default = None)] root_event: Option<NostrEvent>,
     on_close: EventHandler<()>,
     on_success: EventHandler<NostrEvent>,
 ) -> Element {
@@ -42,6 +40,7 @@ pub fn ReplyComposer(
     let mut show_media_uploader = use_signal(|| false);
     let mut uploaded_media = use_signal(Vec::<String>::new);
     let mut show_poll_modal = use_signal(|| false);
+    let toast = consume_toast();
 
     let content_len = content.read().len();
     let media_len = if !uploaded_media.read().is_empty() {
@@ -71,7 +70,6 @@ pub fn ReplyComposer(
     let short_author = truncate_pubkey(&author_pubkey);
     let reply_content = reply_to.content.clone();
     let reply_tags: Vec<_> = reply_to.tags.iter().cloned().collect();
-    let reply_id = reply_to.id.to_hex();
 
     let mut thread_participants = Vec::new();
     thread_participants.push(reply_to.pubkey);
@@ -80,16 +78,6 @@ pub fn ReplyComposer(
             thread_participants.push(*public_key);
         }
     }
-    log::info!(
-        "Reply composer: Extracted {} thread participants: author={}, others={:?}",
-        thread_participants.len(),
-        reply_to.pubkey.to_hex(),
-        thread_participants
-            .iter()
-            .skip(1)
-            .map(|pk| pk.to_hex())
-            .collect::<Vec<_>>()
-    );
 
     let handle_media_uploaded = move |url: String| {
         uploaded_media.write().push(url);
@@ -169,137 +157,148 @@ pub fn ReplyComposer(
 
         is_publishing.set(true);
 
-        let event_id = reply_id.clone();
-        let author_pk = author_pubkey.clone();
-        let parent_tags = reply_to.tags.clone();
-
-        let parent_root = parent_tags.iter().find_map(|tag| {
-            let tag_vec = tag.clone().to_vec();
-            if tag_vec.len() >= 4 && tag_vec[0] == "e" && tag_vec[3] == "root" {
-                Some(tag_vec[1].clone())
-            } else {
-                None
-            }
-        });
-        let thread_root_id = if let Some(root_id) = &parent_root {
-            root_id.clone()
-        } else {
-            event_id.clone()
-        };
-
+        let reply_to_event = reply_to.clone();
+        let root = root_event.clone();
+        let thread_root_id = root
+            .as_ref()
+            .map(|r| r.id.to_hex())
+            .unwrap_or_else(|| reply_to_event.id.to_hex());
         let content_for_publish = content_value.clone();
-        let thread_root_id_clone = thread_root_id.clone();
-        let relay_hint = get_relay_hint_for_reply(&parent_tags);
+        let relay_hint = get_relay_hint_for_reply(&reply_to_event.tags);
+        let toast_for_async = toast;
 
         spawn(async move {
             let client = match get_client() {
                 Some(c) => c,
                 None => {
                     log::error!("Client not initialized");
+                    toast_for_async.error(
+                        "Unable to publish".to_string(),
+                        ToastOptions::new()
+                            .description("Client not initialized")
+                            .duration(Duration::from_secs(3)),
+                    );
                     is_publishing.set(false);
                     return;
                 }
             };
 
-            // Build tags for the reply
-            let mut tags: Vec<Tag> = Vec::new();
-            if let Some(root_id) = parent_root {
-                if let Ok(root_event_id) = EventId::from_hex(&root_id) {
-                    let relay_url = if relay_hint.is_empty() {
-                        None
-                    } else {
-                        RelayUrl::parse(&relay_hint).ok()
-                    };
-                    tags.push(Tag::from_standardized_without_cell(TagStandard::Event {
-                        event_id: root_event_id,
-                        relay_url: relay_url.clone(),
-                        marker: Some(Marker::Root),
-                        public_key: None,
-                        uppercase: false,
-                    }));
-                    if let Ok(reply_event_id) = EventId::from_hex(&event_id) {
-                        tags.push(Tag::from_standardized_without_cell(TagStandard::Event {
-                            event_id: reply_event_id,
-                            relay_url,
-                            marker: Some(Marker::Reply),
-                            public_key: None,
-                            uppercase: false,
-                        }));
-                    }
-                }
-            } else if let Ok(reply_event_id) = EventId::from_hex(&event_id) {
-                let relay_url = if relay_hint.is_empty() {
-                    None
-                } else {
-                    RelayUrl::parse(&relay_hint).ok()
-                };
-                tags.push(Tag::from_standardized_without_cell(TagStandard::Event {
-                    event_id: reply_event_id,
-                    relay_url,
-                    marker: Some(Marker::Root),
-                    public_key: None,
-                    uppercase: false,
-                }));
-            }
-            if let Ok(pk) = PublicKey::from_hex(&author_pk) {
-                tags.push(Tag::public_key(pk));
-            }
-            for tag in parent_tags.iter() {
-                let tag_vec = tag.clone().to_vec();
-                if tag_vec.len() >= 2 && tag_vec[0] == "p" {
-                    let pubkey = tag_vec[1].clone();
-                    if pubkey != author_pk {
-                        if let Ok(pk) = PublicKey::from_hex(&pubkey) {
-                            tags.push(Tag::public_key(pk));
-                        }
-                    }
-                }
-            }
-            tags.extend(build_custom_emoji_tags(&content_for_publish));
+            let relay_url = if relay_hint.is_empty() {
+                None
+            } else {
+                RelayUrl::parse(&relay_hint).ok()
+            };
 
-            let builder = EventBuilder::text_note(&content_for_publish).tags(tags);
+            let builder = EventBuilder::text_note_reply(
+                &content_for_publish,
+                &reply_to_event,
+                root.as_ref(),
+                relay_url,
+            )
+            .tags(build_custom_emoji_tags(&content_for_publish));
 
-            // Sign the event first to get the full event
-            match client
+            let signed_event = match client
                 .sign_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
                 .await
             {
-                Ok(signed_event) => {
-                    // Send the signed event
-                    match client.send_event(&signed_event).await {
-                        Ok(output) => {
-                            log::info!(
-                                "Reply published: {} ({}/{} relays)",
-                                output.id().to_hex(),
-                                output.success.len(),
-                                output.success.len() + output.failed.len()
-                            );
-                            for (relay, error) in &output.failed {
-                                log::warn!("Relay {} failed for reply: {}", relay, error);
-                            }
-                            // Invalidate cache so new replies appear on refresh
-                            if let Ok(root_event_id) = EventId::from_hex(&thread_root_id_clone) {
-                                invalidate_thread_tree_cache(&root_event_id);
-                                log::debug!(
-                                    "Invalidated thread tree cache for root: {}",
-                                    thread_root_id_clone
-                                );
-                            }
-                            // Clear UI and call on_success with the signed event for optimistic update
-                            // nostr-sdk excludes self-published events from RelayPoolNotification::Event
-                            content.set(String::new());
-                            uploaded_media.set(Vec::new());
-                            on_success.call(signed_event);
+                Ok(e) => e,
+                Err(e) => {
+                    log::error!("Failed to sign reply: {}", e);
+                    toast_for_async.error(
+                        "Failed to publish".to_string(),
+                        ToastOptions::new()
+                            .description(e.to_string())
+                            .duration(Duration::from_secs(3)),
+                    );
+                    is_publishing.set(false);
+                    return;
+                }
+            };
+
+            let mut success = false;
+            match client.send_event(&signed_event).await {
+                Ok(output) => {
+                    if !output.success.is_empty() {
+                        log::info!(
+                            "Reply published: {} ({}/{} relays)",
+                            output.id().to_hex(),
+                            output.success.len(),
+                            output.success.len() + output.failed.len(),
+                        );
+                        for (relay, error) in &output.failed {
+                            log::warn!("Relay {} failed for reply: {}", relay, error);
                         }
-                        Err(e) => {
-                            log::error!("Failed to send reply: {}", e);
-                        }
+                        success = true;
+                    } else {
+                        log::warn!(
+                            "Gossip publish had 0 successes for reply {}, retrying with broadcast",
+                            output.id().to_hex()
+                        );
                     }
                 }
                 Err(e) => {
-                    log::error!("Failed to sign reply: {}", e);
+                    log::warn!(
+                        "Gossip publish failed for reply: {}, retrying with broadcast",
+                        e
+                    );
                 }
             }
+
+            if !success {
+                let write_relays = relay::nip65::get_write_relays();
+                if write_relays.is_empty() {
+                    toast_for_async.error(
+                        "Failed to publish".to_string(),
+                        ToastOptions::new()
+                            .description("No write relays configured")
+                            .duration(Duration::from_secs(3)),
+                    );
+                    is_publishing.set(false);
+                    return;
+                }
+                match send_presigned_event_to_relays(signed_event.clone(), write_relays).await {
+                    Ok(result) if result.success_count() > 0 => {
+                        log::info!(
+                            "Reply published via broadcast: {} ({}/{} relays)",
+                            result.event_id,
+                            result.success_count(),
+                            result.total_attempted()
+                        );
+                        success = true;
+                    }
+                    Ok(result) => {
+                        log::warn!(
+                            "Broadcast publish also had 0 successes for reply {}",
+                            result.event_id
+                        );
+                        toast_for_async.error(
+                            "Failed to publish".to_string(),
+                            ToastOptions::new()
+                                .description("No relay accepted the event")
+                                .duration(Duration::from_secs(3)),
+                        );
+                    }
+                    Err(e) => {
+                        log::error!("Broadcast publish failed for reply: {}", e);
+                        toast_for_async.error(
+                            "Failed to publish".to_string(),
+                            ToastOptions::new()
+                                .description(e.to_string())
+                                .duration(Duration::from_secs(3)),
+                        );
+                    }
+                }
+            }
+
+            if success {
+                if let Ok(root_event_id) = EventId::from_hex(&thread_root_id) {
+                    invalidate_thread_tree_cache(&root_event_id);
+                }
+                content.set(String::new());
+                uploaded_media.set(Vec::new());
+                on_success.call(signed_event);
+            }
+
             is_publishing.set(false);
         });
     };

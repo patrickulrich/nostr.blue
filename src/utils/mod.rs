@@ -11,6 +11,7 @@ pub use nips::nip73;
 pub use nips::nip84;
 pub use nips::nip98;
 pub use nips::nip99;
+pub use nips::nip_bb;
 
 pub mod nkbips;
 pub use nkbips::nkbip03;

@@ -238,3 +238,5 @@ pub use wiki::{
     WikiBacklinks, WikiCardSearchResult, WikiCardSkeleton, WikiDownloadMenu, WikiForwardLinks,
     WikiGrid, WikiMetadataCard, WikiOutline, WikiPageContent, WikiPageNotFound, WikiPageSkeleton,
 };
+
+pub mod blobbi;

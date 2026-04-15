@@ -33,6 +33,7 @@ native = [
 # Dioxus web framework
 dioxus = { version = "0.7.3", default-features = false, features = ["router", "launch", "logger", "lib"] }
 dioxus-stores = "0.7.3"
+dioxus-motion = "0.2"
 
 # Nostr protocol
 nostr = { version = "0.44.1", default-features = false, features = ["std", "nip47", "nip49", "nip57", "nip98"] }

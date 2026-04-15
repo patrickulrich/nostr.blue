@@ -83,6 +83,7 @@ pub enum SidebarItem {
     Bible,
     Highlights,
     AIChat,
+    Blobbi,
 }
 impl SidebarItem {
     /// Returns true if this item requires authentication
@@ -102,8 +103,9 @@ impl SidebarItem {
                 | SidebarItem::Lists
                 | SidebarItem::Badges
                 | SidebarItem::Citations
-                | SidebarItem::Blossom
-                | SidebarItem::AIChat => true,
+            | SidebarItem::Blossom
+            | SidebarItem::AIChat
+            | SidebarItem::Blobbi => true,
             #[cfg(feature = "cashu")]
             SidebarItem::Wallet => true,
             _ => false,
@@ -168,6 +170,7 @@ impl SidebarItem {
             SidebarItem::Bible => "Bible",
             SidebarItem::Highlights => "Highlights",
             SidebarItem::AIChat => "AI Chat",
+            SidebarItem::Blobbi => "Blobbi",
         }
     }
     /// Returns the Route for this sidebar item
@@ -222,6 +225,7 @@ impl SidebarItem {
             SidebarItem::Bible => Some(Route::BibleHome {}),
             SidebarItem::Highlights => Some(Route::Highlights {}),
             SidebarItem::AIChat => Some(Route::AIChat {}),
+            SidebarItem::Blobbi => Some(Route::BlobbiHome {}),
         }
     }
 }
@@ -324,6 +328,7 @@ pub fn default_sidebar_items() -> Vec<SidebarItem> {
         SidebarItem::Bible,
         SidebarItem::Highlights,
         SidebarItem::AIChat,
+        SidebarItem::Blobbi,
     ]
 }
 /// Global state for sidebar items

@@ -269,6 +269,7 @@ pub fn PollView(noteid: String) -> Element {
                                                 key: "{node.event.id}",
                                                 node: node.clone(),
                                                 depth: 0,
+                                                root_event: Some(event.clone()),
                                                 on_reply: move |reply_event: NostrEvent| {
                                                     let already_exists = comments.read().iter().any(|e| e.id == reply_event.id);
                                                     if !already_exists {

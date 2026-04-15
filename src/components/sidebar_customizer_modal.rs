@@ -1018,5 +1018,10 @@ fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 SparklesIcon { class: class.to_string() }
             }
         }
+        SidebarItem::Blobbi => {
+            rsx! {
+                crate::components::icons::EggIcon { class: class.to_string() }
+            }
+        }
     }
 }

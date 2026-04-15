@@ -458,6 +458,7 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                             NoteCard {
                                 key: "{event.id}",
                                 event: event.clone(),
+                                root_event: Some(event.clone()),
                                 precomputed_counts: interaction_counts.read().get(&event.id.to_hex()).cloned(),
                                 collapsible: false,
                                 cached_muted_posts: cached_muted_posts.read().clone(),
@@ -501,6 +502,7 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                                         key: "{node.event.id}",
                                         node: node.clone(),
                                         depth: 0,
+                                        root_event: Some(event.clone()),
                                         precomputed_counts: interaction_counts.read().get(&node.event.id.to_hex()).cloned(),
                                         on_reply: move |reply_event: NostrEvent| {
                                             let already_exists = replies.read().iter().any(|e| e.id == reply_event.id);
