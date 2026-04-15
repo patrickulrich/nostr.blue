@@ -10,7 +10,8 @@ license = "MIT"
 [features]
 default = ["web"]
 cashu = ["dep:cdk", "dep:cdk-common", "nostr/nip60"]
-playstore = []
+mobile_platform = []
+playstore = ["dioxus/mobile", "native", "dep:jni", "dep:ndk-context", "mobile_platform"]
 web = [
     "dioxus/web",
     "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys",
@@ -22,7 +23,7 @@ web = [
     "cashu",
 ]
 desktop = ["dioxus/desktop", "native", "dep:arboard", "dep:rfd", "dep:webbrowser", "cashu"]
-mobile = ["dioxus/mobile", "native", "dep:jni", "dep:ndk-context"]
+mobile = ["dioxus/mobile", "native", "dep:jni", "dep:ndk-context", "cashu", "mobile_platform"]
 native = [
     "dep:nostr-ndb", "dep:cdk-sqlite", "dep:git2",
     "dep:dirs", "dep:env_logger",

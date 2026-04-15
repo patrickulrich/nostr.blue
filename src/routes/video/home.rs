@@ -126,11 +126,11 @@ pub fn Videos() -> Element {
                 | Some(auth_store::LoginMethod::PrivateKey)
                 | Some(auth_store::LoginMethod::RemoteSigner)
         ) || {
-            #[cfg(feature = "mobile")]
+            #[cfg(feature = "mobile_platform")]
             {
                 matches!(login_method, Some(auth_store::LoginMethod::AndroidSigner))
             }
-            #[cfg(not(feature = "mobile"))]
+            #[cfg(not(feature = "mobile_platform"))]
             {
                 false
             }

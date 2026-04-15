@@ -17,13 +17,13 @@ pub mod ppq;
 #[cfg(all(feature = "web", feature = "desktop"))]
 compile_error!("Cannot enable both 'web' and 'desktop' features");
 
-#[cfg(all(feature = "web", feature = "mobile"))]
+#[cfg(all(feature = "web", feature = "mobile_platform"))]
 compile_error!("Cannot enable both 'web' and 'mobile' features");
 
-#[cfg(all(feature = "desktop", feature = "mobile"))]
+#[cfg(all(feature = "desktop", feature = "mobile_platform"))]
 compile_error!("Cannot enable both 'desktop' and 'mobile' features");
 
-#[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile")))]
+#[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile_platform")))]
 compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature");
 
 pub mod admission_policy;
@@ -33,7 +33,7 @@ pub mod ai_tools;
 pub mod bible_api;
 pub mod geocoding;
 pub mod git_hosting;
-#[cfg(any(feature = "desktop", feature = "mobile"))]
+#[cfg(any(feature = "desktop", feature = "mobile_platform"))]
 #[allow(dead_code)]
 pub mod git_native;
 pub mod git_types;

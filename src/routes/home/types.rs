@@ -35,11 +35,11 @@ pub fn login_method_requires_signer(login_method: Option<&auth_store::LoginMetho
             | Some(auth_store::LoginMethod::PrivateKey)
             | Some(auth_store::LoginMethod::RemoteSigner)
     ) || {
-        #[cfg(feature = "mobile")]
+        #[cfg(feature = "mobile_platform")]
         {
             matches!(login_method, Some(auth_store::LoginMethod::AndroidSigner))
         }
-        #[cfg(not(feature = "mobile"))]
+        #[cfg(not(feature = "mobile_platform"))]
         {
             false
         }

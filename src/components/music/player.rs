@@ -1,10 +1,10 @@
 use crate::components::icons;
 use crate::components::{ContentShareModal, ContentType};
-#[cfg(feature = "mobile")]
+#[cfg(feature = "mobile_platform")]
 use crate::platform::android_media;
 use crate::routes::Route;
 use crate::stores::music_player::{self, MUSIC_PLAYER};
-#[cfg(not(feature = "mobile"))]
+#[cfg(not(feature = "mobile_platform"))]
 use crate::utils::radio::NowPlaying;
 use dioxus::prelude::*;
 #[cfg(feature = "web")]
@@ -23,7 +23,7 @@ fn format_time(seconds: f64) -> String {
     format!("{}:{:02}", mins, secs)
 }
 
-#[cfg(not(feature = "mobile"))]
+#[cfg(not(feature = "mobile_platform"))]
 fn parse_audio_bind_result(val: serde_json::Value) -> String {
     match val {
         serde_json::Value::String(result) => result,
@@ -38,7 +38,7 @@ fn parse_audio_bind_result(val: serde_json::Value) -> String {
     }
 }
 
-#[cfg(not(feature = "mobile"))]
+#[cfg(not(feature = "mobile_platform"))]
 async fn ensure_audio_hls_manager() -> Result<(), String> {
     let check = document::eval("return typeof window.hlsManager !== 'undefined'")
         .await
@@ -72,17 +72,17 @@ pub fn PersistentMusicPlayer() -> Element {
     #[allow(unused_mut)]
     let mut seek_gen = use_signal(|| 0u32);
     let mut show_share_modal = use_signal(|| false);
-    #[cfg(not(feature = "mobile"))]
+    #[cfg(not(feature = "mobile_platform"))]
     #[allow(unused_mut)]
     let mut native_source_bound = use_signal(|| false);
-    #[cfg(not(feature = "mobile"))]
+    #[cfg(not(feature = "mobile_platform"))]
     #[allow(unused_mut)]
     let mut native_bind_token = use_signal(|| 0u32);
     let audio_id = "global-music-player-audio";
     // Inject HLS manager JS on desktop builds.
     // On web, it loads via <script> tag in index.html.
     // On mobile, index.html is not used — Dioxus generates its own HTML.
-    #[cfg(all(not(feature = "mobile"), not(feature = "web")))]
+    #[cfg(all(not(feature = "mobile_platform"), not(feature = "web")))]
     {
         use_effect(move || {
             spawn(async move {
@@ -92,7 +92,7 @@ pub fn PersistentMusicPlayer() -> Element {
             });
         });
     }
-    #[cfg(not(feature = "mobile"))]
+    #[cfg(not(feature = "mobile_platform"))]
     use_effect(use_reactive(
         (&state.current_track, &state.is_playing),
         move |(current_track, is_playing)| {
@@ -315,7 +315,7 @@ pub fn PersistentMusicPlayer() -> Element {
             });
         },
     ));
-    #[cfg(not(feature = "mobile"))]
+    #[cfg(not(feature = "mobile_platform"))]
     {
         let audio_id_for_volume = audio_id.to_string();
         let volume_memo = use_memo(move || {
@@ -346,9 +346,9 @@ pub fn PersistentMusicPlayer() -> Element {
             });
         });
     }
-    #[cfg(not(feature = "mobile"))]
+    #[cfg(not(feature = "mobile_platform"))]
     let mut last_synced_time = use_signal(|| 0.0f64);
-    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
+    #[cfg(all(not(feature = "web"), not(feature = "mobile_platform")))]
     use_effect(move || {
         let state = MUSIC_PLAYER.read();
         let current_time = state.current_time;
@@ -392,7 +392,7 @@ pub fn PersistentMusicPlayer() -> Element {
     // ontimeupdate/onloadedmetadata use web_sys which is WASM-only.
     // NOTE: Bare `return` (no IIFE) — Dioxus wraps eval scripts in an AsyncFunction,
     // so IIFE return values are lost. Bare return exits the outer AsyncFunction correctly.
-    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
+    #[cfg(all(not(feature = "web"), not(feature = "mobile_platform")))]
     {
         let _time_poller = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
             loop {
@@ -437,9 +437,9 @@ pub fn PersistentMusicPlayer() -> Element {
             }
         });
     }
-    #[cfg(not(feature = "mobile"))]
+    #[cfg(not(feature = "mobile_platform"))]
     let playback_speed = use_memo(move || MUSIC_PLAYER.read().playback_speed);
-    #[cfg(not(feature = "mobile"))]
+    #[cfg(not(feature = "mobile_platform"))]
     use_effect(move || {
         let speed = playback_speed();
         {
@@ -473,7 +473,7 @@ pub fn PersistentMusicPlayer() -> Element {
             music_player::clear_now_playing();
         }
     });
-    #[cfg(feature = "mobile")]
+    #[cfg(feature = "mobile_platform")]
     let _native_snapshot_poller = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
         loop {
             crate::platform::timer::sleep_ms(250).await;
@@ -485,7 +485,7 @@ pub fn PersistentMusicPlayer() -> Element {
             }
         }
     });
-    #[cfg(not(feature = "mobile"))]
+    #[cfg(not(feature = "mobile_platform"))]
     let _now_playing_poller = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
         loop {
             crate::platform::timer::sleep_ms(2000).await;
@@ -513,11 +513,11 @@ pub fn PersistentMusicPlayer() -> Element {
         }
     });
     if !state.is_visible || state.current_track.is_none() {
-        #[cfg(feature = "mobile")]
+        #[cfg(feature = "mobile_platform")]
         {
             return rsx! {};
         }
-        #[cfg(not(feature = "mobile"))]
+        #[cfg(not(feature = "mobile_platform"))]
         return rsx! {
             audio {
                 id: "{audio_id}",
@@ -620,7 +620,7 @@ pub fn PersistentMusicPlayer() -> Element {
         // On mobile, playback is managed entirely via document::eval.
         // The RSX audio element has src="" which fires onerror immediately.
         // Suppress placeholder src errors — eval path handles binding/errors.
-        #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
+        #[cfg(all(not(feature = "web"), not(feature = "mobile_platform")))]
         {
             if !*native_source_bound.read() {
                 log::warn!("Audio playback error before native source binding completed");
@@ -651,7 +651,7 @@ pub fn PersistentMusicPlayer() -> Element {
         }
     };
     rsx! {
-        if cfg!(not(feature = "mobile")) {
+        if cfg!(not(feature = "mobile_platform")) {
         audio {
             id: "{audio_id}",
             preload: if track.is_live_stream { "none" } else { "metadata" },
@@ -845,7 +845,7 @@ pub fn PersistentMusicPlayer() -> Element {
                                     let client_x = evt.client_coordinates().x;
                                     #[allow(unused_variables)]
                                     let client_y = evt.client_coordinates().y;
-                                    #[cfg(all(feature = "web", not(feature = "mobile")))]
+                                    #[cfg(all(feature = "web", not(feature = "mobile_platform")))]
                                     {
                                         let duration = state.duration;
                                         let mut seek_gen = seek_gen;
@@ -882,7 +882,7 @@ pub fn PersistentMusicPlayer() -> Element {
                                             }
                                         });
                                     }
-                                    #[cfg(feature = "mobile")]
+                                    #[cfg(feature = "mobile_platform")]
                                     {
                                         let duration = state.duration;
                                         let mut seek_gen = seek_gen;
@@ -921,7 +921,7 @@ pub fn PersistentMusicPlayer() -> Element {
                                             }
                                         });
                                     }
-                                    #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
+                                    #[cfg(all(not(feature = "web"), not(feature = "mobile_platform")))]
                                     {
                                         let audio_id_str = audio_id.to_string();
                                         let mut seek_gen = seek_gen;

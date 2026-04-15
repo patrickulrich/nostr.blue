@@ -508,7 +508,7 @@ pub enum Route {
     ZapGoalsNew {},
 }
 
-#[cfg_attr(not(feature = "mobile"), allow(dead_code))]
+#[cfg_attr(not(feature = "mobile_platform"), allow(dead_code))]
 fn note_back_target(current_route: &Route) -> Option<Route> {
     let Route::Note {
         note_id,
@@ -541,7 +541,7 @@ fn note_back_target(current_route: &Route) -> Option<Route> {
     }
 }
 
-#[cfg_attr(not(feature = "mobile"), allow(dead_code))]
+#[cfg_attr(not(feature = "mobile_platform"), allow(dead_code))]
 fn fallback_route_for(current_route: &Route) -> Option<Route> {
     match current_route {
         Route::Home { .. }
@@ -722,7 +722,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
     }
 }
 
-#[cfg_attr(not(feature = "mobile"), allow(dead_code))]
+#[cfg_attr(not(feature = "mobile_platform"), allow(dead_code))]
 fn handle_android_back(navigator: dioxus::router::Navigator, current_route: &Route) {
     if crate::stores::back_navigation::close_topmost_mobile_overlay() {
         return;
@@ -736,7 +736,7 @@ fn handle_android_back(navigator: dioxus::router::Navigator, current_route: &Rou
     if let Some(target) = fallback_route_for(current_route) {
         let _ = navigator.replace(target);
     } else {
-        #[cfg(feature = "mobile")]
+        #[cfg(feature = "mobile_platform")]
         {
             if let Err(error) = crate::platform::mobile::finish_app() {
                 log::error!("Failed to finish Android activity: {}", error);
@@ -781,7 +781,7 @@ fn Layout() -> Element {
     let mut last_handled_android_back_nonce = use_signal(|| 0u64);
     let current_route = use_route::<Route>();
     let navigator = navigator();
-    #[cfg(feature = "mobile")]
+    #[cfg(feature = "mobile_platform")]
     let _android_back_poller = use_future(move || async move {
         let mut last_seen = 0;
         loop {
@@ -793,9 +793,9 @@ fn Layout() -> Element {
             crate::platform::timer::sleep_ms(50).await;
         }
     });
-    #[cfg(feature = "mobile")]
+    #[cfg(feature = "mobile_platform")]
     let route_for_android_back = current_route.clone();
-    #[cfg(feature = "mobile")]
+    #[cfg(feature = "mobile_platform")]
     use_effect(use_reactive(&*android_back_nonce.read(), move |nonce| {
         if nonce == 0 {
             return;

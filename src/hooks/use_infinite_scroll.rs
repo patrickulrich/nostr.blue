@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-#[cfg(feature = "mobile")]
+#[cfg(feature = "mobile_platform")]
 use dioxus_core::{use_drop, Task};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -39,12 +39,12 @@ where
     F: FnMut() + 'static,
 {
     let sentinel_id = use_hook(|| format!("scroll-sentinel-{}", uuid::Uuid::new_v4()));
-    #[cfg_attr(not(any(feature = "web", feature = "mobile")), allow(unused_variables))]
+    #[cfg_attr(not(any(feature = "web", feature = "mobile_platform")), allow(unused_variables))]
     let last_check = use_signal(|| 0u64);
     let trigger = use_signal(|| 0u64);
-    #[cfg_attr(not(any(feature = "web", feature = "mobile")), allow(unused_variables))]
+    #[cfg_attr(not(any(feature = "web", feature = "mobile_platform")), allow(unused_variables))]
     let cb = use_hook(|| Rc::new(RefCell::new(callback)));
-    #[cfg_attr(not(any(feature = "web", feature = "mobile")), allow(unused_variables))]
+    #[cfg_attr(not(any(feature = "web", feature = "mobile_platform")), allow(unused_variables))]
     let id_for_effect = sentinel_id.clone();
     use_effect(move || {
         let trigger_value = *trigger.read();
@@ -246,7 +246,7 @@ where
             });
         });
     }
-    #[cfg(feature = "mobile")]
+    #[cfg(feature = "mobile_platform")]
     {
         let mut polling_generation = use_signal(|| 0u64);
         let mut polling_task: Signal<Option<Task>> = use_signal(|| None);

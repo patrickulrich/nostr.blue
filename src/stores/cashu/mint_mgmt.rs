@@ -72,7 +72,7 @@ async fn publish_wallet_snapshot(privkey: &str, mints: &[String]) -> Result<Even
             .sign(&*remote_signer)
             .await
             .map_err(|e| format!("Failed to sign wallet event: {}", e))?,
-        #[cfg(feature = "mobile")]
+        #[cfg(feature = "mobile_platform")]
         crate::stores::signer::SignerType::AndroidSigner(android_signer) => builder
             .sign(&*android_signer)
             .await
