@@ -129,23 +129,20 @@ pub async fn load_following_feed(
         pubkey_str,
         until
     );
-    let contacts_future = nostr_client::fetch_contacts(pubkey_str.clone());
-    let global_future = load_global_feed(until);
-    let (contacts_result, global_result) = futures::join!(contacts_future, global_future);
-    let contacts = match contacts_result {
-        Ok(contacts) => contacts,
+    let contacts = match nostr_client::fetch_contacts(pubkey_str.clone()).await {
+        Ok(c) => c,
         Err(e) => {
             log::warn!(
                 "Failed to fetch contacts: {}, falling back to global feed",
                 e
             );
-            let global = global_result?;
+            let global = load_global_feed(until).await?;
             return Ok((global, true));
         }
     };
     if contacts.is_empty() {
         log::info!("User doesn't follow anyone, showing global feed");
-        let global = global_result?;
+        let global = load_global_feed(until).await?;
         return Ok((global, true));
     }
     log::info!("User follows {} accounts", contacts.len());

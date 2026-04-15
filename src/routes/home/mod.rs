@@ -737,6 +737,120 @@ pub fn Home(list: String) -> Element {
                 "Starting batched real-time subscription for {} followed users in {} batches using gossip",
                 contacts.len(), num_batches
             );
+
+            {
+                let sub_ids = subscription_ids;
+                let mut pending = pending_posts;
+                let fstate = feed_state;
+                let ftype = current_feed_type.clone();
+                let client_for_listener = client.clone();
+                spawn(async move {
+                    let mut notifications = client_for_listener.notifications();
+                    while let Ok(notification) = notifications.recv().await {
+                        if let nostr_sdk::RelayPoolNotification::Event {
+                            subscription_id: event_sub_id,
+                            event,
+                            ..
+                        } = notification
+                        {
+                            let active_ids = sub_ids.read();
+                            if !active_ids.contains(&event_sub_id) {
+                                continue;
+                            }
+                            drop(active_ids);
+
+                            let feed_item_opt = if event.kind == Kind::Repost {
+                                match crate::utils::extract_reposted_event(&event) {
+                                    Ok(original) => Some(FeedItem::Repost {
+                                        original,
+                                        reposted_by: event.pubkey,
+                                        repost_timestamp: event.created_at,
+                                    }),
+                                    Err(e) => {
+                                        log::warn!(
+                                            "Failed to parse repost event {}: {}",
+                                            event.id,
+                                            e
+                                        );
+                                        None
+                                    }
+                                }
+                            } else if event.kind == Kind::TextNote {
+                                let should_add = match &ftype {
+                                    FeedType::Following => !event
+                                        .tags
+                                        .iter()
+                                        .any(|tag| tag.is_reply() || tag.is_root()),
+                                    FeedType::FollowingWithReplies
+                                    | FeedType::Global
+                                    | FeedType::PeopleList(_) => true,
+                                };
+                                if should_add {
+                                    Some(FeedItem::OriginalPost((*event).clone()))
+                                } else {
+                                    None
+                                }
+                            } else if event.kind == Kind::Comment {
+                                if crate::stores::topic_store::is_topic_post(&event) {
+                                    let is_reply = event
+                                        .tags
+                                        .iter()
+                                        .any(|tag| tag.is_reply() || tag.is_root());
+                                    if !is_reply {
+                                        Some(FeedItem::OriginalPost((*event).clone()))
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
+                            } else if event.kind.as_u16() == crate::utils::nip_bb::KIND_BLOBBI_STATE {
+                                Some(FeedItem::OriginalPost((*event).clone()))
+                            } else {
+                                None
+                            };
+                            if let Some(feed_item) = feed_item_opt {
+                                log::info!("New post received in real-time");
+                                let event_id = feed_item.event().id;
+                                let already_buffered = pending
+                                    .read()
+                                    .iter()
+                                    .any(|item| item.event().id == event_id);
+                                let already_in_feed = match &*fstate.peek() {
+                                    DataState::Loaded(ref current_items) => current_items
+                                        .iter()
+                                        .any(|item| item.event().id == event_id),
+                                    _ => false,
+                                };
+                                if !already_buffered && !already_in_feed {
+                                    let author_pk = feed_item.event().pubkey.to_hex();
+                                    spawn(async move {
+                                        let _ = crate::stores::profiles::fetch_profile(
+                                            author_pk,
+                                        )
+                                        .await;
+                                    });
+                                    if let FeedItem::Repost { ref original, .. } = feed_item {
+                                        let original_author_pk = original.pubkey.to_hex();
+                                        spawn(async move {
+                                            let _ = crate::stores::profiles::fetch_profile(
+                                                original_author_pk,
+                                            )
+                                            .await;
+                                        });
+                                    }
+                                    pending.write().push(feed_item);
+                                    log::info!(
+                                        "Buffered new post, total pending: {}",
+                                        pending.read().len()
+                                    );
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
             for (batch_idx, author_batch) in authors.chunks(BATCH_SIZE).enumerate() {
                 let batch_authors = author_batch.to_vec();
                 let client = client.clone();
@@ -765,120 +879,7 @@ pub fn Home(list: String) -> Element {
                             num_batches,
                             subscription_id
                         );
-                        subscription_ids.write().push(subscription_id.clone());
-                        let client_for_notifications = client.clone();
-                        let batch_feed_type = current_feed_type.clone();
-                        let batch_author_set: std::collections::HashSet<_> =
-                            batch_authors.iter().cloned().collect();
-                        spawn(async move {
-                            let mut notifications = client_for_notifications.notifications();
-                            while let Ok(notification) = notifications.recv().await {
-                                if let nostr_sdk::RelayPoolNotification::Event {
-                                    subscription_id: event_sub_id,
-                                    event,
-                                    ..
-                                } = notification
-                                {
-                                    if event_sub_id != subscription_id {
-                                        continue;
-                                    }
-                                    if !batch_author_set.contains(&event.pubkey) {
-                                        continue;
-                                    }
-                                    let feed_item_opt = if event.kind == Kind::Repost {
-                                        match crate::utils::extract_reposted_event(&event) {
-                                            Ok(original) => Some(FeedItem::Repost {
-                                                original,
-                                                reposted_by: event.pubkey,
-                                                repost_timestamp: event.created_at,
-                                            }),
-                                            Err(e) => {
-                                                log::warn!(
-                                                    "Failed to parse repost event {}: {}",
-                                                    event.id,
-                                                    e
-                                                );
-                                                None
-                                            }
-                                        }
-                                    } else if event.kind == Kind::TextNote {
-                                        let should_add = match &batch_feed_type {
-                                            FeedType::Following => !event
-                                                .tags
-                                                .iter()
-                                                .any(|tag| tag.is_reply() || tag.is_root()),
-                                            FeedType::FollowingWithReplies
-                                            | FeedType::Global
-                                            | FeedType::PeopleList(_) => true,
-                                        };
-                                        if should_add {
-                                            Some(FeedItem::OriginalPost((*event).clone()))
-                                        } else {
-                                            None
-                                        }
-                                    } else if event.kind == Kind::Comment {
-                                        if crate::stores::topic_store::is_topic_post(&event) {
-                                            let is_reply = event
-                                                .tags
-                                                .iter()
-                                                .any(|tag| tag.is_reply() || tag.is_root());
-                                            if !is_reply {
-                                                Some(FeedItem::OriginalPost((*event).clone()))
-                                            } else {
-                                                None
-                                            }
-                                        } else {
-                                            None
-                                        }
-                                    } else if event.kind.as_u16() == crate::utils::nip_bb::KIND_BLOBBI_STATE {
-                                        Some(FeedItem::OriginalPost((*event).clone()))
-                                    } else {
-                                        None
-                                    };
-                                    if let Some(feed_item) = feed_item_opt {
-                                        log::info!(
-                                            "New post received in real-time from batch {}",
-                                            batch_num
-                                        );
-                                        let event_id = feed_item.event().id;
-                                        let already_buffered = pending_posts
-                                            .read()
-                                            .iter()
-                                            .any(|item| item.event().id == event_id);
-                                        let already_in_feed = match &*feed_state.peek() {
-                                            DataState::Loaded(ref current_items) => current_items
-                                                .iter()
-                                                .any(|item| item.event().id == event_id),
-                                            _ => false,
-                                        };
-                                        if !already_buffered && !already_in_feed {
-                                            let author_pk = feed_item.event().pubkey.to_hex();
-                                            spawn(async move {
-                                                let _ = crate::stores::profiles::fetch_profile(
-                                                    author_pk,
-                                                )
-                                                .await;
-                                            });
-                                            if let FeedItem::Repost { ref original, .. } = feed_item
-                                            {
-                                                let original_author_pk = original.pubkey.to_hex();
-                                                spawn(async move {
-                                                    let _ = crate::stores::profiles::fetch_profile(
-                                                        original_author_pk,
-                                                    )
-                                                    .await;
-                                                });
-                                            }
-                                            pending_posts.write().push(feed_item);
-                                            log::info!(
-                                                "Buffered new post, total pending: {}",
-                                                pending_posts.read().len()
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                        });
+                        subscription_ids.write().push(subscription_id);
                     }
                     Err(e) => {
                         log::error!(
