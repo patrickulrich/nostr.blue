@@ -166,7 +166,12 @@ pub fn cache_calendar_events(events: &[NostrEvent]) {
                     .or_default()
                     .push(cal_event.coordinate.clone());
             }
-            cache.put(cal_event.coordinate.clone(), cal_event);
+            let should_insert = cache
+                .peek(&cal_event.coordinate)
+                .is_none_or(|existing| cal_event.created_at > existing.created_at);
+            if should_insert {
+                cache.put(cal_event.coordinate.clone(), cal_event);
+            }
         }
     }
 }
@@ -189,10 +194,46 @@ pub fn cache_live_events(events: &[NostrEvent]) {
             for tag in activity.hashtags() {
                 hashtags.insert(tag.clone());
             }
-            cache.put(activity.coordinate().to_string(), activity);
+            let coord = activity.coordinate().to_string();
+            let new_created_at = match &activity {
+                LiveActivityEvent::Meeting(m) => m.created_at,
+                LiveActivityEvent::Space(s) => s.created_at,
+            };
+            let should_insert = cache.peek(&coord).is_none_or(|existing| {
+                new_created_at
+                    > match existing {
+                        LiveActivityEvent::Meeting(m) => m.created_at,
+                        LiveActivityEvent::Space(s) => s.created_at,
+                    }
+            });
+            if should_insert {
+                cache.put(coord, activity);
+            }
         }
     }
 }
+/// Deduplicate events by coordinate, keeping the newest version by `created_at`.
+/// Handles parameterized replaceable events (NIP-52 calendar, NIP-53 meetings)
+/// where the same coordinate can have multiple event IDs from different relays.
+pub fn dedupe_events_by_coordinate(events: Vec<UnifiedEvent>) -> Vec<UnifiedEvent> {
+    let mut map: HashMap<String, UnifiedEvent> = HashMap::with_capacity(events.len());
+    for event in events {
+        let coord = event.coordinate().to_string();
+        let created_at = event.created_at();
+        match map.entry(coord) {
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                if created_at > entry.get().created_at() {
+                    entry.insert(event);
+                }
+            }
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(event);
+            }
+        }
+    }
+    map.into_values().collect()
+}
+
 /// Get all cached calendar events
 pub fn get_all_cached_events() -> Vec<CalendarEvent> {
     let cache = CALENDAR_EVENTS_CACHE.read();
@@ -257,6 +298,15 @@ impl UnifiedEvent {
         match self {
             UnifiedEvent::Calendar(e) => &e.coordinate,
             UnifiedEvent::Live(e) => e.coordinate(),
+        }
+    }
+    pub fn created_at(&self) -> u64 {
+        match self {
+            UnifiedEvent::Calendar(e) => e.created_at,
+            UnifiedEvent::Live(e) => match e {
+                LiveActivityEvent::Meeting(m) => m.created_at,
+                LiveActivityEvent::Space(s) => s.created_at,
+            },
         }
     }
     pub fn naddr(&self) -> &str {
