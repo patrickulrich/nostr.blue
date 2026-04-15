@@ -135,14 +135,17 @@ async fn use_item_on_blobbi(
     let mut profile = blobbi_profile_store::get_profile()
         .ok_or("No profile")?;
 
-    let storage_entry = profile.storage.iter_mut()
+    let original_quantity = match profile.storage.iter_mut()
         .find(|i| i.item_id == item_id)
-        .ok_or("Item not in inventory")?;
-
-    if storage_entry.quantity == 0 {
-        return Err("No items left".to_string());
-    }
-    storage_entry.quantity -= 1;
+    {
+        Some(entry) if entry.quantity > 0 => {
+            let q = entry.quantity;
+            entry.quantity -= 1;
+            q
+        }
+        Some(_) => return Err("No items left".to_string()),
+        None => return Err("Item not in inventory".to_string()),
+    };
 
     for (stat, delta) in &item.stat_changes {
         let new_val = blobbi.stat_value(stat) + delta;
@@ -160,8 +163,20 @@ async fn use_item_on_blobbi(
     blobbi.last_interaction = Some(now);
     blobbi.experience = blobbi.experience.saturating_add(item.price.max(5));
 
-    crate::components::blobbi::core::builders::publish_blobbi_state(blobbi).await?;
-    crate::components::blobbi::core::builders::publish_profile(&profile).await?;
+    if let Err(e) = crate::components::blobbi::core::builders::publish_profile(&profile).await {
+        log::error!("Failed to publish profile (inventory decrement): {}", e);
+        return Err(e);
+    }
+
+    if let Err(e) = crate::components::blobbi::core::builders::publish_blobbi_state(blobbi).await {
+        log::error!("Failed to publish blobbi state after inventory use: {}", e);
+        if let Some(entry) = profile.storage.iter_mut().find(|i| i.item_id == item_id) {
+            entry.quantity = original_quantity;
+        }
+        let _ = crate::components::blobbi::core::builders::publish_profile(&profile).await;
+        return Err(e);
+    }
+
     blobbi_profile_store::set_profile(profile);
 
     Ok(())

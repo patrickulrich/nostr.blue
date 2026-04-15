@@ -66,6 +66,7 @@ pub mod relay;
 pub mod shop_database;
 pub mod shop_store;
 pub mod signer;
+pub mod notification_dispatcher;
 pub mod subscription_manager;
 #[cfg(feature = "cashu")]
 pub mod wallet_database;

@@ -4,7 +4,6 @@ pub mod use_blobbi_profile;
 pub mod use_blobbi_decay;
 #[allow(dead_code)]
 pub mod use_blobbi_sleep_recovery;
-#[allow(dead_code)]
 pub mod use_blobbi_sleep;
 #[allow(dead_code)]
 pub mod use_blobbi_quest_watcher;

@@ -126,7 +126,25 @@ pub fn BreedingModal(blobbi: BlobbiCompanion, on_close: EventHandler<()>) -> Ele
                                     );
 
                                     if let Some(client) = nostr_client::NOSTR_CLIENT.read().as_ref() {
-                                        let _ = client.send_event_builder(event).await;
+                                        match client.send_event_builder(event).await {
+                                            Ok(_) => {}
+                                            Err(e) => {
+                                                log::error!("Breeding publish failed: {}", e);
+                                                result.set(Some(BreedingResult {
+                                                    success: false,
+                                                    offspring_id,
+                                                }));
+                                                breeding.set(false);
+                                                return;
+                                            }
+                                        }
+                                    } else {
+                                        result.set(Some(BreedingResult {
+                                            success: false,
+                                            offspring_id,
+                                        }));
+                                        breeding.set(false);
+                                        return;
                                     }
 
                                     result.set(Some(BreedingResult {

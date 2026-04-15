@@ -3,8 +3,8 @@ use dioxus::prelude::*;
 use crate::components::blobbi::actions::care_actions::execute_blobbi_action;
 use crate::components::blobbi::actions::BlobbiActionType;
 use crate::components::blobbi::core::types::BlobbiCompanion;
+use crate::hooks::blobbi::use_blobbi_sleep;
 use crate::stores::blobbi_store;
-use crate::utils::nip_bb::BlobbiState;
 
 #[component]
 pub fn ActionMenu(x: f32, y: f32, blobbi: BlobbiCompanion, on_close: EventHandler<()>) -> Element {
@@ -62,17 +62,17 @@ pub fn ActionMenu(x: f32, y: f32, blobbi: BlobbiCompanion, on_close: EventHandle
 }
 
 fn toggle_blobbi_sleep_state() {
-    if let Some(mut blobbi) = blobbi_store::get_selected_blobbi() {
-        blobbi.state = if blobbi.is_sleeping() {
-            BlobbiState::Active
-        } else {
-            BlobbiState::Sleeping
-        };
-        let b = blobbi.clone();
+    if let Some(blobbi) = blobbi_store::get_selected_blobbi() {
         spawn(async move {
-            let _ = crate::components::blobbi::core::builders::publish_blobbi_state(&b).await;
+            let result = if blobbi.is_sleeping() {
+                use_blobbi_sleep::wake_up(&blobbi).await
+            } else {
+                use_blobbi_sleep::put_to_sleep(&blobbi).await
+            };
+            if let Err(e) = result {
+                log::error!("Sleep toggle failed: {}", e);
+            }
         });
-        blobbi_store::update_blobbi_in_collection(&blobbi);
     }
 }
 

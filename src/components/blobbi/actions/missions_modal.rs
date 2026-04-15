@@ -147,6 +147,13 @@ async fn claim_mission(mission_id: &str, reward_coins: u64, reward_xp: u64) {
         if is_mission_claimed(&blobbi, mission_id) {
             return;
         }
+
+        let mut profile = match crate::stores::blobbi_profile_store::get_profile() {
+            Some(p) => p,
+            None => return,
+        };
+        let original_coins = profile.coins;
+
         blobbi.tasks.push(crate::components::blobbi::core::types::BlobbiTaskProgress {
             id: claimed_tag.clone(),
             completed: true,
@@ -154,14 +161,21 @@ async fn claim_mission(mission_id: &str, reward_coins: u64, reward_xp: u64) {
             target: 1,
         });
         blobbi.experience = blobbi.experience.saturating_add(reward_xp);
+        profile.coins = profile.coins.saturating_add(reward_coins);
 
-        if let Some(mut profile) = crate::stores::blobbi_profile_store::get_profile() {
-            profile.coins = profile.coins.saturating_add(reward_coins);
-            let _ = crate::components::blobbi::core::builders::publish_profile(&profile).await;
-            crate::stores::blobbi_profile_store::set_profile(profile);
+        if let Err(e) = crate::components::blobbi::core::builders::publish_profile(&profile).await {
+            log::error!("Failed to publish profile (mission reward): {}", e);
+            return;
         }
 
-        let _ = crate::components::blobbi::core::builders::publish_blobbi_state(&blobbi).await;
+        if let Err(e) = crate::components::blobbi::core::builders::publish_blobbi_state(&blobbi).await {
+            log::error!("Failed to publish blobbi state (mission claim): {}", e);
+            profile.coins = original_coins;
+            let _ = crate::components::blobbi::core::builders::publish_profile(&profile).await;
+            return;
+        }
+
+        crate::stores::blobbi_profile_store::set_profile(profile);
         blobbi_store::update_blobbi_in_collection(&blobbi);
     }
 }

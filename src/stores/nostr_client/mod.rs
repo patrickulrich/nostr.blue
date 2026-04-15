@@ -280,6 +280,10 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
     }
     *CLIENT_INITIALIZED.write() = true;
     relay::start_health_poll(client.clone());
+    crate::stores::notification_dispatcher::NotificationDispatcher::init(client.clone());
+    if let Some(dispatcher) = crate::stores::notification_dispatcher::NotificationDispatcher::instance() {
+        dispatcher.start_listener();
+    }
     log::info!("Nostr client initialized with relays ready");
     Ok(client)
 }

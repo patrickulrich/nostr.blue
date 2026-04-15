@@ -1331,7 +1331,7 @@ fn MessageBubble(message: DisplayMessage) -> Element {
                 if !message.tool_calls.is_empty() {
                     div { class: "mt-4 space-y-2 border-t border-border pt-3",
                         for call in message.tool_calls.iter() {
-                            div { key: "{call.id}", class: "rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground",
+                            div { key: "{call.id}", class: "overflow-x-auto max-h-64 overflow-y-auto rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground",
                                 p { class: "font-medium text-foreground", "Tool: {call.name}" }
                                 p { class: "mt-1 whitespace-pre-wrap break-words", "{call.result}" }
                             }
@@ -1615,6 +1615,8 @@ fn build_api_messages(messages: &[DisplayMessage]) -> Vec<ChatMessage> {
     let mut api_messages = vec![ChatMessage {
         role: ChatRole::System,
         content: ChatMessageContent::Text(SYSTEM_PROMPT.to_string()),
+        tool_call_id: None,
+        tool_calls: None,
     }];
     for message in messages {
         let content =
@@ -1634,13 +1636,43 @@ fn build_api_messages(messages: &[DisplayMessage]) -> Vec<ChatMessage> {
             } else {
                 ChatMessageContent::Text(message.content.clone())
             };
+        let has_tool_calls = !message.tool_calls.is_empty();
+        let tool_calls_for_msg: Option<Vec<ToolCall>> = if has_tool_calls {
+            Some(
+                message
+                    .tool_calls
+                    .iter()
+                    .map(|tc| ToolCall {
+                        id: tc.id.clone(),
+                        function: crate::services::ai_chat::ToolCallFunction {
+                            name: tc.name.clone(),
+                            arguments: String::new(),
+                        },
+                    })
+                    .collect(),
+            )
+        } else {
+            None
+        };
         api_messages.push(ChatMessage {
             role: match message.role {
                 DisplayRole::User => ChatRole::User,
                 DisplayRole::Assistant => ChatRole::Assistant,
             },
             content,
+            tool_call_id: None,
+            tool_calls: tool_calls_for_msg,
         });
+        if has_tool_calls {
+            for tc in &message.tool_calls {
+                api_messages.push(ChatMessage {
+                    role: ChatRole::Tool,
+                    content: ChatMessageContent::Text(tc.result.clone()),
+                    tool_call_id: Some(tc.id.clone()),
+                    tool_calls: None,
+                });
+            }
+        }
     }
     api_messages
 }
@@ -1862,14 +1894,15 @@ async fn apply_chat_response(
     follow_up_messages.push(ChatMessage {
         role: ChatRole::Assistant,
         content: follow_up_assistant_content,
+        tool_call_id: None,
+        tool_calls: Some(choice.message.tool_calls.clone()),
     });
-    for tool in executed {
+    for tool in &executed {
         follow_up_messages.push(ChatMessage {
-            role: ChatRole::User,
-            content: ChatMessageContent::Text(format!(
-                "[Tool \"{}\" returned: {}]",
-                tool.name, tool.result
-            )),
+            role: ChatRole::Tool,
+            content: ChatMessageContent::Text(tool.result.clone()),
+            tool_call_id: Some(tool.id.clone()),
+            tool_calls: None,
         });
     }
 

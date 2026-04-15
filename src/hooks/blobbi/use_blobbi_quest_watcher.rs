@@ -137,9 +137,12 @@ pub fn use_blobbi_quest_watcher() {
 
         if updated {
             let blobbi = blobbi.clone();
-            blobbi_store::update_blobbi_in_collection(&blobbi);
             spawn(async move {
-                let _ = publish_blobbi_state(&blobbi).await;
+                if let Err(e) = publish_blobbi_state(&blobbi).await {
+                    log::error!("Failed to publish quest progress: {}", e);
+                } else {
+                    blobbi_store::update_blobbi_in_collection(&blobbi);
+                }
             });
         }
     });

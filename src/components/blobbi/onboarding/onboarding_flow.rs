@@ -276,7 +276,6 @@ async fn create_egg_and_profile_inner(name: &str, color: &str) -> Result<(), Str
     client.send_event_builder(record_event).await
         .map_err(|e| format!("Failed to publish birth record: {}", e))?;
 
-    profile.coins = profile.coins.saturating_sub(ADOPTION_FEE);
     profile.has.push(d.clone());
     profile.current_companion = Some(d.clone());
     profile.onboarding_done = true;

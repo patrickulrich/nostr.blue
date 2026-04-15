@@ -572,7 +572,7 @@ pub async fn fetch_tokens() -> Result<(), String> {
                 *WALLET_TOKENS.read().data().write() = tokens;
             }
             super::signals::update_wallet_balances();
-            let new_sync_ts = Timestamp::now().as_secs();
+            let new_sync_ts = Timestamp::now().as_secs().saturating_sub(300);
             let known_ids: HashSet<String> = WALLET_TOKENS
                 .read()
                 .data()

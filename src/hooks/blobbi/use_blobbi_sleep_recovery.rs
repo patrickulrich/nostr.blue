@@ -22,8 +22,11 @@ pub fn use_blobbi_sleep_recovery() {
 
                     let recovered = apply_sleep_recovery(blobbi, now);
                     if recovered.stats.energy != blobbi.stats.energy || recovered.is_sleeping != blobbi.is_sleeping {
-                        blobbi_store::update_blobbi_in_collection(&recovered);
-                        let _ = publish_blobbi_state_with_source(&recovered, "system").await;
+                        if let Err(e) = publish_blobbi_state_with_source(&recovered, "system").await {
+                            log::error!("Failed to publish sleep recovery: {}", e);
+                        } else {
+                            blobbi_store::update_blobbi_in_collection(&recovered);
+                        }
                     }
                 }
             }
