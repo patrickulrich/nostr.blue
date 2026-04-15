@@ -1,6 +1,8 @@
 use crate::services::lnurl;
 use crate::stores::nostr_client::get_client;
-use crate::stores::{cashu, nwc_store, settings_store, signer};
+#[cfg(feature = "cashu")]
+use crate::stores::cashu;
+use crate::stores::{nwc_store, settings_store, signer};
 use dioxus::hooks::use_reactive;
 use dioxus::html::input_data::keyboard_types::Key;
 use dioxus::prelude::*;
@@ -109,8 +111,11 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
     let mut qr_code_svg = use_signal(|| None::<String>);
     let webln_available = is_webln_available();
     let toast = consume_toast();
+    #[cfg(feature = "cashu")]
     let mut nutzap_mint = use_signal(|| None::<cashu::NutzapMint>);
+    #[cfg(feature = "cashu")]
     let mut checking_nutzap = use_signal(|| false);
+    #[cfg(feature = "cashu")]
     let mut nutzap_request_version = use_signal(|| 0u32);
     {
         let initial_amount_prop = props.initial_amount;
@@ -124,6 +129,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
             custom_amount.set(initial_custom_amount);
         }));
     }
+    #[cfg(feature = "cashu")]
     {
         let recipient_pubkey = props.recipient_pubkey.clone();
         use_effect(use_reactive!(|recipient_pubkey| {
@@ -293,6 +299,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                 .clone();
             let nwc_available = nwc_store::is_connected();
             match payment_preference.as_str() {
+                #[cfg(feature = "cashu")]
                 "cashu_first" => {
                     use futures::future::{select, Either};
                     let timeout = async {
@@ -614,42 +621,49 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                             }
                         }
                     } else {
-                        if settings_store::SETTINGS.read().payment_method_preference == "cashu_first" {
-                            if *checking_nutzap.read() {
-                                div { class: "bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 mb-4",
-                                    p { class: "text-sm text-blue-700 dark:text-blue-300",
-                                        "Checking nutzap availability..."
-                                    }
-                                }
-                            } else if let Some(mint) = nutzap_mint.read().as_ref() {
-                                {
-                                    let normalized_url = cashu::normalize_mint_url(&mint.url);
-                                    if mint.unit != "sat" {
-                                        rsx! {
+                        {
+                            #[cfg(feature = "cashu")]
+                            {
+                                rsx! {
+                                    if settings_store::SETTINGS.read().payment_method_preference == "cashu_first" {
+                                        if *checking_nutzap.read() {
+                                            div { class: "bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 mb-4",
+                                                p { class: "text-sm text-blue-700 dark:text-blue-300",
+                                                    "Checking nutzap availability..."
+                                                }
+                                            }
+                                        } else if let Some(mint) = nutzap_mint.read().as_ref() {
+                                            {
+                                                let normalized_url = cashu::normalize_mint_url(&mint.url);
+                                                if mint.unit != "sat" {
+                                                    rsx! {
+                                                        div { class: "bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 mb-4",
+                                                            p { class: "text-sm text-amber-700 dark:text-amber-300",
+                                                                "Mint uses '{mint.unit}' unit, not sats. Will use Lightning."
+                                                            }
+                                                        }
+                                                    }
+                                                } else {
+                                                    let balance = cashu::get_mint_unit_spendable_balance(
+                                                        &normalized_url,
+                                                        &mint.unit,
+                                                    );
+                                                    rsx! {
+                                                        div { class: "bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3 mb-4",
+                                                            p { class: "text-sm text-green-700 dark:text-green-300",
+                                                                "✓ Nutzap available via {normalized_url} ({balance} sats at mint)"
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        } else {
                                             div { class: "bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 mb-4",
                                                 p { class: "text-sm text-amber-700 dark:text-amber-300",
-                                                    "Mint uses '{mint.unit}' unit, not sats. Will use Lightning."
+                                                    "Recipient doesn't support nutzaps. Will use Lightning."
                                                 }
                                             }
                                         }
-                                    } else {
-                                        let balance = cashu::get_mint_unit_spendable_balance(
-                                            &normalized_url,
-                                            &mint.unit,
-                                        );
-                                        rsx! {
-                                            div { class: "bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3 mb-4",
-                                                p { class: "text-sm text-green-700 dark:text-green-300",
-                                                    "✓ Nutzap available via {normalized_url} ({balance} sats at mint)"
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            } else {
-                                div { class: "bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 mb-4",
-                                    p { class: "text-sm text-amber-700 dark:text-amber-300",
-                                        "Recipient doesn't support nutzaps. Will use Lightning."
                                     }
                                 }
                             }

@@ -45,6 +45,7 @@ pub(super) fn NavLink(
             n1 == n2
         }
         (Route::LiveStreamNew {}, Route::LiveStreamNew {}) => true,
+        #[cfg(feature = "cashu")]
         (Route::CashuWallet {}, Route::CashuWallet {}) => true,
         (Route::Settings {}, Route::Settings {}) => true,
         (Route::BlossomPage {}, Route::BlossomPage {}) => true,
@@ -53,6 +54,7 @@ pub(super) fn NavLink(
         | (Route::BibleHome {}, Route::BibleChapter { .. })
         | (Route::BibleHome {}, Route::BibleSearch {}) => true,
         (Route::Highlights {}, Route::Highlights {}) => true,
+        (Route::BlobbiHome {}, Route::BlobbiHome {}) => true,
         // Packs group
         (Route::PacksHome {}, Route::PacksHome {})
         | (Route::PacksHome {}, Route::PackNew {})

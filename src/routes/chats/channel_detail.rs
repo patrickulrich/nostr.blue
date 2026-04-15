@@ -145,7 +145,7 @@ pub fn ChatDetail(channel_id: String) -> Element {
         .ok();
 
     rsx! {
-        div { class: "flex flex-col h-[calc(100vh-57px)] lg:h-screen",
+        div { class: "flex flex-col min-h-mobile-shell lg:h-screen",
             // Channel header
             div { class: "shrink-0 border-b border-border px-4 py-3",
                 div { class: "flex items-center gap-3",

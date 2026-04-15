@@ -387,41 +387,25 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                     );
                     show_fork_modal.set(false);
                     // Navigate to the new fork
-                    if let Some(client) = crate::stores::nostr_client::get_client() {
-                        if let Ok(signer) = client.signer().await {
-                            if let Ok(pubkey) = signer.get_public_key().await {
-                                let coordinate = nostr_sdk::prelude::Coordinate::new(
-                                    nostr_sdk::prelude::Kind::GitRepoAnnouncement,
-                                    pubkey,
-                                )
-                                .identifier(&fork_id);
-                                if let Ok(naddr) = coordinate.to_bech32() {
-                                    let nav = navigator();
-                                    nav.push(crate::routes::Route::CodeRepo { naddr });
-                                } else {
-                                    toast.warning(
-                                        "Fork created, but the app could not build the redirect URL"
-                                            .to_string(),
-                                        ToastOptions::new(),
-                                    );
-                                }
-                            } else {
-                                toast.warning(
-                                    "Fork created, but the app could not read your signer public key for redirect"
-                                        .to_string(),
-                                    ToastOptions::new(),
-                                );
-                            }
+                    if let Ok(pubkey) = crate::stores::nostr_client::get_cached_pubkey() {
+                        let coordinate = nostr_sdk::prelude::Coordinate::new(
+                            nostr_sdk::prelude::Kind::GitRepoAnnouncement,
+                            pubkey,
+                        )
+                        .identifier(&fork_id);
+                        if let Ok(naddr) = coordinate.to_bech32() {
+                            let nav = navigator();
+                            nav.push(crate::routes::Route::CodeRepo { naddr });
                         } else {
                             toast.warning(
-                                "Fork created, but the app could not access your signer for redirect"
+                                "Fork created, but the app could not build the redirect URL"
                                     .to_string(),
                                 ToastOptions::new(),
                             );
                         }
                     } else {
                         toast.warning(
-                            "Fork created, but the app could not redirect because the Nostr client is unavailable"
+                            "Fork created, but the app could not read your public key for redirect"
                                 .to_string(),
                             ToastOptions::new(),
                         );

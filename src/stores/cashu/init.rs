@@ -422,10 +422,14 @@ async fn decrypt_wallet_event(event: &Event) -> Result<WalletEvent, String> {
     let signer = crate::stores::signer::get_signer()
         .ok_or("No signer available")?
         .as_nostr_signer();
-    let decrypted = signer
-        .nip44_decrypt(&event.pubkey, &event.content)
-        .await
-        .map_err(|e| format!("Failed to decrypt wallet event: {}", e))?;
+    let decrypted = super::internal::nip44_decrypt_cached(
+        signer,
+        event.id,
+        event.pubkey,
+        event.content.clone(),
+    )
+    .await
+    .map_err(|e| format!("Failed to decrypt wallet event: {}", e))?;
     let pairs: Vec<Vec<String>> = serde_json::from_str(&decrypted)
         .map_err(|e| format!("Failed to parse wallet JSON: {}", e))?;
     let mut privkey = String::new();

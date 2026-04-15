@@ -13,7 +13,7 @@ use lru::LruCache;
 use nostr::Event as NostrEvent;
 use nostr_sdk::prelude::*;
 type Result<T> = std::result::Result<T, String>;
-use crate::stores::indexeddb_database::IndexedDbDatabase;
+use crate::stores::shop_database::ShopDatabase;
 use crate::stores::nostr_client;
 use crate::utils::format::truncate_pubkey;
 use crate::utils::nip99::{
@@ -71,7 +71,7 @@ pub static BUYER_ORDERS: GlobalSignal<Vec<ShopOrder>> = GlobalSignal::new(Vec::n
 pub static SELLER_ORDERS: GlobalSignal<Vec<ShopOrder>> = GlobalSignal::new(Vec::new);
 
 /// IndexedDB database handle for order persistence
-pub static SHOP_DB: GlobalSignal<Option<Arc<IndexedDbDatabase>>> = GlobalSignal::new(|| None);
+pub static SHOP_DB: GlobalSignal<Option<Arc<ShopDatabase>>> = GlobalSignal::new(|| None);
 
 /// Processed gift wrap event IDs to prevent duplicate order message processing
 /// This prevents the same order update from being applied multiple times
@@ -779,9 +779,7 @@ pub async fn delete_product(product_naddr: &str, d_tag: &str) -> Result<()> {
         .signer()
         .await
         .map_err(|e| format!("Failed to get signer: {}", e))?;
-    let pubkey = signer
-        .get_public_key()
-        .await
+    let pubkey = crate::stores::nostr_client::get_cached_pubkey()
         .map_err(|e| format!("Failed to get pubkey: {}", e))?;
     let coordinate = format!("{}:{}:{}", KIND_PRODUCT, pubkey.to_hex(), d_tag);
     let tags = vec![Tag::custom(TagKind::custom("a"), vec![coordinate])];

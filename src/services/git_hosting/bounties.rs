@@ -144,13 +144,7 @@ pub async fn claim_bounty(
         }
     }
 
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("Failed to get signer: {}", e))?;
-    let claimer_pubkey = signer
-        .get_public_key()
-        .await
+    let claimer_pubkey = crate::stores::nostr_client::get_cached_pubkey()
         .map_err(|e| format!("Failed to get public key: {}", e))?;
     let mut builder = EventBuilder::new(Kind::Custom(Bounty::KIND), "")
         .tag(Tag::event(issue_event_id))

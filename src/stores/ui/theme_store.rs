@@ -2,6 +2,9 @@ use crate::platform::storage;
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "native")]
+use std::sync::Once;
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub enum Theme {
     Light,
@@ -28,6 +31,12 @@ impl Theme {
 /// Global theme state
 pub static THEME: GlobalSignal<Theme> = Signal::global(Theme::default);
 const STORAGE_KEY: &str = "nostr_theme";
+
+#[cfg(feature = "native")]
+static SYSTEM_THEME_IS_DARK: GlobalSignal<bool> = Signal::global(|| false);
+#[cfg(feature = "native")]
+static NATIVE_THEME_LISTENER_STARTED: Once = Once::new();
+
 /// Initialize theme from localStorage or system preference
 pub fn init_theme() {
     if let Ok(theme_str) = storage::get::<String>(STORAGE_KEY) {
@@ -38,6 +47,10 @@ pub fn init_theme() {
         *THEME.write() = Theme::System;
         log::info!("Using system theme preference");
     }
+
+    #[cfg(feature = "native")]
+    start_native_theme_listener();
+
     apply_theme();
 }
 /// Set theme UI state only (internal use, no Nostr sync)
@@ -71,40 +84,21 @@ pub fn apply_theme() {
         if let Some(win) = window() {
             if let Some(document) = win.document() {
                 if let Some(root) = document.document_element() {
-                    let theme = *THEME.read();
-                    match theme {
-                        Theme::Light => {
-                            root.set_attribute("class", "").ok();
-                        }
-                        Theme::Dark => {
-                            root.set_attribute("class", "dark").ok();
-                        }
-                        Theme::System => {
-                            let media_query = "(prefers-color-scheme: dark)";
-                            if let Ok(Some(match_media)) = win.match_media(media_query) {
-                                if match_media.matches() {
-                                    root.set_attribute("class", "dark").ok();
-                                } else {
-                                    root.set_attribute("class", "").ok();
-                                }
-                            }
-                        }
-                    }
+                    let class = if is_dark_mode() { "dark" } else { "" };
+                    root.set_attribute("class", class).ok();
                 }
             }
         }
     }
     #[cfg(feature = "native")]
     {
-        let theme = *THEME.read();
-        let class = match theme {
-            Theme::Light => "",
-            Theme::Dark => "dark",
-            Theme::System => "",
-        };
+        let is_dark = is_dark_mode();
+        let class = if is_dark { "dark" } else { "" };
+        let color_scheme = if is_dark { "dark" } else { "light" };
         let js = format!(
-            "document.documentElement.setAttribute('class', '{}')",
-            class
+            "document.documentElement.setAttribute('class', '{}'); document.documentElement.style.colorScheme = '{}';",
+            class,
+            color_scheme
         );
         dioxus::prelude::spawn(async move {
             if let Err(e) = dioxus::prelude::document::eval(&js).await {
@@ -145,8 +139,58 @@ pub fn is_dark_mode() -> bool {
                         return match_media.matches();
                     }
                 }
+                false
             }
-            false
+            #[cfg(feature = "native")]
+            {
+                *SYSTEM_THEME_IS_DARK.read()
+            }
         }
     }
+}
+
+#[cfg(feature = "native")]
+fn start_native_theme_listener() {
+    NATIVE_THEME_LISTENER_STARTED.call_once(|| {
+        dioxus::prelude::spawn(async move {
+            let mut eval = dioxus::prelude::document::eval(
+                r#"
+                const query = "(prefers-color-scheme: dark)";
+                const media = typeof window.matchMedia === "function"
+                    ? window.matchMedia(query)
+                    : null;
+
+                dioxus.send(Boolean(media && media.matches));
+
+                if (media) {
+                    const sendUpdate = (event) => dioxus.send(Boolean(event.matches));
+                    if (typeof media.addEventListener === "function") {
+                        media.addEventListener("change", sendUpdate);
+                    } else if (typeof media.addListener === "function") {
+                        media.addListener(sendUpdate);
+                    }
+                }
+
+                await new Promise(() => {});
+                "#,
+            );
+
+            loop {
+                match eval.recv::<bool>().await {
+                    Ok(is_dark) => {
+                        let previous = *SYSTEM_THEME_IS_DARK.read();
+                        if previous != is_dark {
+                            log::info!("Native system theme changed: dark={}", is_dark);
+                        }
+                        *SYSTEM_THEME_IS_DARK.write() = is_dark;
+                        apply_theme();
+                    }
+                    Err(e) => {
+                        log::warn!("Native theme listener stopped: {:?}", e);
+                        break;
+                    }
+                }
+            }
+        });
+    });
 }

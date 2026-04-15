@@ -90,10 +90,15 @@ pub(super) fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 crate::components::icons::RadioIcon { class: class.to_string() }
             }
         }
+        #[cfg(feature = "cashu")]
         SidebarItem::Wallet => {
             rsx! {
                 crate::components::icons::WalletIcon { class: class.to_string() }
             }
+        }
+        #[cfg(not(feature = "cashu"))]
+        SidebarItem::Wallet => {
+            rsx! { div {} }
         }
         SidebarItem::P2PTrading => {
             rsx! {
@@ -208,6 +213,11 @@ pub(super) fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
         SidebarItem::AIChat => {
             rsx! {
                 crate::components::icons::SparklesIcon { class: class.to_string() }
+            }
+        }
+        SidebarItem::Blobbi => {
+            rsx! {
+                crate::components::icons::EggIcon { class: class.to_string() }
             }
         }
     }

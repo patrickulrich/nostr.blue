@@ -1,6 +1,7 @@
 use crate::components::{
     icons::*, ArticleContent, ClientInitializing, CommentComposer, ShareModal, ThreadedComment,
 };
+use crate::hooks::use_relay_subscription;
 use crate::routes::Route;
 use crate::stores::bookmarks;
 use crate::stores::nostr_client;
@@ -9,7 +10,6 @@ use crate::utils::article_meta::{
 };
 use crate::utils::{build_thread_tree, format_relative_time_or, truncate_pubkey};
 use dioxus::prelude::*;
-use dioxus_core::use_drop;
 use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 use std::time::Duration;
@@ -26,7 +26,6 @@ pub fn ArticleDetail(naddr: String) -> Element {
     let mut is_liking = use_signal(|| false);
     let mut is_liked = use_signal(|| false);
     let mut like_count = use_signal(|| 0usize);
-    let mut comment_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
     let has_signer = *nostr_client::HAS_SIGNER.read();
     use_effect(move || {
         let naddr_str = naddr.clone();
@@ -111,67 +110,29 @@ pub fn ArticleDetail(naddr: String) -> Element {
                     }
                 }
                 loading_comments.set(false);
-
-                // Set up real-time subscription for new comments
-                if let Some(client) = nostr_client::get_client() {
-                    let filter = Filter::new()
-                        .kind(Kind::Comment)
-                        .event(event_id)
-                        .since(Timestamp::now())
-                        .limit(0);
-
-                    match client.subscribe(filter, None).await {
-                        Ok(output) => {
-                            let subscription_id = output.val;
-                            comment_sub_id.set(Some(subscription_id.clone()));
-                            log::debug!(
-                                "Subscribed for new comments on article {}",
-                                event_id.to_hex()
-                            );
-
-                            spawn(async move {
-                                let mut notifications = client.notifications();
-                                while let Ok(notification) = notifications.recv().await {
-                                    if let RelayPoolNotification::Event {
-                                        subscription_id: sub_id,
-                                        event,
-                                        ..
-                                    } = notification
-                                    {
-                                        if sub_id == subscription_id {
-                                            let already_exists =
-                                                comments.read().iter().any(|e| e.id == event.id);
-                                            if !already_exists {
-                                                log::info!(
-                                                    "New comment received via streaming: {}",
-                                                    event.id.to_hex()
-                                                );
-                                                comments.write().push((*event).clone());
-                                            }
-                                        }
-                                    }
-                                }
-                            });
-                        }
-                        Err(e) => {
-                            log::error!("Failed to subscribe for comments: {}", e);
-                        }
-                    }
-                }
             });
         }
     });
-    // Cleanup subscription on unmount
-    use_drop(move || {
-        if let Some(sub_id) = comment_sub_id.peek().clone() {
-            spawn(async move {
-                if let Some(client) = nostr_client::get_client() {
-                    client.unsubscribe(&sub_id).await;
-                    log::debug!("Cleaned up comment subscription");
-                }
-            });
-        }
-    });
+
+    {
+        let comment_filter = article.read().as_ref().map(|event| {
+            Filter::new()
+                .kind(Kind::Comment)
+                .event(event.id)
+                .since(Timestamp::now())
+                .limit(0)
+        });
+        use_relay_subscription(comment_filter, move |event: &nostr::Event| {
+            let already_exists = comments.read().iter().any(|e| e.id == event.id);
+            if !already_exists {
+                log::info!(
+                    "New comment received via streaming: {}",
+                    event.id.to_hex()
+                );
+                comments.write().push(event.clone());
+            }
+        });
+    }
 
     use_effect(move || {
         let article_data = article.read();

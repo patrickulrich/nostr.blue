@@ -1,8 +1,6 @@
 //! Shop Checkout - Checkout flow with payment
 use crate::routes::Route;
 use crate::services::lnurl;
-use crate::stores::cashu::{get_balances_per_mint, send_tokens_p2pk};
-use crate::stores::cashu_cdk_bridge::WALLET_BALANCES;
 use crate::stores::nwc_store;
 use crate::stores::profiles;
 use crate::stores::shop_store::{
@@ -24,7 +22,6 @@ enum CheckoutStep {
 /// Payment method
 #[derive(Clone, Copy, PartialEq)]
 enum PaymentMethod {
-    Cashu,
     Lightning,
 }
 /// Per-merchant payment tracking for multi-merchant Lightning
@@ -79,7 +76,6 @@ pub fn ShopCheckout() -> Element {
     let cart_items = CART_ITEMS.read();
     let total_sats = *CART_TOTAL_SATS.read();
     let item_count = get_cart_count();
-    let cashu_balance = WALLET_BALANCES.read().available;
     let nwc_connected = nwc_store::is_connected();
     let merchant_pubkeys: Vec<String> = {
         let mut pks: Vec<String> = cart_items
@@ -531,10 +527,8 @@ pub fn ShopCheckout() -> Element {
                                     {
                                         let method = *payment_method.read();
                                         let lightning_ready = *all_merchants_have_lightning.read();
-                                        let can_pay_cashu = method == PaymentMethod::Cashu
-                                            && cashu_balance >= total_sats;
                                         let can_pay_lightning = method == PaymentMethod::Lightning && lightning_ready;
-                                        let can_pay = can_pay_cashu || can_pay_lightning;
+                                        let can_pay = can_pay_lightning;
                                         let processing = *payment_processing.read();
                                         rsx! {
                                             button {
@@ -550,79 +544,6 @@ pub fn ShopCheckout() -> Element {
                                                     let lud16 = merchant_lud16.read().clone();
                                                     spawn(async move {
                                                         match method {
-                                                            PaymentMethod::Cashu => {
-                                                                if items.is_empty() {
-                                                                    payment_error.set(Some("No items in cart".to_string()));
-                                                                    payment_processing.set(false);
-                                                                    return;
-                                                                }
-                                                                let merchant_pubkey = items
-                                                                    .first()
-                                                                    .map(|i| i.product.pubkey.clone())
-                                                                    .unwrap_or_default();
-                                                                match get_balances_per_mint().await {
-                                                                    Ok(balances) => {
-                                                                        if let Some(mint) = balances
-                                                                            .iter()
-                                                                            .find(|b| b.balance >= total)
-                                                                            .map(|b| b.mint_url.clone())
-                                                                        {
-                                                                            match send_tokens_p2pk(mint, total, merchant_pubkey).await {
-                                                                                Ok(token) => {
-                                                                                    log::info!("Payment successful: {}", token);
-                                                                                    let shipping = if address.is_empty() {
-                                                                                        None
-                                                                                    } else {
-                                                                                        Some(address.clone())
-                                                                                    };
-                                                                                    match create_shop_order(
-                                                                                            items,
-                                                                                            shipping,
-                                                                                            None,
-                                                                                            "cashu",
-                                                                                            &token,
-                                                                                        )
-                                                                                        .await
-                                                                                    {
-                                                                                        Ok(id) => {
-                                                                                            order_id.set(Some(id));
-                                                                                            clear_cart();
-                                                                                            step.set(CheckoutStep::Complete);
-                                                                                        }
-                                                                                        Err(e) => {
-                                                                                            log::error!("Failed to create order: {}", e);
-                                                                                            let id = crate::utils::format::generate_unique_id();
-                                                                                            order_id.set(Some(id));
-                                                                                            order_warning
-                                                                                                .set(
-                                                                                                    Some(
-                                                                                                        format!(
-                                                                                                            "Payment sent but order notification failed: {}. \
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        Please contact merchant directly with your Order ID.",
-                                                                                                            e,
-                                                                                                        ),
-                                                                                                    ),
-                                                                                                );
-                                                                                            clear_cart();
-                                                                                            step.set(CheckoutStep::Complete);
-                                                                                        }
-                                                                                    }
-                                                                                }
-                                                                                Err(e) => {
-                                                                                    payment_error.set(Some(e));
-                                                                                }
-                                                                            }
-                                                                        } else {
-                                                                            payment_error
-                                                                                .set(Some("No mint with sufficient balance".to_string()));
-                                                                        }
-                                                                    }
-                                                                    Err(e) => {
-                                                                        payment_error.set(Some(e));
-                                                                    }
-                                                                }
-                                                                payment_processing.set(false);
-                                                            }
                                                             PaymentMethod::Lightning => {
                                                                 let payments = merchant_payments.read().clone();
                                                                 let is_multi = *multi_merchant_mode.read();

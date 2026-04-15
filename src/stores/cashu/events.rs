@@ -361,7 +361,6 @@ pub async fn delete_quote_event(event_id: &str) -> Result<(), String> {
 /// Uses the `since` filter when sync state exists to avoid fetching all events.
 /// On first run or after reset, fetches all events to build initial state.
 pub async fn fetch_tokens() -> Result<(), String> {
-    use nostr_sdk::signer::NostrSigner;
     use std::collections::HashSet;
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
     let client = nostr_client::NOSTR_CLIENT
@@ -434,16 +433,31 @@ pub async fn fetch_tokens() -> Result<(), String> {
                 .ok_or("No signer available")?
                 .as_nostr_signer();
             let events: Vec<_> = events.into_iter().collect();
+            let mut decrypted_map: std::collections::HashMap<nostr_sdk::EventId, String> =
+                std::collections::HashMap::new();
             let mut deleted_via_del_field = HashSet::new();
             for event in &events {
                 if deleted_event_ids.contains(&event.id.to_hex()) {
                     continue;
                 }
-                if let Ok(decrypted) = signer.nip44_decrypt(&event.pubkey, &event.content).await {
-                    if let Ok(token_event) = serde_json::from_str::<TokenEventData>(&decrypted) {
-                        for del_event_id in &token_event.del {
-                            deleted_via_del_field.insert(del_event_id.clone());
+                match super::internal::nip44_decrypt_cached(
+                    signer.clone(),
+                    event.id,
+                    event.pubkey,
+                    event.content.clone(),
+                )
+                .await
+                {
+                    Ok(decrypted) => {
+                        if let Ok(token_event) = serde_json::from_str::<TokenEventData>(&decrypted) {
+                            for del_event_id in &token_event.del {
+                                deleted_via_del_field.insert(del_event_id.clone());
+                            }
                         }
+                        decrypted_map.insert(event.id, decrypted);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to decrypt token event {}: {}", event.id, e);
                     }
                 }
             }
@@ -465,61 +479,60 @@ pub async fn fetch_tokens() -> Result<(), String> {
                     log::debug!("Skipping deleted token event: {}", event_id_hex);
                     continue;
                 }
-                match signer.nip44_decrypt(&event.pubkey, &event.content).await {
-                    Ok(decrypted) => match serde_json::from_str::<TokenEventData>(&decrypted) {
-                        Ok(token_event) => {
-                            let proofs: Vec<ProofData> = token_event
-                                .proofs
+                let decrypted = match decrypted_map.get(&event.id) {
+                    Some(d) => d,
+                    None => continue,
+                };
+                match serde_json::from_str::<TokenEventData>(decrypted) {
+                    Ok(token_event) => {
+                        let proofs: Vec<ProofData> = token_event
+                            .proofs
+                            .iter()
+                            .map(|p| ProofData {
+                                id: if p.id.is_empty() {
+                                    format!("{}_{}", p.secret, p.amount)
+                                } else {
+                                    p.id.clone()
+                                },
+                                amount: p.amount,
+                                secret: p.secret.clone(),
+                                c: p.c.clone(),
+                                witness: p.witness.clone(),
+                                dleq: p.dleq.clone(),
+                                state: ProofState::Unspent,
+                                transaction_id: None,
+                                state_set_at: None,
+                            })
+                            .collect();
+                        if !proofs.is_empty() {
+                            let token_balance: u64 = proofs
                                 .iter()
-                                .map(|p| ProofData {
-                                    id: if p.id.is_empty() {
-                                        format!("{}_{}", p.secret, p.amount)
-                                    } else {
-                                        p.id.clone()
-                                    },
-                                    amount: p.amount,
-                                    secret: p.secret.clone(),
-                                    c: p.c.clone(),
-                                    witness: p.witness.clone(),
-                                    dleq: p.dleq.clone(),
-                                    state: ProofState::Unspent,
-                                    transaction_id: None,
-                                    state_set_at: None,
-                                })
-                                .collect();
-                            if !proofs.is_empty() {
-                                let token_balance: u64 = proofs
-                                    .iter()
-                                    .map(|p| p.amount)
-                                    .try_fold(0u64, |acc, amount| acc.checked_add(amount))
-                                    .ok_or_else(|| {
-                                        format!(
-                                            "Proof amount overflow in token event {}",
-                                            event_id_hex,
-                                        )
-                                    })?;
-                                total_balance =
-                                    total_balance.checked_add(token_balance).ok_or_else(|| {
-                                        format!(
-                                            "Balance overflow when adding token event {}",
-                                            event_id_hex,
-                                        )
-                                    })?;
-                                tokens.push(TokenData {
-                                    event_id: event_id_hex,
-                                    mint: normalize_mint_url(&token_event.mint),
-                                    unit: token_event.unit.clone(),
-                                    proofs,
-                                    created_at: event.created_at.as_secs(),
-                                });
-                            }
+                                .map(|p| p.amount)
+                                .try_fold(0u64, |acc, amount| acc.checked_add(amount))
+                                .ok_or_else(|| {
+                                    format!(
+                                        "Proof amount overflow in token event {}",
+                                        event_id_hex,
+                                    )
+                                })?;
+                            total_balance =
+                                total_balance.checked_add(token_balance).ok_or_else(|| {
+                                    format!(
+                                        "Balance overflow when adding token event {}",
+                                        event_id_hex,
+                                    )
+                                })?;
+                            tokens.push(TokenData {
+                                event_id: event_id_hex,
+                                mint: normalize_mint_url(&token_event.mint),
+                                unit: token_event.unit.clone(),
+                                proofs,
+                                created_at: event.created_at.as_secs(),
+                            });
                         }
-                        Err(e) => {
-                            log::error!("Failed to parse token event {}: {}", event.id, e);
-                        }
-                    },
+                    }
                     Err(e) => {
-                        log::error!("Failed to decrypt token event {}: {}", event.id, e);
+                        log::error!("Failed to parse token event {}: {}", event.id, e);
                     }
                 }
             }

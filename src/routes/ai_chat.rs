@@ -7,8 +7,7 @@ use crate::routes::Route;
 use crate::services::ai_chat::{
     generate_images, get_available_models, send_chat_message, AssistantContent,
     ChatCompletionRequest, ChatCompletionResponse, ChatImageUrl, ChatMessage, ChatMessageContent,
-    ChatMessagePart, ChatModel, ChatModelKind, ChatRole, ImageGenerationRequest, ToolCall,
-    ToolDefinition, ToolFunction,
+    ChatMessagePart,     ChatModel, ChatModelKind, ChatRole, ImageGenerationRequest, ToolCall,
 };
 use crate::services::ppq;
 use crate::stores::ai_chat_seed_store;
@@ -20,15 +19,13 @@ use crate::stores::ai_provider_store::{
     self, ppq_provider, resolve_providers, AiProviderConfig, AiProviderState, PpqAccountState,
     PROVIDER_STATE_SAVE_EVENT,
 };
-use crate::stores::{nostr_client, theme_store};
+use crate::stores::nostr_client;
 use crate::utils::markdown::render_markdown;
 use dioxus::document;
 use dioxus::prelude::*;
-use serde_json::json;
 use std::hash::{Hash, Hasher};
 
-const SYSTEM_PROMPT: &str = "You are Nostrich, an AI assistant inside nostr.blue. Be concise and helpful for the user. Your personality is a fun ostrich that represents the nostr community.";
-const THEME_TOOL_NAME: &str = "set_theme";
+const SYSTEM_PROMPT: &str = "You are Nostrich, an AI assistant inside nostr.blue, a Nostr client. Be concise and helpful. Your personality is a fun ostrich that represents the nostr community. You have access to nostr tools to fetch profiles, notes, events, interactions, search content, and more. When the user shares or asks about a note, profile, or any Nostr entity, proactively use the available tools to provide enriched context.";
 const AI_CHAT_PROVIDER_PERSISTENCE_ENABLED: bool = true;
 const AI_CHAT_HISTORY_LOAD_ENABLED: bool = true;
 const AI_CHAT_HISTORY_SAVE_ENABLED: bool = true;
@@ -89,11 +86,6 @@ fn should_suggest_image_model(
         && attached_images.is_empty()
         && image_models_available
         && looks_like_image_generation_prompt(text)
-}
-
-#[derive(Clone, serde::Deserialize)]
-struct ThemeToolArgs {
-    theme: String,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1739,7 +1731,7 @@ fn submit_message(
                 let base_request = ChatCompletionRequest {
                     model: model.clone(),
                     messages: build_api_messages(&next_messages),
-                    tools: provider.supports_tools().then(theme_tool_definitions),
+                    tools: Some(crate::services::ai_tools::nostr_tool_definitions()),
                 };
 
                 match send_chat_message(&provider, &base_request).await {
@@ -1801,28 +1793,6 @@ fn submit_message(
     });
 }
 
-fn theme_tool_definitions() -> Vec<ToolDefinition> {
-    vec![ToolDefinition {
-        tool_type: "function".to_string(),
-        function: ToolFunction {
-            name: THEME_TOOL_NAME.to_string(),
-            description: "Switch the app theme. Supported values are: light, dark, system."
-                .to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "theme": {
-                        "type": "string",
-                        "enum": ["light", "dark", "system"],
-                        "description": "Theme mode to apply."
-                    }
-                },
-                "required": ["theme"]
-            }),
-        },
-    }]
-}
-
 async fn apply_chat_response(
     response: ChatCompletionResponse,
     prior_messages: Vec<DisplayMessage>,
@@ -1840,19 +1810,6 @@ async fn apply_chat_response(
     };
 
     let (assistant_content, assistant_images) = extract_assistant_content(choice.message.content);
-    if !provider.supports_tools() {
-        let mut next_messages = prior_messages;
-        next_messages.push(DisplayMessage {
-            id: format!("assistant-{}", crate::platform::timestamp::now_millis()),
-            role: DisplayRole::Assistant,
-            content: assistant_content,
-            images: assistant_images,
-            tool_calls: Vec::new(),
-        });
-        messages.set(next_messages);
-        persisted_messages_dirty.set(true);
-        return;
-    }
 
     if choice.message.tool_calls.is_empty() {
         let mut next_messages = prior_messages;
@@ -1868,7 +1825,7 @@ async fn apply_chat_response(
         return;
     }
 
-    let executed = execute_tool_calls(&choice.message.tool_calls);
+    let executed = execute_tool_calls(&choice.message.tool_calls).await;
     let mut intermediate_messages = prior_messages.clone();
     intermediate_messages.push(DisplayMessage {
         id: format!(
@@ -1980,39 +1937,21 @@ fn extract_assistant_content(content: Option<AssistantContent>) -> (String, Vec<
     }
 }
 
-fn execute_tool_calls(tool_calls: &[ToolCall]) -> Vec<ExecutedToolCall> {
-    tool_calls
-        .iter()
-        .map(|call| ExecutedToolCall {
+async fn execute_tool_calls(tool_calls: &[ToolCall]) -> Vec<ExecutedToolCall> {
+    let mut results = Vec::with_capacity(tool_calls.len());
+    for call in tool_calls {
+        let result = crate::services::ai_tools::execute_nostr_tool(
+            &call.function.name,
+            &call.function.arguments,
+        )
+        .await;
+        results.push(ExecutedToolCall {
             id: call.id.clone(),
             name: call.function.name.clone(),
-            result: execute_tool_call(&call.function.name, &call.function.arguments),
-        })
-        .collect()
-}
-
-fn execute_tool_call(name: &str, arguments: &str) -> String {
-    match name {
-        THEME_TOOL_NAME => match serde_json::from_str::<ThemeToolArgs>(arguments) {
-            Ok(args) => {
-                let theme = match args.theme.trim().to_lowercase().as_str() {
-                    "light" => theme_store::Theme::Light,
-                    "dark" => theme_store::Theme::Dark,
-                    "system" => theme_store::Theme::System,
-                    other => {
-                        return format!(
-                            "{{\"error\":\"Unsupported theme '{}'. Supported values: light, dark, system.\"}}",
-                            other
-                        );
-                    }
-                };
-                theme_store::set_theme(theme);
-                format!("{{\"success\":true,\"theme\":\"{}\"}}", theme.as_str())
-            }
-            Err(e) => format!("{{\"error\":\"Invalid tool arguments: {}\"}}", e),
-        },
-        other => format!("{{\"error\":\"Unknown tool: {}\"}}", other),
+            result,
+        });
     }
+    results
 }
 
 fn persisted_message_from_display(message: DisplayMessage) -> PersistedChatMessage {

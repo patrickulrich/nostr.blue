@@ -173,7 +173,7 @@ pub fn MobileSearchSlideout(show: bool, on_close: EventHandler<()>) -> Element {
 
         // Search panel sliding from top
         div {
-            class: "fixed top-0 left-0 right-0 z-50 bg-background shadow-2xl lg:hidden
+            class: "fixed top-0 left-0 right-0 z-50 bg-background shadow-2xl lg:hidden pt-safe-top
                     transform transition-transform duration-300 ease-out",
             role: "dialog",
             "aria-modal": "true",

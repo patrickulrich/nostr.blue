@@ -502,13 +502,7 @@ async fn submit_new_file(
         decode_repo_naddr(naddr).map_err(|e| format!("Invalid repository address: {}", e))?;
 
     // Get current user's public key for the From header
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("Failed to get signer: {}", e))?;
-    let pubkey = signer
-        .get_public_key()
-        .await
+    let pubkey = crate::stores::nostr_client::get_cached_pubkey()
         .map_err(|e| format!("Failed to get public key: {}", e))?;
 
     // Build the unified diff content

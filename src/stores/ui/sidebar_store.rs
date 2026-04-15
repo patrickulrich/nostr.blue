@@ -83,12 +83,12 @@ pub enum SidebarItem {
     Bible,
     Highlights,
     AIChat,
+    Blobbi,
 }
 impl SidebarItem {
     /// Returns true if this item requires authentication
     pub fn requires_auth(&self) -> bool {
-        matches!(
-            self,
+        match self {
             SidebarItem::Photos
                 | SidebarItem::Videos
                 | SidebarItem::Live
@@ -97,16 +97,19 @@ impl SidebarItem {
                 | SidebarItem::Messages
                 | SidebarItem::Bookmarks
                 | SidebarItem::Settings
-                | SidebarItem::Wallet
                 | SidebarItem::VoiceMessages
                 | SidebarItem::Polls
                 | SidebarItem::WebBookmarks
                 | SidebarItem::Lists
                 | SidebarItem::Badges
                 | SidebarItem::Citations
-                | SidebarItem::Blossom
-                | SidebarItem::AIChat
-        )
+            | SidebarItem::Blossom
+            | SidebarItem::AIChat
+            | SidebarItem::Blobbi => true,
+            #[cfg(feature = "cashu")]
+            SidebarItem::Wallet => true,
+            _ => false,
+        }
     }
     /// Items temporarily hidden from sidebar and customizer.
     /// Routes remain accessible via direct navigation.
@@ -140,7 +143,10 @@ impl SidebarItem {
             SidebarItem::WebBookmarks => "Web Bookmarks",
             SidebarItem::Podcasts => "Podcasts",
             SidebarItem::Radio => "Radio",
+            #[cfg(feature = "cashu")]
             SidebarItem::Wallet => "Wallet",
+            #[cfg(not(feature = "cashu"))]
+            SidebarItem::Wallet => "",
             SidebarItem::P2PTrading => "P2P Trading",
             SidebarItem::Communities => "Communities",
             SidebarItem::Topics => "Topics",
@@ -164,6 +170,7 @@ impl SidebarItem {
             SidebarItem::Bible => "Bible",
             SidebarItem::Highlights => "Highlights",
             SidebarItem::AIChat => "AI Chat",
+            SidebarItem::Blobbi => "Blobbi",
         }
     }
     /// Returns the Route for this sidebar item
@@ -191,7 +198,10 @@ impl SidebarItem {
             SidebarItem::WebBookmarks => Some(Route::WebBookmarks {}),
             SidebarItem::Podcasts => Some(Route::PodcastHome {}),
             SidebarItem::Radio => Some(Route::RadioHome {}),
+            #[cfg(feature = "cashu")]
             SidebarItem::Wallet => Some(Route::CashuWallet {}),
+            #[cfg(not(feature = "cashu"))]
+            SidebarItem::Wallet => None,
             SidebarItem::P2PTrading => Some(Route::P2PHome {}),
             SidebarItem::Communities => Some(Route::Communities {}),
             SidebarItem::Topics => Some(Route::TopicsHome {}),
@@ -215,6 +225,7 @@ impl SidebarItem {
             SidebarItem::Bible => Some(Route::BibleHome {}),
             SidebarItem::Highlights => Some(Route::Highlights {}),
             SidebarItem::AIChat => Some(Route::AIChat {}),
+            SidebarItem::Blobbi => Some(Route::BlobbiHome {}),
         }
     }
 }
@@ -308,6 +319,7 @@ pub fn default_sidebar_items() -> Vec<SidebarItem> {
         SidebarItem::Settings,
         SidebarItem::Live,
         SidebarItem::Bookmarks,
+        #[cfg(feature = "cashu")]
         SidebarItem::Wallet,
         SidebarItem::Calendar,
         SidebarItem::Badges,
@@ -316,6 +328,7 @@ pub fn default_sidebar_items() -> Vec<SidebarItem> {
         SidebarItem::Bible,
         SidebarItem::Highlights,
         SidebarItem::AIChat,
+        SidebarItem::Blobbi,
     ]
 }
 /// Global state for sidebar items

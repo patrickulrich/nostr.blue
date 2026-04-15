@@ -22,8 +22,12 @@ pub mod urls {
 /// Default options for specialty relays
 fn specialty_relay_options() -> RelayOptions {
     RelayOptions::new()
-        .max_avg_latency(Some(Duration::from_secs(2)))
+        .max_avg_latency(Some(Duration::from_secs(5)))
+        .verify_subscriptions(true)
+        .adjust_retry_interval(true)
         .reconnect(true)
+        .sleep_when_idle(true)
+        .idle_timeout(Duration::from_secs(60))
 }
 /// Add relays temporarily, returning which ones were newly added.
 /// Uses SDK's add_relay() which returns Ok if added successfully.
