@@ -6,7 +6,7 @@
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 
-use crate::components::ClientInitializing;
+use crate::components::{ArticleCoverUploader, ClientInitializing};
 use crate::routes::Route;
 use crate::services::search::profile_search;
 use crate::stores::packs_store::PackMember;
@@ -236,27 +236,11 @@ pub fn PackNew() -> Element {
                     }
                 }
 
-                // Cover image URL
-                div {
-                    label { class: "block text-sm font-medium mb-2", "Cover Image URL" }
-                    input {
-                        class: "w-full px-4 py-2 bg-muted rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
-                        r#type: "url",
-                        placeholder: "https://example.com/cover.jpg",
-                        value: "{image_url}",
-                        oninput: move |e| image_url.set(e.value()),
-                    }
-                    // Live preview
-                    if !image_url.read().is_empty() && is_valid_http_url(&image_url.read()) {
-                        div { class: "mt-2 h-32 bg-muted rounded-lg overflow-hidden",
-                            img {
-                                src: "{image_url}",
-                                alt: "Cover preview",
-                                class: "w-full h-full object-cover",
-                                onerror: move |_| {},
-                            }
-                        }
-                    }
+                // Cover image
+                ArticleCoverUploader {
+                    cover_url: image_url,
+                    label: "Upload Cover Image".to_string(),
+                    show_url_input: true,
                 }
 
                 // Members section

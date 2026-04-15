@@ -2,14 +2,18 @@
 //!
 //! Display detailed view of a calendar event or live activity
 use crate::components::ClientInitializing;
+use crate::hooks::use_relay_subscription_opts;
 use crate::routes::Route;
 use crate::stores::calendar_store::{CalendarEventComment, UnifiedEvent};
 use crate::stores::{auth_store, calendar_store, nostr_client, profiles};
 use crate::utils::ics::{download_ics, export_event_to_ics};
-use crate::utils::nip52::{is_online_location, RsvpStatus};
-use crate::utils::nip53::{LiveActivityEvent, RoomPresence};
+use crate::utils::nip52::{is_online_location, parse_calendar_rsvp, RsvpStatus, KIND_CALENDAR_RSVP};
+use crate::utils::nip53::{LiveActivityEvent, RoomPresence, KIND_ROOM_PRESENCE};
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
+use nostr_relay_pool::relay::ReqExitPolicy;
+use nostr_sdk::{Filter, Kind, SubscribeAutoCloseOptions};
+use std::collections::HashSet;
 #[component]
 pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
     let mut event = use_signal(|| None::<UnifiedEvent>);
@@ -58,15 +62,18 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                     let coord = unified_event.coordinate().to_string();
                     event.set(Some(unified_event.clone()));
                     if unified_event.is_calendar_event() {
-                        if let Ok(rsvps) = calendar_store::fetch_event_rsvps(&coord).await {
+                        comments_loading.set(true);
+                        let (rsvp_result, comment_result) = futures::join!(
+                            calendar_store::fetch_event_rsvps(&coord),
+                            calendar_store::fetch_event_comments(&coord),
+                        );
+                        if let Ok(rsvps) = rsvp_result {
                             rsvp_count.set(rsvps.len());
                         }
                         if let Some(my_rsvp) = calendar_store::get_my_rsvp(&coord) {
                             rsvp_status.set(Some(my_rsvp.status));
                         }
-                        comment_error.set(None);
-                        comments_loading.set(true);
-                        match calendar_store::fetch_event_comments(&coord).await {
+                        match comment_result {
                             Ok(event_comments) => {
                                 comments.set(event_comments);
                             }
@@ -77,47 +84,57 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                         }
                         comments_loading.set(false);
                     } else {
-                        if let Ok(presence) = calendar_store::fetch_room_presence(&coord, 300).await
-                        {
+                        async fn fetch_parent_space_url(
+                            unified_event: &UnifiedEvent,
+                        ) -> Option<String> {
+                            if let UnifiedEvent::Live(LiveActivityEvent::Meeting(ref meeting)) =
+                                unified_event
+                            {
+                                if let Some(ref space_coord) = meeting.space_coordinate {
+                                    let parts: Vec<&str> =
+                                        space_coord.splitn(3, ':').collect();
+                                    if parts.len() >= 3 {
+                                        use nostr::prelude::*;
+                                        if let Ok(pk) = PublicKey::from_hex(parts[1]) {
+                                            let coordinate =
+                                                Coordinate::new(Kind::Custom(30312), pk)
+                                                    .identifier(parts[2]);
+                                            let nip19 =
+                                                Nip19Coordinate::new(coordinate, vec![]);
+                                            if let Ok(naddr_str) = nip19.to_bech32() {
+                                                if let Ok(Some(UnifiedEvent::Live(
+                                                    LiveActivityEvent::Space(space),
+                                                ))) = calendar_store::fetch_unified_event_by_naddr(
+                                                    &naddr_str,
+                                                )
+                                                .await
+                                                {
+                                                    return Some(space.service_url);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            None
+                        }
+                        let (presence_result, parent_url) = futures::join!(
+                            calendar_store::fetch_room_presence(&coord, 300),
+                            fetch_parent_space_url(&unified_event),
+                        );
+                        if let Ok(presence) = presence_result {
                             log::info!(
                                 "[CalendarEventDetail] Found {} users present",
                                 presence.len()
                             );
                             room_presence.set(presence);
                         }
-                        if let UnifiedEvent::Live(LiveActivityEvent::Meeting(ref meeting)) =
-                            unified_event
-                        {
-                            if let Some(ref space_coord) = meeting.space_coordinate {
-                                log::info!(
-                                    "[CalendarEventDetail] Fetching parent space: {}",
-                                    space_coord
-                                );
-                                let parts: Vec<&str> = space_coord.splitn(3, ':').collect();
-                                if parts.len() >= 3 {
-                                    use nostr::prelude::*;
-                                    if let Ok(pk) = PublicKey::from_hex(parts[1]) {
-                                        let coordinate = Coordinate::new(Kind::Custom(30312), pk)
-                                            .identifier(parts[2]);
-                                        let nip19 = Nip19Coordinate::new(coordinate, vec![]);
-                                        if let Ok(naddr_str) = nip19.to_bech32() {
-                                            if let Ok(Some(UnifiedEvent::Live(
-                                                LiveActivityEvent::Space(space),
-                                            ))) = calendar_store::fetch_unified_event_by_naddr(
-                                                &naddr_str,
-                                            )
-                                            .await
-                                            {
-                                                log::info!(
-                                                    "[CalendarEventDetail] Found parent space service_url: {}",
-                                                    space.service_url
-                                                );
-                                                parent_space_url.set(Some(space.service_url));
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                        if let Some(url) = parent_url {
+                            log::info!(
+                                "[CalendarEventDetail] Found parent space service_url: {}",
+                                url
+                            );
+                            parent_space_url.set(Some(url));
                         }
                     }
                 }
@@ -136,6 +153,136 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
             loading.set(false);
         });
     });
+    let seen_rsvp_ids: Signal<HashSet<nostr::EventId>> = use_signal(HashSet::new);
+    let seen_comment_ids: Signal<HashSet<nostr::EventId>> = use_signal(HashSet::new);
+    let sub_coord = event.read().as_ref().map(|e| e.coordinate().to_string());
+    let sub_coord_for_presence = sub_coord.clone();
+    {
+        let mut rsvp_count = rsvp_count;
+        let mut rsvp_status = rsvp_status;
+        let mut seen_rsvp_ids = seen_rsvp_ids;
+        let mut comments = comments;
+        let mut seen_comment_ids = seen_comment_ids;
+        let my_pubkey = auth_store::get_pubkey();
+        let sub_coord_for_comments = sub_coord.clone();
+        use_relay_subscription_opts(
+            sub_coord.map(|coord| {
+                Filter::new()
+                    .kinds([
+                        Kind::Custom(KIND_CALENDAR_RSVP),
+                        Kind::Custom(1111),
+                    ])
+                    .custom_tag(
+                        nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::A),
+                        coord,
+                    )
+                    .limit(0)
+            }),
+            Some(
+                SubscribeAutoCloseOptions::default()
+                    .exit_policy(ReqExitPolicy::WaitDurationAfterEOSE(
+                        std::time::Duration::from_secs(300),
+                    )),
+            ),
+            move |event: &nostr::Event| {
+                match event.kind.as_u16() {
+                    KIND_CALENDAR_RSVP => {
+                        if !seen_rsvp_ids.write().insert(event.id) {
+                            return;
+                        }
+                        if let Ok(rsvp) = parse_calendar_rsvp(event) {
+                            log::info!(
+                                "[CalendarEventDetail] Real-time RSVP from {}",
+                                rsvp.pubkey
+                            );
+                            let current = *rsvp_count.peek();
+                            rsvp_count.set(current + 1);
+                            if my_pubkey.as_ref() == Some(&rsvp.pubkey) {
+                                rsvp_status.set(Some(rsvp.status));
+                            }
+                        }
+                    }
+                    1111 => {
+                        if !seen_comment_ids.write().insert(event.id) {
+                            return;
+                        }
+                        let coord = match sub_coord_for_comments.as_ref() {
+                            Some(c) => c,
+                            None => return,
+                        };
+                        let has_tag_value = |tag_name: &str, expected: &str| -> bool {
+                            event.tags.iter().any(|t| {
+                                t.as_slice().first().map(|s| s.as_str()) == Some(tag_name)
+                                    && t.as_slice().get(1).map(|s| s.as_str()) == Some(expected)
+                            })
+                        };
+                        if !has_tag_value("A", coord) {
+                            return;
+                        }
+                        log::info!(
+                            "[CalendarEventDetail] Real-time comment from {}",
+                            event.pubkey
+                        );
+                        let comment = CalendarEventComment {
+                            event_id: event.id.to_hex(),
+                            pubkey: event.pubkey.to_hex(),
+                            content: ammonia::clean(&event.content),
+                            created_at: event.created_at.as_secs(),
+                        };
+                        let mut current = comments.peek().clone();
+                        current.insert(0, comment);
+                        current.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                        comments.set(current);
+                    }
+                    _ => {}
+                }
+            },
+        );
+    }
+    {
+        let mut room_presence = room_presence;
+        let mut seen_presence_ids: Signal<HashSet<nostr::EventId>> = use_signal(HashSet::new);
+        use_relay_subscription_opts(
+            sub_coord_for_presence.map(|coord| {
+                Filter::new()
+                    .kind(Kind::Custom(KIND_ROOM_PRESENCE))
+                    .custom_tag(
+                        nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::A),
+                        coord,
+                    )
+                    .since(nostr_sdk::Timestamp::now() - 300)
+                    .limit(0)
+            }),
+            Some(
+                SubscribeAutoCloseOptions::default()
+                    .exit_policy(ReqExitPolicy::WaitDurationAfterEOSE(
+                        std::time::Duration::from_secs(300),
+                    )),
+            ),
+            move |event: &nostr::Event| {
+                if !seen_presence_ids.write().insert(event.id) {
+                    return;
+                }
+                if let Ok(presence) =
+                    crate::utils::nip53::parse_room_presence(event)
+                {
+                    log::info!(
+                        "[CalendarEventDetail] Real-time presence update from {}",
+                        presence.pubkey
+                    );
+                    let mut current = room_presence.peek().clone();
+                    if let Some(existing) =
+                        current.iter_mut().find(|p| p.pubkey == presence.pubkey)
+                    {
+                        *existing = presence;
+                    } else {
+                        current.push(presence);
+                    }
+                    room_presence.set(current);
+                }
+            },
+        );
+    }
     let handle_rsvp = move |status: RsvpStatus| {
         let Some(evt) = event.read().as_ref().cloned() else {
             return;

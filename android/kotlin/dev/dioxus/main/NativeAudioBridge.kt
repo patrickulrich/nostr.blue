@@ -7,7 +7,10 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.MediaPlayer
 import android.media.PlaybackParams
@@ -57,6 +60,55 @@ object NativeAudioBridge {
     private val lastError = AtomicReference<String?>(null)
     private var appContext: Context? = null
     private var serviceRef: WeakReference<MediaPlaybackService>? = null
+    private var audioManager: AudioManager? = null
+    private var audioFocusRequest: AudioFocusRequest? = null
+    private var shouldResumeAfterFocusGain: Boolean = false
+    private val audioFocusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+        synchronized(this) {
+            when (focusChange) {
+                AudioManager.AUDIOFOCUS_GAIN -> {
+                    player?.setVolume(1f, 1f)
+                    if (shouldResumeAfterFocusGain) {
+                        shouldResumeAfterFocusGain = false
+                        playWhenReady = true
+                        when {
+                            player == null -> prepareCurrent(true)
+                            isPreparing -> updatePlaybackState(false, PlaybackState.STATE_BUFFERING)
+                            player?.isPlaying != true -> {
+                                player?.start()
+                                updatePlaybackState(true, PlaybackState.STATE_PLAYING)
+                            }
+                        }
+                        updateNotification()
+                    }
+                }
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                    player?.setVolume(0.2f, 0.2f)
+                }
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                    player?.setVolume(1f, 1f)
+                    val wasPlaying = player?.isPlaying == true || (isPreparing && playWhenReady)
+                    shouldResumeAfterFocusGain = wasPlaying
+                    if (player?.isPlaying == true) {
+                        player?.pause()
+                    }
+                    playWhenReady = false
+                    updatePlaybackState(false, currentPlaybackState())
+                    updateNotification()
+                }
+                AudioManager.AUDIOFOCUS_LOSS -> {
+                    player?.setVolume(1f, 1f)
+                    shouldResumeAfterFocusGain = false
+                    if (player?.isPlaying == true) {
+                        player?.pause()
+                    }
+                    playWhenReady = false
+                    updatePlaybackState(false, currentPlaybackState())
+                    updateNotification()
+                }
+            }
+        }
+    }
 
     private data class ParsedQueueResult(
         val items: List<NativeQueueItem>,
@@ -81,6 +133,9 @@ object NativeAudioBridge {
     fun ensureInitialized(context: Context) {
         val applicationContext = context.applicationContext
         appContext = applicationContext
+        if (audioManager == null) {
+            audioManager = applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        }
         ensureChannel(applicationContext)
         if (mediaSession == null) {
             mediaSession = MediaSession(applicationContext, "nostrblue-media").apply {
@@ -130,13 +185,20 @@ object NativeAudioBridge {
             this.playWhenReady = playWhenReady
             lastError.set(null)
             if (queue.isEmpty()) {
+                abandonAudioFocus()
                 resetSnapshotState()
                 releasePlayer()
                 updatePlaybackState(false, PlaybackState.STATE_STOPPED)
                 stopForegroundPlayback()
             } else {
                 ensureServiceStarted(context)
-                prepareCurrent(playWhenReady)
+                if (playWhenReady && !requestAudioFocus(context)) {
+                    this.playWhenReady = false
+                    lastError.set("Audio focus unavailable")
+                    prepareCurrent(false)
+                    return "error:audio_focus_denied"
+                }
+                prepareCurrent(this.playWhenReady)
             }
             "ok"
         } catch (e: Exception) {
@@ -150,6 +212,11 @@ object NativeAudioBridge {
         return try {
             if (queue.isEmpty()) return "ok"
             ensureServiceStarted(context)
+            if (!requestAudioFocus(context)) {
+                lastError.set("Audio focus unavailable")
+                updateNotification()
+                return "error:audio_focus_denied"
+            }
             if (isPreparing) {
                 playWhenReady = true
                 updatePlaybackState(false, PlaybackState.STATE_BUFFERING)
@@ -178,8 +245,11 @@ object NativeAudioBridge {
     fun pause(context: Context): String {
         return try {
             ensureInitialized(context)
+            shouldResumeAfterFocusGain = false
             playWhenReady = false
             player?.takeIf { it.isPlaying }?.pause()
+            player?.setVolume(1f, 1f)
+            abandonAudioFocus()
             updatePlaybackState(false, PlaybackState.STATE_PAUSED)
             updateNotification()
             "ok"
@@ -193,7 +263,9 @@ object NativeAudioBridge {
     fun stop(context: Context): String {
         return try {
             ensureInitialized(context)
+            shouldResumeAfterFocusGain = false
             playWhenReady = false
+            abandonAudioFocus()
             releasePlayer()
             updatePlaybackState(false, PlaybackState.STATE_STOPPED)
             stopForegroundPlayback()
@@ -285,6 +357,8 @@ object NativeAudioBridge {
         return try {
             ensureInitialized(context)
             queue.clear()
+            shouldResumeAfterFocusGain = false
+            abandonAudioFocus()
             resetSnapshotState()
             releasePlayer()
             updatePlaybackState(false, PlaybackState.STATE_STOPPED)
@@ -325,10 +399,7 @@ object NativeAudioBridge {
         }
         return MediaPlayer().apply {
             setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .build()
+                playbackAudioAttributes()
             )
             setOnPreparedListener {
                 synchronized(this@NativeAudioBridge) {
@@ -348,6 +419,7 @@ object NativeAudioBridge {
                     isPreparing = false
                     if (queue.isEmpty()) {
                         playWhenReady = false
+                        abandonAudioFocus()
                         releasePlayer()
                         updatePlaybackState(false, PlaybackState.STATE_STOPPED)
                         stopForegroundPlayback()
@@ -361,6 +433,7 @@ object NativeAudioBridge {
                         prepareCurrent(true)
                     } else {
                         playWhenReady = false
+                        abandonAudioFocus()
                         releasePlayer()
                         updatePlaybackState(false, PlaybackState.STATE_STOPPED)
                         stopForegroundPlayback()
@@ -373,6 +446,8 @@ object NativeAudioBridge {
                 synchronized(this@NativeAudioBridge) {
                     isPreparing = false
                     playWhenReady = false
+                    shouldResumeAfterFocusGain = false
+                    abandonAudioFocus()
                     lastError.set("Playback failed")
                     releasePlayer()
                     updatePlaybackState(false, PlaybackState.STATE_ERROR)
@@ -395,10 +470,7 @@ object NativeAudioBridge {
         val player = ensurePlayer()
         player.reset()
         player.setAudioAttributes(
-            AudioAttributes.Builder()
-                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                .setUsage(AudioAttributes.USAGE_MEDIA)
-                .build()
+            playbackAudioAttributes()
         )
         try {
             player.setDataSource(item.mediaUrl)
@@ -543,7 +615,15 @@ object NativeAudioBridge {
                 serviceIntent(context, ACTION_NEXT)
             )
 
-        service.startForeground(NOTIFICATION_ID, builder.build())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            service.startForeground(
+                NOTIFICATION_ID,
+                builder.build(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            )
+        } else {
+            service.startForeground(NOTIFICATION_ID, builder.build())
+        }
     }
 
     private fun stopForegroundPlayback() {
@@ -576,6 +656,46 @@ object NativeAudioBridge {
                     NotificationManager.IMPORTANCE_LOW
                 )
             )
+        }
+    }
+
+    private fun playbackAudioAttributes(): AudioAttributes {
+        return AudioAttributes.Builder()
+            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .build()
+    }
+
+    private fun requestAudioFocus(context: Context): Boolean {
+        ensureInitialized(context)
+        shouldResumeAfterFocusGain = false
+        val manager = audioManager ?: return false
+        val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val request = audioFocusRequest ?: AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(playbackAudioAttributes())
+                .setOnAudioFocusChangeListener(audioFocusChangeListener)
+                .setWillPauseWhenDucked(false)
+                .build()
+                .also { audioFocusRequest = it }
+            manager.requestAudioFocus(request)
+        } else {
+            @Suppress("DEPRECATION")
+            manager.requestAudioFocus(
+                audioFocusChangeListener,
+                AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN
+            )
+        }
+        return result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+    }
+
+    private fun abandonAudioFocus() {
+        val manager = audioManager ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            audioFocusRequest?.let { manager.abandonAudioFocusRequest(it) }
+        } else {
+            @Suppress("DEPRECATION")
+            manager.abandonAudioFocus(audioFocusChangeListener)
         }
     }
 

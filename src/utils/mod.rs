@@ -11,6 +11,7 @@ pub use nips::nip73;
 pub use nips::nip84;
 pub use nips::nip98;
 pub use nips::nip99;
+pub use nips::nip_bb;
 
 pub mod nkbips;
 pub use nkbips::nkbip03;
@@ -64,9 +65,10 @@ pub mod video_kinds;
 pub use data_state::DataState;
 pub use error::log_fetch_error;
 pub use format::{
-    format_bytes, format_relative_time_or, format_sats_compact, format_sats_with_separator,
-    shorten_url, truncate_pubkey,
+    format_bytes, format_relative_time_or, format_sats_compact, truncate_pubkey,
 };
+#[cfg(feature = "cashu")]
+pub use format::{format_sats_with_separator, shorten_url};
 pub use list_kinds::{get_item_count, get_list_icon, get_list_type_name};
 pub use path_validation::is_safe_path;
 pub use repost::{extract_reposted_event, process_events_to_feed_items, FeedItem};

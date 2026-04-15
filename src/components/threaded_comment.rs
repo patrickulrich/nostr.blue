@@ -2,6 +2,7 @@ use crate::components::icons::{BookmarkIcon, MessageCircleIcon, Repeat2Icon, Sha
 use crate::components::{ReactionButton, ReplyComposer, RichContent, ZapModal};
 use crate::hooks::{use_author_metadata, use_reaction};
 use crate::routes::Route;
+use crate::services::aggregation::InteractionCounts;
 use crate::stores::bookmarks;
 use crate::stores::nostr_client::{get_client, publish_repost, HAS_SIGNER};
 use crate::stores::signer::SIGNER_INFO;
@@ -28,6 +29,8 @@ pub fn ThreadedComment(
     node: ThreadNode,
     depth: usize,
     #[props(default)] on_reply: Option<EventHandler<NostrEvent>>,
+    #[props(default)] precomputed_counts: Option<InteractionCounts>,
+    #[props(default = None)] root_event: Option<NostrEvent>,
 ) -> Element {
     let event = &node.event;
     let children = &node.children;
@@ -38,7 +41,6 @@ pub fn ThreadedComment(
     let event_id_repost = event_id.clone();
     let event_id_bookmark = event_id.clone();
     let event_id_memo = event_id.clone();
-    let event_id_counts = event_id.clone();
 
     let author_pubkey_str = author_pubkey.to_string();
     let author_pubkey_like = author_pubkey_str.clone();
@@ -53,10 +55,25 @@ pub fn ThreadedComment(
     let mut show_reply_modal = use_signal(|| false);
     let mut show_zap_modal = use_signal(|| false);
 
-    let reaction = use_reaction(event_id_like.clone(), author_pubkey_like.clone(), None);
+    let reaction = use_reaction(
+        event_id_like.clone(),
+        author_pubkey_like.clone(),
+        precomputed_counts.as_ref(),
+    );
     let mut reply_count = use_signal(|| 0usize);
     let mut repost_count = use_signal(|| 0usize);
     let mut zap_amount_sats = use_signal(|| 0u64);
+
+    let has_precomputed = precomputed_counts.is_some();
+
+    use_effect(use_reactive(&precomputed_counts, move |counts_opt| {
+        if let Some(counts) = counts_opt {
+            reply_count.set(counts.replies);
+            repost_count.set(counts.reposts);
+            zap_amount_sats.set(counts.zap_amount_sats);
+            is_reposted.set(counts.user_reposted.unwrap_or(false));
+        }
+    }));
 
     let is_voice = is_voice_message(event);
     let audio_url = if is_voice {
@@ -90,84 +107,92 @@ pub fn ThreadedComment(
         None
     };
 
-    use_effect(move || {
-        let event_id_for_counts = event_id_counts.clone();
-        spawn(async move {
-            let client = match get_client() {
-                Some(c) => c,
-                None => return,
-            };
-            let event_id_parsed = match nostr_sdk::EventId::from_hex(&event_id_for_counts) {
-                Ok(id) => id,
-                Err(_) => return,
-            };
-            let reply_filter = Filter::new()
-                .kind(Kind::TextNote)
-                .event(event_id_parsed)
-                .limit(500);
-            if let Ok(replies) = client
-                .fetch_events(reply_filter, Duration::from_secs(5))
-                .await
-            {
-                reply_count.set(replies.len());
+    {
+        let event_id_counts = event_id.clone();
+        let skip = has_precomputed;
+        use_effect(move || {
+            if skip {
+                return;
             }
-            let repost_filter = Filter::new()
-                .kind(Kind::Repost)
-                .event(event_id_parsed)
-                .limit(500);
-            if let Ok(reposts) = client
-                .fetch_events(repost_filter, Duration::from_secs(5))
-                .await
-            {
-                let current_user_pubkey = SIGNER_INFO
-                    .read()
-                    .as_ref()
-                    .map(|info| info.public_key.clone());
-                let mut user_has_reposted = false;
-                if let Some(ref user_pk) = current_user_pubkey {
-                    for repost in reposts.iter() {
-                        if repost.pubkey.to_string() == *user_pk {
-                            user_has_reposted = true;
-                            break;
+            let event_id_for_counts = event_id_counts.clone();
+            spawn(async move {
+                let client = match get_client() {
+                    Some(c) => c,
+                    None => return,
+                };
+                let event_id_parsed =
+                    match nostr_sdk::EventId::from_hex(&event_id_for_counts) {
+                        Ok(id) => id,
+                        Err(_) => return,
+                    };
+                let reply_filter = Filter::new()
+                    .kind(Kind::TextNote)
+                    .event(event_id_parsed)
+                    .limit(500);
+                if let Ok(replies) = client
+                    .fetch_events(reply_filter, Duration::from_secs(5))
+                    .await
+                {
+                    reply_count.set(replies.len());
+                }
+                let repost_filter = Filter::new()
+                    .kind(Kind::Repost)
+                    .event(event_id_parsed)
+                    .limit(500);
+                if let Ok(reposts) = client
+                    .fetch_events(repost_filter, Duration::from_secs(5))
+                    .await
+                {
+                    let current_user_pubkey = SIGNER_INFO
+                        .read()
+                        .as_ref()
+                        .map(|info| info.public_key.clone());
+                    let mut user_has_reposted = false;
+                    if let Some(ref user_pk) = current_user_pubkey {
+                        for repost in reposts.iter() {
+                            if repost.pubkey.to_string() == *user_pk {
+                                user_has_reposted = true;
+                                break;
+                            }
                         }
                     }
+                    repost_count.set(reposts.len());
+                    is_reposted.set(user_has_reposted);
                 }
-                repost_count.set(reposts.len());
-                is_reposted.set(user_has_reposted);
-            }
-            let zap_filter = Filter::new()
-                .kind(Kind::ZapReceipt)
-                .event(event_id_parsed)
-                .limit(500);
-            if let Ok(zaps) = client
-                .fetch_events(zap_filter, Duration::from_secs(5))
-                .await
-            {
-                let total_sats: u64 = zaps
-                    .iter()
-                    .filter_map(|zap_event| {
-                        zap_event.tags.iter().find_map(|tag| {
-                            let tag_vec = tag.clone().to_vec();
-                            if tag_vec.first()?.as_str() == "description" {
-                                let zap_request_json = tag_vec.get(1)?.as_str();
-                                if let Ok(zap_request) =
-                                    serde_json::from_str::<serde_json::Value>(zap_request_json)
-                                {
-                                    if let Some(tags) =
-                                        zap_request.get("tags").and_then(|t| t.as_array())
+                let zap_filter = Filter::new()
+                    .kind(Kind::ZapReceipt)
+                    .event(event_id_parsed)
+                    .limit(500);
+                if let Ok(zaps) = client
+                    .fetch_events(zap_filter, Duration::from_secs(5))
+                    .await
+                {
+                    let total_sats: u64 = zaps
+                        .iter()
+                        .filter_map(|zap_event| {
+                            zap_event.tags.iter().find_map(|tag| {
+                                let tag_vec = tag.clone().to_vec();
+                                if tag_vec.first()?.as_str() == "description" {
+                                    let zap_request_json = tag_vec.get(1)?.as_str();
+                                    if let Ok(zap_request) =
+                                        serde_json::from_str::<serde_json::Value>(zap_request_json)
                                     {
-                                        for tag_array in tags {
-                                            if let Some(tag_vals) = tag_array.as_array() {
-                                                if tag_vals.first().and_then(|v| v.as_str())
-                                                    == Some("amount")
-                                                {
-                                                    if let Some(amount_str) =
-                                                        tag_vals.get(1).and_then(|v| v.as_str())
+                                        if let Some(tags) =
+                                            zap_request.get("tags").and_then(|t| t.as_array())
+                                        {
+                                            for tag_array in tags {
+                                                if let Some(tag_vals) = tag_array.as_array() {
+                                                    if tag_vals.first().and_then(|v| v.as_str())
+                                                        == Some("amount")
                                                     {
-                                                        if let Ok(millisats) =
-                                                            amount_str.parse::<u64>()
+                                                        if let Some(amount_str) =
+                                                            tag_vals.get(1).and_then(|v| v.as_str())
                                                         {
-                                                            return Some(millisats / 1000);
+                                                            if let Ok(millisats) =
+                                                                amount_str.parse::<u64>()
+                                                            {
+                                                                return Some(millisats / 1000);
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -175,15 +200,15 @@ pub fn ThreadedComment(
                                         }
                                     }
                                 }
-                            }
-                            None
+                                None
+                            })
                         })
-                    })
-                    .sum();
-                zap_amount_sats.set(total_sats);
-            }
+                        .sum();
+                    zap_amount_sats.set(total_sats);
+                }
+            });
         });
-    });
+    }
 
     let repost_button_class = if *is_reposted.read() {
         "flex items-center text-green-500 hover:text-green-600 transition"
@@ -584,6 +609,7 @@ pub fn ThreadedComment(
                             key: "{child.event.id}",
                             node: child.clone(),
                             depth: depth + 1,
+                            root_event: root_event.clone(),
                             on_reply,
                         }
                     }
@@ -604,6 +630,7 @@ pub fn ThreadedComment(
         if *show_reply_modal.read() {
             ReplyComposer {
                 reply_to: event.clone(),
+                root_event: root_event.clone(),
                 on_close: move |_| {
                     show_reply_modal.set(false);
                 },

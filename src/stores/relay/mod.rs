@@ -29,7 +29,9 @@
 //! ```
 #![allow(unused_imports)]
 pub mod connection;
+pub mod coverage;
 pub mod display;
+pub mod health;
 pub mod hints;
 pub mod nip65;
 pub mod pool;
@@ -41,7 +43,15 @@ pub use connection::{
     fetch_event_by_coordinate_with_relays, fetch_events_from_relays, reconnect, try_connect_relays,
     wait_for_user_relays,
 };
+pub use coverage::{
+    clear_coverage, coverage_size, get_relays_for_pubkey, record_user_relays, RelayCoverageMap,
+    RELAY_COVERAGE,
+};
 pub use display::{get_relay_display_info, RelayDisplayInfo};
+pub use health::{
+    connected_count, poll_relay_health, quarantine_dead_relays, quarantined_count,
+    start_health_poll, sync_ui_signals, RelayHealthEntry, RelayHealthState, RELAY_HEALTH,
+};
 pub use hints::{get_write_relay_hints, make_naddr_with_hints};
 pub use nip65::{
     apply_local_relays_to_client, default_dm_relays, default_relays, default_search_relays,
@@ -58,7 +68,7 @@ pub use pool::{
     add_relay, apply_relay_lists_to_client, is_relay_blocked, remove_relay, DEFAULT_RELAYS,
 };
 pub use signals::{
-    RelayInfo, RelayPoolStore, RelayPoolStoreStoreExt, RelaySource, RelayStatus, RELAY_CONNECTED,
+    RelayInfo, RelaySource, RelayPoolStore, RelayPoolStoreStoreExt, RelayStatus, RELAY_CONNECTED,
     RELAY_POOL, USER_RELAYS_APPLIED,
 };
 pub use specialty::{

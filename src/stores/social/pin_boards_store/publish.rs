@@ -47,13 +47,7 @@ pub async fn publish_pinboard(
     }
     let event_id = output.id().to_hex();
     log::info!("Pinboard published: {}", event_id);
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("Failed to get signer: {}", e))?;
-    let pubkey = signer
-        .get_public_key()
-        .await
+    let pubkey = crate::stores::nostr_client::get_cached_pubkey()
         .map_err(|e| format!("Failed to get pubkey: {}", e))?;
     let naddr = nostr_client::make_naddr_with_hints(KIND_PINBOARD, &pubkey, &d_tag).await?;
     Ok(naddr)

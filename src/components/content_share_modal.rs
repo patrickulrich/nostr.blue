@@ -604,54 +604,52 @@ pub fn ContentShareModal(
                                 }
                             }
                             div { class: "flex items-center gap-2",
-                                if cfg!(feature = "web") {
-                                    button {
-                                        class: if *is_publishing.read() {
-                                            "p-2 rounded-full opacity-50 cursor-not-allowed"
-                                        } else if *show_image_uploader.read() {
-                                            "p-2 rounded-full bg-primary text-primary-foreground transition"
-                                        } else {
-                                            "p-2 rounded-full hover:bg-accent transition"
-                                        },
-                                        title: "Add media",
-                                        aria_label: "Add media",
-                                        onclick: move |_| {
-                                            if *is_publishing.read() {
-                                                return;
-                                            }
-                                            let current = *show_image_uploader.read();
-                                            show_image_uploader.set(!current);
-                                        },
-                                        disabled: *is_publishing.read(),
-                                        CameraIcon { class: "w-5 h-5" }
-                                    }
-                                    if !*is_publishing.read() {
-                                        EmojiPicker {
-                                            on_emoji_selected: handle_emoji_selected,
-                                            icon_only: true,
+                                button {
+                                    class: if *is_publishing.read() {
+                                        "p-2 rounded-full opacity-50 cursor-not-allowed"
+                                    } else if *show_image_uploader.read() {
+                                        "p-2 rounded-full bg-primary text-primary-foreground transition"
+                                    } else {
+                                        "p-2 rounded-full hover:bg-accent transition"
+                                    },
+                                    title: "Add media",
+                                    aria_label: "Add media",
+                                    onclick: move |_| {
+                                        if *is_publishing.read() {
+                                            return;
                                         }
-                                        GifPicker {
-                                            on_gif_selected: handle_gif_selected,
-                                            icon_only: true,
+                                        let current = *show_image_uploader.read();
+                                        show_image_uploader.set(!current);
+                                    },
+                                    disabled: *is_publishing.read(),
+                                    CameraIcon { class: "w-5 h-5" }
+                                }
+                                if !*is_publishing.read() {
+                                    EmojiPicker {
+                                        on_emoji_selected: handle_emoji_selected,
+                                        icon_only: true,
+                                    }
+                                    GifPicker {
+                                        on_gif_selected: handle_gif_selected,
+                                        icon_only: true,
+                                    }
+                                }
+                                button {
+                                    class: if *is_publishing.read() {
+                                        "p-2 rounded-full opacity-50 cursor-not-allowed"
+                                    } else {
+                                        "p-2 rounded-full hover:bg-accent transition"
+                                    },
+                                    title: "Create poll",
+                                    aria_label: "Create poll",
+                                    onclick: move |_| {
+                                        if *is_publishing.read() {
+                                            return;
                                         }
-                                    }
-                                    button {
-                                        class: if *is_publishing.read() {
-                                            "p-2 rounded-full opacity-50 cursor-not-allowed"
-                                        } else {
-                                            "p-2 rounded-full hover:bg-accent transition"
-                                        },
-                                        title: "Create poll",
-                                        aria_label: "Create poll",
-                                        onclick: move |_| {
-                                            if *is_publishing.read() {
-                                                return;
-                                            }
-                                            show_poll_modal.set(true);
-                                        },
-                                        disabled: *is_publishing.read(),
-                                        BarChartIcon { class: "w-5 h-5" }
-                                    }
+                                        show_poll_modal.set(true);
+                                    },
+                                    disabled: *is_publishing.read(),
+                                    BarChartIcon { class: "w-5 h-5" }
                                 }
                             }
                             button {

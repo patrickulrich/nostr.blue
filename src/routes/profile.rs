@@ -1198,36 +1198,11 @@ pub fn Profile(pubkey: String) -> Element {
                                 }
                             }
                         }
-                        if is_own_profile {
-                            if let Ok(p2pk_pubkey) = crate::stores::cashu::get_wallet_pubkey() {
-                                {
-                                    #[allow(unused_variables)]
-                                    let pubkey_for_copy = p2pk_pubkey.clone();
-                                    rsx! {
-                                        div {
-                                            label { class: "block text-sm font-medium mb-1", "Cashu P2PK Pubkey" }
-                                            p { class: "text-xs text-muted-foreground mb-2",
-                                                "Others can send you locked ecash tokens that only you can redeem"
-                                            }
-                                            div { class: "flex items-center gap-2",
-                                                div { class: "flex-1 p-2 bg-muted rounded border border-border text-xs font-mono break-all",
-                                                    "{p2pk_pubkey}"
-                                                }
-                                                button {
-                                                    class: "px-3 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 transition",
-                                                    onclick: move |_| {
-                                                        #[cfg(feature = "web")]
-                                                        if let Some(window) = web_sys::window() {
-                                                            let _ = window.navigator().clipboard().write_text(&pubkey_for_copy);
-                                                        }
-                                                    },
-                                                    "Copy"
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                        {
+                            #[cfg(feature = "cashu")]
+                            { render_cashu_p2pk_section(is_own_profile) }
+                            #[cfg(not(feature = "cashu"))]
+                            { rsx! {} }
                         }
                     }
                     div { class: "flex justify-end mt-6",
@@ -1301,6 +1276,41 @@ fn parse_video_meta(event: &NostrEvent) -> VideoMeta {
     }
     meta
 }
+#[cfg(feature = "cashu")]
+fn render_cashu_p2pk_section(is_own_profile: bool) -> Element {
+    if !is_own_profile {
+        return rsx! {};
+    }
+    let Ok(p2pk_pubkey) = crate::stores::cashu::get_wallet_pubkey() else {
+        return rsx! {};
+    };
+    #[allow(unused_variables)]
+    let pubkey_for_copy = p2pk_pubkey.clone();
+    rsx! {
+        div {
+            label { class: "block text-sm font-medium mb-1", "Cashu P2PK Pubkey" }
+            p { class: "text-xs text-muted-foreground mb-2",
+                "Others can send you locked ecash tokens that only you can redeem"
+            }
+            div { class: "flex items-center gap-2",
+                div { class: "flex-1 p-2 bg-muted rounded border border-border text-xs font-mono break-all",
+                    "{p2pk_pubkey}"
+                }
+                button {
+                    class: "px-3 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 transition",
+                    onclick: move |_| {
+                        #[cfg(feature = "web")]
+                        if let Some(window) = web_sys::window() {
+                            let _ = window.navigator().clipboard().write_text(&pubkey_for_copy);
+                        }
+                    },
+                    "Copy"
+                }
+            }
+        }
+    }
+}
+
 #[component]
 fn VertsVideoCard(event: NostrEvent) -> Element {
     let video_meta = parse_video_meta(&event);

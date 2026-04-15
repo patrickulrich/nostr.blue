@@ -13,11 +13,11 @@ pub fn Hashtag(tag: String) -> Element {
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
-    let tag_clone = tag.clone();
     let tag_for_load = tag.clone();
-    use_effect(move || {
-        let _ = refresh_trigger.read();
-        let hashtag = tag_clone.clone();
+    let tag_display = tag.clone();
+    use_effect(use_reactive!(|(tag, refresh_trigger)| {
+        let _ = refresh_trigger;
+        let hashtag = tag;
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
@@ -42,7 +42,7 @@ pub fn Hashtag(tag: String) -> Element {
                 }
             }
         });
-    });
+    }));
     let load_more = move || {
         if *loading.read() || !*has_more.read() {
             return;
@@ -93,7 +93,7 @@ pub fn Hashtag(tag: String) -> Element {
                 div { class: "px-4 py-3 flex items-center justify-between",
                     div { class: "flex items-center gap-2",
                         span { class: "text-2xl", "#" }
-                        h2 { class: "text-xl font-bold", "{tag}" }
+                        h2 { class: "text-xl font-bold", "{tag_display}" }
                     }
                     button {
                         class: "p-2 hover:bg-accent rounded-full transition disabled:opacity-50",
@@ -117,7 +117,7 @@ pub fn Hashtag(tag: String) -> Element {
                         } else if *loading.read() {
                             "Loading posts..."
                         } else {
-                            "Posts tagged with #{tag}"
+                            "Posts tagged with #{tag_display}"
                         }
                     }
                 }
@@ -163,7 +163,7 @@ pub fn Hashtag(tag: String) -> Element {
                 div { class: "text-center py-12",
                     div { class: "text-6xl mb-4", "#️⃣" }
                     h3 { class: "text-xl font-semibold mb-2", "No posts found" }
-                    p { class: "text-muted-foreground", "Be the first to post with #{tag}" }
+                    p { class: "text-muted-foreground", "Be the first to post with #{tag_display}" }
                 }
             }
         }

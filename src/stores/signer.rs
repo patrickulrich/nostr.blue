@@ -23,8 +23,11 @@ pub enum SignerType {
     #[cfg(feature = "mobile")]
     AndroidSigner(Arc<Nip55Signer>),
 }
+
 impl SignerType {
-    /// Get the public key for this signer
+    /// Get the public key for this signer.
+    /// For Keys signers, returns immediately from memory.
+    /// For external signers, falls back to the async call.
     pub async fn public_key(&self) -> Result<PublicKey, String> {
         match self {
             SignerType::Keys(keys) => Ok(keys.public_key()),

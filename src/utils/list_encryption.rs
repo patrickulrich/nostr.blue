@@ -272,9 +272,7 @@ pub async fn create_people_list(
         }
     }
     let content = if is_private_default {
-        let pubkey = signer
-            .get_public_key()
-            .await
+        let pubkey = crate::stores::nostr_client::get_cached_pubkey()
             .map_err(|e| format!("Failed to get pubkey: {}", e))?;
         signer
             .nip44_encrypt(&pubkey, "[]")

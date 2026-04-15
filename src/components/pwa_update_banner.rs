@@ -44,7 +44,7 @@ pub fn PwaUpdateBanner() -> Element {
         return rsx! {};
     }
     rsx! {
-        div { class: "fixed bottom-20 left-1/2 -translate-x-1/2 z-50 px-4 py-3 bg-primary text-primary-foreground rounded-lg shadow-lg flex items-center gap-3 animate-in slide-in-from-bottom-4 duration-300",
+        div { class: "fixed bottom-safe-banner left-1/2 -translate-x-1/2 z-50 px-4 py-3 bg-primary text-primary-foreground rounded-lg shadow-lg flex items-center gap-3 animate-in slide-in-from-bottom-4 duration-300",
             svg {
                 class: "w-5 h-5 shrink-0",
                 xmlns: "http://www.w3.org/2000/svg",

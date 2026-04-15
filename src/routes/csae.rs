@@ -32,7 +32,10 @@ pub fn Csae() -> Element {
                 Ok(pubkey) => pubkey,
                 Err(e) => {
                     sending.set(false);
-                    send_feedback.set(Some((false, format!("Invalid safety contact pubkey: {}", e))));
+                    send_feedback.set(Some((
+                        false,
+                        format!("Invalid safety contact pubkey: {}", e),
+                    )));
                     return;
                 }
             };

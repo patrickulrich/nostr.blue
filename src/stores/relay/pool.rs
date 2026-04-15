@@ -209,6 +209,5 @@ pub fn default_relay_options() -> RelayOptions {
         .verify_subscriptions(true)
         .ban_relay_on_mismatch(true)
         .adjust_retry_interval(true)
-        .retry_interval(Duration::from_secs(10))
         .reconnect(true)
 }

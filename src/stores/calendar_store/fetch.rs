@@ -141,6 +141,7 @@ pub async fn fetch_all_events_paginated(
     if !cal_ok && !mtg_ok {
         return Err("Both calendar and meeting fetches failed".to_string());
     }
+    all_events = super::dedupe_events_by_coordinate(all_events);
     Ok((all_events, oldest_ts))
 }
 /// Fetch personal calendar events for the signed-in user
@@ -202,9 +203,8 @@ pub async fn fetch_personal_calendar_events() -> StdResult<Vec<UnifiedEvent>, St
         for event in events {
             if let Ok(cal_event) = parse_calendar_event(&event) {
                 let coord = cal_event.coordinate.clone();
-                if seen_coords.insert(coord) {
-                    all_events.push(UnifiedEvent::Calendar(cal_event));
-                }
+                seen_coords.insert(coord);
+                all_events.push(UnifiedEvent::Calendar(cal_event));
             }
         }
     }
@@ -214,9 +214,8 @@ pub async fn fetch_personal_calendar_events() -> StdResult<Vec<UnifiedEvent>, St
         for event in events {
             if let Ok(cal_event) = parse_calendar_event(&event) {
                 let coord = cal_event.coordinate.clone();
-                if seen_coords.insert(coord) {
-                    all_events.push(UnifiedEvent::Calendar(cal_event));
-                }
+                seen_coords.insert(coord);
+                all_events.push(UnifiedEvent::Calendar(cal_event));
             }
         }
     }
@@ -257,7 +256,7 @@ pub async fn fetch_personal_calendar_events() -> StdResult<Vec<UnifiedEvent>, St
         "[calendar_store] Total personal calendar events: {}",
         all_events.len()
     );
-    Ok(all_events)
+    Ok(super::dedupe_events_by_coordinate(all_events))
 }
 /// Helper to fetch a single event by its coordinate (kind:pubkey:d-tag)
 async fn fetch_event_by_coordinate(coordinate: &str) -> StdResult<Option<UnifiedEvent>, String> {
@@ -398,16 +397,14 @@ pub async fn search_calendar_events(
     let events =
         crate::stores::nostr_client::fetch_events_from_relays(filter, Duration::from_secs(10))
             .await?;
-    let mut seen_coords = std::collections::HashSet::new();
     let mut results: Vec<UnifiedEvent> = Vec::new();
     for e in events.iter() {
         if let Ok(cal_event) = parse_calendar_event(e) {
-            if seen_coords.insert(cal_event.coordinate.clone()) {
-                results.push(UnifiedEvent::Calendar(cal_event));
-            }
+            results.push(UnifiedEvent::Calendar(cal_event));
         }
     }
     cache_calendar_events(&events);
+    results = super::dedupe_events_by_coordinate(results);
     results.sort_by_key(|a| a.start_timestamp());
     results.truncate(limit);
     Ok(results)
@@ -480,6 +477,7 @@ pub async fn search_all_events(query: &str, limit: usize) -> StdResult<Vec<Unifi
             }
         }
     }
+    results = super::dedupe_events_by_coordinate(results);
     results.sort_by_key(|e| e.start_timestamp());
     Ok(results)
 }

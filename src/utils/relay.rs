@@ -269,7 +269,10 @@ mod tests {
             vec!["wss://relay.search/".to_string()],
             vec!["ws://localhost:8080/".to_string()],
             vec!["wss://relay.broadcast/".to_string()],
-            vec!["wss://relay.two".to_string(), "wss://relay.broadcast".to_string()],
+            vec![
+                "wss://relay.two".to_string(),
+                "wss://relay.broadcast".to_string(),
+            ],
         );
 
         assert_eq!(

@@ -15,7 +15,6 @@ use std::time::Duration;
 /// Uses the sync state to fetch only new events since the last sync.
 /// On first run or after reset, fetches all events.
 pub async fn fetch_history() -> Result<(), String> {
-    use nostr_sdk::signer::NostrSigner;
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
     let client = nostr_client::NOSTR_CLIENT
         .read()
@@ -68,95 +67,108 @@ pub async fn fetch_history() -> Result<(), String> {
                 .as_nostr_signer();
             let mut history = Vec::new();
             for event in events {
-                match signer.nip44_decrypt(&event.pubkey, &event.content).await {
-                    Ok(decrypted) => match serde_json::from_str::<Vec<Vec<String>>>(&decrypted) {
-                        Ok(pairs) => {
-                            let mut direction = TransactionDirection::In;
-                            let mut amount: Option<u64> = None;
-                            let mut created_tokens = Vec::new();
-                            let mut destroyed_tokens = Vec::new();
-                            for pair in pairs {
-                                let key = match pair.first() {
-                                    Some(k) => k.as_str(),
-                                    None => continue,
-                                };
-                                match key {
-                                    "direction" => {
-                                        if let Some(val) = pair.get(1) {
-                                            direction = if val == "in" {
-                                                TransactionDirection::In
-                                            } else {
-                                                TransactionDirection::Out
-                                            };
-                                        }
-                                    }
-                                    "amount" => {
-                                        if let Some(val) = pair.get(1) {
-                                            match val.parse::<u64>() {
-                                                Ok(parsed_amount) => {
-                                                    amount = Some(parsed_amount);
-                                                }
-                                                Err(e) => {
-                                                    log::error!(
-                                                            "Failed to parse amount in history event {}: '{}' - {}",
-                                                            event.id.to_hex(), val, e
-                                                        );
-                                                }
-                                            }
-                                        }
-                                    }
-                                    "e" => {
-                                        if let (Some(event_id), Some(marker)) =
-                                            (pair.get(1), pair.get(3))
-                                        {
-                                            match marker.as_str() {
-                                                "created" => created_tokens.push(event_id.clone()),
-                                                "destroyed" => {
-                                                    destroyed_tokens.push(event_id.clone())
-                                                }
-                                                _ => {}
-                                            }
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            let redeemed_events: Vec<String> = event
-                                .tags
-                                .iter()
-                                .filter_map(|tag| {
-                                    let vec = tag.clone().to_vec();
-                                    if vec.len() > 3 && vec[0] == "e" && vec[3] == "redeemed" {
-                                        Some(vec[1].clone())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect();
-                            if let Some(parsed_amount) = amount {
-                                history.push(HistoryItem {
-                                    event_id: event.id.to_hex(),
-                                    direction,
-                                    amount: parsed_amount,
-                                    unit: "sat".to_string(),
-                                    created_at: event.created_at.as_secs(),
-                                    created_tokens,
-                                    destroyed_tokens,
-                                    redeemed_events,
-                                });
-                            } else {
-                                log::warn!(
-                                    "Skipping history event {} due to missing or invalid amount",
-                                    event.id.to_hex()
-                                );
-                            }
-                        }
-                        Err(e) => {
-                            log::error!("Failed to parse history event {}: {}", event.id, e);
-                        }
-                    },
+                let decrypted = match super::internal::nip44_decrypt_cached(
+                    signer.clone(),
+                    event.id,
+                    event.pubkey,
+                    event.content.clone(),
+                )
+                .await
+                {
+                    Ok(d) => d,
                     Err(e) => {
-                        log::error!("Failed to decrypt history event {}: {}", event.id, e);
+                        log::error!(
+                            "Failed to decrypt history event {}: {}",
+                            event.id.to_hex(),
+                            e
+                        );
+                        continue;
+                    }
+                };
+                match serde_json::from_str::<Vec<Vec<String>>>(&decrypted) {
+                    Ok(pairs) => {
+                        let mut direction = TransactionDirection::In;
+                        let mut amount: Option<u64> = None;
+                        let mut created_tokens = Vec::new();
+                        let mut destroyed_tokens = Vec::new();
+                        for pair in pairs {
+                            let key = match pair.first() {
+                                Some(k) => k.as_str(),
+                                None => continue,
+                            };
+                            match key {
+                                "direction" => {
+                                    if let Some(val) = pair.get(1) {
+                                        direction = if val == "in" {
+                                            TransactionDirection::In
+                                        } else {
+                                            TransactionDirection::Out
+                                        };
+                                    }
+                                }
+                                "amount" => {
+                                    if let Some(val) = pair.get(1) {
+                                        match val.parse::<u64>() {
+                                            Ok(parsed_amount) => {
+                                                amount = Some(parsed_amount);
+                                            }
+                                            Err(e) => {
+                                                log::error!(
+                                                    "Failed to parse amount in history event {}: '{}' - {}",
+                                                    event.id.to_hex(), val, e
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                                "e" => {
+                                    if let (Some(event_id), Some(marker)) =
+                                        (pair.get(1), pair.get(3))
+                                    {
+                                        match marker.as_str() {
+                                            "created" => created_tokens.push(event_id.clone()),
+                                            "destroyed" => {
+                                                destroyed_tokens.push(event_id.clone())
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        let redeemed_events: Vec<String> = event
+                            .tags
+                            .iter()
+                            .filter_map(|tag| {
+                                let vec = tag.clone().to_vec();
+                                if vec.len() > 3 && vec[0] == "e" && vec[3] == "redeemed" {
+                                    Some(vec[1].clone())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+                        if let Some(parsed_amount) = amount {
+                            history.push(HistoryItem {
+                                event_id: event.id.to_hex(),
+                                direction,
+                                amount: parsed_amount,
+                                unit: "sat".to_string(),
+                                created_at: event.created_at.as_secs(),
+                                created_tokens,
+                                destroyed_tokens,
+                                redeemed_events,
+                            });
+                        } else {
+                            log::warn!(
+                                "Skipping history event {} due to missing or invalid amount",
+                                event.id.to_hex()
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to parse history event {}: {}", event.id, e);
                     }
                 }
             }

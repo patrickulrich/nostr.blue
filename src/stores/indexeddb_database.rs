@@ -477,8 +477,6 @@ const STORE_PENDING_EVENTS: &str = "pending_events";
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const STORE_SYNC_STATE: &str = "sync_state";
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
-const STORE_SHOP_ORDERS: &str = "shop_orders";
-#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const STORE_PENDING_SECRETS: &str = "pending_secrets";
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const STORE_IN_FLIGHT_MELTS: &str = "in_flight_melts";
@@ -541,9 +539,6 @@ impl IndexedDbDatabase {
             }
             if !db.object_store_names().any(|n| n == STORE_SYNC_STATE) {
                 db.create_object_store(STORE_SYNC_STATE)?;
-            }
-            if !db.object_store_names().any(|n| n == STORE_SHOP_ORDERS) {
-                db.create_object_store(STORE_SHOP_ORDERS)?;
             }
             if !db.object_store_names().any(|n| n == STORE_PENDING_SECRETS) {
                 db.create_object_store(STORE_PENDING_SECRETS)?;
@@ -765,39 +760,6 @@ impl IndexedDbDatabase {
     #[allow(dead_code)]
     pub async fn clear_sync_state(&self) -> Result<(), database::Error> {
         self.delete_value(STORE_SYNC_STATE, "current").await
-    }
-    /// Save a shop order to persistent storage
-    pub async fn save_order(
-        &self,
-        order: &crate::utils::nip99::ShopOrder,
-    ) -> Result<(), database::Error> {
-        let key = order.order_id.clone();
-        self.put_value(STORE_SHOP_ORDERS, &key, order).await
-    }
-    /// Get a shop order by ID
-    pub async fn get_order(
-        &self,
-        order_id: &str,
-    ) -> Result<Option<crate::utils::nip99::ShopOrder>, database::Error> {
-        self.get_value(STORE_SHOP_ORDERS, order_id).await
-    }
-    /// Get all shop orders
-    pub async fn get_all_orders(
-        &self,
-    ) -> Result<Vec<crate::utils::nip99::ShopOrder>, database::Error> {
-        self.get_all_values(STORE_SHOP_ORDERS).await
-    }
-    /// Update an existing shop order
-    pub async fn update_order(
-        &self,
-        order: &crate::utils::nip99::ShopOrder,
-    ) -> Result<(), database::Error> {
-        let key = order.order_id.clone();
-        self.put_value(STORE_SHOP_ORDERS, &key, order).await
-    }
-    /// Delete a shop order
-    pub async fn delete_order(&self, order_id: &str) -> Result<(), database::Error> {
-        self.delete_value(STORE_SHOP_ORDERS, order_id).await
     }
     /// Save pending mint secrets with timestamps
     ///

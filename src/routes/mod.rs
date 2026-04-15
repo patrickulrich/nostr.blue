@@ -57,6 +57,7 @@ pub mod voice;
 pub mod webbookmarks;
 pub mod wiki;
 pub mod zapgoals;
+pub mod blobbi;
 use about::About;
 use about_donate::AboutDonate;
 use ai_chat::AIChat;
@@ -136,6 +137,7 @@ use voice::{VoiceMessageDetail, VoiceMessageNew, VoiceMessages};
 use webbookmarks::WebBookmarks;
 use wiki::{WikiAuthor, WikiDetail, WikiHome, WikiNew};
 use zapgoals::{ZapGoalsHome, ZapGoalsNew};
+use blobbi::BlobbiHome;
 /// App routes
 #[derive(Clone, Routable, Debug, PartialEq)]
 #[rustfmt::skip]
@@ -474,6 +476,8 @@ pub enum Route {
     Highlights {},
     #[route("/ai-chat")]
     AIChat {},
+    #[route("/blobbi")]
+    BlobbiHome {},
     #[route("/settings")]
     Settings {},
     #[route("/settings/ai")]
@@ -580,6 +584,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::BibleHome {}
         | Route::Highlights {}
         | Route::AIChat {}
+        | Route::BlobbiHome {}
         | Route::Settings {}
         | Route::WebBookmarks {} => None,
         Route::Search { .. }
@@ -813,7 +818,10 @@ fn Layout() -> Element {
             | Route::VideosLiveTag { .. }
             | Route::LiveStreamDetail { .. }
     );
+    #[cfg(feature = "cashu")]
     let is_wallet_page = matches!(current_route, Route::CashuWallet {});
+    #[cfg(not(feature = "cashu"))]
+    let is_wallet_page = false;
     let is_music_page = matches!(
         current_route,
         Route::MusicHome {}
@@ -1019,7 +1027,7 @@ fn Layout() -> Element {
         || is_topics_page
         || matches!(
             current_route,
-            Route::AboutDonate {} | Route::ZapGoalsHome {} | Route::ZapGoalsNew {}
+            Route::AboutDonate {} | Route::ZapGoalsHome {} | Route::ZapGoalsNew {} | Route::BlobbiHome {}
         );
     let music_player_visible = {
         let state = MUSIC_PLAYER.read();
@@ -1027,7 +1035,11 @@ fn Layout() -> Element {
     };
     rsx! {
         div {
-            class: "min-h-screen bg-background transition-colors",
+            class: "min-h-dynamic-screen bg-background transition-colors",
+            style: format!(
+                "--persistent-player-offset: {}; --mobile-shell-header-height: calc(var(--safe-area-top) + 57px);",
+                if music_player_visible { "6rem" } else { "0px" }
+            ),
             onclick: move |_| {
                 if *sidebar_page.read() != 0 {
                     *sidebar_page.write() = 0;
@@ -1408,16 +1420,12 @@ fn Layout() -> Element {
                     }
                 }
                 main {
-                    class: match (is_wide_page, music_player_visible) {
-                        (true, true) => {
-                            "w-full flex-1 min-w-0 overflow-x-hidden border-r border-border pb-24"
-                        }
-                        (true, false) => "w-full flex-1 min-w-0 overflow-x-hidden border-r border-border",
-                        (false, true) => "w-full max-w-[600px] shrink grow border-r border-border pb-24",
-                        (false, false) => "w-full max-w-[600px] shrink grow border-r border-border",
+                    class: match is_wide_page {
+                        true => "w-full flex-1 min-w-0 overflow-x-hidden border-r border-border pb-safe-player",
+                        false => "w-full max-w-[600px] shrink grow border-r border-border pb-safe-player",
                     },
-                    div { class: "sticky top-0 z-30 bg-background/80 backdrop-blur-sm border-b border-border p-4 lg:hidden",
-                        div { class: "flex items-center justify-between",
+                    div { class: "sticky top-0 z-30 bg-background/80 backdrop-blur-sm border-b border-border lg:hidden pt-safe-top",
+                        div { class: "flex items-center justify-between p-4",
                             button {
                                 class: "p-2 hover:bg-accent rounded-lg",
                                 onclick: move |_| *sidebar_open.write() = true,
@@ -1482,6 +1490,9 @@ fn Layout() -> Element {
             crate::components::PwaUpdateBanner {}
             if *sidebar_customizer_open.read() {
                 crate::components::SidebarCustomizerModal { on_close: move |_| *sidebar_customizer_open.write() = false }
+            }
+            if auth.is_authenticated && crate::components::blobbi::companion::companion_visible() {
+                crate::components::blobbi::companion::CompanionLayer {}
             }
         }
     }

@@ -1,7 +1,7 @@
 use super::timer::PollTimer;
 use crate::components::icons::{BookmarkIcon, MessageCircleIcon, Repeat2Icon, ShareIcon, ZapIcon};
 use crate::components::{CommentComposer, ConfirmModal, ReactionButton, ZapModal};
-use crate::hooks::use_reaction;
+use crate::hooks::{use_reaction, use_relay_subscription};
 use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
 use crate::stores::bookmarks;
@@ -15,13 +15,11 @@ use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use nostr_sdk::{
     nips::nip19::Nip19Event,
     nips::nip88::{Poll, PollResponse, PollType},
-    Event as NostrEvent, EventId, Filter, Kind, PublicKey, RelayPoolNotification, SubscriptionId,
+    Event as NostrEvent, EventId, Filter, Kind, PublicKey,
     TagStandard, Timestamp, ToBech32,
 };
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::time::Duration;
 #[component]
 pub fn PollCard(
@@ -48,9 +46,6 @@ pub fn PollCard(
     let mut selected_options = use_signal(Vec::<String>::new);
     let mut show_results = use_signal(|| false);
     let mut is_voting = use_signal(|| false);
-    let mut vote_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
-    let mut vote_gen = use_signal(|| 0u32);
-    let mut poll_relay_urls: Signal<Vec<nostr_sdk::RelayUrl>> = use_signal(Vec::new);
     // Interaction bar state
     let mut is_reposting = use_signal(|| false);
     let mut is_reposted = use_signal(|| false);
@@ -111,31 +106,16 @@ pub fn PollCard(
             }
         }
     });
-    // Cancellation flag for the notification loop; set synchronously in use_drop
-    let cancelled = use_hook(|| Arc::new(AtomicBool::new(false)));
-    let cancelled_for_loop = cancelled.clone();
-
     use_effect(use_reactive(&poll_data, move |pd| {
         let Some(poll) = pd.read().clone() else {
             return;
         };
         let poll_id = event_id;
-        let cancelled_for_loop = cancelled_for_loop.clone();
-        // Increment generation counter before spawn to guard all mutations
-        let current_vote_gen = vote_gen.peek().wrapping_add(1);
-        vote_gen.set(current_vote_gen);
         spawn(async move {
             loading_votes.set(true);
-            let (ends_at, poll_relays) = (poll.ends_at, poll.relays);
-            let poll_relays_for_sub = poll_relays.clone();
-            // Capture timestamp before fetch so votes created during
-            // the fetch window are not missed on the next poll.
-            let pre_fetch = Timestamp::now();
-            match fetch_poll_votes(poll_id, ends_at, poll_relays, false).await {
+            let ends_at = poll.ends_at;
+            match fetch_poll_votes(poll_id, ends_at, vec![], false).await {
                 Ok(vote_events) => {
-                    if *vote_gen.peek() != current_vote_gen {
-                        return;
-                    }
                     votes.set(vote_events.clone());
                     if let Ok(user_pubkey) = nostr_client::get_cached_pubkey() {
                         let user_pubkey_str = user_pubkey.to_string();
@@ -150,151 +130,39 @@ pub fn PollCard(
                 }
                 Err(e) => log::error!("Failed to fetch votes: {}", e),
             }
-            // Subscribe for real-time vote updates unconditionally
-            // (remove_relay is idempotent; subscribe/unsubscribe are
-            // independent of relay state, so safe after a failed fetch)
-            if *vote_gen.peek() != current_vote_gen {
-                return;
-            }
-            if let Some(client) = nostr_client::get_client() {
-                // Unsubscribe previous vote subscription before creating a new one
-                if let Some(old_sub_id) = vote_sub_id.peek().clone() {
-                    client.unsubscribe(&old_sub_id).await;
-                }
-                // Track only component-owned relays (those we actually added).
-                // On unmount we must only remove relays we added, not ones that
-                // were already connected before this component mounted.
-                if !poll_relays_for_sub.is_empty() {
-                    let old_owned = poll_relay_urls.peek().clone();
-                    let added = relay::add_relays(&client, &poll_relays_for_sub).await;
-                    nostr_client::ensure_relays_ready(&client).await;
-                    // New owned set = previously owned relays still in desired set + newly added
-                    let desired: HashSet<&nostr_sdk::RelayUrl> =
-                        poll_relays_for_sub.iter().collect();
-                    let mut new_owned: Vec<nostr_sdk::RelayUrl> = old_owned
-                        .iter()
-                        .filter(|r| desired.contains(r))
-                        .cloned()
-                        .collect();
-                    for r in &added {
-                        if !new_owned.contains(r) {
-                            new_owned.push(r.clone());
-                        }
-                    }
-                    // Remove previously-owned relays no longer in the desired set
-                    let stale: Vec<nostr_sdk::RelayUrl> = old_owned
-                        .iter()
-                        .filter(|r| !desired.contains(r))
-                        .cloned()
-                        .collect();
-                    if !stale.is_empty() {
-                        relay::remove_relays(&client, &stale).await;
-                    }
-                    poll_relay_urls.set(new_owned);
-                } else {
-                    // No new poll relays; remove any previously-owned ones
-                    let old_owned = poll_relay_urls.peek().clone();
-                    if !old_owned.is_empty() {
-                        relay::remove_relays(&client, &old_owned).await;
-                        poll_relay_urls.set(Vec::new());
-                    }
-                }
-                let since_ts = votes
-                    .read()
-                    .iter()
-                    .map(|v| v.created_at)
-                    .max()
-                    .map(|t| Timestamp::from_secs(t.as_secs().saturating_sub(1)))
-                    .unwrap_or(Timestamp::from_secs(pre_fetch.as_secs().saturating_sub(1)));
-                let mut vote_filter = Filter::new()
-                    .kind(Kind::PollResponse)
-                    .event(poll_id)
-                    .since(since_ts);
-                if let Some(until) = ends_at {
-                    vote_filter = vote_filter.until(until);
-                }
-                match client.subscribe(vote_filter, None).await {
-                    Ok(output) => {
-                        let subscription_id = output.val;
-                        if *vote_gen.peek() != current_vote_gen {
-                            client.unsubscribe(&subscription_id).await;
-                            return;
-                        }
-                        vote_sub_id.set(Some(subscription_id.clone()));
-                        let cancelled_flag = cancelled_for_loop.clone();
-                        spawn(async move {
-                            let mut notifications = client.notifications();
-                            while let Ok(notification) = notifications.recv().await {
-                                if cancelled_flag.load(Ordering::SeqCst) {
-                                    // Component is being dropped; use_drop handles relay cleanup
-                                    break;
-                                }
-                                if *vote_gen.peek() != current_vote_gen {
-                                    break;
-                                }
-                                if let RelayPoolNotification::Event {
-                                    subscription_id: sub_id,
-                                    event: new_vote,
-                                    ..
-                                } = notification
-                                {
-                                    if sub_id == subscription_id {
-                                        let already_exists =
-                                            votes.read().iter().any(|e| e.id == new_vote.id);
-                                        if !already_exists {
-                                            // Check if this is the current user's vote
-                                            if let Ok(current_user_pk) =
-                                                nostr_client::get_cached_pubkey()
-                                            {
-                                                if new_vote.pubkey == current_user_pk {
-                                                    user_vote.set(Some((*new_vote).clone()));
-                                                    show_results.set(true);
-                                                }
-                                            }
-                                            votes.with_mut(|current| {
-                                                current.push((*new_vote).clone());
-                                                let deduped =
-                                                    deduplicate_votes(std::mem::take(current));
-                                                *current = deduped;
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                        });
-                    }
-                    Err(e) => {
-                        log::error!("Failed to subscribe for poll votes: {}", e);
-                    }
-                }
-            }
-            if *vote_gen.peek() == current_vote_gen {
-                loading_votes.set(false);
-            }
+            loading_votes.set(false);
         });
     }));
-    // Cleanup vote subscription and poll relays on unmount.
-    // Set cancellation flag synchronously so the notification loop
-    // can perform async cleanup reliably, rather than relying on
-    // spawned tasks from a synchronous Drop context.
-    use_drop(move || {
-        cancelled.store(true, Ordering::SeqCst);
-        let relays = poll_relay_urls.peek().clone();
-        if let Some(sub_id) = vote_sub_id.peek().clone() {
-            spawn(async move {
-                if let Some(client) = nostr_client::get_client() {
-                    client.unsubscribe(&sub_id).await;
-                    relay::remove_relays(&client, &relays).await;
+
+    {
+        let vote_filter = poll_data.read().clone().map(|poll| {
+            let mut f = Filter::new()
+                .kind(Kind::PollResponse)
+                .event(event_id)
+                .since(Timestamp::now())
+                .limit(0);
+            if let Some(until) = poll.ends_at {
+                f = f.until(until);
+            }
+            f
+        });
+        use_relay_subscription(vote_filter, move |event: &nostr::Event| {
+            let already_exists = votes.read().iter().any(|e| e.id == event.id);
+            if !already_exists {
+                if let Ok(current_user_pk) = nostr_client::get_cached_pubkey() {
+                    if event.pubkey == current_user_pk {
+                        user_vote.set(Some(event.clone()));
+                        show_results.set(true);
+                    }
                 }
-            });
-        } else if !relays.is_empty() {
-            spawn(async move {
-                if let Some(client) = nostr_client::get_client() {
-                    relay::remove_relays(&client, &relays).await;
-                }
-            });
-        }
-    });
+                votes.with_mut(|current| {
+                    current.push(event.clone());
+                    let deduped = deduplicate_votes(std::mem::take(current));
+                    *current = deduped;
+                });
+            }
+        });
+    }
     let results = use_memo(move || {
         let poll = match poll_data.read().clone() {
             Some(p) => p,

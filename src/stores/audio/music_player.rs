@@ -946,6 +946,47 @@ pub fn try_next_stream() -> bool {
     log::info!("Falling back to stream {}/{}", next_idx + 1, total_streams);
     true
 }
+/// Try next available stream when current one fails (mobile/Android)
+/// Returns true if a fallback stream was started, false if all failed
+#[cfg(feature = "mobile")]
+pub fn try_next_stream_mobile() -> bool {
+    let mut state = MUSIC_PLAYER.write();
+    if state.available_streams.is_empty() {
+        return false;
+    }
+    let next_idx = state.current_stream_index + 1;
+    if next_idx >= state.available_streams.len() {
+        state.is_buffering = false;
+        state.playback_error =
+            Some("All streams failed - station may be offline".to_string());
+        return false;
+    }
+    let new_url = state.available_streams[next_idx].clone();
+    let total_streams = state.available_streams.len();
+    state.current_stream_index = next_idx;
+    state.playback_error = None;
+    state.is_buffering = true;
+    if let Some(ref mut track) = state.current_track {
+        track.media_url = new_url;
+    }
+    let playlist = state.playlist.clone();
+    let index = state.current_index;
+    drop(state);
+    log::info!(
+        "Falling back to stream {}/{} on Android",
+        next_idx + 1,
+        total_streams
+    );
+    if let Err(e) = crate::platform::android_media::set_queue(&playlist, index, true) {
+        log::error!("Failed to start Android fallback stream: {}", e);
+        MUSIC_PLAYER.write().playback_error =
+            Some(format!("Fallback stream failed: {}", e));
+        MUSIC_PLAYER.write().is_buffering = false;
+        return false;
+    }
+    true
+}
+
 /// Set available streams for fallback logic
 pub fn set_available_streams(streams: Vec<String>) {
     let mut state = MUSIC_PLAYER.write();
@@ -964,6 +1005,7 @@ pub fn clear_now_playing() {
 
 #[cfg(feature = "mobile")]
 pub fn sync_native_playback_snapshot(snapshot: AndroidPlaybackSnapshot) {
+    let has_error = snapshot.playback_error.is_some();
     let mut state = MUSIC_PLAYER.write();
     if !state.playlist.is_empty() && snapshot.current_index < state.playlist.len() {
         state.current_index = snapshot.current_index;
@@ -985,5 +1027,10 @@ pub fn sync_native_playback_snapshot(snapshot: AndroidPlaybackSnapshot) {
         .unwrap_or(false)
     {
         state.now_playing = None;
+    }
+    if has_error {
+        state.is_buffering = false;
+        drop(state);
+        try_next_stream_mobile();
     }
 }

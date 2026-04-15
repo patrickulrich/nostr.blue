@@ -96,8 +96,9 @@ impl AiProviderConfig {
         matches!(&self.auth, ProviderAuth::PpqManaged { api_key } if api_key.as_deref().unwrap_or("").trim().is_empty())
     }
 
+    #[allow(dead_code)]
     pub fn supports_tools(&self) -> bool {
-        !matches!(self.provider_kind, AiProviderKind::Ppq)
+        true
     }
 
     pub fn authentication_label(&self) -> &'static str {
@@ -382,7 +383,7 @@ mod tests {
     fn ppq_provider_requires_setup_without_key() {
         let provider = ppq_provider(None);
         assert!(provider.requires_setup());
-        assert!(!provider.supports_tools());
+        assert!(provider.supports_tools());
     }
 
     #[test]

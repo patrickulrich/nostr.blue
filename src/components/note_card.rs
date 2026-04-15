@@ -150,6 +150,7 @@ pub fn NoteCard(
     #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
     #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
     #[props(default = None)] on_reply: Option<EventHandler<NostrEvent>>,
+    #[props(default = None)] root_event: Option<NostrEvent>,
 ) -> Element {
     let author_pubkey = event.pubkey.to_string();
     let author_pubkey_like = author_pubkey.clone();
@@ -509,6 +510,7 @@ pub fn NoteCard(
         && !*show_hidden_anyway.read();
     rsx! {
         article {
+            "data-event-id": "{event.id}",
             class: "border-b border-border p-4 hover:bg-accent/50 transition-colors cursor-pointer",
             onclick: move |_evt: MouseEvent| {
                 #[cfg(feature = "web")]
@@ -871,6 +873,7 @@ pub fn NoteCard(
         if *show_reply_modal.read() {
             ReplyComposer {
                 reply_to: event.clone(),
+                root_event: root_event.clone(),
                 on_close: move |_| {
                     show_reply_modal.set(false);
                 },

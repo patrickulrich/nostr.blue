@@ -1,4 +1,5 @@
 use crate::components::{ClientInitializing, MiniLiveStreamCard};
+use crate::hooks::use_relay_subscription;
 use crate::routes::video::live_discovery::{
     filter_live_streams_by_status, load_following_live_streams, load_global_live_streams,
     stream_matches_following, LiveStreamStatusFilter,
@@ -6,8 +7,7 @@ use crate::routes::video::live_discovery::{
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
-use dioxus_core::use_drop;
-use nostr_sdk::{Event, Filter, Kind, RelayPoolNotification, SubscriptionId, TagKind, Timestamp};
+use nostr_sdk::{Event, Filter, Kind, TagKind, Timestamp};
 use std::collections::HashSet;
 
 #[component]
@@ -28,7 +28,6 @@ pub fn VideosLive() -> Element {
     let mut request_id_global = use_signal(|| 0u32);
     let mut last_loaded_following = use_signal(|| (0u32, LiveStreamStatusFilter::Live));
     let mut last_loaded_global = use_signal(|| (0u32, LiveStreamStatusFilter::Live));
-    let mut stream_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
     let mut followed_pubkeys_cache: Signal<Option<HashSet<String>>> = use_signal(|| None);
     use_effect(move || {
         let refresh = *refresh_trigger.read();
@@ -125,80 +124,41 @@ pub fn VideosLive() -> Element {
             }
         });
     });
-    // Set up real-time subscription for stream updates
-    use_effect(move || {
+
+    {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !client_initialized {
-            return;
-        }
-
-        // Only set up once
-        if stream_sub_id.peek().is_some() {
-            return;
-        }
-
-        spawn(async move {
-            if let Some(client) = nostr_client::get_client() {
-                let filter = Filter::new()
+        let stream_filter = if client_initialized {
+            Some(
+                Filter::new()
                     .kind(Kind::Custom(30311))
                     .since(Timestamp::now())
-                    .limit(0);
+                    .limit(0),
+            )
+        } else {
+            None
+        };
+        use_relay_subscription(stream_filter, move |event: &nostr::Event| {
+            let current_filter = *status_filter.peek();
+            let followed = followed_pubkeys_cache.peek().clone();
 
-                match client.subscribe(filter, None).await {
-                    Ok(output) => {
-                        let subscription_id = output.val;
-                        stream_sub_id.set(Some(subscription_id.clone()));
-                        log::debug!("Subscribed for live stream updates");
+            upsert_stream_event(
+                &mut global_streams,
+                event.clone(),
+                current_filter,
+            );
 
-                        let mut notifications = client.notifications();
-                        while let Ok(notification) = notifications.recv().await {
-                            if let RelayPoolNotification::Event {
-                                subscription_id: sub_id,
-                                event,
-                                ..
-                            } = notification
-                            {
-                                if sub_id == subscription_id {
-                                    let current_filter = *status_filter.peek();
-                                    let followed = followed_pubkeys_cache.peek().clone();
-
-                                    // Upsert into global (always)
-                                    upsert_stream_event(
-                                        &mut global_streams,
-                                        (*event).clone(),
-                                        current_filter,
-                                    );
-
-                                    // Upsert into following (if followed)
-                                    if let Some(ref followed_set) = followed {
-                                        if stream_matches_following(&event, followed_set) {
-                                            upsert_stream_event(
-                                                &mut following_streams,
-                                                (*event).clone(),
-                                                current_filter,
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => log::error!("Failed to subscribe for stream updates: {}", e),
+            if let Some(ref followed_set) = followed {
+                if stream_matches_following(event, followed_set) {
+                    upsert_stream_event(
+                        &mut following_streams,
+                        event.clone(),
+                        current_filter,
+                    );
                 }
             }
         });
-    });
-    // Clean up subscription on unmount
-    use_drop(move || {
-        if let Some(sub_id) = stream_sub_id.peek().clone() {
-            spawn(async move {
-                if let Some(client) = nostr_client::get_client() {
-                    client.unsubscribe(&sub_id).await;
-                    log::debug!("Cleaned up stream subscription");
-                }
-            });
-        }
-    });
+    }
+
     let mut load_more_following = move || {
         if *loading_following.read() || !*has_more_following.read() {
             return;

@@ -301,9 +301,7 @@ async fn create_list(
         ));
     }
     let content = if list_type.supports_privacy() && is_private_default {
-        let pubkey = signer
-            .get_public_key()
-            .await
+        let pubkey = crate::stores::nostr_client::get_cached_pubkey()
             .map_err(|e| format!("Failed to get pubkey: {}", e))?;
         signer
             .nip44_encrypt(&pubkey, "[]")

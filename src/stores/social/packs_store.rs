@@ -124,16 +124,27 @@ pub fn get_cached_pack(naddr: &str) -> Option<StarterPack> {
     PACKS_CACHE.read().peek(naddr).cloned()
 }
 
-/// Cache a pack
+/// Cache a pack (only if newer than existing)
 pub fn cache_pack(pack: &StarterPack) {
-    PACKS_CACHE.write().put(pack.naddr.clone(), pack.clone());
+    let mut cache = PACKS_CACHE.write();
+    let should_insert = cache
+        .peek(&pack.naddr)
+        .is_none_or(|existing| pack.created_at > existing.created_at);
+    if should_insert {
+        cache.put(pack.naddr.clone(), pack.clone());
+    }
 }
 
-/// Cache multiple packs
+/// Cache multiple packs (only if newer than existing)
 fn cache_packs(packs: &[StarterPack]) {
     let mut cache = PACKS_CACHE.write();
     for pack in packs {
-        cache.put(pack.naddr.clone(), pack.clone());
+        let should_insert = cache
+            .peek(&pack.naddr)
+            .is_none_or(|existing| pack.created_at > existing.created_at);
+        if should_insert {
+            cache.put(pack.naddr.clone(), pack.clone());
+        }
     }
 }
 
@@ -306,7 +317,7 @@ pub async fn publish_starter_pack(
 
     let d = d_tag.map(|s| s.to_string()).unwrap_or_else(generate_d_tag);
 
-    let mut tags: Vec<Tag> = vec![Tag::identifier(&d), Tag::title(name)];
+    let mut tags: Vec<Tag> = vec![Tag::identifier(&d), Tag::title(name), Tag::alt("Starter pack")];
 
     if let Some(desc) = description {
         if !desc.is_empty() {
@@ -340,18 +351,35 @@ pub async fn publish_starter_pack(
         }
     }
 
-    let builder = EventBuilder::new(Kind::Custom(STARTER_PACK_KIND), "").tags(tags);
+    let builder = EventBuilder::new(Kind::Custom(STARTER_PACK_KIND), "")
+        .tags(tags)
+        .allow_self_tagging();
+    let builder = crate::utils::nips::nip89::tag_event_builder(builder);
+
+    let event = client
+        .sign_event_builder(builder)
+        .await
+        .map_err(|e| format!("Failed to sign starter pack: {}", e))?;
 
     client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+        .pool()
+        .send_event(&event)
         .await
         .map_err(|e| format!("Failed to publish starter pack: {}", e))?;
+
+    if let Some(pack) = StarterPack::from_event(&event) {
+        cache_pack(&pack);
+        log::info!(
+            "Starter pack published: {} ({} members)",
+            pack.naddr,
+            pack.members.len(),
+        );
+        return Ok(pack.naddr);
+    }
 
     let pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
     let naddr =
         crate::stores::nostr_client::make_naddr_with_hints(STARTER_PACK_KIND, &pubkey, &d).await?;
-
-    log::info!("Starter pack published: {}", naddr);
     Ok(naddr)
 }
 

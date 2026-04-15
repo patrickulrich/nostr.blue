@@ -472,13 +472,7 @@ async fn submit_edit_file(
     let (coordinate, _relay_hints) =
         decode_repo_naddr(naddr).map_err(|e| format!("Invalid repository address: {}", e))?;
 
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("Failed to get signer: {}", e))?;
-    let pubkey = signer
-        .get_public_key()
-        .await
+    let pubkey = crate::stores::nostr_client::get_cached_pubkey()
         .map_err(|e| format!("Failed to get public key: {}", e))?;
 
     let diff_content = build_edit_file_diff(
