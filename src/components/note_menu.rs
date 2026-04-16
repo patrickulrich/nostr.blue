@@ -1,4 +1,5 @@
 use crate::components::board::item_selector::PinToBoardModal;
+use crate::components::edit_post::EditPostView;
 use crate::components::icons::MoreHorizontalIcon;
 use crate::components::{AddToListModal, ConfirmModal, ReportModal};
 use crate::routes::Route;
@@ -65,6 +66,7 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
     let mut is_broadcasting = use_signal(|| false);
     let mut show_ai_chat_confirm = use_signal(|| false);
     let mut pending_ai_chat_seed = use_signal(|| None::<AiChatSeedPayload>);
+    let mut show_edit_modal = use_signal(|| false);
     let toast = consume_toast();
     let event = props.event.clone();
     let parsed_author = PublicKey::parse(&props.author_pubkey).ok();
@@ -108,6 +110,7 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
     let event_id_pin_check = event_id.clone();
     let event_id_pin_board = event_id.clone();
     let event_broadcast = event.clone();
+    let event_edit = event.clone();
     let mut follow_state_gen = use_signal(|| 0u32);
     let is_own_note = auth_store::get_pubkey()
         .and_then(|pubkey| PublicKey::parse(&pubkey).ok())
@@ -387,9 +390,9 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                                 }
                             });
                         },
-                        span { class: "text-sm", "AI Chat" }
-                    }
-                    if is_own_note {
+                         span { class: "text-sm", "AI Chat" }
+                     }
+                     if is_own_note {
                         button {
                             class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
                             disabled: *is_broadcasting.read(),
@@ -474,6 +477,17 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                         }
                     }
                     div { class: "h-px bg-border my-1" }
+                    if is_own_note && event.kind == Kind::TextNote {
+                        button {
+                            class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
+                            onclick: move |e: MouseEvent| {
+                                e.stop_propagation();
+                                show_edit_modal.set(true);
+                                is_open.set(false);
+                            },
+                            span { class: "text-sm", "Edit Post" }
+                        }
+                    }
                     button {
                         class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2 text-muted-foreground",
                         onclick: move |e: MouseEvent| {
@@ -563,6 +577,13 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                     pending_ai_chat_seed.set(None);
                     show_ai_chat_confirm.set(false);
                 },
+            }
+        }
+        if *show_edit_modal.read() {
+            EditPostView {
+                original_event: event_edit.clone(),
+                on_close: move |_| show_edit_modal.set(false),
+                on_success: move |_| show_edit_modal.set(false),
             }
         }
     }

@@ -12,6 +12,8 @@ pub mod comment_composer;
 pub mod confirm_modal;
 pub mod content_menu;
 pub mod dvm_selector_modal;
+pub mod edit_post;
+pub mod edit_status;
 pub mod emoji_pack_manager_modal;
 pub mod emoji_picker;
 pub mod external_content_card;
@@ -122,6 +124,9 @@ pub use cashu::{
 };
 pub use content_share_modal::{ContentShareModal, ContentType};
 pub use dvm_selector_modal::DvmSelectorModal;
+#[allow(unused_imports)]
+pub use edit_post::EditPostView;
+pub use edit_status::EditStatus;
 pub use markdown_editor::MarkdownEditor;
 pub use note_menu::NoteMenu;
 pub use nwc_setup_modal::NwcSetupModal;

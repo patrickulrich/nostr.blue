@@ -179,6 +179,7 @@ pub async fn stream_interaction_counts(
             Kind::Reaction,
             Kind::Repost,
             Kind::ZapReceipt,
+            Kind::Custom(1010),
         ])
         .events(event_ids)
         .since(Timestamp::now());
@@ -300,6 +301,11 @@ pub async fn stream_interaction_counts(
                                 &referenced_id[..8.min(referenced_id.len())],
                                 event.kind.as_u16()
                             );
+                        }
+                        if event.kind.as_u16() == 1010 {
+                            if let Ok(original_id) = nostr_sdk::EventId::from_hex(&referenced_id) {
+                                crate::stores::edit_cache::process_edit_event(&original_id, &event);
+                            }
                         }
                     }
                     Ok(false)

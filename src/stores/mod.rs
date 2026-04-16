@@ -53,6 +53,7 @@ pub mod cashu;
 pub mod cashu_cdk_bridge;
 pub mod directory_store;
 pub mod dvm_store;
+pub mod edit_cache;
 pub mod embedding_store;
 pub mod feed_cache;
 pub mod feed_cache_db;

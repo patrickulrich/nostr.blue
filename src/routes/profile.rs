@@ -6,7 +6,7 @@ use crate::components::{
 };
 use crate::hooks::{use_infinite_scroll, use_mute_block_cache};
 use crate::services::profile_stats;
-use crate::stores::{auth_store, dms, nostr_client, pinned_notes};
+use crate::stores::{auth_store, dms, edit_cache, nostr_client, pinned_notes};
 use crate::utils::article_meta::{get_identifier, get_published_at};
 use crate::utils::repost::{expand_events_for_prefetch, extract_reposted_event};
 use crate::utils::video_kinds::{horizontal_kinds, vertical_kinds};
@@ -1162,9 +1162,9 @@ pub fn Profile(pubkey: String) -> Element {
                                         if let Ok(pk) = PublicKey::from_bech32(&pubkey_for_info)
                                             .or_else(|_| PublicKey::from_hex(&pubkey_for_info))
                                         {
-                                            let npub_uri = format!("nostr:{}", pk.to_bech32().unwrap());
+                                            let npub = pk.to_bech32().unwrap();
                                             if let Some(window) = web_sys::window() {
-                                                let _ = window.navigator().clipboard().write_text(&npub_uri);
+                                                let _ = window.navigator().clipboard().write_text(&npub);
                                             }
                                         }
                                     },
@@ -1395,7 +1395,7 @@ fn build_tab_filter(
     let mut filter = match tab {
         ProfileTab::Posts => Filter::new()
             .author(public_key)
-            .kinds(vec![Kind::TextNote, Kind::Repost])
+            .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT)])
             .limit(limit),
         ProfileTab::Replies => Filter::new()
             .author(public_key)
@@ -1430,15 +1430,20 @@ fn build_tab_filter(
 /// Filter and process events based on tab type
 fn process_tab_events(events: Vec<NostrEvent>, tab: &ProfileTab) -> Vec<NostrEvent> {
     match tab {
-        ProfileTab::Posts => events
-            .into_iter()
-            .filter(|e| {
+        ProfileTab::Posts => {
+            let edit_kind = Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT);
+            let (edits, display): (Vec<_>, Vec<_>) = events.into_iter().partition(|e| e.kind == edit_kind);
+            if !edits.is_empty() {
+                let event_map: HashMap<String, NostrEvent> = display.iter().map(|e| (e.id.to_hex(), e.clone())).collect();
+                edit_cache::apply_edits_to_event_map(&edits, &event_map);
+            }
+            display.into_iter().filter(|e| {
                 if e.kind == Kind::Repost {
                     return true;
                 }
                 e.tags.event_ids().next().is_none()
-            })
-            .collect(),
+            }).collect()
+        }
         ProfileTab::Replies => events
             .into_iter()
             .filter(|e| e.kind != Kind::Repost && e.tags.event_ids().next().is_some())
@@ -1698,7 +1703,7 @@ async fn load_tab_events(
             while all_posts.len() < TARGET_COUNT && total_fetched < MAX_FETCH_LIMIT {
                 let mut filter = Filter::new()
                     .author(public_key)
-                    .kinds(vec![Kind::TextNote, Kind::Repost])
+                    .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT)])
                     .limit(100);
                 if let Some(until_ts) = current_until {
                     filter = filter.until(Timestamp::from(until_ts));
@@ -1714,7 +1719,13 @@ async fn load_tab_events(
                 }
                 total_fetched += events_len;
                 let oldest_event_ts = events.last().map(|e| e.created_at.as_secs());
-                let posts: Vec<NostrEvent> = events
+                let edit_kind = Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT);
+                let (edits, display): (Vec<NostrEvent>, Vec<NostrEvent>) = events.into_iter().partition(|e| e.kind == edit_kind);
+                if !edits.is_empty() {
+                    let event_map: HashMap<String, NostrEvent> = display.iter().map(|e| (e.id.to_hex(), e.clone())).collect();
+                    edit_cache::apply_edits_to_event_map(&edits, &event_map);
+                }
+                let posts: Vec<NostrEvent> = display
                     .into_iter()
                     .filter(|e| e.kind == Kind::Repost || e.tags.event_ids().next().is_none())
                     .collect();

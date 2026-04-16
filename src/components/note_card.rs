@@ -3,13 +3,14 @@ use crate::components::icons::{
     Repeat2Icon, RssIcon, ShareIcon, ZapIcon,
 };
 use crate::components::{
-    ConfirmModal, ExternalContentList, NoteMenu, ReactionButton, ReplyComposer, RichContent,
-    ZapModal,
+    ConfirmModal, EditStatus, ExternalContentList, NoteMenu, ReactionButton, ReplyComposer,
+    RichContent, ZapModal,
 };
 use crate::hooks::use_reaction;
 use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
 use crate::stores::bookmarks;
+use crate::stores::edit_cache;
 use crate::stores::nostr_client::{self, delete_repost, get_client, publish_repost, HAS_SIGNER};
 use crate::stores::signer::SIGNER_INFO;
 use crate::utils::{
@@ -601,6 +602,15 @@ pub fn NoteCard(
                                 span { class: "text-muted-foreground text-sm", "·" }
                                 span { class: "text-muted-foreground text-sm", "{timestamp}" }
                                 {
+                                    let _v = edit_cache::EDIT_VERSION.read();
+                                    let edit_info = edit_cache::get_latest_edit(&event_id);
+                                    if let Some(info) = edit_info {
+                                        rsx! { EditStatus { edit_info: info } }
+                                    } else {
+                                        rsx! {}
+                                    }
+                                }
+                                {
                                     if let Some(proxy_info) = nip48::get_proxy_info(&event) {
                                         rsx! {
                                             span { class: "text-muted-foreground text-sm", "·" }
@@ -633,12 +643,22 @@ pub fn NoteCard(
                                 rsx! {}
                             }
                         }
-                        div { class: "mb-3",
-                            RichContent {
-                                content: content.clone(),
-                                tags: event.tags.iter().cloned().collect(),
-                                collapsible,
-                                interactive_media: true,
+                        {
+                            let _v = edit_cache::EDIT_VERSION.read();
+                            let edit_info = edit_cache::get_latest_edit(&event_id);
+                            let display_content = edit_info
+                                .as_ref()
+                                .map(|e| e.edited_content.clone())
+                                .unwrap_or_else(|| content.clone());
+                            rsx! {
+                                div { class: "mb-3",
+                                    RichContent {
+                                        content: display_content,
+                                        tags: event.tags.iter().cloned().collect(),
+                                        collapsible,
+                                        interactive_media: true,
+                                    }
+                                }
                             }
                         }
                         {
