@@ -31,6 +31,11 @@ pub mod aggregation;
 pub mod ai_chat;
 pub mod ai_tools;
 pub mod bible_api;
+pub mod bible_offline;
+#[cfg(feature = "native")]
+pub mod bible_offline_sqlite;
+#[cfg(feature = "web")]
+pub mod bible_offline_indexeddb;
 pub mod geocoding;
 pub mod git_hosting;
 #[cfg(any(feature = "desktop", feature = "mobile_platform"))]

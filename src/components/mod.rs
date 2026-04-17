@@ -13,6 +13,7 @@ pub mod confirm_modal;
 pub mod content_menu;
 pub mod dvm_selector_modal;
 pub mod edit_post;
+pub mod edit_proposal;
 pub mod edit_status;
 pub mod emoji_pack_manager_modal;
 pub mod emoji_picker;
@@ -29,9 +30,12 @@ pub mod mobile_search_slideout;
 pub mod nip_card;
 pub mod note;
 pub mod note_card;
+pub mod bible_commentary_panel;
+pub mod bible_cross_ref_panel;
 pub mod note_composer;
 pub mod note_menu;
 pub mod nwc_setup_modal;
+pub mod offline_download_indicator;
 pub mod password_modal;
 pub mod photo_card;
 pub mod ppq_settings_panel;
@@ -47,11 +51,13 @@ pub mod share_modal;
 pub mod sheet;
 pub mod shop;
 pub mod threaded_comment;
+pub mod text_with_links;
 #[cfg(feature = "cashu")]
 pub mod token_list;
 #[cfg(feature = "cashu")]
 pub mod transaction_history;
 pub mod trending_notes;
+pub mod translation_picker_modal;
 pub mod video_card;
 pub mod virtual_list;
 #[cfg(feature = "cashu")]
@@ -126,6 +132,7 @@ pub use content_share_modal::{ContentShareModal, ContentType};
 pub use dvm_selector_modal::DvmSelectorModal;
 #[allow(unused_imports)]
 pub use edit_post::EditPostView;
+pub use edit_proposal::EditProposalCard;
 pub use edit_status::EditStatus;
 pub use markdown_editor::MarkdownEditor;
 pub use note_menu::NoteMenu;

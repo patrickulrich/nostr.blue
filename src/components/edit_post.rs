@@ -31,9 +31,13 @@ pub fn EditPostView(
     original_event: NostrEvent,
     on_close: EventHandler<()>,
     on_success: EventHandler<NostrEvent>,
+    #[props(default)] prefill_content: Option<String>,
+    #[props(default)] is_proposal: bool,
 ) -> Element {
-    let original_content = original_event.content.clone();
-    let mut content = use_signal(move || original_content);
+    let initial_content = prefill_content
+        .clone()
+        .unwrap_or_else(|| original_event.content.clone());
+    let mut content = use_signal(move || initial_content);
     let mut is_publishing = use_signal(|| false);
     let mut show_media_uploader = use_signal(|| false);
     let mut uploaded_media = use_signal(Vec::<String>::new);
@@ -75,6 +79,32 @@ pub fn EditPostView(
             thread_participants.push(*public_key);
         }
     }
+
+    let title = if is_proposal {
+        "Propose an Edit"
+    } else {
+        "Edit Post"
+    };
+    let subtitle = if is_proposal {
+        format!("Proposing edit for post by @{short_author}")
+    } else {
+        format!("Editing post by @{short_author}")
+    };
+    let placeholder = if is_proposal {
+        "Propose your edit...".to_string()
+    } else {
+        "Edit your post...".to_string()
+    };
+    let save_label = if is_proposal {
+        "Send Proposal"
+    } else {
+        "Save Edit"
+    };
+    let notify_pubkey = if is_proposal {
+        Some(original_event.pubkey)
+    } else {
+        None
+    };
 
     let handle_media_uploaded = move |url: String| {
         uploaded_media.write().push(url);
@@ -144,13 +174,20 @@ pub fn EditPostView(
 
         is_publishing.set(true);
 
-        let original_event_id = original_event.id.to_hex();
         let content_for_publish = content_value.clone();
         let toast_for_async = toast;
         let original_event_clone = original_event.clone();
+        let notify = notify_pubkey;
 
         spawn(async move {
-            match edits::publish_edit(original_event_id.clone(), content_for_publish, None).await {
+            match edits::publish_edit(
+                &original_event_clone,
+                content_for_publish,
+                None,
+                notify,
+            )
+            .await
+            {
                 Ok(result) => {
                     if result.publish.is_success() {
                         log::info!(
@@ -159,7 +196,11 @@ pub fn EditPostView(
                             result.publish.success_count(),
                             result.publish.total_attempted()
                         );
-                        edit_cache::process_edit_event(&original_event_clone.id, &result.event);
+                        edit_cache::process_edit_event(
+                            &original_event_clone.id,
+                            &result.event,
+                            None,
+                        );
                         content.set(String::new());
                         uploaded_media.set(Vec::new());
                         on_success.call(original_event_clone);
@@ -202,7 +243,7 @@ pub fn EditPostView(
                 class: "bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto",
                 onclick: move |e| e.stop_propagation(),
                 div { class: "flex items-center justify-between p-4 border-b border-border",
-                    h3 { class: "text-lg font-bold", "Edit Post" }
+                    h3 { class: "text-lg font-bold", "{title}" }
                     button {
                         class: "p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition",
                         onclick: handle_cancel,
@@ -211,7 +252,7 @@ pub fn EditPostView(
                 }
                 div { class: "p-4 bg-gray-50 dark:bg-gray-900 border-b border-border",
                     div { class: "text-sm text-gray-600 dark:text-gray-400 mb-2",
-                        "Editing post by @{short_author}"
+                        "{subtitle}"
                     }
                     div { class: "text-sm text-gray-700 dark:text-gray-300 line-clamp-3 overflow-hidden",
                         RichContent {
@@ -231,7 +272,7 @@ pub fn EditPostView(
                             on_input: move |new_value: String| {
                                 content.set(new_value);
                             },
-                            placeholder: "Edit your post...".to_string(),
+                            placeholder,
                             rows: 6,
                             disabled: *is_publishing.read(),
                             thread_participants: thread_participants.clone(),
@@ -315,7 +356,7 @@ pub fn EditPostView(
                                         span { class: "inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" }
                                         "Saving..."
                                     } else {
-                                        "Save Edit"
+                                        "{save_label}"
                                     }
                                 }
                             }

@@ -224,7 +224,16 @@ impl MusicTrack {
             } => Some(Route::MusicTrackDetail {
                 track_id: format!("rss:{}:{}", feed_id, episode_id),
             }),
-            // Podcasts and radio use their own detail pages
+            TrackSource::Bible {
+                translation,
+                book,
+                chapter,
+                ..
+            } => Some(Route::BibleChapter {
+                translation: translation.clone(),
+                book: book.clone(),
+                chapter: *chapter,
+            }),
             _ => None,
         }
     }
@@ -320,6 +329,9 @@ pub struct MusicPlayerState {
     /// Now playing metadata from HLS ID3 tags (for radio streams)
     #[serde(skip)]
     pub now_playing: Option<NowPlaying>,
+    /// If true, stop playback when reaching the end of the playlist instead of wrapping
+    #[serde(default)]
+    pub stop_at_end: bool,
 }
 fn default_playback_speed() -> f64 {
     1.0
@@ -344,6 +356,7 @@ impl Default for MusicPlayerState {
             current_stream_index: 0,
             available_streams: Vec::new(),
             now_playing: None,
+            stop_at_end: false,
         }
     }
 }
@@ -370,6 +383,9 @@ pub fn init_player() {
 }
 /// Publish NIP-38 music status (Kind 30315)
 async fn publish_music_status(track: &MusicTrack) {
+    if matches!(track.source, TrackSource::Bible { .. }) {
+        return;
+    }
     if !auth_store::is_authenticated() {
         return;
     }
@@ -457,6 +473,7 @@ async fn publish_music_status(track: &MusicTrack) {
         TrackSource::Radio { d_tag, .. } => {
             format!("https://nostr.blue/radio/{}", urlencoding::encode(d_tag))
         }
+        TrackSource::Bible { .. } => String::new(),
     };
     let mut status = LiveStatus {
         status_type: StatusType::Music,
@@ -556,6 +573,14 @@ pub fn play_or_toggle_track(
         play_track(track, playlist, index_override);
     }
 }
+pub fn append_to_playlist(tracks: Vec<MusicTrack>) {
+    let mut state = MUSIC_PLAYER.write();
+    state.playlist.extend(tracks);
+    #[cfg(feature = "mobile_platform")]
+    if !state.playlist.is_empty() {
+        let _ = android_media::set_queue(&state.playlist, state.current_index, state.is_playing);
+    }
+}
 /// Toggle play/pause
 pub fn toggle_play() {
     let mut state = MUSIC_PLAYER.write();
@@ -586,6 +611,14 @@ pub fn toggle_play() {
 pub fn next_track() {
     let mut state = MUSIC_PLAYER.write();
     if state.playlist.is_empty() {
+        return;
+    }
+    if state.stop_at_end && state.current_index >= state.playlist.len() - 1 {
+        state.is_playing = false;
+        state.is_visible = false;
+        state.current_track = None;
+        #[cfg(feature = "mobile_platform")]
+        let _ = android_media::stop();
         return;
     }
     state.current_index = (state.current_index + 1) % state.playlist.len();
@@ -756,6 +789,9 @@ pub fn hide_zap_dialog() {
 /// Vote for a track using Kind 33169 (Music Vote - addressable, one per user)
 /// Supports both Wavlake and Nostr tracks via TrackSource
 pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
+    if matches!(track.source, TrackSource::Bible { .. }) {
+        return Ok(());
+    }
     if !auth_store::is_authenticated() {
         return Err("You must be logged in to vote".to_string());
     }
@@ -864,6 +900,7 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
             ));
             log::debug!("Voting for radio station: {}", coordinate);
         }
+        TrackSource::Bible { .. } => {}
     }
     let builder = EventBuilder::new(Kind::from(KIND_MUSIC_VOTE), "").tags(tags);
     match client

@@ -67,6 +67,7 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
     let mut show_ai_chat_confirm = use_signal(|| false);
     let mut pending_ai_chat_seed = use_signal(|| None::<AiChatSeedPayload>);
     let mut show_edit_modal = use_signal(|| false);
+    let mut show_propose_modal = use_signal(|| false);
     let toast = consume_toast();
     let event = props.event.clone();
     let parsed_author = PublicKey::parse(&props.author_pubkey).ok();
@@ -488,6 +489,17 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                             span { class: "text-sm", "Edit Post" }
                         }
                     }
+                    if !is_own_note && event.kind == Kind::TextNote {
+                        button {
+                            class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
+                            onclick: move |e: MouseEvent| {
+                                e.stop_propagation();
+                                show_propose_modal.set(true);
+                                is_open.set(false);
+                            },
+                            span { class: "text-sm", "Propose an Edit" }
+                        }
+                    }
                     button {
                         class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2 text-muted-foreground",
                         onclick: move |e: MouseEvent| {
@@ -584,6 +596,14 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                 original_event: event_edit.clone(),
                 on_close: move |_| show_edit_modal.set(false),
                 on_success: move |_| show_edit_modal.set(false),
+            }
+        }
+        if *show_propose_modal.read() {
+            EditPostView {
+                original_event: event_edit.clone(),
+                is_proposal: true,
+                on_close: move |_| show_propose_modal.set(false),
+                on_success: move |_| show_propose_modal.set(false),
             }
         }
     }

@@ -25,6 +25,7 @@ struct PendingProviderStateSave {
 pub enum AiProviderKind {
     Ppq,
     OpenAiCompatible,
+    Anthropic,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -34,6 +35,8 @@ pub struct CustomAiProvider {
     pub base_url: String,
     pub api_key: String,
     pub provider_kind: AiProviderKind,
+    #[serde(default)]
+    pub default_model: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -79,6 +82,7 @@ impl Default for AiProviderState {
 pub enum ProviderAuth {
     PpqManaged { api_key: Option<String> },
     BearerToken(String),
+    XApiKey(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -89,6 +93,7 @@ pub struct AiProviderConfig {
     pub provider_kind: AiProviderKind,
     pub auth: ProviderAuth,
     pub is_builtin: bool,
+    pub default_model: Option<String>,
 }
 
 impl AiProviderConfig {
@@ -105,6 +110,7 @@ impl AiProviderConfig {
         match self.auth {
             ProviderAuth::PpqManaged { .. } => "Managed API Key",
             ProviderAuth::BearerToken(_) => "API Key",
+            ProviderAuth::XApiKey(_) => "API Key",
         }
     }
 }
@@ -127,6 +133,7 @@ pub fn ppq_provider(account: Option<&PpqAccountState>) -> AiProviderConfig {
             }),
         },
         is_builtin: true,
+        default_model: None,
     }
 }
 
@@ -136,13 +143,22 @@ pub fn resolve_providers(state: &AiProviderState) -> Vec<AiProviderConfig> {
         state
             .custom_providers
             .iter()
-            .map(|provider| AiProviderConfig {
-                id: provider.id.clone(),
-                name: provider.name.clone(),
-                base_url: provider.base_url.clone(),
-                provider_kind: provider.provider_kind.clone(),
-                auth: ProviderAuth::BearerToken(provider.api_key.clone()),
-                is_builtin: false,
+            .map(|provider| {
+                let auth = match provider.provider_kind {
+                    AiProviderKind::Anthropic => ProviderAuth::XApiKey(provider.api_key.clone()),
+                    AiProviderKind::Ppq | AiProviderKind::OpenAiCompatible => {
+                        ProviderAuth::BearerToken(provider.api_key.clone())
+                    }
+                };
+                AiProviderConfig {
+                    id: provider.id.clone(),
+                    name: provider.name.clone(),
+                    base_url: provider.base_url.clone(),
+                    provider_kind: provider.provider_kind.clone(),
+                    auth,
+                    is_builtin: false,
+                    default_model: provider.default_model.clone(),
+                }
             }),
     );
     providers
@@ -359,6 +375,7 @@ mod tests {
                 base_url: "https://example.com/v1".to_string(),
                 api_key: "secret".to_string(),
                 provider_kind: AiProviderKind::OpenAiCompatible,
+                default_model: None,
             }],
             ppq_account: Some(PpqAccountState {
                 credit_id: "credit-123".to_string(),
@@ -380,6 +397,30 @@ mod tests {
     }
 
     #[test]
+    fn resolves_anthropic_provider_with_x_api_key_auth() {
+        let state = AiProviderState {
+            selected_provider_id: "anthropic".to_string(),
+            selected_model_by_provider: HashMap::new(),
+            custom_providers: vec![CustomAiProvider {
+                id: "anthropic".to_string(),
+                name: "Anthropic".to_string(),
+                base_url: "https://api.anthropic.com/v1".to_string(),
+                api_key: "sk-ant-123".to_string(),
+                provider_kind: AiProviderKind::Anthropic,
+                default_model: None,
+            }],
+            ppq_account: None,
+        };
+
+        let providers = resolve_providers(&state);
+        assert_eq!(providers.len(), 2);
+        assert!(matches!(providers[1].auth, ProviderAuth::XApiKey(_)));
+        if let ProviderAuth::XApiKey(key) = &providers[1].auth {
+            assert_eq!(key, "sk-ant-123");
+        }
+    }
+
+    #[test]
     fn ppq_provider_requires_setup_without_key() {
         let provider = ppq_provider(None);
         assert!(provider.requires_setup());
@@ -395,6 +436,7 @@ mod tests {
             provider_kind: AiProviderKind::OpenAiCompatible,
             auth: ProviderAuth::BearerToken("secret".to_string()),
             is_builtin: false,
+            default_model: None,
         };
         assert!(provider.supports_tools());
     }
@@ -463,6 +505,7 @@ mod tests {
                 base_url: "https://example.com/v1".to_string(),
                 api_key: "secret-a".to_string(),
                 provider_kind: AiProviderKind::OpenAiCompatible,
+                default_model: None,
             }],
             ppq_account: None,
         };
@@ -475,6 +518,7 @@ mod tests {
                 base_url: "https://example.net/v1".to_string(),
                 api_key: "secret-b".to_string(),
                 provider_kind: AiProviderKind::OpenAiCompatible,
+                default_model: None,
             }],
             ppq_account: None,
         };

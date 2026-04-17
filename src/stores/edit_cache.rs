@@ -14,6 +14,15 @@ pub struct EditInfo {
     pub edit_count: usize,
 }
 
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub struct EditHistoryEntry {
+    pub content: String,
+    pub timestamp: u64,
+    pub event_id: String,
+    pub author: PublicKey,
+}
+
 struct EditCacheInner {
     edits: HashMap<String, EditInfo>,
 }
@@ -30,6 +39,9 @@ fn get_cache() -> &'static Mutex<EditCacheInner> {
 
 pub static EDIT_VERSION: GlobalSignal<u64> = Signal::global(|| 0);
 
+pub static EDIT_HISTORY: GlobalSignal<HashMap<String, Vec<EditHistoryEntry>>> =
+    Signal::global(HashMap::new);
+
 fn bump_version() {
     *EDIT_VERSION.write() += 1;
 }
@@ -39,10 +51,44 @@ pub fn get_latest_edit(note_id: &str) -> Option<EditInfo> {
     cache.edits.get(note_id).cloned()
 }
 
-pub fn process_edit_event(original_note_id: &EventId, edit_event: &NostrEvent) {
+pub fn get_edit_history(note_id: &str) -> Vec<EditHistoryEntry> {
+    EDIT_HISTORY
+        .read()
+        .get(note_id)
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn append_to_history(key: &str, event: &NostrEvent) {
+    let entry = EditHistoryEntry {
+        content: event.content.clone(),
+        timestamp: event.created_at.as_secs(),
+        event_id: event.id.to_hex(),
+        author: event.pubkey,
+    };
+    let mut history = EDIT_HISTORY.write();
+    let entries = history.entry(key.to_string()).or_default();
+    if let Some(_pos) = entries.iter().position(|e| e.event_id == entry.event_id) {
+        return;
+    }
+    entries.push(entry);
+    entries.sort_by_key(|e| e.timestamp);
+}
+
+pub fn process_edit_event(
+    original_note_id: &EventId,
+    edit_event: &NostrEvent,
+    original_author: Option<PublicKey>,
+) {
     if edit_event.kind.as_u16() != KIND_NOTE_EDIT {
         return;
     }
+    if let Some(author) = original_author {
+        if edit_event.pubkey != author {
+            return;
+        }
+    }
+    append_to_history(&original_note_id.to_hex(), edit_event);
     let mut cache = get_cache().lock().unwrap_or_else(|p| p.into_inner());
     let key = original_note_id.to_hex();
     let new_created_at = edit_event.created_at.as_secs();
@@ -83,6 +129,7 @@ pub fn process_edit_events_batch(
                     continue;
                 }
             }
+            append_to_history(&key, event);
             let new_created_at = event.created_at.as_secs();
             let should_update = match cache.edits.get(&key) {
                 Some(existing) => new_created_at > existing.edited_at,
@@ -134,6 +181,9 @@ pub fn apply_edits_to_event_map(
                 .collect();
             if same_author_edits.is_empty() {
                 continue;
+            }
+            for edit in &same_author_edits {
+                append_to_history(&original_id_hex, edit);
             }
             let latest = same_author_edits
                 .iter()

@@ -610,6 +610,10 @@ pub fn PersistentMusicPlayer() -> Element {
             format!("https://nostr.blue/radio/{}", urlencoding::encode(d_tag)),
             ContentType::MusicTrack,
         ),
+        crate::stores::nostr_music::TrackSource::Bible { translation, book, chapter, .. } => (
+            format!("https://nostr.blue/bible/{}/{}/{}", translation, book, chapter),
+            ContentType::BibleVerse,
+        ),
     };
     let progress = if state.duration > 0.0 {
         (state.current_time / state.duration * 100.0).min(100.0)

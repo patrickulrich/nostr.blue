@@ -605,7 +605,7 @@ pub fn NoteCard(
                                     let _v = edit_cache::EDIT_VERSION.read();
                                     let edit_info = edit_cache::get_latest_edit(&event_id);
                                     if let Some(info) = edit_info {
-                                        rsx! { EditStatus { edit_info: info } }
+                                        rsx! { EditStatus { edit_info: info, event_id: event_id.clone() } }
                                     } else {
                                         rsx! {}
                                     }

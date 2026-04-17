@@ -5,16 +5,17 @@
 //! Highlight logic is delegated to the centralized nip84 module.
 #![allow(dead_code)]
 pub use crate::services::bible_api::{
-    fetch_books, fetch_chapter, fetch_translations, filter_english_translations,
-    get_chapter_api_url, sort_translations_by_priority, verse_to_plain_text, Book, ChapterContent,
-    ChapterResponse, Translation, VerseContent,
+    fetch_books, fetch_chapter, fetch_complete_translation, fetch_translations,
+    get_chapter_api_url, group_by_language, sort_translations_by_priority, verse_to_plain_text,
+    Book, ChapterContent, ChapterResponse, Translation, VerseContent,
+    RECOMMENDED_TRANSLATIONS,
 };
 pub use crate::utils::nip84::Highlight as BibleHighlight;
 use crate::utils::nip84::{self, Highlight, HighlightSource};
 use dioxus::prelude::*;
 use lru::LruCache;
 use nostr_sdk::prelude::*;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroUsize;
 type StdResult<T, E> = std::result::Result<T, E>;
 /// Re-export KIND_HIGHLIGHT from nip84 for backwards compatibility
@@ -40,8 +41,11 @@ pub struct ChapterHighlightStats {
 }
 /// All available translations
 pub static TRANSLATIONS: GlobalSignal<Vec<Translation>> = GlobalSignal::new(Vec::new);
-/// English translations only (filtered for UI)
-pub static ENGLISH_TRANSLATIONS: GlobalSignal<Vec<Translation>> = GlobalSignal::new(Vec::new);
+/// All translations sorted by priority (favorites, recommended, alphabetical)
+pub static ALL_TRANSLATIONS: GlobalSignal<Vec<Translation>> = GlobalSignal::new(Vec::new);
+/// Translations grouped by language
+pub static GROUPED_TRANSLATIONS: GlobalSignal<BTreeMap<String, Vec<Translation>>> =
+    GlobalSignal::new(BTreeMap::new);
 /// Currently selected translation
 pub static CURRENT_TRANSLATION: GlobalSignal<String> =
     GlobalSignal::new(|| DEFAULT_TRANSLATION.to_string());
@@ -62,6 +66,15 @@ pub static LOADING_CHAPTER: GlobalSignal<bool> = GlobalSignal::new(|| false);
 pub static LOADING_HIGHLIGHTS: GlobalSignal<bool> = GlobalSignal::new(|| false);
 /// Store initialization flag
 pub static BIBLE_STORE_INITIALIZED: GlobalSignal<bool> = GlobalSignal::new(|| false);
+/// Favorite translation IDs (persisted to local storage)
+pub static FAVORITE_TRANSLATIONS: GlobalSignal<Vec<String>> = Signal::global(|| {
+    crate::platform::storage::get::<Vec<String>>("nostr_blue_bible_favorite_translations")
+        .unwrap_or_default()
+});
+/// Downloaded translation IDs (available offline)
+pub static DOWNLOADED_TRANSLATIONS: GlobalSignal<Vec<String>> = GlobalSignal::new(Vec::new);
+/// Currently downloading translation ID
+pub static DOWNLOAD_IN_PROGRESS: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
 /// Last viewed position (for "Continue Reading" feature)
 /// Tuple: (translation, book_id, book_common_name, chapter)
 pub static LAST_POSITION: GlobalSignal<Option<(String, String, String, u32)>> =
@@ -118,10 +131,14 @@ pub async fn initialize() -> StdResult<(), String> {
     *LOADING_TRANSLATIONS.write() = true;
     let result = async {
         let translations = fetch_translations().await?;
-        let english = filter_english_translations(&translations);
-        let sorted_english = sort_translations_by_priority(english);
-        *ENGLISH_TRANSLATIONS.write() = sorted_english;
+        let favorites = FAVORITE_TRANSLATIONS.read().clone();
+        let sorted = sort_translations_by_priority(translations.clone(), &favorites);
+        let grouped = group_by_language(&sorted);
+        *ALL_TRANSLATIONS.write() = sorted;
+        *GROUPED_TRANSLATIONS.write() = grouped;
         *TRANSLATIONS.write() = translations;
+        let storage = crate::services::bible_offline::offline_storage();
+        *DOWNLOADED_TRANSLATIONS.write() = storage.list_downloaded().await;
         load_books(DEFAULT_TRANSLATION).await?;
         Ok(())
     }
@@ -153,7 +170,7 @@ pub async fn load_books(translation: &str) -> StdResult<Vec<Book>, String> {
         }
     }
 }
-/// Load a chapter (with caching)
+/// Load a chapter (with caching and offline support)
 pub async fn load_chapter(
     translation: &str,
     book: &str,
@@ -167,6 +184,19 @@ pub async fn load_chapter(
             chapter,
         ));
         return Ok(cached.response);
+    }
+    if is_offline_available(translation) {
+        let storage = crate::services::bible_offline::offline_storage();
+        if let Some(data) = storage.load_chapter(translation, book, chapter).await {
+            cache_chapter(translation, book, chapter, data.clone());
+            *LAST_POSITION.write() = Some((
+                translation.to_string(),
+                book.to_string(),
+                data.book.common_name.clone(),
+                chapter,
+            ));
+            return Ok(data);
+        }
     }
     let chapter_key = chapter_cache_key(translation, book, chapter);
     *LATEST_REQUESTED_CHAPTER.write() = chapter_key.clone();
@@ -427,6 +457,53 @@ pub fn search_cached_verses(query: &str, limit: usize) -> Vec<BibleSearchResult>
 pub fn get_translation(id: &str) -> Option<Translation> {
     TRANSLATIONS.read().iter().find(|t| t.id == id).cloned()
 }
+/// Toggle a translation as favorite (persisted to local storage)
+pub fn toggle_favorite(id: &str) {
+    let mut favs = FAVORITE_TRANSLATIONS.write();
+    if let Some(pos) = favs.iter().position(|f| f == id) {
+        favs.remove(pos);
+    } else {
+        favs.push(id.to_string());
+    }
+    let _ = crate::platform::storage::set(
+        "nostr_blue_bible_favorite_translations",
+        &*favs,
+    );
+}
+/// Check if a translation is favorited
+pub fn is_favorite(id: &str) -> bool {
+    FAVORITE_TRANSLATIONS.read().contains(&id.to_string())
+}
+/// Check if a translation is available offline
+pub fn is_offline_available(id: &str) -> bool {
+    DOWNLOADED_TRANSLATIONS.read().contains(&id.to_string())
+}
+/// Download a translation for offline use
+pub async fn download_translation(id: &str) -> StdResult<(), String> {
+    *DOWNLOAD_IN_PROGRESS.write() = Some(id.to_string());
+    let result = download_translation_inner(id).await;
+    if result.is_ok() {
+        let mut downloaded = DOWNLOADED_TRANSLATIONS.write();
+        if !downloaded.contains(&id.to_string()) {
+            downloaded.push(id.to_string());
+        }
+    }
+    *DOWNLOAD_IN_PROGRESS.write() = None;
+    result
+}
+async fn download_translation_inner(id: &str) -> StdResult<(), String> {
+    let complete = fetch_complete_translation(id).await?;
+    let storage = crate::services::bible_offline::offline_storage();
+    storage.save_complete_translation(id, &complete).await?;
+    Ok(())
+}
+/// Remove an offline translation
+pub async fn remove_offline_translation(id: &str) -> StdResult<(), String> {
+    let storage = crate::services::bible_offline::offline_storage();
+    storage.delete_translation(id).await?;
+    DOWNLOADED_TRANSLATIONS.write().retain(|d| d != id);
+    Ok(())
+}
 /// Get book by ID for current translation
 pub fn get_book(book_id: &str) -> Option<Book> {
     CURRENT_BOOKS
@@ -435,8 +512,14 @@ pub fn get_book(book_id: &str) -> Option<Book> {
         .find(|b| b.id == book_id)
         .cloned()
 }
-/// Split books into Old and New Testament
-pub fn split_books_by_testament(books: &[Book]) -> (Vec<Book>, Vec<Book>) {
+/// Split books into Old Testament, New Testament, and Apocrypha
+pub struct TestamentBooks {
+    pub old_testament: Vec<Book>,
+    pub new_testament: Vec<Book>,
+    pub apocrypha: Vec<Book>,
+}
+
+pub fn split_books_by_testament(books: &[Book]) -> TestamentBooks {
     let ot_books: Vec<&str> = vec![
         "GEN", "EXO", "LEV", "NUM", "DEU", "JOS", "JDG", "RUT", "1SA", "2SA", "1KI", "2KI", "1CH",
         "2CH", "EZR", "NEH", "EST", "JOB", "PSA", "PRO", "ECC", "SNG", "ISA", "JER", "LAM", "EZK",
@@ -452,7 +535,16 @@ pub fn split_books_by_testament(books: &[Book]) -> (Vec<Book>, Vec<Book>) {
         .filter(|b| !ot_books.contains(&b.id.as_str()) && b.is_apocryphal != Some(true))
         .cloned()
         .collect();
-    (old_testament, new_testament)
+    let apocrypha: Vec<Book> = books
+        .iter()
+        .filter(|b| b.is_apocryphal == Some(true))
+        .cloned()
+        .collect();
+    TestamentBooks {
+        old_testament,
+        new_testament,
+        apocrypha,
+    }
 }
 /// Format chapter navigation URL (relative path for internal routing)
 pub fn format_bible_url(translation: &str, book: &str, chapter: u32) -> String {
@@ -477,7 +569,10 @@ pub fn clear_store() {
     *CURRENT_BOOKS.write() = Vec::new();
     *LAST_POSITION.write() = None;
     *TRANSLATIONS.write() = Vec::new();
-    *ENGLISH_TRANSLATIONS.write() = Vec::new();
+    *ALL_TRANSLATIONS.write() = Vec::new();
+    *GROUPED_TRANSLATIONS.write() = BTreeMap::new();
+    *DOWNLOADED_TRANSLATIONS.write() = Vec::new();
+    *DOWNLOAD_IN_PROGRESS.write() = None;
     *CURRENT_TRANSLATION.write() = DEFAULT_TRANSLATION.to_string();
     *LOADING_TRANSLATIONS.write() = false;
     *LOADING_BOOKS.write() = false;

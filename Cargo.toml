@@ -1,6 +1,6 @@
 [package]
 name = "nostrblue"
-version = "0.8.5"
+version = "0.8.6"
 edition = "2021"
 rust-version = "1.82"
 authors = ["Patrick Ulrich"]
@@ -26,7 +26,7 @@ desktop = ["dioxus/desktop", "native", "dep:arboard", "dep:rfd", "dep:webbrowser
 mobile = ["dioxus/mobile", "native", "dep:jni", "dep:ndk-context", "cashu", "mobile_platform"]
 native = [
     "dep:nostr-ndb", "dep:cdk-sqlite", "dep:git2",
-    "dep:dirs", "dep:env_logger",
+    "dep:dirs", "dep:env_logger", "dep:rusqlite",
     "tokio/rt-multi-thread", "tokio/fs", "getrandom/std",
 ]
 
@@ -172,6 +172,7 @@ emoji = "0.2"
 
 # Native-only utilities
 dirs = { version = "6.0.0", optional = true }
+rusqlite = { version = "0.31", features = ["bundled"], optional = true }
 git2 = { version = "0.19", optional = true }
 arboard = { version = "3.4", optional = true }
 rfd = { version = "0.15", optional = true }

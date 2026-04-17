@@ -304,7 +304,7 @@ pub async fn stream_interaction_counts(
                         }
                         if event.kind.as_u16() == 1010 {
                             if let Ok(original_id) = nostr_sdk::EventId::from_hex(&referenced_id) {
-                                crate::stores::edit_cache::process_edit_event(&original_id, &event);
+                                crate::stores::edit_cache::process_edit_event(&original_id, &event, None);
                             }
                         }
                     }
