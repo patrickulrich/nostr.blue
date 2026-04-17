@@ -528,11 +528,16 @@ find "$DX_ANDROID" \
 echo ""
 echo "--- Step 1a: Pre-copy Android resources ---"
 mkdir -p "$DX_ANDROID/app/src/main/res/xml"
+mkdir -p "$DX_ANDROID/app/src/main/res/values"
 if cp "$PROJECT_ROOT/android/res/xml/file_paths.xml" "$DX_ANDROID/app/src/main/res/xml/"; then
     echo "Pre-copied file_paths.xml"
 else
     echo "ERROR: Failed to pre-copy file_paths.xml into $DX_ANDROID/app/src/main/res/xml/" >&2
     exit 1
+fi
+if [ -f "$PROJECT_ROOT/android/res/values/strings.xml" ]; then
+    cp "$PROJECT_ROOT/android/res/values/strings.xml" "$DX_ANDROID/app/src/main/res/values/strings.xml"
+    echo "Pre-copied strings.xml"
 fi
 if copy_overlay_dir \
     "$ANDROID_KOTLIN_SRC/dev/dioxus/main" \

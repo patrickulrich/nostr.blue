@@ -1236,13 +1236,13 @@ fn Layout() -> Element {
                 }
                 if *sidebar_open.read() {
                     div {
-                        class: "fixed inset-0 bg-black/50 z-40 lg:hidden",
+                        class: "fixed inset-0 bg-black/50 z-50 lg:hidden",
                         onclick: move |_| {
                             *sidebar_open.write() = false;
                             *sidebar_page.write() = 0;
                         },
                         aside {
-                            class: "w-64 bg-background h-full overflow-y-auto",
+                            class: "w-64 bg-background h-full overflow-y-auto pt-safe-top",
                             onclick: move |e| e.stop_propagation(),
                             div { class: "p-4 space-y-6",
                                 {

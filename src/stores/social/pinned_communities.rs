@@ -9,6 +9,8 @@
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
+#[cfg(feature = "native")]
+use dioxus_core::spawn_forever;
 use dioxus_stores::Store;
 use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::{EventBuilder, Filter, Kind, PublicKey};
@@ -143,14 +145,12 @@ fn schedule_debounced_publish(pins: Vec<String>) {
     #[cfg(not(feature = "web"))]
     {
         use std::sync::atomic::Ordering;
-        // fetch_add returns previous value, so add 1 to get the new generation
         let captured_gen = GENERATION_COUNTER
             .fetch_add(1, Ordering::SeqCst)
             .wrapping_add(1);
         let delay_ms = 1000;
-        crate::platform::spawn::spawn_detached(async move {
+        spawn_forever(async move {
             crate::platform::timer::sleep_ms(delay_ms).await;
-            // Only publish if generation hasn't changed (debounce protects against stale calls)
             if captured_gen == GENERATION_COUNTER.load(Ordering::SeqCst) {
                 publish_with_retry(pins, captured_gen, 0).await;
             }
