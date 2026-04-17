@@ -101,14 +101,12 @@ pub fn PersistentMusicPlayer() -> Element {
         (&state.current_track, &state.is_playing),
         move |(current_track, is_playing)| {
             native_source_bound.set(false);
-            let previous_bind_token = *native_bind_token.peek();
             let bind_token = native_bind_token.with_mut(|token| {
                 *token = token.wrapping_add(1);
                 *token
             });
 
             let Some(track) = current_track.as_ref() else {
-                let bind_token = previous_bind_token;
                 spawn(async move {
                     let audio_id_json = serde_json::to_string(&"global-music-player-audio")
                         .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
@@ -117,8 +115,6 @@ pub fn PersistentMusicPlayer() -> Element {
                         (function() {{
                             let audio = document.getElementById({audio_id});
                             if (!audio) return;
-                            let currentToken = audio.dataset.bindToken ? parseInt(audio.dataset.bindToken, 10) : 0;
-                            if (currentToken !== {bind_token}) return;
                             audio.pause();
                             audio.src = "";
                             audio.currentTime = 0;
@@ -131,7 +127,6 @@ pub fn PersistentMusicPlayer() -> Element {
                         }})();
                         "#,
                         audio_id = audio_id_json,
-                        bind_token = bind_token,
                     );
                     let _ = document::eval(&script).await;
                 });
