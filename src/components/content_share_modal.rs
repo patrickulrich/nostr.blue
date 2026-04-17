@@ -338,7 +338,7 @@ pub fn ContentShareModal(
     };
     rsx! {
         div {
-            class: "fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4",
+            class: "fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4",
             onclick: move |_| {
                 if !*is_publishing.read() {
                     on_close.call(());

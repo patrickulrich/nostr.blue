@@ -1,6 +1,6 @@
 use crate::components::icons::{
     BlueskyIcon, BookmarkIcon, ExternalLinkIcon, GlobeIcon, MastodonIcon, MessageCircleIcon,
-    Repeat2Icon, RssIcon, ShareIcon, ZapIcon,
+    Repeat2Icon, RssIcon, ZapIcon,
 };
 use crate::components::{
     ConfirmModal, EditStatus, ExternalContentList, NoteMenu, ReactionButton, ReplyComposer,
@@ -875,16 +875,7 @@ pub fn NoteCard(
                                     filled: is_bookmarked,
                                 }
                             }
-                            button {
-                                class: "flex items-center text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10 px-2 py-1.5 rounded transition",
-                                onclick: move |e: MouseEvent| {
-                                    e.stop_propagation();
-                                },
-                                ShareIcon {
-                                    class: "h-4 w-4".to_string(),
-                                    filled: false,
-                                }
-                            }
+
                         }
                     }
                 }

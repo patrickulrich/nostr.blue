@@ -3,8 +3,7 @@
 use crate::components::bible_commentary_panel::BibleCommentaryPanel;
 use crate::components::bible_cross_ref_panel::BibleCrossRefPanel;
 use crate::components::content_share_modal::{ContentShareModal, ContentType};
-use crate::components::icons::SparklesIcon;
-use crate::components::offline_download_indicator::DownloadProgressButton;
+use crate::components::icons::{SparklesIcon, VolumeIcon};
 use crate::components::{ConfirmModal, HighlightModal};
 use crate::routes::Route;
 use crate::services::bible_api::format_selected_verses_reference;
@@ -73,6 +72,97 @@ fn parse_chapter_api_link(api_link: &str) -> Option<(String, String, u32)> {
         chapter,
     ))
 }
+#[component]
+fn BibleAudioMenu(
+    audio_links: Option<HashMap<String, String>>,
+    translation: String,
+    book: String,
+    book_name: String,
+    chapter: u32,
+    next_chapter_api_link: Option<String>,
+) -> Element {
+    let links = match &audio_links {
+        Some(l) if !l.is_empty() => l,
+        _ => return VNode::empty(),
+    };
+
+    let mut is_open = use_signal(|| false);
+
+    rsx! {
+        div { class: "relative",
+            button {
+                class: "p-1.5 hover:bg-muted rounded-lg transition text-muted-foreground",
+                title: "Audio",
+                onclick: move |evt: MouseEvent| {
+                    evt.stop_propagation();
+                    is_open.toggle();
+                },
+                VolumeIcon { class: "w-4 h-4".to_string() }
+            }
+
+            if is_open() {
+                div {
+                    class: "fixed inset-0 z-40",
+                    onclick: move |evt: MouseEvent| {
+                        evt.stop_propagation();
+                        is_open.set(false);
+                    },
+                }
+
+                div { class: "absolute right-0 mt-2 w-56 bg-background border border-border rounded-lg shadow-lg z-50 py-1",
+                    p { class: "px-4 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide", "Audio Versions" }
+                    div { class: "h-px bg-border mx-2 my-1" }
+
+                    for (reader, url) in links.iter() {
+                        {
+                            let url_clone = url.clone();
+                            let reader_clone = reader.clone();
+                            let trans_id = translation.clone();
+                            let book_id = book.clone();
+                            let b_name = book_name.clone();
+                            let next_link = next_chapter_api_link.clone();
+                            let reader_label = reader.clone();
+                            rsx! {
+                                button {
+                                    key: "{reader}",
+                                    class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2.5",
+                                    onclick: move |evt: MouseEvent| {
+                                        evt.stop_propagation();
+                                        is_open.set(false);
+                                        play_bible_chapter_audio(
+                                            &trans_id,
+                                            &book_id,
+                                            &b_name,
+                                            chapter,
+                                            &reader_clone,
+                                            &url_clone,
+                                        );
+                                        if let Some(ref nl) = next_link {
+                                            spawn_prefetch_bible_audio(
+                                                nl.clone(),
+                                                reader_clone.clone(),
+                                                trans_id.clone(),
+                                                3,
+                                            );
+                                        }
+                                    },
+                                    svg {
+                                        class: "w-4 h-4 text-muted-foreground shrink-0",
+                                        view_box: "0 0 24 24",
+                                        fill: "currentColor",
+                                        polygon { points: "8,5 19,12 8,19" }
+                                    }
+                                    span { class: "text-sm", "{reader_label}" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Bible Chapter Reading View
 #[component]
 pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element {
@@ -257,7 +347,16 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                             }
                         }
                         div { class: "flex gap-1 items-center",
-                            DownloadProgressButton { translation_id: translation_for_display.clone() }
+                            if let Some(Ok(data)) = &*chapter_data.read() {
+                                BibleAudioMenu {
+                                    audio_links: data.this_chapter_audio_links.clone(),
+                                    translation: translation_for_display.clone(),
+                                    book: book.clone(),
+                                    book_name: data.book.common_name.clone(),
+                                    chapter: chapter,
+                                    next_chapter_api_link: data.next_chapter_api_link.clone(),
+                                }
+                            }
                             if let Some(Ok(data)) = &*chapter_data.read() {
                                 if let Some(ref prev_link) = data.previous_chapter_api_link {
                                     if let Some((prev_trans, prev_book, prev_ch)) = parse_chapter_api_link(prev_link) {
@@ -363,7 +462,6 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                             let is_rtl = data.translation.text_direction == "rtl";
                             let dir_class = if is_rtl { "text-right" } else { "" };
                             let current_tab = active_tab.read().clone();
-                            let audio_links = data.this_chapter_audio_links.clone();
                             rsx! {
                                 if current_tab == "bible" {
                                     div { dir: "{data.translation.text_direction}", class: "prose prose-lg dark:prose-invert max-w-none leading-relaxed {dir_class}",
@@ -448,51 +546,6 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                                 div { key: "fn-{footnote.note_id}",
                                                     span { class: "text-blue-500", "[{footnote.note_id}] " }
                                                     "{footnote.text}"
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                if let Some(ref links) = audio_links {
-                                    if !links.is_empty() {
-                                        div { class: "mt-6 pt-4 border-t border-border",
-                                            p { class: "text-sm font-medium mb-2", "Audio" }
-                                            div { class: "flex flex-wrap gap-2",
-                                                for (reader, url) in links.iter() {
-                                                    {
-                                                        let url_clone = url.clone();
-                                                        let reader_clone = reader.clone();
-                                                        let trans_id = translation.clone();
-                                                        let book_id = book.clone();
-                                                        let book_name = data.book.common_name.clone();
-                                                        let next_link = data.next_chapter_api_link.clone();
-                                                        rsx! {
-                                                            button {
-                                                                key: "{reader}",
-                                                                class: "px-3 py-1.5 text-sm rounded-lg bg-muted/50 hover:bg-muted transition flex items-center gap-1.5",
-                                                                onclick: move |_| {
-                                                                    play_bible_chapter_audio(
-                                                                        &trans_id,
-                                                                        &book_id,
-                                                                        &book_name,
-                                                                        chapter,
-                                                                        &reader_clone,
-                                                                        &url_clone,
-                                                                    );
-                                                                    if let Some(ref nl) = next_link {
-                                                                        spawn_prefetch_bible_audio(nl.clone(), reader_clone.clone(), trans_id.clone(), 3);
-                                                                    }
-                                                                },
-                                                                svg {
-                                                                    class: "w-3.5 h-3.5",
-                                                                    view_box: "0 0 24 24",
-                                                                    fill: "currentColor",
-                                                                    polygon { points: "8,5 19,12 8,19" }
-                                                                }
-                                                                "{reader}"
-                                                            }
-                                                        }
-                                                    }
                                                 }
                                             }
                                         }

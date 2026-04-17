@@ -32,6 +32,27 @@ pub fn platform_android_back_request_count() -> u64 {
 
 #[cfg_attr(not(feature = "mobile_platform"), allow(dead_code))]
 pub fn close_topmost_mobile_overlay() -> bool {
+    if crate::stores::media::LIGHTBOX_STATE.read().is_open {
+        crate::stores::media::close_lightbox();
+        return true;
+    }
+
+    {
+        let player = crate::stores::music_player::MUSIC_PLAYER.read();
+        if player.is_visible
+            && matches!(
+                player.view_mode,
+                crate::stores::music_player::PlayerViewMode::Expanded
+            )
+        {
+            drop(player);
+            crate::stores::music_player::set_view_mode(
+                crate::stores::music_player::PlayerViewMode::Bar,
+            );
+            return true;
+        }
+    }
+
     if *SIDEBAR_CUSTOMIZER_OPEN.read() {
         *SIDEBAR_CUSTOMIZER_OPEN.write() = false;
         return true;

@@ -148,7 +148,7 @@ pub fn PollCreatorModal(show: Signal<bool>, on_poll_created: EventHandler<String
     }
     rsx! {
         div {
-            class: "fixed inset-0 bg-black/50 z-50 flex items-start justify-center overflow-y-auto",
+            class: "fixed inset-0 bg-black/50 z-[80] flex items-start justify-center overflow-y-auto",
             onclick: handle_close,
             div {
                 class: "bg-background border border-border rounded-lg shadow-xl w-full max-w-lg m-4 mt-8 sm:mt-20",

@@ -295,6 +295,14 @@ impl MusicTrack {
         }
     }
 }
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+pub enum PlayerViewMode {
+    #[default]
+    Bar,
+    Expanded,
+    Floating,
+}
+
 /// Music player state
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MusicPlayerState {
@@ -332,6 +340,12 @@ pub struct MusicPlayerState {
     /// If true, stop playback when reaching the end of the playlist instead of wrapping
     #[serde(default)]
     pub stop_at_end: bool,
+    /// Current player view mode (bar / expanded / floating)
+    #[serde(skip)]
+    pub view_mode: PlayerViewMode,
+    /// Position of the floating player pill (x, y) in viewport coordinates
+    #[serde(skip)]
+    pub floating_pos: (f64, f64),
 }
 fn default_playback_speed() -> f64 {
     1.0
@@ -357,6 +371,8 @@ impl Default for MusicPlayerState {
             available_streams: Vec::new(),
             now_playing: None,
             stop_at_end: false,
+            view_mode: PlayerViewMode::Bar,
+            floating_pos: (16.0, 16.0),
         }
     }
 }
@@ -541,6 +557,7 @@ pub fn play_track(
     state.current_index = index;
     state.is_playing = true;
     state.is_visible = true;
+    state.view_mode = PlayerViewMode::Bar;
     state.current_time = 0.0;
     state.now_playing = None;
     log::info!("Playing track: {}", track.title);
@@ -757,6 +774,7 @@ pub fn close_player() {
     let mut state = MUSIC_PLAYER.write();
     state.is_visible = false;
     state.is_playing = false;
+    state.view_mode = PlayerViewMode::Bar;
     #[cfg(feature = "mobile_platform")]
     {
         if let Err(e) = android_media::stop() {
@@ -769,6 +787,22 @@ pub fn close_player() {
     spawn(async move {
         clear_music_status().await;
     });
+}
+pub fn set_view_mode(mode: PlayerViewMode) {
+    let mut state = MUSIC_PLAYER.write();
+    state.view_mode = mode;
+}
+pub fn set_floating_pos(x: f64, y: f64) {
+    let mut state = MUSIC_PLAYER.write();
+    state.floating_pos = (x, y);
+}
+pub fn minimize_to_floating() {
+    let mut state = MUSIC_PLAYER.write();
+    state.view_mode = PlayerViewMode::Floating;
+}
+pub fn restore_from_floating() {
+    let mut state = MUSIC_PLAYER.write();
+    state.view_mode = PlayerViewMode::Bar;
 }
 /// Show zap dialog for a specific track (or current track if None)
 pub fn show_zap_dialog_for_track(track: Option<MusicTrack>) {
