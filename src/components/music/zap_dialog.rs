@@ -201,6 +201,9 @@ pub fn MusicZapDialog() -> Element {
                     )
                     .await
                 }
+                TrackSource::Bible { .. } => {
+                    Err("Bible audio does not support zapping.".to_string())
+                }
             };
             match result {
                 Ok((inv, qr)) => {

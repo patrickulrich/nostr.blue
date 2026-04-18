@@ -4795,7 +4795,7 @@ dependencies = [
 
 [[package]]
 name = "nostrblue"
-version = "0.8.5"
+version = "0.8.6"
 dependencies = [
  "ammonia",
  "arboard",
@@ -4851,6 +4851,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rfd 0.15.4",
+ "rusqlite",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",

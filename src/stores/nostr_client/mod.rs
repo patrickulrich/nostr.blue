@@ -58,6 +58,7 @@ use std::time::Duration;
 mod articles;
 mod contacts;
 mod custom_nips;
+pub mod edits;
 mod error;
 mod fetching;
 mod media;
@@ -90,6 +91,7 @@ pub use custom_nips::{
     fetch_custom_nip_by_naddr, fetch_custom_nips, generate_custom_nip_naddr, publish_custom_nip,
     publish_custom_nip_tracked, search_custom_nips, KIND_CUSTOM_NIP,
 };
+pub use edits::{publish_edit, EditPublishResult};
 pub use error::Error;
 pub use fetching::{
     fetch_events_aggregated, fetch_events_aggregated_outbox, fetch_events_from_connected_relays,

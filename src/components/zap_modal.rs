@@ -258,7 +258,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                         }
                     }
                 }
-                #[cfg(feature = "mobile")]
+                #[cfg(feature = "mobile_platform")]
                 signer::SignerType::AndroidSigner(ref android_signer) => {
                     #[allow(unused_imports)]
                     use nostr::signer::NostrSigner;

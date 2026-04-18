@@ -2,13 +2,13 @@
 #[cfg(all(feature = "web", feature = "desktop"))]
 compile_error!("Cannot enable both 'web' and 'desktop' features");
 
-#[cfg(all(feature = "web", feature = "mobile"))]
+#[cfg(all(feature = "web", feature = "mobile_platform"))]
 compile_error!("Cannot enable both 'web' and 'mobile' features");
 
-#[cfg(all(feature = "desktop", feature = "mobile"))]
+#[cfg(all(feature = "desktop", feature = "mobile_platform"))]
 compile_error!("Cannot enable both 'desktop' and 'mobile' features");
 
-#[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile")))]
+#[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile_platform")))]
 compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature");
 
 pub mod clipboard;
@@ -23,15 +23,15 @@ pub mod timestamp;
 
 pub use lightning::open_lightning_invoice;
 
-#[cfg(feature = "mobile")]
+#[cfg(feature = "mobile_platform")]
 pub mod android_signer;
-#[cfg(feature = "mobile")]
+#[cfg(feature = "mobile_platform")]
 pub use android_signer::{IntentPollResult, Nip55Signer};
 
-#[cfg(feature = "mobile")]
+#[cfg(feature = "mobile_platform")]
 pub mod mobile;
-#[cfg(feature = "mobile")]
+#[cfg(feature = "mobile_platform")]
 pub use mobile::download_file;
 
-#[cfg(feature = "mobile")]
+#[cfg(feature = "mobile_platform")]
 pub mod android_media;

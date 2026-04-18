@@ -6,13 +6,13 @@ use dioxus::prelude::*;
 #[cfg(all(feature = "web", feature = "desktop"))]
 compile_error!("Cannot enable both 'web' and 'desktop' features");
 
-#[cfg(all(feature = "web", feature = "mobile"))]
+#[cfg(all(feature = "web", feature = "mobile_platform"))]
 compile_error!("Cannot enable both 'web' and 'mobile' features");
 
-#[cfg(all(feature = "desktop", feature = "mobile"))]
+#[cfg(all(feature = "desktop", feature = "mobile_platform"))]
 compile_error!("Cannot enable both 'desktop' and 'mobile' features");
 
-#[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile")))]
+#[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile_platform")))]
 compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature");
 
 #[cfg(feature = "web")]
@@ -58,7 +58,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
     let show_server_selector = props.show_server_selector;
     let input_id = props.input_id.clone();
     let input_id_for_handler = input_id.clone();
-    #[cfg(feature = "mobile")]
+    #[cfg(feature = "mobile_platform")]
     let input_id_for_mobile_handler = input_id.clone();
     #[cfg(feature = "desktop")]
     let input_id_for_desktop_handler = input_id.clone();
@@ -85,7 +85,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
                     }
                 }
             }
-            #[cfg(feature = "mobile")]
+            #[cfg(feature = "mobile_platform")]
             {
                 let _ = (evt, input_id);
                 // Mobile uses its dedicated picker button path.
@@ -97,7 +97,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
             }
         });
     };
-    #[cfg(feature = "mobile")]
+    #[cfg(feature = "mobile_platform")]
     let handle_mobile_pick = move |_| {
         let input_id = input_id_for_mobile_handler.clone();
         spawn(async move {
@@ -114,7 +114,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
             }
         });
     };
-    #[cfg(not(feature = "mobile"))]
+    #[cfg(not(feature = "mobile_platform"))]
     let handle_mobile_pick = move |_| {};
     #[cfg(feature = "desktop")]
     let handle_desktop_pick = move |_| {
@@ -178,7 +178,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
         div { class: "space-y-3",
             if selected_file.read().is_none() {
                 div { class: "flex items-center justify-center w-full",
-                    if cfg!(feature = "mobile") {
+                    if cfg!(feature = "mobile_platform") {
                         button {
                             r#type: "button",
                             class: "flex flex-col items-center justify-center w-full h-32 border-2 border-border border-dashed rounded-lg bg-background hover:bg-muted transition",
@@ -357,7 +357,7 @@ async fn read_file_as_bytes(
 }
 
 /// Stub for desktop platforms
-#[cfg(all(feature = "native", not(feature = "mobile")))]
+#[cfg(all(feature = "native", not(feature = "mobile_platform")))]
 async fn read_file_as_bytes(
     _input_id: &str,
     accept: &str,
@@ -387,7 +387,7 @@ async fn read_file_as_bytes(
 }
 
 /// Mobile implementation - uses Android file picker via JNI
-#[cfg(feature = "mobile")]
+#[cfg(feature = "mobile_platform")]
 async fn read_file_as_bytes(
     _input_id: &str,
     accept: &str,
@@ -435,7 +435,7 @@ fn matches_accept_filter(accept: &str, mime_type: &str, filename: &str) -> bool 
     false
 }
 
-#[cfg(all(feature = "native", not(feature = "mobile")))]
+#[cfg(all(feature = "native", not(feature = "mobile_platform")))]
 fn mime_type_from_filename(filename: &str) -> String {
     match filename
         .rsplit('.')
@@ -484,13 +484,13 @@ fn clear_file_input(input_id: &str) {
 }
 
 /// Stub for desktop platforms
-#[cfg(all(feature = "native", not(feature = "mobile")))]
+#[cfg(all(feature = "native", not(feature = "mobile_platform")))]
 fn clear_file_input(_input_id: &str) {
     // No-op on desktop
 }
 
 /// Mobile: no-op (Android handles this differently)
-#[cfg(feature = "mobile")]
+#[cfg(feature = "mobile_platform")]
 fn clear_file_input(_input_id: &str) {
     // No-op on mobile
 }

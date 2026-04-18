@@ -116,7 +116,7 @@ pub fn RadioStationNew() -> Element {
     };
     rsx! {
         div { class: "min-h-screen",
-            div { class: "sticky top-0 z-40 bg-background/80 backdrop-blur-sm border-b border-border",
+            div { class: "sticky top-0 z-30 bg-background/80 backdrop-blur-sm border-b border-border",
                 div { class: "px-4 py-3 flex items-center gap-3",
                     Link {
                         to: Route::RadioHome {},

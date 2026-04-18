@@ -102,14 +102,14 @@ pub fn use_user_lists() -> (
                 | Some(auth_store::LoginMethod::PrivateKey)
                 | Some(auth_store::LoginMethod::RemoteSigner)
         ) || {
-            #[cfg(feature = "mobile")]
+            #[cfg(feature = "mobile_platform")]
             {
                 matches!(
                     auth.login_method,
                     Some(auth_store::LoginMethod::AndroidSigner)
                 )
             }
-            #[cfg(not(feature = "mobile"))]
+            #[cfg(not(feature = "mobile_platform"))]
             {
                 false
             }

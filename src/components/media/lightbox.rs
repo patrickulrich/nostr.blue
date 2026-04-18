@@ -217,7 +217,7 @@ pub fn MediaLightbox() -> Element {
 
     rsx! {
         div {
-            class: "fixed inset-0 z-[120] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4",
+            class: "fixed inset-0 z-[120] bg-black/90 backdrop-blur-sm flex items-center justify-center px-4 pb-4 pt-safe-top",
             onclick: move |_| media::close_lightbox(),
             div {
                 class: "relative flex h-full w-full max-w-7xl flex-col items-center justify-center",

@@ -349,9 +349,10 @@ configure_outputs() {
                 echo "ERROR: ANDROID_GRADLE_VARIANT must be release for Android App Bundles" >&2
                 exit 1
             fi
+            ANDROID_ARTIFACT_NAME="${ANDROID_ARTIFACT_NAME:-nostrblue-release}"
             FINAL_GRADLE_TASK="bundleRelease"
             ARTIFACT_SRC_REL="app/build/outputs/bundle/release/app-release.aab"
-            ARTIFACT_DST="$PROJECT_ROOT/nostrblue-release.aab"
+            ARTIFACT_DST="$PROJECT_ROOT/${ANDROID_ARTIFACT_NAME}.aab"
             ARTIFACT_LABEL="AAB"
             ;;
         *)
@@ -362,12 +363,13 @@ configure_outputs() {
 }
 
 build_dx_android() {
+    ANDROID_FEATURES="${ANDROID_FEATURES:-mobile}"
     local dx_args=(
         build
         --platform android
         --target aarch64-linux-android
         --no-default-features
-        --features mobile
+        --features "$ANDROID_FEATURES"
     )
 
     if [ "$DX_BUILD_PROFILE" = "release" ]; then
@@ -496,6 +498,7 @@ echo "Version: $CARGO_VERSION ($ANDROID_VERSION_CODE)"
 echo "Android SDKs: min=$ANDROID_MIN_SDK target=$ANDROID_TARGET_SDK compile=$ANDROID_COMPILE_SDK"
 echo "Gradle variant: $ANDROID_GRADLE_VARIANT"
 echo "Rust profile: $DX_BUILD_PROFILE"
+echo "Cargo features: ${ANDROID_FEATURES:-mobile}"
 echo "Gradle home: $GRADLE_USER_HOME"
 echo "Android resources: $ANDROID_RES_SRC"
 
@@ -525,11 +528,16 @@ find "$DX_ANDROID" \
 echo ""
 echo "--- Step 1a: Pre-copy Android resources ---"
 mkdir -p "$DX_ANDROID/app/src/main/res/xml"
+mkdir -p "$DX_ANDROID/app/src/main/res/values"
 if cp "$PROJECT_ROOT/android/res/xml/file_paths.xml" "$DX_ANDROID/app/src/main/res/xml/"; then
     echo "Pre-copied file_paths.xml"
 else
     echo "ERROR: Failed to pre-copy file_paths.xml into $DX_ANDROID/app/src/main/res/xml/" >&2
     exit 1
+fi
+if [ -f "$PROJECT_ROOT/android/res/values/strings.xml" ]; then
+    cp "$PROJECT_ROOT/android/res/values/strings.xml" "$DX_ANDROID/app/src/main/res/values/strings.xml"
+    echo "Pre-copied strings.xml"
 fi
 if copy_overlay_dir \
     "$ANDROID_KOTLIN_SRC/dev/dioxus/main" \

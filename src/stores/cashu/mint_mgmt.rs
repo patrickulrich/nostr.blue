@@ -19,6 +19,8 @@ use super::types::{
 use super::utils::{mint_matches, normalize_mint_url, now_secs};
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
+#[cfg(feature = "native")]
+use dioxus_core::spawn_forever;
 use nostr_sdk::{Event, Filter, Kind, PublicKey};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -72,7 +74,7 @@ async fn publish_wallet_snapshot(privkey: &str, mints: &[String]) -> Result<Even
             .sign(&*remote_signer)
             .await
             .map_err(|e| format!("Failed to sign wallet event: {}", e))?,
-        #[cfg(feature = "mobile")]
+        #[cfg(feature = "mobile_platform")]
         crate::stores::signer::SignerType::AndroidSigner(android_signer) => builder
             .sign(&*android_signer)
             .await
@@ -633,7 +635,7 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
         }
     });
     #[cfg(feature = "native")]
-    tokio::task::spawn(async move {
+    spawn_forever(async move {
         if let Err(e) = restore_proofs_from_mint(&mint_url_owned).await {
             log::warn!(
                 "Background restoration failed for {}: {}",

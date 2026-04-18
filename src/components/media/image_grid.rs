@@ -53,7 +53,8 @@ pub fn ImageGrid(props: ImageGridProps) -> Element {
                     ImageTile {
                         image: visible_images[0].clone(),
                         index: 0,
-                        class: "aspect-[4/3] w-full".to_string(),
+                        class: String::new(),
+                        natural: true,
                         overlay_text: None,
                         on_open: props.on_open,
                     }
@@ -125,6 +126,8 @@ struct ImageTileProps {
     class: String,
     #[props(default)]
     overlay_text: Option<String>,
+    #[props(default)]
+    natural: bool,
     on_open: EventHandler<usize>,
 }
 
@@ -138,14 +141,27 @@ fn ImageTile(props: ImageTileProps) -> Element {
         .filter(|alt| !alt.is_empty())
         .unwrap_or_else(|| format!("Image {}", props.index + 1));
     let url_for_error = redact_url_for_logging(&props.image.url);
+    let (outer_class, img_class) = if props.natural {
+        (
+            "group relative overflow-hidden rounded-lg border border-border cursor-pointer"
+                .to_string(),
+            "max-w-full h-auto transition duration-200 group-hover:opacity-90".to_string(),
+        )
+    } else {
+        (
+            format!(
+                "group relative overflow-hidden rounded-lg border border-border bg-muted {}",
+                props.class
+            ),
+            "h-full w-full object-cover transition duration-200 group-hover:scale-[1.02]"
+                .to_string(),
+        )
+    };
 
     rsx! {
         button {
             r#type: "button",
-            class: format!(
-                "group relative overflow-hidden rounded-lg border border-border bg-muted {}",
-                props.class
-            ),
+            class: "{outer_class}",
             onclick: move |evt: MouseEvent| {
                 evt.stop_propagation();
                 props.on_open.call(props.index);
@@ -153,7 +169,7 @@ fn ImageTile(props: ImageTileProps) -> Element {
             img {
                 src: "{props.image.url}",
                 alt: "{alt_text}",
-                class: "h-full w-full object-cover transition duration-200 group-hover:scale-[1.02]",
+                class: "{img_class}",
                 loading: "lazy",
                 onerror: move |_| {
                     log::warn!("Failed to load image: {}", url_for_error);

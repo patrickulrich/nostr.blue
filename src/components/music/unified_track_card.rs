@@ -100,6 +100,7 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
             "bg-orange-500/20 text-orange-400",
         ),
         TrackSource::Radio { .. } => ("LIVE", "Internet Radio", "bg-red-500/20 text-red-400"),
+        TrackSource::Bible { .. } => ("B", "Bible", "bg-blue-500/20 text-blue-400"),
     };
     let artwork_url = track
         .album_art_url
@@ -154,6 +155,10 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
             format!("https://nostr.blue/radio/{}", urlencoding::encode(d_tag)),
             ContentType::MusicTrack,
         ),
+        TrackSource::Bible { translation, book, chapter, .. } => (
+            format!("https://nostr.blue/bible/{}/{}/{}", translation, book, chapter),
+            ContentType::BibleVerse,
+        ),
     };
     let artist_route = match &track.source {
         TrackSource::Wavlake { artist_id, .. } => Some(Route::MusicArtist {
@@ -173,6 +178,11 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
         TrackSource::RssMusic { feed_id, .. } => Some(Route::MusicRssAlbum { feed_id: *feed_id }),
         TrackSource::Radio { pubkey, .. } => Some(Route::Profile {
             pubkey: pubkey.clone(),
+        }),
+        TrackSource::Bible { translation, book, chapter, .. } => Some(Route::BibleChapter {
+            translation: translation.clone(),
+            book: book.clone(),
+            chapter: *chapter,
         }),
     };
     rsx! {
@@ -266,7 +276,8 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
                                 TrackSource::Nostr { .. }
                                 | TrackSource::NostrPodcast { .. }
                                 | TrackSource::RssPodcast { .. }
-                                | TrackSource::Radio { .. } => rsx! {
+                                | TrackSource::Radio { .. }
+                                | TrackSource::Bible { .. } => rsx! {
                                     span { "{album}" }
                                 },
                             }

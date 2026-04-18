@@ -20,7 +20,7 @@ pub async fn copy_to_clipboard(text: &str) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?
     }
-    #[cfg(feature = "mobile")]
+    #[cfg(feature = "mobile_platform")]
     {
         // On mobile, clipboard is handled via WebView's JavaScript bridge
         // Wrap in async IIFE to properly await the clipboard Promise
@@ -30,7 +30,7 @@ pub async fn copy_to_clipboard(text: &str) -> Result<(), String> {
         ));
         eval.await.map(|_| ()).map_err(|e| format!("{e:?}"))
     }
-    #[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile")))]
+    #[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile_platform")))]
     {
         Err("clipboard not supported on this platform".to_string())
     }
@@ -58,7 +58,7 @@ pub async fn read_text_from_clipboard() -> Result<String, String> {
         .await
         .map_err(|e| e.to_string())?
     }
-    #[cfg(feature = "mobile")]
+    #[cfg(feature = "mobile_platform")]
     {
         let eval =
             dioxus::prelude::document::eval("(async () => await navigator.clipboard.readText())()");
@@ -68,7 +68,7 @@ pub async fn read_text_from_clipboard() -> Result<String, String> {
             .map(|s| s.to_string())
             .ok_or_else(|| "No text in clipboard".to_string())
     }
-    #[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile")))]
+    #[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile_platform")))]
     {
         Err("clipboard not supported on this platform".to_string())
     }

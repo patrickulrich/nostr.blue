@@ -1,5 +1,5 @@
 //! Unified signer management for all authentication methods
-#[cfg(feature = "mobile")]
+#[cfg(feature = "mobile_platform")]
 use crate::platform::Nip55Signer;
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
@@ -20,7 +20,7 @@ pub enum SignerType {
     /// Remote signer (NIP-46)
     NostrConnect(Arc<NostrConnect>),
     /// Android signer (NIP-55)
-    #[cfg(feature = "mobile")]
+    #[cfg(feature = "mobile_platform")]
     AndroidSigner(Arc<Nip55Signer>),
 }
 
@@ -46,7 +46,7 @@ impl SignerType {
                     .await
                     .map_err(|e| format!("Failed to get public key from remote signer: {}", e))
             }
-            #[cfg(feature = "mobile")]
+            #[cfg(feature = "mobile_platform")]
             SignerType::AndroidSigner(signer) => {
                 use nostr::signer::NostrSigner;
                 signer
@@ -63,7 +63,7 @@ impl SignerType {
             #[cfg(target_family = "wasm")]
             SignerType::BrowserExtension(_) => "Browser Extension",
             SignerType::NostrConnect(_) => "Remote Signer",
-            #[cfg(feature = "mobile")]
+            #[cfg(feature = "mobile_platform")]
             SignerType::AndroidSigner(_) => "Android Signer",
         }
     }
@@ -75,7 +75,7 @@ impl SignerType {
             #[cfg(target_family = "wasm")]
             SignerType::BrowserExtension(signer) => signer,
             SignerType::NostrConnect(nostr_connect) => nostr_connect,
-            #[cfg(feature = "mobile")]
+            #[cfg(feature = "mobile_platform")]
             SignerType::AndroidSigner(signer) => signer,
         }
     }
@@ -86,7 +86,7 @@ impl SignerType {
             #[cfg(target_family = "wasm")]
             SignerType::BrowserExtension(signer) => signer.clone(),
             SignerType::NostrConnect(nostr_connect) => nostr_connect.clone(),
-            #[cfg(feature = "mobile")]
+            #[cfg(feature = "mobile_platform")]
             SignerType::AndroidSigner(signer) => signer.clone(),
         }
     }
@@ -104,7 +104,7 @@ pub enum SignerBackend {
     #[cfg(target_family = "wasm")]
     BrowserExtension,
     RemoteSigner,
-    #[cfg(feature = "mobile")]
+    #[cfg(feature = "mobile_platform")]
     AndroidSigner,
 }
 impl SignerBackend {
@@ -115,7 +115,7 @@ impl SignerBackend {
             #[cfg(target_family = "wasm")]
             SignerBackend::BrowserExtension => "browser_extension",
             SignerBackend::RemoteSigner => "remote_signer",
-            #[cfg(feature = "mobile")]
+            #[cfg(feature = "mobile_platform")]
             SignerBackend::AndroidSigner => "android_signer",
         }
     }
@@ -133,7 +133,7 @@ pub async fn set_signer(signer: SignerType) -> Result<(), String> {
         #[cfg(target_family = "wasm")]
         SignerType::BrowserExtension(_) => SignerBackend::BrowserExtension,
         SignerType::NostrConnect(_) => SignerBackend::RemoteSigner,
-        #[cfg(feature = "mobile")]
+        #[cfg(feature = "mobile_platform")]
         SignerType::AndroidSigner(_) => SignerBackend::AndroidSigner,
     };
     let info = SignerInfo {
@@ -199,7 +199,7 @@ pub async fn restore_session() -> Result<(), String> {
                 clear_signer();
                 return Err("Remote signer session requires re-login".to_string());
             }
-            #[cfg(feature = "mobile")]
+            #[cfg(feature = "mobile_platform")]
             SignerBackend::AndroidSigner => {
                 let pubkey = PublicKey::parse(&info.public_key)
                     .map_err(|e| format!("Invalid stored public key: {}", e))?;

@@ -69,14 +69,14 @@ pub struct AssistantMessage {
     pub tool_calls: Vec<ToolCall>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(untagged)]
 pub enum AssistantContent {
     Text(String),
     Parts(Vec<AssistantContentPart>),
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AssistantContentPart {
     Text { text: String },
@@ -107,6 +107,265 @@ pub struct ToolCall {
 pub struct ToolCallFunction {
     pub name: String,
     pub arguments: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AnthropicMessagesRequest {
+    model: String,
+    messages: Vec<AnthropicMessage>,
+    max_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<AnthropicToolDef>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "lowercase", tag = "role")]
+enum AnthropicMessage {
+    User {
+        content: serde_json::Value,
+    },
+    Assistant {
+        content: serde_json::Value,
+    },
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AnthropicToolDef {
+    name: String,
+    description: String,
+    input_schema: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct AnthropicMessagesResponse {
+    content: Vec<AnthropicContentBlock>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    stop_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type")]
+enum AnthropicContentBlock {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "tool_use")]
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct AnthropicModelsResponse {
+    data: Vec<AnthropicModel>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    has_more: bool,
+    #[serde(default)]
+    #[allow(dead_code)]
+    last_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct AnthropicModel {
+    id: String,
+    #[serde(default)]
+    display_name: String,
+    #[serde(default)]
+    capabilities: Option<AnthropicModelCapabilities>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct AnthropicModelCapabilities {
+    #[serde(default)]
+    image_input: Option<AnthropicCapabilitySupport>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct AnthropicCapabilitySupport {
+    #[serde(default)]
+    supported: bool,
+}
+
+fn convert_to_anthropic_request(request: &ChatCompletionRequest) -> AnthropicMessagesRequest {
+    let mut system_prompt = None;
+    let mut messages = Vec::new();
+
+    for msg in &request.messages {
+        match msg.role {
+            ChatRole::System => {
+                system_prompt = Some(extract_text_content(&msg.content));
+            }
+            ChatRole::User => {
+                let content = convert_user_content(&msg.content, &msg.tool_call_id);
+                messages.push(AnthropicMessage::User { content });
+            }
+            ChatRole::Assistant => {
+                let content = convert_assistant_content(
+                    &msg.content,
+                    &msg.tool_calls,
+                );
+                messages.push(AnthropicMessage::Assistant { content });
+            }
+            ChatRole::Tool => {
+                if let Some(tool_call_id) = &msg.tool_call_id {
+                    let tool_result_content = extract_text_content(&msg.content);
+                    let content = serde_json::json!([{
+                        "type": "tool_result",
+                        "tool_use_id": tool_call_id,
+                        "content": tool_result_content
+                    }]);
+                    messages.push(AnthropicMessage::User { content });
+                }
+            }
+        }
+    }
+
+    let anthropic_tools = request.tools.as_ref().map(|tools| {
+        tools
+            .iter()
+            .map(|t| AnthropicToolDef {
+                name: t.function.name.clone(),
+                description: t.function.description.clone(),
+                input_schema: t.function.parameters.clone(),
+            })
+            .collect::<Vec<_>>()
+    });
+
+    AnthropicMessagesRequest {
+        model: request.model.clone(),
+        messages,
+        max_tokens: 8192,
+        system: system_prompt,
+        tools: anthropic_tools,
+    }
+}
+
+fn convert_user_content(
+    content: &ChatMessageContent,
+    tool_call_id: &Option<String>,
+) -> serde_json::Value {
+    if let ChatMessageContent::Parts(parts) = content {
+        let blocks: Vec<serde_json::Value> = parts
+            .iter()
+            .map(|part| match part {
+                ChatMessagePart::Text { text } => {
+                    serde_json::json!({"type": "text", "text": text})
+                }
+                ChatMessagePart::ImageUrl { image_url } => {
+                    serde_json::json!({
+                        "type": "image",
+                        "source": {"type": "url", "url": image_url.url}
+                    })
+                }
+            })
+            .collect();
+        if blocks.len() == 1 {
+            return serde_json::Value::Array(blocks);
+        }
+        serde_json::Value::Array(blocks)
+    } else {
+        let text = extract_text_content(content);
+        if let Some(_id) = tool_call_id {
+            serde_json::json!([{"type": "text", "text": text}])
+        } else {
+            serde_json::json!(text)
+        }
+    }
+}
+
+fn convert_assistant_content(
+    content: &ChatMessageContent,
+    tool_calls: &Option<Vec<ToolCall>>,
+) -> serde_json::Value {
+    let mut blocks = Vec::new();
+
+    let text = extract_text_content(content);
+    if !text.is_empty() {
+        blocks.push(serde_json::json!({"type": "text", "text": text}));
+    }
+
+    if let Some(calls) = tool_calls {
+        for tc in calls {
+            let input: serde_json::Value =
+                serde_json::from_str(&tc.function.arguments).unwrap_or(serde_json::json!({}));
+            blocks.push(serde_json::json!({
+                "type": "tool_use",
+                "id": tc.id,
+                "name": tc.function.name,
+                "input": input
+            }));
+        }
+    }
+
+    if blocks.is_empty() {
+        serde_json::json!("")
+    } else if blocks.len() == 1 && tool_calls.is_none() {
+        serde_json::json!(text)
+    } else {
+        serde_json::Value::Array(blocks)
+    }
+}
+
+fn extract_text_content(content: &ChatMessageContent) -> String {
+    match content {
+        ChatMessageContent::Text(text) => text.clone(),
+        ChatMessageContent::Parts(parts) => parts
+            .iter()
+            .filter_map(|p| match p {
+                ChatMessagePart::Text { text } => Some(text.as_str()),
+                ChatMessagePart::ImageUrl { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .join(""),
+    }
+}
+
+fn parse_anthropic_response(response: AnthropicMessagesResponse) -> ChatCompletionResponse {
+    let mut text_parts = Vec::new();
+    let mut tool_calls = Vec::new();
+
+    for block in &response.content {
+        match block {
+            AnthropicContentBlock::Text { text } => text_parts.push(text.clone()),
+            AnthropicContentBlock::ToolUse {
+                id,
+                name,
+                input,
+            } => {
+                tool_calls.push(ToolCall {
+                    id: id.clone(),
+                    function: ToolCallFunction {
+                        name: name.clone(),
+                        arguments: serde_json::to_string(input).unwrap_or_default(),
+                    },
+                });
+            }
+            AnthropicContentBlock::Unknown => {}
+        }
+    }
+
+    let content_str = text_parts.join("");
+    let assistant_message = AssistantMessage {
+        content: if content_str.is_empty() && tool_calls.is_empty() {
+            None
+        } else {
+            Some(AssistantContent::Text(content_str))
+        },
+        tool_calls,
+    };
+
+    ChatCompletionResponse {
+        choices: vec![ChatCompletionChoice {
+            message: assistant_message,
+        }],
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -170,7 +429,23 @@ pub struct GeneratedImage {
 }
 
 pub async fn get_available_models(provider: &AiProviderConfig) -> Result<Vec<ChatModel>, String> {
-    let mut models = fetch_models_from_endpoint(provider, "models").await?;
+    if let Some(ref model_id) = provider.default_model {
+        return Ok(vec![ChatModel {
+            id: model_id.clone(),
+            name: model_id.clone(),
+            description: String::new(),
+            kind: ChatModelKind::Chat,
+            supports_image_input: false,
+            total_cost: None,
+        }]);
+    }
+
+    let mut models = if provider.provider_kind == AiProviderKind::Anthropic {
+        fetch_anthropic_models(provider).await?
+    } else {
+        fetch_models_from_endpoint(provider, "models").await?
+    };
+
     if provider.provider_kind == AiProviderKind::Ppq {
         match fetch_models_from_endpoint(provider, "models?type=image").await {
             Ok(mut image_models) => models.append(&mut image_models),
@@ -191,6 +466,10 @@ pub async fn send_chat_message(
     provider: &AiProviderConfig,
     request: &ChatCompletionRequest,
 ) -> Result<ChatCompletionResponse, String> {
+    if provider.provider_kind == AiProviderKind::Anthropic {
+        return send_anthropic_chat_message(provider, request).await;
+    }
+
     let url = format!("{}/chat/completions", provider.base_url);
     let body = serde_json::to_vec(request)
         .map_err(|e| format!("Failed to serialize chat request: {}", e))?;
@@ -206,6 +485,87 @@ pub async fn send_chat_message(
         .json()
         .await
         .map_err(|e| format!("Failed to parse chat response: {}", e))
+}
+
+async fn send_anthropic_chat_message(
+    provider: &AiProviderConfig,
+    request: &ChatCompletionRequest,
+) -> Result<ChatCompletionResponse, String> {
+    let anthropic_req = convert_to_anthropic_request(request);
+    let url = format!("{}/messages", provider.base_url);
+    let body = serde_json::to_vec(&anthropic_req)
+        .map_err(|e| format!("Failed to serialize Anthropic request: {}", e))?;
+    let response = send_provider_request(provider, Method::POST, &url, Some(body)).await?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("Anthropic request failed ({}): {}", status, body));
+    }
+
+    let body = response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read Anthropic response: {}", e))?;
+    let anthropic_resp: AnthropicMessagesResponse = serde_json::from_str(&body).map_err(|e| {
+        format!(
+            "Failed to parse Anthropic response: {}. Body preview: {}",
+            e,
+            preview_body(&body)
+        )
+    })?;
+
+    Ok(parse_anthropic_response(anthropic_resp))
+}
+
+async fn fetch_anthropic_models(
+    provider: &AiProviderConfig,
+) -> Result<Vec<ChatModel>, String> {
+    let url = format!("{}/models", provider.base_url);
+    let response = send_provider_request(provider, Method::GET, &url, None).await?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!(
+            "Failed to fetch Anthropic models ({}): {}",
+            status, body
+        ));
+    }
+
+    let body = response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read Anthropic models response: {}", e))?;
+    let parsed: AnthropicModelsResponse = serde_json::from_str(&body).map_err(|e| {
+        format!(
+            "Failed to parse Anthropic models response: {}. Body preview: {}",
+            e,
+            preview_body(&body)
+        )
+    })?;
+
+    Ok(parsed
+        .data
+        .into_iter()
+        .map(|model| ChatModel {
+            name: if model.display_name.trim().is_empty() {
+                model.id.clone()
+            } else {
+                model.display_name
+            },
+            id: model.id,
+            description: String::new(),
+            kind: ChatModelKind::Chat,
+            supports_image_input: model
+                .capabilities
+                .as_ref()
+                .and_then(|c| c.image_input.as_ref())
+                .map(|s| s.supported)
+                .unwrap_or(false),
+            total_cost: None,
+        })
+        .collect())
 }
 
 async fn fetch_models_from_endpoint(
@@ -323,6 +683,7 @@ fn is_supported_model(provider: &AiProviderConfig, endpoint: &str, model: &WireM
         AiProviderKind::Ppq | AiProviderKind::OpenAiCompatible => {
             model_kind(provider, endpoint, model).is_some()
         }
+        AiProviderKind::Anthropic => model_kind(provider, endpoint, model).is_some(),
     }
 }
 
@@ -331,6 +692,10 @@ fn model_kind(
     endpoint: &str,
     model: &WireModel,
 ) -> Option<ChatModelKind> {
+    if provider.provider_kind == AiProviderKind::Anthropic {
+        return Some(ChatModelKind::Chat);
+    }
+
     if provider.provider_kind == AiProviderKind::Ppq {
         if endpoint.starts_with("models?type=image") {
             return Some(ChatModelKind::Image);
@@ -534,6 +899,21 @@ async fn send_provider_request(
                 .await
                 .map_err(|e| format!("Failed to send request: {}", e))
         }
+        ProviderAuth::XApiKey(api_key) => {
+            let mut request = client.request(method, url);
+            request = request
+                .header("x-api-key", api_key)
+                .header("anthropic-version", "2023-06-01");
+            if let Some(body_bytes) = body {
+                request = request
+                    .header("Content-Type", "application/json")
+                    .body(body_bytes);
+            }
+            request
+                .send()
+                .await
+                .map_err(|e| format!("Failed to send request: {}", e))
+        }
     }
 }
 
@@ -647,6 +1027,7 @@ mod tests {
             provider_kind: AiProviderKind::OpenAiCompatible,
             auth: ProviderAuth::BearerToken("secret".to_string()),
             is_builtin: false,
+            default_model: None,
         };
         assert!(is_supported_model(
             &provider,
@@ -673,6 +1054,7 @@ mod tests {
             provider_kind: AiProviderKind::OpenAiCompatible,
             auth: ProviderAuth::BearerToken("secret".to_string()),
             is_builtin: false,
+            default_model: None,
         };
         let model = WireModel {
             id: "image-model".to_string(),
@@ -754,6 +1136,7 @@ mod tests {
             provider_kind: AiProviderKind::OpenAiCompatible,
             auth: ProviderAuth::BearerToken("secret".to_string()),
             is_builtin: false,
+            default_model: None,
         };
         let model = WireModel {
             id: "embedding-model".to_string(),
@@ -814,5 +1197,157 @@ mod tests {
             normalize_generated_image_reference(url),
             Some(url.to_string())
         );
+    }
+
+    #[test]
+    fn converts_openai_request_to_anthropic_format() {
+        let request = ChatCompletionRequest {
+            model: "claude-sonnet-4-20250514".to_string(),
+            messages: vec![
+                ChatMessage {
+                    role: ChatRole::System,
+                    content: ChatMessageContent::Text("You are helpful.".to_string()),
+                    tool_call_id: None,
+                    tool_calls: None,
+                },
+                ChatMessage {
+                    role: ChatRole::User,
+                    content: ChatMessageContent::Text("Hello".to_string()),
+                    tool_call_id: None,
+                    tool_calls: None,
+                },
+            ],
+            tools: None,
+        };
+
+        let anthropic_req = convert_to_anthropic_request(&request);
+        assert_eq!(anthropic_req.system, Some("You are helpful.".to_string()));
+        assert_eq!(anthropic_req.max_tokens, 8192);
+        assert_eq!(anthropic_req.messages.len(), 1);
+    }
+
+    #[test]
+    fn converts_tool_calls_to_anthropic_format() {
+        let request = ChatCompletionRequest {
+            model: "claude-sonnet-4-20250514".to_string(),
+            messages: vec![
+                ChatMessage {
+                    role: ChatRole::User,
+                    content: ChatMessageContent::Text("What's the weather?".to_string()),
+                    tool_call_id: None,
+                    tool_calls: None,
+                },
+                ChatMessage {
+                    role: ChatRole::Assistant,
+                    content: ChatMessageContent::Text(String::new()),
+                    tool_call_id: None,
+                    tool_calls: Some(vec![ToolCall {
+                        id: "toolu_123".to_string(),
+                        function: ToolCallFunction {
+                            name: "get_weather".to_string(),
+                            arguments: r#"{"location":"SF"}"#.to_string(),
+                        },
+                    }]),
+                },
+                ChatMessage {
+                    role: ChatRole::Tool,
+                    content: ChatMessageContent::Text("15 degrees".to_string()),
+                    tool_call_id: Some("toolu_123".to_string()),
+                    tool_calls: None,
+                },
+            ],
+            tools: None,
+        };
+
+        let anthropic_req = convert_to_anthropic_request(&request);
+        assert_eq!(anthropic_req.system, None);
+        assert_eq!(anthropic_req.messages.len(), 3);
+    }
+
+    #[test]
+    fn parses_anthropic_response_with_tool_use() {
+        let response = AnthropicMessagesResponse {
+            content: vec![
+                AnthropicContentBlock::Text {
+                    text: "Let me check.".to_string(),
+                },
+                AnthropicContentBlock::ToolUse {
+                    id: "toolu_abc".to_string(),
+                    name: "get_weather".to_string(),
+                    input: serde_json::json!({"location": "SF"}),
+                },
+            ],
+            stop_reason: Some("tool_use".to_string()),
+        };
+
+        let parsed = parse_anthropic_response(response);
+        assert_eq!(parsed.choices.len(), 1);
+        let msg = &parsed.choices[0].message;
+        assert_eq!(msg.tool_calls.len(), 1);
+        assert_eq!(msg.tool_calls[0].id, "toolu_abc");
+        assert_eq!(msg.tool_calls[0].function.name, "get_weather");
+    }
+
+    #[test]
+    fn parses_anthropic_text_only_response() {
+        let response = AnthropicMessagesResponse {
+            content: vec![AnthropicContentBlock::Text {
+                text: "Hello there!".to_string(),
+            }],
+            stop_reason: Some("end_turn".to_string()),
+        };
+
+        let parsed = parse_anthropic_response(response);
+        assert_eq!(parsed.choices.len(), 1);
+        let msg = &parsed.choices[0].message;
+        assert!(msg.tool_calls.is_empty());
+        assert_eq!(
+            msg.content,
+            Some(AssistantContent::Text("Hello there!".to_string()))
+        );
+    }
+
+    #[test]
+    fn converts_tool_definitions_to_anthropic_format() {
+        let request = ChatCompletionRequest {
+            model: "claude-sonnet-4-20250514".to_string(),
+            messages: vec![ChatMessage {
+                role: ChatRole::User,
+                content: ChatMessageContent::Text("test".to_string()),
+                tool_call_id: None,
+                tool_calls: None,
+            }],
+            tools: Some(vec![ToolDefinition {
+                tool_type: "function".to_string(),
+                function: ToolFunction {
+                    name: "get_profile".to_string(),
+                    description: "Get a profile".to_string(),
+                    parameters: serde_json::json!({"type": "object", "properties": {}}),
+                },
+            }]),
+        };
+
+        let anthropic_req = convert_to_anthropic_request(&request);
+        let tools = anthropic_req.tools.unwrap();
+        assert_eq!(tools[0].name, "get_profile");
+        assert_eq!(tools[0].description, "Get a profile");
+    }
+
+    #[tokio::test]
+    async fn returns_default_model_without_fetching() {
+        let provider = AiProviderConfig {
+            id: "custom".to_string(),
+            name: "Custom".to_string(),
+            base_url: "https://example.com/v1".to_string(),
+            provider_kind: AiProviderKind::Anthropic,
+            auth: ProviderAuth::XApiKey("secret".to_string()),
+            is_builtin: false,
+            default_model: Some("claude-sonnet-4-20250514".to_string()),
+        };
+
+        let models = get_available_models(&provider).await.unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "claude-sonnet-4-20250514");
+        assert_eq!(models[0].kind, ChatModelKind::Chat);
     }
 }

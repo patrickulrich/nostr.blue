@@ -1,35 +1,27 @@
 package dev.dioxus.main
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
-import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ServiceInfo
-import android.media.AudioAttributes
-import android.media.AudioFocusRequest
-import android.media.AudioManager
-import android.media.MediaMetadata
-import android.media.MediaPlayer
-import android.media.PlaybackParams
-import android.media.session.MediaSession
-import android.media.session.PlaybackState
-import android.os.Build
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.MediaSession
 import org.json.JSONArray
 import org.json.JSONObject
 import java.lang.ref.WeakReference
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicReference
 
 private const val AUDIO_TAG = "NativeAudio"
-private const val CHANNEL_ID = "nostrblue_media"
-private const val NOTIFICATION_ID = 7001
 
 data class NativeQueueItem(
     val id: String,
@@ -51,63 +43,37 @@ object NativeAudioBridge {
     const val ACTION_STOP = "com.nostr.blue.media.STOP"
 
     private val queue = mutableListOf<NativeQueueItem>()
-    private var player: MediaPlayer? = null
-    private var mediaSession: MediaSession? = null
+    private var player: ExoPlayer? = null
+    @Volatile
+    var mediaSession: MediaSession? = null
+        private set
     private var currentIndex: Int = 0
     private var playWhenReady: Boolean = false
-    private var isPreparing: Boolean = false
-    private var lastDurationSeconds: Double = 0.0
     private val lastError = AtomicReference<String?>(null)
     private var appContext: Context? = null
     private var serviceRef: WeakReference<MediaPlaybackService>? = null
-    private var audioManager: AudioManager? = null
-    private var audioFocusRequest: AudioFocusRequest? = null
-    private var shouldResumeAfterFocusGain: Boolean = false
-    private val audioFocusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
-        synchronized(this) {
-            when (focusChange) {
-                AudioManager.AUDIOFOCUS_GAIN -> {
-                    player?.setVolume(1f, 1f)
-                    if (shouldResumeAfterFocusGain) {
-                        shouldResumeAfterFocusGain = false
-                        playWhenReady = true
-                        when {
-                            player == null -> prepareCurrent(true)
-                            isPreparing -> updatePlaybackState(false, PlaybackState.STATE_BUFFERING)
-                            player?.isPlaying != true -> {
-                                player?.start()
-                                updatePlaybackState(true, PlaybackState.STATE_PLAYING)
-                            }
-                        }
-                        updateNotification()
-                    }
-                }
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                    player?.setVolume(0.2f, 0.2f)
-                }
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                    player?.setVolume(1f, 1f)
-                    val wasPlaying = player?.isPlaying == true || (isPreparing && playWhenReady)
-                    shouldResumeAfterFocusGain = wasPlaying
-                    if (player?.isPlaying == true) {
-                        player?.pause()
-                    }
-                    playWhenReady = false
-                    updatePlaybackState(false, currentPlaybackState())
-                    updateNotification()
-                }
-                AudioManager.AUDIOFOCUS_LOSS -> {
-                    player?.setVolume(1f, 1f)
-                    shouldResumeAfterFocusGain = false
-                    if (player?.isPlaying == true) {
-                        player?.pause()
-                    }
-                    playWhenReady = false
-                    updatePlaybackState(false, currentPlaybackState())
-                    updateNotification()
-                }
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private fun <T> runOnMainThread(block: () -> T): T {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            return block()
+        }
+        var result: T? = null
+        var exception: Exception? = null
+        val latch = CountDownLatch(1)
+        mainHandler.post {
+            try {
+                result = block()
+            } catch (e: Exception) {
+                exception = e
+            } finally {
+                latch.countDown()
             }
         }
+        latch.await()
+        exception?.let { throw it }
+        @Suppress("UNCHECKED_CAST")
+        return result as T
     }
 
     private data class ParsedQueueResult(
@@ -119,7 +85,8 @@ object NativeAudioBridge {
     fun attachService(service: MediaPlaybackService) {
         serviceRef = WeakReference(service)
         ensureInitialized(service.applicationContext)
-        updateNotification()
+        ensurePlayer()
+        mediaSession?.let { service.addSession(it) }
     }
 
     @Synchronized
@@ -131,109 +98,56 @@ object NativeAudioBridge {
 
     @Synchronized
     fun ensureInitialized(context: Context) {
-        val applicationContext = context.applicationContext
-        appContext = applicationContext
-        if (audioManager == null) {
-            audioManager = applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        }
-        ensureChannel(applicationContext)
-        if (mediaSession == null) {
-            mediaSession = MediaSession(applicationContext, "nostrblue-media").apply {
-                setCallback(
-                    object : MediaSession.Callback() {
-                        override fun onPlay() {
-                            play(applicationContext)
-                        }
-
-                        override fun onPause() {
-                            pause(applicationContext)
-                        }
-
-                        override fun onSkipToNext() {
-                            skipNext(applicationContext)
-                        }
-
-                        override fun onSkipToPrevious() {
-                            skipPrevious(applicationContext)
-                        }
-
-                        override fun onSeekTo(pos: Long) {
-                            seekTo(applicationContext, pos)
-                        }
-                    },
-                    Handler(Looper.getMainLooper())
-                )
-                isActive = true
-            }
+        if (appContext == null) {
+            appContext = context.applicationContext
         }
     }
 
-    @Synchronized
-    fun ensureServiceStarted(context: Context) {
+    private fun ensureServiceStarted(context: Context) {
         ensureInitialized(context)
-        val intent = Intent(context, MediaPlaybackService::class.java)
-        ContextCompat.startForegroundService(context, intent)
+        try {
+            val intent = Intent(context, MediaPlaybackService::class.java)
+            ContextCompat.startForegroundService(context, intent)
+        } catch (_: Exception) {}
     }
 
-    @Synchronized
     fun setQueue(context: Context, queueJson: String, startIndex: Int, playWhenReady: Boolean): String {
-        return try {
-            val parsed = parseQueue(queueJson, startIndex)
-            queue.clear()
-            queue.addAll(parsed.items)
-            currentIndex = parsed.adjustedStartIndex.coerceIn(0, (queue.size - 1).coerceAtLeast(0))
-            this.playWhenReady = playWhenReady
-            lastError.set(null)
-            if (queue.isEmpty()) {
-                abandonAudioFocus()
-                resetSnapshotState()
-                releasePlayer()
-                updatePlaybackState(false, PlaybackState.STATE_STOPPED)
-                stopForegroundPlayback()
-            } else {
-                ensureServiceStarted(context)
-                if (playWhenReady && !requestAudioFocus(context)) {
-                    this.playWhenReady = false
-                    lastError.set("Audio focus unavailable")
-                    prepareCurrent(false)
-                    return "error:audio_focus_denied"
+        return runOnMainThread {
+            try {
+                val parsed = parseQueue(queueJson, startIndex)
+                queue.clear()
+                queue.addAll(parsed.items)
+                currentIndex = parsed.adjustedStartIndex.coerceIn(0, (queue.size - 1).coerceAtLeast(0))
+                this.playWhenReady = playWhenReady
+                lastError.set(null)
+                if (queue.isEmpty()) {
+                    resetSnapshotState()
+                    releasePlayer()
+                } else {
+                    ensureServiceStarted(context)
+                    prepareCurrent(this.playWhenReady)
                 }
-                prepareCurrent(this.playWhenReady)
+                "ok"
+            } catch (e: Exception) {
+                Log.e(AUDIO_TAG, "setQueue failed", e)
+                "error:${e.message}"
             }
-            "ok"
-        } catch (e: Exception) {
-            Log.e(AUDIO_TAG, "setQueue failed", e)
-            "error:${e.message}"
         }
     }
 
-    @Synchronized
-    fun play(context: Context): String {
-        return try {
-            if (queue.isEmpty()) return "ok"
+    fun play(context: Context): String = runOnMainThread {
+        try {
+            if (queue.isEmpty()) return@runOnMainThread "ok"
             ensureServiceStarted(context)
-            if (!requestAudioFocus(context)) {
-                lastError.set("Audio focus unavailable")
-                updateNotification()
-                return "error:audio_focus_denied"
-            }
-            if (isPreparing) {
-                playWhenReady = true
-                updatePlaybackState(false, PlaybackState.STATE_BUFFERING)
-                updateNotification()
-                return "ok"
-            }
-            if (player == null) {
+            val p = player
+            if (p == null) {
                 prepareCurrent(true)
-                return "ok"
+                return@runOnMainThread "ok"
             }
-            val player = ensurePlayer()
-            if (!player.isPlaying) {
-                player.start()
+            if (!p.isPlaying) {
+                p.play()
             }
             playWhenReady = true
-            updatePlaybackState(true, PlaybackState.STATE_PLAYING)
-            updateNotification()
             "ok"
         } catch (e: Exception) {
             Log.e(AUDIO_TAG, "play failed", e)
@@ -241,17 +155,11 @@ object NativeAudioBridge {
         }
     }
 
-    @Synchronized
-    fun pause(context: Context): String {
-        return try {
+    fun pause(context: Context): String = runOnMainThread {
+        try {
             ensureInitialized(context)
-            shouldResumeAfterFocusGain = false
             playWhenReady = false
             player?.takeIf { it.isPlaying }?.pause()
-            player?.setVolume(1f, 1f)
-            abandonAudioFocus()
-            updatePlaybackState(false, PlaybackState.STATE_PAUSED)
-            updateNotification()
             "ok"
         } catch (e: Exception) {
             Log.e(AUDIO_TAG, "pause failed", e)
@@ -259,16 +167,11 @@ object NativeAudioBridge {
         }
     }
 
-    @Synchronized
-    fun stop(context: Context): String {
-        return try {
+    fun stop(context: Context): String = runOnMainThread {
+        try {
             ensureInitialized(context)
-            shouldResumeAfterFocusGain = false
             playWhenReady = false
-            abandonAudioFocus()
             releasePlayer()
-            updatePlaybackState(false, PlaybackState.STATE_STOPPED)
-            stopForegroundPlayback()
             "ok"
         } catch (e: Exception) {
             Log.e(AUDIO_TAG, "stop failed", e)
@@ -276,13 +179,12 @@ object NativeAudioBridge {
         }
     }
 
-    @Synchronized
-    fun skipNext(context: Context): String {
-        return try {
+    fun skipNext(context: Context): String = runOnMainThread {
+        try {
             ensureInitialized(context)
-            if (queue.isEmpty()) return "ok"
-            currentIndex = (currentIndex + 1).mod(queue.size)
-            prepareCurrent(playWhenReady)
+            if (queue.isEmpty()) return@runOnMainThread "ok"
+            player?.seekToNext()
+            currentIndex = player?.currentMediaItemIndex ?: currentIndex
             "ok"
         } catch (e: Exception) {
             Log.e(AUDIO_TAG, "skipNext failed", e)
@@ -290,18 +192,17 @@ object NativeAudioBridge {
         }
     }
 
-    @Synchronized
-    fun skipPrevious(context: Context): String {
-        return try {
+    fun skipPrevious(context: Context): String = runOnMainThread {
+        try {
             ensureInitialized(context)
-            if (queue.isEmpty()) return "ok"
-            val currentPosition = if (isPreparing) 0 else (player?.currentPosition ?: 0)
+            if (queue.isEmpty()) return@runOnMainThread "ok"
+            val currentPosition = player?.currentPosition ?: 0
             if (currentPosition > 3_000) {
                 player?.seekTo(0)
             } else {
-                currentIndex = if (currentIndex == 0) queue.lastIndex else currentIndex - 1
-                prepareCurrent(playWhenReady)
+                player?.seekToPrevious()
             }
+            currentIndex = player?.currentMediaItemIndex ?: currentIndex
             "ok"
         } catch (e: Exception) {
             Log.e(AUDIO_TAG, "skipPrevious failed", e)
@@ -309,13 +210,11 @@ object NativeAudioBridge {
         }
     }
 
-    @Synchronized
-    fun seekTo(context: Context, positionMs: Long): String {
-        return try {
+    fun seekTo(context: Context, positionMs: Long): String = runOnMainThread {
+        try {
             ensureInitialized(context)
-            val targetMs = positionMs.coerceAtLeast(0L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            val targetMs = positionMs.coerceAtLeast(0L)
             player?.seekTo(targetMs)
-            updatePlaybackState(player?.isPlaying == true, currentPlaybackState())
             "ok"
         } catch (e: Exception) {
             Log.e(AUDIO_TAG, "seekTo failed", e)
@@ -323,16 +222,10 @@ object NativeAudioBridge {
         }
     }
 
-    @Synchronized
-    fun setPlaybackSpeed(context: Context, speed: Float): String {
-        return try {
+    fun setPlaybackSpeed(context: Context, speed: Float): String = runOnMainThread {
+        try {
             ensureInitialized(context)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                player?.let { mediaPlayer ->
-                    val params = (mediaPlayer.playbackParams ?: PlaybackParams()).setSpeed(speed)
-                    mediaPlayer.playbackParams = params
-                }
-            }
+            player?.setPlaybackSpeed(speed)
             "ok"
         } catch (e: Exception) {
             Log.e(AUDIO_TAG, "setPlaybackSpeed failed", e)
@@ -340,11 +233,10 @@ object NativeAudioBridge {
         }
     }
 
-    @Synchronized
-    fun setVolume(context: Context, volume: Float): String {
-        return try {
+    fun setVolume(context: Context, volume: Float): String = runOnMainThread {
+        try {
             ensureInitialized(context)
-            player?.setVolume(volume.coerceIn(0f, 1f), volume.coerceIn(0f, 1f))
+            player?.setVolume(volume.coerceIn(0f, 1f))
             "ok"
         } catch (e: Exception) {
             Log.e(AUDIO_TAG, "setVolume failed", e)
@@ -352,17 +244,12 @@ object NativeAudioBridge {
         }
     }
 
-    @Synchronized
-    fun clearQueue(context: Context): String {
-        return try {
+    fun clearQueue(context: Context): String = runOnMainThread {
+        try {
             ensureInitialized(context)
             queue.clear()
-            shouldResumeAfterFocusGain = false
-            abandonAudioFocus()
             resetSnapshotState()
             releasePlayer()
-            updatePlaybackState(false, PlaybackState.STATE_STOPPED)
-            stopForegroundPlayback()
             "ok"
         } catch (e: Exception) {
             Log.e(AUDIO_TAG, "clearQueue failed", e)
@@ -370,333 +257,125 @@ object NativeAudioBridge {
         }
     }
 
-    @Synchronized
-    fun getSnapshot(context: Context): String {
-        return try {
+    fun getSnapshot(context: Context): String = runOnMainThread {
+        try {
             ensureInitialized(context)
-            val activelyPlayingOrStarting = player?.isPlaying == true || (isPreparing && playWhenReady)
-            val currentPositionSeconds = safeCurrentPositionSeconds()
-            val durationSeconds = safeDurationSeconds()
-            val obj = JSONObject().apply {
+            val p = player
+            val snapshotIsPlaying = p?.isPlaying == true || (p?.playbackState == Player.STATE_BUFFERING && playWhenReady)
+            val snapshotIsBuffering = p?.playbackState == Player.STATE_BUFFERING
+            val snapshotCurrentTime = (p?.currentPosition ?: 0) / 1000.0
+            val snapshotDuration = (p?.duration?.takeIf { it > 0 } ?: 0) / 1000.0
+            JSONObject().apply {
                 put("queue_len", queue.size)
-                put("current_index", currentIndex)
-                put("is_playing", activelyPlayingOrStarting)
-                put("is_buffering", isPreparing)
-                put("current_time", currentPositionSeconds)
-                put("duration", durationSeconds)
+                put("current_index", p?.currentMediaItemIndex ?: currentIndex)
+                put("is_playing", snapshotIsPlaying)
+                put("is_buffering", snapshotIsBuffering)
+                put("current_time", snapshotCurrentTime)
+                put("duration", snapshotDuration)
                 put("playback_error", lastError.get())
-            }
-            obj.toString()
+            }.toString()
         } catch (e: Exception) {
             JSONObject().put("playback_error", e.message ?: "snapshot_failed").toString()
         }
     }
 
-    private fun ensurePlayer(): MediaPlayer {
-        val current = player
-        if (current != null) {
-            return current
+    private fun ensurePlayer(): ExoPlayer {
+        player?.let { return it }
+        val context = appContext ?: throw IllegalStateException("Not initialized")
+        val audioAttributes = AudioAttributes.Builder()
+            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+            .setUsage(C.USAGE_MEDIA)
+            .build()
+        val p = ExoPlayer.Builder(context)
+            .setAudioAttributes(audioAttributes, true)
+            .setHandleAudioBecomingNoisy(true)
+            .build()
+        p.addListener(playerListener)
+        player = p
+
+        mediaSession?.release()
+        mediaSession = MediaSession.Builder(context, p)
+            .setCallback(mediaSessionCallback)
+            .build()
+        serviceRef?.get()?.addSession(mediaSession!!)
+
+        return p
+    }
+
+    private val playerListener = object : Player.Listener {
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState == Player.STATE_ENDED) {
+                playWhenReady = false
+                releasePlayer()
+            }
         }
-        return MediaPlayer().apply {
-            setAudioAttributes(
-                playbackAudioAttributes()
-            )
-            setOnPreparedListener {
-                synchronized(this@NativeAudioBridge) {
-                    isPreparing = false
-                    lastDurationSeconds = if (it.duration > 0) it.duration / 1000.0 else 0.0
-                    if (playWhenReady) {
-                        it.start()
-                        updatePlaybackState(true, PlaybackState.STATE_PLAYING)
-                    } else {
-                        updatePlaybackState(false, PlaybackState.STATE_PAUSED)
-                    }
-                    updateNotification()
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            player?.currentMediaItemIndex?.let { idx ->
+                if (idx != currentIndex && idx in queue.indices) {
+                    currentIndex = idx
                 }
             }
-            setOnCompletionListener {
-                synchronized(this@NativeAudioBridge) {
-                    isPreparing = false
-                    if (queue.isEmpty()) {
-                        playWhenReady = false
-                        abandonAudioFocus()
-                        releasePlayer()
-                        updatePlaybackState(false, PlaybackState.STATE_STOPPED)
-                        stopForegroundPlayback()
-                        // Clear service state before updating notification to prevent re-triggering startForeground()
-                        serviceRef = null
-                        updateNotification()
-                        return@synchronized
-                    }
-                    if (currentIndex + 1 < queue.size) {
-                        currentIndex += 1
-                        prepareCurrent(true)
-                    } else {
-                        playWhenReady = false
-                        abandonAudioFocus()
-                        releasePlayer()
-                        updatePlaybackState(false, PlaybackState.STATE_STOPPED)
-                        stopForegroundPlayback()
-                        serviceRef = null
-                        updateNotification()
-                    }
-                }
-            }
-            setOnErrorListener { _, _, _ ->
-                synchronized(this@NativeAudioBridge) {
-                    isPreparing = false
-                    playWhenReady = false
-                    shouldResumeAfterFocusGain = false
-                    abandonAudioFocus()
-                    lastError.set("Playback failed")
-                    releasePlayer()
-                    updatePlaybackState(false, PlaybackState.STATE_ERROR)
-                    updateNotification()
-                }
-                true
-            }
-            player = this
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            Log.e(AUDIO_TAG, "Player error: ${error.message}", error)
+            lastError.set("Playback failed: ${error.message}")
+            playWhenReady = false
+        }
+    }
+
+    private val mediaSessionCallback = object : MediaSession.Callback {
+        override fun onAddMediaItems(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            mediaItems: MutableList<MediaItem>
+        ): com.google.common.util.concurrent.ListenableFuture<MutableList<MediaItem>> {
+            return com.google.common.util.concurrent.Futures.immediateFuture(mediaItems)
         }
     }
 
     @Synchronized
     private fun prepareCurrent(playWhenReady: Boolean) {
-        val item = queue.getOrNull(currentIndex) ?: return
+        if (queue.isEmpty()) return
         this.playWhenReady = playWhenReady
-        isPreparing = true
-        // Reset per-track state before preparing new track
         lastError.set(null)
-        lastDurationSeconds = 0.0
         val player = ensurePlayer()
-        player.reset()
-        player.setAudioAttributes(
-            playbackAudioAttributes()
-        )
-        try {
-            player.setDataSource(item.mediaUrl)
-        } catch (e: Exception) {
-            Log.e(AUDIO_TAG, "Failed to load media source for item=${item.id}", e)
-            releasePlayer()
-            lastError.set("Failed to load media source")
-            isPreparing = false
-            updatePlaybackState(false, PlaybackState.STATE_ERROR)
-            updateNotification()
-            return
+
+        val mediaItems = queue.map { item ->
+            MediaItem.Builder()
+                .setUri(Uri.parse(item.mediaUrl))
+                .setMediaMetadata(
+                    MediaMetadata.Builder()
+                        .setTitle(item.title)
+                        .setArtist(item.artist)
+                        .setAlbumTitle(item.album)
+                        .setArtworkUri(item.albumArtUrl?.let { Uri.parse(it) })
+                        .build()
+                )
+                .build()
         }
-        updatePlaybackState(false, PlaybackState.STATE_BUFFERING)
-        updateMetadata(item)
-        updateNotification()
-        player.prepareAsync()
+
+        player.setMediaItems(mediaItems, currentIndex, 0L)
+        player.playWhenReady = playWhenReady
+        player.prepare()
+        val item = queue[currentIndex]
+        Log.d(AUDIO_TAG, "prepareCurrent: ${item.mediaUrl} isLive=${item.isLiveStream} queueSize=${queue.size} index=$currentIndex")
     }
 
     @Synchronized
     private fun releasePlayer() {
-        isPreparing = false
+        player?.removeListener(playerListener)
         player?.release()
         player = null
+        mediaSession?.release()
+        mediaSession = null
     }
 
     private fun resetSnapshotState() {
         currentIndex = 0
         playWhenReady = false
-        lastDurationSeconds = 0.0
         lastError.set(null)
-    }
-
-    private fun updateMetadata(item: NativeQueueItem) {
-        val metadata = MediaMetadata.Builder()
-            .putString(MediaMetadata.METADATA_KEY_TITLE, item.title)
-            .putString(MediaMetadata.METADATA_KEY_ARTIST, item.artist)
-            .putString(MediaMetadata.METADATA_KEY_ALBUM, item.album)
-            .build()
-        mediaSession?.setMetadata(metadata)
-    }
-
-    private fun updatePlaybackState(isPlaying: Boolean, state: Int) {
-        val actions = PlaybackState.ACTION_PLAY or
-            PlaybackState.ACTION_PAUSE or
-            PlaybackState.ACTION_PLAY_PAUSE or
-            PlaybackState.ACTION_SKIP_TO_NEXT or
-            PlaybackState.ACTION_SKIP_TO_PREVIOUS or
-            PlaybackState.ACTION_SEEK_TO or
-            PlaybackState.ACTION_STOP
-        val positionMs = if (isPreparing) {
-            0L
-        } else {
-            try {
-                (player?.currentPosition ?: 0).toLong()
-            } catch (_: IllegalStateException) {
-                0L
-            }
-        }
-        val playbackState = PlaybackState.Builder()
-            .setActions(actions)
-            .setState(state, positionMs, if (isPlaying) 1.0f else 0.0f)
-            .build()
-        mediaSession?.setPlaybackState(playbackState)
-        mediaSession?.isActive = true
-    }
-
-    private fun currentPlaybackState(): Int {
-        return when {
-            player == null -> PlaybackState.STATE_STOPPED
-            isPreparing -> PlaybackState.STATE_BUFFERING
-            player?.isPlaying == true -> PlaybackState.STATE_PLAYING
-            else -> PlaybackState.STATE_PAUSED
-        }
-    }
-
-    private fun safeCurrentPositionSeconds(): Double {
-        val activePlayer = player ?: return 0.0
-        if (isPreparing) {
-            return 0.0
-        }
-        return try {
-            activePlayer.currentPosition.toDouble() / 1000.0
-        } catch (_: IllegalStateException) {
-            0.0
-        }
-    }
-
-    private fun safeDurationSeconds(): Double {
-        if (isPreparing) {
-            return lastDurationSeconds
-        }
-        val activePlayer = player ?: return lastDurationSeconds
-        return try {
-            activePlayer.duration
-                .takeIf { it > 0 }
-                ?.toDouble()
-                ?.div(1000.0)
-                ?: lastDurationSeconds
-        } catch (_: IllegalStateException) {
-            lastDurationSeconds
-        }
-    }
-
-    private fun updateNotification() {
-        val context = appContext ?: return
-        val service = serviceRef?.get()
-        val item = queue.getOrNull(currentIndex)
-        if (service == null || item == null) {
-            return
-        }
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(context, CHANNEL_ID)
-        } else {
-            Notification.Builder(context)
-        }
-            .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentTitle(item.title)
-            .setContentText(item.artist)
-            .setStyle(
-                Notification.MediaStyle()
-                    .setMediaSession(mediaSession?.sessionToken)
-                    .setShowActionsInCompactView(0, 1, 2)
-            )
-            .setOnlyAlertOnce(true)
-            .setOngoing(player?.isPlaying == true || (isPreparing && playWhenReady))
-            .addAction(
-                android.R.drawable.ic_media_previous,
-                "Previous",
-                serviceIntent(context, ACTION_PREVIOUS)
-            )
-            .addAction(
-                if (player?.isPlaying == true || (isPreparing && playWhenReady)) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
-                if (player?.isPlaying == true || (isPreparing && playWhenReady)) "Pause" else "Play",
-                serviceIntent(
-                    context,
-                    if (player?.isPlaying == true || (isPreparing && playWhenReady)) ACTION_PAUSE else ACTION_PLAY
-                )
-            )
-            .addAction(
-                android.R.drawable.ic_media_next,
-                "Next",
-                serviceIntent(context, ACTION_NEXT)
-            )
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            service.startForeground(
-                NOTIFICATION_ID,
-                builder.build(),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-            )
-        } else {
-            service.startForeground(NOTIFICATION_ID, builder.build())
-        }
-    }
-
-    private fun stopForegroundPlayback() {
-        val service = serviceRef?.get() ?: return
-        service.stopForeground(Service.STOP_FOREGROUND_REMOVE)
-        NotificationManagerCompat.from(service).cancel(NOTIFICATION_ID)
-        service.stopSelf()
-    }
-
-    private fun serviceIntent(context: Context, action: String): PendingIntent {
-        val intent = Intent(context, MediaPlaybackService::class.java).setAction(action)
-        return PendingIntent.getService(
-            context,
-            action.hashCode(),
-            intent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-    }
-
-    private fun ensureChannel(context: Context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            return
-        }
-        val manager = context.getSystemService(NotificationManager::class.java)
-        if (manager.getNotificationChannel(CHANNEL_ID) == null) {
-            manager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_ID,
-                    "Media playback",
-                    NotificationManager.IMPORTANCE_LOW
-                )
-            )
-        }
-    }
-
-    private fun playbackAudioAttributes(): AudioAttributes {
-        return AudioAttributes.Builder()
-            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-            .setUsage(AudioAttributes.USAGE_MEDIA)
-            .build()
-    }
-
-    private fun requestAudioFocus(context: Context): Boolean {
-        ensureInitialized(context)
-        shouldResumeAfterFocusGain = false
-        val manager = audioManager ?: return false
-        val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val request = audioFocusRequest ?: AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                .setAudioAttributes(playbackAudioAttributes())
-                .setOnAudioFocusChangeListener(audioFocusChangeListener)
-                .setWillPauseWhenDucked(false)
-                .build()
-                .also { audioFocusRequest = it }
-            manager.requestAudioFocus(request)
-        } else {
-            @Suppress("DEPRECATION")
-            manager.requestAudioFocus(
-                audioFocusChangeListener,
-                AudioManager.STREAM_MUSIC,
-                AudioManager.AUDIOFOCUS_GAIN
-            )
-        }
-        return result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-    }
-
-    private fun abandonAudioFocus() {
-        val manager = audioManager ?: return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            audioFocusRequest?.let { manager.abandonAudioFocusRequest(it) }
-        } else {
-            @Suppress("DEPRECATION")
-            manager.abandonAudioFocus(audioFocusChangeListener)
-        }
     }
 
     private fun parseQueue(queueJson: String, startIndex: Int): ParsedQueueResult {
@@ -706,7 +385,6 @@ object NativeAudioBridge {
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
                 val mediaUrl = obj.optString("media_url")
-                // Skip entries with blank or missing media_url
                 if (mediaUrl.isBlank()) {
                     if (i < startIndex) {
                         adjustedStartIndex -= 1

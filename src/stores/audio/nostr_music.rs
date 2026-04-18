@@ -74,6 +74,13 @@ pub enum TrackSource {
         /// Station name
         station_name: String,
     },
+    /// Bible audio chapter
+    Bible {
+        translation: String,
+        book: String,
+        chapter: u32,
+        reader: String,
+    },
 }
 impl Default for TrackSource {
     fn default() -> Self {

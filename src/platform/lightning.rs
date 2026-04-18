@@ -17,13 +17,13 @@ pub async fn open_lightning_invoice(invoice: &str) -> Result<(), String> {
             .map_err(|error| format!("Failed to open Lightning wallet: {error}"))
     }
 
-    #[cfg(feature = "mobile")]
+    #[cfg(feature = "mobile_platform")]
     {
         let uri = format!("lightning:{invoice}");
         crate::platform::mobile::open_lightning_uri(&uri)
     }
 
-    #[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile")))]
+    #[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile_platform")))]
     {
         Err("Lightning invoice opening is not supported on this platform".to_string())
     }

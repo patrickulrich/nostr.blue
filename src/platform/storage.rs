@@ -80,7 +80,7 @@ pub fn set_string(key: &str, value: &str) -> Result<(), String> {
 /// On desktop, delegates to `dirs::data_dir()` with a fallback to the current directory.
 #[cfg(feature = "native")]
 pub fn data_dir() -> std::path::PathBuf {
-    #[cfg(all(target_os = "android", feature = "mobile"))]
+    #[cfg(all(target_os = "android", feature = "mobile_platform"))]
     {
         get_android_files_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("/data/data/dev.dioxus.main/files"))
@@ -91,7 +91,7 @@ pub fn data_dir() -> std::path::PathBuf {
     }
 }
 
-#[cfg(all(target_os = "android", feature = "mobile"))]
+#[cfg(all(target_os = "android", feature = "mobile_platform"))]
 fn get_android_files_dir() -> Option<std::path::PathBuf> {
     let ctx = ndk_context::android_context();
     let vm = unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) }.ok()?;
