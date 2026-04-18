@@ -173,7 +173,6 @@ pub fn PlayerExpanded() -> Element {
                             id: "expanded-seek-bar",
                             class: "relative h-6 flex items-center cursor-pointer touch-none",
                             onpointerdown: move |evt: Event<PointerData>| {
-                                is_scrubbing.set(true);
                                 let client_x = evt.client_coordinates().x;
                                 spawn(async move {
                                     let result = document::eval(&format!(
@@ -195,12 +194,13 @@ pub fn PlayerExpanded() -> Element {
                                             seek_bar_left.set(left);
                                             seek_bar_width.set(width);
                                             scrub_position.set(Some(percent));
+                                            is_scrubbing.set(true);
                                         }
                                     }
                                 });
                             },
                             onpointermove: move |evt: Event<PointerData>| {
-                                if *is_scrubbing.read() {
+                                if *is_scrubbing.read() && *seek_bar_width.read() > 1.0 {
                                     let client_x = evt.client_coordinates().x;
                                     let left = *seek_bar_left.read();
                                     let width = *seek_bar_width.read();
