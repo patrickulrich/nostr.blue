@@ -85,8 +85,17 @@ pub fn PlayerFloating() -> Element {
                 }
 
                 let (cx, cy) = pos();
-                let viewport_height = 800.0_f64;
-                let dismiss_threshold = viewport_height - 120.0;
+
+                #[cfg(feature = "web")]
+                let dismiss_threshold = {
+                    let vh = web_sys::window()
+                        .and_then(|w| w.inner_height().ok())
+                        .and_then(|h| h.as_f64())
+                        .unwrap_or(800.0);
+                    vh - 120.0
+                };
+                #[cfg(not(feature = "web"))]
+                let dismiss_threshold = 800.0 - 120.0;
 
                 if cy > dismiss_threshold {
                     music_player::close_player();

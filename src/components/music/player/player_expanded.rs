@@ -21,6 +21,7 @@ pub fn PlayerExpanded() -> Element {
     let mut show_share_modal = use_signal(|| false);
     let mut seek_bar_left = use_signal(|| 0.0f64);
     let mut seek_bar_width = use_signal(|| 1.0f64);
+    let mut gesture_id = use_signal(|| 0u32);
 
     let (share_url, share_content_type) = match &track.source {
         crate::stores::nostr_music::TrackSource::Wavlake { .. } => (
@@ -174,6 +175,8 @@ pub fn PlayerExpanded() -> Element {
                             class: "relative h-6 flex items-center cursor-pointer touch-none",
                             onpointerdown: move |evt: Event<PointerData>| {
                                 let client_x = evt.client_coordinates().x;
+                                gesture_id.set(gesture_id().wrapping_add(1));
+                                let current_gesture = gesture_id();
                                 spawn(async move {
                                     let result = document::eval(&format!(
                                         r#"
@@ -186,6 +189,9 @@ pub fn PlayerExpanded() -> Element {
                                         "#,
                                     ))
                                     .await;
+                                    if gesture_id() != current_gesture {
+                                        return;
+                                    }
                                     if let Ok(val) = result {
                                         if let Some(arr) = val.as_array() {
                                             let left = arr.first().and_then(|v| v.as_f64()).unwrap_or(0.0);
@@ -209,6 +215,7 @@ pub fn PlayerExpanded() -> Element {
                                 }
                             },
                             onpointerup: move |_| {
+                                gesture_id.set(gesture_id().wrapping_add(1));
                                 if let Some(pos) = scrub_position() {
                                     let new_time = pos / 100.0 * state.duration;
                                     if new_time.is_finite() && new_time >= 0.0 {
@@ -220,6 +227,7 @@ pub fn PlayerExpanded() -> Element {
                             },
                             onpointerleave: move |_| {
                                 if *is_scrubbing.read() {
+                                    gesture_id.set(gesture_id().wrapping_add(1));
                                     if let Some(pos) = scrub_position() {
                                         let new_time = pos / 100.0 * state.duration;
                                         if new_time.is_finite() && new_time >= 0.0 {
