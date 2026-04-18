@@ -19,6 +19,8 @@ pub fn PlayerExpanded() -> Element {
     let mut is_scrubbing = use_signal(|| false);
     let mut scrub_position = use_signal(|| None::<f64>);
     let mut show_share_modal = use_signal(|| false);
+    let mut seek_bar_left = use_signal(|| 0.0f64);
+    let mut seek_bar_width = use_signal(|| 1.0f64);
 
     let (share_url, share_content_type) = match &track.source {
         crate::stores::nostr_music::TrackSource::Wavlake { .. } => (
@@ -168,21 +170,41 @@ pub fn PlayerExpanded() -> Element {
                 if !track.is_live_stream {
                     div { class: "w-full mb-4",
                         div {
+                            id: "expanded-seek-bar",
                             class: "relative h-6 flex items-center cursor-pointer touch-none",
                             onpointerdown: move |evt: Event<PointerData>| {
                                 is_scrubbing.set(true);
                                 let client_x = evt.client_coordinates().x;
-                                let el = evt.data.element_coordinates();
-                                let width = el.x.max(1.0);
-                                let percent = (client_x / width * 100.0).clamp(0.0, 100.0);
-                                scrub_position.set(Some(percent));
+                                spawn(async move {
+                                    let result = document::eval(&format!(
+                                        r#"
+                                        let el = document.getElementById('expanded-seek-bar');
+                                        if (!el) return [0, 1, 0];
+                                        let r = el.getBoundingClientRect();
+                                        let w = r.width || 1;
+                                        let p = Math.max(0, Math.min(100, (({client_x} - r.left) / w) * 100));
+                                        return [r.left, w, p];
+                                        "#,
+                                    ))
+                                    .await;
+                                    if let Ok(val) = result {
+                                        if let Some(arr) = val.as_array() {
+                                            let left = arr.first().and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                            let width = arr.get(1).and_then(|v| v.as_f64()).unwrap_or(1.0).max(1.0);
+                                            let percent = arr.get(2).and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                            seek_bar_left.set(left);
+                                            seek_bar_width.set(width);
+                                            scrub_position.set(Some(percent));
+                                        }
+                                    }
+                                });
                             },
                             onpointermove: move |evt: Event<PointerData>| {
                                 if *is_scrubbing.read() {
                                     let client_x = evt.client_coordinates().x;
-                                    let el = evt.data.element_coordinates();
-                                    let width = el.x.max(1.0);
-                                    let percent = (client_x / width * 100.0).clamp(0.0, 100.0);
+                                    let left = *seek_bar_left.read();
+                                    let width = *seek_bar_width.read();
+                                    let percent = ((client_x - left) / width * 100.0).clamp(0.0, 100.0);
                                     scrub_position.set(Some(percent));
                                 }
                             },
