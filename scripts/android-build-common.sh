@@ -566,7 +566,7 @@ echo "--- Step 2b.i: Normalize Android metadata ---"
 require_file "$GRADLE_APP" "Generated Android Gradle config not found"
 require_file "$GENERATED_MAIN_ACTIVITY" "Generated Android MainActivity not found"
 normalize_gradle_properties
-python3 - "$GRADLE_APP" "$APP_ID" "$CARGO_VERSION" "$ANDROID_VERSION_CODE" "$ANDROID_MIN_SDK" "$ANDROID_TARGET_SDK" "$ANDROID_COMPILE_SDK" <<'PY'
+python3 - "$GRADLE_APP" "$APP_ID" "$CARGO_VERSION" "$ANDROID_VERSION_CODE" "$ANDROID_MIN_SDK" "$ANDROID_TARGET_SDK" "$ANDROID_COMPILE_SDK" "$DIOXUS_CONFIG" <<'PY'
 from pathlib import Path
 import re
 import sys
@@ -578,6 +578,7 @@ version_code = sys.argv[4]
 min_sdk = sys.argv[5]
 target_sdk = sys.argv[6]
 compile_sdk = sys.argv[7]
+dioxus_config_path = sys.argv[8]
 content = path.read_text()
 replacements = [
     (r'namespace\s*=\s*"[^"]*"', f'namespace="{app_id}"'),
@@ -671,6 +672,50 @@ elif "compilerOptions" not in content:
     if plugins_block not in content:
         raise SystemExit(f"failed to find plugins block in {path}")
     content = content.replace(plugins_block, plugins_block + compiler_options_block, 1)
+
+dioxus_config = Path(dioxus_config_path).read_text()
+in_android = False
+gradle_deps = []
+for raw_line in dioxus_config.splitlines():
+    stripped = raw_line.strip()
+    if stripped == "[android]":
+        in_android = True
+        continue
+    if stripped.startswith("[") and stripped.endswith("]"):
+        if in_android:
+            break
+        continue
+    if in_android and stripped.startswith("gradle_dependencies"):
+        array_text = raw_line[raw_line.index("=") + 1:].strip()
+        if not array_text.startswith("["):
+            raise SystemExit(f"unexpected gradle_dependencies format in {dioxus_config_path}")
+        if "]" in array_text:
+            inner = array_text[array_text.index("[") + 1:array_text.index("]")]
+            for part in inner.split(","):
+                part = part.strip().strip('"').strip("'")
+                if part:
+                    gradle_deps.append(part)
+        else:
+            for dline in dioxus_config.splitlines()[dioxus_config.splitlines().index(raw_line) + 1:]:
+                ds = dline.strip()
+                if ds.startswith("]"):
+                    break
+                dep = ds.strip(",").strip().strip('"').strip("'")
+                if dep:
+                    gradle_deps.append(dep)
+        break
+
+if gradle_deps:
+    deps_match = re.search(r'(?ms)^dependencies\s*\{(.*?)^\}', content)
+    if not deps_match:
+        raise SystemExit(f"failed to find dependencies block in {path}")
+    deps_body = deps_match.group(1)
+    existing = set(re.findall(r'implementation\s*\(\s*"([^"]+)"\s*\)', deps_body))
+    missing = [d for d in gradle_deps if d not in existing]
+    if missing:
+        insert_lines = "".join(f'    implementation("{d}")\n' for d in missing)
+        closing = deps_match.group(0).rfind("}")
+        content = content[:deps_match.start() + closing] + insert_lines + content[deps_match.start() + closing:]
 
 path.write_text(content)
 PY
