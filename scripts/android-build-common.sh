@@ -568,157 +568,17 @@ echo "--- Step 2b.i: Normalize Android metadata ---"
 require_file "$GRADLE_APP" "Generated Android Gradle config not found"
 require_file "$GENERATED_MAIN_ACTIVITY" "Generated Android MainActivity not found"
 normalize_gradle_properties
-python3 - "$GRADLE_APP" "$APP_ID" "$CARGO_VERSION" "$ANDROID_VERSION_CODE" "$ANDROID_MIN_SDK" "$ANDROID_TARGET_SDK" "$ANDROID_COMPILE_SDK" "$DIOXUS_CONFIG" <<'PY'
+python3 - "$GRADLE_APP" "$ANDROID_VERSION_CODE" <<'PY'
 from pathlib import Path
 import re
 import sys
 
 path = Path(sys.argv[1])
-app_id = sys.argv[2]
-version_name = sys.argv[3]
-version_code = sys.argv[4]
-min_sdk = sys.argv[5]
-target_sdk = sys.argv[6]
-compile_sdk = sys.argv[7]
-dioxus_config_path = sys.argv[8]
+version_code = sys.argv[2]
 content = path.read_text()
-replacements = [
-    (r'namespace\s*=\s*"[^"]*"', f'namespace="{app_id}"'),
-    (r'compileSdk\s*=\s*\d+', f'compileSdk = {compile_sdk}'),
-    (r'applicationId = "[^"]*"', f'applicationId = "{app_id}"'),
-    (r'minSdk\s*=\s*\d+', f'minSdk = {min_sdk}'),
-    (r'targetSdk\s*=\s*\d+', f'targetSdk = {target_sdk}'),
-    (r'versionName = "[^"]*"', f'versionName = "{version_name}"'),
-    (r'versionCode = \d+', f'versionCode = {version_code}'),
-]
-for pattern, replacement in replacements:
-    content, count = re.subn(pattern, replacement, content, count=1)
-    if count != 1:
-        raise SystemExit(f"failed to patch {pattern} in {path}")
-
-kotlin_options_match = re.search(r'(?ms)^\s*kotlinOptions\s*\{\s*(.*?)^\s*\}\s*', content)
-if kotlin_options_match:
-    kotlin_options_block = kotlin_options_match.group(0)
-    updated_block, count = re.subn(
-        r'(?m)^(\s*jvmTarget\s*=\s*)"[^"]+"(\s*)$',
-        r'\1"17"\2',
-        kotlin_options_block,
-        count=1,
-    )
-    if count != 1:
-        raise SystemExit(f"unexpected kotlinOptions format in {path}")
-    content = (
-        content[:kotlin_options_match.start()]
-        + updated_block
-        + content[kotlin_options_match.end():]
-    )
-
-compile_options_match = re.search(r'(?ms)^\s*compileOptions\s*\{\s*(.*?)^\s*\}\s*', content)
-compile_options_block = (
-    '    compileOptions {\n'
-    '        sourceCompatibility = JavaVersion.VERSION_17\n'
-    '        targetCompatibility = JavaVersion.VERSION_17\n'
-    '    }\n'
-)
-if compile_options_match:
-    compile_options_body = compile_options_match.group(0)
-    if re.search(r'(?m)^\s*sourceCompatibility\s*=', compile_options_body):
-        compile_options_body = re.sub(
-            r'(?m)^(\s*sourceCompatibility\s*=\s*)[^\n]+$',
-            r'\1JavaVersion.VERSION_17',
-            compile_options_body,
-            count=1,
-        )
-    else:
-        compile_options_body = compile_options_body.replace(
-            "    }\n",
-            "        sourceCompatibility = JavaVersion.VERSION_17\n    }\n",
-            1,
-        )
-    if re.search(r'(?m)^\s*targetCompatibility\s*=', compile_options_body):
-        compile_options_body = re.sub(
-            r'(?m)^(\s*targetCompatibility\s*=\s*)[^\n]+$',
-            r'\1JavaVersion.VERSION_17',
-            compile_options_body,
-            count=1,
-        )
-    else:
-        compile_options_body = compile_options_body.replace(
-            "    }\n",
-            "        targetCompatibility = JavaVersion.VERSION_17\n    }\n",
-            1,
-        )
-    content = (
-        content[:compile_options_match.start()]
-        + compile_options_body
-        + content[compile_options_match.end():]
-    )
-else:
-    insertion_targets = ("    kotlinOptions {", "    buildFeatures {")
-    for target in insertion_targets:
-        if target in content:
-            content = content.replace(target, compile_options_block + target, 1)
-            break
-    else:
-        raise SystemExit(f"failed to find insertion point for compileOptions in {path}")
-
-plugins_block = 'plugins {\n    id("com.android.application")\n    id("org.jetbrains.kotlin.android")\n}\n'
-compiler_options_block = '\nkotlin {\n    compilerOptions {\n        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17\n    }\n}\n'
-if kotlin_options_match:
-    if re.search(r'(?m)^\s*kotlinOptions\s*\{', content) and not re.search(
-        r'(?m)^\s*jvmTarget\s*=\s*"17"\s*$',
-        content,
-    ):
-        raise SystemExit(f"unresolved kotlinOptions remains in {path}")
-elif "compilerOptions" not in content:
-    if plugins_block not in content:
-        raise SystemExit(f"failed to find plugins block in {path}")
-    content = content.replace(plugins_block, plugins_block + compiler_options_block, 1)
-
-dioxus_config = Path(dioxus_config_path).read_text()
-in_android = False
-gradle_deps = []
-for raw_line in dioxus_config.splitlines():
-    stripped = raw_line.strip()
-    if stripped == "[android]":
-        in_android = True
-        continue
-    if stripped.startswith("[") and stripped.endswith("]"):
-        if in_android:
-            break
-        continue
-    if in_android and stripped.startswith("gradle_dependencies"):
-        array_text = raw_line[raw_line.index("=") + 1:].strip()
-        if not array_text.startswith("["):
-            raise SystemExit(f"unexpected gradle_dependencies format in {dioxus_config_path}")
-        if "]" in array_text:
-            inner = array_text[array_text.index("[") + 1:array_text.index("]")]
-            for part in inner.split(","):
-                part = part.strip().strip('"').strip("'")
-                if part:
-                    gradle_deps.append(part)
-        else:
-            for dline in dioxus_config.splitlines()[dioxus_config.splitlines().index(raw_line) + 1:]:
-                ds = dline.strip()
-                if ds.startswith("]"):
-                    break
-                dep = ds.strip(",").strip().strip('"').strip("'")
-                if dep:
-                    gradle_deps.append(dep)
-        break
-
-if gradle_deps:
-    deps_match = re.search(r'(?ms)^dependencies\s*\{(.*?)^\}', content)
-    if not deps_match:
-        raise SystemExit(f"failed to find dependencies block in {path}")
-    deps_body = deps_match.group(1)
-    existing = set(re.findall(r'implementation\s*\(\s*"([^"]+)"\s*\)', deps_body))
-    missing = [d for d in gradle_deps if d not in existing]
-    if missing:
-        insert_lines = "".join(f'    implementation("{d}")\n' for d in missing)
-        closing = deps_match.group(0).rfind("}")
-        content = content[:deps_match.start() + closing] + insert_lines + content[deps_match.start() + closing:]
-
+content, count = re.subn(r'versionCode = \d+', f'versionCode = {version_code}', content, count=1)
+if count != 1:
+    raise SystemExit(f"failed to patch versionCode in {path}")
 path.write_text(content)
 PY
 python3 - "$GENERATED_MAIN_ACTIVITY" "$APP_ID" <<'PY'
