@@ -525,6 +525,17 @@ find "$DX_ANDROID" \
     -o -path '*/mipmap-anydpi-v26/ic_launcher_round.xml' \) \
     -delete 2>/dev/null || true
 
+echo "Cleaning stale custom Kotlin sources (dx build must not see media3-dependent files)"
+kotlin_out="$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main"
+if [ -d "$kotlin_out" ]; then
+    for stale_file in NativeAudioBridge.kt MediaPlaybackService.kt; do
+        if [ -f "$kotlin_out/$stale_file" ]; then
+            rm -f "$kotlin_out/$stale_file"
+            echo "  Removed stale $stale_file"
+        fi
+    done
+fi
+
 echo ""
 echo "--- Step 1a: Pre-copy Android resources ---"
 mkdir -p "$DX_ANDROID/app/src/main/res/xml"
@@ -538,15 +549,6 @@ fi
 if [ -f "$PROJECT_ROOT/android/res/values/strings.xml" ]; then
     cp "$PROJECT_ROOT/android/res/values/strings.xml" "$DX_ANDROID/app/src/main/res/values/strings.xml"
     echo "Pre-copied strings.xml"
-fi
-if copy_overlay_dir \
-    "$ANDROID_KOTLIN_SRC/dev/dioxus/main" \
-    "$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main"
-then
-    echo "Pre-copied Android Kotlin sources"
-else
-    echo "ERROR: Failed to pre-copy Android Kotlin sources into $DX_ANDROID/app/src/main/kotlin/dev/dioxus/main/" >&2
-    exit 1
 fi
 write_android_local_properties
 
