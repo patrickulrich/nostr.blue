@@ -203,7 +203,7 @@ pub fn NipDetail(nip_id: String) -> Element {
                 let filter = Filter::new().kind(Kind::Comment).event(event_id).limit(500);
                 match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
                     Ok(mut comment_events) => {
-                        comment_events.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                        comment_events.sort_by_key(|a| a.created_at);
                         log::info!("Loaded {} comments for custom NIP", comment_events.len());
                         comments.set(comment_events);
                     }

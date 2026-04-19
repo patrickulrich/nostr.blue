@@ -299,7 +299,7 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
             });
     }
     let mut sorted_votes: Vec<VoteData> = vote_map.into_values().collect();
-    sorted_votes.sort_by(|a, b| b.votes.cmp(&a.votes));
+    sorted_votes.sort_by_key(|b| std::cmp::Reverse(b.votes));
     let top_10 = sorted_votes.into_iter().take(10).collect::<Vec<_>>();
     log::info!(
         "Top {} tracks identified, resolving for playback...",

@@ -261,7 +261,7 @@ pub fn CodeRepoArchitecture(naddr: String) -> Element {
         .iter()
         .map(|(k, v)| (k.clone(), v.len()))
         .collect();
-    sorted_cats.sort_by(|a, b| b.1.cmp(&a.1));
+    sorted_cats.sort_by_key(|b| std::cmp::Reverse(b.1));
 
     let mermaid_code = if !sorted_cats.is_empty() {
         build_mermaid(&sorted_cats, total)

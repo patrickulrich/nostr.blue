@@ -340,7 +340,7 @@ pub async fn get_ditto_trending_tags(limit: usize) -> Result<TrendingTagsResult,
         .limit(1);
 
     let mut events = fetch_ditto_events(label_filter, Duration::from_secs(8)).await?;
-    events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    events.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     let Some(event) = events.into_iter().next() else {
         return Ok(TrendingTagsResult {
             tags: Vec::new(),

@@ -118,15 +118,15 @@ pub fn markdown_to_text(markdown: &str) -> String {
             Event::Text(t) | Event::Code(t) => {
                 text.push_str(&t);
             }
-            Event::SoftBreak | Event::HardBreak => {
-                if !text.is_empty() && !text.ends_with(' ') {
-                    text.push(' ');
-                }
+            Event::SoftBreak | Event::HardBreak
+                if !text.is_empty() && !text.ends_with(' ') =>
+            {
+                text.push(' ');
             }
-            Event::Start(Tag::Paragraph) => {
-                if !text.is_empty() && !text.ends_with(' ') {
-                    text.push(' ');
-                }
+            Event::Start(Tag::Paragraph)
+                if !text.is_empty() && !text.ends_with(' ') =>
+            {
+                text.push(' ');
             }
             _ => {}
         }

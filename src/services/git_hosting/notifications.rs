@@ -196,7 +196,7 @@ pub async fn fetch_code_notifications(limit: usize) -> Result<Vec<CodeNotificati
         .filter_map(|e| CodeNotification::from_event(e, &pubkey_hex))
         .collect();
 
-    notifications.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    notifications.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     notifications.truncate(limit);
     Ok(notifications)
 }

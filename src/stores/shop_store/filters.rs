@@ -152,8 +152,8 @@ impl ProductSortBy {
 /// Sort products
 pub fn sort_products(products: &mut [Product], sort_by: ProductSortBy) {
     match sort_by {
-        ProductSortBy::Newest => products.sort_by(|a, b| b.created_at.cmp(&a.created_at)),
-        ProductSortBy::Oldest => products.sort_by(|a, b| a.created_at.cmp(&b.created_at)),
+        ProductSortBy::Newest => products.sort_by_key(|b| std::cmp::Reverse(b.created_at)),
+        ProductSortBy::Oldest => products.sort_by_key(|a| a.created_at),
         ProductSortBy::PriceLow => products.sort_by(|a, b| {
             let a_sats = a.price.to_sats().unwrap_or(u64::MAX);
             let b_sats = b.price.to_sats().unwrap_or(u64::MAX);

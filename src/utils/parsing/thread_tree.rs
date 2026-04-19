@@ -280,14 +280,14 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
                 }
             }
         }
-        children.sort_by(|a, b| a.event.created_at.cmp(&b.event.created_at));
+        children.sort_by_key(|a| a.event.created_at);
         children
     }
     root_replies = processed.into_values().collect();
     for node in &mut root_replies {
         node.children = attach_children(&node.event.id, &replies, &mut node_map);
     }
-    root_replies.sort_by(|a, b| a.event.created_at.cmp(&b.event.created_at));
+    root_replies.sort_by_key(|a| a.event.created_at);
     {
         let mut cache = get_thread_tree_cache().lock().unwrap_or_else(|poisoned| {
             log::warn!("Thread tree cache mutex was poisoned, recovering");

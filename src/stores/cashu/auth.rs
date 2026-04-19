@@ -315,15 +315,13 @@ pub async fn ensure_auth_available(
                 );
             }
         }
-        Some(AuthRequired::Blind) => {
-            if !has_blind_auth_tokens(mint_url) {
-                return Err(
-                    "This mint requires Blind Auth (NUT-22). Please request blind auth tokens first."
-                        .to_string(),
-                );
-            }
+        Some(AuthRequired::Blind) if !has_blind_auth_tokens(mint_url) => {
+            return Err(
+                "This mint requires Blind Auth (NUT-22). Please request blind auth tokens first."
+                    .to_string(),
+            );
         }
-        None => {}
+        Some(AuthRequired::Blind) | None => {}
     }
     Ok(())
 }

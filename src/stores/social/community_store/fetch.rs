@@ -127,7 +127,7 @@ pub async fn fetch_community_posts(
             )
         });
     }
-    posts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    posts.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     cache_posts(&posts);
     log::info!(
         "Fetched {} posts for community {}",
@@ -347,7 +347,7 @@ pub async fn fetch_user_communities(
             }
         }
     }
-    communities.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    communities.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     cache_communities(&communities);
     log::info!(
         "Fetched {} user communities for {} ({} member communities attempted)",
@@ -456,7 +456,7 @@ pub async fn fetch_communities_page(
         .into_iter()
         .filter_map(|e| parse_community_event(&e))
         .collect();
-    communities.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    communities.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     cache_communities(&communities);
     log::info!(
         "fetch_communities_page: events={}, parsed={}, until={:?}",

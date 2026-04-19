@@ -185,7 +185,7 @@ pub async fn fetch_history() -> Result<(), String> {
                         merged_history.push(item);
                     }
                 }
-                merged_history.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                merged_history.sort_by_key(|b| std::cmp::Reverse(b.created_at));
                 log::info!(
                     "Incremental history sync: {} total items (fetched {} new events)",
                     merged_history.len(),
@@ -193,7 +193,7 @@ pub async fn fetch_history() -> Result<(), String> {
                 );
                 *WALLET_HISTORY.read().data().write() = merged_history;
             } else {
-                history.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                history.sort_by_key(|b| std::cmp::Reverse(b.created_at));
                 log::info!("Full history sync: {} items", history.len());
                 *WALLET_HISTORY.read().data().write() = history;
             }

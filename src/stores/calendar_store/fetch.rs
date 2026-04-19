@@ -365,7 +365,7 @@ pub async fn fetch_event_comments(
             created_at: e.created_at.as_secs(),
         });
     }
-    comments.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    comments.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(comments)
 }
 
@@ -793,6 +793,6 @@ pub async fn fetch_room_presence(
         }
     }
     let mut result: Vec<RoomPresence> = presence_by_user.into_values().collect();
-    result.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    result.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(result)
 }

@@ -115,7 +115,7 @@ pub fn search_cached_profiles(
         });
     }
     drop(cache);
-    results.sort_by(|a, b| b.relevance.cmp(&a.relevance));
+    results.sort_by_key(|b| std::cmp::Reverse(b.relevance));
     results.truncate(limit);
     log::debug!(
         "Cached profile search for '{}' returned {} results",
@@ -224,7 +224,7 @@ pub async fn search_profiles(
             }
         }
     }
-    results.sort_by(|a, b| b.relevance.cmp(&a.relevance));
+    results.sort_by_key(|b| std::cmp::Reverse(b.relevance));
     results.truncate(limit);
     log::debug!(
         "Profile search for '{}' returned {} results",

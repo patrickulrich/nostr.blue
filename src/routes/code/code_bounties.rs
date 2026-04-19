@@ -96,7 +96,7 @@ async fn fetch_all_bounties() -> Result<Vec<BountyListing>, String> {
         });
     }
     // Sort newest first by default
-    listings.sort_by(|a, b| b.bounty.created_at.cmp(&a.bounty.created_at));
+    listings.sort_by_key(|b| std::cmp::Reverse(b.bounty.created_at));
     Ok(listings)
 }
 
@@ -180,13 +180,13 @@ pub fn CodeBounties() -> Element {
 
     match current_sort {
         BountySort::Newest => {
-            sorted_bounties.sort_by(|a, b| b.bounty.created_at.cmp(&a.bounty.created_at))
+            sorted_bounties.sort_by_key(|b| std::cmp::Reverse(b.bounty.created_at))
         }
         BountySort::HighestReward => {
-            sorted_bounties.sort_by(|a, b| b.bounty.amount_sats.cmp(&a.bounty.amount_sats))
+            sorted_bounties.sort_by_key(|b| std::cmp::Reverse(b.bounty.amount_sats))
         }
         BountySort::LowestReward => {
-            sorted_bounties.sort_by(|a, b| a.bounty.amount_sats.cmp(&b.bounty.amount_sats))
+            sorted_bounties.sort_by_key(|a| a.bounty.amount_sats)
         }
     }
 

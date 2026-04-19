@@ -173,7 +173,7 @@ pub fn cache_review(review: ProductReview) {
     let reviews = cache.entry(review.product_coordinate.clone()).or_default();
     if !reviews.iter().any(|r| r.event_id == review.event_id) {
         reviews.push(review);
-        reviews.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        reviews.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     }
 }
 
@@ -624,7 +624,7 @@ pub async fn fetch_my_collections() -> Result<Vec<ProductCollection>> {
             collections.push(collection);
         }
     }
-    collections.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    collections.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     *MY_COLLECTIONS.write() = collections.clone();
     *LOADING_MY_COLLECTIONS.write() = false;
     Ok(collections)

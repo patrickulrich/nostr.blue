@@ -326,7 +326,7 @@ pub async fn sync_state_with_all_mints() -> CashuResult<SyncResult> {
         .collect();
     let results = futures::future::join_all(futures).await;
     let mut total_result = SyncResult::default();
-    for (mint_url, result) in mints.iter().zip(results.into_iter()) {
+    for (mint_url, result) in mints.iter().zip(results) {
         match result {
             Ok(r) => {
                 total_result.spent_found += r.spent_found;
@@ -1146,7 +1146,7 @@ pub async fn check_pending_melt_quotes_batch() -> CashuResult<MeltRecoveryResult
         .map(|mint_url| check_melt_quotes_for_mint(mint_url))
         .collect();
     let mint_results = futures::future::join_all(futures).await;
-    for (mint_url, mint_result) in mints.iter().zip(mint_results.into_iter()) {
+    for (mint_url, mint_result) in mints.iter().zip(mint_results) {
         match mint_result {
             Ok(mr) => {
                 result.quotes_checked += mr.quotes_checked;
@@ -1324,7 +1324,7 @@ pub async fn recover_active_melt_quotes() -> CashuResult<MeltRecoveryResult> {
         .map(|mint_url| recover_operations_for_mint(mint_url))
         .collect();
     let mint_results = futures::future::join_all(futures).await;
-    for (mint_url, mint_result) in mints.iter().zip(mint_results.into_iter()) {
+    for (mint_url, mint_result) in mints.iter().zip(mint_results) {
         result.quotes_checked += 1;
         match mint_result {
             Ok(recovered) => {

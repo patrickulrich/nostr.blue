@@ -418,7 +418,7 @@ pub async fn fetch_interaction_counts_batch(
         }
     }
     let mut events: Vec<Event> = event_map.into_values().collect();
-    events.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+    events.sort_by_key(|right| std::cmp::Reverse(right.created_at));
     log::info!(
         "Processing {} total interaction events (DB + relay, deduplicated)",
         events.len()
@@ -595,7 +595,7 @@ pub async fn sync_interaction_counts(
                     new_events.push(event);
                 }
             }
-            new_events.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+            new_events.sort_by_key(|right| std::cmp::Reverse(right.created_at));
             let sync_edit_events: Vec<Event> = new_events
                 .iter()
                 .filter(|e| e.kind.as_u16() == 1010)
@@ -871,10 +871,8 @@ pub async fn fetch_trending_interactions(
         let counts = counts_map.entry(event_key).or_default();
         match event.kind {
             kind if is_reply_kind(kind) => counts.replies += 1,
-            Kind::Reaction => {
-                if event.content.trim() != "-" {
-                    counts.likes += 1;
-                }
+            Kind::Reaction if event.content.trim() != "-" => {
+                counts.likes += 1;
             }
             Kind::Repost => counts.reposts += 1,
             Kind::ZapReceipt => {

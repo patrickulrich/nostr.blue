@@ -70,7 +70,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
                     match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
                         Ok(events) => {
                             let mut sorted_messages = events;
-                            sorted_messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                            sorted_messages.sort_by_key(|a| a.created_at);
                             messages.set(sorted_messages);
                             log::info!("Loaded {} chat messages", messages.read().len());
                         }

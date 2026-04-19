@@ -199,7 +199,7 @@ pub fn Videos() -> Element {
                         }
                         let mut current = feed_events.cloned();
                         current.extend(batch);
-                        current.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                        current.sort_by_key(|b| std::cmp::Reverse(b.created_at));
                         let deduped = dedupe_videos_by_url(current);
                         feed_events.set(deduped);
                         loading_feed.set(false);
@@ -212,7 +212,7 @@ pub fn Videos() -> Element {
                     }
                     let mut current = feed_events.cloned();
                     current.extend(batch);
-                    current.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                    current.sort_by_key(|b| std::cmp::Reverse(b.created_at));
                     let deduped = dedupe_videos_by_url(current);
                     feed_events.set(deduped);
                     loading_feed.set(false);
@@ -792,7 +792,7 @@ async fn load_featured_content() -> Result<Vec<Event>, String> {
                     )
                     .await
                     .unwrap_or(0);
-                    all_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                    all_events.sort_by_key(|b| std::cmp::Reverse(b.created_at));
                     let deduped = dedupe_videos_by_url(all_events);
                     let landscape_vec: Vec<Event> = deduped.into_iter().take(3).collect();
                     if !landscape_vec.is_empty() {
@@ -816,7 +816,7 @@ async fn load_featured_content() -> Result<Vec<Event>, String> {
     )
     .await
     .unwrap_or(0);
-    all_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    all_events.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     let deduped = dedupe_videos_by_url(all_events);
     let landscape_vec: Vec<Event> = deduped.into_iter().take(3).collect();
     Ok(landscape_vec)
@@ -850,7 +850,7 @@ async fn load_recent_verts() -> Result<Vec<Event>, String> {
                 )
                 .await
                 .unwrap_or(0);
-                all_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                all_events.sort_by_key(|b| std::cmp::Reverse(b.created_at));
                 let deduped = dedupe_videos_by_url(all_events);
                 let verts_vec: Vec<Event> = deduped.into_iter().take(5).collect();
                 return Ok(verts_vec);
@@ -949,7 +949,7 @@ where
         log::info!("No horizontal videos from followed users");
         return Ok((Vec::new(), false, false));
     }
-    events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    events.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     let deduped = dedupe_videos_by_url(events);
     log::info!(
         "Loaded {} horizontal video events from following (after dedup)",
@@ -989,7 +989,7 @@ where
     if events.is_empty() {
         return Err("Failed to load any content".to_string());
     }
-    events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    events.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     let deduped = dedupe_videos_by_url(events);
     log::info!(
         "Loaded {} global horizontal video events (after dedup)",

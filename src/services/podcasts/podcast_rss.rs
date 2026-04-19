@@ -339,10 +339,10 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
                     if let Some(ref mut ep) = current_episode {
                         match current_element.as_str() {
                             "title" => ep.title = text,
-                            "description" | "itunes:summary" => {
-                                if ep.description.is_none() {
-                                    ep.description = Some(text);
-                                }
+                            "description" | "itunes:summary"
+                                if ep.description.is_none() =>
+                            {
+                                ep.description = Some(text);
                             }
                             "guid" => ep.guid = text,
                             "pubDate" => ep.pub_date = Some(text),
@@ -357,10 +357,10 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
                 } else if in_channel {
                     match current_element.as_str() {
                         "title" => podcast.title = text,
-                        "description" | "itunes:summary" => {
-                            if podcast.description.is_none() {
-                                podcast.description = Some(text);
-                            }
+                        "description" | "itunes:summary"
+                            if podcast.description.is_none() =>
+                        {
+                            podcast.description = Some(text);
                         }
                         "itunes:author" | "author" => podcast.author = Some(text),
                         "link" => podcast.link = Some(text),

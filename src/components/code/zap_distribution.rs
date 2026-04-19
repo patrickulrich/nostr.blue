@@ -184,7 +184,7 @@ fn compute_allocations(
         .enumerate()
         .map(|(i, w)| (i, (amount as u128) * (*w as u128) % (total_weight as u128)))
         .collect();
-    remainders.sort_by(|a, b| b.1.cmp(&a.1));
+    remainders.sort_by_key(|b| std::cmp::Reverse(b.1));
     for &(i, _) in remainders.iter().take(remainder) {
         floors[i] += 1;
     }

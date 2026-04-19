@@ -1738,7 +1738,7 @@ async fn load_tab_events(
                     break;
                 }
             }
-            all_posts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            all_posts.sort_by_key(|b| std::cmp::Reverse(b.created_at));
             let mut seen_ids = std::collections::HashSet::new();
             all_posts.retain(|e| seen_ids.insert(e.id));
             log::info!(
@@ -1791,7 +1791,7 @@ async fn load_tab_events(
                     break;
                 }
             }
-            all_replies.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            all_replies.sort_by_key(|b| std::cmp::Reverse(b.created_at));
             let mut seen_ids = std::collections::HashSet::new();
             all_replies.retain(|e| seen_ids.insert(e.id));
             log::info!(
@@ -1845,7 +1845,7 @@ async fn load_tab_events(
                     .map_err(|e| format!("Failed to fetch events: {}", e))?;
             let relay_count = events.len();
             let mut event_vec: Vec<NostrEvent> = events.into_iter().collect();
-            event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            event_vec.sort_by_key(|b| std::cmp::Reverse(b.created_at));
             log::info!("Loaded {} photos", event_vec.len());
             let oldest_cursor = event_vec.last().map(|e| e.created_at.as_secs());
             Ok(LoadOutcome {
@@ -1868,7 +1868,7 @@ async fn load_tab_events(
                     .map_err(|e| format!("Failed to fetch events: {}", e))?;
             let relay_count = events.len();
             let mut event_vec: Vec<NostrEvent> = events.into_iter().collect();
-            event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            event_vec.sort_by_key(|b| std::cmp::Reverse(b.created_at));
             log::info!("Loaded {} videos", event_vec.len());
             let oldest_cursor = event_vec.last().map(|e| e.created_at.as_secs());
             Ok(LoadOutcome {
@@ -1891,7 +1891,7 @@ async fn load_tab_events(
                     .map_err(|e| format!("Failed to fetch events: {}", e))?;
             let relay_count = events.len();
             let mut event_vec: Vec<NostrEvent> = events.into_iter().collect();
-            event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            event_vec.sort_by_key(|b| std::cmp::Reverse(b.created_at));
             log::info!("Loaded {} verts", event_vec.len());
             let oldest_cursor = event_vec.last().map(|e| e.created_at.as_secs());
             Ok(LoadOutcome {

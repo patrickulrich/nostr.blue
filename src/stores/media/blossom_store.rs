@@ -820,7 +820,7 @@ async fn list_files_inner() -> Result<Vec<MediaItem>, String> {
         ));
     }
     let mut items: Vec<MediaItem> = all_items.into_values().collect();
-    items.sort_by(|a, b| b.uploaded.cmp(&a.uploaded));
+    items.sort_by_key(|b| std::cmp::Reverse(b.uploaded));
     *MEDIA_ITEMS.write() = items.clone();
     *LAST_FETCH_TIME.write() = Timestamp::now().as_secs();
     Ok(items)

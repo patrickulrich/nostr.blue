@@ -204,7 +204,7 @@ async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
             }
         }
     }
-    lists.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    lists.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     log::info!("Fetched {} lists", lists.len());
     Ok(lists)
 }

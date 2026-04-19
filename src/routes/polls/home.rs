@@ -134,7 +134,7 @@ pub fn Polls() -> Element {
                     }
                     // Sort and update pagination state
                     events.with_mut(|current| {
-                        current.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                        current.sort_by_key(|b| std::cmp::Reverse(b.created_at));
                     });
                     let current_events = events.read();
                     if let Some(last_event) = current_events.last() {
@@ -466,7 +466,7 @@ async fn load_following_polls(
         .await
         .map_err(|e| format!("Failed to fetch polls: {}", e))?;
     let mut event_vec: Vec<Event> = events.into_iter().collect();
-    event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    event_vec.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(event_vec)
 }
 /// Load polls from everyone (global feed)
@@ -482,6 +482,6 @@ async fn load_global_polls(
         .await
         .map_err(|e| format!("Failed to fetch polls: {}", e))?;
     let mut event_vec: Vec<Event> = events.into_iter().collect();
-    event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    event_vec.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(event_vec)
 }

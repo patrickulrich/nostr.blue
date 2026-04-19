@@ -55,7 +55,7 @@ pub fn ShopOrders() -> Element {
     });
     let sorted_orders = {
         let mut o = orders.read().clone();
-        o.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        o.sort_by_key(|b| std::cmp::Reverse(b.created_at));
         o
     };
     rsx! {

@@ -146,22 +146,20 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
                     }
                 }
             }
-            Key::Enter => {
-                if !results.is_empty() {
-                    evt.prevent_default();
-                    let selected = results.get(*autocomplete.selected_index.read());
-                    if let Some(profile) = selected {
-                        insert_mention(
-                            profile.clone(),
-                            props.content,
-                            props.on_input,
-                            *autocomplete.start_pos.read(),
-                            autocomplete.query.read().len(),
-                            (**textarea_id.read()).clone(),
-                            autocomplete.show,
-                            props.cursor_position,
-                        );
-                    }
+            Key::Enter if !results.is_empty() => {
+                evt.prevent_default();
+                let selected = results.get(*autocomplete.selected_index.read());
+                if let Some(profile) = selected {
+                    insert_mention(
+                        profile.clone(),
+                        props.content,
+                        props.on_input,
+                        *autocomplete.start_pos.read(),
+                        autocomplete.query.read().len(),
+                        (**textarea_id.read()).clone(),
+                        autocomplete.show,
+                        props.cursor_position,
+                    );
                 }
             }
             Key::Escape => {
@@ -330,7 +328,7 @@ fn detect_mention(
                                 present.insert(extra.pubkey);
                                 merged.push(extra);
                             }
-                            merged.sort_by(|a, b| b.relevance.cmp(&a.relevance));
+                            merged.sort_by_key(|b| std::cmp::Reverse(b.relevance));
                             merged.truncate(10);
                             results_signal.set(merged);
                             searching_signal.set(false);

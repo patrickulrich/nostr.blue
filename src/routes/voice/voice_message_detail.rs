@@ -84,7 +84,7 @@ pub fn VoiceMessageDetail(voice_id: String) -> Element {
                     .filter(|event| seen_ids.insert(event.id))
                     .collect();
                 let mut sorted_replies = unique_replies;
-                sorted_replies.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                sorted_replies.sort_by_key(|a| a.created_at);
                 log::info!("Total unique replies: {}", sorted_replies.len());
                 replies.set(sorted_replies);
                 loading_replies.set(false);
@@ -239,7 +239,7 @@ pub fn VoiceMessageDetail(voice_id: String) -> Element {
                                         .filter(|event| seen_ids.insert(event.id))
                                         .collect();
                                     let mut sorted_replies = unique_replies;
-                                    sorted_replies.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                                    sorted_replies.sort_by_key(|a| a.created_at);
                                     replies.set(sorted_replies);
                                     loading_replies.set(false);
                                 });

@@ -1752,7 +1752,7 @@ fn RecentEpisodesMerged(props: RecentEpisodesMergedProps) -> Element {
         if let Some(ref eps) = *nostr_episodes.read() {
             all.extend(eps.iter().cloned());
         }
-        all.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        all.sort_by_key(|b| std::cmp::Reverse(b.created_at));
         all
     });
     let has_rss_data = rss_episodes.read().is_some();
@@ -2085,7 +2085,7 @@ async fn fetch_recent_nostr_episodes() -> std::result::Result<Vec<DisplayEpisode
     } else {
         log::info!("Parsed {} episodes", episodes.len());
     }
-    episodes.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    episodes.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(episodes)
 }
 /// Search Nostr podcasts by query using NIP-50 relay-side search

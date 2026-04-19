@@ -112,15 +112,15 @@ pub fn MusicHome() -> Element {
             match tab {
                 DiscoveryTab::Trending => {
                     all_tracks
-                        .sort_by(|a, b| b.msat_total.unwrap_or(0).cmp(&a.msat_total.unwrap_or(0)));
+                        .sort_by_key(|b| std::cmp::Reverse(b.msat_total.unwrap_or(0)));
                 }
                 DiscoveryTab::New => {
                     all_tracks
-                        .sort_by(|a, b| b.created_at.unwrap_or(0).cmp(&a.created_at.unwrap_or(0)));
+                        .sort_by_key(|b| std::cmp::Reverse(b.created_at.unwrap_or(0)));
                 }
                 DiscoveryTab::Following => {
                     all_tracks
-                        .sort_by(|a, b| b.created_at.unwrap_or(0).cmp(&a.created_at.unwrap_or(0)));
+                        .sort_by_key(|b| std::cmp::Reverse(b.created_at.unwrap_or(0)));
                 }
                 DiscoveryTab::Playlists | DiscoveryTab::Rss => {}
             }

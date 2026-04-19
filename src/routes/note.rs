@@ -318,7 +318,7 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
             }
 
             if let Ok(mut parents) = parents_result {
-                parents.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                parents.sort_by_key(|a| a.created_at);
                 back_navigation::set_active_note_back_context(
                     note_id_str.clone(),
                     parents.iter().map(|event| event.id.to_hex()).collect(),
@@ -327,7 +327,7 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                 parent_events.set(parents);
             }
             if let Ok(mut reply_vec) = replies_result {
-                reply_vec.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                reply_vec.sort_by_key(|a| a.created_at);
                 log::info!("Loaded {} replies", reply_vec.len());
                 replies.set(reply_vec);
             }

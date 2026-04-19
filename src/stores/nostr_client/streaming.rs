@@ -341,7 +341,7 @@ pub async fn stream_events_collected(
             events.push(event);
         }
     }
-    events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    events.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     log::info!("Stream completed: collected {} unique events", events.len());
     Ok(events)
 }

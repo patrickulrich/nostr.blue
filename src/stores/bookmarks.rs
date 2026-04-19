@@ -544,7 +544,7 @@ pub async fn fetch_bookmarked_events_paginated(
     {
         Ok(events) => {
             let mut event_vec: Vec<Event> = events.into_iter().collect();
-            event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            event_vec.sort_by_key(|b| std::cmp::Reverse(b.created_at));
             log::info!(
                 "Fetched {} bookmarked events (skip: {}, limit: {:?})",
                 event_vec.len(),

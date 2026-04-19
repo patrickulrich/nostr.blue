@@ -63,7 +63,7 @@ pub async fn search_text_notes(
                     }
                 })
                 .collect();
-            results.sort_by(|a, b| b.relevance.cmp(&a.relevance));
+            results.sort_by_key(|b| std::cmp::Reverse(b.relevance));
             log::debug!(
                 "Text note search for '{}' returned {} results",
                 query,
@@ -120,7 +120,7 @@ pub async fn search_articles(
                     }
                 })
                 .collect();
-            results.sort_by(|a, b| b.relevance.cmp(&a.relevance));
+            results.sort_by_key(|b| std::cmp::Reverse(b.relevance));
             log::debug!(
                 "Article search for '{}' returned {} results",
                 query,
@@ -177,7 +177,7 @@ pub async fn search_photos(
                     }
                 })
                 .collect();
-            results.sort_by(|a, b| b.relevance.cmp(&a.relevance));
+            results.sort_by_key(|b| std::cmp::Reverse(b.relevance));
             log::debug!(
                 "Photo search for '{}' returned {} results",
                 query,
@@ -234,7 +234,7 @@ pub async fn search_videos(
                     }
                 })
                 .collect();
-            results.sort_by(|a, b| b.relevance.cmp(&a.relevance));
+            results.sort_by_key(|b| std::cmp::Reverse(b.relevance));
             log::debug!(
                 "Video search for '{}' returned {} results",
                 query,

@@ -165,7 +165,7 @@ pub async fn fetch_starter_packs(limit: usize) -> StdResult<Vec<StarterPack>, St
         Ok(events) => {
             let mut packs: Vec<StarterPack> =
                 events.iter().filter_map(StarterPack::from_event).collect();
-            packs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            packs.sort_by_key(|b| std::cmp::Reverse(b.created_at));
             packs.truncate(limit);
             cache_packs(&packs);
             log::info!("Fetched {} starter packs", packs.len());
@@ -194,7 +194,7 @@ pub async fn fetch_packs_by_author(
             .await?;
 
     let mut packs: Vec<StarterPack> = events.iter().filter_map(StarterPack::from_event).collect();
-    packs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    packs.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     packs.truncate(limit);
     cache_packs(&packs);
     Ok(packs)
@@ -215,7 +215,7 @@ pub async fn fetch_packs_containing_pubkey(
             .await?;
 
     let mut packs: Vec<StarterPack> = events.iter().filter_map(StarterPack::from_event).collect();
-    packs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    packs.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     packs.truncate(limit);
     cache_packs(&packs);
     Ok(packs)
@@ -249,7 +249,7 @@ pub async fn fetch_packs_from_following(
             .await?;
 
     let mut packs: Vec<StarterPack> = events.iter().filter_map(StarterPack::from_event).collect();
-    packs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    packs.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     packs.truncate(limit);
     cache_packs(&packs);
     Ok(packs)
@@ -446,7 +446,7 @@ pub async fn fetch_pack_member_posts(
     )
     .await?;
 
-    events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    events.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(events)
 }
 

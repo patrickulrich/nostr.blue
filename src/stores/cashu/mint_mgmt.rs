@@ -1576,7 +1576,7 @@ pub async fn discover_mints() -> Result<Vec<DiscoveredMint>, String> {
         }
     }
     let mut mints: Vec<DiscoveredMint> = mints_by_url.into_values().collect();
-    mints.sort_by(|a, b| b.recommendation_count.cmp(&a.recommendation_count));
+    mints.sort_by_key(|b| std::cmp::Reverse(b.recommendation_count));
     log::info!("Discovered {} unique mints", mints.len());
     Ok(mints)
 }

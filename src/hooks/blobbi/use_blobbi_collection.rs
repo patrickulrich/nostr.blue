@@ -56,7 +56,7 @@ pub fn use_blobbi_collection() {
             let mut collection: Vec<BlobbiCompanion> =
                 events.iter().map(parse_blobbi_from_event).collect();
 
-            collection.sort_by(|a, b| b.experience.cmp(&a.experience));
+            collection.sort_by_key(|b| std::cmp::Reverse(b.experience));
 
             let selected_d = {
                 let store = blobbi_store::BLOBBI_COLLECTION.read();

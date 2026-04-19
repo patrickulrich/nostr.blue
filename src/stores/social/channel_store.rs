@@ -221,7 +221,7 @@ pub async fn fetch_channels_page(
     let filter = channels_discovery_filter_until(limit, until);
     let events = fetch_events_aggregated(filter, Duration::from_secs(15)).await?;
     let mut channels: Vec<Channel> = events.iter().filter_map(parse_channel_creation).collect();
-    channels.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    channels.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     for ch in &channels {
         cache_channel(ch.clone());
     }

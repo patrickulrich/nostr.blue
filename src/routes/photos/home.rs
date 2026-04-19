@@ -379,7 +379,7 @@ async fn load_following_photos(until: Option<u64>) -> Result<(Vec<Event>, bool),
             log::info!("Loaded {} photo events from following", events.len());
             let mut seen = std::collections::HashSet::new();
             events.retain(|e| seen.insert(e.id));
-            events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            events.sort_by_key(|b| std::cmp::Reverse(b.created_at));
             events.truncate(50);
             if events.is_empty() {
                 log::info!("No photos from followed users");
@@ -416,7 +416,7 @@ async fn load_global_photos(until: Option<u64>) -> Result<Vec<Event>, String> {
     log::info!("Loaded {} global photo events", events.len());
     let mut seen = std::collections::HashSet::new();
     events.retain(|e| seen.insert(e.id));
-    events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    events.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     events.truncate(50);
     Ok(events)
 }

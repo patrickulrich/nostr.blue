@@ -198,8 +198,8 @@ impl OrderSortBy {
 /// Sort orders
 pub fn sort_orders(orders: &mut [P2POrder], sort_by: OrderSortBy) {
     match sort_by {
-        OrderSortBy::Newest => orders.sort_by(|a, b| b.created_at.cmp(&a.created_at)),
-        OrderSortBy::Oldest => orders.sort_by(|a, b| a.created_at.cmp(&b.created_at)),
+        OrderSortBy::Newest => orders.sort_by_key(|b| std::cmp::Reverse(b.created_at)),
+        OrderSortBy::Oldest => orders.sort_by_key(|a| a.created_at),
         OrderSortBy::PremiumLow => orders.sort_by(|a, b| {
             let pa = a.premium.unwrap_or(0.0);
             let pb = b.premium.unwrap_or(0.0);
