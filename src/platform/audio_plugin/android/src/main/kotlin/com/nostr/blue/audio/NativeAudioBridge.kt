@@ -1,4 +1,4 @@
-package dev.dioxus.main
+package com.nostr.blue.audio
 
 import android.content.Context
 import android.content.Intent

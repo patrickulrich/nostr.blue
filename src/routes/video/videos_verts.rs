@@ -12,7 +12,7 @@ pub fn VideosVerts() -> Element {
         FeedType::Global
     };
     let mut feed_type = use_signal(|| default_feed);
-    let feed_key = match *feed_type.read() {
+    let _feed_key = match *feed_type.read() {
         FeedType::Following => "following",
         FeedType::Global => "global",
     };
@@ -25,7 +25,7 @@ pub fn VideosVerts() -> Element {
         } else {
             div {
                 ShortsPlayer {
-                    key: "{feed_key}",
+                    key: "{_feed_key}",
                     initial_video_id: String::new(),
                     feed_type: *feed_type.read(),
                     initial_event: None,

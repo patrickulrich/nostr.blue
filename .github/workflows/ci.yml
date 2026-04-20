@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -22,7 +22,7 @@ jobs:
           components: clippy
 
       - name: Cache Cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/bin/
@@ -35,9 +35,9 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install npm dependencies
@@ -57,7 +57,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -66,7 +66,7 @@ jobs:
           components: clippy
 
       - name: Cache Cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/bin/
@@ -79,9 +79,9 @@ jobs:
             ${{ runner.os }}-native-cargo-
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install npm dependencies
@@ -111,7 +111,7 @@ jobs:
             libgdk-pixbuf-2.0-dev
 
       - name: Install Dioxus CLI
-        run: cargo install dioxus-cli --version 0.7.3 --locked --force
+        run: cargo install dioxus-cli --version 0.7.5 --locked --force
 
       - name: Dioxus check
         run: dx check --platform linux --no-default-features --features desktop
@@ -133,10 +133,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -147,7 +147,7 @@ jobs:
           targets: aarch64-linux-android
 
       - name: Cache Cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/bin/
@@ -179,9 +179,9 @@ jobs:
           sudo apt-get install -y unzip
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install npm dependencies
@@ -191,7 +191,7 @@ jobs:
         run: npm run build:all
 
       - name: Install Dioxus CLI
-        run: cargo install dioxus-cli --version 0.7.3 --locked --force
+        run: cargo install dioxus-cli --version 0.7.5 --locked --force
 
       - name: Build Android APK
         run: |
@@ -204,14 +204,14 @@ jobs:
         run: |
           APK=nostrblue-debug.apk
           VERSION="$(sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml | head -n1)"
-          AAPT="$ANDROID_SDK_ROOT/build-tools/34.0.0/aapt"
+          AAPT="$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt"
           "$AAPT" dump badging "$APK" > apk-metadata.txt
           grep -q "package: name='com.nostr.blue'" apk-metadata.txt
           grep -q "versionName='$VERSION'" apk-metadata.txt
           grep -q "application-label:'nostr.blue'" apk-metadata.txt
 
       - name: Upload Android APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nostrblue-debug-apk
           path: nostrblue-debug.apk
