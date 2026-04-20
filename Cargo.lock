@@ -4932,7 +4932,6 @@ dependencies = [
  "js-sys",
  "log",
  "lru",
- "manganis",
  "maplit",
  "ndk-context",
  "nostr",

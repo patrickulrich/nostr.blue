@@ -451,7 +451,7 @@ pub fn PersistentMusicPlayer() -> Element {
             if *is_seeking.read() {
                 continue;
             }
-            if let Ok(snapshot) = crate::platform::audio_plugin::snapshot() {
+            if let Ok(snapshot) = crate::platform::android_media::snapshot() {
                 music_player::sync_native_playback_snapshot(snapshot);
             }
         }

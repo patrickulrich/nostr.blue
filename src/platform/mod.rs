@@ -34,4 +34,4 @@ pub mod mobile;
 pub use mobile::download_file;
 
 #[cfg(feature = "mobile_platform")]
-pub mod audio_plugin;
+pub mod android_media;

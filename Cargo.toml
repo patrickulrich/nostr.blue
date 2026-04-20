@@ -11,7 +11,7 @@ license = "MIT"
 default = ["web"]
 cashu = ["dep:cdk", "dep:cdk-common", "nostr/nip60"]
 mobile_platform = []
-playstore = ["dioxus/mobile", "native", "dep:jni", "dep:ndk-context", "dep:manganis", "mobile_platform"]
+playstore = ["dioxus/mobile", "native", "dep:jni", "dep:ndk-context", "mobile_platform"]
 web = [
     "dioxus/web",
     "dioxus-motion/web",
@@ -24,7 +24,7 @@ web = [
     "cashu",
 ]
 desktop = ["dioxus/desktop", "dioxus-motion/desktop", "native", "dep:arboard", "dep:rfd", "dep:webbrowser", "cashu"]
-mobile = ["dioxus/mobile", "dioxus-motion/desktop", "native", "dep:jni", "dep:ndk-context", "dep:manganis", "cashu", "mobile_platform"]
+mobile = ["dioxus/mobile", "dioxus-motion/desktop", "native", "dep:jni", "dep:ndk-context", "cashu", "mobile_platform"]
 native = [
     "dep:nostr-ndb", "dep:cdk-sqlite", "dep:git2",
     "dep:dirs", "dep:env_logger", "dep:rusqlite",
@@ -182,7 +182,6 @@ webbrowser = { version = "1.0", optional = true }
 # Android-only (NIP-55 signer via JNI)
 jni = { version = "0.21", optional = true }
 ndk-context = { version = "0.1", optional = true }
-manganis = { version = "0.7", optional = true }
 
 # Markdown rendering
 pulldown-cmark = "0.13"

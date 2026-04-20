@@ -444,6 +444,7 @@ case "${DX_RELEASE:-}" in
 esac
 DX_ANDROID="$PROJECT_ROOT/target/dx/nostrblue/$DX_BUILD_PROFILE/android/app"
 ANDROID_RES_SRC="$PROJECT_ROOT/android/res"
+ANDROID_KOTLIN_SRC="$PROJECT_ROOT/android/kotlin"
 DIOXUS_CONFIG="$PROJECT_ROOT/Dioxus.toml"
 APP_ID="com.nostr.blue"
 CARGO_VERSION="$(version_field version)"
@@ -486,6 +487,8 @@ require_files \
     "$ANDROID_RES_SRC/mipmap-xxhdpi/ic_launcher_foreground.png" "launcher foreground asset (xxhdpi)" \
     "$ANDROID_RES_SRC/mipmap-xxxhdpi/ic_launcher_foreground.png" "launcher foreground asset (xxxhdpi)" \
     "$ANDROID_RES_SRC/drawable/ic_launcher_background.xml" "launcher background asset"
+require_file "$ANDROID_KOTLIN_SRC/dev/dioxus/main/MediaPlaybackService.kt" "Native playback service source not found"
+require_file "$ANDROID_KOTLIN_SRC/dev/dioxus/main/NativeAudioBridge.kt" "Native audio bridge source not found"
 
 echo "=== nostr.blue Android Build ==="
 echo "Project: $PROJECT_ROOT"
@@ -522,8 +525,8 @@ find "$DX_ANDROID" \
     -o -path '*/mipmap-anydpi-v26/ic_launcher_round.xml' \) \
     -delete 2>/dev/null || true
 
-
 echo ""
+
 echo "--- Step 1a: Pre-copy Android resources ---"
 mkdir -p "$DX_ANDROID/app/src/main/res/xml"
 mkdir -p "$DX_ANDROID/app/src/main/res/values"
@@ -538,6 +541,13 @@ if [ -f "$PROJECT_ROOT/android/res/values/strings.xml" ]; then
     echo "Pre-copied strings.xml"
 fi
 write_android_local_properties
+
+echo "Pre-copying Kotlin sources (so dx build / Gradle can see them)"
+kotlin_out="$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main"
+mkdir -p "$kotlin_out"
+copy_overlay_dir \
+    "$ANDROID_KOTLIN_SRC/dev/dioxus/main" \
+    "$kotlin_out"
 
 build_dx_android
 
@@ -675,6 +685,13 @@ if [ -d "$ANDROID_RES_SRC" ]; then
 else
     echo "WARNING: $ANDROID_RES_SRC not found, skipping Android resource overlay"
 fi
+
+echo ""
+echo "--- Step 4c: Copy Android Kotlin sources ---"
+copy_overlay_dir \
+    "$ANDROID_KOTLIN_SRC/dev/dioxus/main" \
+    "$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main"
+echo "Copied native Android Kotlin sources"
 
 echo ""
 echo "--- Step 4d: Verify Android resource overrides ---"

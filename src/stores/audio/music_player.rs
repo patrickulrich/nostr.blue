@@ -1,5 +1,5 @@
 #[cfg(feature = "mobile_platform")]
-use crate::platform::audio_plugin::{self, AndroidPlaybackSnapshot};
+use crate::platform::android_media::{self, AndroidPlaybackSnapshot};
 use crate::platform::storage;
 use crate::routes::Route;
 use crate::services::podcast_index::{Episode as PodcastIndexEpisode, PodcastFeed};
@@ -562,7 +562,7 @@ pub fn play_track(
     state.now_playing = None;
     log::info!("Playing track: {}", track.title);
     #[cfg(feature = "mobile_platform")]
-    if let Err(e) = audio_plugin::set_queue(&state.playlist, state.current_index, true) {
+    if let Err(e) = android_media::set_queue(&state.playlist, state.current_index, true) {
         log::error!("Failed to start native Android playback queue: {}", e);
         state.playback_error = Some(format!("Android playback failed: {}", e));
     }
@@ -595,7 +595,7 @@ pub fn append_to_playlist(tracks: Vec<MusicTrack>) {
     state.playlist.extend(tracks);
     #[cfg(feature = "mobile_platform")]
     if !state.playlist.is_empty() {
-        let _ = audio_plugin::set_queue(&state.playlist, state.current_index, state.is_playing);
+        let _ = android_media::set_queue(&state.playlist, state.current_index, state.is_playing);
     }
 }
 /// Toggle play/pause
@@ -605,9 +605,9 @@ pub fn toggle_play() {
     #[cfg(feature = "mobile_platform")]
     {
         let result = if state.is_playing {
-            audio_plugin::play()
+            android_media::play()
         } else {
-            audio_plugin::pause()
+            android_media::pause()
         };
         if let Err(e) = result {
             log::error!("Failed to toggle native Android playback: {}", e);
@@ -635,7 +635,7 @@ pub fn next_track() {
         state.is_visible = false;
         state.current_track = None;
         #[cfg(feature = "mobile_platform")]
-        let _ = audio_plugin::stop();
+        let _ = android_media::stop();
         return;
     }
     state.current_index = (state.current_index + 1) % state.playlist.len();
@@ -645,7 +645,7 @@ pub fn next_track() {
     if let Some(track) = state.current_track.clone() {
         log::info!("Next track: {}", track.title);
         #[cfg(feature = "mobile_platform")]
-        if let Err(e) = audio_plugin::next_track() {
+        if let Err(e) = android_media::next_track() {
             log::error!("Failed to skip to next native Android track: {}", e);
             state.playback_error = Some(format!("Android playback failed: {}", e));
         }
@@ -663,7 +663,7 @@ pub fn previous_track() {
     if state.current_time > 3.0 {
         state.current_time = 0.0;
         #[cfg(feature = "mobile_platform")]
-        if let Err(e) = audio_plugin::seek_to(0.0) {
+        if let Err(e) = android_media::seek_to(0.0) {
             log::error!("Failed to rewind native Android track: {}", e);
             state.playback_error = Some(format!("Android playback failed: {}", e));
         }
@@ -685,7 +685,7 @@ pub fn previous_track() {
     if let Some(track) = state.current_track.clone() {
         log::info!("Previous track: {}", track.title);
         #[cfg(feature = "mobile_platform")]
-        if let Err(e) = audio_plugin::previous_track() {
+        if let Err(e) = android_media::previous_track() {
             log::error!("Failed to skip to previous native Android track: {}", e);
             state.playback_error = Some(format!("Android playback failed: {}", e));
         }
@@ -701,7 +701,7 @@ pub fn set_volume(volume: f64) {
         let mut state = MUSIC_PLAYER.write();
         state.volume = clamped;
         #[cfg(feature = "mobile_platform")]
-        if let Err(e) = audio_plugin::set_volume(if state.is_muted { 0.0 } else { clamped }) {
+        if let Err(e) = android_media::set_volume(if state.is_muted { 0.0 } else { clamped }) {
             log::error!("Failed to set native Android volume: {}", e);
             state.playback_error = Some(format!("Android playback failed: {}", e));
         }
@@ -723,7 +723,7 @@ pub fn toggle_mute() {
         let mut state = MUSIC_PLAYER.write();
         state.is_muted = !state.is_muted;
         #[cfg(feature = "mobile_platform")]
-        if let Err(e) = audio_plugin::set_volume(if state.is_muted { 0.0 } else { state.volume }) {
+        if let Err(e) = android_media::set_volume(if state.is_muted { 0.0 } else { state.volume }) {
             log::error!("Failed to toggle native Android mute: {}", e);
             state.playback_error = Some(format!("Android playback failed: {}", e));
         }
@@ -743,7 +743,7 @@ pub fn seek_to(time: f64) {
     let mut state = MUSIC_PLAYER.write();
     state.current_time = time;
     #[cfg(feature = "mobile_platform")]
-    if let Err(e) = audio_plugin::seek_to(time) {
+    if let Err(e) = android_media::seek_to(time) {
         log::error!("Failed to seek native Android playback: {}", e);
         state.playback_error = Some(format!("Android playback failed: {}", e));
     }
@@ -777,10 +777,10 @@ pub fn close_player() {
     state.view_mode = PlayerViewMode::Bar;
     #[cfg(feature = "mobile_platform")]
     {
-        if let Err(e) = audio_plugin::stop() {
+        if let Err(e) = android_media::stop() {
             log::error!("Failed to stop native Android playback: {}", e);
         }
-        if let Err(e) = audio_plugin::clear_queue() {
+        if let Err(e) = android_media::clear_queue() {
             log::error!("Failed to clear native Android playback queue: {}", e);
         }
     }
@@ -963,7 +963,7 @@ pub fn set_playback_speed(speed: f64) {
         let mut state = MUSIC_PLAYER.write();
         state.playback_speed = speed;
         #[cfg(feature = "mobile_platform")]
-        if let Err(e) = audio_plugin::set_playback_speed(speed) {
+        if let Err(e) = android_media::set_playback_speed(speed) {
             log::error!("Failed to set native Android playback speed: {}", e);
             state.playback_error = Some(format!("Android playback failed: {}", e));
         }
@@ -1048,7 +1048,7 @@ pub fn try_next_stream_mobile() -> bool {
         next_idx + 1,
         total_streams
     );
-    if let Err(e) = crate::platform::audio_plugin::set_queue(&playlist, index, true) {
+    if let Err(e) = crate::platform::android_media::set_queue(&playlist, index, true) {
         log::error!("Failed to start Android fallback stream: {}", e);
         MUSIC_PLAYER.write().playback_error =
             Some(format!("Fallback stream failed: {}", e));

@@ -1,4 +1,4 @@
-package com.nostr.blue.audio
+package dev.dioxus.main
 
 import android.app.Notification
 import android.app.NotificationChannel
