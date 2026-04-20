@@ -17,7 +17,7 @@ pub struct ActiveNoteBackContext {
 pub static ACTIVE_NOTE_BACK_CONTEXT: GlobalSignal<ActiveNoteBackContext> =
     Signal::global(ActiveNoteBackContext::default);
 
-#[cfg_attr(not(feature = "mobile"), allow(dead_code))]
+#[cfg_attr(not(feature = "mobile_platform"), allow(dead_code))]
 static ANDROID_BACK_REQUESTS: AtomicU64 = AtomicU64::new(0);
 
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
@@ -25,13 +25,34 @@ pub fn request_android_back_from_platform() {
     ANDROID_BACK_REQUESTS.fetch_add(1, Ordering::SeqCst);
 }
 
-#[cfg_attr(not(feature = "mobile"), allow(dead_code))]
+#[cfg_attr(not(feature = "mobile_platform"), allow(dead_code))]
 pub fn platform_android_back_request_count() -> u64 {
     ANDROID_BACK_REQUESTS.load(Ordering::SeqCst)
 }
 
-#[cfg_attr(not(feature = "mobile"), allow(dead_code))]
+#[cfg_attr(not(feature = "mobile_platform"), allow(dead_code))]
 pub fn close_topmost_mobile_overlay() -> bool {
+    if crate::stores::media::LIGHTBOX_STATE.read().is_open {
+        crate::stores::media::close_lightbox();
+        return true;
+    }
+
+    {
+        let player = crate::stores::music_player::MUSIC_PLAYER.read();
+        if player.is_visible
+            && matches!(
+                player.view_mode,
+                crate::stores::music_player::PlayerViewMode::Expanded
+            )
+        {
+            drop(player);
+            crate::stores::music_player::set_view_mode(
+                crate::stores::music_player::PlayerViewMode::Bar,
+            );
+            return true;
+        }
+    }
+
     if *SIDEBAR_CUSTOMIZER_OPEN.read() {
         *SIDEBAR_CUSTOMIZER_OPEN.write() = false;
         return true;

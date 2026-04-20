@@ -142,7 +142,7 @@ fn LandscapePlayer(event: Event) -> Element {
                 .filter(|event| seen_ids.insert(event.id))
                 .collect();
             let mut sorted_comments = unique_comments;
-            sorted_comments.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+            sorted_comments.sort_by_key(|a| a.created_at);
             comments.set(sorted_comments);
             loading_comments.set(false);
         });
@@ -322,7 +322,7 @@ fn LandscapePlayer(event: Event) -> Element {
                                     .filter(|event| seen_ids.insert(event.id))
                                     .collect();
                                 let mut sorted_comments = unique_comments;
-                                sorted_comments.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                                sorted_comments.sort_by_key(|a| a.created_at);
                                 comments.set(sorted_comments);
                                 loading_comments.set(false);
                             });
@@ -839,7 +839,7 @@ fn VideoInfo(
                 .filter(|event| seen_ids.insert(event.id))
                 .collect();
             let mut sorted_comments = unique_comments;
-            sorted_comments.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+            sorted_comments.sort_by_key(|a| a.created_at);
             log::info!("VideoInfo loaded {} comments", sorted_comments.len());
             comments.set(sorted_comments);
             loading_comments.set(false);
@@ -1091,7 +1091,7 @@ fn VideoInfo(
                                 .filter(|event| seen_ids.insert(event.id))
                                 .collect();
                             let mut sorted_comments = unique_comments;
-                            sorted_comments.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                            sorted_comments.sort_by_key(|a| a.created_at);
                             comments.set(sorted_comments);
                             loading_comments.set(false);
                         });
@@ -1541,7 +1541,7 @@ async fn load_shorts_following(
     match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             let mut event_vec: Vec<Event> = events.into_iter().collect();
-            event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            event_vec.sort_by_key(|b| std::cmp::Reverse(b.created_at));
             if event_vec.is_empty() {
                 return if fallback_to_global_on_empty {
                     match load_shorts_global(until).await {
@@ -1579,7 +1579,7 @@ async fn load_shorts_global(until: Option<u64>) -> std::result::Result<Vec<Event
     match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             let mut event_vec: Vec<Event> = events.into_iter().collect();
-            event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            event_vec.sort_by_key(|b| std::cmp::Reverse(b.created_at));
             Ok(event_vec)
         }
         Err(e) => {

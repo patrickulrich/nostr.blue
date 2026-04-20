@@ -243,7 +243,7 @@ async fn load_following_voice_messages(until: Option<u64>) -> Result<Vec<Event>,
         .await
         .map_err(|e| format!("Failed to fetch voice messages: {}", e))?;
     let mut event_vec: Vec<Event> = events.into_iter().collect();
-    event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    event_vec.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(event_vec)
 }
 /// Load voice messages from everyone (global feed)
@@ -258,6 +258,6 @@ async fn load_global_voice_messages(until: Option<u64>) -> Result<Vec<Event>, St
         .await
         .map_err(|e| format!("Failed to fetch voice messages: {}", e))?;
     let mut event_vec: Vec<Event> = events.into_iter().collect();
-    event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    event_vec.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(event_vec)
 }

@@ -693,7 +693,7 @@ impl IndexedDbDatabase {
             .await
             .map_err(|e| Self::make_error(format!("Get all await error: {:?}", e)))?;
         let mut results = Vec::new();
-        for (key_js, val_js) in js_keys_array.into_iter().zip(js_values_array.into_iter()) {
+        for (key_js, val_js) in js_keys_array.into_iter().zip(js_values_array) {
             if !val_js.is_undefined() && !val_js.is_null() {
                 if let (Some(key_str), Some(json_str)) = (key_js.as_string(), val_js.as_string()) {
                     let deserialized: T = serde_json::from_str(&json_str).map_err(|e| {
@@ -1511,7 +1511,7 @@ impl IndexedDbDatabase {
             .await
             .map_err(|e| Self::make_error(format!("Get all await error: {:?}", e)))?;
         let mut counters = HashMap::new();
-        for (key_js, value_js) in keys.into_iter().zip(values.into_iter()) {
+        for (key_js, value_js) in keys.into_iter().zip(values) {
             if let Some(key_str) = key_js.as_string() {
                 let counter = value_js.as_f64().map(|f| f as u32).unwrap_or(0);
                 counters.insert(key_str, counter);

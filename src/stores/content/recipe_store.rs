@@ -251,7 +251,7 @@ async fn fetch_with_multiple_filters(
             errors.join("; ")
         );
     }
-    all_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    all_events.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(all_events)
 }
 /// Fetch all recipes with pagination
@@ -267,7 +267,7 @@ pub async fn fetch_recipes(
         Ok(events) => {
             let mut recipes: Vec<CachedRecipe> =
                 events.iter().filter_map(parse_recipe_event).collect();
-            recipes.sort_by(|a, b| b.event.created_at.cmp(&a.event.created_at));
+            recipes.sort_by_key(|b| std::cmp::Reverse(b.event.created_at));
             recipes.truncate(limit);
             cache_recipes(&recipes);
             *RECIPE_STORE_INITIALIZED.write() = true;
@@ -294,7 +294,7 @@ pub async fn fetch_recipes_by_tag(
         Ok(events) => {
             let mut recipes: Vec<CachedRecipe> =
                 events.iter().filter_map(parse_recipe_event).collect();
-            recipes.sort_by(|a, b| b.event.created_at.cmp(&a.event.created_at));
+            recipes.sort_by_key(|b| std::cmp::Reverse(b.event.created_at));
             recipes.truncate(limit);
             cache_recipes(&recipes);
             log::info!("Fetched {} recipes for tag '{}'", recipes.len(), tag);
@@ -321,7 +321,7 @@ pub async fn fetch_recipes_by_author(
         Ok(events) => {
             let mut recipes: Vec<CachedRecipe> =
                 events.iter().filter_map(parse_recipe_event).collect();
-            recipes.sort_by(|a, b| b.event.created_at.cmp(&a.event.created_at));
+            recipes.sort_by_key(|b| std::cmp::Reverse(b.event.created_at));
             recipes.truncate(limit);
             cache_recipes(&recipes);
             log::info!("Fetched {} recipes by author", recipes.len());
@@ -429,7 +429,7 @@ pub async fn fetch_popular_chefs(limit: usize) -> StdResult<Vec<PopularChef>, St
                     recipe_count,
                 })
                 .collect();
-            chefs.sort_by(|a, b| b.recipe_count.cmp(&a.recipe_count));
+            chefs.sort_by_key(|b| std::cmp::Reverse(b.recipe_count));
             chefs.truncate(limit);
             *POPULAR_CHEFS.write() = chefs.clone();
             log::info!("Fetched {} popular chefs", chefs.len());
@@ -886,7 +886,7 @@ pub async fn compute_popular_tags(limit: usize) -> StdResult<Vec<TagWithCount>, 
         .into_iter()
         .map(|(tag, count)| TagWithCount { tag, count })
         .collect();
-    tags.sort_by(|a, b| b.count.cmp(&a.count));
+    tags.sort_by_key(|b| std::cmp::Reverse(b.count));
     tags.truncate(limit);
     log::info!("Computed {} popular tags", tags.len());
     Ok(tags)

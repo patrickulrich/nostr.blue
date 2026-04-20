@@ -66,7 +66,7 @@ pub async fn fetch_ssh_keys(pubkey: &PublicKey) -> Result<Vec<SshKey>, String> {
         .await
         .map_err(|e| format!("Failed to fetch SSH keys: {}", e))?;
     let mut keys: Vec<SshKey> = events.iter().filter_map(SshKey::from_event).collect();
-    keys.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    keys.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(keys)
 }
 /// Publish a new SSH key

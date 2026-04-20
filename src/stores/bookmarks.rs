@@ -9,13 +9,13 @@ use std::time::Duration;
 #[cfg(all(feature = "web", feature = "desktop"))]
 compile_error!("Cannot enable both 'web' and 'desktop' features");
 
-#[cfg(all(feature = "web", feature = "mobile"))]
+#[cfg(all(feature = "web", feature = "mobile_platform"))]
 compile_error!("Cannot enable both 'web' and 'mobile' features");
 
-#[cfg(all(feature = "desktop", feature = "mobile"))]
+#[cfg(all(feature = "desktop", feature = "mobile_platform"))]
 compile_error!("Cannot enable both 'desktop' and 'mobile' features");
 
-#[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile")))]
+#[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile_platform")))]
 compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature");
 
 #[cfg(feature = "web")]
@@ -544,7 +544,7 @@ pub async fn fetch_bookmarked_events_paginated(
     {
         Ok(events) => {
             let mut event_vec: Vec<Event> = events.into_iter().collect();
-            event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            event_vec.sort_by_key(|b| std::cmp::Reverse(b.created_at));
             log::info!(
                 "Fetched {} bookmarked events (skip: {}, limit: {:?})",
                 event_vec.len(),

@@ -1,6 +1,4 @@
 [application]
-name = "nostrblue"
-default_platform = "web"
 asset_dir = "public"
 android_manifest = "android/AndroidManifest.xml"
 android_main_activity = "android/MainActivity.kt"
@@ -19,6 +17,12 @@ icon = ["public/icons/icon-512.png", "public/icons/icon-192.png"]
 min_sdk = 24
 target_sdk = 35
 compile_sdk = 35
+gradle_dependencies = [
+    "androidx.media3:media3-exoplayer:1.9.0",
+    "androidx.media3:media3-exoplayer-hls:1.9.0",
+    "androidx.media3:media3-session:1.9.0",
+]
+lib_name = "dioxusmain"
 
 [web.app]
 title = "nostr.blue - Decentralized Social Network"
@@ -39,9 +43,3 @@ script = []
 
 # [[web.proxy]]
 # backend = "http://localhost:8000/api"
-
-[desktop.window]
-title = "nostr.blue"
-width = 1280
-height = 800
-resizable = true

@@ -139,7 +139,7 @@ pub async fn discover_content_dvms() -> Result<Vec<DvmProvider>, String> {
         .into_iter()
         .filter_map(|event| DvmProvider::from_event(&event))
         .collect();
-    providers.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    providers.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     let mut seen_pubkeys = std::collections::HashSet::new();
     providers.retain(|p| seen_pubkeys.insert(p.pubkey));
     log::info!("Found {} unique content discovery DVMs", providers.len());
@@ -294,7 +294,7 @@ async fn parse_feed_response(
         .await
         .map_err(|e| format!("Failed to fetch feed events: {}", e))?;
     let mut event_vec: Vec<Event> = events.into_iter().collect();
-    event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    event_vec.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     log::info!(
         "Fetched {} feed events from DVM recommendation",
         event_vec.len()

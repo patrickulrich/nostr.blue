@@ -30,6 +30,8 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
     let mut provider_id = use_signal(String::new);
     let mut base_url = use_signal(String::new);
     let mut api_key = use_signal(String::new);
+    let mut provider_kind = use_signal(|| AiProviderKind::OpenAiCompatible);
+    let mut model_name = use_signal(String::new);
     let mut pending_save_snapshot = use_signal(|| None::<AiProviderState>);
     let mut pending_save_action = use_signal(PendingSaveAction::default);
     let mut pending_save_min_event_id = use_signal(|| 0u64);
@@ -102,6 +104,8 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                     provider_id.set(String::new());
                     base_url.set(String::new());
                     api_key.set(String::new());
+                    provider_kind.set(AiProviderKind::OpenAiCompatible);
+                    model_name.set(String::new());
                 }
             }
             Err(err) => save_error.set(Some(err)),
@@ -188,9 +192,11 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                                                     provider_id.set(provider_clone.id.clone());
                                                     base_url.set(provider_clone.base_url.clone());
                                                     api_key.set(match &provider_clone.auth {
-                                                        ProviderAuth::BearerToken(value) => value.clone(),
+                                                        ProviderAuth::BearerToken(value) | ProviderAuth::XApiKey(value) => value.clone(),
                                                         ProviderAuth::PpqManaged { .. } => String::new(),
                                                     });
+                                                    provider_kind.set(provider_clone.provider_kind.clone());
+                                                    model_name.set(provider_clone.default_model.clone().unwrap_or_default());
                                                     save_error.set(None);
                                                 },
                                                 "Edit"
@@ -246,7 +252,7 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                     if editing_provider_id.read().is_some() { "Edit Custom Provider" } else { "Add Custom Provider" }
                 }
                 p { class: "mt-1 text-sm text-muted-foreground",
-                    "Configure a custom OpenAI-compatible provider with local-only credentials."
+                    "Configure a custom AI provider with local-only credentials."
                 }
                 div { class: "mt-4 grid gap-4 md:grid-cols-2",
                     label { class: "block space-y-2",
@@ -278,6 +284,40 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                             disabled: !provider_state_ready || *is_saving.read(),
                             oninput: move |evt| base_url.set(evt.value()),
                         }
+                    }
+                    label { class: "block space-y-2",
+                        span { class: "text-sm font-medium text-foreground", "API Format *" }
+                        select {
+                            class: "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                            disabled: !provider_state_ready || *is_saving.read(),
+                            onchange: move |evt| {
+                                provider_kind.set(match evt.value().as_str() {
+                                    "anthropic" => AiProviderKind::Anthropic,
+                                    _ => AiProviderKind::OpenAiCompatible,
+                                });
+                            },
+                            option {
+                                value: "openai_compatible",
+                                selected: *provider_kind.read() == AiProviderKind::OpenAiCompatible,
+                                "OpenAI Compatible"
+                            }
+                            option {
+                                value: "anthropic",
+                                selected: *provider_kind.read() == AiProviderKind::Anthropic,
+                                "Anthropic"
+                            }
+                        }
+                    }
+                    label { class: "block space-y-2",
+                        span { class: "text-sm font-medium text-foreground", "Default Model" }
+                        input {
+                            class: "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                            placeholder: "e.g., claude-sonnet-4-20250514",
+                            value: "{model_name}",
+                            disabled: !provider_state_ready || *is_saving.read(),
+                            oninput: move |evt| model_name.set(evt.value()),
+                        }
+                        p { class: "text-xs text-muted-foreground", "Leave blank to auto-detect models. Set to skip model discovery and use this model directly." }
                     }
                     div { class: "space-y-2 md:col-span-2",
                         span { class: "text-sm font-medium text-foreground", "Authentication" }
@@ -311,12 +351,16 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                             let current_provider_id = provider_id.read().clone();
                             let current_base_url = base_url.read().clone();
                             let current_api_key = api_key.read().clone();
+                            let current_kind = provider_kind.read().clone();
+                            let current_model = model_name.read().clone();
                             let current_state = state.read().clone();
                             match build_custom_provider(
                                 &current_name,
                                 &current_provider_id,
                                 &current_base_url,
                                 &current_api_key,
+                                &current_kind,
+                                &current_model,
                                 &current_state,
                                 editing.as_deref(),
                             ) {
@@ -376,6 +420,8 @@ pub fn AiSettingsPanel(#[props(default = false)] headerless: bool) -> Element {
                                 provider_id.set(String::new());
                                 base_url.set(String::new());
                                 api_key.set(String::new());
+                                provider_kind.set(AiProviderKind::OpenAiCompatible);
+                                model_name.set(String::new());
                                 save_error.set(None);
                             },
                             "Cancel"
@@ -421,11 +467,14 @@ fn persist_provider_state(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_custom_provider(
     name: &str,
     provider_id: &str,
     base_url: &str,
     api_key: &str,
+    provider_kind: &AiProviderKind,
+    model_name: &str,
     state: &AiProviderState,
     editing_provider_id: Option<&str>,
 ) -> Result<CustomAiProvider, String> {
@@ -468,7 +517,12 @@ fn build_custom_provider(
         name,
         base_url,
         api_key,
-        provider_kind: AiProviderKind::OpenAiCompatible,
+        provider_kind: provider_kind.clone(),
+        default_model: if model_name.trim().is_empty() {
+            None
+        } else {
+            Some(model_name.trim().to_string())
+        },
     })
 }
 
@@ -542,6 +596,8 @@ mod tests {
             " custom ",
             " https://api.example.com/v1/ ",
             " secret ",
+            &AiProviderKind::OpenAiCompatible,
+            "",
             &state,
             None,
         )
@@ -551,6 +607,28 @@ mod tests {
         assert_eq!(provider.id, "custom");
         assert_eq!(provider.base_url, "https://api.example.com/v1");
         assert_eq!(provider.api_key, "secret");
+        assert_eq!(provider.default_model, None);
+    }
+
+    #[test]
+    fn stores_default_model_when_provided() {
+        let state = AiProviderState::default();
+        let provider = build_custom_provider(
+            "Test",
+            "test",
+            "https://api.example.com/v1",
+            "secret",
+            &AiProviderKind::Anthropic,
+            " claude-sonnet-4-20250514 ",
+            &state,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            provider.default_model,
+            Some("claude-sonnet-4-20250514".to_string())
+        );
     }
 
     #[test]

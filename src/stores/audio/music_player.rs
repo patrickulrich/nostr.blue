@@ -1,4 +1,4 @@
-#[cfg(feature = "mobile")]
+#[cfg(feature = "mobile_platform")]
 use crate::platform::android_media::{self, AndroidPlaybackSnapshot};
 use crate::platform::storage;
 use crate::routes::Route;
@@ -224,7 +224,16 @@ impl MusicTrack {
             } => Some(Route::MusicTrackDetail {
                 track_id: format!("rss:{}:{}", feed_id, episode_id),
             }),
-            // Podcasts and radio use their own detail pages
+            TrackSource::Bible {
+                translation,
+                book,
+                chapter,
+                ..
+            } => Some(Route::BibleChapter {
+                translation: translation.clone(),
+                book: book.clone(),
+                chapter: *chapter,
+            }),
             _ => None,
         }
     }
@@ -286,6 +295,14 @@ impl MusicTrack {
         }
     }
 }
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+pub enum PlayerViewMode {
+    #[default]
+    Bar,
+    Expanded,
+    Floating,
+}
+
 /// Music player state
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MusicPlayerState {
@@ -320,6 +337,15 @@ pub struct MusicPlayerState {
     /// Now playing metadata from HLS ID3 tags (for radio streams)
     #[serde(skip)]
     pub now_playing: Option<NowPlaying>,
+    /// If true, stop playback when reaching the end of the playlist instead of wrapping
+    #[serde(default)]
+    pub stop_at_end: bool,
+    /// Current player view mode (bar / expanded / floating)
+    #[serde(skip)]
+    pub view_mode: PlayerViewMode,
+    /// Position of the floating player pill (x, y) in viewport coordinates
+    #[serde(skip)]
+    pub floating_pos: (f64, f64),
 }
 fn default_playback_speed() -> f64 {
     1.0
@@ -344,6 +370,9 @@ impl Default for MusicPlayerState {
             current_stream_index: 0,
             available_streams: Vec::new(),
             now_playing: None,
+            stop_at_end: false,
+            view_mode: PlayerViewMode::Bar,
+            floating_pos: (16.0, 16.0),
         }
     }
 }
@@ -370,6 +399,9 @@ pub fn init_player() {
 }
 /// Publish NIP-38 music status (Kind 30315)
 async fn publish_music_status(track: &MusicTrack) {
+    if matches!(track.source, TrackSource::Bible { .. }) {
+        return;
+    }
     if !auth_store::is_authenticated() {
         return;
     }
@@ -457,6 +489,7 @@ async fn publish_music_status(track: &MusicTrack) {
         TrackSource::Radio { d_tag, .. } => {
             format!("https://nostr.blue/radio/{}", urlencoding::encode(d_tag))
         }
+        TrackSource::Bible { .. } => String::new(),
     };
     let mut status = LiveStatus {
         status_type: StatusType::Music,
@@ -524,10 +557,11 @@ pub fn play_track(
     state.current_index = index;
     state.is_playing = true;
     state.is_visible = true;
+    state.view_mode = PlayerViewMode::Bar;
     state.current_time = 0.0;
     state.now_playing = None;
     log::info!("Playing track: {}", track.title);
-    #[cfg(feature = "mobile")]
+    #[cfg(feature = "mobile_platform")]
     if let Err(e) = android_media::set_queue(&state.playlist, state.current_index, true) {
         log::error!("Failed to start native Android playback queue: {}", e);
         state.playback_error = Some(format!("Android playback failed: {}", e));
@@ -556,11 +590,19 @@ pub fn play_or_toggle_track(
         play_track(track, playlist, index_override);
     }
 }
+pub fn append_to_playlist(tracks: Vec<MusicTrack>) {
+    let mut state = MUSIC_PLAYER.write();
+    state.playlist.extend(tracks);
+    #[cfg(feature = "mobile_platform")]
+    if !state.playlist.is_empty() {
+        let _ = android_media::set_queue(&state.playlist, state.current_index, state.is_playing);
+    }
+}
 /// Toggle play/pause
 pub fn toggle_play() {
     let mut state = MUSIC_PLAYER.write();
     state.is_playing = !state.is_playing;
-    #[cfg(feature = "mobile")]
+    #[cfg(feature = "mobile_platform")]
     {
         let result = if state.is_playing {
             android_media::play()
@@ -588,13 +630,21 @@ pub fn next_track() {
     if state.playlist.is_empty() {
         return;
     }
+    if state.stop_at_end && state.current_index >= state.playlist.len() - 1 {
+        state.is_playing = false;
+        state.is_visible = false;
+        state.current_track = None;
+        #[cfg(feature = "mobile_platform")]
+        let _ = android_media::stop();
+        return;
+    }
     state.current_index = (state.current_index + 1) % state.playlist.len();
     state.current_track = state.playlist.get(state.current_index).cloned();
     state.is_playing = true;
     state.current_time = 0.0;
     if let Some(track) = state.current_track.clone() {
         log::info!("Next track: {}", track.title);
-        #[cfg(feature = "mobile")]
+        #[cfg(feature = "mobile_platform")]
         if let Err(e) = android_media::next_track() {
             log::error!("Failed to skip to next native Android track: {}", e);
             state.playback_error = Some(format!("Android playback failed: {}", e));
@@ -612,7 +662,7 @@ pub fn previous_track() {
     }
     if state.current_time > 3.0 {
         state.current_time = 0.0;
-        #[cfg(feature = "mobile")]
+        #[cfg(feature = "mobile_platform")]
         if let Err(e) = android_media::seek_to(0.0) {
             log::error!("Failed to rewind native Android track: {}", e);
             state.playback_error = Some(format!("Android playback failed: {}", e));
@@ -634,7 +684,7 @@ pub fn previous_track() {
     state.current_time = 0.0;
     if let Some(track) = state.current_track.clone() {
         log::info!("Previous track: {}", track.title);
-        #[cfg(feature = "mobile")]
+        #[cfg(feature = "mobile_platform")]
         if let Err(e) = android_media::previous_track() {
             log::error!("Failed to skip to previous native Android track: {}", e);
             state.playback_error = Some(format!("Android playback failed: {}", e));
@@ -650,7 +700,7 @@ pub fn set_volume(volume: f64) {
     {
         let mut state = MUSIC_PLAYER.write();
         state.volume = clamped;
-        #[cfg(feature = "mobile")]
+        #[cfg(feature = "mobile_platform")]
         if let Err(e) = android_media::set_volume(if state.is_muted { 0.0 } else { clamped }) {
             log::error!("Failed to set native Android volume: {}", e);
             state.playback_error = Some(format!("Android playback failed: {}", e));
@@ -672,7 +722,7 @@ pub fn toggle_mute() {
     let is_muted = {
         let mut state = MUSIC_PLAYER.write();
         state.is_muted = !state.is_muted;
-        #[cfg(feature = "mobile")]
+        #[cfg(feature = "mobile_platform")]
         if let Err(e) = android_media::set_volume(if state.is_muted { 0.0 } else { state.volume }) {
             log::error!("Failed to toggle native Android mute: {}", e);
             state.playback_error = Some(format!("Android playback failed: {}", e));
@@ -682,7 +732,7 @@ pub fn toggle_mute() {
     storage::set(STORAGE_KEY_MUTED, &is_muted).ok();
 }
 /// Set current time
-#[cfg(not(feature = "mobile"))]
+#[cfg(not(feature = "mobile_platform"))]
 pub fn set_current_time(time: f64) {
     let mut state = MUSIC_PLAYER.write();
     state.current_time = time;
@@ -692,7 +742,7 @@ pub fn set_current_time(time: f64) {
 pub fn seek_to(time: f64) {
     let mut state = MUSIC_PLAYER.write();
     state.current_time = time;
-    #[cfg(feature = "mobile")]
+    #[cfg(feature = "mobile_platform")]
     if let Err(e) = android_media::seek_to(time) {
         log::error!("Failed to seek native Android playback: {}", e);
         state.playback_error = Some(format!("Android playback failed: {}", e));
@@ -714,7 +764,7 @@ pub fn seek_to(time: f64) {
     });
 }
 /// Set duration
-#[cfg(not(feature = "mobile"))]
+#[cfg(not(feature = "mobile_platform"))]
 pub fn set_duration(duration: f64) {
     let mut state = MUSIC_PLAYER.write();
     state.duration = duration;
@@ -724,7 +774,8 @@ pub fn close_player() {
     let mut state = MUSIC_PLAYER.write();
     state.is_visible = false;
     state.is_playing = false;
-    #[cfg(feature = "mobile")]
+    state.view_mode = PlayerViewMode::Bar;
+    #[cfg(feature = "mobile_platform")]
     {
         if let Err(e) = android_media::stop() {
             log::error!("Failed to stop native Android playback: {}", e);
@@ -736,6 +787,22 @@ pub fn close_player() {
     spawn(async move {
         clear_music_status().await;
     });
+}
+pub fn set_view_mode(mode: PlayerViewMode) {
+    let mut state = MUSIC_PLAYER.write();
+    state.view_mode = mode;
+}
+pub fn set_floating_pos(x: f64, y: f64) {
+    let mut state = MUSIC_PLAYER.write();
+    state.floating_pos = (x, y);
+}
+pub fn minimize_to_floating() {
+    let mut state = MUSIC_PLAYER.write();
+    state.view_mode = PlayerViewMode::Floating;
+}
+pub fn restore_from_floating() {
+    let mut state = MUSIC_PLAYER.write();
+    state.view_mode = PlayerViewMode::Bar;
 }
 /// Show zap dialog for a specific track (or current track if None)
 pub fn show_zap_dialog_for_track(track: Option<MusicTrack>) {
@@ -756,6 +823,9 @@ pub fn hide_zap_dialog() {
 /// Vote for a track using Kind 33169 (Music Vote - addressable, one per user)
 /// Supports both Wavlake and Nostr tracks via TrackSource
 pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
+    if matches!(track.source, TrackSource::Bible { .. }) {
+        return Ok(());
+    }
     if !auth_store::is_authenticated() {
         return Err("You must be logged in to vote".to_string());
     }
@@ -864,6 +934,7 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
             ));
             log::debug!("Voting for radio station: {}", coordinate);
         }
+        TrackSource::Bible { .. } => {}
     }
     let builder = EventBuilder::new(Kind::from(KIND_MUSIC_VOTE), "").tags(tags);
     match client
@@ -891,7 +962,7 @@ pub fn set_playback_speed(speed: f64) {
     {
         let mut state = MUSIC_PLAYER.write();
         state.playback_speed = speed;
-        #[cfg(feature = "mobile")]
+        #[cfg(feature = "mobile_platform")]
         if let Err(e) = android_media::set_playback_speed(speed) {
             log::error!("Failed to set native Android playback speed: {}", e);
             state.playback_error = Some(format!("Android playback failed: {}", e));
@@ -926,7 +997,7 @@ pub fn set_buffering(buffering: bool) {
 }
 /// Try next available stream when current one fails
 /// Returns true if there's a fallback stream to try, false if all failed
-#[cfg(not(feature = "mobile"))]
+#[cfg(not(feature = "mobile_platform"))]
 pub fn try_next_stream() -> bool {
     let mut state = MUSIC_PLAYER.write();
     if state.available_streams.is_empty() {
@@ -948,7 +1019,7 @@ pub fn try_next_stream() -> bool {
 }
 /// Try next available stream when current one fails (mobile/Android)
 /// Returns true if a fallback stream was started, false if all failed
-#[cfg(feature = "mobile")]
+#[cfg(feature = "mobile_platform")]
 pub fn try_next_stream_mobile() -> bool {
     let mut state = MUSIC_PLAYER.write();
     if state.available_streams.is_empty() {
@@ -994,7 +1065,7 @@ pub fn set_available_streams(streams: Vec<String>) {
     state.current_stream_index = 0;
 }
 /// Set now playing metadata from HLS ID3 tags
-#[cfg(not(feature = "mobile"))]
+#[cfg(not(feature = "mobile_platform"))]
 pub fn set_now_playing(now_playing: Option<NowPlaying>) {
     MUSIC_PLAYER.write().now_playing = now_playing;
 }
@@ -1003,7 +1074,7 @@ pub fn clear_now_playing() {
     MUSIC_PLAYER.write().now_playing = None;
 }
 
-#[cfg(feature = "mobile")]
+#[cfg(feature = "mobile_platform")]
 pub fn sync_native_playback_snapshot(snapshot: AndroidPlaybackSnapshot) {
     let has_error = snapshot.playback_error.is_some();
     let mut state = MUSIC_PLAYER.write();

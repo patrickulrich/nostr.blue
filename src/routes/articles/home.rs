@@ -326,7 +326,7 @@ async fn load_articles(until: Option<u64>) -> Result<Vec<Event>, String> {
         }
     }
     let mut deduplicated: Vec<Event> = address_map.into_values().collect();
-    deduplicated.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    deduplicated.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(deduplicated)
 }
 /// Load articles from followed users with deduplication by address
@@ -417,7 +417,7 @@ async fn load_following_articles(until: Option<u64>) -> Result<(Vec<Event>, bool
                 );
             }
             let mut deduplicated: Vec<Event> = address_map.into_values().collect();
-            deduplicated.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            deduplicated.sort_by_key(|b| std::cmp::Reverse(b.created_at));
             log::info!(
                 "After deduplication: {} unique articles",
                 deduplicated.len()

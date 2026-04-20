@@ -113,7 +113,7 @@ pub async fn calculate_mpp_split(
         ));
     }
     let mut sorted = available;
-    sorted.sort_by(|a, b| b.balance.cmp(&a.balance));
+    sorted.sort_by_key(|b| std::cmp::Reverse(b.balance));
     let mut remaining = target_amount;
     let mut allocations = Vec::new();
     for mint in sorted {

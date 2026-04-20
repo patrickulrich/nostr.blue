@@ -321,7 +321,7 @@ async fn load_streams_by_tag(tag: &str, until: Option<u64>) -> Result<(Vec<Event
         .await
         .map_err(|e| format!("Failed to fetch streams: {}", e))?;
     let mut sorted_events: Vec<Event> = events.into_iter().collect();
-    sorted_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    sorted_events.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     let hit_limit = sorted_events.len() >= 50;
     Ok((sorted_events, hit_limit))
 }

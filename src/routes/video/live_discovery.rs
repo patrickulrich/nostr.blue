@@ -148,7 +148,7 @@ async fn stream_live_events(
 
     let mut seen = HashSet::new();
     events.retain(|event| seen.insert(event.id));
-    events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    events.sort_by_key(|b| std::cmp::Reverse(b.created_at));
 
     let next_until = events.last().map(|event| event.created_at.as_secs());
     let hit_limit = events.len() >= hit_limit_threshold;

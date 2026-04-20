@@ -224,7 +224,7 @@ pub fn WebBookmarks() -> Element {
             .collect();
         match sort {
             SortOrder::DateAdded => {
-                filtered.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                filtered.sort_by_key(|b| std::cmp::Reverse(b.created_at));
             }
             SortOrder::DatePublished => {
                 filtered.sort_by(|a, b| {

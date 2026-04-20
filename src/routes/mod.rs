@@ -508,7 +508,7 @@ pub enum Route {
     ZapGoalsNew {},
 }
 
-#[cfg_attr(not(feature = "mobile"), allow(dead_code))]
+#[cfg_attr(not(feature = "mobile_platform"), allow(dead_code))]
 fn note_back_target(current_route: &Route) -> Option<Route> {
     let Route::Note {
         note_id,
@@ -541,7 +541,7 @@ fn note_back_target(current_route: &Route) -> Option<Route> {
     }
 }
 
-#[cfg_attr(not(feature = "mobile"), allow(dead_code))]
+#[cfg_attr(not(feature = "mobile_platform"), allow(dead_code))]
 fn fallback_route_for(current_route: &Route) -> Option<Route> {
     match current_route {
         Route::Home { .. }
@@ -722,7 +722,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
     }
 }
 
-#[cfg_attr(not(feature = "mobile"), allow(dead_code))]
+#[cfg_attr(not(feature = "mobile_platform"), allow(dead_code))]
 fn handle_android_back(navigator: dioxus::router::Navigator, current_route: &Route) {
     if crate::stores::back_navigation::close_topmost_mobile_overlay() {
         return;
@@ -736,7 +736,7 @@ fn handle_android_back(navigator: dioxus::router::Navigator, current_route: &Rou
     if let Some(target) = fallback_route_for(current_route) {
         let _ = navigator.replace(target);
     } else {
-        #[cfg(feature = "mobile")]
+        #[cfg(feature = "mobile_platform")]
         {
             if let Err(error) = crate::platform::mobile::finish_app() {
                 log::error!("Failed to finish Android activity: {}", error);
@@ -757,7 +757,7 @@ pub extern "system" fn Java_dev_dioxus_main_MainActivity_handleAndroidBackPresse
 #[component]
 fn Layout() -> Element {
     use crate::stores::{
-        auth_store, back_navigation, music_player::MUSIC_PLAYER, notifications as notif_store,
+        auth_store, back_navigation, music_player::{MUSIC_PLAYER, PlayerViewMode}, notifications as notif_store,
     };
     let auth = auth_store::AUTH_STATE.read();
     let notif_count = use_memo(notif_store::get_unread_count);
@@ -781,7 +781,7 @@ fn Layout() -> Element {
     let mut last_handled_android_back_nonce = use_signal(|| 0u64);
     let current_route = use_route::<Route>();
     let navigator = navigator();
-    #[cfg(feature = "mobile")]
+    #[cfg(feature = "mobile_platform")]
     let _android_back_poller = use_future(move || async move {
         let mut last_seen = 0;
         loop {
@@ -793,9 +793,9 @@ fn Layout() -> Element {
             crate::platform::timer::sleep_ms(50).await;
         }
     });
-    #[cfg(feature = "mobile")]
+    #[cfg(feature = "mobile_platform")]
     let route_for_android_back = current_route.clone();
-    #[cfg(feature = "mobile")]
+    #[cfg(feature = "mobile_platform")]
     use_effect(use_reactive(&*android_back_nonce.read(), move |nonce| {
         if nonce == 0 {
             return;
@@ -1029,16 +1029,23 @@ fn Layout() -> Element {
             current_route,
             Route::AboutDonate {} | Route::ZapGoalsHome {} | Route::ZapGoalsNew {} | Route::BlobbiHome {}
         );
-    let music_player_visible = {
+    let player_offset = {
         let state = MUSIC_PLAYER.read();
-        state.is_visible && state.current_track.is_some()
+        if !state.is_visible || state.current_track.is_none() {
+            "0px"
+        } else {
+            match state.view_mode {
+                PlayerViewMode::Floating => "0px",
+                _ => "6rem",
+            }
+        }
     };
     rsx! {
         div {
             class: "min-h-dynamic-screen bg-background transition-colors",
             style: format!(
                 "--persistent-player-offset: {}; --mobile-shell-header-height: calc(var(--safe-area-top) + 57px);",
-                if music_player_visible { "6rem" } else { "0px" }
+                player_offset
             ),
             onclick: move |_| {
                 if *sidebar_page.read() != 0 {
@@ -1236,13 +1243,13 @@ fn Layout() -> Element {
                 }
                 if *sidebar_open.read() {
                     div {
-                        class: "fixed inset-0 bg-black/50 z-40 lg:hidden",
+                        class: "fixed inset-0 bg-black/50 z-50 lg:hidden",
                         onclick: move |_| {
                             *sidebar_open.write() = false;
                             *sidebar_page.write() = 0;
                         },
                         aside {
-                            class: "w-64 bg-background h-full overflow-y-auto",
+                            class: "w-64 bg-background h-full overflow-y-auto pt-safe-top",
                             onclick: move |e| e.stop_propagation(),
                             div { class: "p-4 space-y-6",
                                 {

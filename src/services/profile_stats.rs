@@ -1,14 +1,12 @@
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "web")]
-use std::collections::HashMap;
-#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 #[cfg(feature = "web")]
 use wasm_bindgen_futures::JsFuture;
 #[cfg(feature = "web")]
 use web_sys::{Request, RequestInit, RequestMode, Response};
 #[cfg(feature = "web")]
-const NOSTR_BAND_API: &str = "https://api.nostr.band";
+const NOSTR_ARCHIVES_API: &str = "https://api.nostrarchives.com";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileStats {
     pub pubkey: String,
@@ -16,14 +14,23 @@ pub struct ProfileStats {
 }
 #[cfg(feature = "web")]
 #[derive(Debug, Clone, Deserialize)]
-struct NostrBandStatsResponse {
-    stats: HashMap<String, ProfileStats>,
+struct SocialListResponse {
+    count: i64,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pubkeys: Vec<String>,
 }
-/// Fetch profile statistics from Nostr.Band API
-/// Returns followers count and other profile statistics
+#[cfg(feature = "web")]
+#[derive(Debug, Clone, Deserialize)]
+struct SocialGraphResponse {
+    followers: SocialListResponse,
+}
 #[cfg(feature = "web")]
 pub async fn fetch_profile_stats(pubkey: &str) -> Result<ProfileStats, String> {
-    let url = format!("{}/v0/stats/profile/{}", NOSTR_BAND_API, pubkey);
+    let url = format!(
+        "{}/v1/social/{}?followers_limit=0&follows_limit=0",
+        NOSTR_ARCHIVES_API, pubkey
+    );
     let opts = RequestInit::new();
     opts.set_method("GET");
     opts.set_mode(RequestMode::Cors);
@@ -49,16 +56,14 @@ pub async fn fetch_profile_stats(pubkey: &str) -> Result<ProfileStats, String> {
     )
     .await
     .map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
-    let response: NostrBandStatsResponse = serde_wasm_bindgen::from_value(json)
+    let response: SocialGraphResponse = serde_wasm_bindgen::from_value(json)
         .map_err(|e| format!("Failed to deserialize: {:?}", e))?;
-    response
-        .stats
-        .get(pubkey)
-        .cloned()
-        .ok_or_else(|| format!("No stats found for pubkey: {}", pubkey))
+    Ok(ProfileStats {
+        pubkey: pubkey.to_string(),
+        followers_pubkey_count: Some(response.followers.count as u64),
+    })
 }
 
-/// Fetch profile statistics (native stub - uses reqwest in future)
 #[cfg(not(feature = "web"))]
 pub async fn fetch_profile_stats(pubkey: &str) -> Result<ProfileStats, String> {
     Err(format!(

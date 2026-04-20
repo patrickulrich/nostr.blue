@@ -365,17 +365,13 @@ pub fn parse_symlink_event(event: &NostrEvent) -> Option<SymlinkEvent> {
     for tag in event.tags.iter() {
         let slice = tag.as_slice();
         match slice.first().map(|s| s.as_str()) {
-            Some("a") => {
-                if target.is_none() {
-                    target = slice.get(1).map(|s| s.to_string());
-                    target_is_address = true;
-                }
+            Some("a") if target.is_none() => {
+                target = slice.get(1).map(|s| s.to_string());
+                target_is_address = true;
             }
-            Some("e") => {
-                if target.is_none() {
-                    target = slice.get(1).map(|s| s.to_string());
-                    target_is_address = false;
-                }
+            Some("e") if target.is_none() => {
+                target = slice.get(1).map(|s| s.to_string());
+                target_is_address = false;
             }
             Some("A") => {
                 if context_directory.is_none() {

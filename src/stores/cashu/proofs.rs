@@ -417,7 +417,7 @@ pub fn select_proofs_for_amount(
         .filter(|p| p.state.is_spendable())
         .cloned()
         .collect();
-    sorted_proofs.sort_by(|a, b| b.amount.cmp(&a.amount));
+    sorted_proofs.sort_by_key(|b| std::cmp::Reverse(b.amount));
     let mut selected = Vec::new();
     let mut selected_amount: u64 = 0;
     let estimate_fee = |num_proofs: usize| -> u64 {
@@ -480,8 +480,8 @@ pub fn select_proofs_prefer_inactive(
         .filter(|p| p.state.is_spendable() && active_keyset_ids.contains(&p.id))
         .cloned()
         .collect();
-    inactive_proofs.sort_by(|a, b| b.amount.cmp(&a.amount));
-    active_proofs.sort_by(|a, b| b.amount.cmp(&a.amount));
+    inactive_proofs.sort_by_key(|b| std::cmp::Reverse(b.amount));
+    active_proofs.sort_by_key(|b| std::cmp::Reverse(b.amount));
     let mut selected = Vec::new();
     let mut selected_amount: u64 = 0;
     for proof in &inactive_proofs {

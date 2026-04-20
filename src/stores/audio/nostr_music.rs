@@ -74,6 +74,13 @@ pub enum TrackSource {
         /// Station name
         station_name: String,
     },
+    /// Bible audio chapter
+    Bible {
+        translation: String,
+        book: String,
+        chapter: u32,
+        reader: String,
+    },
 }
 impl Default for TrackSource {
     fn default() -> Self {
@@ -321,7 +328,7 @@ pub async fn fetch_nostr_tracks(
         .iter()
         .filter_map(|e| parse_track_event(e).ok())
         .collect();
-    tracks.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    tracks.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     for track in &tracks {
         NOSTR_TRACK_CACHE.write().put(
             track.coordinate.clone(),
@@ -452,7 +459,7 @@ pub async fn search_nostr_tracks(query: &str, limit: usize) -> Result<Vec<NostrT
         .filter_map(|e| parse_track_event(e).ok())
         .collect();
     if query.trim().is_empty() {
-        tracks.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        tracks.sort_by_key(|b| std::cmp::Reverse(b.created_at));
         return Ok(tracks);
     }
     let pubkeys: Vec<String> = tracks
@@ -490,7 +497,7 @@ pub async fn search_nostr_tracks(query: &str, limit: usize) -> Result<Vec<NostrT
         }
         false
     });
-    tracks.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    tracks.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(tracks)
 }
 /// Search for nostr music artists by name
@@ -551,7 +558,7 @@ pub async fn fetch_artist_tracks(pubkey: &str, limit: usize) -> Result<Vec<Nostr
         .iter()
         .filter_map(|e| parse_track_event(e).ok())
         .collect();
-    tracks.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    tracks.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     for track in &tracks {
         NOSTR_TRACK_CACHE.write().put(
             track.coordinate.clone(),
@@ -582,7 +589,7 @@ pub async fn fetch_playlists(
         .iter()
         .filter_map(|e| parse_playlist_event(e).ok())
         .collect();
-    playlists.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    playlists.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     for playlist in &playlists {
         NOSTR_PLAYLIST_CACHE
             .write()

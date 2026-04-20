@@ -184,7 +184,7 @@ async fn load_hashtag_feed(tag: &str, until: Option<u64>) -> Result<Vec<Event>, 
         Ok(events) => {
             log::info!("Loaded {} events for #{}", events.len(), tag);
             let mut event_vec: Vec<Event> = events.into_iter().collect();
-            event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            event_vec.sort_by_key(|b| std::cmp::Reverse(b.created_at));
             Ok(event_vec)
         }
         Err(e) => {

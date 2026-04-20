@@ -126,8 +126,11 @@ fn App() -> Element {
             }
         }
     });
+    let tailwind_css: Option<Asset> = option_asset!("/public/tailwind.css");
     rsx! {
-        document::Stylesheet { href: asset!("/public/tailwind.css") }
+        if let Some(css) = tailwind_css {
+            document::Stylesheet { href: css }
+        }
         ToastProvider { Router::<routes::Route> {} }
         components::password_modal::PasswordModal {}
         components::MediaLightbox {}

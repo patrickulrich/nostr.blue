@@ -442,7 +442,7 @@ async fn upload_blob_with_auth(
             )
             .await
             .map_err(|e| format!("Upload failed: {}", e))?,
-        #[cfg(feature = "mobile")]
+        #[cfg(feature = "mobile_platform")]
         crate::stores::signer::SignerType::AndroidSigner(android_signer) => client
             .upload_blob(
                 data,
@@ -628,7 +628,7 @@ pub async fn publish_user_servers() -> Result<String, String> {
             .sign(nostr_connect.as_ref())
             .await
             .map_err(|e| format!("Failed to sign event: {}", e))?,
-        #[cfg(feature = "mobile")]
+        #[cfg(feature = "mobile_platform")]
         crate::stores::signer::SignerType::AndroidSigner(android_signer) => builder
             .sign(android_signer.as_ref())
             .await
@@ -719,7 +719,7 @@ pub async fn get_auth_header(
             .sign(nostr_connect.as_ref())
             .await
             .map_err(|e| format!("Failed to sign auth event: {}", e))?,
-        #[cfg(feature = "mobile")]
+        #[cfg(feature = "mobile_platform")]
         crate::stores::signer::SignerType::AndroidSigner(android_signer) => builder
             .sign(android_signer.as_ref())
             .await
@@ -820,7 +820,7 @@ async fn list_files_inner() -> Result<Vec<MediaItem>, String> {
         ));
     }
     let mut items: Vec<MediaItem> = all_items.into_values().collect();
-    items.sort_by(|a, b| b.uploaded.cmp(&a.uploaded));
+    items.sort_by_key(|b| std::cmp::Reverse(b.uploaded));
     *MEDIA_ITEMS.write() = items.clone();
     *LAST_FETCH_TIME.write() = Timestamp::now().as_secs();
     Ok(items)

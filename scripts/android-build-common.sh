@@ -349,9 +349,10 @@ configure_outputs() {
                 echo "ERROR: ANDROID_GRADLE_VARIANT must be release for Android App Bundles" >&2
                 exit 1
             fi
+            ANDROID_ARTIFACT_NAME="${ANDROID_ARTIFACT_NAME:-nostrblue-release}"
             FINAL_GRADLE_TASK="bundleRelease"
             ARTIFACT_SRC_REL="app/build/outputs/bundle/release/app-release.aab"
-            ARTIFACT_DST="$PROJECT_ROOT/nostrblue-release.aab"
+            ARTIFACT_DST="$PROJECT_ROOT/${ANDROID_ARTIFACT_NAME}.aab"
             ARTIFACT_LABEL="AAB"
             ;;
         *)
@@ -362,12 +363,13 @@ configure_outputs() {
 }
 
 build_dx_android() {
+    ANDROID_FEATURES="${ANDROID_FEATURES:-mobile}"
     local dx_args=(
         build
         --platform android
         --target aarch64-linux-android
         --no-default-features
-        --features mobile
+        --features "$ANDROID_FEATURES"
     )
 
     if [ "$DX_BUILD_PROFILE" = "release" ]; then
@@ -496,6 +498,7 @@ echo "Version: $CARGO_VERSION ($ANDROID_VERSION_CODE)"
 echo "Android SDKs: min=$ANDROID_MIN_SDK target=$ANDROID_TARGET_SDK compile=$ANDROID_COMPILE_SDK"
 echo "Gradle variant: $ANDROID_GRADLE_VARIANT"
 echo "Rust profile: $DX_BUILD_PROFILE"
+echo "Cargo features: ${ANDROID_FEATURES:-mobile}"
 echo "Gradle home: $GRADLE_USER_HOME"
 echo "Android resources: $ANDROID_RES_SRC"
 
@@ -523,24 +526,28 @@ find "$DX_ANDROID" \
     -delete 2>/dev/null || true
 
 echo ""
+
 echo "--- Step 1a: Pre-copy Android resources ---"
 mkdir -p "$DX_ANDROID/app/src/main/res/xml"
+mkdir -p "$DX_ANDROID/app/src/main/res/values"
 if cp "$PROJECT_ROOT/android/res/xml/file_paths.xml" "$DX_ANDROID/app/src/main/res/xml/"; then
     echo "Pre-copied file_paths.xml"
 else
     echo "ERROR: Failed to pre-copy file_paths.xml into $DX_ANDROID/app/src/main/res/xml/" >&2
     exit 1
 fi
-if copy_overlay_dir \
-    "$ANDROID_KOTLIN_SRC/dev/dioxus/main" \
-    "$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main"
-then
-    echo "Pre-copied Android Kotlin sources"
-else
-    echo "ERROR: Failed to pre-copy Android Kotlin sources into $DX_ANDROID/app/src/main/kotlin/dev/dioxus/main/" >&2
-    exit 1
+if [ -f "$PROJECT_ROOT/android/res/values/strings.xml" ]; then
+    cp "$PROJECT_ROOT/android/res/values/strings.xml" "$DX_ANDROID/app/src/main/res/values/strings.xml"
+    echo "Pre-copied strings.xml"
 fi
 write_android_local_properties
+
+echo "Pre-copying Kotlin sources (so dx build / Gradle can see them)"
+kotlin_out="$DX_ANDROID/app/src/main/kotlin/dev/dioxus/main"
+mkdir -p "$kotlin_out"
+copy_overlay_dir \
+    "$ANDROID_KOTLIN_SRC/dev/dioxus/main" \
+    "$kotlin_out"
 
 build_dx_android
 
@@ -558,112 +565,17 @@ echo "--- Step 2b.i: Normalize Android metadata ---"
 require_file "$GRADLE_APP" "Generated Android Gradle config not found"
 require_file "$GENERATED_MAIN_ACTIVITY" "Generated Android MainActivity not found"
 normalize_gradle_properties
-python3 - "$GRADLE_APP" "$APP_ID" "$CARGO_VERSION" "$ANDROID_VERSION_CODE" "$ANDROID_MIN_SDK" "$ANDROID_TARGET_SDK" "$ANDROID_COMPILE_SDK" <<'PY'
+python3 - "$GRADLE_APP" "$ANDROID_VERSION_CODE" <<'PY'
 from pathlib import Path
 import re
 import sys
 
 path = Path(sys.argv[1])
-app_id = sys.argv[2]
-version_name = sys.argv[3]
-version_code = sys.argv[4]
-min_sdk = sys.argv[5]
-target_sdk = sys.argv[6]
-compile_sdk = sys.argv[7]
+version_code = sys.argv[2]
 content = path.read_text()
-replacements = [
-    (r'namespace\s*=\s*"[^"]*"', f'namespace="{app_id}"'),
-    (r'compileSdk\s*=\s*\d+', f'compileSdk = {compile_sdk}'),
-    (r'applicationId = "[^"]*"', f'applicationId = "{app_id}"'),
-    (r'minSdk\s*=\s*\d+', f'minSdk = {min_sdk}'),
-    (r'targetSdk\s*=\s*\d+', f'targetSdk = {target_sdk}'),
-    (r'versionName = "[^"]*"', f'versionName = "{version_name}"'),
-    (r'versionCode = \d+', f'versionCode = {version_code}'),
-]
-for pattern, replacement in replacements:
-    content, count = re.subn(pattern, replacement, content, count=1)
-    if count != 1:
-        raise SystemExit(f"failed to patch {pattern} in {path}")
-
-kotlin_options_match = re.search(r'(?ms)^\s*kotlinOptions\s*\{\s*(.*?)^\s*\}\s*', content)
-if kotlin_options_match:
-    kotlin_options_block = kotlin_options_match.group(0)
-    updated_block, count = re.subn(
-        r'(?m)^(\s*jvmTarget\s*=\s*)"[^"]+"(\s*)$',
-        r'\1"17"\2',
-        kotlin_options_block,
-        count=1,
-    )
-    if count != 1:
-        raise SystemExit(f"unexpected kotlinOptions format in {path}")
-    content = (
-        content[:kotlin_options_match.start()]
-        + updated_block
-        + content[kotlin_options_match.end():]
-    )
-
-compile_options_match = re.search(r'(?ms)^\s*compileOptions\s*\{\s*(.*?)^\s*\}\s*', content)
-compile_options_block = (
-    '    compileOptions {\n'
-    '        sourceCompatibility = JavaVersion.VERSION_17\n'
-    '        targetCompatibility = JavaVersion.VERSION_17\n'
-    '    }\n'
-)
-if compile_options_match:
-    compile_options_body = compile_options_match.group(0)
-    if re.search(r'(?m)^\s*sourceCompatibility\s*=', compile_options_body):
-        compile_options_body = re.sub(
-            r'(?m)^(\s*sourceCompatibility\s*=\s*)[^\n]+$',
-            r'\1JavaVersion.VERSION_17',
-            compile_options_body,
-            count=1,
-        )
-    else:
-        compile_options_body = compile_options_body.replace(
-            "    }\n",
-            "        sourceCompatibility = JavaVersion.VERSION_17\n    }\n",
-            1,
-        )
-    if re.search(r'(?m)^\s*targetCompatibility\s*=', compile_options_body):
-        compile_options_body = re.sub(
-            r'(?m)^(\s*targetCompatibility\s*=\s*)[^\n]+$',
-            r'\1JavaVersion.VERSION_17',
-            compile_options_body,
-            count=1,
-        )
-    else:
-        compile_options_body = compile_options_body.replace(
-            "    }\n",
-            "        targetCompatibility = JavaVersion.VERSION_17\n    }\n",
-            1,
-        )
-    content = (
-        content[:compile_options_match.start()]
-        + compile_options_body
-        + content[compile_options_match.end():]
-    )
-else:
-    insertion_targets = ("    kotlinOptions {", "    buildFeatures {")
-    for target in insertion_targets:
-        if target in content:
-            content = content.replace(target, compile_options_block + target, 1)
-            break
-    else:
-        raise SystemExit(f"failed to find insertion point for compileOptions in {path}")
-
-plugins_block = 'plugins {\n    id("com.android.application")\n    id("org.jetbrains.kotlin.android")\n}\n'
-compiler_options_block = '\nkotlin {\n    compilerOptions {\n        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17\n    }\n}\n'
-if kotlin_options_match:
-    if re.search(r'(?m)^\s*kotlinOptions\s*\{', content) and not re.search(
-        r'(?m)^\s*jvmTarget\s*=\s*"17"\s*$',
-        content,
-    ):
-        raise SystemExit(f"unresolved kotlinOptions remains in {path}")
-elif "compilerOptions" not in content:
-    if plugins_block not in content:
-        raise SystemExit(f"failed to find plugins block in {path}")
-    content = content.replace(plugins_block, plugins_block + compiler_options_block, 1)
-
+content, count = re.subn(r'versionCode = \d+', f'versionCode = {version_code}', content, count=1)
+if count != 1:
+    raise SystemExit(f"failed to patch versionCode in {path}")
 path.write_text(content)
 PY
 python3 - "$GENERATED_MAIN_ACTIVITY" "$APP_ID" <<'PY'

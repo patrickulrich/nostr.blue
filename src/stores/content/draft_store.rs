@@ -344,7 +344,7 @@ pub async fn load_drafts() -> Result<Vec<LoadedDraft>, String> {
             }
         }
     }
-    drafts.sort_by(|a, b| b.draft.updated_at.cmp(&a.draft.updated_at));
+    drafts.sort_by_key(|b| std::cmp::Reverse(b.draft.updated_at));
     log::info!("Loaded {} drafts", drafts.len());
     Ok(drafts)
 }

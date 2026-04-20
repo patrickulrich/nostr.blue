@@ -86,7 +86,7 @@ pub async fn fetch_gifs(
             gifs.push(gif);
         }
     }
-    gifs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    gifs.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     let mut seen_urls = std::collections::HashSet::new();
     let gifs: Vec<GifMetadata> = gifs
         .into_iter()
@@ -143,44 +143,30 @@ fn parse_gif_event(event: &nostr::Event) -> Option<GifMetadata> {
             continue;
         }
         match tag_slice[0].as_str() {
-            "url" => {
-                if tag_slice.len() >= 2 {
-                    url = Some(tag_slice[1].to_string());
+            "url" if tag_slice.len() >= 2 => {
+                url = Some(tag_slice[1].to_string());
+            }
+            "thumb" if tag_slice.len() >= 2 => {
+                thumbnail = Some(tag_slice[1].to_string());
+            }
+            "dim" if tag_slice.len() >= 2 => {
+                if let Some((w, h)) = parse_dimensions(&tag_slice[1]) {
+                    dimensions = Some((w, h));
                 }
             }
-            "thumb" => {
-                if tag_slice.len() >= 2 {
-                    thumbnail = Some(tag_slice[1].to_string());
+            "size" if tag_slice.len() >= 2 => {
+                if let Ok(s) = tag_slice[1].parse::<usize>() {
+                    size = Some(s);
                 }
             }
-            "dim" => {
-                if tag_slice.len() >= 2 {
-                    if let Some((w, h)) = parse_dimensions(&tag_slice[1]) {
-                        dimensions = Some((w, h));
-                    }
-                }
+            "blurhash" if tag_slice.len() >= 2 => {
+                blurhash = Some(tag_slice[1].to_string());
             }
-            "size" => {
-                if tag_slice.len() >= 2 {
-                    if let Ok(s) = tag_slice[1].parse::<usize>() {
-                        size = Some(s);
-                    }
-                }
+            "alt" if tag_slice.len() >= 2 => {
+                alt = Some(tag_slice[1].to_string());
             }
-            "blurhash" => {
-                if tag_slice.len() >= 2 {
-                    blurhash = Some(tag_slice[1].to_string());
-                }
-            }
-            "alt" => {
-                if tag_slice.len() >= 2 {
-                    alt = Some(tag_slice[1].to_string());
-                }
-            }
-            "summary" => {
-                if tag_slice.len() >= 2 {
-                    summary = Some(tag_slice[1].to_string());
-                }
+            "summary" if tag_slice.len() >= 2 => {
+                summary = Some(tag_slice[1].to_string());
             }
             _ => {}
         }
@@ -415,7 +401,7 @@ pub async fn publish_gif_event(
             .sign(nostr_connect.as_ref())
             .await
             .map_err(|e| format!("Failed to sign event: {}", e))?,
-        #[cfg(feature = "mobile")]
+        #[cfg(feature = "mobile_platform")]
         crate::stores::signer::SignerType::AndroidSigner(android_signer) => builder
             .sign(android_signer.as_ref())
             .await

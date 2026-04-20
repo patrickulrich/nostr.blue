@@ -1,6 +1,6 @@
 use crate::components::{NoteCard, NoteCardSkeleton};
 use crate::hooks::use_mute_block_cache;
-use crate::services::search::sidebar_discovery::{self, HotPostItem, HotPostSource};
+use crate::services::search::sidebar_discovery::{self, HotPostItem, HotPostSource, NostrarchivesNote};
 use crate::services::trending::TrendingNote;
 use crate::stores::nostr_client;
 use dioxus::prelude::*;
@@ -45,6 +45,7 @@ pub fn Trending(source: Option<String>) -> Element {
     let subtitle = match source {
         HotPostSource::NostrWine => "Top trending posts from nostr.wine",
         HotPostSource::Ditto => "Top hot posts from Ditto",
+        HotPostSource::Nostrarchives => "Top trending posts from Nostrarchives",
     };
 
     rsx! {
@@ -124,6 +125,7 @@ async fn load_trending_events(source: HotPostSource) -> Result<Vec<NostrEvent>, 
         .map(|item| match item {
             HotPostItem::NostrWine(note) => convert_trending_to_event(&note),
             HotPostItem::Ditto(event) => Ok(event),
+            HotPostItem::Nostrarchives(note) => convert_nostrarchives_to_event(&note),
         })
         .collect()
 }
@@ -142,6 +144,10 @@ async fn filter_hot_posts(items: Vec<HotPostItem>) -> Vec<HotPostItem> {
                 let pubkey = event.pubkey.to_hex();
                 !mute_data.blocked_users.contains(&pubkey)
                     && !mute_data.muted_posts.contains(&event_id)
+            }
+            HotPostItem::Nostrarchives(note) => {
+                !mute_data.blocked_users.contains(&note.pubkey)
+                    && !mute_data.muted_posts.contains(&note.id)
             }
         })
         .collect()
@@ -175,6 +181,37 @@ fn convert_trending_to_event(note: &TrendingNote) -> Result<NostrEvent, String> 
         kind,
         tags,
         note.event.content.clone(),
+        sig,
+    ))
+}
+
+fn convert_nostrarchives_to_event(note: &NostrarchivesNote) -> Result<NostrEvent, String> {
+    let event_id =
+        EventId::from_hex(&note.id).map_err(|e| format!("Invalid event ID: {}", e))?;
+    let pubkey =
+        PublicKey::from_hex(&note.pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let created_at = Timestamp::from(note.created_at as u64);
+    let kind = Kind::from(note.kind as u16);
+    let tags: Vec<Tag> = note
+        .tags
+        .iter()
+        .filter_map(|tag_vec| {
+            if tag_vec.is_empty() {
+                return None;
+            }
+            Tag::parse(tag_vec.iter().map(|s| s.as_str())).ok()
+        })
+        .collect();
+    let sig_bytes =
+        hex::decode(&note.sig).map_err(|e| format!("Invalid signature hex: {}", e))?;
+    let sig = Signature::from_slice(&sig_bytes).map_err(|e| format!("Invalid signature: {}", e))?;
+    Ok(NostrEvent::new(
+        event_id,
+        pubkey,
+        created_at,
+        kind,
+        tags,
+        note.content.clone(),
         sig,
     ))
 }

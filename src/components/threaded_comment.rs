@@ -1,4 +1,4 @@
-use crate::components::icons::{BookmarkIcon, MessageCircleIcon, Repeat2Icon, ShareIcon, ZapIcon};
+use crate::components::icons::{BookmarkIcon, MessageCircleIcon, Repeat2Icon, ZapIcon};
 use crate::components::{ReactionButton, ReplyComposer, RichContent, ZapModal};
 use crate::hooks::{use_author_metadata, use_reaction};
 use crate::routes::Route;
@@ -590,14 +590,7 @@ pub fn ThreadedComment(
                                     filled: *is_bookmarked.read(),
                                 }
                             }
-                            button {
-                                class: "flex items-center gap-1 text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10 transition px-2 py-1.5 rounded",
-                                onclick: move |e: MouseEvent| {
-                                    e.stop_propagation();
-                                    log::info!("Share button clicked for event");
-                                },
-                                ShareIcon { class: "h-4 w-4".to_string(), filled: false }
-                            }
+
                         }
                     }
                 }

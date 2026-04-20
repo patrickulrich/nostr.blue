@@ -3,3 +3,6 @@
 # Static methods are called from Rust via jni::call_static_method()
 # Instance fields/methods are needed for ActivityResultLauncher and Intent flow
 -keep class dev.dioxus.main.MainActivity { *; }
+# Media3 (ExoPlayer) - rules bundled in AARs but explicit for safety
+-keep class androidx.media3.** { *; }
+-dontwarn androidx.media3.**

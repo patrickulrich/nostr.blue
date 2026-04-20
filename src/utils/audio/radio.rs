@@ -400,7 +400,7 @@ pub async fn search_radio_stations(query: &str, limit: usize) -> Result<Vec<Radi
                             .unwrap_or(false)
                 })
                 .collect();
-            stations.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            stations.sort_by_key(|b| std::cmp::Reverse(b.created_at));
             stations.truncate(limit);
             Ok(stations)
         }
@@ -476,7 +476,7 @@ pub fn rank_streams(streams: &[RadioStream]) -> Vec<usize> {
         .enumerate()
         .map(|(i, s)| (i, stream_score(s)))
         .collect();
-    indexed.sort_by(|a, b| b.1.cmp(&a.1));
+    indexed.sort_by_key(|b| std::cmp::Reverse(b.1));
     indexed.into_iter().map(|(i, _)| i).collect()
 }
 /// Get all stream URLs in ranked order for fallback logic

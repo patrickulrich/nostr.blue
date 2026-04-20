@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">nostr.blue</string>
+    <string name="media_playback_channel_name">Media playback</string>
 </resources>

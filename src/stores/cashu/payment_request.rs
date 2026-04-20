@@ -63,7 +63,7 @@ async fn sign_cashu_event_builder(
             .sign(&**remote_signer)
             .await
             .map_err(|e| format!("Failed to sign event: {}", e)),
-        #[cfg(feature = "mobile")]
+        #[cfg(feature = "mobile_platform")]
         SignerType::AndroidSigner(android_signer) => builder
             .sign(&**android_signer)
             .await

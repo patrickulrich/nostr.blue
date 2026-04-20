@@ -51,7 +51,7 @@ pub async fn create_auth_header(
             .to_authorization(nostr_connect.as_ref())
             .await
             .map_err(|e| format!("Failed to create NIP-98 auth: {}", e))?,
-        #[cfg(feature = "mobile")]
+        #[cfg(feature = "mobile_platform")]
         crate::stores::signer::SignerType::AndroidSigner(android_signer) => http_data
             .to_authorization(android_signer.as_ref())
             .await
@@ -99,7 +99,7 @@ pub async fn create_auth_header_with_payload(
             .to_authorization(nostr_connect.as_ref())
             .await
             .map_err(|e| format!("Failed to create NIP-98 auth: {}", e))?,
-        #[cfg(feature = "mobile")]
+        #[cfg(feature = "mobile_platform")]
         crate::stores::signer::SignerType::AndroidSigner(android_signer) => http_data
             .to_authorization(android_signer.as_ref())
             .await

@@ -161,7 +161,7 @@ pub async fn sign_event_builder_with_signer(
             .sign(&*remote_signer)
             .await
             .map_err(|e| format!("Failed to sign event: {}", e)),
-        #[cfg(feature = "mobile")]
+        #[cfg(feature = "mobile_platform")]
         crate::stores::signer::SignerType::AndroidSigner(android_signer) => builder
             .sign(&*android_signer)
             .await

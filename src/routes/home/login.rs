@@ -593,7 +593,7 @@ pub fn ProfileSection() -> Element {
                             Some(auth_store::LoginMethod::ReadOnly) => "👁️ Read-Only",
                             Some(auth_store::LoginMethod::BrowserExtension) => "🔌 Browser Extension",
                             Some(auth_store::LoginMethod::RemoteSigner) => "🔐 Remote Signer",
-                            #[cfg(feature = "mobile")]
+                            #[cfg(feature = "mobile_platform")]
                             Some(auth_store::LoginMethod::AndroidSigner) => "📱 Android Signer",
                             None => "Unknown",
                         }

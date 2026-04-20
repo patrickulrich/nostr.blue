@@ -168,7 +168,7 @@ pub async fn fetch_user_highlights(pubkey: &PublicKey) -> Result<Vec<Highlight>,
         .await
         .map_err(|e| format!("Failed to fetch highlights: {}", e))?;
     let mut highlights: Vec<Highlight> = events.iter().filter_map(parse_highlight).collect();
-    highlights.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    highlights.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(highlights)
 }
 /// Fetch highlights for a specific URL (r tag)
@@ -184,7 +184,7 @@ pub async fn fetch_highlights_by_url(url: &str) -> Result<Vec<Highlight>, String
         .await
         .map_err(|e| format!("Failed to fetch highlights: {}", e))?;
     let mut highlights: Vec<Highlight> = events.iter().filter_map(parse_highlight).collect();
-    highlights.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    highlights.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(highlights)
 }
 /// Fetch highlights by authors (for Following feed)
@@ -224,7 +224,7 @@ pub async fn fetch_highlights_by_authors(
     }
     .map_err(|e| format!("Failed to fetch highlights: {}", e))?;
     let mut highlights: Vec<Highlight> = events.iter().filter_map(parse_highlight).collect();
-    highlights.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    highlights.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(highlights)
 }
 /// Fetch global highlights (discovery feed)
@@ -243,7 +243,7 @@ pub async fn fetch_global_highlights(
         .await
         .map_err(|e| format!("Failed to fetch highlights: {}", e))?;
     let mut highlights: Vec<Highlight> = events.iter().filter_map(parse_highlight).collect();
-    highlights.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    highlights.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(highlights)
 }
 /// Create and publish a highlight event

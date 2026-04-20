@@ -4,7 +4,7 @@ use nostr_sdk::Event as NostrEvent;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use crate::components::{ClientInitializing, NoteCard, ThreadedComment, VoiceMessageCard};
+use crate::components::{ClientInitializing, EditProposalCard, NoteCard, ThreadedComment, VoiceMessageCard};
 use crate::hooks::{use_mute_block_cache, use_relay_subscription};
 use crate::routes::Route;
 use crate::services::aggregation::{
@@ -166,6 +166,7 @@ async fn fetch_replies(
             Kind::TextNote,
             Kind::VoiceMessage,
             Kind::VoiceMessageReply,
+            Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT),
         ])
         .event(event_id)
         .limit(100);
@@ -317,7 +318,7 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
             }
 
             if let Ok(mut parents) = parents_result {
-                parents.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                parents.sort_by_key(|a| a.created_at);
                 back_navigation::set_active_note_back_context(
                     note_id_str.clone(),
                     parents.iter().map(|event| event.id.to_hex()).collect(),
@@ -326,7 +327,7 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                 parent_events.set(parents);
             }
             if let Ok(mut reply_vec) = replies_result {
-                reply_vec.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                reply_vec.sort_by_key(|a| a.created_at);
                 log::info!("Loaded {} replies", reply_vec.len());
                 replies.set(reply_vec);
             }
@@ -365,7 +366,12 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
     {
         let reply_filter = note_data.read().as_ref().map(|event| {
             Filter::new()
-                .kinds(vec![Kind::TextNote, Kind::Comment, Kind::VoiceMessageReply])
+                .kinds(vec![
+                    Kind::TextNote,
+                    Kind::Comment,
+                    Kind::VoiceMessageReply,
+                    Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT),
+                ])
                 .event(event.id)
                 .since(Timestamp::now())
                 .limit(0)
@@ -509,9 +515,14 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                     }
                 } else {{
                     let reply_vec = replies.read().clone();
-                    let thread_tree = build_thread_tree(reply_vec, &event.id);
+                    let edit_kind = Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT);
+                    let (proposals, actual_replies): (Vec<NostrEvent>, Vec<NostrEvent>) = reply_vec
+                        .into_iter()
+                        .partition(|e| e.kind == edit_kind && e.pubkey != event.pubkey);
                     let root_event_id = event.id;
-                    if thread_tree.is_empty() && !*loading_parents.read() {
+                    let original_for_proposals = event.clone();
+                    let has_content = !actual_replies.is_empty() || !proposals.is_empty();
+                    if !has_content && !*loading_parents.read() {
                         rsx! {
                             div { class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
                                 p { "No replies yet" }
@@ -519,8 +530,16 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                             }
                         }
                     } else {
+                        let thread_tree = build_thread_tree(actual_replies, &event.id);
                         rsx! {
                             div { class: "divide-y divide-border",
+                                for proposal in proposals {
+                                    EditProposalCard {
+                                        key: "{proposal.id}",
+                                        event: proposal,
+                                        original_event: original_for_proposals.clone(),
+                                    }
+                                }
                                 for node in thread_tree {
                                     ThreadedComment {
                                         key: "{node.event.id}",

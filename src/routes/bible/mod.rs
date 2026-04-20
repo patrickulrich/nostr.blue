@@ -2,19 +2,22 @@
 //! Routes for the Bible reading app
 mod chapter;
 mod search;
+use crate::components::translation_picker_modal::TranslationPickerModal;
 use crate::stores::bible_store::{
     self, split_books_by_testament, Book, BIBLE_STORE_INITIALIZED, CURRENT_BOOKS,
-    CURRENT_TRANSLATION, ENGLISH_TRANSLATIONS, LOADING_BOOKS, LOADING_TRANSLATIONS,
+    CURRENT_TRANSLATION, DOWNLOADED_TRANSLATIONS, FAVORITE_TRANSLATIONS, ALL_TRANSLATIONS,
+    LOADING_BOOKS, LOADING_TRANSLATIONS, RECOMMENDED_TRANSLATIONS,
 };
 pub use chapter::BibleChapter;
 use dioxus::prelude::*;
 pub use search::BibleSearch;
-/// Bible Home Page - Book/Chapter picker
+
 #[component]
 pub fn BibleHome() -> Element {
     let mut selected_translation = use_signal(|| bible_store::DEFAULT_TRANSLATION.to_string());
-    let mut show_all_translations = use_signal(|| false);
+    let mut show_picker = use_signal(|| false);
     let mut active_tab = use_signal(|| "ot");
+
     use_effect(move || {
         if !*BIBLE_STORE_INITIALIZED.read() {
             spawn(async move {
@@ -24,6 +27,7 @@ pub fn BibleHome() -> Element {
             });
         }
     });
+
     use_effect(move || {
         let translation = selected_translation.read().clone();
         let store_initialized = *BIBLE_STORE_INITIALIZED.read();
@@ -41,18 +45,34 @@ pub fn BibleHome() -> Element {
             }
         });
     });
-    let translations = ENGLISH_TRANSLATIONS.read();
+
+    let translations = ALL_TRANSLATIONS.read();
     let books = CURRENT_BOOKS.read();
     let loading_translations = *LOADING_TRANSLATIONS.read();
     let loading_books = *LOADING_BOOKS.read();
-    let (old_testament, new_testament) = split_books_by_testament(&books);
+    let testaments = split_books_by_testament(&books);
+    let favorites = FAVORITE_TRANSLATIONS.read();
+    let downloaded = DOWNLOADED_TRANSLATIONS.read();
+    let downloaded_translations: Vec<_> = translations
+        .iter()
+        .filter(|t| downloaded.contains(&t.id))
+        .collect();
+    let fav_not_downloaded: Vec<_> = translations
+        .iter()
+        .filter(|t| !downloaded.contains(&t.id) && favorites.contains(&t.id))
+        .collect();
+    let recommended: Vec<_> = translations
+        .iter()
+        .filter(|t| RECOMMENDED_TRANSLATIONS.contains(&t.id.as_str()))
+        .collect();
+    let total_count = translations.len();
+
     rsx! {
         div { class: "max-w-5xl mx-auto p-4 space-y-6",
             div { class: "flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4",
                 h1 { class: "text-3xl font-bold", "Bible" }
                 Link {
-                    to: crate::routes::Route::BibleSearch {
-                    },
+                    to: crate::routes::Route::BibleSearch {},
                     class: "px-4 py-2 bg-muted text-muted-foreground rounded-lg hover:bg-muted/80 transition text-sm font-medium inline-flex items-center gap-2",
                     svg {
                         xmlns: "http://www.w3.org/2000/svg",
@@ -70,53 +90,41 @@ pub fn BibleHome() -> Element {
                     "Search"
                 }
             }
+
             div { class: "space-y-2",
                 label { class: "text-sm font-medium text-muted-foreground", "Translation" }
                 if loading_translations {
                     div { class: "h-10 bg-muted animate-pulse rounded-lg" }
                 } else {
-                    div { class: "flex flex-wrap gap-2",
-                        {
-                            let display_translations = if *show_all_translations.read() {
-                                translations.clone()
-                            } else {
-                                translations.iter().take(6).cloned().collect::<Vec<_>>()
-                            };
-                            let current_selection = selected_translation.read().clone();
-                            rsx! {
-                                for t in display_translations {
-                                    {
-                                        let is_selected = current_selection == t.id;
-                                        let tid = t.id.clone();
-                                        rsx! {
-                                            button {
-                                                key: "{t.id}",
-                                                class: if is_selected { "px-3 py-2 rounded-lg text-sm font-medium transition bg-primary text-primary-foreground" } else { "px-3 py-2 rounded-lg text-sm font-medium transition bg-muted/50 hover:bg-muted text-muted-foreground" },
-                                                onclick: move |_| selected_translation.set(tid.clone()),
-                                                "{t.short_name}"
-                                            }
-                                        }
-                                    }
+                    div { class: "space-y-2",
+                        if !downloaded_translations.is_empty() {
+                            div { class: "flex flex-wrap gap-2",
+                                for t in &downloaded_translations {
+                                    { translation_chip((*t).clone(), selected_translation, true, true) }
                                 }
                             }
                         }
-                        if translations.len() > 6 {
-                            button {
-                                class: "px-3 py-2 rounded-lg text-sm font-medium transition bg-muted/30 hover:bg-muted text-muted-foreground",
-                                onclick: move |_| {
-                                    let current = *show_all_translations.read();
-                                    show_all_translations.set(!current);
-                                },
-                                if *show_all_translations.read() {
-                                    "Show Less"
-                                } else {
-                                    "More..."
+                        if !fav_not_downloaded.is_empty() {
+                            div { class: "flex flex-wrap gap-2",
+                                for t in &fav_not_downloaded {
+                                    { translation_chip((*t).clone(), selected_translation, true, false) }
                                 }
+                            }
+                        }
+                        div { class: "flex flex-wrap gap-2",
+                            for t in &recommended {
+                                { translation_chip((*t).clone(), selected_translation, false, false) }
+                            }
+                            button {
+                                class: "px-3 py-2 rounded-lg text-sm font-medium transition bg-muted/30 hover:bg-muted text-muted-foreground border border-dashed border-border",
+                                onclick: move |_| show_picker.set(true),
+                                "Browse all {total_count} translations..."
                             }
                         }
                     }
                 }
             }
+
             div { class: "flex gap-2 border-b border-border",
                 button {
                     class: if *active_tab.read() == "ot" { "px-4 py-2 font-medium border-b-2 border-primary text-primary" } else { "px-4 py-2 font-medium text-muted-foreground hover:text-foreground" },
@@ -128,7 +136,15 @@ pub fn BibleHome() -> Element {
                     onclick: move |_| active_tab.set("nt"),
                     "New Testament"
                 }
+                if !testaments.apocrypha.is_empty() {
+                    button {
+                        class: if *active_tab.read() == "apoc" { "px-4 py-2 font-medium border-b-2 border-primary text-primary" } else { "px-4 py-2 font-medium text-muted-foreground hover:text-foreground" },
+                        onclick: move |_| active_tab.set("apoc"),
+                        "Apocrypha"
+                    }
+                }
             }
+
             if loading_books {
                 div { class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3",
                     for i in 0..20 {
@@ -142,9 +158,11 @@ pub fn BibleHome() -> Element {
                 div { class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3",
                     {
                         let books_to_show = if *active_tab.read() == "ot" {
-                            &old_testament
+                            &testaments.old_testament
+                        } else if *active_tab.read() == "apoc" {
+                            &testaments.apocrypha
                         } else {
-                            &new_testament
+                            &testaments.new_testament
                         };
                         let current_translation = selected_translation.read().clone();
                         rsx! {
@@ -159,6 +177,7 @@ pub fn BibleHome() -> Element {
                     }
                 }
             }
+
             if let Some((last_trans, last_book, last_book_name, last_chapter)) = bible_store::LAST_POSITION
                 .read()
                 .clone()
@@ -184,9 +203,58 @@ pub fn BibleHome() -> Element {
                 }
             }
         }
+
+        if *show_picker.read() {
+            TranslationPickerModal {
+                show: show_picker,
+                on_select: move |id: String| {
+                    selected_translation.set(id);
+                    show_picker.set(false);
+                },
+            }
+        }
     }
 }
-/// Book card component
+
+fn translation_chip(
+    t: crate::stores::bible_store::Translation,
+    mut selected: Signal<String>,
+    is_favorite: bool,
+    is_downloaded: bool,
+) -> Element {
+    let current_selection = selected.read().clone();
+    let is_selected = current_selection == t.id;
+    let tid = t.id.clone();
+    let lang_code = if t.language != "eng" {
+        format!(" ({})", t.language)
+    } else {
+        String::new()
+    };
+    let display_name = if t.short_name.len() <= 6 {
+        format!("{}{}", t.short_name, lang_code)
+    } else {
+        format!("{}{}", &t.short_name[..6.min(t.short_name.len())], lang_code)
+    };
+    rsx! {
+        button {
+            key: "{t.id}",
+            class: if is_selected {
+                "px-3 py-2 rounded-lg text-sm font-medium transition bg-primary text-primary-foreground"
+            } else if is_downloaded {
+                "px-3 py-2 rounded-lg text-sm font-medium transition bg-green-500/10 text-green-600 dark:text-green-400 hover:bg-green-500/20 border border-green-500/30"
+            } else if is_favorite {
+                "px-3 py-2 rounded-lg text-sm font-medium transition bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 hover:bg-yellow-500/20 border border-yellow-500/30"
+            } else {
+                "px-3 py-2 rounded-lg text-sm font-medium transition bg-muted/50 hover:bg-muted text-muted-foreground"
+            },
+            onclick: move |_| selected.set(tid.clone()),
+            if is_downloaded { span { class: "mr-1", "✓" } }
+            if is_favorite && !is_downloaded { span { class: "mr-1", "★" } }
+            "{display_name}"
+        }
+    }
+}
+
 #[component]
 fn BookCard(book: Book, translation: String) -> Element {
     let mut expanded = use_signal(|| false);

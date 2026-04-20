@@ -328,7 +328,6 @@ pub fn default_sidebar_items() -> Vec<SidebarItem> {
         SidebarItem::Bible,
         SidebarItem::Highlights,
         SidebarItem::AIChat,
-        SidebarItem::Blobbi,
     ]
 }
 /// Global state for sidebar items

@@ -445,7 +445,7 @@ pub async fn fetch_discoverable_emoji_packs(limit: usize) -> std::result::Result
         .filter(|pack| seen.insert(pack.coordinate.clone()))
         .collect();
 
-    packs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    packs.sort_by_key(|b| std::cmp::Reverse(b.created_at));
 
     *DISCOVERABLE_EMOJI_PACKS.read().data().write() = packs;
     *DISCOVERABLE_EMOJI_PACKS_FETCH_TIME.write() = Some(Timestamp::now());

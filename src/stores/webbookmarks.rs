@@ -267,7 +267,7 @@ pub async fn load_following_webbookmarks(
     match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             let mut bookmarks: Vec<Event> = events.into_iter().collect();
-            bookmarks.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            bookmarks.sort_by_key(|b| std::cmp::Reverse(b.created_at));
             log::info!("Loaded {} web bookmarks from following", bookmarks.len());
             Ok(bookmarks)
         }
@@ -290,7 +290,7 @@ pub async fn load_global_webbookmarks(
     match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             let mut bookmarks: Vec<Event> = events.into_iter().collect();
-            bookmarks.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            bookmarks.sort_by_key(|b| std::cmp::Reverse(b.created_at));
             log::info!("Loaded {} global web bookmarks", bookmarks.len());
             Ok(bookmarks)
         }

@@ -1027,7 +1027,7 @@ fn render_account_info() -> Element {
                             "🔌 Browser Extension (NIP-07)"
                         }
                         Some(auth_store::LoginMethod::RemoteSigner) => "🔐 Remote Signer (NIP-46)",
-                        #[cfg(feature = "mobile")]
+                        #[cfg(feature = "mobile_platform")]
                         Some(auth_store::LoginMethod::AndroidSigner) => "📱 Android Signer (NIP-55)",
                         None => "Unknown",
                     }

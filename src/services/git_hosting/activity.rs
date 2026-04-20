@@ -200,7 +200,7 @@ pub async fn fetch_user_activity(
 
     let mut activities: Vec<Activity> = events.iter().filter_map(Activity::from_event).collect();
 
-    activities.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    activities.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     activities.truncate(limit);
     Ok(activities)
 }
@@ -329,7 +329,7 @@ pub async fn fetch_trending_repositories(limit: usize) -> Result<Vec<Repository>
 
     // Note: star_count is not available from NIP-34 events, so this effectively
     // sorts by creation time (recency). Star counting requires separate queries.
-    repos.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    repos.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     repos.truncate(limit);
     Ok(repos)
 }
@@ -379,7 +379,7 @@ pub async fn fetch_top_developers(limit: usize) -> Result<Vec<TopDeveloper>, Str
         })
         .collect();
 
-    developers.sort_by(|a, b| b.contribution_count.cmp(&a.contribution_count));
+    developers.sort_by_key(|b| std::cmp::Reverse(b.contribution_count));
     developers.truncate(limit);
     Ok(developers)
 }
@@ -410,7 +410,7 @@ pub async fn fetch_recent_global_activity(limit: usize) -> Result<Vec<Activity>,
 
     let mut activities: Vec<Activity> = events.iter().filter_map(Activity::from_event).collect();
 
-    activities.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    activities.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     activities.truncate(limit);
     Ok(activities)
 }

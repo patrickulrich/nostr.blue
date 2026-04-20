@@ -231,7 +231,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                         };
                         let mut current = comments.peek().clone();
                         current.insert(0, comment);
-                        current.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                        current.sort_by_key(|b| std::cmp::Reverse(b.created_at));
                         comments.set(current);
                     }
                     _ => {}

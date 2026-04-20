@@ -1,4 +1,5 @@
 use crate::components::icons::{BookmarkIcon, MessageCircleIcon, Repeat2Icon, ZapIcon};
+use crate::components::text_with_links::TextWithLinks;
 use crate::components::{ReactionButton, ZapModal};
 use crate::hooks::use_reaction;
 use crate::routes::Route;
@@ -578,17 +579,19 @@ pub fn PhotoCard(
             }
             div { class: "px-3 pb-2",
                 if let Some(title_text) = &title {
-                    div { class: "mb-1",
+                    div { class: "mb-1 break-all",
                         span { class: "font-semibold text-sm mr-2", "{display_name}" }
                         span { class: "font-bold", "{title_text}" }
                     }
                 }
                 if !description.is_empty() {
-                    div {
+                    div { class: "text-sm break-words",
                         if title.is_none() {
                             span { class: "font-semibold text-sm mr-2", "{display_name}" }
                         }
-                        span { class: "text-sm", "{description}" }
+                        TextWithLinks {
+                            content: event.content.clone(),
+                        }
                     }
                 }
             }

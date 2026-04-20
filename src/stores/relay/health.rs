@@ -12,10 +12,10 @@
 //! - `start_health_poll()` spawns the periodic background task
 use super::signals::RelayPoolStoreStoreExt;
 use dioxus::prelude::*;
+use dioxus_core::spawn_forever;
 use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 #[derive(Clone, Debug, Default)]
 #[allow(dead_code)]
@@ -217,9 +217,9 @@ pub fn start_health_poll(client: Arc<Client>) {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        tokio::spawn(async move {
+        spawn_forever(async move {
             loop {
-                tokio::time::sleep(Duration::from_millis(POLL_INTERVAL_MS)).await;
+                crate::stores::nostr_client::platform_sleep_ms(POLL_INTERVAL_MS).await;
                 let connected = poll_relay_health(&client).await;
                 let _ = connected;
                 sync_ui_signals(&client).await;

@@ -6,13 +6,13 @@
 #[cfg(all(feature = "web", feature = "desktop"))]
 compile_error!("Cannot enable both 'web' and 'desktop' features");
 
-#[cfg(all(feature = "web", feature = "mobile"))]
+#[cfg(all(feature = "web", feature = "mobile_platform"))]
 compile_error!("Cannot enable both 'web' and 'mobile' features");
 
-#[cfg(all(feature = "desktop", feature = "mobile"))]
+#[cfg(all(feature = "desktop", feature = "mobile_platform"))]
 compile_error!("Cannot enable both 'desktop' and 'mobile' features");
 
-#[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile")))]
+#[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile_platform")))]
 compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature");
 
 use crate::utils::nip52::{CalendarEvent, CalendarEventType, EventTime};
@@ -519,7 +519,7 @@ pub fn download_ics(filename: &str, content: &str) -> Result<(), String> {
 }
 
 /// Trigger download of ICS file (mobile - uses Share Intent)
-#[cfg(feature = "mobile")]
+#[cfg(feature = "mobile_platform")]
 pub fn download_ics(filename: &str, content: &str) -> Result<(), String> {
     crate::platform::download::save_file(filename, content, "text/calendar;charset=utf-8")
 }

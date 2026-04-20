@@ -84,7 +84,7 @@ pub fn TopicFeed(topic: String) -> Element {
                         (p, score)
                     })
                     .collect();
-                top.sort_by(|a, b| b.1.cmp(&a.1));
+                top.sort_by_key(|b| std::cmp::Reverse(b.1));
                 top.into_iter().map(|(p, _)| p).collect()
             }
             _ => {

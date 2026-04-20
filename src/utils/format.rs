@@ -5,13 +5,13 @@
 #[cfg(all(feature = "web", feature = "desktop"))]
 compile_error!("Cannot enable both 'web' and 'desktop' features");
 
-#[cfg(all(feature = "web", feature = "mobile"))]
+#[cfg(all(feature = "web", feature = "mobile_platform"))]
 compile_error!("Cannot enable both 'web' and 'mobile' features");
 
-#[cfg(all(feature = "desktop", feature = "mobile"))]
+#[cfg(all(feature = "desktop", feature = "mobile_platform"))]
 compile_error!("Cannot enable both 'desktop' and 'mobile' features");
 
-#[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile")))]
+#[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile_platform")))]
 compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature");
 
 /// Format server URL for user-friendly display

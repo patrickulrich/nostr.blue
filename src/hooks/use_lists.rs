@@ -102,14 +102,14 @@ pub fn use_user_lists() -> (
                 | Some(auth_store::LoginMethod::PrivateKey)
                 | Some(auth_store::LoginMethod::RemoteSigner)
         ) || {
-            #[cfg(feature = "mobile")]
+            #[cfg(feature = "mobile_platform")]
             {
                 matches!(
                     auth.login_method,
                     Some(auth_store::LoginMethod::AndroidSigner)
                 )
             }
-            #[cfg(not(feature = "mobile"))]
+            #[cfg(not(feature = "mobile_platform"))]
             {
                 false
             }
@@ -204,7 +204,7 @@ async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
             }
         }
     }
-    lists.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    lists.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     log::info!("Fetched {} lists", lists.len());
     Ok(lists)
 }

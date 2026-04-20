@@ -1,7 +1,9 @@
 //! Bible Chapter Reading View
 //! Displays a chapter with verse selection and highlighting
+use crate::components::bible_commentary_panel::BibleCommentaryPanel;
+use crate::components::bible_cross_ref_panel::BibleCrossRefPanel;
 use crate::components::content_share_modal::{ContentShareModal, ContentType};
-use crate::components::icons::SparklesIcon;
+use crate::components::icons::{SparklesIcon, VolumeIcon};
 use crate::components::{ConfirmModal, HighlightModal};
 use crate::routes::Route;
 use crate::services::bible_api::format_selected_verses_reference;
@@ -70,6 +72,97 @@ fn parse_chapter_api_link(api_link: &str) -> Option<(String, String, u32)> {
         chapter,
     ))
 }
+#[component]
+fn BibleAudioMenu(
+    audio_links: Option<HashMap<String, String>>,
+    translation: String,
+    book: String,
+    book_name: String,
+    chapter: u32,
+    next_chapter_api_link: Option<String>,
+) -> Element {
+    let links = match &audio_links {
+        Some(l) if !l.is_empty() => l,
+        _ => return VNode::empty(),
+    };
+
+    let mut is_open = use_signal(|| false);
+
+    rsx! {
+        div { class: "relative",
+            button {
+                class: "p-1.5 hover:bg-muted rounded-lg transition text-muted-foreground",
+                title: "Audio",
+                onclick: move |evt: MouseEvent| {
+                    evt.stop_propagation();
+                    is_open.toggle();
+                },
+                VolumeIcon { class: "w-4 h-4".to_string() }
+            }
+
+            if is_open() {
+                div {
+                    class: "fixed inset-0 z-40",
+                    onclick: move |evt: MouseEvent| {
+                        evt.stop_propagation();
+                        is_open.set(false);
+                    },
+                }
+
+                div { class: "absolute right-0 mt-2 w-56 bg-background border border-border rounded-lg shadow-lg z-50 py-1",
+                    p { class: "px-4 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide", "Audio Versions" }
+                    div { class: "h-px bg-border mx-2 my-1" }
+
+                    for (reader, url) in links.iter() {
+                        {
+                            let url_clone = url.clone();
+                            let reader_clone = reader.clone();
+                            let trans_id = translation.clone();
+                            let book_id = book.clone();
+                            let b_name = book_name.clone();
+                            let next_link = next_chapter_api_link.clone();
+                            let reader_label = reader.clone();
+                            rsx! {
+                                button {
+                                    key: "{reader}",
+                                    class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2.5",
+                                    onclick: move |evt: MouseEvent| {
+                                        evt.stop_propagation();
+                                        is_open.set(false);
+                                        play_bible_chapter_audio(
+                                            &trans_id,
+                                            &book_id,
+                                            &b_name,
+                                            chapter,
+                                            &reader_clone,
+                                            &url_clone,
+                                        );
+                                        if let Some(ref nl) = next_link {
+                                            spawn_prefetch_bible_audio(
+                                                nl.clone(),
+                                                reader_clone.clone(),
+                                                trans_id.clone(),
+                                                3,
+                                            );
+                                        }
+                                    },
+                                    svg {
+                                        class: "w-4 h-4 text-muted-foreground shrink-0",
+                                        view_box: "0 0 24 24",
+                                        fill: "currentColor",
+                                        polygon { points: "8,5 19,12 8,19" }
+                                    }
+                                    span { class: "text-sm", "{reader_label}" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Bible Chapter Reading View
 #[component]
 pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element {
@@ -98,6 +191,7 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
     let mut pending_ai_chat_seed = use_signal(|| None::<AiChatSeedPayload>);
     let is_authenticated = auth_store::is_authenticated();
     let toast = consume_toast();
+    let mut active_tab = use_signal(|| "bible");
     let current_key = format!("{}/{}/{}", translation, book, chapter);
     let mut loaded_key = use_signal(String::new);
     let mut chapter_data: Signal<
@@ -235,16 +329,34 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                         }
                         div { class: "text-center flex-1",
                             match &*chapter_data.read() {
-                                Some(Ok(data)) => rsx! {
-                                    h1 { class: "text-xl font-bold", "{data.book.common_name} {chapter}" }
-                                    p { class: "text-sm text-muted-foreground", "{translation_for_display}" }
+                                Some(Ok(data)) => {
+                                    let lang = data.translation.language_english_name.as_deref().unwrap_or("");
+                                    let label = if lang == "English" || lang.is_empty() {
+                                        data.translation.english_name.clone()
+                                    } else {
+                                        format!("{} ({})", data.translation.english_name, lang)
+                                    };
+                                    rsx! {
+                                        h1 { class: "text-xl font-bold", "{data.book.common_name} {chapter}" }
+                                        p { class: "text-sm text-muted-foreground", "{label}" }
+                                    }
                                 },
                                 _ => rsx! {
                                     h1 { class: "text-xl font-bold", "{book_for_display} {chapter}" }
                                 },
                             }
                         }
-                        div { class: "flex gap-2",
+                        div { class: "flex gap-1 items-center",
+                            if let Some(Ok(data)) = &*chapter_data.read() {
+                                BibleAudioMenu {
+                                    audio_links: data.this_chapter_audio_links.clone(),
+                                    translation: translation_for_display.clone(),
+                                    book: book.clone(),
+                                    book_name: data.book.common_name.clone(),
+                                    chapter: chapter,
+                                    next_chapter_api_link: data.next_chapter_api_link.clone(),
+                                }
+                            }
                             if let Some(Ok(data)) = &*chapter_data.read() {
                                 if let Some(ref prev_link) = data.previous_chapter_api_link {
                                     if let Some((prev_trans, prev_book, prev_ch)) = parse_chapter_api_link(prev_link) {
@@ -301,6 +413,23 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                     }
                 }
             }
+            div { class: "flex gap-1 border-b border-border px-4 max-w-3xl mx-auto",
+                button {
+                    class: if *active_tab.read() == "bible" { "px-3 py-2 text-sm font-medium border-b-2 border-primary text-primary" } else { "px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground" },
+                    onclick: move |_| active_tab.set("bible"),
+                    "Bible"
+                }
+                button {
+                    class: if *active_tab.read() == "commentary" { "px-3 py-2 text-sm font-medium border-b-2 border-primary text-primary" } else { "px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground" },
+                    onclick: move |_| active_tab.set("commentary"),
+                    "Commentary"
+                }
+                button {
+                    class: if *active_tab.read() == "xrefs" { "px-3 py-2 text-sm font-medium border-b-2 border-primary text-primary" } else { "px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground" },
+                    onclick: move |_| active_tab.set("xrefs"),
+                    "Cross-Refs"
+                }
+            }
             div { class: "flex-1 overflow-y-auto",
                 div { class: "max-w-3xl mx-auto p-4 pb-32",
                     match &*chapter_data.read() {
@@ -330,8 +459,12 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                         },
                         Some(Ok(data)) => {
                             let highlight_stats = bible_store::get_chapter_highlight_stats();
+                            let is_rtl = data.translation.text_direction == "rtl";
+                            let dir_class = if is_rtl { "text-right" } else { "" };
+                            let current_tab = active_tab.read().clone();
                             rsx! {
-                                div { class: "prose prose-lg dark:prose-invert max-w-none leading-relaxed",
+                                if current_tab == "bible" {
+                                    div { dir: "{data.translation.text_direction}", class: "prose prose-lg dark:prose-invert max-w-none leading-relaxed {dir_class}",
                                     for content in data.chapter.content.iter() {
                                         match content {
                                             ChapterContent::Heading { content: heading_content } => {
@@ -416,6 +549,19 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                                 }
                                             }
                                         }
+                                    }
+                                }
+                                } else if current_tab == "commentary" {
+                                    BibleCommentaryPanel {
+                                        translation: translation.clone(),
+                                        book: book.clone(),
+                                        chapter: chapter,
+                                    }
+                                } else if current_tab == "xrefs" {
+                                    BibleCrossRefPanel {
+                                        translation: translation.clone(),
+                                        book: book.clone(),
+                                        chapter: chapter,
                                     }
                                 }
                             }
@@ -677,6 +823,108 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
             }
         }
     }
+}
+
+use crate::stores::audio::music_player::{self, MusicTrack};
+use crate::stores::audio::nostr_music::TrackSource;
+
+fn build_bible_track(
+    translation: &str,
+    book_id: &str,
+    book_name: &str,
+    chapter: u32,
+    reader: &str,
+    url: &str,
+) -> MusicTrack {
+    MusicTrack {
+        id: format!("bible-{}-{}-{}-{}", translation, book_id, chapter, reader),
+        title: format!("{} {}", book_name, chapter),
+        artist: reader.to_string(),
+        album: None,
+        media_url: url.to_string(),
+        album_art_url: None,
+        artist_art_url: None,
+        duration: None,
+        artist_id: None,
+        album_id: None,
+        artist_npub: None,
+        source: TrackSource::Bible {
+            translation: translation.to_string(),
+            book: book_id.to_string(),
+            chapter,
+            reader: reader.to_string(),
+        },
+        msat_total: None,
+        created_at: None,
+        is_podcast: true,
+        is_live_stream: false,
+        value_block: None,
+        chapters_url: None,
+        transcripts: Vec::new(),
+    }
+}
+
+fn play_bible_chapter_audio(
+    translation: &str,
+    book_id: &str,
+    book_name: &str,
+    chapter: u32,
+    reader: &str,
+    url: &str,
+) {
+    let track = build_bible_track(translation, book_id, book_name, chapter, reader, url);
+    let mut state = music_player::MUSIC_PLAYER.write();
+    state.stop_at_end = true;
+    drop(state);
+    music_player::play_or_toggle_track(track, None, None);
+}
+
+fn spawn_prefetch_bible_audio(
+    next_api_link: String,
+    reader: String,
+    translation: String,
+    depth: u32,
+) {
+    if depth == 0 {
+        return;
+    }
+    spawn(async move {
+        let client = reqwest::Client::new();
+        let url = if next_api_link.starts_with("http") {
+            next_api_link.clone()
+        } else {
+            format!("https://bible.helloao.org{}", next_api_link)
+        };
+        match client.get(&url).send().await {
+            Ok(resp) => match resp.json::<crate::services::bible_api::ChapterResponse>().await {
+                Ok(data) => {
+                    if let Some(ref audio_links) = data.this_chapter_audio_links {
+                        if let Some(mp3_url) = audio_links.get(&reader) {
+                            let track = build_bible_track(
+                                &translation,
+                                &data.book.id,
+                                &data.book.common_name,
+                                data.chapter.number,
+                                &reader,
+                                mp3_url,
+                            );
+                            music_player::append_to_playlist(vec![track]);
+                            if let Some(ref next_link) = data.next_chapter_api_link {
+                                spawn_prefetch_bible_audio(
+                                    next_link.clone(),
+                                    reader.clone(),
+                                    translation.clone(),
+                                    depth - 1,
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(e) => log::warn!("Failed to parse prefetched chapter: {}", e),
+            },
+            Err(e) => log::warn!("Failed to prefetch next chapter: {}", e),
+        }
+    });
 }
 
 #[cfg(test)]

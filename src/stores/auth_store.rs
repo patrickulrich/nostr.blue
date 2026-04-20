@@ -24,7 +24,7 @@ pub enum LoginMethod {
     PrivateKey,
     ReadOnly,
     RemoteSigner,
-    #[cfg(feature = "mobile")]
+    #[cfg(feature = "mobile_platform")]
     AndroidSigner,
 }
 /// Global authentication state
@@ -121,7 +121,7 @@ pub fn init_auth() {
                     }
                 }
             }
-            #[cfg(feature = "mobile")]
+            #[cfg(feature = "mobile_platform")]
             "android_signer" => {
                 if let Ok(npub) = crate::platform::storage::get::<String>(STORAGE_KEY_NPUB) {
                     log::info!("Found stored Android signer session");
@@ -191,7 +191,7 @@ pub async fn restore_session_async() {
                     }
                 }
             }
-            #[cfg(feature = "mobile")]
+            #[cfg(feature = "mobile_platform")]
             "android_signer" => {
                 if let Ok(npub) = crate::platform::storage::get::<String>(STORAGE_KEY_NPUB) {
                     let package =
@@ -697,11 +697,11 @@ pub enum AndroidSignerAutoResult {
 
 /// Check if an Android signer (NIP-55) is available
 pub fn is_android_signer_available() -> bool {
-    #[cfg(feature = "mobile")]
+    #[cfg(feature = "mobile_platform")]
     {
         crate::platform::Nip55Signer::is_signer_installed()
     }
-    #[cfg(not(feature = "mobile"))]
+    #[cfg(not(feature = "mobile_platform"))]
     {
         false
     }
@@ -715,7 +715,7 @@ pub async fn login_with_android_signer(
     npub: &str,
     signer_package: Option<&str>,
 ) -> Result<(), String> {
-    #[cfg(feature = "mobile")]
+    #[cfg(feature = "mobile_platform")]
     {
         use crate::platform::Nip55Signer;
 
@@ -752,7 +752,7 @@ pub async fn login_with_android_signer(
         run_post_login_init().await;
         Ok(())
     }
-    #[cfg(not(feature = "mobile"))]
+    #[cfg(not(feature = "mobile_platform"))]
     {
         let _ = (npub, signer_package);
         Err("Android signer is only available on mobile".to_string())
@@ -765,7 +765,7 @@ pub async fn login_with_android_signer(
 /// 1. **Poll**: Check for pending Intent result from a previous launch
 /// 2. **ContentResolver**: Try to get pubkey from already-approved signers
 /// 3. **Intent**: Launch get_public_key Intent to open signer for first-time approval
-#[cfg(feature = "mobile")]
+#[cfg(feature = "mobile_platform")]
 pub async fn login_with_android_signer_auto() -> Result<AndroidSignerAutoResult, String> {
     use crate::platform::{IntentPollResult, Nip55Signer};
 
@@ -833,7 +833,7 @@ pub async fn login_with_android_signer_auto() -> Result<AndroidSignerAutoResult,
 }
 
 /// Auto-detect and login with Android signer (NIP-55) — non-mobile stub.
-#[cfg(not(feature = "mobile"))]
+#[cfg(not(feature = "mobile_platform"))]
 pub async fn login_with_android_signer_auto() -> Result<AndroidSignerAutoResult, String> {
     Err("Android signer is only available on mobile".to_string())
 }

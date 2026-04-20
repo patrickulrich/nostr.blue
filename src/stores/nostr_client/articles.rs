@@ -23,7 +23,7 @@ pub async fn fetch_articles(
     match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             let mut sorted = events;
-            sorted.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            sorted.sort_by_key(|b| std::cmp::Reverse(b.created_at));
             sorted.truncate(limit);
             log::info!("Fetched {} articles", sorted.len());
             Ok(sorted)

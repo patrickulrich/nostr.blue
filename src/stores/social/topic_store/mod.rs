@@ -347,7 +347,7 @@ pub fn build_topic_thread_tree(posts: Vec<TopicPost>) -> Vec<Rc<TopicThread>> {
     }
     // Sort children by created_at ascending (oldest first)
     for posts_vec in children_map.values_mut() {
-        posts_vec.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        posts_vec.sort_by_key(|a| a.created_at);
     }
 
     fn build_tree(
@@ -376,7 +376,7 @@ pub fn build_topic_thread_tree(posts: Vec<TopicPost>) -> Vec<Rc<TopicThread>> {
     }
 
     let mut tree = build_tree(None, &children_map, 0, 10);
-    tree.sort_by(|a, b| b.post.created_at.cmp(&a.post.created_at));
+    tree.sort_by_key(|b| std::cmp::Reverse(b.post.created_at));
     tree
 }
 

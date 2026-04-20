@@ -16,7 +16,7 @@ pub async fn fetch_topic_posts(
     match result {
         Ok(events) => {
             let mut posts: Vec<TopicPost> = events.iter().filter_map(parse_topic_post).collect();
-            posts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            posts.sort_by_key(|b| std::cmp::Reverse(b.created_at));
             cache_topic_posts(&posts);
             log::info!("Fetched {} posts for topic #{}", posts.len(), topic);
             Ok(posts)
@@ -42,7 +42,7 @@ pub async fn fetch_recent_posts(
     match result {
         Ok(events) => {
             let mut posts: Vec<TopicPost> = events.iter().filter_map(parse_topic_post).collect();
-            posts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            posts.sort_by_key(|b| std::cmp::Reverse(b.created_at));
             cache_topic_posts(&posts);
             log::info!("Fetched {} recent topic posts", posts.len());
             Ok(posts)
@@ -83,7 +83,7 @@ pub async fn fetch_subscribed_feed(
     match result {
         Ok(events) => {
             let mut posts: Vec<TopicPost> = events.iter().filter_map(parse_topic_post).collect();
-            posts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            posts.sort_by_key(|b| std::cmp::Reverse(b.created_at));
             cache_topic_posts(&posts);
             log::info!("Fetched {} posts for subscribed feed", posts.len());
             Ok(posts)
@@ -218,7 +218,7 @@ pub async fn fetch_post_replies(
         // Only include replies that belong to the same topic
         .filter(|p| p.topic == topic)
         .collect();
-    posts.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+    posts.sort_by_key(|a| a.created_at);
     cache_topic_posts(&posts);
     Ok(posts)
 }
@@ -252,7 +252,7 @@ pub async fn discover_topics(limit: usize) -> std::result::Result<Vec<TopicInfo>
         .collect();
 
     // Sort by post count descending
-    topics.sort_by(|a, b| b.post_count.cmp(&a.post_count));
+    topics.sort_by_key(|b| std::cmp::Reverse(b.post_count));
     topics.truncate(limit);
 
     // Cache discovered topics

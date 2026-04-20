@@ -403,6 +403,7 @@ pub async fn fetch_interaction_counts_batch(
                 Kind::Reaction,
                 Kind::Repost,
                 Kind::ZapReceipt,
+                Kind::Custom(1010),
             ],
             timeout,
         )
@@ -417,11 +418,16 @@ pub async fn fetch_interaction_counts_batch(
         }
     }
     let mut events: Vec<Event> = event_map.into_values().collect();
-    events.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+    events.sort_by_key(|right| std::cmp::Reverse(right.created_at));
     log::info!(
         "Processing {} total interaction events (DB + relay, deduplicated)",
         events.len()
     );
+    let edit_events: Vec<Event> = events
+        .iter()
+        .filter(|e| e.kind.as_u16() == 1010)
+        .cloned()
+        .collect();
     let mut freshly_fetched: HashMap<String, InteractionCounts> = HashMap::new();
     let requested_ids: HashSet<String> = uncached_ids.iter().map(|id| id.to_hex()).collect();
     for event_id in &uncached_ids {
@@ -504,6 +510,17 @@ pub async fn fetch_interaction_counts_batch(
         }
     }
     {
+        if !edit_events.is_empty() {
+            let mut event_map_for_edits: HashMap<String, Event> = HashMap::new();
+            for id in &uncached_ids {
+                if let Ok(Some(event)) = client.database().event_by_id(id).await {
+                    event_map_for_edits.insert(id.to_hex(), event);
+                }
+            }
+            crate::stores::edit_cache::apply_edits_to_event_map(&edit_events, &event_map_for_edits);
+        }
+    }
+    {
         let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
             log::warn!("Counts cache mutex was poisoned, recovering");
             poisoned.into_inner()
@@ -549,6 +566,7 @@ pub async fn sync_interaction_counts(
             Kind::Reaction,
             Kind::Repost,
             Kind::ZapReceipt,
+            Kind::Custom(1010),
         ])
         .events(event_ids.clone());
     let sync_opts = SyncOptions::default()
@@ -577,7 +595,12 @@ pub async fn sync_interaction_counts(
                     new_events.push(event);
                 }
             }
-            new_events.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+            new_events.sort_by_key(|right| std::cmp::Reverse(right.created_at));
+            let sync_edit_events: Vec<Event> = new_events
+                .iter()
+                .filter(|e| e.kind.as_u16() == 1010)
+                .cloned()
+                .collect();
             let mut result = {
                 let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
                     log::warn!("Counts cache mutex was poisoned, recovering");
@@ -670,6 +693,17 @@ pub async fn sync_interaction_counts(
                         }
                     }
                     _ => {}
+                }
+            }
+            {
+                if !sync_edit_events.is_empty() {
+                    let mut original_author_map: HashMap<nostr_sdk::EventId, nostr_sdk::PublicKey> = HashMap::new();
+                    for event_id in &event_ids {
+                        if let Ok(Some(orig_event)) = client.database().event_by_id(event_id).await {
+                            original_author_map.insert(*event_id, orig_event.pubkey);
+                        }
+                    }
+                    crate::stores::edit_cache::process_edit_events_batch(&sync_edit_events, &original_author_map);
                 }
             }
             {
@@ -818,6 +852,7 @@ pub async fn fetch_trending_interactions(
             Kind::Reaction,
             Kind::Repost,
             Kind::ZapReceipt,
+            Kind::Custom(1010),
         ])
         .since(since)
         .limit(limit);
@@ -836,10 +871,8 @@ pub async fn fetch_trending_interactions(
         let counts = counts_map.entry(event_key).or_default();
         match event.kind {
             kind if is_reply_kind(kind) => counts.replies += 1,
-            Kind::Reaction => {
-                if event.content.trim() != "-" {
-                    counts.likes += 1;
-                }
+            Kind::Reaction if event.content.trim() != "-" => {
+                counts.likes += 1;
             }
             Kind::Repost => counts.reposts += 1,
             Kind::ZapReceipt => {

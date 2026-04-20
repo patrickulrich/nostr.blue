@@ -271,7 +271,7 @@ pub fn PRReviewSection(
                                 .or_insert(r);
                         }
                         let mut sorted: Vec<_> = by_pubkey.into_values().collect();
-                        sorted.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                        sorted.sort_by_key(|b| std::cmp::Reverse(b.created_at));
                         reviews.set(sorted);
                     }
                     Err(e) => {
@@ -344,7 +344,7 @@ pub fn PRReviewSection(
             let mut current = reviews.write();
             current.retain(|r| r.pubkey != user_pubkey);
             current.push(local_review);
-            current.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            current.sort_by_key(|b| std::cmp::Reverse(b.created_at));
             drop(current);
             show_form.set(false);
             review_body.set(String::new());
@@ -396,7 +396,7 @@ pub fn PRReviewSection(
                             });
                             if !has_newer {
                                 current.push(prior);
-                                current.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                                current.sort_by_key(|b| std::cmp::Reverse(b.created_at));
                             }
                         }
                         drop(current);

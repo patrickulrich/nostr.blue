@@ -118,10 +118,10 @@ pub fn Search(q: String) -> Element {
         let order = *sort_order.read();
         match order {
             SortOrder::Newest => {
-                sorted.sort_by(|a, b| b.event.created_at.cmp(&a.event.created_at));
+                sorted.sort_by_key(|b| std::cmp::Reverse(b.event.created_at));
             }
             SortOrder::Oldest => {
-                sorted.sort_by(|a, b| a.event.created_at.cmp(&b.event.created_at));
+                sorted.sort_by_key(|a| a.event.created_at);
             }
             SortOrder::FollowingFirst => {
                 sorted.sort_by(|a, b| match (a.is_from_contact, b.is_from_contact) {

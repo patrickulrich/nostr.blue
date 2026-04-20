@@ -1,5 +1,6 @@
 use crate::services::ai_chat::{ToolDefinition, ToolFunction};
 use crate::stores::nostr_client::get_client;
+use crate::stores::relay::fetch_events_from_relays;
 use nostr_sdk::nips::nip19::Nip19;
 use nostr_sdk::prelude::*;
 use serde::Deserialize;
@@ -9,6 +10,31 @@ use std::time::Duration;
 const DEFAULT_TIMEOUT_SECS: u64 = 10;
 const DEFAULT_LIMIT: usize = 10;
 const MAX_LIMIT: usize = 50;
+
+async fn get_read_relays(client: &Client) -> Vec<String> {
+    let pool_relays = client.pool().relays().await;
+    let urls: Vec<String> = pool_relays
+        .into_iter()
+        .filter(|(_, relay)| relay.flags().has_read())
+        .map(|(url, _)| url.to_string())
+        .collect();
+    if urls.is_empty() {
+        vec![
+            "wss://relay.damus.io".to_string(),
+            "wss://nos.lol".to_string(),
+            "wss://relay.snort.social".to_string(),
+            "wss://nostr.wine".to_string(),
+        ]
+    } else {
+        urls
+    }
+}
+
+async fn tool_fetch_events(client: &Client, filter: Filter) -> Result<Vec<nostr::Event>, String> {
+    let relays = get_read_relays(client).await;
+    let timeout = Duration::from_secs(DEFAULT_TIMEOUT_SECS);
+    fetch_events_from_relays(client, filter, relays, timeout).await
+}
 
 pub fn nostr_tool_definitions() -> Vec<ToolDefinition> {
     vec![
@@ -465,10 +491,7 @@ async fn tool_get_profile(args_str: &str) -> Result<serde_json::Value, String> {
         .kind(Kind::Metadata)
         .author(pk)
         .limit(1);
-    let events = client
-        .fetch_events(filter, Duration::from_secs(DEFAULT_TIMEOUT_SECS))
-        .await
-        .map_err(|e| e.to_string())?;
+    let events = tool_fetch_events(&client, filter).await?;
     let Some(event) = events.first() else {
         return Ok(json!({"error": "Profile not found"}));
     };
@@ -494,10 +517,7 @@ async fn tool_get_note(args_str: &str) -> Result<serde_json::Value, String> {
     let id = parse_event_id(&args.id)?;
     let client = get_client().ok_or("Nostr client not initialized")?;
     let filter = Filter::new().id(id).limit(1);
-    let events = client
-        .fetch_events(filter, Duration::from_secs(DEFAULT_TIMEOUT_SECS))
-        .await
-        .map_err(|e| e.to_string())?;
+    let events = tool_fetch_events(&client, filter).await?;
     let Some(event) = events.first() else {
         return Ok(json!({"error": "Event not found"}));
     };
@@ -514,10 +534,7 @@ async fn tool_get_notes(args_str: &str) -> Result<serde_json::Value, String> {
         .kind(Kind::TextNote)
         .author(pk)
         .limit(limit);
-    let events = client
-        .fetch_events(filter, Duration::from_secs(DEFAULT_TIMEOUT_SECS))
-        .await
-        .map_err(|e| e.to_string())?;
+    let events = tool_fetch_events(&client, filter).await?;
     let notes: Vec<serde_json::Value> = events
         .iter()
         .map(|e| {
@@ -549,10 +566,7 @@ async fn tool_get_contact_list(args_str: &str) -> Result<serde_json::Value, Stri
         .kind(Kind::ContactList)
         .author(pk)
         .limit(1);
-    let events = client
-        .fetch_events(filter, Duration::from_secs(DEFAULT_TIMEOUT_SECS))
-        .await
-        .map_err(|e| e.to_string())?;
+    let events = tool_fetch_events(&client, filter).await?;
     let Some(event) = events.first() else {
         return Ok(json!({"contacts": [], "count": 0}));
     };
@@ -576,10 +590,7 @@ async fn tool_get_relay_list(args_str: &str) -> Result<serde_json::Value, String
         .kind(Kind::RelayList)
         .author(pk)
         .limit(1);
-    let events = client
-        .fetch_events(filter, Duration::from_secs(DEFAULT_TIMEOUT_SECS))
-        .await
-        .map_err(|e| e.to_string())?;
+    let events = tool_fetch_events(&client, filter).await?;
     let Some(event) = events.first() else {
         return Ok(json!({"relays": [], "count": 0}));
     };
@@ -629,10 +640,7 @@ async fn tool_get_received_zaps(args_str: &str) -> Result<serde_json::Value, Str
         .kind(Kind::ZapReceipt)
         .pubkey(pk)
         .limit(limit);
-    let events = client
-        .fetch_events(filter, Duration::from_secs(DEFAULT_TIMEOUT_SECS))
-        .await
-        .map_err(|e| e.to_string())?;
+    let events = tool_fetch_events(&client, filter).await?;
     let zaps: Vec<serde_json::Value> = events
         .iter()
         .map(|e| {
@@ -731,10 +739,7 @@ async fn tool_query_events(args_str: &str) -> Result<serde_json::Value, String> 
             }
         }
     }
-    let events = client
-        .fetch_events(filter, Duration::from_secs(DEFAULT_TIMEOUT_SECS))
-        .await
-        .map_err(|e| e.to_string())?;
+    let events = tool_fetch_events(&client, filter).await?;
     let results: Vec<serde_json::Value> =
         events.iter().map(format_event_summary).collect();
     Ok(json!({"events": results, "count": results.len()}))
@@ -812,10 +817,7 @@ async fn tool_get_long_form_notes(args_str: &str) -> Result<serde_json::Value, S
         .kind(Kind::LongFormTextNote)
         .author(pk)
         .limit(limit);
-    let events = client
-        .fetch_events(filter, Duration::from_secs(DEFAULT_TIMEOUT_SECS))
-        .await
-        .map_err(|e| e.to_string())?;
+    let events = tool_fetch_events(&client, filter).await?;
     let articles: Vec<serde_json::Value> = events
         .iter()
         .map(|e| {
@@ -990,10 +992,7 @@ async fn tool_get_blossom_servers(args_str: &str) -> Result<serde_json::Value, S
         .kind(Kind::Custom(10063))
         .author(pk)
         .limit(1);
-    let events = client
-        .fetch_events(filter, Duration::from_secs(DEFAULT_TIMEOUT_SECS))
-        .await
-        .map_err(|e| e.to_string())?;
+    let events = tool_fetch_events(&client, filter).await?;
     let Some(event) = events.first() else {
         return Ok(json!({"servers": [], "count": 0}));
     };

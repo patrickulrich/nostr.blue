@@ -203,7 +203,7 @@ pub async fn fetch_cookbooks(limit: usize) -> std::result::Result<Vec<Pinboard>,
         .iter()
         .filter_map(|e| parse_pinboard_event(e, current_user.as_deref()))
         .collect();
-    cookbooks.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    cookbooks.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     cache_pinboards(&cookbooks);
     log::info!("Fetched {} cookbooks", cookbooks.len());
     Ok(cookbooks)
@@ -223,7 +223,7 @@ pub async fn fetch_user_cookbooks() -> std::result::Result<Vec<Pinboard>, String
         .iter()
         .filter_map(|e| parse_pinboard_event(e, Some(&current_user)))
         .collect();
-    cookbooks.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    cookbooks.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     cache_pinboards(&cookbooks);
     log::info!("Fetched {} user cookbooks", cookbooks.len());
     Ok(cookbooks)
@@ -252,7 +252,7 @@ pub async fn fetch_pins_for_board(board_a_tag: &str) -> std::result::Result<Vec<
     let filter = pins_for_board_filter(board_a_tag, 500);
     let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await?;
     let mut pins: Vec<Pin> = events.iter().filter_map(parse_pin_event).collect();
-    pins.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    pins.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     cache_pins(&pins);
     log::info!("Fetched {} pins for board {}", pins.len(), board_a_tag);
     Ok(pins)
@@ -267,7 +267,7 @@ pub async fn fetch_owner_pins_for_board(
     let filter = pins_by_author_for_board_filter(pk, board_a_tag, 500);
     let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await?;
     let mut pins: Vec<Pin> = events.iter().filter_map(parse_pin_event).collect();
-    pins.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    pins.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     cache_pins(&pins);
     log::info!(
         "Fetched {} owner pins for board {}",
@@ -306,7 +306,7 @@ pub async fn fetch_pins_for_board_filtered(
     }
     let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await?;
     let mut pins: Vec<Pin> = events.iter().filter_map(parse_pin_event).collect();
-    pins.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    pins.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     cache_pins(&pins);
     let mode = if owner_pubkey.is_some() {
         "owner-only"
@@ -367,7 +367,7 @@ pub async fn fetch_my_pins() -> std::result::Result<Vec<Pin>, String> {
     let filter = pins_by_author_filter(pk, 500);
     let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await?;
     let mut pins: Vec<Pin> = events.iter().filter_map(parse_pin_event).collect();
-    pins.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    pins.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     cache_pins(&pins);
     log::info!("Fetched {} pins for current user", pins.len());
     Ok(pins)

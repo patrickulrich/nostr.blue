@@ -85,7 +85,7 @@ pub fn PhotoDetail(photo_id: String) -> Element {
                     .filter(|event| seen_ids.insert(event.id))
                     .collect();
                 let mut sorted_comments = unique_comments;
-                sorted_comments.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                sorted_comments.sort_by_key(|a| a.created_at);
                 log::info!("Total unique comments: {}", sorted_comments.len());
                 comments.set(sorted_comments);
                 loading_comments.set(false);
@@ -223,7 +223,7 @@ pub fn PhotoDetail(photo_id: String) -> Element {
                                         .filter(|event| seen_ids.insert(event.id))
                                         .collect();
                                     let mut sorted_comments = unique_comments;
-                                    sorted_comments.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                                    sorted_comments.sort_by_key(|a| a.created_at);
                                     comments.set(sorted_comments);
                                     loading_comments.set(false);
                                 });

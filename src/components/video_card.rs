@@ -76,10 +76,8 @@ pub fn parse_video_imeta_tags(event: &Event) -> Vec<VideoMeta> {
                                 }
                             }
                         }
-                        "image" => {
-                            if video.thumbnail.is_none() {
-                                video.thumbnail = Some(value.to_string());
-                            }
+                        "image" if video.thumbnail.is_none() => {
+                            video.thumbnail = Some(value.to_string());
                         }
                         "fallback" => {
                             video.fallback_urls.push(value.to_string());
