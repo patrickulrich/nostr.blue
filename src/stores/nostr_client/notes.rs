@@ -75,6 +75,7 @@ fn extract_quote_tags(content: &str) -> Vec<nostr::Tag> {
 pub async fn publish_note_tracked(
     content: String,
     tags: Vec<Vec<String>>,
+    content_warning: Option<String>,
 ) -> std::result::Result<PublishResult, String> {
     let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
@@ -93,6 +94,13 @@ pub async fn publish_note_tracked(
     mention_tags.extend(quote_tags);
     let custom_emoji_tags = build_custom_emoji_tags(&content);
     mention_tags.extend(custom_emoji_tags);
+    if let Some(reason) = content_warning {
+        mention_tags.push(nostr::Tag::from_standardized_without_cell(
+            nostr::event::tag::TagStandard::ContentWarning {
+                reason: if reason.is_empty() { None } else { Some(reason) },
+            },
+        ));
+    }
     let mut seen_pubkeys = std::collections::HashSet::new();
     mention_tags.retain(|tag| {
         if tag.kind() == nostr::TagKind::p() {
@@ -123,7 +131,7 @@ pub async fn publish_note(
     content: String,
     tags: Vec<Vec<String>>,
 ) -> std::result::Result<String, String> {
-    publish_note_tracked(content, tags)
+    publish_note_tracked(content, tags, None)
         .await
         .map(|result| result.event_id)
 }

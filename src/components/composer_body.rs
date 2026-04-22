@@ -1,4 +1,4 @@
-use crate::components::icons::{BarChartIcon, CameraIcon};
+use crate::components::icons::{BarChartIcon, CameraIcon, EyeOffIcon};
 use crate::components::{EmojiPicker, GifPicker, MediaUploader, PollCreatorModal};
 use crate::hooks::use_composer_editor::UseComposerEditor;
 use dioxus::prelude::*;
@@ -29,6 +29,8 @@ pub fn ComposerBody(props: ComposerBodyProps) -> Element {
     let mut show_media_uploader = editor.show_media_uploader;
     let show_poll_modal = editor.show_poll_modal;
     let is_publishing = editor.is_publishing;
+    let mut is_sensitive = editor.is_sensitive;
+    let mut sensitive_reason = editor.sensitive_reason;
     let char_count = editor.char_count;
     let _remaining = editor.remaining;
     let is_over_limit = editor.is_over_limit;
@@ -70,6 +72,28 @@ pub fn ComposerBody(props: ComposerBodyProps) -> Element {
                     }
                 }
             }
+            if *is_sensitive.read() {
+                div { class: "mt-2 flex items-center gap-2",
+                    input {
+                        r#type: "text",
+                        class: "flex-1 px-3 py-1.5 text-sm bg-transparent border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring",
+                        placeholder: "Content warning reason (optional)",
+                        value: "{sensitive_reason}",
+                        oninput: move |evt| {
+                            let mut r = sensitive_reason;
+                            r.set(evt.value());
+                        },
+                    }
+                    button {
+                        class: "p-1.5 text-muted-foreground hover:text-foreground transition",
+                        onclick: move |_| {
+                            is_sensitive.set(false);
+                            sensitive_reason.set(String::new());
+                        },
+                        "×"
+                    }
+                }
+            }
             div { class: "mt-3 flex items-center justify-between",
                 div { class: "flex items-center gap-2",
                     button {
@@ -99,6 +123,19 @@ pub fn ComposerBody(props: ComposerBodyProps) -> Element {
                         },
                         disabled: *is_publishing.read(),
                         BarChartIcon { class: "w-5 h-5".to_string() }
+                    }
+                    button {
+                        class: if *is_sensitive.read() { "p-2 rounded-full bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 transition" } else { "p-2 rounded-full hover:bg-accent transition" },
+                        title: "Mark as sensitive",
+                        onclick: move |_| {
+                            let val = *is_sensitive.read();
+                            is_sensitive.set(!val);
+                            if val {
+                                sensitive_reason.set(String::new());
+                            }
+                        },
+                        disabled: *is_publishing.read(),
+                        EyeOffIcon { class: "w-5 h-5".to_string() }
                     }
                     div { class: "text-sm {counter_color} ml-2",
                         if *is_over_limit.read() {

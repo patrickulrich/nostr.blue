@@ -118,6 +118,17 @@ pub fn ReplyComposer(
                 EventBuilder::comment(content_owned, comment_to, comment_root)
             };
             let event_builder = event_builder.tags(emoji_tags);
+            let event_builder = if *editor.is_sensitive.read() {
+                let reason = editor.sensitive_reason.read().clone();
+                let cw_tag = nostr::Tag::from_standardized_without_cell(
+                    nostr::event::tag::TagStandard::ContentWarning {
+                        reason: if reason.is_empty() { None } else { Some(reason) },
+                    },
+                );
+                event_builder.tag(cw_tag)
+            } else {
+                event_builder
+            };
             let signed_event = match crate::stores::publish_queue::signing::sign_event_builder(
                 event_builder,
             )

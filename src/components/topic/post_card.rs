@@ -2,10 +2,12 @@
 //! Reddit-style post card with vote column on left, content on right
 use crate::components::topic::{TopicBadge, VoteColumn};
 use crate::components::RichContent;
+use crate::components::SensitiveContent;
 use crate::routes::Route;
 use crate::stores::profiles::get_cached_profile;
 use crate::stores::topic_store::{TopicPost, VoteCounts};
 use crate::utils::format::format_relative_time_or;
+use crate::utils::nip36;
 use dioxus::prelude::*;
 #[cfg(feature = "web")]
 use dioxus::web::WebEventExt;
@@ -117,10 +119,27 @@ pub fn TopicPostCard(
                     },
                     div {
                         class: "prose prose-sm max-w-none text-foreground",
-                        RichContent {
-                            content: post.content.clone(),
-                            tags: post.event.tags.to_vec(),
-                            interactive_media: true,
+                        {
+                            let content_warning = nip36::get_content_warning(&post.event.tags);
+                            if let Some(reason) = content_warning {
+                                rsx! {
+                                    SensitiveContent { reason,
+                                        RichContent {
+                                            content: post.content.clone(),
+                                            tags: post.event.tags.to_vec(),
+                                            interactive_media: true,
+                                        }
+                                    }
+                                }
+                            } else {
+                                rsx! {
+                                    RichContent {
+                                        content: post.content.clone(),
+                                        tags: post.event.tags.to_vec(),
+                                        interactive_media: true,
+                                    }
+                                }
+                            }
                         }
                     }
                 }

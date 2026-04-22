@@ -1,4 +1,5 @@
 pub mod nips;
+pub use nips::nip36;
 pub use nips::nip34;
 pub use nips::nip48;
 pub use nips::nip49;

@@ -16,6 +16,8 @@ pub struct UseComposerEditor {
     pub show_media_uploader: Signal<bool>,
     pub show_poll_modal: Signal<bool>,
     pub is_publishing: Signal<bool>,
+    pub is_sensitive: Signal<bool>,
+    pub sensitive_reason: Signal<String>,
     pub char_count: Memo<usize>,
     pub remaining: Memo<usize>,
     pub is_over_limit: Memo<bool>,
@@ -31,6 +33,8 @@ pub fn use_composer_editor(config: ComposerConfig) -> UseComposerEditor {
     let show_media_uploader = use_signal(|| false);
     let show_poll_modal = use_signal(|| false);
     let is_publishing = use_signal(|| false);
+    let is_sensitive = use_signal(|| false);
+    let sensitive_reason = use_signal(String::new);
 
     let char_count = use_memo(move || content.read().chars().count());
     let remaining = use_memo(move || MAX_LENGTH.saturating_sub(*char_count.read()));
@@ -76,6 +80,8 @@ pub fn use_composer_editor(config: ComposerConfig) -> UseComposerEditor {
         show_media_uploader,
         show_poll_modal,
         is_publishing,
+        is_sensitive,
+        sensitive_reason,
         char_count,
         remaining,
         is_over_limit,

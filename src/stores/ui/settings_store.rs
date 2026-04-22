@@ -32,6 +32,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub cashu_wallet_auto_load: bool,
     #[serde(default)]
+    pub show_sensitive_content: bool,
+    #[serde(default)]
     pub version: u32,
 }
 fn default_mempool_endpoint() -> String {
@@ -61,6 +63,7 @@ impl Default for AppSettings {
             enable_negentropy_sync: default_enable_negentropy_sync(),
             negentropy_sync_interval_minutes: default_negentropy_sync_interval_minutes(),
             cashu_wallet_auto_load: false,
+            show_sensitive_content: false,
             version: 7,
         }
     }
@@ -363,6 +366,17 @@ pub async fn update_cashu_wallet_auto_load(enabled: bool) {
             e
         );
         cache_settings(&settings);
+    }
+}
+
+pub async fn update_show_sensitive_content(enabled: bool) {
+    let settings = {
+        let mut w = SETTINGS.write();
+        w.show_sensitive_content = enabled;
+        w.clone()
+    };
+    if let Err(e) = save_settings(&settings).await {
+        log::error!("Failed to save show_sensitive_content setting: {}", e);
     }
 }
 

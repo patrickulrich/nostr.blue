@@ -46,6 +46,13 @@ pub fn NoteComposer(mode: NoteMode) -> Element {
         let mut is_publishing = editor.is_publishing;
         is_publishing.set(true);
 
+        let content_warning = if *editor.is_sensitive.read() {
+            let reason = editor.sensitive_reason.read().clone();
+            Some(reason).filter(|r| !r.is_empty()).or(Some(String::new()))
+        } else {
+            None
+        };
+
         match mode_for_publish {
             NoteMode::Inline => {
                 let mut content = editor.content;
@@ -53,7 +60,7 @@ pub fn NoteComposer(mode: NoteMode) -> Element {
                 let toast_api = toast;
                 publish_feedback.set(None);
                 spawn(async move {
-                    match publish_note_tracked(content_value, Vec::new()).await {
+                    match publish_note_tracked(content_value, Vec::new(), content_warning.clone()).await {
                         Ok(result) => {
                             log::info!("Note published: {}", result.event_id);
                             if result.is_success() {
@@ -94,7 +101,7 @@ pub fn NoteComposer(mode: NoteMode) -> Element {
                 let nav = navigator;
                 let toast_api = toast;
                 spawn(async move {
-                    match publish_note_tracked(content_value, Vec::new()).await {
+                    match publish_note_tracked(content_value, Vec::new(), content_warning.clone()).await {
                         Ok(_) => {
                             show_queued_toast(toast_api, "Note");
                             editor.clear();

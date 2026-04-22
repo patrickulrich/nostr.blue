@@ -1,5 +1,5 @@
 use crate::components::icons::{BookmarkIcon, MessageCircleIcon, Repeat2Icon, ZapIcon};
-use crate::components::{ReactionButton, ReplyComposer, RichContent, ZapModal};
+use crate::components::{ReactionButton, ReplyComposer, RichContent, SensitiveContent, ZapModal};
 use crate::hooks::{use_author_metadata, use_reaction};
 use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
@@ -8,6 +8,7 @@ use crate::stores::nostr_client::{get_client, publish_repost, HAS_SIGNER};
 use crate::stores::signer::SIGNER_INFO;
 use crate::stores::voice_messages_store;
 use crate::utils::format_sats_compact;
+use crate::utils::nip36;
 use crate::utils::time::format_relative_time_ex;
 use crate::utils::{event::is_voice_message, ThreadNode};
 use dioxus::events::MediaData;
@@ -462,10 +463,27 @@ pub fn ThreadedComment(
                                     }
                                 }
                             } else {
-                                RichContent {
-                                    content: event.content.clone(),
-                                    tags: event.tags.clone().to_vec(),
-                                    interactive_media: true,
+                                {
+                                    let content_warning = nip36::get_content_warning(&event.tags);
+                                    if let Some(reason) = content_warning {
+                                        rsx! {
+                                            SensitiveContent { reason,
+                                                RichContent {
+                                                    content: event.content.clone(),
+                                                    tags: event.tags.clone().to_vec(),
+                                                    interactive_media: true,
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        rsx! {
+                                            RichContent {
+                                                content: event.content.clone(),
+                                                tags: event.tags.clone().to_vec(),
+                                                interactive_media: true,
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

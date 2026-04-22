@@ -629,7 +629,7 @@ pub fn Settings() -> Element {
                         h3 { class: "text-xl font-semibold text-gray-900 dark:text-white",
                             "🛡️ Content Moderation"
                         }
-                        span { class: "text-xs text-gray-500 dark:text-gray-400", "NIP-51 & NIP-56" }
+                        span { class: "text-xs text-gray-500 dark:text-gray-400", "NIP-36 & NIP-51 & NIP-56" }
                     }
                     p { class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
                         "Manage blocked users and muted posts"
@@ -666,6 +666,42 @@ pub fn Settings() -> Element {
                                 }
                             }
                             span { class: "text-gray-400", "→" }
+                        }
+                        div { class: "flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700 rounded-lg",
+                            div { class: "flex items-center gap-3",
+                                span { class: "text-lg", "👁️" }
+                                div {
+                                    span { class: "block font-medium text-gray-900 dark:text-white",
+                                        "Sensitive Content"
+                                    }
+                                    span { class: "block text-xs text-gray-500 dark:text-gray-400",
+                                        "Always show content warnings without blurring"
+                                    }
+                                }
+                            }
+                            div { class: "flex items-center gap-3",
+                                label { class: "relative inline-flex items-center cursor-pointer",
+                                    input {
+                                        r#type: "checkbox",
+                                        class: "sr-only peer",
+                                        checked: settings_store::SETTINGS.read().show_sensitive_content,
+                                        disabled: !auth.is_authenticated,
+                                        onchange: move |evt| {
+                                            let enabled = evt.checked();
+                                            spawn(async move {
+                                                settings_store::update_show_sensitive_content(enabled).await;
+                                            });
+                                        },
+                                    }
+                                    div { class: "w-11 h-6 bg-gray-300 dark:bg-gray-700 peer-focus:outline-hidden peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600" }
+                                }
+                                span { class: "text-sm font-medium text-gray-900 dark:text-white",
+                                    {
+                                        let is_enabled = settings_store::SETTINGS.read().show_sensitive_content;
+                                        if is_enabled { "Enabled" } else { "Disabled" }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

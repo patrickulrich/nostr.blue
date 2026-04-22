@@ -114,6 +114,12 @@ impl ConversationMessage {
             Self::Nip17 { .. } => "NIP-17",
         }
     }
+    pub fn tags(&self) -> &nostr_sdk::Tags {
+        match self {
+            Self::Nip04 { event } => &event.tags,
+            Self::Nip17 { rumor, .. } => &rumor.tags,
+        }
+    }
 }
 /// Represents a DM conversation with another user
 #[derive(Clone, Debug, PartialEq)]
