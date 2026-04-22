@@ -15,9 +15,10 @@ use crate::utils::nip54::WikiMergeRequest;
 use crate::utils::time::format_relative_time_ex;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
+use nostr_sdk::ToBech32;
 /// Wiki page detail view
 #[component]
-pub fn WikiDetail(identifier: String) -> Element {
+pub fn WikiDetail(npub: String, identifier: String) -> Element {
     let nav = use_navigator();
     let mut loading = use_signal(|| true);
     let mut page = use_signal(|| None::<CachedWikiPage>);
@@ -31,15 +32,19 @@ pub fn WikiDetail(identifier: String) -> Element {
         if !client_initialized {
             return;
         }
+        let n = npub.clone();
         let id = identifier.clone();
         spawn(async move {
             loading.set(true);
             if let Some(target) = wiki_store::get_redirect_target(&id) {
                 log::info!("Wiki redirect: {} -> {}", id, target);
-                nav.push(Route::WikiDetail { identifier: target });
+                nav.push(Route::WikiDetail {
+                    npub: n,
+                    identifier: target,
+                });
                 return;
             }
-            match wiki_store::fetch_wiki_page_by_identifier(&id).await {
+            match wiki_store::fetch_wiki_page(&n, &id).await {
                 Ok(result) => {
                     page.set(result);
                     loading.set(false);
@@ -119,7 +124,10 @@ pub fn WikiDetail(identifier: String) -> Element {
                         }
                         if !wiki_page.forward_links.is_empty() {
                             div { class: "mt-8 pt-6 border-t border-border",
-                                WikiForwardLinks { links: wiki_page.forward_links.clone() }
+                                WikiForwardLinks {
+                                    links: wiki_page.forward_links.clone(),
+                                    author_npub: Some(wiki_page.event.pubkey.to_bech32().unwrap_or_default()),
+                                }
                             }
                         }
                         {
@@ -172,8 +180,8 @@ pub fn WikiDetail(identifier: String) -> Element {
                                                     "View profile"
                                                 }
                                                 Link {
-                                                    to: Route::WikiAuthor {
-                                                        pubkey: author_hex.clone(),
+                                                    to: Route::WikiSlug {
+                                                        slug: wiki_page.event.pubkey.to_bech32().unwrap_or_else(|_| author_hex.clone()),
                                                     },
                                                     class: "flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors",
                                                     BookOpenIcon { class: "w-4 h-4" }
@@ -188,8 +196,8 @@ pub fn WikiDetail(identifier: String) -> Element {
                         BacklinksCollapsiblePanel {
                             identifier: wiki_page.article.identifier.clone(),
                             backlink_count: wiki_page.backward_links.len(),
-                        }
-                        {
+                            author_npub: Some(wiki_page.event.pubkey.to_bech32().unwrap_or_default()),
+                        }                        {
                             let author_pubkey = wiki_page.event.pubkey.to_hex();
                             let current_user = auth_store::AUTH_STATE.read().pubkey.clone();
                             let is_author = current_user.map(|p| p == author_pubkey).unwrap_or(false);
@@ -233,7 +241,11 @@ pub fn WikiDetail(identifier: String) -> Element {
 }
 /// Collapsible backlinks panel
 #[component]
-fn BacklinksCollapsiblePanel(identifier: String, backlink_count: usize) -> Element {
+fn BacklinksCollapsiblePanel(
+    identifier: String,
+    backlink_count: usize,
+    #[props(default = None)] author_npub: Option<String>,
+) -> Element {
     let mut is_expanded = use_signal(|| false);
     if backlink_count == 0 {
         return rsx! {};
@@ -257,6 +269,7 @@ fn BacklinksCollapsiblePanel(identifier: String, backlink_count: usize) -> Eleme
                 div { class: "mt-4",
                     WikiBacklinks {
                         identifier: identifier.clone(),
+                        author_npub,
                         class: "bg-muted/30 rounded-lg p-4".to_string(),
                     }
                 }

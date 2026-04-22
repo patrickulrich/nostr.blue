@@ -139,7 +139,7 @@ use video_new_landscape::VideoNewLandscape;
 use video_new_portrait::VideoNewPortrait;
 use voice::{VoiceMessageDetail, VoiceMessageNew, VoiceMessages};
 use webbookmarks::WebBookmarks;
-use wiki::{WikiAuthor, WikiDetail, WikiHome, WikiNew};
+use wiki::{WikiAuthor, WikiDetail, WikiHome, WikiNew, WikiSlug};
 use zapgoals::{ZapGoalsHome, ZapGoalsNew};
 use blobbi::BlobbiHome;
 /// App routes
@@ -374,8 +374,10 @@ pub enum Route {
     WikiHome {},
     #[route("/wiki/new")]
     WikiNew {},
-    #[route("/wiki/:identifier")]
-    WikiDetail { identifier: String },
+    #[route("/wiki/:npub/:identifier")]
+    WikiDetail { npub: String, identifier: String },
+    #[route("/wiki/:slug")]
+    WikiSlug { slug: String },
     #[route("/wiki/author/:pubkey")]
     WikiAuthor { pubkey: String },
     #[route("/publications")]
@@ -694,7 +696,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::UserPins {}
         | Route::PinBoardDetail { .. }
         | Route::PinBoardEdit { .. } => Some(Route::PinBoardsHome {}),
-        Route::WikiNew {} | Route::WikiDetail { .. } | Route::WikiAuthor { .. } => {
+        Route::WikiNew {} | Route::WikiDetail { .. } | Route::WikiAuthor { .. } | Route::WikiSlug { .. } => {
             Some(Route::WikiHome {})
         }
         Route::PublicationNew {}
@@ -961,6 +963,7 @@ fn Layout() -> Element {
         current_route,
         Route::WikiHome {}
             | Route::WikiDetail { .. }
+            | Route::WikiSlug { .. }
             | Route::WikiNew {}
             | Route::WikiAuthor { .. }
     );

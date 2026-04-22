@@ -131,19 +131,30 @@ pub fn wikilinks_to_tags(links: &[WikiLink]) -> Vec<Tag> {
 }
 /// Render wikilinks in content to clickable HTML links
 ///
-/// Converts `[[Target Page]]` to `<a href="/wiki/target-page">Target Page</a>`
-pub fn render_wikilinks_to_html(content: &str) -> String {
+/// Converts `[[Target Page]]` to `<a href="/wiki/npub/target-page">Target Page</a>`
+/// when author npub is known, or `<a href="/wiki/target-page">Target Page</a>` as fallback.
+pub fn render_wikilinks_to_html(content: &str, author_npub: Option<&str>) -> String {
     WIKILINK_REGEX
         .replace_all(content, |caps: &regex::Captures| {
             let target_raw = caps.get(1).map(|m| m.as_str()).unwrap_or("");
             let display = caps.get(2).map(|m| m.as_str()).unwrap_or(target_raw);
             let target = normalize_wiki_dtag(target_raw);
-            format!(
-                r#"<a href="/wiki/{}" class="wikilink" data-target="{}">{}</a>"#,
-                target,
-                target,
-                html_escape(display),
-            )
+            if let Some(npub) = author_npub {
+                format!(
+                    r#"<a href="/wiki/{}/{}" class="wikilink" data-target="{}">{}</a>"#,
+                    npub,
+                    target,
+                    target,
+                    html_escape(display),
+                )
+            } else {
+                format!(
+                    r#"<a href="/wiki/{}" class="wikilink" data-target="{}">{}</a>"#,
+                    target,
+                    target,
+                    html_escape(display),
+                )
+            }
         })
         .to_string()
 }
@@ -404,8 +415,15 @@ mod tests {
     #[test]
     fn test_render_wikilinks_to_html() {
         let content = "See [[Bitcoin]] for details.";
-        let rendered = render_wikilinks_to_html(content);
+        let rendered = render_wikilinks_to_html(content, None);
         assert!(rendered.contains(r#"href="/wiki/bitcoin""#));
+        assert!(rendered.contains(">Bitcoin</a>"));
+    }
+    #[test]
+    fn test_render_wikilinks_to_html_with_author() {
+        let content = "See [[Bitcoin]] for details.";
+        let rendered = render_wikilinks_to_html(content, Some("npub1testauthor"));
+        assert!(rendered.contains(r#"href="/wiki/npub1testauthor/bitcoin""#));
         assert!(rendered.contains(">Bitcoin</a>"));
     }
     #[test]

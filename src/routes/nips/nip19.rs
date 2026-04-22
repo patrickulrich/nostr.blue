@@ -160,7 +160,10 @@ async fn decode_and_redirect(identifier: &str) -> std::result::Result<Route, Str
                             })
                         }
                         30818 => {
+                            let npub = coord.coordinate.public_key.to_bech32()
+                                .unwrap_or_else(|_| coord.coordinate.public_key.to_hex());
                             Ok(Route::WikiDetail {
+                                npub,
                                 identifier: coord.coordinate.identifier.clone(),
                             })
                         }

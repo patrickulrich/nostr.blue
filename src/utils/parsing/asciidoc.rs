@@ -104,11 +104,23 @@ pub fn render_content_auto(content: &str) -> String {
 /// Detects whether content is Markdown or AsciiDoc and renders accordingly.
 /// When `enable_wikilinks` is true, wikilinks are processed.
 pub fn render_content_auto_with_options(content: &str, enable_wikilinks: bool) -> String {
+    render_content_auto_with_options_and_author(content, enable_wikilinks, None)
+}
+/// Render content with automatic format detection and optional wikilink support
+///
+/// Detects whether content is Markdown or AsciiDoc and renders accordingly.
+/// When `enable_wikilinks` is true, wikilinks are processed.
+/// When `author_npub` is provided, wikilinks point to the author's version.
+pub fn render_content_auto_with_options_and_author(
+    content: &str,
+    enable_wikilinks: bool,
+    author_npub: Option<&str>,
+) -> String {
     let format = detect_content_format(content);
     match format {
         ContentFormat::Markdown => {
             if enable_wikilinks {
-                let with_wikilinks = render_wikilinks_to_html(content);
+                let with_wikilinks = render_wikilinks_to_html(content, author_npub);
                 render_markdown(&with_wikilinks)
             } else {
                 render_markdown(content)
@@ -116,7 +128,7 @@ pub fn render_content_auto_with_options(content: &str, enable_wikilinks: bool) -
         }
         ContentFormat::AsciiDoc => {
             if enable_wikilinks {
-                render_asciidoc_with_wikilinks(content)
+                render_asciidoc_with_wikilinks_and_author(content, author_npub)
             } else {
                 render_asciidoc(content)
             }
@@ -172,8 +184,18 @@ pub fn render_asciidoc(content: &str) -> String {
 /// Render AsciiDoc with wikilink processing
 ///
 /// First processes [[wikilinks]] to HTML links, then renders AsciiDoc.
+#[allow(dead_code)]
 pub fn render_asciidoc_with_wikilinks(content: &str) -> String {
-    let with_wikilinks = render_wikilinks_to_html(content);
+    render_asciidoc_with_wikilinks_and_author(content, None)
+}
+/// Render AsciiDoc with wikilink processing and author context
+///
+/// When author_npub is provided, wikilinks point to that author's version.
+pub fn render_asciidoc_with_wikilinks_and_author(
+    content: &str,
+    author_npub: Option<&str>,
+) -> String {
+    let with_wikilinks = render_wikilinks_to_html(content, author_npub);
     render_asciidoc(&with_wikilinks)
 }
 /// Internal rendering without sanitization (for testing)
@@ -636,10 +658,26 @@ pub fn extract_citation_identifiers(content: &str) -> Vec<String> {
 /// If `resolved_citations` is provided, citations will be rendered with full data.
 /// Otherwise, citations render as placeholders that can be hydrated later.
 /// The `enable_wikilinks` parameter controls whether [[wikilinks]] are processed.
+#[allow(dead_code)]
 pub fn render_content_with_citations(
     content: &str,
     resolved_citations: &HashMap<String, ResolvedCitation>,
     enable_wikilinks: bool,
+) -> RenderedContentWithCitations {
+    render_content_with_citations_and_author(content, resolved_citations, enable_wikilinks, None)
+}
+/// Render content with automatic format detection and citation support
+///
+/// Returns rendered HTML along with citation information.
+/// If `resolved_citations` is provided, citations will be rendered with full data.
+/// Otherwise, citations render as placeholders that can be hydrated later.
+/// The `enable_wikilinks` parameter controls whether [[wikilinks]] are processed.
+/// The `author_npub` parameter controls the wikilink href prefix.
+pub fn render_content_with_citations_and_author(
+    content: &str,
+    resolved_citations: &HashMap<String, ResolvedCitation>,
+    enable_wikilinks: bool,
+    author_npub: Option<&str>,
 ) -> RenderedContentWithCitations {
     let format = detect_content_format(content);
     let has_citations_flag = has_citations(content);
@@ -654,7 +692,7 @@ pub fn render_content_with_citations(
     let html = match format {
         ContentFormat::Markdown => {
             if enable_wikilinks {
-                let with_wikilinks = render_wikilinks_to_html(&content_with_citations);
+                let with_wikilinks = render_wikilinks_to_html(&content_with_citations, author_npub);
                 render_markdown(&with_wikilinks)
             } else {
                 render_markdown(&content_with_citations)
@@ -662,7 +700,7 @@ pub fn render_content_with_citations(
         }
         ContentFormat::AsciiDoc => {
             if enable_wikilinks {
-                render_asciidoc_with_wikilinks(&content_with_citations)
+                render_asciidoc_with_wikilinks_and_author(&content_with_citations, author_npub)
             } else {
                 render_asciidoc(&content_with_citations)
             }

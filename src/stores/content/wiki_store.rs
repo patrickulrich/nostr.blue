@@ -62,7 +62,7 @@ pub struct WikiEngagement {
     pub backlinks: usize,
     pub views: usize,
 }
-/// Wiki page cache (keyed by identifier)
+/// Wiki page cache (keyed by a_tag: "30818:pubkey:identifier")
 pub static WIKI_CACHE: GlobalSignal<LruCache<String, CachedWikiPage>> =
     GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(WIKI_CACHE_SIZE).unwrap()));
 /// Backlinks cache (keyed by identifier -> list of linking identifiers)
@@ -77,11 +77,25 @@ pub static LOADING_WIKI: GlobalSignal<bool> = GlobalSignal::new(|| false);
 pub static LOADING_BACKLINKS: GlobalSignal<bool> = GlobalSignal::new(|| false);
 /// Store initialization flag
 pub static WIKI_STORE_INITIALIZED: GlobalSignal<bool> = GlobalSignal::new(|| false);
-/// Get a wiki page from cache by identifier
+/// Get a wiki page from cache by identifier (scans all entries)
 pub fn get_cached_wiki_page(identifier: &str) -> Option<CachedWikiPage> {
-    WIKI_CACHE.read().peek(identifier).cloned()
+    let cache = WIKI_CACHE.read();
+    cache
+        .iter()
+        .find(|(_, p)| p.article.identifier == identifier)
+        .map(|(_, p)| p.clone())
 }
-/// Get a wiki page by naddr
+/// Get a wiki page by a_tag (direct lookup)
+pub fn get_cached_wiki_page_by_a_tag(a_tag: &str) -> Option<CachedWikiPage> {
+    WIKI_CACHE.read().peek(a_tag).cloned()
+}
+/// Get a wiki page by npub and identifier
+pub fn get_cached_wiki_page_by_npub(npub: &str, identifier: &str) -> Option<CachedWikiPage> {
+    let hex = PublicKey::from_bech32(npub).ok()?.to_hex();
+    let a_tag = format!("{}:{}:{}", KIND_WIKI_ARTICLE, hex, identifier);
+    get_cached_wiki_page_by_a_tag(&a_tag)
+}
+/// Get a wiki page by naddr (scans all entries)
 pub fn get_cached_wiki_page_by_naddr(naddr: &str) -> Option<CachedWikiPage> {
     let cache = WIKI_CACHE.read();
     cache
@@ -89,16 +103,25 @@ pub fn get_cached_wiki_page_by_naddr(naddr: &str) -> Option<CachedWikiPage> {
         .find(|(_, p)| p.naddr == naddr)
         .map(|(_, p)| p.clone())
 }
-/// Cache a wiki page
+/// Get all cached wiki pages for a given identifier (multiple authors)
+pub fn get_cached_wiki_pages_by_identifier(identifier: &str) -> Vec<CachedWikiPage> {
+    let cache = WIKI_CACHE.read();
+    cache
+        .iter()
+        .filter(|(_, p)| p.article.identifier == identifier)
+        .map(|(_, p)| p.clone())
+        .collect()
+}
+/// Cache a wiki page (keyed by a_tag)
 pub fn cache_wiki_page(page: CachedWikiPage) {
-    let identifier = page.article.identifier.clone();
-    WIKI_CACHE.write().put(identifier, page);
+    let a_tag = page.a_tag.clone();
+    WIKI_CACHE.write().put(a_tag, page);
 }
 /// Cache multiple wiki pages
 pub fn cache_wiki_pages(pages: &[CachedWikiPage]) {
     let mut cache = WIKI_CACHE.write();
     for page in pages {
-        cache.put(page.article.identifier.clone(), page.clone());
+        cache.put(page.a_tag.clone(), page.clone());
     }
 }
 /// Get backlinks for an identifier
@@ -294,15 +317,16 @@ pub async fn fetch_wiki_pages(
         }
     }
 }
-/// Fetch a wiki page by identifier
+/// Fetch a wiki page by identifier (returns most recent across all authors)
 pub fn fetch_wiki_page_by_identifier(
     identifier: &str,
 ) -> std::pin::Pin<
     Box<dyn std::future::Future<Output = StdResult<Option<CachedWikiPage>, String>> + '_>,
 > {
     Box::pin(async move {
-        if let Some(page) = get_cached_wiki_page(identifier) {
-            return Ok(Some(page));
+        let cached = get_cached_wiki_pages_by_identifier(identifier);
+        if let Some(page) = cached.iter().max_by_key(|p| p.event.created_at) {
+            return Ok(Some(page.clone()));
         }
         if let Some(target) = get_redirect_target(identifier) {
             return fetch_wiki_page_by_identifier(&target).await;
@@ -327,6 +351,56 @@ pub fn fetch_wiki_page_by_identifier(
             }
         }
     })
+}
+/// Fetch a wiki page by npub and identifier
+pub async fn fetch_wiki_page(npub: &str, identifier: &str) -> StdResult<Option<CachedWikiPage>, String> {
+    if let Some(page) = get_cached_wiki_page_by_npub(npub, identifier) {
+        return Ok(Some(page));
+    }
+    let pubkey = PublicKey::from_bech32(npub)
+        .map_err(|e| format!("Invalid npub: {}", e))?;
+    if let Some(target) = get_redirect_target(identifier) {
+        return Box::pin(fetch_wiki_page(npub, &target)).await;
+    }
+    let filter = wiki_page_by_coord_filter(pubkey, identifier);
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await;
+    match result {
+        Ok(events) => {
+            if let Some(event) = events.iter().max_by_key(|e| e.created_at) {
+                if let Some(page) = parse_wiki_page_event(event) {
+                    cache_wiki_page(page.clone());
+                    return Ok(Some(page));
+                }
+            }
+            Ok(None)
+        }
+        Err(e) => {
+            log::error!("Failed to fetch wiki page: {}", e);
+            Err(e)
+        }
+    }
+}
+/// Fetch all wiki pages for a given topic identifier (all authors)
+pub async fn fetch_wiki_pages_by_topic(
+    identifier: &str,
+) -> StdResult<Vec<CachedWikiPage>, String> {
+    let filter = wiki_page_by_identifier_filter(identifier);
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await;
+    match result {
+        Ok(events) => {
+            let pages: Vec<CachedWikiPage> =
+                events.iter().filter_map(parse_wiki_page_event).collect();
+            cache_wiki_pages(&pages);
+            log::info!("Fetched {} wiki pages for topic '{}'", pages.len(), identifier);
+            Ok(pages)
+        }
+        Err(e) => {
+            log::error!("Failed to fetch wiki pages for topic: {}", e);
+            Err(e)
+        }
+    }
 }
 /// Fetch a wiki page by naddr
 pub async fn fetch_wiki_page_by_naddr(naddr: &str) -> StdResult<Option<CachedWikiPage>, String> {

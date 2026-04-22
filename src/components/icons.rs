@@ -431,6 +431,27 @@ pub fn MusicIcon(props: IconProps) -> Element {
     }
 }
 #[component]
+pub fn EmojiIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            circle { cx: "12", cy: "12", r: "10" }
+            path { d: "M8 14s1.5 2 4 2 4-2 4-2" }
+            line { x1: "9", y1: "9", x2: "9.01", y2: "9" }
+            line { x1: "15", y1: "9", x2: "15.01", y2: "9" }
+        }
+    }
+}
+#[component]
 pub fn CameraIcon(props: IconProps) -> Element {
     rsx! {
         svg {
@@ -1463,6 +1484,26 @@ pub fn NostrBlueMiniLogo(#[props(default = "w-3 h-3".to_string())] class: String
                 text_anchor: "middle",
                 "N"
             }
+        }
+    }
+}
+/// Vertical video / shorts icon (tall phone with play button)
+#[component]
+pub fn VertsIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            rect { x: "6", y: "2", width: "12", height: "20", rx: "2", ry: "2" }
+            polygon { points: "10,8 16,12 10,16", fill: "currentColor", stroke: "none" }
         }
     }
 }

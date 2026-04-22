@@ -743,8 +743,8 @@ fn NostrBlueWikiTopicRenderer(id: String) -> Element {
     rsx! {
         div { class: "my-2", onclick: move |e: MouseEvent| e.stop_propagation(),
             Link {
-                to: Route::WikiDetail {
-                    identifier: id.clone(),
+                to: Route::WikiSlug {
+                    slug: id.clone(),
                 },
                 class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
                 "Wiki: {id}"
@@ -791,9 +791,11 @@ fn render_wiki_card(event: &Event, identifier: &str) -> Element {
             WikiCardCompact { page: cached }
         }
     } else {
+        let npub = event.pubkey.to_bech32().unwrap_or_else(|_| identifier.to_string());
         rsx! {
             Link {
                 to: Route::WikiDetail {
+                    npub,
                     identifier: identifier.to_string(),
                 },
                 class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",

@@ -1,5 +1,5 @@
 use super::video_detail::{FeedType, ShortsPlayer};
-use crate::components::ClientInitializing;
+use crate::stores::nostr_client::get_contacts_cache;
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
 
@@ -7,7 +7,20 @@ use dioxus::prelude::*;
 pub fn VideosVerts() -> Element {
     let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
     let default_feed = if is_authenticated {
-        FeedType::Following
+        let has_contacts = get_contacts_cache()
+            .lock()
+            .map(|guard| {
+                guard
+                    .as_ref()
+                    .map(|c| !c.contacts.is_empty())
+                    .unwrap_or(false)
+            })
+            .unwrap_or(false);
+        if has_contacts {
+            FeedType::Following
+        } else {
+            FeedType::Global
+        }
     } else {
         FeedType::Global
     };
@@ -19,8 +32,13 @@ pub fn VideosVerts() -> Element {
 
     rsx! {
         if !*nostr_client::CLIENT_INITIALIZED.read() {
-            div { class: "min-h-screen bg-black text-white",
-                ClientInitializing {}
+            div { class: "fixed inset-0 bg-black flex items-center justify-center",
+                div { class: "text-center",
+                    div { class: "mb-4 flex justify-center",
+                        span { class: "inline-block h-10 w-10 rounded-full border-4 border-white/30 border-t-white animate-spin" }
+                    }
+                    p { class: "text-sm text-white/70", "Loading..." }
+                }
             }
         } else {
             div {

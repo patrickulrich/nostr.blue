@@ -342,7 +342,7 @@ pub(crate) fn ShortsPlayer(
     title: &'static str,
 ) -> Element {
     let mut events = use_signal(Vec::<Event>::new);
-    let mut loading = use_signal(|| false);
+    let mut loading = use_signal(|| true);
     let mut load_error = use_signal(|| None::<String>);
     let mut empty_message = use_signal(|| None::<String>);
     let mut current_video_index = use_signal(|| 0usize);
@@ -1538,7 +1538,7 @@ async fn load_shorts_following(
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+    match nostr_client::fetch_events_from_connected_relays(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             let mut event_vec: Vec<Event> = events.into_iter().collect();
             event_vec.sort_by_key(|b| std::cmp::Reverse(b.created_at));
@@ -1576,7 +1576,7 @@ async fn load_shorts_global(until: Option<u64>) -> std::result::Result<Vec<Event
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+    match nostr_client::fetch_events_from_relays(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             let mut event_vec: Vec<Event> = events.into_iter().collect();
             event_vec.sort_by_key(|b| std::cmp::Reverse(b.created_at));

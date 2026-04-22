@@ -122,8 +122,8 @@ pub use relay_publishing::{
 };
 pub use reposts::{delete_repost, publish_repost, publish_repost_tracked};
 pub use signals::{
-    invalidate_contacts_cache, invalidate_mute_block_cache, CLIENT_INITIALIZED, CURRENT_SIGNER,
-    HAS_SIGNER, MUTE_BLOCK_INVALIDATE, NOSTR_CLIENT,
+    get_contacts_cache, invalidate_contacts_cache, invalidate_mute_block_cache, CLIENT_INITIALIZED,
+    CURRENT_SIGNER, HAS_SIGNER, MUTE_BLOCK_INVALIDATE, NOSTR_CLIENT,
 };
 pub use streaming::{
     stream_events_batched, stream_events_collected, stream_events_from_connected_relays_batched,

@@ -381,6 +381,11 @@ fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 }
             }
         }
+        SidebarItem::Verts => {
+            rsx! {
+                crate::components::icons::VertsIcon { class: class.to_string() }
+            }
+        }
         SidebarItem::Notifications => {
             rsx! {
                 BellIcon { class: class.to_string() }
