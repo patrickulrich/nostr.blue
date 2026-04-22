@@ -190,12 +190,7 @@ pub fn EditPostView(
             {
                 Ok(result) => {
                     if result.publish.is_success() {
-                        log::info!(
-                            "Edit published: {} ({}/{} relays)",
-                            result.publish.event_id,
-                            result.publish.success_count(),
-                            result.publish.total_attempted()
-                        );
+                        log::info!("Edit published: {}", result.publish.event_id);
                         edit_cache::process_edit_event(
                             &original_event_clone.id,
                             &result.event,

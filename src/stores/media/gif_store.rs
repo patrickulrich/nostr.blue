@@ -418,21 +418,11 @@ pub async fn publish_gif_event(
     if let Err(e) = client.connect_relay(&gifbuddy_url).await {
         log::warn!("Could not connect to gifbuddy relay: {}", e);
     }
-    match client.send_event(&event).await {
-        Ok(output) => {
-            if output.success.is_empty() {
-                log::error!("GIF event was not accepted by any relay");
-                return Err("Failed to publish: no relays accepted the event".to_string());
-            }
-            log::info!("Published GIF event to {} relays", output.success.len());
-            if !output.failed.is_empty() {
-                log::warn!("Failed to publish to {} relays", output.failed.len());
-            }
-            Ok(event_id)
-        }
-        Err(e) => {
-            log::error!("Failed to publish GIF event: {}", e);
-            Err(format!("Failed to publish: {}", e))
-        }
-    }
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Media,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }

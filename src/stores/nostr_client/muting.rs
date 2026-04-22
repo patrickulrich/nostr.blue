@@ -121,7 +121,7 @@ pub async fn is_post_muted(event_id: String) -> std::result::Result<bool, String
 /// Mute a post (add to mute list kind 10000)
 /// NIP-51: https://github.com/nostr-protocol/nips/blob/master/51.md
 pub async fn mute_post(event_id: String) -> std::result::Result<(), String> {
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
@@ -144,20 +144,22 @@ pub async fn mute_post(event_id: String) -> std::result::Result<(), String> {
     let all_tags = rebuild_mute_list_tags(&tags);
     let builder =
         nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish mute list: {}", e))?;
-    if output.success.is_empty() {
-        return Err("No relays accepted event".to_string());
-    }
+        .map_err(|e| format!("Failed to sign mute list: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Mute,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     super::signals::invalidate_mute_block_cache();
     log::info!("Post muted successfully");
     Ok(())
 }
 /// Unmute a post (remove from mute list)
 pub async fn unmute_post(event_id: String) -> std::result::Result<(), String> {
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
@@ -181,13 +183,15 @@ pub async fn unmute_post(event_id: String) -> std::result::Result<(), String> {
     let all_tags = rebuild_mute_list_tags(&tags);
     let builder =
         nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish mute list: {}", e))?;
-    if output.success.is_empty() {
-        return Err("No relays accepted event".to_string());
-    }
+        .map_err(|e| format!("Failed to sign mute list: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Mute,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     super::signals::invalidate_mute_block_cache();
     log::info!("Post unmuted successfully");
     Ok(())
@@ -220,7 +224,7 @@ pub async fn is_user_blocked(pubkey: String) -> std::result::Result<bool, String
 /// Block a user (add to mute list kind 10000)
 /// NIP-51: https://github.com/nostr-protocol/nips/blob/master/51.md
 pub async fn block_user(pubkey: String) -> std::result::Result<(), String> {
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
@@ -244,20 +248,22 @@ pub async fn block_user(pubkey: String) -> std::result::Result<(), String> {
     let all_tags = rebuild_mute_list_tags(&tags);
     let builder =
         nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish mute list: {}", e))?;
-    if output.success.is_empty() {
-        return Err("No relays accepted event".to_string());
-    }
+        .map_err(|e| format!("Failed to sign mute list: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Mute,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     super::signals::invalidate_mute_block_cache();
     log::info!("User blocked successfully");
     Ok(())
 }
 /// Unblock a user (remove from mute list)
 pub async fn unblock_user(pubkey: String) -> std::result::Result<(), String> {
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
@@ -282,13 +288,15 @@ pub async fn unblock_user(pubkey: String) -> std::result::Result<(), String> {
     let all_tags = rebuild_mute_list_tags(&tags);
     let builder =
         nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish mute list: {}", e))?;
-    if output.success.is_empty() {
-        return Err("No relays accepted event".to_string());
-    }
+        .map_err(|e| format!("Failed to sign mute list: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Mute,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     super::signals::invalidate_mute_block_cache();
     log::info!("User unblocked successfully");
     Ok(())
@@ -342,19 +350,16 @@ pub async fn report_post(
     ];
     let content = details.unwrap_or_default();
     let builder = nostr::EventBuilder::new(nostr::Kind::from(1984), content).tags(tags);
-    match client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-    {
-        Ok(output) if !output.success.is_empty() => {
-            let report_id = output.id().to_hex();
-            log::info!("Report published successfully: {}", report_id);
-            Ok(report_id)
-        }
-        Ok(_) => Err("No relays accepted event".to_string()),
-        Err(e) => {
-            log::error!("Failed to publish report: {}", e);
-            Err(format!("Failed to publish report: {}", e))
-        }
-    }
+        .map_err(|e| format!("Failed to sign report: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("report".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    log::info!("Report queued: {}", event_id);
+    Ok(event_id)
 }

@@ -11,6 +11,7 @@ pub mod badges;
 pub mod bible;
 pub mod blossom;
 pub mod bookmarks;
+#[cfg(feature = "cashu")]
 pub mod cashu_wallet;
 pub mod chats;
 pub mod citations;
@@ -39,6 +40,7 @@ pub mod photos;
 pub mod pin;
 pub mod podcast;
 pub mod polls;
+pub mod publish_queue;
 pub mod privacy;
 pub mod profile;
 pub mod radio;
@@ -69,7 +71,8 @@ use badges::{BadgeDetail, BadgeNew, BadgesHome};
 use bible::{BibleChapter, BibleHome, BibleSearch};
 use blossom::BlossomPage;
 use bookmarks::Bookmarks;
-use cashu_wallet::CashuWallet;
+    #[cfg(feature = "cashu")]
+    use cashu_wallet::CashuWallet;
 use chats::{ChatDetail, ChatNew, Chats};
 use citations::{CitationDetail, CitationsHome};
 use code::{
@@ -112,6 +115,7 @@ use podcast::{
     PodcastRssFeedDetail, PodcastTrending,
 };
 use polls::{PollNew, PollView, Polls};
+use publish_queue::PublishQueue;
 use privacy::Privacy;
 use profile::Profile;
 use radio::{RadioHome, RadioStation, RadioStationNew};
@@ -416,6 +420,8 @@ pub enum Route {
     ShopSearch { q: String },
     #[route("/notifications")]
     Notifications {},
+    #[route("/pending")]
+    PublishQueue {},
     #[route("/bookmarks")]
     Bookmarks {},
     #[route("/dms")]
@@ -438,6 +444,7 @@ pub enum Route {
     PollNew {},
     #[route("/polls/:noteid")]
     PollView { noteid: String },
+    #[cfg(feature = "cashu")]
     #[route("/cashuwallet")]
     CashuWallet {},
     #[route("/notes/new?:quote")]
@@ -572,12 +579,12 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::Calendar {}
         | Route::ShopHome {}
         | Route::Notifications {}
+        | Route::PublishQueue {}
         | Route::Bookmarks {}
         | Route::DMs {}
         | Route::Photos {}
         | Route::VoiceMessages {}
         | Route::Polls {}
-        | Route::CashuWallet {}
         | Route::Lists {}
         | Route::DVM {}
         | Route::BlossomPage {}
@@ -587,6 +594,8 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::BlobbiHome {}
         | Route::Settings {}
         | Route::WebBookmarks {} => None,
+        #[cfg(feature = "cashu")]
+        Route::CashuWallet {} => None,
         Route::Search { .. }
         | Route::Hashtag { .. }
         | Route::Profile { .. }
@@ -1439,10 +1448,13 @@ fn Layout() -> Element {
                                 "☰ Menu"
                             }
                             div { class: "text-lg font-bold", "nostr.blue" }
-                            button {
-                                class: "p-2 hover:bg-accent rounded-lg",
-                                onclick: move |_| *mobile_search_open.write() = true,
-                                crate::components::icons::SearchIcon { class: "w-5 h-5".to_string() }
+                            div { class: "flex items-center",
+                                crate::components::PublishQueueIndicator {}
+                                button {
+                                    class: "p-2 hover:bg-accent rounded-lg",
+                                    onclick: move |_| *mobile_search_open.write() = true,
+                                    crate::components::icons::SearchIcon { class: "w-5 h-5".to_string() }
+                                }
                             }
                         }
                     }

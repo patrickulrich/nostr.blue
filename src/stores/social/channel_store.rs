@@ -341,17 +341,17 @@ pub async fn send_channel_message(
     relay_url: RelayUrl,
     content: &str,
 ) -> std::result::Result<Event, String> {
-    let client = get_client().ok_or("Client not initialized")?;
     let builder = EventBuilder::channel_msg(channel_id, relay_url, content)
         .tags(build_custom_emoji_tags(content));
-    let event = client
-        .sign_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;
-    client
-        .send_event(&event)
-        .await
-        .map_err(|e| format!("Failed to send: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event.clone(),
+        crate::stores::publish_queue::types::QueueEventType::Channel,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     Ok(event)
 }
 
@@ -361,7 +361,6 @@ pub async fn create_channel(
     about: &str,
     picture: &str,
 ) -> std::result::Result<Event, String> {
-    let client = get_client().ok_or("Client not initialized")?;
     let mut metadata = Metadata::new().name(name);
     if !about.is_empty() {
         metadata = metadata.about(about);
@@ -371,13 +370,14 @@ pub async fn create_channel(
             .picture(Url::parse(picture).map_err(|e| format!("Invalid picture URL: {}", e))?);
     }
     let builder = EventBuilder::channel(&metadata);
-    let event = client
-        .sign_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;
-    client
-        .send_event(&event)
-        .await
-        .map_err(|e| format!("Failed to send: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event.clone(),
+        crate::stores::publish_queue::types::QueueEventType::Channel,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     Ok(event)
 }

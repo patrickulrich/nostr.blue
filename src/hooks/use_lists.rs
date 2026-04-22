@@ -211,7 +211,7 @@ async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
 /// Delete a list by publishing a deletion event (kind 5)
 pub async fn delete_list(event: &Event) -> Result<(), String> {
     use nostr_sdk::{EventBuilder, Kind, Tag, TagStandard};
-    let client = nostr_client::NOSTR_CLIENT
+    let _client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
@@ -228,10 +228,14 @@ pub async fn delete_list(event: &Event) -> Result<(), String> {
         }),
     ];
     let builder = EventBuilder::new(Kind::EventDeletion, "Deleted list").tags(tags);
-    client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish deletion: {}", e))?;
-    log::info!("List deleted successfully");
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("list".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     Ok(())
 }

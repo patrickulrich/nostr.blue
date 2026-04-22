@@ -220,7 +220,7 @@ pub fn LiveStreamShareModal(
         }
         is_publishing.set(true);
         spawn(async move {
-            let client = match nostr_client::get_client() {
+            let _client = match nostr_client::get_client() {
                 Some(c) => c,
                 None => {
                     log::error!("Client not initialized");
@@ -232,12 +232,14 @@ pub fn LiveStreamShareModal(
             let builder = EventBuilder::text_note(&text)
                 .tag(nostr_sdk::Tag::event(event_id))
                 .tags(build_custom_emoji_tags(&text));
-            match client
-                .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
-                .await
-            {
-                Ok(output) => {
-                    log::info!("Shared to Nostr: {:?}", output.val);
+            match crate::stores::publish_queue::signing::sign_event_builder(builder).await {
+                Ok(event) => {
+                    crate::stores::publish_queue::enqueue(
+                        event,
+                        crate::stores::publish_queue::types::QueueEventType::Other("live".to_string()),
+                        None,
+                        std::collections::HashMap::new(),
+                    ).await;
                     nostr_error.set(None);
                     nostr_text.set(String::new());
                     share_mode.set(ShareMode::Main);

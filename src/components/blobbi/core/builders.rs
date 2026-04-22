@@ -1,5 +1,4 @@
 use crate::components::blobbi::core::types::*;
-use crate::stores::nostr_client;
 use crate::utils::nip_bb::*;
 use nostr_sdk::{EventBuilder, Tag, TagKind, Timestamp};
 
@@ -197,15 +196,16 @@ pub async fn publish_blobbi_state(blobbi: &BlobbiCompanion) -> Result<(), String
     let tags = StateTags::new(blobbi).build();
     let content = blobbi_content(blobbi);
 
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let event_builder = crate::utils::nips::nip89::tag_event_builder(
-        EventBuilder::new(blobbi_state_kind(), content).tags(tags),
-    );
-
-    client
-        .send_event_builder(event_builder)
+    let builder = EventBuilder::new(blobbi_state_kind(), content).tags(tags);
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish blobbi state: {}", e))?;
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("blobbi".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
 
     Ok(())
 }
@@ -247,9 +247,7 @@ pub fn build_interaction_event(
     }
 
     let content = format!("Blobbi {} interaction", action);
-    crate::utils::nips::nip89::tag_event_builder(
-        EventBuilder::new(blobbi_interaction_kind(), content).tags(tags),
-    )
+    EventBuilder::new(blobbi_interaction_kind(), content).tags(tags)
 }
 
 #[allow(dead_code)]
@@ -308,15 +306,16 @@ pub async fn publish_profile(profile: &BlobbonautProfile) -> Result<(), String> 
 
     let tags = sorted_tags(tags);
 
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let event_builder = crate::utils::nips::nip89::tag_event_builder(
-        EventBuilder::new(blobbonaut_profile_kind(), "").tags(tags),
-    );
-
-    client
-        .send_event_builder(event_builder)
+    let builder = EventBuilder::new(blobbonaut_profile_kind(), "").tags(tags);
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish profile: {}", e))?;
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("blobbi".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
 
     Ok(())
 }
@@ -344,9 +343,7 @@ pub fn build_breeding_event(
         tags.push(Tag::custom(TagKind::custom(TAG_OFFSPRING_ID), vec![offspring.to_string()]));
     }
 
-    crate::utils::nips::nip89::tag_event_builder(
-        EventBuilder::new(blobbi_breeding_kind(), content).tags(tags),
-    )
+    EventBuilder::new(blobbi_breeding_kind(), content).tags(tags)
 }
 
 pub fn build_record_event(
@@ -367,7 +364,5 @@ pub fn build_record_event(
         tags.push(Tag::custom(TagKind::custom(tag_name), vec![value]));
     }
 
-    crate::utils::nips::nip89::tag_event_builder(
-        EventBuilder::new(blobbi_record_kind(), content).tags(tags),
-    )
+    EventBuilder::new(blobbi_record_kind(), content).tags(tags)
 }

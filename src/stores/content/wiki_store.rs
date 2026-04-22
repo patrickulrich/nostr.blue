@@ -485,7 +485,7 @@ pub async fn publish_wiki_page(
     identifier: Option<&str>,
     summary: Option<&str>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -509,88 +509,18 @@ pub async fn publish_wiki_page(
     let wikilinks = extract_wikilinks(content);
     tags.extend(wikilinks_to_tags(&wikilinks));
     let builder = EventBuilder::new(Kind::Custom(KIND_WIKI_ARTICLE), content).tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish wiki page: {}", e))?;
-    if output.success.is_empty() {
-        return Err("Failed to publish wiki page: no relays accepted the event".to_string());
-    }
-    log::info!("Wiki page published: {}", output.id().to_hex());
-    Ok(output.id().to_hex())
-}
-/// Fork a wiki page (create new version)
-pub async fn fork_wiki_page(
-    original: &CachedWikiPage,
-    new_content: &str,
-    summary: Option<&str>,
-) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
-    if !*crate::stores::nostr_client::HAS_SIGNER.read() {
-        return Err("No signer attached".to_string());
-    }
-    let d_tag = &original.article.identifier;
-    let mut tags: Vec<Tag> = vec![Tag::identifier(d_tag)];
-    for mime_tag in generate_mime_tags(KIND_WIKI_ARTICLE) {
-        tags.push(mime_tag);
-    }
-    if !original.article.title.is_empty() {
-        tags.push(Tag::title(&original.article.title));
-    }
-    if let Some(s) = summary {
-        tags.push(Tag::custom(
-            TagKind::Custom("summary".into()),
-            vec![s.to_string()],
-        ));
-    }
-    tags.push(Tag::custom(
-        TagKind::Custom("a".into()),
-        vec![original.a_tag.clone(), "".to_string(), "fork".to_string()],
-    ));
-    tags.push(Tag::public_key(original.event.pubkey));
-    let wikilinks = extract_wikilinks(new_content);
-    tags.extend(wikilinks_to_tags(&wikilinks));
-    let builder = EventBuilder::new(Kind::Custom(KIND_WIKI_ARTICLE), new_content).tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
-        .await
-        .map_err(|e| format!("Failed to fork wiki page: {}", e))?;
-    if output.success.is_empty() {
-        return Err("Failed to fork wiki page: no relays accepted the event".to_string());
-    }
-    log::info!("Wiki page forked: {}", output.id().to_hex());
-    Ok(output.id().to_hex())
-}
-/// Publish a wiki redirect
-pub async fn publish_wiki_redirect(
-    source_identifier: &str,
-    target_identifier: &str,
-) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
-    if !*crate::stores::nostr_client::HAS_SIGNER.read() {
-        return Err("No signer attached".to_string());
-    }
-    let source_normalized = normalize_wiki_dtag(source_identifier);
-    let target_normalized = normalize_wiki_dtag(target_identifier);
-    let tags: Vec<Tag> = vec![
-        Tag::identifier(&source_normalized),
-        Tag::custom(TagKind::Custom("w".into()), vec![target_normalized.clone()]),
-    ];
-    let builder = EventBuilder::new(Kind::Custom(KIND_WIKI_REDIRECT), "").tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
-        .await
-        .map_err(|e| format!("Failed to publish redirect: {}", e))?;
-    if output.success.is_empty() {
-        return Err("Failed to publish redirect: no relays accepted the event".to_string());
-    }
-    cache_redirect(&source_normalized, &target_normalized);
-    log::info!(
-        "Wiki redirect published: {} -> {}",
-        source_normalized,
-        target_normalized
-    );
-    Ok(output.id().to_hex())
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue_and_await(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("wiki".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await?;
+    Ok(event_id)
 }
 /// Publish a merge request for a wiki page
 pub async fn publish_merge_request(
@@ -599,7 +529,7 @@ pub async fn publish_merge_request(
     source_event_id: &str,
     reason: Option<&str>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -614,15 +544,17 @@ pub async fn publish_merge_request(
     ];
     let content = reason.unwrap_or("");
     let builder = EventBuilder::new(Kind::Custom(KIND_MERGE_REQUEST), content).tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish merge request: {}", e))?;
-    if output.success.is_empty() {
-        return Err("Failed to publish merge request: no relays accepted the event".to_string());
-    }
-    log::info!("Merge request published: {}", output.id().to_hex());
-    Ok(output.id().to_hex())
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("wiki".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }
 #[cfg(test)]
 mod tests {

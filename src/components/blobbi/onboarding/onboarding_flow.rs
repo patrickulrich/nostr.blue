@@ -272,9 +272,15 @@ async fn create_egg_and_profile_inner(name: &str, color: &str) -> Result<(), Str
         record_tags,
         format!("{} was born!", name),
     );
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
-    client.send_event_builder(record_event).await
-        .map_err(|e| format!("Failed to publish birth record: {}", e))?;
+    let event = crate::stores::publish_queue::signing::sign_event_builder(record_event)
+        .await
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("blobbi".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
 
     profile.has.push(d.clone());
     profile.current_companion = Some(d.clone());

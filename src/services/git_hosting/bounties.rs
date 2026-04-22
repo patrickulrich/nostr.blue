@@ -35,7 +35,7 @@ pub async fn publish_bounty(
     amount_sats: u64,
     repository: Option<&Coordinate>,
 ) -> Result<EventId, String> {
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
@@ -55,11 +55,16 @@ pub async fn publish_bounty(
     if let Some(coord) = repository {
         builder = builder.tag(Tag::coordinate(coord.clone(), None));
     }
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish: {}", e))?;
-    let event_id = *output.id();
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::GitHosting,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     let filter = Filter::new().id(event_id);
     if let Ok(events) = fetch_events_aggregated(filter, Duration::from_secs(2)).await {
         cache_bounty_events(&events);
@@ -87,7 +92,7 @@ pub async fn update_bounty_status(
         return Err("Bounty amount must be greater than 0".into());
     }
 
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
@@ -105,11 +110,16 @@ pub async fn update_bounty_status(
     if let Some(coord) = repository {
         builder = builder.tag(Tag::coordinate(coord.clone(), None));
     }
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish: {}", e))?;
-    let event_id = *output.id();
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::GitHosting,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     let filter = Filter::new().id(event_id);
     if let Ok(events) = fetch_events_aggregated(filter, Duration::from_secs(2)).await {
         cache_bounty_events(&events);
@@ -123,7 +133,7 @@ pub async fn claim_bounty(
     amount_sats: u64,
     repository: Option<&Coordinate>,
 ) -> Result<EventId, String> {
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
@@ -161,11 +171,16 @@ pub async fn claim_bounty(
     if let Some(coord) = repository {
         builder = builder.tag(Tag::coordinate(coord.clone(), None));
     }
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish: {}", e))?;
-    let event_id = *output.id();
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::GitHosting,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     let filter = Filter::new().id(event_id);
     if let Ok(events) = fetch_events_aggregated(filter, Duration::from_secs(2)).await {
         cache_bounty_events(&events);

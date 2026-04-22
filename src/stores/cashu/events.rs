@@ -5,7 +5,9 @@
 //! and deletion events (kind 5).
 #![allow(dead_code)]
 use super::proofs::rebuild_proof_event_map;
-use super::signals::{PENDING_NOSTR_EVENTS, SHARED_LOCALSTORE, SYNC_STATE, WALLET_TOKENS};
+#[allow(deprecated)]
+use super::signals::PENDING_NOSTR_EVENTS;
+use super::signals::{SHARED_LOCALSTORE, SYNC_STATE, WALLET_TOKENS};
 use super::types::{
     PendingEventType, PendingNostrEvent, ProofData, ProofState, SyncState, TokenData,
     TokenEventData, WalletTokensStoreStoreExt,
@@ -16,52 +18,25 @@ use dioxus::prelude::*;
 use nostr::nips::nip60::{SpendingHistory, TransactionDirection};
 use nostr_sdk::{EventId, Filter, Kind, PublicKey, Timestamp};
 use std::time::Duration;
-/// Queue a Nostr event for publication (with offline support)
-///
-/// Events are saved to IndexedDB for persistence across app restarts.
-/// A background task will publish queued events when possible.
+#[deprecated(note = "Use publish_queue::enqueue instead. This uses the old Cashu-specific queue.")]
 pub async fn queue_nostr_event(
     event_json: String,
     event_type: PendingEventType,
 ) -> Result<String, String> {
-    use uuid::Uuid;
-    let event_id = Uuid::new_v4().to_string();
-    let created_at = chrono::Utc::now().timestamp() as u64;
-    let pending = PendingNostrEvent {
-        id: event_id.clone(),
-        builder_json: event_json,
-        event_type: event_type.clone(),
-        created_at,
-        retry_count: 0,
-        last_retry_at: None,
-        pending_token_id: None,
-        mint_url: None,
-        history_amount: None,
-        history_type: None,
-        published_event_id: None,
-    };
-    PENDING_NOSTR_EVENTS.write().push(pending.clone());
-    if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
-        if let Err(e) = localstore.add_pending_event(&pending).await {
-            log::warn!("Failed to persist pending event to IndexedDB: {}", e);
-        }
-    }
-    log::debug!(
-        "Queued {} event: {}",
-        match event_type {
-            PendingEventType::TokenEvent => "token",
-            PendingEventType::DeletionEvent => "deletion",
-            PendingEventType::HistoryEvent => "history",
-            PendingEventType::QuoteEvent => "quote",
-            PendingEventType::WalletSnapshot => "wallet snapshot",
-            PendingEventType::NutzapEvent => "nutzap",
-        },
-        event_id
-    );
-    Ok(event_id)
+    let event: nostr_sdk::Event = serde_json::from_str(&event_json)
+        .map_err(|e| format!("Failed to deserialize event: {}", e))?;
+    let mut metadata = std::collections::HashMap::new();
+    metadata.insert("event_type".to_string(), format!("{:?}", event_type));
+    Ok(crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Cashu,
+        None,
+        metadata,
+    ).await)
 }
-/// Remove a pending event from the queue and IndexedDB
+#[deprecated(note = "Use publish_queue::processor::deque instead. This uses the old Cashu-specific queue.")]
 pub async fn remove_pending_event(event_id: &str) -> Result<(), String> {
+    #[allow(deprecated)]
     PENDING_NOSTR_EVENTS.write().retain(|e| e.id != event_id);
     if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
         if let Err(e) = localstore.remove_pending_event(event_id).await {
@@ -71,222 +46,146 @@ pub async fn remove_pending_event(event_id: &str) -> Result<(), String> {
     log::debug!("Removed pending event from queue: {}", event_id);
     Ok(())
 }
-/// Queue an already-signed Event for retry when publication fails
-///
-/// Optional `pending_token_id` and `mint_url` link this pending event to a token
-/// in WALLET_TOKENS, allowing the token's event_id to be updated when background
-/// publish succeeds.
 pub async fn queue_signed_event_for_retry(
     event: nostr_sdk::Event,
-    event_type: PendingEventType,
+    _event_type: PendingEventType,
     pending_token_id: Option<String>,
     mint_url: Option<String>,
 ) {
-    let _ =
-        queue_signed_event_for_retry_result(event, event_type, pending_token_id, mint_url).await;
+    let mut metadata = std::collections::HashMap::new();
+    if let Some(tid) = pending_token_id {
+        metadata.insert("pending_token_id".to_string(), tid);
+    }
+    if let Some(mu) = mint_url {
+        metadata.insert("mint_url".to_string(), mu);
+    }
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Cashu,
+        None,
+        metadata,
+    ).await;
 }
 
 pub async fn queue_signed_event_for_retry_result(
     event: nostr_sdk::Event,
-    event_type: PendingEventType,
+    _event_type: PendingEventType,
     pending_token_id: Option<String>,
     mint_url: Option<String>,
 ) -> Result<(), String> {
-    let event_id = event.id.to_hex();
-    let event_json = match serde_json::to_string(&event) {
-        Ok(j) => j,
-        Err(e) => {
-            let message = format!("Failed to serialize event for queueing: {}", e);
-            log::error!("{}", message);
-            return Err(message);
-        }
-    };
-    let pending_event = PendingNostrEvent {
-        id: uuid::Uuid::new_v4().to_string(),
-        builder_json: event_json,
-        event_type: event_type.clone(),
-        created_at: chrono::Utc::now().timestamp() as u64,
-        retry_count: 0,
-        last_retry_at: None,
-        pending_token_id,
-        mint_url,
-        history_amount: None,
-        history_type: None,
-        published_event_id: None,
-    };
-    let pending_event_id = pending_event.id.clone();
-    PENDING_NOSTR_EVENTS.write().push(pending_event.clone());
-    if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
-        if let Err(e) = localstore.add_pending_event(&pending_event).await {
-            PENDING_NOSTR_EVENTS
-                .write()
-                .retain(|event| event.id != pending_event_id);
-            let message = format!("Failed to persist pending event: {}", e);
-            log::warn!("{}", message);
-            return Err(message);
-        }
+    let mut metadata = std::collections::HashMap::new();
+    if let Some(tid) = pending_token_id {
+        metadata.insert("pending_token_id".to_string(), tid);
     }
-    log::info!(
-        "Queued signed event {} for retry: {}",
-        event_id,
-        pending_event.id
-    );
+    if let Some(mu) = mint_url {
+        metadata.insert("mint_url".to_string(), mu);
+    }
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Cashu,
+        None,
+        metadata,
+    ).await;
     Ok(())
 }
-/// Sign an EventBuilder using the current signer
-/// Returns Ok(Event) or Err(error_message)
 pub async fn sign_event_builder(
     builder: nostr_sdk::EventBuilder,
 ) -> Result<nostr_sdk::Event, String> {
-    let signer =
-        crate::stores::signer::get_signer().ok_or_else(|| "No signer available".to_string())?;
-    sign_event_builder_with_signer(builder, signer).await
+    crate::stores::publish_queue::signing::sign_event_builder(builder).await
 }
 
 pub async fn sign_event_builder_with_signer(
     builder: nostr_sdk::EventBuilder,
     signer: crate::stores::signer::SignerType,
 ) -> Result<nostr_sdk::Event, String> {
-    let builder = crate::utils::nips::nip89::tag_event_builder(builder);
-    match signer {
-        crate::stores::signer::SignerType::Keys(keys) => builder
-            .sign_with_keys(&keys)
-            .map_err(|e| format!("Failed to sign event: {}", e)),
-        #[cfg(target_family = "wasm")]
-        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => builder
-            .sign(&*browser_signer)
-            .await
-            .map_err(|e| format!("Failed to sign event: {}", e)),
-        crate::stores::signer::SignerType::NostrConnect(remote_signer) => builder
-            .sign(&*remote_signer)
-            .await
-            .map_err(|e| format!("Failed to sign event: {}", e)),
-        #[cfg(feature = "mobile_platform")]
-        crate::stores::signer::SignerType::AndroidSigner(android_signer) => builder
-            .sign(&*android_signer)
-            .await
-            .map_err(|e| format!("Failed to sign event: {}", e)),
-    }
+    crate::stores::publish_queue::signing::sign_event_builder_with_signer(builder, signer).await
 }
 
 pub async fn publish_signed_event(
-    client: &nostr_sdk::Client,
+    _client: &nostr_sdk::Client,
     event: &nostr_sdk::Event,
-) -> Result<nostr_relay_pool::Output<EventId>, String> {
-    client
-        .send_event(event)
-        .await
-        .map_err(|e| format!("Failed to publish signed event: {}", e))
+) -> Result<(), String> {
+    crate::stores::publish_queue::enqueue(
+        event.clone(),
+        crate::stores::publish_queue::types::QueueEventType::Cashu,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(())
 }
-/// Queue an EventBuilder for retry when initial publication fails
-///
-/// Optional `pending_token_id` and `mint_url` link this pending event to a token
-/// in WALLET_TOKENS, allowing the token's event_id to be updated when background
-/// publish succeeds.
 pub async fn queue_token_event_for_retry_with_history(
     builder: nostr_sdk::EventBuilder,
     pending_token_id: String,
     mint_url: String,
-    history_amount: u64,
-    history_type: String,
+    _history_amount: u64,
+    _history_type: String,
 ) -> Result<(), String> {
-    let event = match sign_event_builder(builder).await {
-        Ok(e) => e,
-        Err(e) => {
-            log::error!("Cannot queue token event with history metadata: {}", e);
-            return Err(e);
-        }
-    };
-    let pending_event = PendingNostrEvent {
-        id: uuid::Uuid::new_v4().to_string(),
-        builder_json: match serde_json::to_string(&event) {
-            Ok(j) => j,
-            Err(e) => {
-                let message = format!("Failed to serialize event for queueing: {}", e);
-                log::error!("{}", message);
-                return Err(message);
-            }
-        },
-        event_type: PendingEventType::TokenEvent,
-        created_at: chrono::Utc::now().timestamp() as u64,
-        retry_count: 0,
-        last_retry_at: None,
-        pending_token_id: Some(pending_token_id.clone()),
-        mint_url: Some(mint_url),
-        history_amount: Some(history_amount),
-        history_type: Some(history_type),
-        published_event_id: None,
-    };
-    let pending_event_id = pending_event.id.clone();
-    PENDING_NOSTR_EVENTS.write().push(pending_event.clone());
-    if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
-        if let Err(e) = localstore.add_pending_event(&pending_event).await {
-            PENDING_NOSTR_EVENTS
-                .write()
-                .retain(|event| event.id != pending_event_id);
-            let message = format!("Failed to persist pending event: {}", e);
-            log::warn!("{}", message);
-            return Err(message);
-        }
-    }
-    log::info!(
-        "Queued token event for retry with history metadata, pending_id={}",
-        pending_token_id
-    );
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder).await?;
+    let mut metadata = std::collections::HashMap::new();
+    metadata.insert("pending_token_id".to_string(), pending_token_id);
+    metadata.insert("mint_url".to_string(), mint_url);
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Cashu,
+        None,
+        metadata,
+    ).await;
     Ok(())
 }
 
 pub async fn queue_event_for_retry(
     builder: nostr_sdk::EventBuilder,
-    event_type: PendingEventType,
+    _event_type: PendingEventType,
     pending_token_id: Option<String>,
     mint_url: Option<String>,
 ) -> Result<(), String> {
-    let event = match sign_event_builder(builder).await {
-        Ok(e) => e,
-        Err(e) => {
-            log::error!("Failed to sign event for queueing: {}", e);
-            return Err(e);
-        }
-    };
-    queue_signed_event_for_retry_result(event, event_type, pending_token_id, mint_url).await
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder).await?;
+    let mut metadata = std::collections::HashMap::new();
+    if let Some(tid) = pending_token_id {
+        metadata.insert("pending_token_id".to_string(), tid);
+    }
+    if let Some(mu) = mint_url {
+        metadata.insert("mint_url".to_string(), mu);
+    }
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Cashu,
+        None,
+        metadata,
+    ).await;
+    Ok(())
 }
-/// Queue a token event for retry with tracking info
-///
-/// The `pending_token_id` links this pending event to a token in WALLET_TOKENS,
-/// allowing us to update the token's event_id when background publish succeeds.
-///
-/// This is a convenience wrapper around `queue_signed_event_for_retry` that handles
-/// signing the builder first. Eliminates duplicate queue+persist logic.
 pub async fn queue_token_event_for_retry(
     builder: nostr_sdk::EventBuilder,
     pending_token_id: String,
     mint_url: String,
 ) {
-    let event = match sign_event_builder(builder).await {
+    let event = match crate::stores::publish_queue::signing::sign_event_builder(builder).await {
         Ok(e) => e,
         Err(e) => {
             log::error!("Cannot queue token event: {}", e);
             return;
         }
     };
-    queue_signed_event_for_retry(
+    let mut metadata = std::collections::HashMap::new();
+    metadata.insert("pending_token_id".to_string(), pending_token_id.clone());
+    metadata.insert("mint_url".to_string(), mint_url);
+    crate::stores::publish_queue::enqueue(
         event,
-        PendingEventType::TokenEvent,
-        Some(pending_token_id.clone()),
-        Some(mint_url),
-    )
-    .await;
+        crate::stores::publish_queue::types::QueueEventType::Cashu,
+        None,
+        metadata,
+    ).await;
     log::info!(
         "Queued token event for retry, pending_id={}",
         pending_token_id
     );
 }
-/// Get count of pending events waiting to be published
+#[deprecated(note = "Use publish_queue::get_pending_count instead")]
 pub fn get_pending_event_count() -> usize {
+    #[allow(deprecated)]
     PENDING_NOSTR_EVENTS.read().len()
 }
-/// Publish a quote event to relays (NIP-60 kind 7374)
 pub async fn publish_quote_event(
     quote_id: &str,
     mint_url: &str,
@@ -305,32 +204,18 @@ pub async fn publish_quote_event(
         nostr_sdk::Tag::custom(nostr_sdk::TagKind::custom("mint"), [mint_url]),
         nostr_sdk::Tag::expiration(expiration_ts),
     ]);
-    let client = nostr_client::NOSTR_CLIENT
-        .read()
-        .as_ref()
-        .ok_or("Nostr client not initialized")?
-        .clone();
-    let event = sign_event_builder_with_signer(builder, signer_type).await?;
-    match publish_signed_event(&client, &event).await {
-        Ok(output) if !output.success.is_empty() => {
-            let event_id = output.id().to_hex();
-            log::info!("Published quote event for quote {}: {}", quote_id, event_id);
-            Ok(event_id)
-        }
-        Ok(_) => Err("Failed to publish quote event: no relays accepted the event".to_string()),
-        Err(e) => {
-            log::warn!("Failed to publish quote event: {}", e);
-            Err(format!("Failed to publish quote event: {}", e))
-        }
-    }
+    let event = crate::stores::publish_queue::signing::sign_event_builder_with_signer(builder, signer_type).await?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Cashu,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    log::info!("Queued quote event for quote {}: {}", quote_id, event_id);
+    Ok(event_id)
 }
-/// Delete a quote event from relays
 pub async fn delete_quote_event(event_id: &str) -> Result<(), String> {
-    let client = nostr_client::NOSTR_CLIENT
-        .read()
-        .as_ref()
-        .ok_or("Nostr client not initialized")?
-        .clone();
     let mut tags = vec![nostr_sdk::Tag::event(
         nostr_sdk::EventId::from_hex(event_id).map_err(|e| format!("Invalid event ID: {}", e))?,
     )];
@@ -339,22 +224,15 @@ pub async fn delete_quote_event(event_id: &str) -> Result<(), String> {
         ["7374"],
     ));
     let deletion_builder = nostr_sdk::EventBuilder::new(Kind::from(5), "Quote expired").tags(tags);
-    match client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
-            deletion_builder,
-        ))
-        .await
-    {
-        Ok(output) if !output.success.is_empty() => {
-            log::info!("Published deletion for quote event: {}", event_id);
-            Ok(())
-        }
-        Ok(_) => Err("Failed to delete quote event: no relays accepted the event".to_string()),
-        Err(e) => {
-            log::warn!("Failed to delete quote event: {}", e);
-            Err(format!("Failed to delete quote event: {}", e))
-        }
-    }
+    let event = crate::stores::publish_queue::signing::sign_event_builder(deletion_builder).await?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Cashu,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    log::info!("Queued deletion for quote event: {}", event_id);
+    Ok(())
 }
 /// Fetch token events (kind 7375) with incremental sync support
 ///
@@ -700,201 +578,22 @@ pub async fn create_history_event_full(
     }
     let builder =
         nostr_sdk::EventBuilder::new(Kind::CashuWalletSpendingHistory, encrypted).tags(tags);
-    let client = nostr_client::NOSTR_CLIENT
-        .read()
-        .as_ref()
-        .ok_or("Client not initialized")?
-        .clone();
-    let event = sign_event_builder_with_signer(builder, signer_type).await?;
-    let output = publish_signed_event(&client, &event).await?;
-    if output.success.is_empty() {
-        return Err("Failed to publish history event: no relays accepted the event".to_string());
-    }
+    let event = crate::stores::publish_queue::signing::sign_event_builder_with_signer(builder, signer_type).await?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Cashu,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     Ok(())
 }
-/// Publish a single pending event and return the Nostr event ID
-async fn publish_pending_event(event: &PendingNostrEvent) -> Result<String, String> {
-    let client = nostr_client::NOSTR_CLIENT
-        .read()
-        .as_ref()
-        .ok_or("Nostr client not initialized")?
-        .clone();
-    let evt: nostr_sdk::Event = serde_json::from_str(&event.builder_json)
-        .map_err(|e| format!("Failed to deserialize event: {}", e))?;
-    let event_id = evt.id.to_hex();
-    let output = client
-        .send_event(&evt)
-        .await
-        .map_err(|e| format!("Failed to publish event: {}", e))?;
-    if output.success.is_empty() {
-        let all_duplicates = output
-            .failed
-            .values()
-            .all(|err| err.to_lowercase().starts_with("duplicate:"));
-        if all_duplicates && !output.failed.is_empty() {
-            log::debug!(
-                "Event {} already exists on all relays (duplicate)",
-                event_id
-            );
-            return Ok(event_id);
-        }
-        return Err(format!("All {} relays failed", output.failed.len()));
-    }
-    log::debug!(
-        "Published to {}/{} relays",
-        output.success.len(),
-        output.success.len() + output.failed.len()
-    );
-    Ok(event_id)
+async fn publish_pending_event(_event: &PendingNostrEvent) -> Result<String, String> {
+    Err("Deprecated: universal publish queue handles publishing".to_string())
 }
-/// Process pending events with adaptive backoff retry logic
-///
-/// Uses nostr-sdk pattern: adaptive multiplier with jitter to prevent synchronized retries.
-pub async fn process_pending_events() -> Result<usize, String> {
-    if nostr_client::NOSTR_CLIENT.read().as_ref().is_none() {
-        log::debug!("Nostr client not yet initialized, skipping pending events processing");
-        return Ok(0);
-    }
-    const MAX_RETRIES: u32 = 5;
-    const BASE_RETRY_DELAY_SECS: u64 = 10;
-    const MAX_RETRY_DELAY_SECS: u64 = 60;
-    let pending_events = PENDING_NOSTR_EVENTS.read().clone();
-    let mut processed_count = 0;
-    log::info!("Processing {} pending events", pending_events.len());
-    for event in pending_events {
-        if event.retry_count >= MAX_RETRIES {
-            log::warn!("Event {} exceeded max retries, removing", event.id);
-            let _ = remove_pending_event(&event.id).await;
-            continue;
-        }
-        let now = chrono::Utc::now().timestamp() as u64;
-        let last_attempt = event.last_retry_at.unwrap_or(event.created_at);
-        let elapsed = now.saturating_sub(last_attempt);
-        let multiplier = 1 + (event.retry_count / 2);
-        let adaptive_delay = BASE_RETRY_DELAY_SECS * (multiplier as u64);
-        let retry_delay = adaptive_delay.min(MAX_RETRY_DELAY_SECS);
-        if elapsed < retry_delay {
-            log::debug!(
-                "Event {} not ready for retry yet ({}s < {}s)",
-                event.id,
-                elapsed,
-                retry_delay
-            );
-            continue;
-        }
-        let publish_result = if let Some(published_event_id) = event.published_event_id.as_ref() {
-            Ok(published_event_id.clone())
-        } else {
-            publish_pending_event(&event).await
-        };
-        match publish_result {
-            Ok(nostr_event_id) => {
-                log::info!(
-                    "Published pending event: {} -> nostr:{}",
-                    event.id,
-                    nostr_event_id
-                );
-                if event.event_type == PendingEventType::TokenEvent {
-                    if let Some(ref pending_id) = event.pending_token_id {
-                        update_token_event_id(pending_id, &nostr_event_id);
-                    } else if let Some(ref mint_url) = event.mint_url {
-                        log::warn!(
-                            "TokenEvent missing pending_token_id, attempting proof-based fallback for {}",
-                            mint_url
-                        );
-                        let normalized_mint = super::utils::normalize_mint_url(mint_url);
-                        let matched_token = {
-                            let store = WALLET_TOKENS.read();
-                            let data = store.data();
-                            let tokens = data.read();
-                            let candidates: Vec<_> = tokens
-                                .iter()
-                                .filter(|t| {
-                                    t.event_id.starts_with("pending_")
-                                        && super::utils::mint_matches(&t.mint, &normalized_mint)
-                                })
-                                .collect();
-                            if candidates.len() == 1 {
-                                Some(candidates[0].event_id.clone())
-                            } else if candidates.len() > 1 {
-                                log::warn!(
-                                    "Multiple pending tokens ({}) at mint {}, cannot disambiguate without proof matching",
-                                    candidates.len(), mint_url
-                                );
-                                None
-                            } else {
-                                None
-                            }
-                        };
-                        if let Some(old_id) = matched_token {
-                            log::info!(
-                                "Found pending token by mint fallback: {} -> {}",
-                                old_id,
-                                nostr_event_id
-                            );
-                            update_token_event_id(&old_id, &nostr_event_id);
-                        }
-                    }
 
-                    let mut history_handled = true;
-                    if let Some(history_amount) = event.history_amount {
-                        let history_type = event.history_type.as_deref();
-                        if let Err(error) = super::lightning::create_history_event_with_type(
-                            "in",
-                            history_amount,
-                            vec![nostr_event_id.clone()],
-                            vec![],
-                            history_type,
-                            None,
-                        )
-                        .await
-                        {
-                            log::warn!(
-                                "Failed to create retried mint history event for {}: {}",
-                                nostr_event_id,
-                                error
-                            );
-                            let mut updated_event = event.clone();
-                            updated_event.published_event_id = Some(nostr_event_id.clone());
-                            let mut events = PENDING_NOSTR_EVENTS.write();
-                            if let Some(pos) = events.iter().position(|entry| entry.id == event.id)
-                            {
-                                events[pos] = updated_event.clone();
-                            }
-                            drop(events);
-                            if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
-                                let _ = localstore.update_pending_event(&updated_event).await;
-                            }
-                            history_handled = false;
-                        }
-                    }
-                    if !history_handled {
-                        continue;
-                    }
-                }
-                let _ = remove_pending_event(&event.id).await;
-                processed_count += 1;
-            }
-            Err(e) => {
-                log::warn!("Failed to publish event {}: {}", event.id, e);
-                let mut updated_event = event.clone();
-                updated_event.retry_count += 1;
-                updated_event.last_retry_at = Some(now);
-                let mut events = PENDING_NOSTR_EVENTS.write();
-                if let Some(pos) = events.iter().position(|e| e.id == event.id) {
-                    events[pos] = updated_event.clone();
-                }
-                drop(events);
-                if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
-                    let _ = localstore.update_pending_event(&updated_event).await;
-                }
-            }
-        }
-    }
-    if processed_count > 0 {
-        log::info!("Processed {} pending events", processed_count);
-    }
-    Ok(processed_count)
+pub async fn process_pending_events() -> Result<usize, String> {
+    log::debug!("process_pending_events is a no-op; universal publish queue handles this");
+    Ok(0)
 }
 /// Update a token's event_id after successful background publish
 ///
@@ -942,11 +641,6 @@ pub async fn reconcile_pending_event_ids() -> Result<usize, String> {
         .as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
     let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let client = nostr_client::NOSTR_CLIENT
-        .read()
-        .as_ref()
-        .ok_or("Client not initialized")?
-        .clone();
     let pending_tokens: Vec<TokenData> = {
         let store = WALLET_TOKENS.read();
         let data = store.data();
@@ -1019,31 +713,26 @@ pub async fn reconcile_pending_event_ids() -> Result<usize, String> {
             }
         };
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-        match client
-            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
-            .await
-        {
-            Ok(output) => {
-                if !output.success.is_empty() {
-                    let real_event_id = output.id().to_hex();
-                    log::info!(
-                        "Reconciled pending token: {} -> {} (to {} relays)",
-                        old_event_id,
-                        real_event_id,
-                        output.success.len()
-                    );
-                    update_token_event_id(&old_event_id, &real_event_id);
-                    reconciled += 1;
-                } else {
-                    log::warn!(
-                        "No relays accepted reconciliation event for {}, will retry later",
-                        old_event_id
-                    );
-                }
+        match crate::stores::publish_queue::signing::sign_event_builder(builder).await {
+            Ok(signed_event) => {
+                let real_event_id = signed_event.id.to_hex();
+                crate::stores::publish_queue::enqueue(
+                    signed_event,
+                    crate::stores::publish_queue::types::QueueEventType::Cashu,
+                    None,
+                    std::collections::HashMap::new(),
+                ).await;
+                log::info!(
+                    "Reconciled pending token: {} -> {} (queued for publish)",
+                    old_event_id,
+                    real_event_id
+                );
+                update_token_event_id(&old_event_id, &real_event_id);
+                reconciled += 1;
             }
             Err(e) => {
                 log::warn!(
-                    "Failed to publish reconciliation event for {}: {}",
+                    "Failed to sign reconciliation event for {}: {}",
                     old_event_id,
                     e
                 );
@@ -1087,11 +776,6 @@ pub async fn publish_orphaned_proofs_event(
         .as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
     let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let client = nostr_client::NOSTR_CLIENT
-        .read()
-        .as_ref()
-        .ok_or("Client not initialized")?
-        .clone();
     let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
     let extended_proofs: Vec<ExtendedCashuProof> = proofs
         .iter()
@@ -1110,9 +794,7 @@ pub async fn publish_orphaned_proofs_event(
         .await
         .map_err(|e| format!("Failed to encrypt: {}", e))?;
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-    let unsigned = crate::utils::nips::nip89::tag_event_builder(builder).build(pubkey);
-    let signed_event = unsigned
-        .sign(&signer)
+    let signed_event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;
     let normalized_mint = normalize_mint_url(mint_url);
@@ -1131,51 +813,18 @@ pub async fn publish_orphaned_proofs_event(
     } else {
         super::proofs::register_proofs_in_event_map(&pending_id, proofs);
     }
-    match client.send_event(&signed_event).await {
-        Ok(output) => {
-            if !output.success.is_empty() {
-                let real_event_id = output.id().to_hex();
-                update_token_event_id(&pending_id, &real_event_id);
-                log::info!(
-                    "Published orphaned proofs token event: {} (to {} relays)",
-                    real_event_id,
-                    output.success.len()
-                );
-                Ok(real_event_id)
-            } else {
-                log::warn!(
-                    "No relays accepted orphaned proofs event, queuing for retry: {}",
-                    pending_id
-                );
-                queue_signed_event_for_retry(
-                    signed_event,
-                    PendingEventType::TokenEvent,
-                    Some(pending_id.clone()),
-                    Some(mint_url.to_string()),
-                )
-                .await;
-                Ok(pending_id)
-            }
-        }
-        Err(e) => {
-            log::warn!(
-                "Failed to publish orphaned proofs, queuing for retry: {}",
-                e
-            );
-            queue_signed_event_for_retry(
-                signed_event,
-                PendingEventType::TokenEvent,
-                Some(pending_id.clone()),
-                Some(mint_url.to_string()),
-            )
-            .await;
-            Ok(pending_id)
-        }
-    }
+    let mut metadata = std::collections::HashMap::new();
+    metadata.insert("pending_token_id".to_string(), pending_id.clone());
+    metadata.insert("mint_url".to_string(), mint_url.to_string());
+    crate::stores::publish_queue::enqueue(
+        signed_event,
+        crate::stores::publish_queue::types::QueueEventType::Cashu,
+        None,
+        metadata,
+    ).await;
+    log::info!("Queued orphaned proofs token event: {}", pending_id);
+    Ok(pending_id)
 }
-/// Guard to prevent multiple processor spawns
-#[cfg(target_arch = "wasm32")]
-static PROCESSOR_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// Start background task to process pending events periodically
 ///
 /// Uses AtomicBool guard to ensure only one processor runs at a time.
@@ -1186,132 +835,12 @@ static PROCESSOR_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 /// Also runs periodic proof recovery and pending secrets cleanup.
 #[cfg(target_arch = "wasm32")]
 pub fn start_pending_events_processor() {
-    use dioxus::prelude::spawn;
-    use gloo_timers::future::TimeoutFuture;
-    use std::sync::atomic::Ordering;
-    if PROCESSOR_RUNNING
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        log::debug!("Pending events processor already running, skipping spawn");
-        return;
-    }
-    spawn(async {
-        let mut recovery_counter = 0u32;
-        loop {
-            let pending_count = PENDING_NOSTR_EVENTS.read().len();
-            let interval_ms = if pending_count > 0 { 30_000 } else { 60_000 };
-            TimeoutFuture::new(interval_ms).await;
-            if let Err(e) = process_pending_events().await {
-                log::error!("Error processing pending events: {}", e);
-            }
-            let fresh_pending_count = PENDING_NOSTR_EVENTS.read().len();
-            recovery_counter += 1;
-            if recovery_counter >= 6 && fresh_pending_count == 0 {
-                recovery_counter = 0;
-                super::signals::cleanup_expired_pending_secrets().await;
-                match reconcile_pending_event_ids().await {
-                    Ok(count) if count > 0 => {
-                        log::info!("Reconciled {} pending event IDs", count);
-                    }
-                    Err(e) => {
-                        log::debug!("Pending event ID reconciliation error: {}", e);
-                    }
-                    _ => {}
-                }
-                spawn(async {
-                    use futures::FutureExt;
-                    let recovery_future = super::proof_recovery::run_full_recovery().fuse();
-                    let timeout_future = TimeoutFuture::new(180_000).fuse();
-                    futures::pin_mut!(recovery_future, timeout_future);
-                    futures::select! {
-                        result = recovery_future => { if result.recovered_count > 0 ||
-                        result.spent_count > 0 {
-                        log::info!("Periodic recovery: {} recovered, {} spent", result
-                        .recovered_count, result.spent_count); }
-                        if !result.errors
-                        .is_empty() { for err in result.errors {
-                        log::debug!("Periodic recovery error: {}", err); } } } _ =
-                        timeout_future => {
-                        log::warn!("Periodic recovery timed out after 3 minutes"); }
-                    }
-                });
-            }
-        }
-    });
-    log::info!(
-        "Started pending events background processor (adaptive interval + periodic recovery)"
-    );
+    crate::stores::publish_queue::start_processor();
+    log::info!("Redirected to universal publish queue processor");
 }
-/// Start background pending-event processing on native targets.
-///
-/// Runs continuously in the background, retries pending events with adaptive
-/// sleep intervals, and periodically performs maintenance/recovery when the
-/// queue stays empty. The loop is singleton-guarded and stops with process
-/// termination.
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn start_pending_events_processor() {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    static PROCESSOR_RUNNING_NATIVE: AtomicBool = AtomicBool::new(false);
-    if PROCESSOR_RUNNING_NATIVE
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        log::debug!("Pending events processor already running on native");
-        return;
-    }
-    dioxus_core::spawn_forever(async move {
-        let mut recovery_counter: u8 = 0;
-        loop {
-            if let Err(e) = process_pending_events().await {
-                log::error!("Error processing pending events: {}", e);
-            }
-            let pending_count = PENDING_NOSTR_EVENTS.read().len();
-            if pending_count == 0 {
-                recovery_counter = recovery_counter.saturating_add(1);
-            } else {
-                recovery_counter = 0;
-            }
-            if recovery_counter >= 6 {
-                recovery_counter = 0;
-                super::signals::cleanup_expired_pending_secrets().await;
-                match reconcile_pending_event_ids().await {
-                    Ok(count) if count > 0 => {
-                        log::info!("Native reconciled {} pending event IDs", count);
-                    }
-                    Err(e) => {
-                        log::debug!("Native pending event ID reconciliation error: {}", e);
-                    }
-                    _ => {}
-                }
-                dioxus_core::spawn_forever(async {
-                    use futures::FutureExt;
-                    let recovery_future = super::proof_recovery::run_full_recovery().fuse();
-                    let timeout_future = crate::platform::timer::sleep_ms(180_000).fuse();
-                    futures::pin_mut!(recovery_future, timeout_future);
-                    futures::select! {
-                        result = recovery_future => {
-                            if result.recovered_count > 0 || result.spent_count > 0 {
-                                log::info!(
-                                    "Native periodic recovery: {} recovered, {} spent",
-                                    result.recovered_count, result.spent_count
-                                );
-                            }
-                            if !result.errors.is_empty() {
-                                for err in result.errors {
-                                    log::debug!("Native periodic recovery error: {}", err);
-                                }
-                            }
-                        }
-                        _ = timeout_future => {
-                            log::warn!("Native periodic recovery timed out after 3 minutes");
-                        }
-                    }
-                });
-            }
-            let interval_ms = if pending_count > 0 { 30_000 } else { 60_000 };
-            crate::platform::timer::sleep_ms(interval_ms).await;
-        }
-    });
-    log::info!("Started pending events processor on native");
+    crate::stores::publish_queue::start_processor();
+    log::info!("Redirected to universal publish queue processor (native)");
 }

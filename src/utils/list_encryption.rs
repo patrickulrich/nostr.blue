@@ -74,7 +74,7 @@ pub async fn add_person_to_list(
     person_pubkey: &str,
     is_private: bool,
 ) -> Result<(), String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = nostr_client::get_client().ok_or("Client not initialized")?;
     let target_pubkey =
         PublicKey::parse(person_pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let mut public_tags: Vec<Tag> =
@@ -112,13 +112,15 @@ pub async fn add_person_to_list(
     }
     let encrypted_content = encrypt_private_tags(&private_tags).await?;
     let builder = EventBuilder::new(list_event.kind, encrypted_content).tags(public_tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to update list: {}", e))?;
-    if output.success.is_empty() {
-        return Err("No relays accepted event".to_string());
-    }
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("list".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     Ok(())
 }
 /// Remove a person from a list (checks both public and private members)
@@ -126,7 +128,7 @@ pub async fn remove_person_from_list(
     list_event: &Event,
     person_pubkey: &str,
 ) -> Result<(), String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = nostr_client::get_client().ok_or("Client not initialized")?;
     let target_pubkey =
         PublicKey::parse(person_pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     let pubkey_hex = target_pubkey.to_hex();
@@ -161,13 +163,15 @@ pub async fn remove_person_from_list(
         .collect();
     let encrypted_content = encrypt_private_tags(&private_tags).await?;
     let builder = EventBuilder::new(list_event.kind, encrypted_content).tags(public_tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to update list: {}", e))?;
-    if output.success.is_empty() {
-        return Err("No relays accepted event".to_string());
-    }
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("list".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     Ok(())
 }
 /// Result of getting list members with decryption status
@@ -282,17 +286,14 @@ pub async fn create_people_list(
         String::new()
     };
     let builder = EventBuilder::new(Kind::from(NAMED_PEOPLE), content).tags(tags);
-    let event = client
-        .sign_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign list event: {}", e))?;
-    let output = client
-        .send_event(&event)
-        .await
-        .map_err(|e| format!("Failed to publish list: {}", e))?;
-    if output.success.is_empty() {
-        return Err("No relays accepted event".to_string());
-    }
-    log::info!("Created new people list: {}", name);
+    crate::stores::publish_queue::enqueue(
+        event.clone(),
+        crate::stores::publish_queue::types::QueueEventType::Other("list".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     Ok(event)
 }

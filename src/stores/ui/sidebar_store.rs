@@ -200,9 +200,9 @@ impl SidebarItem {
             SidebarItem::Radio => Some(Route::RadioHome {}),
             #[cfg(feature = "cashu")]
             SidebarItem::Wallet => Some(Route::CashuWallet {}),
-            #[cfg(not(feature = "cashu"))]
-            SidebarItem::Wallet => None,
-            SidebarItem::P2PTrading => Some(Route::P2PHome {}),
+        #[cfg(not(feature = "cashu"))]
+        SidebarItem::Wallet => None,
+        SidebarItem::P2PTrading => Some(Route::P2PHome {}),
             SidebarItem::Communities => Some(Route::Communities {}),
             SidebarItem::Topics => Some(Route::TopicsHome {}),
             SidebarItem::Events => Some(Route::Events {}),
@@ -568,11 +568,15 @@ pub async fn save_sidebar_preferences(
         .map_err(|e| format!("Failed to serialize sidebar data: {}", e))?;
     let builder =
         EventBuilder::new(Kind::from(APP_DATA_KIND), content).tag(Tag::identifier(SIDEBAR_D_TAG));
-    client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish sidebar preferences: {}", e))?;
-    log::info!("Sidebar preferences saved to Nostr successfully");
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("sidebar".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     cache_sidebar(&data);
     *SIDEBAR_ITEMS.write() = items;
     *SIDEBAR_SLOT_COUNT.write() = items_per_page;

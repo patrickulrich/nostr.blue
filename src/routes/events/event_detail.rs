@@ -646,13 +646,13 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                         {
                             let content = evt.content();
                             if !content.is_empty() {
-                                let sanitized_content = ammonia::clean(content);
+                                let rendered_content = crate::utils::markdown::render_markdown(content);
                                 rsx! {
                                     div { class: "mb-4",
                                         h3 { class: "text-sm font-medium text-muted-foreground mb-2", "Details" }
                                         div {
                                             class: "prose prose-sm dark:prose-invert max-w-none",
-                                            dangerous_inner_html: "{sanitized_content}",
+                                            dangerous_inner_html: "{rendered_content}",
                                         }
                                     }
                                 }

@@ -362,7 +362,7 @@ pub async fn publish_emoji_collection(
     inline_emojis: Vec<CustomEmoji>,
     pack_coordinates: Vec<String>,
 ) -> std::result::Result<(), String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     let emojis = inline_emojis
         .into_iter()
@@ -387,10 +387,15 @@ pub async fn publish_emoji_collection(
         .collect();
 
     let builder = EventBuilder::emojis(Emojis { emojis, coordinate });
-    client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish emoji collection: {}", e))?;
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("emoji".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
 
     Ok(())
 }

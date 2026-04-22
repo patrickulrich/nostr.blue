@@ -28,9 +28,16 @@ pub async fn put_to_sleep(blobbi: &BlobbiCompanion) -> Result<BlobbiCompanion, S
         None,
         4,
     );
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    client.send_event_builder(interaction).await
-        .map_err(|e| format!("Failed to publish sleep interaction: {}", e))?;
+    let _client = nostr_client::get_client().ok_or("Client not initialized")?;
+    let event = crate::stores::publish_queue::signing::sign_event_builder(interaction)
+        .await
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("blobbi".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
 
     blobbi_store::update_blobbi_in_collection(&updated);
     Ok(updated)
@@ -70,9 +77,16 @@ pub async fn wake_up(blobbi: &BlobbiCompanion) -> Result<BlobbiCompanion, String
         None,
         2,
     );
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    client.send_event_builder(interaction).await
-        .map_err(|e| format!("Failed to publish wake interaction: {}", e))?;
+    let _client = nostr_client::get_client().ok_or("Client not initialized")?;
+    let event = crate::stores::publish_queue::signing::sign_event_builder(interaction)
+        .await
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("blobbi".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
 
     blobbi_store::update_blobbi_in_collection(&updated);
     Ok(updated)

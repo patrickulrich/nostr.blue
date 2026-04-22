@@ -6,6 +6,7 @@ mod engagement;
 use crate::components::{
     ArticleCard, ClientInitializing, NoteCard, NoteCardSkeleton, NoteComposer,
 };
+use crate::components::note_composer::NoteMode;
 use crate::error::NostrBlueError;
 use crate::hooks::{use_infinite_scroll, use_user_lists};
 use crate::services::aggregation::{InteractionCounts, InteractionStreamHandle};
@@ -1237,7 +1238,7 @@ pub fn Home(list: String) -> Element {
                 }
             }
             if auth.is_authenticated {
-                NoteComposer {}
+                NoteComposer { mode: NoteMode::Inline }
             }
             if !auth.is_authenticated {
                 div { class: "border-b border-border p-6 bg-blue-50 dark:bg-blue-900/20",

@@ -883,7 +883,7 @@ pub fn NoteCard(
         }
         if *show_reply_modal.read() {
             ReplyComposer {
-                reply_to: event.clone(),
+                target: event.clone(),
                 root_event: root_event.clone(),
                 on_close: move |_| {
                     show_reply_modal.set(false);

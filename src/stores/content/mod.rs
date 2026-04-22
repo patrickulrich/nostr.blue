@@ -1,6 +1,7 @@
 pub mod citation_store;
 pub mod code_store;
 pub mod draft_store;
+pub mod note_draft_store;
 pub mod publication_store;
 pub mod recipe_store;
 pub mod wiki_store;

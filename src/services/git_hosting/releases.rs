@@ -35,7 +35,7 @@ pub async fn publish_release(
     assets: &[&str],
     prerelease: bool,
 ) -> Result<EventId, String> {
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
@@ -57,11 +57,16 @@ pub async fn publish_release(
             ["true"],
         ));
     }
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish: {}", e))?;
-    let event_id = *output.id();
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::GitHosting,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     let filter = Filter::new().id(event_id);
     if let Ok(events) = fetch_events_aggregated(filter, Duration::from_secs(2)).await {
         cache_release_events(&events);
@@ -70,7 +75,7 @@ pub async fn publish_release(
 }
 /// Delete a release by publishing a Kind 5 deletion event
 pub async fn delete_release(release_event_id: EventId) -> Result<(), String> {
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
@@ -79,10 +84,15 @@ pub async fn delete_release(release_event_id: EventId) -> Result<(), String> {
         .id(release_event_id)
         .reason("Release deleted");
     let builder = EventBuilder::delete(request);
-    client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to delete: {}", e))?;
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::GitHosting,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     Ok(())
 }
 /// Fetch a release by its event ID (note1 or nevent1)

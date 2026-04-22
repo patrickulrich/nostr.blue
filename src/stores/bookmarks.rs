@@ -412,7 +412,7 @@ pub fn dismiss_bookmark_error() {
 }
 /// Publish bookmarks list to relays (NIP-51)
 async fn publish_bookmarks(bookmarks: Vec<String>) -> Result<(), String> {
-    let client = nostr_client::NOSTR_CLIENT
+    let _client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
@@ -449,38 +449,16 @@ async fn publish_bookmarks(bookmarks: Vec<String>) -> Result<(), String> {
         urls: Vec::new(),
     };
     let builder = EventBuilder::bookmarks(bookmark_list);
-    match client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-    {
-        Ok(output) => {
-            let success_count = output.success.len();
-            let failed_count = output.failed.len();
-            let total = success_count + failed_count;
-            if output.success.is_empty() {
-                return Err(format!(
-                    "Failed to publish bookmarks: no relays accepted the event (failed_relays={})",
-                    failed_count
-                ));
-            }
-            log::info!(
-                "Bookmarks published: {} ({}/{} relays succeeded)",
-                output.id().to_hex(),
-                success_count,
-                total
-            );
-            if !output.failed.is_empty() {
-                for (relay, error) in &output.failed {
-                    log::warn!("Relay {} failed: {}", relay, error);
-                }
-            }
-            Ok(())
-        }
-        Err(e) => {
-            log::error!("Failed to publish bookmarks: {}", e);
-            Err(format!("Failed to publish bookmarks: {}", e))
-        }
-    }
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Bookmark,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(())
 }
 /// Fetch bookmarked events with pagination support
 ///

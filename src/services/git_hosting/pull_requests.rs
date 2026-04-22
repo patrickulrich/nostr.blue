@@ -5,7 +5,6 @@
 use crate::stores::code_store::{cache_pr_events, get_cached_pr, update_pr_statuses};
 use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
 use crate::utils::nip34::{decode_event_id, GitComment, IssueStatus, PullRequest};
-use crate::utils::relay_output::ensure_publish_accepted;
 use dioxus::signals::ReadableExt;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
@@ -13,16 +12,21 @@ use std::time::Duration;
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 
 async fn send_and_ensure_published(
-    client: &Client,
+    _client: &Client,
     builder: EventBuilder,
     action: &str,
 ) -> Result<EventId, String> {
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("{action}: {e}"))?;
-    ensure_publish_accepted(&output, action)?;
-    Ok(*output.id())
+    let event_id = event.id;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::GitHosting,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }
 
 /// Fetch status events for a set of PR event IDs and apply them to the cache

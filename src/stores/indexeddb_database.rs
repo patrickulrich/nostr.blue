@@ -222,6 +222,37 @@ mod native_stub {
                 "IndexedDB is only available on wasm32 targets".to_string(),
             ))
         }
+        pub async fn add_queued_event(
+            &self,
+            _event: &crate::stores::publish_queue::types::QueuedEvent,
+        ) -> Result<(), database::Error> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
+        }
+        pub async fn get_all_queued_events(
+            &self,
+        ) -> Result<Vec<crate::stores::publish_queue::types::QueuedEvent>, database::Error> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
+        }
+        pub async fn remove_queued_event(
+            &self,
+            _event_id: &str,
+        ) -> Result<(), database::Error> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
+        }
+        pub async fn update_queued_event(
+            &self,
+            _event: &crate::stores::publish_queue::types::QueuedEvent,
+        ) -> Result<(), database::Error> {
+            Err(Self::make_error(
+                "IndexedDB is only available on wasm32 targets".to_string(),
+            ))
+        }
     }
     #[async_trait::async_trait]
     impl WalletDatabase for IndexedDbDatabase {
@@ -453,7 +484,7 @@ use web_sys::IdbTransactionMode;
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const DB_NAME: &str = "cashu_wallet_db";
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
-const DB_VERSION: u32 = 6;
+const DB_VERSION: u32 = 7;
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const STORE_MINTS: &str = "mints";
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
@@ -484,6 +515,7 @@ const STORE_IN_FLIGHT_MELTS: &str = "in_flight_melts";
 const STORE_NUTZAP_SETTINGS: &str = "nutzap_settings";
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const STORE_PENDING_NUTZAPS: &str = "pending_nutzaps";
+const STORE_PUBLISH_QUEUE: &str = "publish_queue";
 /// IndexedDB-backed implementation of WalletDatabase
 #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 #[derive(Clone, Debug)]
@@ -551,6 +583,9 @@ impl IndexedDbDatabase {
             }
             if !db.object_store_names().any(|n| n == STORE_PENDING_NUTZAPS) {
                 db.create_object_store(STORE_PENDING_NUTZAPS)?;
+            }
+            if !db.object_store_names().any(|n| n == STORE_PUBLISH_QUEUE) {
+                db.create_object_store(STORE_PUBLISH_QUEUE)?;
             }
             Ok(())
         }));
@@ -742,6 +777,32 @@ impl IndexedDbDatabase {
     ) -> Result<(), database::Error> {
         let key = event.id.clone();
         self.put_value(STORE_PENDING_EVENTS, &key, event).await
+    }
+    #[allow(dead_code)]
+    pub async fn add_queued_event(
+        &self,
+        event: &crate::stores::publish_queue::types::QueuedEvent,
+    ) -> Result<(), database::Error> {
+        let key = event.id.clone();
+        self.put_value(STORE_PUBLISH_QUEUE, &key, event).await
+    }
+    #[allow(dead_code)]
+    pub async fn get_all_queued_events(
+        &self,
+    ) -> Result<Vec<crate::stores::publish_queue::types::QueuedEvent>, database::Error> {
+        self.get_all_values(STORE_PUBLISH_QUEUE).await
+    }
+    #[allow(dead_code)]
+    pub async fn remove_queued_event(&self, event_id: &str) -> Result<(), database::Error> {
+        self.delete_value(STORE_PUBLISH_QUEUE, event_id).await
+    }
+    #[allow(dead_code)]
+    pub async fn update_queued_event(
+        &self,
+        event: &crate::stores::publish_queue::types::QueuedEvent,
+    ) -> Result<(), database::Error> {
+        let key = event.id.clone();
+        self.put_value(STORE_PUBLISH_QUEUE, &key, event).await
     }
     /// Save sync state for incremental Nostr event fetching
     pub async fn save_sync_state(

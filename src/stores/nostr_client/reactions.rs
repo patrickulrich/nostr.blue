@@ -83,25 +83,18 @@ pub async fn publish_reaction_tracked(
             log::warn!("Failed to parse custom emoji URL: {}", url_str);
         }
     }
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish reaction: {}", e))?;
-    let result = PublishResult::from_output(output);
-    log::info!(
-        "Reaction published: {} ({}/{} relays succeeded)",
-        result.event_id,
-        result.success_count(),
-        result.total_attempted()
-    );
-    if result.has_failures() {
-        for (relay, error) in &result.failed_relays {
-            log::warn!("Relay {} failed: {}", relay, error);
-        }
-    }
-    if result.success_count() == 0 {
-        return Err("Reaction failed: no relays accepted the event".to_string());
-    }
+        .map_err(|e| format!("Failed to sign reaction: {}", e))?;
+    let event_id = event.id.to_hex();
+    let queue_id = crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Reaction,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    let result = PublishResult::queued(queue_id, event_id);
+    log::info!("Reaction queued: {}", result.event_id);
     Ok(result)
 }
 /// Publish a reaction (kind 7 event) to another event

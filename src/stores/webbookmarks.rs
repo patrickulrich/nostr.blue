@@ -29,7 +29,7 @@ pub async fn add_webbookmark(
     published_at: Option<u64>,
     hashtags: Vec<String>,
 ) -> Result<(), String> {
-    let client = nostr_client::NOSTR_CLIENT
+    let _client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
@@ -58,19 +58,16 @@ pub async fn add_webbookmark(
         use nostr_sdk::Tag;
         builder = builder.tag(Tag::custom(nostr_sdk::TagKind::custom("image"), vec![img]));
     }
-    match client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-    {
-        Ok(output) => {
-            log::info!("Web bookmark published: {}", output.id());
-            Ok(())
-        }
-        Err(e) => {
-            log::error!("Failed to publish web bookmark: {}", e);
-            Err(format!("Failed to publish web bookmark: {}", e))
-        }
-    }
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("webbookmark".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(())
 }
 /// Update an existing web bookmark (creates new event with same URL)
 ///
@@ -88,7 +85,7 @@ pub async fn update_webbookmark(
 }
 /// Delete a web bookmark by publishing a deletion event
 pub async fn delete_webbookmark(event: &Event) -> Result<(), String> {
-    let client = nostr_client::NOSTR_CLIENT
+    let _client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
@@ -100,22 +97,20 @@ pub async fn delete_webbookmark(event: &Event) -> Result<(), String> {
     use nostr::nips::nip09::EventDeletionRequest;
     let request = EventDeletionRequest::new().id(event.id);
     let builder = EventBuilder::delete(request);
-    match client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let signed_event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-    {
-        Ok(_) => {
-            log::info!("Web bookmark deleted");
-            let mut bookmarks = WEB_BOOKMARKS.read().data().read().clone();
-            bookmarks.retain(|e| e.id != event.id);
-            *WEB_BOOKMARKS.read().data().write() = bookmarks;
-            Ok(())
-        }
-        Err(e) => {
-            log::error!("Failed to delete web bookmark: {}", e);
-            Err(format!("Failed to delete web bookmark: {}", e))
-        }
-    }
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        signed_event,
+        crate::stores::publish_queue::types::QueueEventType::Other("webbookmark".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    log::info!("Web bookmark deleted");
+    let mut bookmarks = WEB_BOOKMARKS.read().data().read().clone();
+    bookmarks.retain(|e| e.id != event.id);
+    *WEB_BOOKMARKS.read().data().write() = bookmarks;
+    Ok(())
 }
 /// Toggle favorite status for a web bookmark
 /// This adds/removes a "favorite" hashtag to the bookmark

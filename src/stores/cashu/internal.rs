@@ -450,7 +450,7 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
         .as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
     let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let client = crate::stores::nostr_client::NOSTR_CLIENT
+    let _client = crate::stores::nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
@@ -478,41 +478,25 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-        match client
-            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
-                builder.clone(),
-            ))
-            .await
-        {
-            Ok(event_output) if !event_output.success.is_empty() => {
-                new_event_id = Some(event_output.id().to_hex());
-                log::info!(
-                    "Published cleanup token event: {}",
-                    new_event_id.as_ref().unwrap()
-                );
-            }
-            Ok(_) => {
-                log::warn!("No relays accepted cleanup token event, queuing for retry");
-                super::events::queue_event_for_retry(
-                    builder,
-                    super::types::PendingEventType::TokenEvent,
-                    synthetic_pending_id.clone(),
-                    Some(mint_url.to_string()),
-                )
-                .await
-                .map_err(|queue_err| {
-                    format!(
-                        "Failed to queue cleanup token event for retry: {}",
-                        queue_err
-                    )
-                })?;
-                new_event_id = synthetic_pending_id.clone();
+        match crate::stores::publish_queue::signing::sign_event_builder(builder.clone()).await {
+            Ok(signed_event) => {
+                let real_id = signed_event.id.to_hex();
+                let mut metadata = std::collections::HashMap::new();
+                if let Some(ref sid) = synthetic_pending_id {
+                    metadata.insert("pending_token_id".to_string(), sid.clone());
+                }
+                metadata.insert("mint_url".to_string(), mint_url.to_string());
+                crate::stores::publish_queue::enqueue(
+                    signed_event,
+                    crate::stores::publish_queue::types::QueueEventType::Cashu,
+                    None,
+                    metadata,
+                ).await;
+                new_event_id = Some(real_id);
+                log::info!("Queued cleanup token event: {}", new_event_id.as_ref().unwrap());
             }
             Err(e) => {
-                log::warn!(
-                    "Failed to publish cleanup token event, queuing for retry: {}",
-                    e
-                );
+                log::warn!("Failed to sign cleanup token event, queuing unsigned for retry: {}", e);
                 super::events::queue_event_for_retry(
                     builder,
                     super::types::PendingEventType::TokenEvent,
@@ -548,38 +532,22 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
             ));
             let deletion_builder =
                 nostr_sdk::EventBuilder::new(Kind::from(5), "Spent proofs cleanup").tags(tags);
-            match client
-                .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
-                    deletion_builder.clone(),
-                ))
-                .await
-            {
-                Ok(event_output) if !event_output.success.is_empty() => {
+            match crate::stores::publish_queue::signing::sign_event_builder(deletion_builder.clone()).await {
+                Ok(signed_event) => {
+                    crate::stores::publish_queue::enqueue(
+                        signed_event,
+                        crate::stores::publish_queue::types::QueueEventType::Cashu,
+                        None,
+                        std::collections::HashMap::new(),
+                ).await;
                     log::info!(
-                        "Published deletion event for {} token events",
+                        "Queued deletion event for {} token events",
                         valid_event_ids.len()
                     );
                     deletion_recorded = true;
                 }
-                Ok(_) => {
-                    log::warn!("No relays accepted cleanup deletion event, queuing for retry");
-                    super::events::queue_event_for_retry(
-                        deletion_builder,
-                        super::types::PendingEventType::DeletionEvent,
-                        None,
-                        None,
-                    )
-                    .await
-                    .map_err(|queue_err| {
-                        format!(
-                            "Failed to queue cleanup deletion event for retry: {}",
-                            queue_err
-                        )
-                    })?;
-                    deletion_recorded = true;
-                }
                 Err(e) => {
-                    log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
+                    log::warn!("Failed to sign cleanup deletion event, queuing unsigned: {}", e);
                     super::events::queue_event_for_retry(
                         deletion_builder,
                         super::types::PendingEventType::DeletionEvent,

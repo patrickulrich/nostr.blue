@@ -1,6 +1,6 @@
 use super::timer::PollTimer;
 use crate::components::icons::{BookmarkIcon, MessageCircleIcon, Repeat2Icon, ShareIcon, ZapIcon};
-use crate::components::{CommentComposer, ConfirmModal, ReactionButton, ZapModal};
+use crate::components::{ReplyComposer, ConfirmModal, ReactionButton, ZapModal};
 use crate::hooks::{use_reaction, use_relay_subscription};
 use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
@@ -635,9 +635,9 @@ pub fn PollCard(
             }
             }
             if *show_comment_composer.read() {
-                CommentComposer {
-                    comment_on: event.clone(),
-                    parent_comment: None,
+                ReplyComposer {
+                    target: event.clone(),
+                    root_event: None,
                     on_close: move |_| {
                         show_comment_composer.set(false);
                     },

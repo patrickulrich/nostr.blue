@@ -13,25 +13,28 @@ pub(super) fn encode_naddr(kind: u16, pubkey: &str, d_tag: &str) -> String {
     format!("{}:{}:{}", kind, pubkey, d_tag)
 }
 
-async fn send_tagged_event_builder(
-    client: &std::sync::Arc<nostr_sdk::Client>,
+async fn enqueue_event_builder(
     builder: EventBuilder,
-) -> StdResult<Output<nostr_sdk::EventId>, String> {
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+) -> StdResult<String, String> {
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| e.to_string())?;
-    if output.success.is_empty() {
-        return Err("No relays accepted event".to_string());
-    }
-    Ok(output)
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue_and_await(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Calendar,
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await?;
+    Ok(event_id)
 }
 
 /// Publish a comment on a calendar event
 /// Uses proper NIP-22 threading tags (A/K/P for root, a/k/p for parent)
 /// Author is derived from coordinate (format: kind:pubkey:d-tag) to ensure consistency
 pub async fn publish_event_comment(coordinate: &str, content: &str) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     use nostr::nips::nip01::Coordinate;
     let coord = Coordinate::parse(coordinate)
         .map_err(|_| format!("Invalid coordinate format: {}", coordinate))?;
@@ -62,10 +65,10 @@ pub async fn publish_event_comment(coordinate: &str, content: &str) -> StdResult
             TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::P)),
             vec![author_hex],
         ));
-    let output = send_tagged_event_builder(&client, builder)
+    let event_id = enqueue_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to publish comment: {}", e))?;
-    Ok(output.id().to_string())
+    Ok(event_id)
 }
 
 /// Publish a date-based calendar event (kind 31922)
@@ -97,7 +100,7 @@ pub async fn publish_date_event(
         }
     }
 
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     let d_tag = format!(
         "event-{}-{}",
         crate::platform::timestamp::now_millis(),
@@ -164,7 +167,7 @@ pub async fn publish_date_event(
         ));
     }
     let pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let _output = send_tagged_event_builder(&client, builder)
+    let _event_id = enqueue_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to publish event: {}", e))?;
     let naddr = encode_naddr(KIND_DATE_CALENDAR_EVENT, &pubkey, &d_tag);
@@ -185,7 +188,7 @@ pub async fn publish_time_event(
     participants: &[(String, String)],
     timezone: Option<&str>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     let d_tag = format!(
         "event-{}-{}",
         crate::platform::timestamp::now_millis(),
@@ -261,7 +264,7 @@ pub async fn publish_time_event(
         ));
     }
     let pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let _output = send_tagged_event_builder(&client, builder)
+    let _event_id = enqueue_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to publish event: {}", e))?;
     let naddr = encode_naddr(KIND_TIME_CALENDAR_EVENT, &pubkey, &d_tag);
@@ -276,7 +279,7 @@ pub async fn publish_rsvp(
     note: &str,
 ) -> StdResult<String, String> {
     use crate::utils::nip52::FreeBusy;
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     use nostr::nips::nip01::Coordinate;
     Coordinate::parse(event_coordinate)
         .map_err(|_| format!("Invalid event coordinate: {}", event_coordinate))?;
@@ -304,10 +307,10 @@ pub async fn publish_rsvp(
             TagKind::Custom("fb".into()),
             vec![free_busy.as_str().to_string()],
         ));
-    let output = send_tagged_event_builder(&client, event)
+    let event_id = enqueue_event_builder(event)
         .await
         .map_err(|e| format!("Failed to publish RSVP: {}", e))?;
-    Ok(output.id().to_string())
+    Ok(event_id)
 }
 
 /// Publish an availability template (kind 31926)
@@ -324,7 +327,7 @@ pub async fn publish_availability_template(
     amount_sats: Option<u64>,
     schedule: &[(String, String, String)],
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     let d_tag = format!(
         "avail-{}-{}",
         crate::platform::timestamp::now_millis(),
@@ -411,10 +414,10 @@ pub async fn publish_availability_template(
             vec![day_lower, start.clone(), end.clone()],
         ));
     }
-    let output = send_tagged_event_builder(&client, builder)
+    let event_id = enqueue_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to publish availability template: {}", e))?;
-    Ok(output.id().to_string())
+    Ok(event_id)
 }
 /// Publish an availability block (kind 31927)
 pub async fn publish_availability_block(
@@ -425,7 +428,7 @@ pub async fn publish_availability_block(
     if end <= start {
         return Err("End time must be after start time".to_string());
     }
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     let d_tag = format!(
         "block-{}-{}",
         crate::platform::timestamp::now_millis(),
@@ -447,10 +450,10 @@ pub async fn publish_availability_block(
             vec![t.to_string()],
         ));
     }
-    let output = send_tagged_event_builder(&client, builder)
+    let event_id = enqueue_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to publish availability block: {}", e))?;
-    Ok(output.id().to_string())
+    Ok(event_id)
 }
 
 /// Publish a calendar collection (kind 31924)
@@ -460,7 +463,7 @@ pub async fn publish_calendar(
     event_coordinates: &[String],
 ) -> StdResult<String, String> {
     use crate::utils::nip52::KIND_CALENDAR;
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     use nostr::nips::nip01::Coordinate;
     let d_tag = format!(
         "calendar-{}-{}",
@@ -478,7 +481,7 @@ pub async fn publish_calendar(
         builder = builder.tag(Tag::custom(TagKind::a(), vec![coord.clone()]));
     }
     let pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let _output = send_tagged_event_builder(&client, builder)
+    let _event_id = enqueue_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to publish calendar: {}", e))?;
     let naddr = encode_naddr(KIND_CALENDAR, &pubkey, &d_tag);

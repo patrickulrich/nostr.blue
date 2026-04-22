@@ -76,7 +76,7 @@ pub async fn publish_note_tracked(
     content: String,
     tags: Vec<Vec<String>>,
 ) -> std::result::Result<PublishResult, String> {
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
@@ -103,22 +103,18 @@ pub async fn publish_note_tracked(
         true
     });
     let builder = nostr::EventBuilder::text_note(&content).tags(mention_tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish: {}", e))?;
-    let result = PublishResult::from_output(output);
-    log::info!(
-        "Note published: {} ({}/{} relays succeeded)",
-        result.event_id,
-        result.success_count(),
-        result.total_attempted()
-    );
-    if result.has_failures() {
-        for (relay, error) in &result.failed_relays {
-            log::warn!("Relay {} failed: {}", relay, error);
-        }
-    }
+        .map_err(|e| format!("Failed to sign note: {}", e))?;
+    let event_id = event.id.to_hex();
+    let queue_id = crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Note,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    let result = PublishResult::queued(queue_id, event_id);
+    log::info!("Note queued: {}", result.event_id);
     Ok(result)
 }
 /// Publish a text note (kind 1 event)

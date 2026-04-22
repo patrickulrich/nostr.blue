@@ -74,12 +74,12 @@ User Action → sendEvent(event) → returns { success: true } IMMEDIATELY (opti
 
 | Tier | Pattern | Retry | Queue | Persistence | Examples |
 |------|---------|-------|-------|-------------|----------|
-| **Tier 1: Fire-and-forget** | `client.send_event_builder(tag_event_builder(builder))` | None | None | None | Notes, reactions, reposts, articles, contacts, mute lists, profile (26+ functions) |
+| **Tier 1: Fire-and-forget** | `client.send_event_builder(tag_event_builder(builder))` or `sign_event_builder()` + `send_event()`/`send_event_to()` | None | None | None | Notes, reactions, articles, contacts, mute lists, profile (~141 call sites, 50-60+ functions). **Note**: `publish_repost_tracked` and `publish_edit` already use the two-step sign-then-send pattern. |
 | **Tier 2: Retry with backoff** | Recursive async with generation counter | Exponential backoff (3 retries) | In-memory only | Rollback state | Pinned notes, pinned communities |
 | **Tier 3: Durable queue** | Background processor with adaptive polling | Adaptive backoff (5 retries) | IndexedDB | Full event serialization | Cashu wallet events only |
 
 ### Core Publish Flow (Tier 1 — Most Events)
-**File**: `src/stores/nostr_client/notes.rs:73-133`
+**File**: `src/stores/nostr_client/notes.rs:75-123`
 ```rust
 pub async fn publish_note_tracked(content: String, tags: Vec<Vec<String>>) -> Result<PublishResult, String> {
     let client = get_client().ok_or("Client not initialized")?;
@@ -94,7 +94,7 @@ pub async fn publish_note_tracked(content: String, tags: Vec<Vec<String>>) -> Re
 ```
 
 ### PublishResult Type
-**File**: `src/stores/nostr_client/types.rs:1-85`
+**File**: `src/stores/nostr_client/types.rs:6-69`
 ```rust
 pub struct PublishResult {
     pub event_id: String,
@@ -102,6 +102,8 @@ pub struct PublishResult {
     pub failed_relays: Vec<(String, String)>,
 }
 // Methods: from_output(), is_success(), has_failures(), success_count(), total_attempted()
+//          ignoring_duplicate_event_failures() — moves "duplicate event" relay errors from failed to successful
+//          success_rate() — returns success percentage
 ```
 
 ### NIP-89 Client Tagging
@@ -220,7 +222,7 @@ All Vec-like reactive data uses `#[derive(Store)]` with single `data` field:
 pub struct WalletTokensStore { pub data: Vec<TokenData> }
 // Usage: WALLET_TOKENS.read().data().read() / .write()
 ```
-20+ examples throughout the codebase. The `#[derive(Store)]` macro generates accessor methods for each field with independent reactivity.
+20+ examples throughout the codebase. The `#[derive(Store)]` macro generates accessor methods for each struct field with independent reactivity.
 
 ---
 
@@ -283,30 +285,33 @@ pub struct EventBuilder { ... }
 ```rust
 pub async fn send_event_builder(&self, builder: EventBuilder) -> Result<Output<EventId>, Error> {
     let event: Event = self.sign_event_builder(builder).await?;  // Signs internally
-    self.send_event(&event).await                                 // Sends with default AckPolicy::all()
+    self.send_event(&event).await                                 // Sends to all WRITE relays (or gossip-routed), awaits OK from each
 }
 ```
 
-#### Client::send_event (returns builder)
+#### Client::send_event — broadcast signed event
 ```rust
-pub fn send_event<'event, 'url>(&self, event: &'event Event) -> SendEvent<'_, 'event, 'url>
+pub async fn send_event(&self, event: &Event) -> Result<Output<EventId>, Error>
 ```
-Returns a `SendEvent` builder with:
-- `.broadcast()` — send to all WRITE relays
-- `.to(urls)` — send to specific relays
-- `.ack_policy(AckPolicy)` — `all()` (wait for OK) or `none()` (fire-and-forget)
-- `.ok_timeout(Duration)` — default 10s
-- `.save_into_database(bool)` — default true
+Two internal paths:
+- With gossip (NIP-65): routes to specific relays via outbox model
+- Without gossip: `pool.send_event()` sends to all WRITE relays concurrently via `join_all`
+Always awaits OK from each relay (10s hardcoded timeout, not configurable).
 
-#### AckPolicy — The Key to Optimistic Publishing
+#### Client::send_event_to — targeted relay send
 ```rust
-pub struct AckPolicy(InnerAckPolicy);
-impl AckPolicy {
-    pub const fn all() -> Self   // Wait for relay OK (default)
-    pub const fn none() -> Self  // Fire-and-forget: dispatch EVENT msg, don't wait for OK
-}
+pub async fn send_event_to<I, U>(&self, urls: I, event: &Event) -> Result<Output<EventId>, Error>
 ```
-With `AckPolicy::none()`: EVENT message is sent to relay WebSocket, returns immediately. `output.success` contains all relays where the WebSocket write succeeded (but NOT relay acceptance).
+Send pre-signed event to specific relay URLs only. Same OK-await behavior.
+
+#### Fire-and-Forget Alternative: send_msg_to / batch_msg_to
+For fire-and-forget publishing (no OK wait), the SDK provides lower-level message methods:
+```rust
+pub async fn send_msg_to<I, U>(&self, urls: I, msg: ClientMessage<'_>) -> Result<Output<()>, Error>
+```
+Queues EVENT message on WebSocket channel and returns immediately. `Output<()>` reflects channel queue success only, NOT relay acceptance. **Not suitable for retry logic** (no per-relay success/failure result). Use `send_event` / `send_event_to` for the queue processor.
+
+**Note**: Optimistic publishing in nostr.blue does NOT use fire-and-forget. The optimism comes from returning to the caller after `enqueue()` (which happens before the background processor ever calls `send_event`).
 
 #### Output<EventId>
 ```rust
@@ -321,8 +326,14 @@ Even on partial relay failure, returns `Ok(Output)`. Only returns `Err` for fund
 #### Relay Pool Publishing — ALL Relays, Not Promise.any
 The SDK sends to ALL relays concurrently and waits for ALL to respond. Not Promise.any (first-success-wins).
 
+#### Gossip-Aware Routing
+When NIP-65 gossip is enabled, `Client::send_event` routes to specific relays based on the outbox/inbox model rather than all WRITE relays. This is transparent to the caller — `send_event` handles it internally. Affects the meaning of "partial failure" since the relay set is curated by gossip, not blanket broadcast.
+
 #### No Built-in Retry/Queue
 The SDK has **no** built-in event publishing retry or queue mechanism. Must be implemented at application level.
+
+#### OK Timeout — Hardcoded
+`send_event` and `send_event_to` wait for relay OK with a hardcoded 10s timeout (`WAIT_FOR_OK_TIMEOUT` in `relay/constants.rs`). Not configurable via `RelayOptions`. If auth-required triggers NIP-42, an additional 7s authentication wait occurs before retry.
 
 #### Signer Types
 ```rust
@@ -353,7 +364,7 @@ let event: Event = builder.sign(&*signer).await?;
 |---|-----------|--------------------------|---------------|
 | 1 | `components/photo_card.rs:639` | Reads `result.event_id`, `result.success_count()`, `result.total_attempted()`, iterates `result.failed_relays` | **YES** — relay detail |
 | 2 | `components/photo_card.rs:681` | Same as above | **YES** — relay detail |
-| 3 | `components/note_composer.rs:40` | Reads `result.success_count()`, `result.total_attempted()`, `result.event_id`, `result.has_failures()` for UI feedback | **YES** — relay detail |
+| 3 | `components/note_composer.rs:51,110` | Reads `result.success_count()`, `result.total_attempted()`, `result.event_id`, `result.has_failures()` for UI feedback. Two call sites: line 51 (Inline) and line 110 (FullPage) | **YES** — relay detail |
 
 Wrapper `publish_note` → `Result<String, String>` (extracts event_id only): no callers need relay detail.
 
@@ -365,6 +376,8 @@ Wrapper `publish_note` → `Result<String, String>` (extracts event_id only): no
 | 2 | `hooks/use_reaction.rs:362` | Same pattern (emoji-specific) | **YES** — relay detail |
 
 ### Category 3: publish_repost_tracked / publish_repost
+
+> **Note**: `publish_repost_tracked` already uses `sign_event_builder()` + `send_event_to(write_relays)` (two-step sign-then-send pattern). Migration to queue is simpler — just replace `send_event_to` with `enqueue`.
 
 `publish_repost` wrapper → `Result<String, String>`, called from:
 | # | File:Line | Needs update? |
@@ -402,7 +415,11 @@ Internal callers in `contacts.rs` (lines 305, 325, 347, 401). External callers o
 
 No external callers of `_tracked` variants. Wrappers → `Result<String, String>`.
 
+> **Note**: New function `publish_voice_message_reply_tracked` (NIP-22, Kind 1244) added — needs to be included in migration (see Phase 3a). Video publishing now uses addressable NIP-71 kinds with d-tag identifiers.
+
 ### Category 8: publish_edit → Result<EditPublishResult, String>
+
+> **Note**: `publish_edit` already uses `sign_event_builder()` + `send_event()` (two-step sign-then-send pattern). Migration to queue is simpler — just replace `send_event` with `enqueue`.
 
 | # | File:Line | What it does | Needs update? |
 |---|-----------|--------------|---------------|
@@ -419,7 +436,7 @@ No external callers of `_tracked` variants. Wrappers → `Result<String, String>
 | # | Function | File:Line | What it does | Needs update? |
 |---|----------|-----------|--------------|---------------|
 | 1 | `broadcast_presigned_event` | `components/note_menu.rs:426` | Reads `result.is_success()`, `result.has_failures()`, `result.success_count()`, `result.total_attempted()` | **YES** — relay detail |
-| 2 | `send_presigned_event_to_relays` | `components/reply_composer.rs:259` | Reads `result.success_count() > 0`, `result.event_id`, `result.success_count()`, `result.total_attempted()` | **YES** — relay detail |
+| 2 | `send_presigned_event_to_relays` | `components/reply_composer.rs:188` | **Rewritten**: uses gossip-first, broadcast-fallback strategy. First tries `client.send_event()` (gossip routing), then falls back to `send_presigned_event_to_relays(write_relays)`. Reads `result.success_count() > 0`, `result.event_id`, `result.success_count()`, `result.total_attempted()` | **YES** — relay detail; both gossip and fallback paths must route through queue |
 | 3 | `send_presigned_event_to_relays` | `stores/content/draft_store.rs:279` | Reads `result.event_id`, `result.success_count()`, `result.total_attempted()` for logging | **YES** — relay detail |
 | 4 | `send_presigned_event_to_relays` | `stores/content/draft_store.rs:409` | Same pattern | **YES** — relay detail |
 | 5 | `publish_vanish_request_to_relays` | `routes/settings/home.rs:1447` | Match on result, reads relay counts | **YES** — relay detail |
@@ -549,7 +566,7 @@ All only extract `output.id().to_hex()`. **No relay detail needed.**
 | 75 | `blobbi/social/photo_modal.rs` | 96 |
 | 76 | `blobbi/social/records_modal.rs` | 171 |
 | 77 | `code/review_section.rs` | 41 |
-| 78 | `comment_composer.rs` | 190 |
+| 78 | ~~`comment_composer.rs`~~ | **DELETED** — comments now handled by `reply_composer.rs` (via `is_note` flag) |
 | 79 | `content_share_modal.rs` | 261 |
 | 80-81 | `list/add_to_list_modal.rs` | 508, 552 |
 | 82 | `list/create_list_modal.rs` | 315 |
@@ -583,11 +600,13 @@ All only extract `output.id().to_hex()`. **No relay detail needed.**
 
 | Metric | Count |
 |--------|-------|
-| Total SDK publish call sites | ~200+ |
+| Total SDK publish call sites | **~157** (151 `send_event_builder` + 6 `send_event_builder_to`) |
 | Callers using PublishResult relay details | **10** (need targeted UI update) |
-| Callers using only event_id or error propagation | ~190+ (no change needed) |
+| Callers using only event_id or error propagation | ~147+ (no change needed) |
 | Cashu-specific queue functions | ~10 functions, ~20+ internal call sites |
 | Duplicated signing helper copies | 4+ files |
+| Already using sign-then-send pattern | `publish_repost_tracked`, `publish_edit` (simpler migration) |
+| Files deleted since plan written | `comment_composer.rs` (merged into `reply_composer.rs`) |
 
 ---
 
@@ -598,22 +617,26 @@ All only extract `output.id().to_hex()`. **No relay detail needed.**
 - **Persistence**: IndexedDB via existing `SHARED_LOCALSTORE` / `IndexedDbDatabase`
 - **Optimism level**: Return after signing, before relay send
 - **Scope**: Full — core queue + migrate all publishers + UI indicator + management page
+- **Deduplication**: Included in Phase 1 — Primal-style dedup by event ID on enqueue
+- **Replaceable/addressable event coalescing**: Included in Phase 1 — newer events replace older ones of same kind/d-tag
+- **Background processor**: `spawn_forever` on both WASM and native platforms
+- **Migration phasing**: Sub-phased by priority (3a → 3b → 3c)
 
 ### Approach: Internal-Change-Only (Zero Signature Changes)
 
-Instead of changing function signatures across 200+ call sites, change the **internal implementation** of publish functions while keeping return types backward-compatible.
+Instead of changing function signatures across ~157 call sites, change the **internal implementation** of publish functions while keeping return types backward-compatible.
 
 ```
-BEFORE (current):
+PATTERN A — Most functions (current → new):
   publish_note_tracked(builder)
-    → client.send_event_builder(builder).await  [blocks until relays respond]
-    → PublishResult { event_id, successful_relays, failed_relays }
+    BEFORE: → client.send_event_builder(builder).await  [blocks until relays respond]
+    AFTER:  → sign_event_builder(builder).await          [signs synchronously]
+            → enqueue(signed_event)                       [queues for background relay send]
 
-AFTER (new):
-  publish_note_tracked(builder)
-    → sign_event_builder(builder).await          [signs synchronously]
-    → enqueue(signed_event)                       [queues for background relay send]
-    → PublishResult { event_id, queued: true, successful_relays: [], failed_relays: [] }
+PATTERN B — Already sign-then-send (reposts, edits — simpler migration):
+  publish_repost_tracked(builder)
+    BEFORE: → sign_event_builder(builder).await → client.send_event_to(relays, &event)
+    AFTER:  → sign_event_builder(builder).await → enqueue(event, target_relays)
 ```
 
 ### File Structure
@@ -621,7 +644,7 @@ AFTER (new):
 ```
 src/stores/publish_queue/
 ├── mod.rs           # Queue operations + public API + module init
-├── types.rs         # QueuedEvent, QueueEventStatus, PublishQueueStore
+├── types.rs         # QueuedEvent, QueueEventStatus, QueueEventType, PublishQueueStore
 ├── processor.rs     # Background processor (WASM + native variants)
 ├── persistence.rs   # IndexedDB save/load via SHARED_LOCALSTORE
 └── signing.rs       # Shared signing helper (promoted from cashu/events.rs)
@@ -649,12 +672,40 @@ pub enum QueueEventStatus {
     Aborted,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum QueueEventType {
+    Note,
+    Reaction,
+    Repost,
+    Article,
+    Profile,
+    Contacts,
+    Media,
+    Edit,
+    DirectMessage,
+    Calendar,
+    Shop,
+    Cashu,
+    Community,
+    Channel,
+    PinBoard,
+    Topic,
+    Pack,
+    Mute,
+    Poll,
+    Bookmark,
+    GitHosting,
+    RelayList,
+    Other(String),
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct QueuedEvent {
     pub id: String,
     pub event_json: String,
-    pub event_type: String,
+    pub event_type: QueueEventType,
     pub event_id: String,
+    pub pubkey: String,
     pub status: QueueEventStatus,
     pub target_relays: Option<Vec<String>>,
     pub created_at: u64,
@@ -681,23 +732,32 @@ Promote from `cashu/events.rs:146`. Handles all 4 signer types with proper cfg g
 
 #### Queue Operations (`src/stores/publish_queue/mod.rs`)
 - `enqueue(event, event_type, target_relays, metadata) -> String` — Returns queue UUID
+  - **Deduplication**: Before adding, check if `event_id` already exists in queue. If so, skip.
+  - **Coalescing**: For replaceable events (kind 0, 3, 10000-19999), replace any existing queued event of same kind from same pubkey. For addressable events (kind 30000-39999), replace any existing queued event with matching `kind + d-tag + pubkey`. For all other events, append normally. Uses `QueuedEvent.pubkey` directly — no need to deserialize `event_json`. Always compare `created_at` timestamps to keep the newer event.
+  - **Persist immediately** to IndexedDB after enqueue/coalesce (crash safety).
 - `deque(id)` — Remove + persist
 - `update_status(id, status)` — Update + persist
 - `get_pending() -> Vec<QueuedEvent>` — Filter helper
 - `clear_completed()` — Remove Success/Aborted
+- `retry(id)` — Reset status to Pending, clear retry_count
 
 #### Background Processor (`src/stores/publish_queue/processor.rs`)
-- WASM variant: `spawn` + `gloo_timers::future::TimeoutFuture`
-- Native variant: `spawn_forever` + `tokio::time::sleep`
+- **Both WASM and native**: `spawn_forever` + platform-appropriate timer (`gloo_timers::future::TimeoutFuture` on WASM, `tokio::time::sleep` on native)
 - Adaptive polling: 10s active, 60s idle
 - Per-event:
   1. Deserialize `Event` from `event_json`
-  2. `client.send_event(&event).ack_policy(AckPolicy::all()).await` (or `.to(urls)` if target_relays set)
+  2. If `target_relays` is Some(urls): `client.send_event_to(urls, &event).await`
+     If `target_relays` is None: `client.send_event(&event).await`
+     Both await relay OK (up to 10s per relay, concurrent across relays via join_all)
   3. Success → `Success` → auto-remove after 30s
   4. Partial failure → increment retry, backoff
   5. Total failure → `Failed` → retry with backoff
   6. Max retries (5) → `MaxRetriesExceeded`
 - Singleton guard via `AtomicBool`
+- **Timeout constraint**: `send_event` / `send_event_to` have a hardcoded 10s OK timeout per relay (not configurable). With concurrent relay sends via `join_all`, worst case is ~10s per event. Adaptive polling intervals (10s active, 60s idle) account for this.
+- **Throughput expectation**: Each event takes up to ~10s (relay OK timeout) since the SDK uses `join_all` (waits for ALL relays), not `Promise.any` (first success wins) like Primal. A backlog of 20 events could take ~200s to clear. The UI should reflect backlog size and estimated drain time, not just "pending" status.
+- **Future optimization**: For non-critical events, consider `send_event_to` with a single relay (let gossip propagation handle the rest) to reduce per-event latency from ~10s to ~1-2s. This would require classifying events by criticality in `QueueEventType`.
+- **Panic safety**: `spawn_forever` has no panic catching in the Dioxus runtime. The processor loop body MUST handle all errors (match existing Cashu pattern: `if let Err(e) = ...`). An unhandled panic kills the app.
 
 #### Persistence (`src/stores/publish_queue/persistence.rs`)
 - Add `STORE_PUBLISH_QUEUE = "publish_queue"` constant
@@ -727,71 +787,139 @@ impl PublishResult {
         }
     }
     // Keep existing from_output() unchanged
-    pub fn is_success(&self) -> bool { true } // Always true — optimistic
+    // Keep existing ignoring_duplicate_event_failures() unchanged
+    // Keep existing success_rate() unchanged
+    pub fn is_success(&self) -> bool { self.queued || !self.successful_relays.is_empty() }
     pub fn has_failures(&self) -> bool { !self.queued && !self.failed_relays.is_empty() }
 }
 ```
 
 ### Phase 3: Modify Publish Functions (Internal Only)
 
-Each `publish_*_tracked` function changes from:
+**Pattern A** — Functions currently using `send_event_builder` (most functions):
 ```rust
+// FROM:
 let output = client.send_event_builder(tag_event_builder(builder)).await?;
 Ok(PublishResult::from_output(output))
-```
-To:
-```rust
+// TO:
 let event = sign_event_builder(builder).await?;
 let event_id = event.id.to_hex();
-let queue_id = enqueue(event, "note", None, HashMap::new());
+let queue_id = enqueue(event, QueueEventType::Note, None, HashMap::new());
 Ok(PublishResult::queued(queue_id, event_id))
 ```
 
-**Files to modify** (internal implementation only, no signature changes):
+**Pattern B** — Functions already using sign-then-send (reposts, edits):
+```rust
+// FROM:
+let event = client.sign_event_builder(builder).await?;
+let output = client.send_event_to(write_relays, &event).await?;
+Ok(PublishResult::from_output(output))
+// TO:
+let event = client.sign_event_builder(builder).await?;
+let event_id = event.id.to_hex();
+let queue_id = enqueue(event, QueueEventType::Repost, Some(write_relays), HashMap::new());
+Ok(PublishResult::queued(queue_id, event_id))
+```
+
+**Special cases**:
+- **Encrypted DMs** (`stores/social/dms.rs`): NIP-44 encryption must happen BEFORE the `sign → enqueue` step. The existing encrypt-then-build-EventBuilder flow stays unchanged; only the final `send_event_builder` call gets replaced with `sign → enqueue`.
+- **Deletion events** (kind 5): Processed FIFO like all other events. If a delete event is enqueued while its target event is still in the queue, both will be sent in order. Known limitation: there is no guarantee the target event reaches relays before the delete, but FIFO ordering makes this extremely unlikely in practice.
+
+**Sub-phased migration by priority:**
+
+#### Phase 3a: Core Publish Functions (~15 functions)
 
 | File | Functions |
 |------|-----------|
 | `stores/nostr_client/notes.rs` | `publish_note_tracked` |
 | `stores/nostr_client/reactions.rs` | `publish_reaction_tracked` |
-| `stores/nostr_client/reposts.rs` | `publish_repost_tracked` |
+| `stores/nostr_client/reposts.rs` | `publish_repost_tracked` — **already uses sign-then-send** (`sign_event_builder` + `send_event_to`); just replace `send_event_to` with `enqueue` |
 | `stores/nostr_client/articles.rs` | `publish_article_tracked` |
 | `stores/nostr_client/contacts.rs` | `publish_enriched_contacts` |
 | `stores/nostr_client/profile.rs` | `publish_metadata_tracked` |
-| `stores/nostr_client/media.rs` | `publish_picture_tracked`, `publish_video_tracked`, `publish_voice_message_tracked` |
+| `stores/nostr_client/media.rs` | `publish_picture_tracked`, `publish_video_tracked`, `publish_voice_message_tracked`, `publish_voice_message_reply_tracked` (NIP-22, Kind 1244) |
+| `stores/nostr_client/edits.rs` | `publish_edit` — **already uses sign-then-send** (`sign_event_builder` + `send_event`); just replace `send_event` with `enqueue` |
 | `stores/nostr_client/muting.rs` | all mute/unmute/block/report |
 | `stores/nostr_client/custom_nips.rs` | `publish_custom_nip_tracked` |
-| `stores/nostr_client/edits.rs` | `publish_edit` |
-| `stores/nostr_client/relay_publishing.rs` | all 5 functions |
+| `stores/nostr_client/relay_publishing.rs` | all 5 functions — use `send_event_builder_to`/`send_event_to` for targeted relays; must pass relay URLs through `target_relays` param to `enqueue()`. All functions now call `ignoring_duplicate_event_failures()` on results — preserve this in queue result handling |
+
+#### Phase 3b: Social & Content Stores (~30 functions)
+
+| File | Functions |
+|------|-----------|
+| `stores/social/community_store/publish.rs` | 8 functions |
+| `stores/social/dms.rs` | 3 functions — **special: must encrypt content BEFORE building EventBuilder; encrypt first, then `sign → enqueue` the pre-built encrypted event** |
+| `stores/social/topic_store/publish.rs` | 4 functions |
+| `stores/social/pin_boards_store/publish.rs` | 6 functions |
+| `stores/social/pinned_communities.rs` | 1 function |
+| `stores/social/pinned_notes.rs` | 1 function |
+| `stores/social/packs_store.rs` | 2 functions |
+| `stores/social/channel_store.rs` | 2 functions |
+| `stores/social/reactions_store.rs` | 1 function |
+| `stores/social/polls.rs` | 6 functions |
+| `stores/social/muting.rs` | 5 functions |
+| `stores/social/bookmarks.rs` | 1 function |
+
+#### Phase 3c: Everything Else (~100+ sites)
+
+| File / Directory | Sites |
+|------------------|-------|
 | `stores/calendar_store/publish.rs` | 6 functions |
 | `stores/relay/nip65.rs` | 4 functions |
 | `stores/shop_store/mod.rs` | 6 functions |
 | `services/git_hosting/*` | ~15 functions |
-| All ~100+ direct `send_event_builder` callers in social stores, content stores, components, routes, utils |
+| Content stores (citation, draft, publication, recipe, wiki, etc.) | ~20 sites |
+| Stores (nostr_music, podcast_subscription, zap_goals, directory, dvm, emoji, embedding, notifications, settings, sidebar) | ~15 sites |
+| Stores (media/blossom_store, media/gif_store, webbookmarks) | ~5 sites |
+| Components (blobbi/*, content_share_modal, list/*, live/*, share_modal, code/review_section) | ~19 sites (`comment_composer.rs` deleted — comments handled by `reply_composer.rs`) |
+| Routes (radio, video, code) | ~5 sites |
+| Utils (list_encryption, nip58, nip84) | ~5 sites |
+
+#### Phase 3c Validation Gate
+
+After completing Phase 3c, run a codebase-wide grep for remaining direct `send_event_builder` and `send_event` calls outside the queue processor:
+
+```bash
+grep -rn 'send_event_builder\|\.send_event(' src/ --include='*.rs' | \
+  grep -v 'publish_queue/' | grep -v 'test'
+```
+
+**Any remaining call sites are bugs** — they bypass the queue and block on relay OK. Each must be migrated or explicitly whitelisted (e.g., the queue processor itself, test code).
+
+Target: zero non-whitelisted hits before proceeding to Phase 4.
+
+**Special attention**: `reply_composer.rs` uses a gossip-first, broadcast-fallback strategy with both `client.send_event()` and `send_presigned_event_to_relays()`. Both paths must be migrated to route through the queue. Consider whether the gossip-first pattern should be preserved in the queue processor (enqueue with `target_relays: None` for gossip routing) or flattened to a single queue entry.
 
 ### Phase 4: Update ~10 UI Callers That Use Relay Details
+
+These callers currently show real-time relay feedback ("Published to 3/5 relays"). After the queue migration, `PublishResult` will have `queued: true` with empty relay lists. Update these to show optimistic "Publishing..." / "Published" states instead of relay counts.
 
 | File | Component | Change needed |
 |------|-----------|---------------|
 | `components/photo_card.rs:639,681` | Reply publish | Remove relay count display; show "Published" |
-| `components/note_composer.rs:40` | Note composer | Show "Publishing..." → "Published" instead of relay counts |
+| `components/note_composer.rs:51,110` | Note composer (Inline + FullPage variants) | Show "Publishing..." → "Published" instead of relay counts |
 | `hooks/use_reaction.rs:283,362` | Reaction toggle | Set Success immediately; remove relay logging |
 | `components/edit_post.rs:183` | Edit publish | Remove relay detail checks; keep Event object usage |
 | `components/note_menu.rs:426` | Broadcast | Show "Broadcast queued" instead of relay counts |
-| `components/reply_composer.rs:259` | Reply publish | Show "Published" instead of relay counts |
+| `components/reply_composer.rs:188` | Reply publish (gossip-first, broadcast-fallback) | Show "Published" instead of relay counts; both gossip and fallback paths must route through queue |
 | `stores/content/draft_store.rs:279,409` | Draft publish | Log "queued" instead of relay counts |
 | `routes/settings/home.rs:1447` | Vanish request | Show "Request queued" |
 
 ### Phase 5: Replace Cashu Queue
 
-1. Add migration in IndexedDB `on_upgrade_needed` (bump `DB_VERSION` to 7)
-2. Load old `PendingNostrEvent` entries, convert to `QueuedEvent`, save to new `publish_queue` store
-3. Redirect all Cashu callers to use `publish_queue::enqueue()`
-4. Remove Cashu-specific queue code:
+**Migration ordering (prevents double-processing):**
+
+1. **Drain old Cashu processor** — Set `PROCESSOR_RUNNING` AtomicBool to false, then **wait for current iteration to complete** (the AtomicBool is checked between loop iterations, not during `send_event`). If the processor is mid-send, wait up to 15s for the current `send_event` call to time out before proceeding. This prevents events from being lost or duplicated during migration.
+2. **Load old `PendingNostrEvent` entries** from `pending_events` IndexedDB store
+3. **Convert to `QueuedEvent` format**, save to new `publish_queue` IndexedDB store
+4. **Remove old `PENDING_NOSTR_EVENTS` references**:
    - `cashu/events.rs`: Remove `queue_nostr_event`, `queue_signed_event_for_retry*`, `queue_event_for_retry`, `queue_token_event_for_retry*`, `process_pending_events`, `start_pending_events_processor`, `PENDING_NOSTR_EVENTS` references
    - `cashu/types.rs`: Remove `PendingNostrEvent`, `PendingEventType`
    - `cashu/signals.rs`: Remove `PENDING_NOSTR_EVENTS`
    - `cashu/init.rs`: Replace `load_pending_events` + `start_pending_events_processor` with universal queue load + processor start
-5. Remove duplicated signing helpers in `mint_mgmt.rs`, `payment_request.rs`, `blossom_store.rs`, `gif_store.rs` — redirect to `publish_queue::sign_event_builder`
+5. **Remove duplicated signing helpers** in `mint_mgmt.rs`, `payment_request.rs`, `blossom_store.rs`, `gif_store.rs` — redirect to `publish_queue::sign_event_builder`
+6. **Bump `DB_VERSION` to 7** in `indexeddb_database.rs`, add migration in `on_upgrade_needed` (additive only — keep old `pending_events` store for rollback)
+7. **Start new universal processor** via `start_publish_queue_processor()`
 
 ### Phase 6: Migrate Pinned Notes/Communities
 
@@ -812,7 +940,7 @@ Ok(PublishResult::queued(queue_id, event_id))
 #### Queue Management Page (`src/routes/publish_queue.rs`)
 - Route: `/pending`
 - List grouped by status (Failed, Pending, Publishing, Success)
-- Per-event: type icon, event preview (truncated content from event_json), status badge, timestamp, retry count
+- Per-event: type icon (from `QueueEventType`), event preview (truncated content from event_json), status badge, timestamp, retry count
 - Actions: Retry, Abort
 - Bulk: Retry All Failed, Clear Completed
 - Reactive via `Store<PublishQueueStore>` per-item reactivity
@@ -834,22 +962,30 @@ Ok(PublishResult::queued(queue_id, event_id))
 | IndexedDB version bump breaks wallets | Low | High | Additive migration only; keep old store for rollback |
 | Android signer blocks processor (45s) | Medium | Medium | Process events sequentially; Android events wait their turn |
 | Events lost on crash before IndexedDB write | Low | High | Write to IndexedDB immediately on enqueue |
-| `PublishResult` backward compat breakage | Low | High | Additive changes only; `is_success()` always true |
-| Cashu migration data loss | Low | High | Convert old entries before removing old store |
-| `send_event_builder_to` deprecation | Low | Low | Use `send_event(&event).to(urls)` for targeted sends |
-| WASM ordering: sleep-then-process | Low | Low | Match existing Cashu pattern; initial delay acceptable |
+| `PublishResult` backward compat breakage | Low | High | Additive changes only; `is_success()` returns `self.queued || !self.successful_relays.is_empty()` — preserves original semantics for non-queued results |
+| Cashu migration data loss | Low | High | Convert old entries before removing old store; stop old processor before starting new |
+| `send_event` hardcoded 10s OK timeout | Medium | Low | Slow/stalled relays delay processor; events processed sequentially so one slow relay doesn't block others |
+| Replaceable event coalescing drops newer event | Low | Medium | Compare `created_at` timestamps; always keep the newer event |
+| Dedup prevents legitimate republish | Low | Low | Only dedup on event ID hash; content changes produce different IDs |
+| DM encryption step skipped during migration | Low | High | DM functions keep their encrypt-then-build flow; only `send_event_builder` → `sign → enqueue` changes |
+| Delete event reaches relay before target | Low | Low | FIFO processing makes this unlikely; relay-side kind-5 semantics are advisory anyway |
+| Missed call site bypasses queue after Phase 3c | Medium | Medium | Phase 3c validation gate (grep for remaining `send_event_builder` calls); zero non-whitelisted hits required |
 
 ### What Stays Unchanged
 - All function signatures across the entire codebase
-- `PublishResult` existing fields and methods (additive only)
-- All callers that just use `event_id` or `?` error propagation (~190+ sites)
+- `PublishResult` existing fields and methods (additive only — preserve `ignoring_duplicate_event_failures()`, `success_rate()`)
+- All callers that just use `event_id` or `?` error propagation (~147+ sites)
 - Cashu wallet business logic (only queue infrastructure changes)
 - Relay connection management, event subscriptions
 - No changes to any non-publish code paths
+- `reply_composer.rs` gossip-first strategy pattern preserved (both paths route through queue)
 
 ### Dependencies Verified
 - [x] `dioxus-stores` `0.7.3` supports `#[derive(Store)]` for multi-field structs
-- [x] `nostr_sdk::AckPolicy` re-exported and accessible
+- [x] `nostr_sdk::Client::send_event_to` available for targeted relay sends
 - [x] `indexed_db_futures` supports store creation in `on_upgrade_needed`
 - [x] `gloo-timers` futures feature available
-- [x] `dioxus_core::spawn_forever` available on native (13 existing uses)
+- [x] `dioxus_core::spawn_forever` available on all platforms (confirmed: WASM + native)
+- [x] All Primal reference architecture claims validated against source
+- [x] All nostr SDK API claims validated against source
+- [x] All Dioxus framework claims validated against source

@@ -285,51 +285,20 @@ pub async fn save_preferred_reactions(reactions: Vec<PreferredReaction>) -> Resu
         .map_err(|e| format!("Failed to serialize reactions: {}", e))?;
     let builder =
         EventBuilder::new(Kind::from(APP_DATA_KIND), content).tag(Tag::identifier(REACTIONS_D_TAG));
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| {
-            let error = format!("Failed to publish reactions: {}", e);
+            let error = format!("Failed to sign reactions: {}", e);
             *REACTIONS_STATE.write() = Nip78LoadState::Failed(error.clone());
             error
         })?;
-    let success_count = output.success.len();
-    let failed_count = output.failed.len();
-    let total = success_count + failed_count;
-    if output.success.is_empty() {
-        let relay_errors = output
-            .failed
-            .iter()
-            .map(|(relay, error)| format!("{relay}: {error}"))
-            .collect::<Vec<_>>()
-            .join("; ");
-        let error = if relay_errors.is_empty() {
-            format!(
-                "Failed to publish reactions: no relays accepted event {}",
-                output.id().to_hex()
-            )
-        } else {
-            format!(
-                "Failed to publish reactions: no relays accepted event {} ({})",
-                output.id().to_hex(),
-                relay_errors
-            )
-        };
-        log::warn!("{}", error);
-        *REACTIONS_STATE.write() = Nip78LoadState::Failed(error.clone());
-        return Err(error);
-    }
-    log::info!(
-        "Reactions preferences saved: {} ({}/{} relays succeeded)",
-        output.id().to_hex(),
-        success_count,
-        total
-    );
-    if !output.failed.is_empty() {
-        for (relay, error) in &output.failed {
-            log::warn!("Relay {} failed: {}", relay, error);
-        }
-    }
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Reaction,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    log::info!("Reactions preferences saved");
     cache_reactions(&data);
     *PREFERRED_REACTIONS.write() = reactions;
     *REACTIONS_STATE.write() = Nip78LoadState::Loaded;

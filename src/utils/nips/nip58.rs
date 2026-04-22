@@ -322,7 +322,7 @@ pub async fn create_badge_definition(
     thumb_url: Option<&str>,
     thumb_dimensions: Option<&str>,
 ) -> Result<String, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = nostr_client::get_client().ok_or("Client not initialized")?;
     if !nostr_client::has_signer() {
         return Err("No signer available".to_string());
     }
@@ -350,12 +350,18 @@ pub async fn create_badge_definition(
         }
         tags.push(Tag::custom(TagKind::Custom("thumb".into()), thumb_tag));
     }
-    let event = EventBuilder::new(Kind::Custom(KIND_BADGE_DEFINITION), "").tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(event))
+    let builder = EventBuilder::new(Kind::Custom(KIND_BADGE_DEFINITION), "").tags(tags);
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish badge: {}", e))?;
-    Ok(output.id().to_hex())
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("emoji".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }
 /// Award a badge to one or more users (kind 8)
 #[allow(dead_code)]
@@ -363,7 +369,7 @@ pub async fn award_badge(
     definition_coordinate: &str,
     awardees: Vec<&str>,
 ) -> Result<String, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = nostr_client::get_client().ok_or("Client not initialized")?;
     if !nostr_client::has_signer() {
         return Err("No signer available".to_string());
     }
@@ -383,19 +389,25 @@ pub async fn award_badge(
             .map_err(|e| format!("Invalid awardee pubkey {}: {}", awardee, e))?;
         tags.push(Tag::public_key(pk));
     }
-    let event = EventBuilder::new(Kind::Custom(KIND_BADGE_AWARD), "").tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(event))
+    let builder = EventBuilder::new(Kind::Custom(KIND_BADGE_AWARD), "").tags(tags);
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to award badge: {}", e))?;
-    Ok(output.id().to_hex())
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("emoji".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }
 /// Accept a badge (add to profile badges)
 pub async fn accept_badge(
     definition_coordinate: &str,
     award_event_id: &str,
 ) -> Result<String, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = nostr_client::get_client().ok_or("Client not initialized")?;
     if !nostr_client::has_signer() {
         return Err("No signer available".to_string());
     }
@@ -428,16 +440,22 @@ pub async fn accept_badge(
         TagKind::Custom("e".into()),
         vec![award_event_id.to_string()],
     ));
-    let event = EventBuilder::new(Kind::Custom(KIND_PROFILE_BADGES), "").tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(event))
+    let builder = EventBuilder::new(Kind::Custom(KIND_PROFILE_BADGES), "").tags(tags);
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to accept badge: {}", e))?;
-    Ok(output.id().to_hex())
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("emoji".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }
 /// Reject/remove a badge from profile badges
 pub async fn reject_badge(definition_coordinate: &str) -> Result<String, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = nostr_client::get_client().ok_or("Client not initialized")?;
     if !nostr_client::has_signer() {
         return Err("No signer available".to_string());
     }
@@ -460,12 +478,18 @@ pub async fn reject_badge(definition_coordinate: &str) -> Result<String, String>
             vec![entry.award_event_id.clone()],
         ));
     }
-    let event = EventBuilder::new(Kind::Custom(KIND_PROFILE_BADGES), "").tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(event))
+    let builder = EventBuilder::new(Kind::Custom(KIND_PROFILE_BADGES), "").tags(tags);
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to reject badge: {}", e))?;
-    Ok(output.id().to_hex())
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("emoji".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }
 /// Get first value of a tag by name
 fn get_tag_value(event: &Event, tag_name: &str) -> Option<String> {

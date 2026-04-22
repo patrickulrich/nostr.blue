@@ -227,7 +227,7 @@ pub async fn transfer_between_mints(
         .as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
     let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let client = nostr_client::NOSTR_CLIENT
+    let _client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
@@ -255,36 +255,22 @@ pub async fn transfer_between_mints(
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-        match client
-            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
-                builder.clone(),
-            ))
-            .await
-        {
-            Ok(event_output) if !event_output.success.is_empty() => {
-                source_new_event_id = Some(event_output.id().to_hex());
-                log::info!("Published source token event: {:?}", source_new_event_id);
-            }
-            Ok(_) => {
-                log::warn!("No relays accepted source token event");
-                let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                queue_event_for_retry(
-                    builder,
-                    PendingEventType::TokenEvent,
-                    Some(pending_id.clone()),
-                    Some(source_mint.clone()),
-                )
-                .await
-                .map_err(|queue_err| {
-                    format!(
-                        "Failed to queue source token event for retry: {}",
-                        queue_err
-                    )
-                })?;
-                source_new_event_id = Some(pending_id);
+        match crate::stores::publish_queue::signing::sign_event_builder(builder.clone()).await {
+            Ok(signed_event) => {
+                source_new_event_id = Some(signed_event.id.to_hex());
+                let mut metadata = std::collections::HashMap::new();
+                metadata.insert("pending_token_id".to_string(), source_new_event_id.as_ref().unwrap().clone());
+                metadata.insert("mint_url".to_string(), source_mint.clone());
+                crate::stores::publish_queue::enqueue(
+                    signed_event,
+                    crate::stores::publish_queue::types::QueueEventType::Cashu,
+                    None,
+                    metadata,
+                ).await;
+                log::info!("Queued source token event: {:?}", source_new_event_id);
             }
             Err(e) => {
-                log::warn!("Failed to publish source token event: {}", e);
+                log::warn!("Failed to sign source token event, queuing unsigned: {}", e);
                 let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
                 queue_event_for_retry(
                     builder,
@@ -311,26 +297,17 @@ pub async fn transfer_between_mints(
             }
         }
         let builder = nostr_sdk::EventBuilder::delete(deletion_request);
-        match client
-            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
-                builder.clone(),
-            ))
-            .await
-        {
-            Ok(event_output) if !event_output.success.is_empty() => {}
-            Ok(_) => {
-                log::warn!("No relays accepted deletion event");
-                queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None)
-                    .await
-                    .map_err(|queue_err| {
-                        format!(
-                            "Failed to queue transfer deletion event for retry: {}",
-                            queue_err
-                        )
-                    })?;
+        match crate::stores::publish_queue::signing::sign_event_builder(builder.clone()).await {
+            Ok(signed_event) => {
+                crate::stores::publish_queue::enqueue(
+                    signed_event,
+                    crate::stores::publish_queue::types::QueueEventType::Cashu,
+                    None,
+                    std::collections::HashMap::new(),
+                ).await;
             }
             Err(e) => {
-                log::warn!("Failed to publish deletion event: {}", e);
+                log::warn!("Failed to sign transfer deletion event, queuing unsigned: {}", e);
                 queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None)
                     .await
                     .map_err(|queue_err| {
@@ -362,37 +339,23 @@ pub async fn transfer_between_mints(
             .await
             .map_err(|e| format!("Failed to encrypt target token event: {}", e))?;
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-        match client
-            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
-                builder.clone(),
-            ))
-            .await
-        {
-            Ok(event_output) if !event_output.success.is_empty() => {
-                let event_id = event_output.id().to_hex();
-                log::info!("Published target token event: {}", event_id);
+        match crate::stores::publish_queue::signing::sign_event_builder(builder.clone()).await {
+            Ok(signed_event) => {
+                let event_id = signed_event.id.to_hex();
+                let mut metadata = std::collections::HashMap::new();
+                metadata.insert("pending_token_id".to_string(), event_id.clone());
+                metadata.insert("mint_url".to_string(), target_mint.clone());
+                crate::stores::publish_queue::enqueue(
+                    signed_event,
+                    crate::stores::publish_queue::types::QueueEventType::Cashu,
+                    None,
+                    metadata,
+                ).await;
+                log::info!("Queued target token event: {}", event_id);
                 event_id
             }
-            Ok(_) => {
-                log::warn!("No relays accepted target token event");
-                let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                queue_event_for_retry(
-                    builder,
-                    PendingEventType::TokenEvent,
-                    Some(pending_id.clone()),
-                    Some(target_mint.clone()),
-                )
-                .await
-                .map_err(|queue_err| {
-                    format!(
-                        "Failed to queue target token event for retry: {}",
-                        queue_err
-                    )
-                })?;
-                pending_id
-            }
             Err(e) => {
-                log::warn!("Failed to publish target token event: {}", e);
+                log::warn!("Failed to sign target token event, queuing unsigned: {}", e);
                 let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
                 queue_event_for_retry(
                     builder,

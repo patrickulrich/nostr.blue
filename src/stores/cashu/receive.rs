@@ -12,7 +12,7 @@ use super::types::{
     ExtendedCashuProof, ExtendedTokenEvent, ProofData, TokenData, WalletTokensStoreStoreExt,
 };
 use super::utils::{normalize_mint_url, sanitize_and_validate_token};
-use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
+use crate::stores::{auth_store, cashu_cdk_bridge};
 use dioxus::prelude::*;
 use nostr_sdk::signer::NostrSigner;
 use nostr_sdk::{Kind, PublicKey};
@@ -336,110 +336,20 @@ pub async fn receive_tokens_with_options(
         .await
         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted.clone());
-    let client = nostr_client::NOSTR_CLIENT
-        .read()
-        .as_ref()
-        .ok_or("Client not initialized")?
-        .clone();
-    let signed_event = crate::utils::nips::nip89::tag_event_builder(builder)
-        .build(pubkey)
-        .sign(&signer)
+    let signed_event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign token event: {}", e))?;
-    let pre_signed_event_id = signed_event.id.to_hex();
-    let mut event_id: Option<String> = None;
-    let mut last_error = String::new();
-    let mut retryable = true;
-    let delays_ms = [500u32, 1000, 2000];
-    for (attempt, delay_ms) in std::iter::once(0u32)
-        .chain(delays_ms.iter().copied())
-        .enumerate()
-    {
-        if attempt > 0 {
-            #[cfg(feature = "web")]
-            {
-                let jitter = (js_sys::Math::random() * 200.0) as u32;
-                let actual_delay = delay_ms.saturating_sub(100) + jitter;
-                crate::platform::timer::sleep_ms(actual_delay).await;
-            }
-            #[cfg(feature = "native")]
-            {
-                use rand::Rng;
-                let jitter = rand::thread_rng().gen_range(0..200);
-                let actual_delay = delay_ms.saturating_sub(100) + jitter;
-                crate::platform::timer::sleep_ms(actual_delay).await;
-            }
-            log::info!("Retrying token event publish (attempt {})", attempt + 1);
-        }
-        match client.send_event(&signed_event).await {
-            Ok(output) => {
-                if !output.success.is_empty() {
-                    event_id = Some(pre_signed_event_id.clone());
-                    log::info!(
-                        "Published token event to {}/{} relays",
-                        output.success.len(),
-                        output.success.len() + output.failed.len()
-                    );
-                    break;
-                } else {
-                    let all_duplicates = output
-                        .failed
-                        .values()
-                        .all(|err| err.to_lowercase().starts_with("duplicate:"));
-                    if all_duplicates && !output.failed.is_empty() {
-                        log::debug!(
-                            "Token event {} already exists on all relays (duplicate)",
-                            pre_signed_event_id
-                        );
-                        event_id = Some(pre_signed_event_id.clone());
-                        retryable = false;
-                        break;
-                    }
-                    last_error = format!("All {} relays failed", output.failed.len());
-                }
-            }
-            Err(e) => {
-                last_error = e.to_string();
-                let err_str = last_error.to_lowercase();
-                if err_str.contains("banned") || err_str.contains("invalid") {
-                    log::error!("Permanent error, stopping retries: {}", last_error);
-                    retryable = false;
-                    break;
-                }
-                if err_str.contains("duplicate") || err_str.contains("already exists") {
-                    log::info!("Event already exists on relay, using pre-signed ID");
-                    event_id = Some(pre_signed_event_id.clone());
-                    retryable = false;
-                    break;
-                }
-            }
-        }
-    }
-    let event_id = match event_id {
-        Some(id) => id,
-        None => {
-            if retryable {
-                log::error!(
-                    "All publish attempts failed, queueing for retry: {}",
-                    last_error
-                );
-                let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                let retry_builder =
-                    nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted.clone());
-                super::events::queue_token_event_for_retry(
-                    retry_builder,
-                    pending_id.clone(),
-                    mint_url.clone(),
-                )
-                .await;
-                pending_id
-            } else {
-                log::warn!("Permanent error - not queueing for retry: {}", last_error);
-                format!("local_{}", uuid::Uuid::new_v4())
-            }
-        }
-    };
-    log::info!("Token event ID: {}", event_id);
+    let event_id = signed_event.id.to_hex();
+    let mut metadata = std::collections::HashMap::new();
+    metadata.insert("pending_token_id".to_string(), event_id.clone());
+    metadata.insert("mint_url".to_string(), mint_url.clone());
+    crate::stores::publish_queue::enqueue(
+        signed_event,
+        crate::stores::publish_queue::types::QueueEventType::Cashu,
+        None,
+        metadata,
+    ).await;
+    log::info!("Queued token event: {}", event_id);
     {
         let store = WALLET_TOKENS.read();
         let mut data = store.data();

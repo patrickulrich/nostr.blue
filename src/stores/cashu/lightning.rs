@@ -2,7 +2,7 @@
 //!
 //! Functions for mint/melt operations (lightning topup and withdrawal).
 use super::events::{
-    publish_quote_event, publish_signed_event, queue_event_for_retry,
+    publish_quote_event, queue_event_for_retry,
     queue_token_event_for_retry_with_history, sign_event_builder, sign_event_builder_with_signer,
 };
 use super::internal::{
@@ -31,10 +31,20 @@ use nostr_sdk::signer::NostrSigner;
 use nostr_sdk::{Client, EventId, Kind, PublicKey};
 
 async fn send_signed_builder(
-    client: &Client,
+    _client: &Client,
     event: &nostr_sdk::Event,
 ) -> Result<nostr_relay_pool::Output<EventId>, String> {
-    publish_signed_event(client, event).await
+    crate::stores::publish_queue::enqueue(
+        event.clone(),
+        crate::stores::publish_queue::types::QueueEventType::Cashu,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(nostr_relay_pool::Output {
+        val: event.id,
+        success: std::collections::HashSet::new(),
+        failed: std::collections::HashMap::new(),
+    })
 }
 /// Create a mint quote (request lightning invoice to receive sats)
 pub async fn create_mint_quote(
@@ -706,35 +716,17 @@ async fn publish_melt_events(
             let deletion_builder =
                 nostr_sdk::EventBuilder::new(Kind::from(5), "Melted token").tags(tags);
             let signed_deletion = sign_event_builder(deletion_builder.clone()).await?;
-            if let Some(client) = client.as_ref() {
-                match publish_signed_event(client, &signed_deletion).await {
-                    Ok(output) if !output.success.is_empty() => {
-                        log::info!(
-                            "Published deletion events for {} token events",
-                            valid_event_ids.len()
-                        );
-                    }
-                    Ok(_) => {
-                        log::warn!("No relays accepted deletion event, queuing for retry");
-                        queue_event_for_retry(
-                            deletion_builder,
-                            PendingEventType::DeletionEvent,
-                            None,
-                            None,
-                        )
-                        .await?;
-                    }
-                    Err(e) => {
-                        log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
-                        queue_event_for_retry(
-                            deletion_builder,
-                            PendingEventType::DeletionEvent,
-                            None,
-                            None,
-                        )
-                        .await?;
-                    }
-                }
+            if let Some(_client) = client.as_ref() {
+                crate::stores::publish_queue::enqueue(
+                    signed_deletion,
+                    crate::stores::publish_queue::types::QueueEventType::Cashu,
+                    None,
+                    std::collections::HashMap::new(),
+                ).await;
+                log::info!(
+                    "Queued deletion events for {} token events",
+                    valid_event_ids.len()
+                );
             } else {
                 log::warn!("Client not initialized, queuing deletion event for retry");
                 queue_event_for_retry(

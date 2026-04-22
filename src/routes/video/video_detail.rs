@@ -1,5 +1,5 @@
 use crate::components::{
-    icons::MessageCircleIcon, ClientInitializing, CommentComposer, ShareModal, ThreadedComment,
+    icons::MessageCircleIcon, ClientInitializing, ReplyComposer, ShareModal, ThreadedComment,
 };
 use crate::error::NostrBlueError;
 use crate::hooks::use_relay_subscription;
@@ -280,9 +280,9 @@ fn LandscapePlayer(event: Event) -> Element {
                     }}
                 }
                 if *show_comment_composer.read() {
-                    CommentComposer {
-                        comment_on: event.clone(),
-                        parent_comment: None,
+                    ReplyComposer {
+                        target: event.clone(),
+                        root_event: None,
                         on_close: move |_| show_comment_composer.set(false),
                         on_success: move |_| {
                             show_comment_composer.set(false);
@@ -1047,9 +1047,9 @@ fn VideoInfo(
                 }
             }
             if *show_comment_composer.read() {
-                CommentComposer {
-                    comment_on: event.clone(),
-                    parent_comment: None,
+                ReplyComposer {
+                    target: event.clone(),
+                    root_event: None,
                     on_close: move |_| show_comment_composer.set(false),
                     on_success: move |_| {
                         show_comment_composer.set(false);

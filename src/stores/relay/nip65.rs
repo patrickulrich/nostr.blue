@@ -292,7 +292,7 @@ pub async fn fetch_relay_list(
 /// * `client` - The Nostr client instance
 pub async fn publish_relay_list(
     relays: Vec<RelayConfig>,
-    client: Arc<Client>,
+    _client: Arc<Client>,
 ) -> Result<String, String> {
     log::info!("Publishing relay list with {} relays", relays.len());
     let tags: Vec<Tag> = relays
@@ -308,12 +308,17 @@ pub async fn publish_relay_list(
         })
         .collect();
     let builder = EventBuilder::new(Kind::RelayList, "").tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish relay list: {}", e))?;
-    log::info!("Relay list published: {}", output.id().to_hex());
-    Ok(output.id().to_hex())
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::RelayList,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }
 /// Publish DM relay list (kind 10050)
 ///
@@ -322,7 +327,7 @@ pub async fn publish_relay_list(
 /// * `client` - The Nostr client instance
 pub async fn publish_dm_relay_list(
     dm_relays: Vec<String>,
-    client: Arc<Client>,
+    _client: Arc<Client>,
 ) -> Result<String, String> {
     log::info!("Publishing DM relay list with {} relays", dm_relays.len());
     let tags: Vec<Tag> = dm_relays
@@ -330,12 +335,17 @@ pub async fn publish_dm_relay_list(
         .map(|url| Tag::custom(TagKind::Custom("relay".into()), vec![url]))
         .collect();
     let builder = EventBuilder::new(Kind::from(10050), "").tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish DM relay list: {}", e))?;
-    log::info!("DM relay list published: {}", output.id().to_hex());
-    Ok(output.id().to_hex())
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::RelayList,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }
 /// Initialize relay lists for current user on startup
 /// This is called once when the client starts up with a signer.
@@ -352,20 +362,74 @@ pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
         "Loading relay lists for Settings UI for {}",
         user_pubkey.to_hex()
     );
-    match fetch_relay_list(user_pubkey, client).await {
+    match fetch_relay_list(user_pubkey, client.clone()).await {
         Ok(metadata) => {
             log::info!(
-                "Loaded {} general relays and {} DM relays for Settings display",
+                "Loaded {} general relays and {} DM relays",
                 metadata.relays.len(),
                 metadata.dm_relays.len()
             );
+
+            let blocked = BLOCKED_RELAYS.peek();
+            for relay_config in &metadata.relays {
+                let normalized = relay_config.url.trim_end_matches('/');
+                if blocked
+                    .iter()
+                    .any(|b| b.trim_end_matches('/') == normalized)
+                {
+                    log::info!("Skipping blocked NIP-65 relay: {}", relay_config.url);
+                    continue;
+                }
+                if let Ok(url) = RelayUrl::parse(&relay_config.url) {
+                    match client.add_relay(url).await {
+                        Ok(added) => {
+                            log::info!("NIP-65 relay {} (new={})", relay_config.url, added)
+                        }
+                        Err(e) => {
+                            log::debug!("NIP-65 relay {} skipped: {}", relay_config.url, e)
+                        }
+                    }
+                }
+            }
+            for dm_relay in &metadata.dm_relays {
+                let normalized = dm_relay.trim_end_matches('/');
+                if blocked
+                    .iter()
+                    .any(|b| b.trim_end_matches('/') == normalized)
+                {
+                    log::info!("Skipping blocked DM relay: {}", dm_relay);
+                    continue;
+                }
+                if let Ok(url) = RelayUrl::parse(dm_relay) {
+                    match client.add_relay(url).await {
+                        Ok(added) => log::info!("DM relay {} (new={})", dm_relay, added),
+                        Err(e) => log::debug!("DM relay {} skipped: {}", dm_relay, e),
+                    }
+                }
+            }
+
             *USER_RELAY_METADATA.write() = Some(metadata);
             crate::services::search_relays::invalidate_search_relay_cache().await;
             log::debug!("Invalidated search relay cache after NIP-65 update");
             Ok(())
         }
         Err(e) => {
-            log::warn!("No relay lists found: {}, using defaults for Settings", e);
+            log::warn!("No relay lists found: {}, using defaults", e);
+
+            let blocked = BLOCKED_RELAYS.peek();
+            for dm_relay_url in default_dm_relays() {
+                let normalized = dm_relay_url.trim_end_matches('/');
+                if blocked
+                    .iter()
+                    .any(|b| b.trim_end_matches('/') == normalized)
+                {
+                    continue;
+                }
+                if let Ok(url) = RelayUrl::parse(&dm_relay_url) {
+                    let _ = client.add_relay(url).await;
+                }
+            }
+
             let default = RelayListMetadata {
                 relays: default_relays(),
                 dm_relays: default_dm_relays(),
@@ -375,7 +439,7 @@ pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
             crate::services::search_relays::invalidate_search_relay_cache().await;
             log::debug!("Invalidated search relay cache after NIP-65 fallback");
             log::info!(
-                "Using default relays for Settings display. User can configure and publish their relay lists."
+                "Using default relays. User can configure and publish their relay lists."
             );
             Ok(())
         }
@@ -385,7 +449,7 @@ pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
 /// SDK: EventBuilder::search_relays() creates ["relay", "url"] tags
 pub async fn publish_search_relays(
     relays: Vec<String>,
-    client: Arc<Client>,
+    _client: Arc<Client>,
 ) -> Result<String, String> {
     log::info!("Publishing search relay list with {} relays", relays.len());
     let urls: Vec<RelayUrl> = relays
@@ -393,21 +457,23 @@ pub async fn publish_search_relays(
         .filter_map(|s| RelayUrl::parse(s).ok())
         .collect();
     let builder = EventBuilder::search_relays(urls);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish search relays: {}", e))?;
-    log::info!(
-        "Search relays published (kind 10007): {}",
-        output.id().to_hex()
-    );
-    Ok(output.id().to_hex())
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::RelayList,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }
 /// Publish blocked relays (kind 10006)
 /// SDK: EventBuilder::blocked_relays() creates ["relay", "url"] tags
 pub async fn publish_blocked_relays(
     relays: Vec<String>,
-    client: Arc<Client>,
+    _client: Arc<Client>,
 ) -> Result<String, String> {
     log::info!("Publishing blocked relay list with {} relays", relays.len());
     let urls: Vec<RelayUrl> = relays
@@ -415,15 +481,17 @@ pub async fn publish_blocked_relays(
         .filter_map(|s| RelayUrl::parse(s).ok())
         .collect();
     let builder = EventBuilder::blocked_relays(urls);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish blocked relays: {}", e))?;
-    log::info!(
-        "Blocked relays published (kind 10006): {}",
-        output.id().to_hex()
-    );
-    Ok(output.id().to_hex())
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::RelayList,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }
 /// Fetch search relays (kind 10007) for a user
 pub async fn fetch_search_relays(
@@ -800,6 +868,20 @@ pub async fn start_relay_list_subscription() {
                         log::info!("Received NIP-65 relay list update (kind 10002)");
                         let relays = parse_relay_list_event(&event);
                         if !relays.is_empty() {
+                            let blocked = BLOCKED_RELAYS.peek();
+                            for relay_config in &relays {
+                                let normalized = relay_config.url.trim_end_matches('/');
+                                if blocked
+                                    .iter()
+                                    .any(|b| b.trim_end_matches('/') == normalized)
+                                {
+                                    continue;
+                                }
+                                if let Ok(url) = RelayUrl::parse(&relay_config.url) {
+                                    let _ = client.add_relay(url).await;
+                                }
+                            }
+
                             let mut metadata =
                                 USER_RELAY_METADATA.read().clone().unwrap_or_default();
                             metadata.relays = relays;

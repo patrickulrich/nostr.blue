@@ -92,8 +92,13 @@ pub fn PhotoModal(blobbi: BlobbiCompanion, on_close: EventHandler<()>) -> Elemen
                                                 vec![],
                                                 content,
                                             );
-                                            if let Some(client) = crate::stores::nostr_client::NOSTR_CLIENT.read().as_ref() {
-                                                let _ = client.send_event_builder(event).await;
+                                            if let Ok(signed) = crate::stores::publish_queue::signing::sign_event_builder(event).await {
+                                                crate::stores::publish_queue::enqueue(
+                                                    signed,
+                                                    crate::stores::publish_queue::types::QueueEventType::Other("blobbi".to_string()),
+                                                    None,
+                                                    std::collections::HashMap::new(),
+                                                ).await;
                                             }
                                         });
                                         on_close.call(());

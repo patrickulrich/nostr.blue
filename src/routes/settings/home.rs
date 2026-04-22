@@ -29,9 +29,7 @@ enum VanishModalStep {
 
 #[derive(Clone)]
 struct VanishPublishSummary {
-    success_count: usize,
-    total_attempted: usize,
-    failed_count: usize,
+    queued: bool,
 }
 
 #[component]
@@ -1349,36 +1347,20 @@ fn VanishAccountModal(on_close: EventHandler<()>) -> Element {
                         VanishModalStep::Result => rsx! {
                             if let Some(summary) = publish_summary.read().as_ref() {
                                 div { class: "space-y-4",
-                                    div { class: if summary.success_count > 0 {
+                                    div { class: if summary.queued {
                                         "rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-4"
                                     } else {
                                         "rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-4"
                                     },
                                         p { class: "text-sm font-medium text-gray-900 dark:text-white",
-                                            if summary.success_count > 0 {
-                                                if summary.failed_count > 0 {
-                                                    "Vanish request partially delivered."
-                                                } else {
-                                                    "Vanish request delivered."
-                                                }
+                                            if summary.queued {
+                                                "Vanish request queued."
                                             } else {
                                                 "No relay accepted the vanish request."
                                             }
                                         }
-                                        p { class: "mt-1 text-sm text-gray-700 dark:text-gray-300",
-                                            {format!(
-                                                "Accepted by {}/{} relay(s).",
-                                                summary.success_count,
-                                                summary.total_attempted
-                                            )}
-                                        }
-                                        if summary.failed_count > 0 {
-                                            p { class: "mt-1 text-sm text-gray-700 dark:text-gray-300",
-                                                {format!("{} relay(s) rejected or missed the request.", summary.failed_count)}
-                                            }
-                                        }
                                     }
-                                    if summary.success_count > 0 {
+                                    if summary.queued {
                                         p { class: "text-sm text-gray-600 dark:text-gray-400",
                                             "The remote request has been sent. Continue to clear local auth state and log out of this device."
                                         }
@@ -1447,9 +1429,7 @@ fn VanishAccountModal(on_close: EventHandler<()>) -> Element {
                                         match nostr_client::publish_vanish_request_to_relays(relay_urls, reason_value).await {
                                             Ok(result) => {
                                                 publish_summary.set(Some(VanishPublishSummary {
-                                                    success_count: result.success_count(),
-                                                    total_attempted: result.total_attempted(),
-                                                    failed_count: result.failed_relays.len(),
+                                                    queued: result.is_success(),
                                                 }));
                                                 step.set(VanishModalStep::Result);
                                             }
@@ -1469,7 +1449,7 @@ fn VanishAccountModal(on_close: EventHandler<()>) -> Element {
                             }
                         },
                         VanishModalStep::Result => rsx! {
-                            if publish_summary.read().as_ref().is_some_and(|summary| summary.success_count > 0) {
+                            if publish_summary.read().as_ref().is_some_and(|summary| summary.queued) {
                                 button {
                                     class: "px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition disabled:opacity-50 disabled:cursor-not-allowed",
                                     disabled: *is_logging_out.read(),
