@@ -106,7 +106,15 @@ pub async fn publish_discussion_comment(
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;
-    Ok(event.id)
+    let event_id = event.id;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::GitHosting,
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await;
+    Ok(event_id)
 }
 /// Fetch comments for a discussion (by EventId)
 pub async fn fetch_discussion_comments(discussion_id: EventId) -> Result<Vec<GitComment>, String> {

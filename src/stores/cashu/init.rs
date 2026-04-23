@@ -213,15 +213,18 @@ pub async fn accept_terms() -> Result<(), String> {
     let now = crate::platform::timestamp::now_secs();
     let content = serde_json::json!({ "accepted_at" : now, "version" : 1 }).to_string();
     let builder = EventBuilder::new(Kind::from(30078), content).tag(Tag::identifier(TERMS_D_TAG));
-    let event = crate::stores::publish_queue::signing::sign_event_builder(builder).await
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish terms acceptance: {}", e))?;
-    crate::stores::publish_queue::enqueue(
+    crate::stores::publish_queue::enqueue_and_await(
         event,
         crate::stores::publish_queue::types::QueueEventType::Cashu,
         None,
         std::collections::HashMap::new(),
-    ).await;
-    log::info!("Terms acceptance queued for publish");
+    )
+    .await
+    .map_err(|e| format!("Failed to publish terms acceptance: {}", e))?;
+    log::info!("Terms acceptance published to relays");
     *TERMS_ACCEPTED.write() = Some(true);
     Ok(())
 }
