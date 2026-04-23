@@ -516,23 +516,25 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                                         let naddr_str = naddr_val.clone();
                                                         let toast_api = toast;
                                                         spawn(async move {
-                                                            #[cfg(feature = "web")]
-                                                            {
-                                                                use dioxus::prelude::document;
-                                                                let text = format!("nostr:{}", naddr_str);
-                                                                let _ = document::eval(&format!(
-                                                                    "navigator.clipboard.writeText(\"{}\")",
-                                                                    text.replace('"', "\\\"")
-                                                                ));
+                                                            let text = format!("nostr:{}", naddr_str);
+                                                            match crate::platform::clipboard::copy_to_clipboard(&text).await {
+                                                                Ok(()) => {
+                                                                    toast_api.success(
+                                                                        "Copied to clipboard".to_string(),
+                                                                        ToastOptions::new().duration(Duration::from_secs(2)).permanent(false),
+                                                                    );
+                                                                }
+                                                                Err(e) => {
+                                                                    log::error!("Failed to copy event ID: {:?}", e);
+                                                                    toast_api.error(
+                                                                        "Failed to copy".to_string(),
+                                                                        ToastOptions::new()
+                                                                            .description("Could not access clipboard".to_string())
+                                                                            .duration(Duration::from_secs(2))
+                                                                            .permanent(false),
+                                                                    );
+                                                                }
                                                             }
-                                                            #[cfg(not(feature = "web"))]
-                                                            {
-                                                                let _ = naddr_str;
-                                                            }
-                                                            toast_api.success(
-                                                                "Copied to clipboard".to_string(),
-                                                                ToastOptions::new().duration(Duration::from_secs(2)).permanent(false),
-                                                            );
                                                         });
                                                         is_menu_open.set(false);
                                                     },

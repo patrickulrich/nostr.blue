@@ -689,10 +689,6 @@ pub fn export_npub() -> Result<String, String> {
 pub enum AndroidSignerAutoResult {
     /// Successfully logged in; contains the signer package name.
     LoggedIn(String),
-    /// Intent launched — Amber opened, user must approve and return.
-    IntentLaunched,
-    /// An Intent is already in flight (user hasn't come back yet).
-    IntentInFlight,
     /// An error occurred during auto-detection.
     Error(String),
 }
@@ -763,13 +759,49 @@ pub async fn login_with_android_signer(
 
 /// Auto-detect and login with Android signer (NIP-55)
 ///
-/// Implements a 3-phase detection flow:
+/// Implements a 3-phase detection flow with automatic polling:
 /// 1. **Poll**: Check for pending Intent result from a previous launch
 /// 2. **ContentResolver**: Try to get pubkey from already-approved signers
-/// 3. **Intent**: Launch get_public_key Intent to open signer for first-time approval
+/// 3. **Intent**: Launch get_public_key Intent, then auto-poll until the user
+///    approves in the signer app and returns. No manual confirmation needed.
 #[cfg(feature = "mobile_platform")]
 pub async fn login_with_android_signer_auto() -> Result<AndroidSignerAutoResult, String> {
     use crate::platform::{IntentPollResult, Nip55Signer};
+
+    async fn poll_until_login() -> Result<AndroidSignerAutoResult, String> {
+        use crate::platform::{IntentPollResult, Nip55Signer};
+
+        const LOGIN_POLL_INTERVAL: Duration = Duration::from_millis(500);
+        const LOGIN_POLL_TIMEOUT: Duration = Duration::from_secs(120);
+
+        let start = std::time::Instant::now();
+        loop {
+            crate::platform::timer::sleep(LOGIN_POLL_INTERVAL).await;
+            match Nip55Signer::poll_intent_result() {
+                IntentPollResult::Ready { pubkey, package } => {
+                    let pubkey_hex = pubkey.to_hex();
+                    log::info!("NIP-55 auto-poll: got result from {}: {}", package, pubkey_hex);
+                    Nip55Signer::clear_pending_result();
+                    login_with_android_signer(&pubkey_hex, Some(&package)).await?;
+                    return Ok(AndroidSignerAutoResult::LoggedIn(package));
+                }
+                IntentPollResult::Error(e) => {
+                    log::warn!("NIP-55 auto-poll: error: {}", e);
+                    Nip55Signer::clear_pending_result();
+                    return Ok(AndroidSignerAutoResult::Error(e));
+                }
+                IntentPollResult::InFlight | IntentPollResult::None => {
+                    if start.elapsed() >= LOGIN_POLL_TIMEOUT {
+                        log::warn!("NIP-55 auto-poll: timed out after {:?}", LOGIN_POLL_TIMEOUT);
+                        Nip55Signer::clear_pending_result();
+                        return Ok(AndroidSignerAutoResult::Error(
+                            "Timed out waiting for signer approval".to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+    }
 
     log::info!("NIP-55 auto-detect: starting 3-phase flow");
 
@@ -788,13 +820,12 @@ pub async fn login_with_android_signer_auto() -> Result<AndroidSignerAutoResult,
             return Ok(AndroidSignerAutoResult::LoggedIn(package));
         }
         IntentPollResult::InFlight => {
-            log::info!("NIP-55 auto-detect: Intent still in flight");
-            return Ok(AndroidSignerAutoResult::IntentInFlight);
+            log::info!("NIP-55 auto-detect: Intent still in flight, auto-polling");
+            return poll_until_login().await;
         }
         IntentPollResult::Error(e) => {
             log::warn!("NIP-55 auto-detect: previous Intent error: {}", e);
             Nip55Signer::clear_pending_result();
-            // Fall through to try ContentResolver / new Intent
         }
         IntentPollResult::None => {
             log::debug!("NIP-55 auto-detect: no pending Intent result");
@@ -822,11 +853,13 @@ pub async fn login_with_android_signer_auto() -> Result<AndroidSignerAutoResult,
         }
     }
 
-    // Phase 3: Launch Intent for first-time approval
+    // Phase 3: Launch Intent for first-time approval, then auto-poll
     log::info!("NIP-55 auto-detect: phase 3 — launching get_public_key Intent");
     match Nip55Signer::launch_get_public_key() {
-        Ok(true) => Ok(AndroidSignerAutoResult::IntentLaunched),
-        Ok(false) => Ok(AndroidSignerAutoResult::IntentInFlight),
+        Ok(_) => {
+            log::info!("NIP-55 auto-detect: Intent launched, auto-polling for result");
+            poll_until_login().await
+        }
         Err(e) => {
             log::error!("NIP-55 auto-detect: failed to launch Intent: {}", e);
             Ok(AndroidSignerAutoResult::Error(e))

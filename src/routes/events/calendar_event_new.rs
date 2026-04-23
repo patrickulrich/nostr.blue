@@ -718,15 +718,20 @@ pub fn CalendarEventNew(edit_naddr: Option<String>) -> Element {
                         label { class: "block text-sm font-medium mb-2", "Event Type" }
                         div { class: "flex gap-2",
                             button {
-                                class: if *event_type.read() == EventType::TimeBased { "flex-1 py-2 px-4 bg-primary text-primary-foreground rounded-lg font-medium" } else { "flex-1 py-2 px-4 bg-muted hover:bg-accent rounded-lg font-medium transition" },
+                                class: if *event_type.read() == EventType::TimeBased { "flex-1 py-2 px-4 bg-primary text-primary-foreground rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed" } else { "flex-1 py-2 px-4 bg-muted hover:bg-accent rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed" },
+                                disabled: *is_edit_mode.read(),
                                 onclick: move |_| event_type.set(EventType::TimeBased),
                                 "Specific Time"
                             }
                             button {
-                                class: if *event_type.read() == EventType::DateBased { "flex-1 py-2 px-4 bg-primary text-primary-foreground rounded-lg font-medium" } else { "flex-1 py-2 px-4 bg-muted hover:bg-accent rounded-lg font-medium transition" },
+                                class: if *event_type.read() == EventType::DateBased { "flex-1 py-2 px-4 bg-primary text-primary-foreground rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed" } else { "flex-1 py-2 px-4 bg-muted hover:bg-accent rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed" },
+                                disabled: *is_edit_mode.read(),
                                 onclick: move |_| event_type.set(EventType::DateBased),
                                 "All Day"
                             }
+                        }
+                        if *is_edit_mode.read() {
+                            p { class: "text-xs text-muted-foreground mt-1", "Event type cannot be changed when editing" }
                         }
                     }
                     div { class: "mb-4",
