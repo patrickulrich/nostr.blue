@@ -18,18 +18,30 @@ pub async fn sign_event_builder_with_signer(
             .sign_with_keys(&keys)
             .map_err(|e| format!("Failed to sign event: {}", e)),
         #[cfg(target_family = "wasm")]
-        SignerType::BrowserExtension(browser_signer) => builder
-            .sign(&*browser_signer)
-            .await
-            .map_err(|e| format!("Failed to sign event: {}", e)),
-        SignerType::NostrConnect(remote_signer) => builder
-            .sign(&*remote_signer)
-            .await
-            .map_err(|e| format!("Failed to sign event: {}", e)),
+        SignerType::BrowserExtension(browser_signer) => {
+            let pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
+            builder
+                .build(pubkey)
+                .sign(&*browser_signer)
+                .await
+                .map_err(|e| format!("Failed to sign event: {}", e))
+        }
+        SignerType::NostrConnect(remote_signer) => {
+            let pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
+            builder
+                .build(pubkey)
+                .sign(&*remote_signer)
+                .await
+                .map_err(|e| format!("Failed to sign event: {}", e))
+        }
         #[cfg(feature = "mobile_platform")]
-        SignerType::AndroidSigner(android_signer) => builder
-            .sign(&*android_signer)
-            .await
-            .map_err(|e| format!("Failed to sign event: {}", e)),
+        SignerType::AndroidSigner(android_signer) => {
+            let pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
+            builder
+                .build(pubkey)
+                .sign(&*android_signer)
+                .await
+                .map_err(|e| format!("Failed to sign event: {}", e))
+        }
     }
 }

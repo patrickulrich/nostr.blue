@@ -1,5 +1,5 @@
 use crate::stores::nostr_client;
-use crate::stores::signer::{set_signer as store_signer, SignerType};
+use crate::stores::signer::{set_signer_with_pubkey, SignerType};
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use nostr::{Keys, PublicKey};
@@ -211,9 +211,9 @@ pub async fn restore_session_async() {
                     crate::platform::storage::get::<String>(STORAGE_KEY_APP_KEYS),
                 ) {
                     match restore_nostr_connect(&bunker_uri, &app_keys_str).await {
-                        Ok(nostr_connect) => {
+                        Ok((nostr_connect, public_key)) => {
                             let signer_type = SignerType::NostrConnect(Arc::new(nostr_connect));
-                            match store_signer(signer_type.clone()).await {
+                            match set_signer_with_pubkey(signer_type.clone(), public_key).await {
                                 Ok(_) => match nostr_client::set_signer(signer_type).await {
                                     Ok(_) => {
                                         run_post_login_init().await;
@@ -260,20 +260,21 @@ pub async fn login_with_nsec(nsec: &str, password: &str) -> Result<(), String> {
         return Err(err);
     }
     let keys = Keys::parse(nsec).map_err(|e| format!("Invalid private key: {}", e))?;
-    let pubkey = keys.public_key().to_string();
+    let pubkey = keys.public_key();
+    let pubkey_str = pubkey.to_string();
     let ncryptsec = crate::utils::nip49::encrypt_secret_key(keys.secret_key(), password)
         .map_err(|e| format!("Encryption failed: {}", e))?;
     *KEYS.write() = Some(keys.clone());
     let signer = SignerType::Keys(keys);
-    store_signer(signer.clone()).await?;
+    set_signer_with_pubkey(signer.clone(), pubkey).await?;
     nostr_client::set_signer(signer).await?;
     *AUTH_STATE.write() = AuthState {
-        pubkey: Some(pubkey.clone()),
+        pubkey: Some(pubkey_str.clone()),
         is_authenticated: true,
         login_method: Some(LoginMethod::PrivateKey),
     };
     crate::platform::storage::set(STORAGE_KEY_NCRYPTSEC, &ncryptsec)?;
-    crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey)?;
+    crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey_str)?;
     crate::platform::storage::set(STORAGE_KEY_METHOD, "private_key")?;
     crate::platform::storage::delete(STORAGE_KEY_NSEC)?;
     log::info!(
@@ -285,17 +286,18 @@ pub async fn login_with_nsec(nsec: &str, password: &str) -> Result<(), String> {
 }
 /// Login with private key without password (internal use only for session restore)
 async fn login_with_keys_internal(keys: Keys) -> Result<(), String> {
-    let pubkey = keys.public_key().to_string();
+    let pubkey = keys.public_key();
+    let pubkey_str = pubkey.to_string();
     *KEYS.write() = Some(keys.clone());
     let signer = SignerType::Keys(keys);
-    store_signer(signer.clone()).await?;
+    set_signer_with_pubkey(signer.clone(), pubkey).await?;
     nostr_client::set_signer(signer).await?;
     *AUTH_STATE.write() = AuthState {
-        pubkey: Some(pubkey.clone()),
+        pubkey: Some(pubkey_str.clone()),
         is_authenticated: true,
         login_method: Some(LoginMethod::PrivateKey),
     };
-    log::info!("Session restored with pubkey: {}", pubkey);
+    log::info!("Session restored with pubkey: {}", pubkey_str);
     run_post_login_init().await;
     Ok(())
 }
@@ -329,7 +331,7 @@ pub async fn login_with_browser_extension() -> Result<(), String> {
             .map_err(|e| format!("Failed to get public key from extension: {}", e))?;
         let pubkey_str = pubkey.to_string();
         let signer = SignerType::BrowserExtension(Arc::new(browser_signer));
-        store_signer(signer.clone()).await?;
+        set_signer_with_pubkey(signer.clone(), pubkey).await?;
         nostr_client::set_signer(signer).await?;
         *AUTH_STATE.write() = AuthState {
             pubkey: Some(pubkey_str.clone()),
@@ -387,7 +389,7 @@ fn get_or_create_app_keys() -> Result<Keys, String> {
 async fn restore_nostr_connect(
     bunker_uri: &str,
     app_keys_str: &str,
-) -> Result<NostrConnect, String> {
+) -> Result<(NostrConnect, PublicKey), String> {
     let uri = NostrConnectURI::parse(bunker_uri)
         .map_err(|e| format!("Invalid stored bunker URI: {}", e))?;
     let app_keys =
@@ -396,11 +398,11 @@ async fn restore_nostr_connect(
     let nostr_connect = NostrConnect::new(uri, app_keys, timeout, None)
         .map_err(|e| format!("Failed to reconnect: {}", e))?;
     use nostr::signer::NostrSigner;
-    nostr_connect
+    let public_key = nostr_connect
         .get_public_key()
         .await
         .map_err(|e| format!("Remote signer not responding: {}", e))?;
-    Ok(nostr_connect)
+    Ok((nostr_connect, public_key))
 }
 /// Run post-login initialization steps (notifications, subscriptions, emoji fetch)
 /// This should be called after any successful login or session restoration
@@ -483,7 +485,7 @@ pub async fn login_with_nostr_connect(bunker_uri: &str) -> Result<(), String> {
     crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey_str)
         .map_err(|e| format!("Failed to store public key: {}", e))?;
     let signer_type = SignerType::NostrConnect(Arc::new(nostr_connect));
-    store_signer(signer_type.clone()).await?;
+    set_signer_with_pubkey(signer_type.clone(), public_key).await?;
     nostr_client::set_signer(signer_type).await?;
     *AUTH_STATE.write() = AuthState {
         pubkey: Some(pubkey_str.clone()),
@@ -732,7 +734,7 @@ pub async fn login_with_android_signer(
         let signer = Nip55Signer::new(public_key, package.clone());
         let signer_type = SignerType::AndroidSigner(Arc::new(signer));
 
-        store_signer(signer_type.clone()).await?;
+        set_signer_with_pubkey(signer_type.clone(), public_key).await?;
         nostr_client::set_signer(signer_type).await?;
 
         *AUTH_STATE.write() = AuthState {

@@ -394,8 +394,8 @@ pub enum Route {
     CalendarEventDetail { naddr: String, from: Option<String> },
     #[route("/calendar")]
     Calendar {},
-    #[route("/calendar/new")]
-    CalendarEventNew {},
+    #[route("/calendar/new?:edit_naddr")]
+    CalendarEventNew { edit_naddr: Option<String> },
     #[route("/marketplace")]
     ShopHome {},
     #[route("/marketplace/product/:naddr")]
@@ -702,7 +702,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         Route::PublicationNew {}
         | Route::PublicationSearch { .. }
         | Route::PublicationDetail { .. } => Some(Route::PublicationsHome {}),
-        Route::CalendarEventDetail { .. } | Route::CalendarEventNew {} => Some(Route::Calendar {}),
+        Route::CalendarEventDetail { .. } | Route::CalendarEventNew { .. } => Some(Route::Calendar {}),
         Route::ShopProductDetail { .. }
         | Route::ShopProductNew {}
         | Route::ShopProductEdit { .. }

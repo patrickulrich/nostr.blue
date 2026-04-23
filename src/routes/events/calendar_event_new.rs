@@ -1,14 +1,16 @@
 //! Calendar Event Creation Page
 //!
 //! Create new calendar events (NIP-52 kinds 31922/31923)
-use crate::components::MediaUploader;
+use crate::components::{DraftDiscardModal, MediaUploader};
 use crate::routes::Route;
 use crate::services::geocoding::{self, GeoLocation};
 use crate::services::profile_search::{
     get_contact_pubkeys, search_cached_profiles, search_profiles, ProfileSearchResult,
 };
+use crate::stores::content::calendar_draft_store;
 use crate::stores::{auth_store, calendar_store};
 use crate::utils::date_helpers::get_today;
+use crate::utils::nips::nip52::{CalendarEventType, EventTime};
 #[cfg(feature = "web")]
 use crate::utils::ics::parse_ics;
 use crate::utils::ics::{IcsDateTime, IcsEvent};
@@ -33,7 +35,7 @@ pub enum EventType {
     DateBased,
 }
 #[component]
-pub fn CalendarEventNew() -> Element {
+pub fn CalendarEventNew(edit_naddr: Option<String>) -> Element {
     let navigator = navigator();
     let mut title = use_signal(String::new);
     let mut summary = use_signal(String::new);
@@ -66,10 +68,149 @@ pub fn CalendarEventNew() -> Element {
     let mut show_participant_dropdown = use_signal(|| false);
     let mut participant_debounce = use_signal(|| 0u32);
     let mut contact_pubkeys = use_signal(Vec::<nostr_sdk::prelude::PublicKey>::new);
+    let mut edit_d_tag = use_signal(|| None::<String>);
+    let mut show_discard = use_signal(|| false);
+    let mut is_edit_mode = use_signal(|| false);
+    let mut draft_loaded = use_signal(|| false);
     let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
     let can_publish = use_memo(move || {
         let title_val = title();
         !title_val.trim().is_empty() && !is_publishing()
+    });
+    // Edit mode: load existing event for editing
+    use_effect(use_reactive((&edit_naddr,), move |(edit_naddr,)| {
+        if let Some(ref naddr) = edit_naddr {
+            let naddr = naddr.clone();
+            is_edit_mode.set(true);
+            spawn(async move {
+                match calendar_store::fetch_unified_event_by_naddr(&naddr).await {
+                    Ok(Some(unified)) => {
+                        if let calendar_store::UnifiedEvent::Calendar(ref cal) = unified {
+                            let my_pk = auth_store::get_pubkey();
+                            if my_pk.as_ref() != Some(&cal.pubkey) {
+                                error_message.set(Some("You can only edit your own events".to_string()));
+                                return;
+                            }
+                            title.set(cal.title.clone());
+                            summary.set(cal.summary.clone().unwrap_or_default());
+                            content.set(cal.content.clone());
+                            image_url.set(cal.image.clone().unwrap_or_default());
+                            locations.set(cal.locations.clone());
+                            hashtags_input.set(cal.hashtags.join(", "));
+                            timezone.set(cal.start_tzid.clone().unwrap_or_default());
+                            edit_d_tag.set(Some(cal.d_tag.clone()));
+                            match cal.event_type {
+                                CalendarEventType::DateBased => {
+                                    event_type.set(EventType::DateBased);
+                                    if let EventTime::Date(ref d) = cal.start {
+                                        start_date.set(d.clone());
+                                    }
+                                    if let Some(EventTime::Date(ref d)) = cal.end {
+                                        end_date.set(d.clone());
+                                    }
+                                }
+                                CalendarEventType::TimeBased => {
+                                    event_type.set(EventType::TimeBased);
+                                    let (sd, st) = timestamp_to_date_time(cal.start_timestamp());
+                                    start_date.set(sd);
+                                    start_time.set(st);
+                                    if let Some(end_ts) = cal.end_timestamp() {
+                                        let (ed, et) = timestamp_to_date_time(end_ts);
+                                        end_date.set(ed);
+                                        end_time.set(et);
+                                    }
+                                }
+                            }
+                            let parts: Vec<(String, String, String)> = cal
+                                .participants
+                                .iter()
+                                .map(|p| {
+                                    let role = p.role.clone().unwrap_or_else(|| "participant".to_string());
+                                    let display = nostr_sdk::prelude::PublicKey::parse(&p.pubkey)
+                                        .ok()
+                                        .and_then(|pk| pk.to_bech32().ok())
+                                        .map(|s| format!("{}...", &s[..12.min(s.len())]))
+                                        .unwrap_or_else(|| format!("{}...", &p.pubkey[..8.min(p.pubkey.len())]));
+                                    (p.pubkey.clone(), display, role)
+                                })
+                                .collect();
+                            participants.set(parts);
+                        } else {
+                            error_message.set(Some("Only calendar events can be edited".to_string()));
+                        }
+                    }
+                    Ok(None) => {
+                        error_message.set(Some("Event not found".to_string()));
+                    }
+                    Err(e) => {
+                        error_message.set(Some(format!("Failed to load event: {}", e)));
+                    }
+                }
+            });
+        }
+    }));
+    // Draft restore (only when NOT in edit mode)
+    use_effect(move || {
+        if edit_naddr.is_none() && !*draft_loaded.read() && !*is_edit_mode.read() {
+            draft_loaded.set(true);
+            if let Some(pk) = auth_store::get_pubkey() {
+                if let Some(draft) = calendar_draft_store::read_calendar_draft(&pk) {
+                    if !draft.title.is_empty() {
+                        title.set(draft.title);
+                        summary.set(draft.summary);
+                        content.set(draft.content);
+                        match draft.event_type.as_str() {
+                            "DateBased" => event_type.set(EventType::DateBased),
+                            _ => event_type.set(EventType::TimeBased),
+                        }
+                        start_date.set(draft.start_date);
+                        start_time.set(draft.start_time);
+                        end_date.set(draft.end_date);
+                        end_time.set(draft.end_time);
+                        location.set(draft.location);
+                        locations.set(draft.locations);
+                        image_url.set(draft.image_url);
+                        hashtags_input.set(draft.hashtags_input);
+                        timezone.set(draft.timezone);
+                        participants.set(draft.participants);
+                    }
+                }
+            }
+        }
+    });
+    // Draft auto-save (only when NOT in edit mode)
+    use_effect(move || {
+        if *is_edit_mode.read() {
+            return;
+        }
+        let title_val = title.read().clone();
+        if title_val.trim().is_empty() {
+            return;
+        }
+        if let Some(pk) = auth_store::get_pubkey() {
+            let draft = calendar_draft_store::CalendarEventDraft {
+                title: title_val,
+                summary: summary.read().clone(),
+                content: content.read().clone(),
+                event_type: if *event_type.read() == EventType::DateBased {
+                    "DateBased".to_string()
+                } else {
+                    "TimeBased".to_string()
+                },
+                start_date: start_date.read().clone(),
+                start_time: start_time.read().clone(),
+                end_date: end_date.read().clone(),
+                end_time: end_time.read().clone(),
+                location: location.read().clone(),
+                locations: locations.read().clone(),
+                image_url: image_url.read().clone(),
+                hashtags_input: hashtags_input.read().clone(),
+                timezone: timezone.read().clone(),
+                participants: participants.read().clone(),
+                saved_at: crate::platform::timestamp::now_secs(),
+            };
+            calendar_draft_store::save_calendar_draft(&pk, &draft);
+        }
     });
     // Fix 1: Auto-sync end date/time when start changes
     use_effect(move || {
@@ -288,7 +429,17 @@ pub fn CalendarEventNew() -> Element {
         show_ics_selector.set(false);
     };
     let handle_close = move |_| {
-        navigator.go_back();
+        let has_content = !title.read().is_empty()
+            || !summary.read().is_empty()
+            || !content.read().is_empty()
+            || !locations.read().is_empty()
+            || !image_url.read().is_empty()
+            || !hashtags_input.read().is_empty();
+        if has_content {
+            show_discard.set(true);
+        } else {
+            navigator.go_back();
+        }
     };
     let handle_publish = move |_| {
         if !*can_publish.read() {
@@ -307,6 +458,7 @@ pub fn CalendarEventNew() -> Element {
         let image_val = image_url.read().clone();
         let hashtags_val = hashtags_input.read().clone();
         let timezone_val = timezone.read().clone();
+        let edit_d_tag_val = edit_d_tag.read().clone();
         let participants_val: Vec<(String, String)> = participants
             .read()
             .iter()
@@ -361,6 +513,7 @@ pub fn CalendarEventNew() -> Element {
                         &all_locations,
                         &hashtags,
                         &participants_val,
+                        edit_d_tag_val.as_deref(),
                     )
                     .await
                 }
@@ -398,12 +551,16 @@ pub fn CalendarEventNew() -> Element {
                         } else {
                             Some(&timezone_val)
                         },
+                        edit_d_tag_val.as_deref(),
                     )
                     .await
                 }
             };
             match result {
                 Ok(naddr) => {
+                    if let Some(pk) = auth_store::get_pubkey() {
+                        calendar_draft_store::clear_calendar_draft(&pk);
+                    }
                     nav.push(Route::CalendarEventDetail {
                         naddr,
                         from: Some("calendar".to_string()),
@@ -438,18 +595,45 @@ pub fn CalendarEventNew() -> Element {
                                 }
                             }
                         }
-                        h1 { class: "text-lg font-bold", "Create Event" }
-                    }
-                    button {
-                        class: if *can_publish.read() { "px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition" } else { "px-4 py-2 bg-muted text-muted-foreground rounded-lg font-medium cursor-not-allowed" },
-                        disabled: !*can_publish.read(),
-                        onclick: handle_publish,
-                        if *is_publishing.read() {
-                            "Publishing..."
-                        } else {
-                            "Publish"
+                        h1 { class: "text-lg font-bold",
+                            if *is_edit_mode.read() { "Edit Event" } else { "Create Event" }
                         }
                     }
+                    div { class: "flex items-center gap-2",
+                        button {
+                            class: "px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition",
+                            onclick: handle_close,
+                            "Cancel"
+                        }
+                        button {
+                            class: if *can_publish.read() { "px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition" } else { "px-4 py-2 bg-muted text-muted-foreground rounded-lg font-medium cursor-not-allowed" },
+                            disabled: !*can_publish.read(),
+                            onclick: handle_publish,
+                            if *is_publishing.read() {
+                                "Publishing..."
+                            } else {
+                                "Publish"
+                            }
+                        }
+                    }
+                }
+            }
+            if *show_discard.read() {
+                DraftDiscardModal {
+                    on_save: move |_| {
+                        show_discard.set(false);
+                        navigator.go_back();
+                    },
+                    on_discard: move |_| {
+                        if let Some(pk) = auth_store::get_pubkey() {
+                            calendar_draft_store::clear_calendar_draft(&pk);
+                        }
+                        show_discard.set(false);
+                        navigator.go_back();
+                    },
+                    on_continue: move |_| {
+                        show_discard.set(false);
+                    },
                 }
             }
             if !is_authenticated {

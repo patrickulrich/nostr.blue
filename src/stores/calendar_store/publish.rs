@@ -84,6 +84,7 @@ pub async fn publish_date_event(
     locations: &[String],
     hashtags: &[String],
     participants: &[(String, String)],
+    existing_d_tag: Option<&str>,
 ) -> StdResult<String, String> {
     // Validate date formats (NIP-52: YYYY-MM-DD)
     let parsed_start = chrono::NaiveDate::parse_from_str(start_date, "%Y-%m-%d").map_err(|_| {
@@ -101,11 +102,15 @@ pub async fn publish_date_event(
     }
 
     let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
-    let d_tag = format!(
-        "event-{}-{}",
-        crate::platform::timestamp::now_millis(),
-        rand::random::<f64>()
-    );
+    let d_tag = existing_d_tag
+        .map(|d| d.to_string())
+        .unwrap_or_else(|| {
+            format!(
+                "event-{}-{}",
+                crate::platform::timestamp::now_millis(),
+                rand::random::<f64>()
+            )
+        });
     let mut builder = EventBuilder::new(
         Kind::Custom(KIND_DATE_CALENDAR_EVENT),
         content.unwrap_or(""),
@@ -187,13 +192,18 @@ pub async fn publish_time_event(
     hashtags: &[String],
     participants: &[(String, String)],
     timezone: Option<&str>,
+    existing_d_tag: Option<&str>,
 ) -> StdResult<String, String> {
     let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
-    let d_tag = format!(
-        "event-{}-{}",
-        crate::platform::timestamp::now_millis(),
-        rand::random::<f64>()
-    );
+    let d_tag = existing_d_tag
+        .map(|d| d.to_string())
+        .unwrap_or_else(|| {
+            format!(
+                "event-{}-{}",
+                crate::platform::timestamp::now_millis(),
+                rand::random::<f64>()
+            )
+        });
     let mut builder = EventBuilder::new(
         Kind::Custom(KIND_TIME_CALENDAR_EVENT),
         content.unwrap_or(""),

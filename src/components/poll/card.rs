@@ -1,6 +1,6 @@
 use super::timer::PollTimer;
 use crate::components::icons::{BookmarkIcon, MessageCircleIcon, Repeat2Icon, ShareIcon, ZapIcon};
-use crate::components::{ReplyComposer, ConfirmModal, ReactionButton, SensitiveContent, ZapModal};
+use crate::components::{ReplyComposer, ConfirmModal, ReactionButton, RichContent, SensitiveContent, ZapModal};
 use crate::utils::nip36;
 use crate::hooks::{use_reaction, use_relay_subscription};
 use crate::routes::Route;
@@ -230,7 +230,6 @@ pub fn PollCard(
         });
     };
     let poll = poll_data.read().clone();
-    let poll_title = poll.as_ref().map(|p| p.title.clone()).unwrap_or_default();
     let poll_type = poll
         .as_ref()
         .map(|p| p.r#type)
@@ -281,12 +280,11 @@ pub fn PollCard(
             {
                 let poll_inner = rsx! {
                     div { class: "mb-3",
-                        Link {
-                            to: Route::PollView {
-                                noteid: event_id_str.clone(),
-                            },
-                            class: "text-lg font-medium mb-2 block hover:underline",
-                            "{poll_title}"
+                        div { class: "text-lg font-medium mb-2 break-words",
+                            RichContent {
+                                content: event.content.clone(),
+                                tags: event.tags.iter().cloned().collect(),
+                            }
                         }
                         div { class: "flex items-center gap-3 text-sm text-muted-foreground",
                             span { class: "px-2 py-1 rounded bg-accent text-foreground text-xs",

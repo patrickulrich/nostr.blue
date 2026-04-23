@@ -218,7 +218,7 @@ pub fn Events() -> Element {
                         div { class: "flex items-center gap-2",
                             if is_logged_in {
                                 Link {
-                                    to: Route::CalendarEventNew {},
+                                    to: Route::CalendarEventNew { edit_naddr: None },
                                     class: "hidden sm:flex items-center gap-2 px-3 py-1.5 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
                                     svg {
                                         class: "w-4 h-4",
@@ -236,7 +236,7 @@ pub fn Events() -> Element {
                                     "Create Event"
                                 }
                                 Link {
-                                    to: Route::CalendarEventNew {},
+                                    to: Route::CalendarEventNew { edit_naddr: None },
                                     class: "sm:hidden p-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
                                     svg {
                                         class: "w-5 h-5",

@@ -38,6 +38,8 @@ pub async fn enqueue(
         max_retries: 5,
         last_retry_at: None,
         metadata,
+        kind: Some(event.kind),
+        d_tag: d_tag.clone(),
     };
 
     let action = {
@@ -58,15 +60,11 @@ pub async fn enqueue(
                 if existing.pubkey != queued.pubkey {
                     continue;
                 }
-                let existing_kind = existing.kind();
-                if existing_kind != Some(event.kind) {
+                if existing.kind != Some(event.kind) {
                     continue;
                 }
-                if is_addressable {
-                    let existing_d = existing.d_tag();
-                    if existing_d != d_tag {
-                        continue;
-                    }
+                if is_addressable && existing.d_tag != d_tag {
+                    continue;
                 }
                 if existing.created_at <= created_at {
                     to_remove = Some(i);

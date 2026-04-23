@@ -54,15 +54,27 @@ pub struct QueuedEvent {
     pub max_retries: u32,
     pub last_retry_at: Option<u64>,
     pub metadata: HashMap<String, String>,
+    #[serde(default)]
+    pub kind: Option<nostr_sdk::Kind>,
+    #[serde(default)]
+    pub d_tag: Option<String>,
 }
 
 impl QueuedEvent {
+    #[allow(dead_code)]
     pub fn kind(&self) -> Option<nostr_sdk::Kind> {
+        if let Some(k) = self.kind {
+            return Some(k);
+        }
         let event: Result<nostr_sdk::Event, _> = serde_json::from_str(&self.event_json);
         event.ok().map(|e| e.kind)
     }
 
+    #[allow(dead_code)]
     pub fn d_tag(&self) -> Option<String> {
+        if let Some(ref d) = self.d_tag {
+            return Some(d.clone());
+        }
         let event: Result<nostr_sdk::Event, _> = serde_json::from_str(&self.event_json);
         event.ok().and_then(|e| e.tags.identifier().map(|s| s.to_string()))
     }

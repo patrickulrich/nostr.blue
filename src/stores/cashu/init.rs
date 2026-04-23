@@ -379,13 +379,15 @@ pub async fn create_wallet(mints: Vec<String>) -> Result<(), String> {
         .map_err(|e| format!("Failed to encrypt wallet data: {}", e))?;
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWallet, encrypted_content);
     let event = sign_event_builder_with_signer(builder, signer_type).await?;
-    crate::stores::publish_queue::enqueue(
+    crate::stores::publish_queue::enqueue_and_await(
         event,
         crate::stores::publish_queue::types::QueueEventType::Cashu,
         None,
         std::collections::HashMap::new(),
-    ).await;
-    log::info!("Wallet creation queued for publish");
+    )
+    .await
+    .map_err(|e| format!("Failed to publish wallet event: {}", e))?;
+    log::info!("Wallet creation published to relays");
     *WALLET_STATE.write() = Some(WalletState {
         privkey: Some(wallet_privkey),
         mints: mints.clone(),
