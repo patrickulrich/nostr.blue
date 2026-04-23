@@ -122,8 +122,8 @@ pub use relay_publishing::{
 };
 pub use reposts::{delete_repost, publish_repost, publish_repost_tracked};
 pub use signals::{
-    invalidate_contacts_cache, invalidate_mute_block_cache, CLIENT_INITIALIZED, CURRENT_SIGNER,
-    HAS_SIGNER, MUTE_BLOCK_INVALIDATE, NOSTR_CLIENT,
+    get_contacts_cache, invalidate_contacts_cache, invalidate_mute_block_cache, CLIENT_INITIALIZED,
+    CURRENT_SIGNER, HAS_SIGNER, MUTE_BLOCK_INVALIDATE, NOSTR_CLIENT,
 };
 pub use streaming::{
     stream_events_batched, stream_events_collected, stream_events_from_connected_relays_batched,
@@ -328,6 +328,11 @@ pub async fn set_signer(signer: SignerType) -> std::result::Result<(), String> {
             log::warn!("Failed to load user pinned notes: {}", e);
         }
     });
+    spawn_forever(async move {
+        crate::stores::publish_queue::load_from_storage().await;
+        crate::stores::publish_queue::start_processor();
+        log::info!("Publish queue loaded and processor started");
+    });
     log::info!("Signer updated successfully");
     Ok(())
 }
@@ -338,6 +343,10 @@ pub async fn set_read_only() -> std::result::Result<(), String> {
     client.unset_signer().await;
     *HAS_SIGNER.write() = false;
     *CURRENT_SIGNER.write() = None;
+    if let Err(e) = crate::stores::publish_queue::processor::process_once_guarded().await {
+        log::warn!("Flush before read-only failed: {}", e);
+    }
+    crate::stores::publish_queue::stop_processor();
     log::info!("Switched to read-only mode");
     Ok(())
 }

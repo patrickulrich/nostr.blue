@@ -2,6 +2,7 @@ pub mod content;
 pub use content::citation_store;
 pub use content::code_store;
 pub use content::draft_store;
+pub use content::note_draft_store;
 pub use content::publication_store;
 pub use content::recipe_store;
 pub use content::wiki_store;
@@ -68,6 +69,7 @@ pub mod shop_database;
 pub mod shop_store;
 pub mod signer;
 pub mod notification_dispatcher;
+pub mod publish_queue;
 pub mod subscription_manager;
 #[cfg(feature = "cashu")]
 pub mod wallet_database;

@@ -24,7 +24,6 @@ impl FeedType {
 pub enum Nip55State {
     Idle,
     Checking,
-    WaitingForApproval,
     Error(String),
 }
 

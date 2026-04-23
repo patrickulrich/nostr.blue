@@ -3,6 +3,8 @@
 //! NIP-52 Calendar Events + NIP-53 Live Activities discovery page
 use crate::components::{ClientInitializing, EventCard, EventCardSkeleton, EventMap};
 use crate::hooks::use_infinite_scroll;
+use crate::routes::Route;
+use crate::stores::auth_store;
 use crate::stores::calendar_store::{
     EventFilterState, EventTypeFilter, LocationFilter, TimeFilter, UnifiedEvent,
 };
@@ -35,6 +37,7 @@ pub fn Events() -> Element {
     let mut has_more = use_signal(|| true);
     let mut pagination_loading = use_signal(|| false);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
+    let is_logged_in = auth_store::get_pubkey().is_some();
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         log::info!(
@@ -212,16 +215,55 @@ pub fn Events() -> Element {
                 div { class: "px-4 py-3",
                     div { class: "flex items-center justify-between mb-3",
                         h1 { class: "text-xl font-bold", "Discover Events" }
-                        div { class: "flex items-center bg-muted rounded-lg p-1",
-                            button {
-                                class: if *view_mode.read() == ViewMode::Grid { "px-3 py-1.5 text-sm font-medium bg-background rounded shadow-xs" } else { "px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition" },
-                                onclick: move |_| view_mode.set(ViewMode::Grid),
-                                "Grid"
+                        div { class: "flex items-center gap-2",
+                            if is_logged_in {
+                                Link {
+                                    to: Route::CalendarEventNew { edit_naddr: None },
+                                    class: "hidden sm:flex items-center gap-2 px-3 py-1.5 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
+                                    svg {
+                                        class: "w-4 h-4",
+                                        xmlns: "http://www.w3.org/2000/svg",
+                                        fill: "none",
+                                        view_box: "0 0 24 24",
+                                        stroke: "currentColor",
+                                        stroke_width: "2",
+                                        path {
+                                            stroke_linecap: "round",
+                                            stroke_linejoin: "round",
+                                            d: "M12 4.5v15m7.5-7.5h-15",
+                                        }
+                                    }
+                                    "Create Event"
+                                }
+                                Link {
+                                    to: Route::CalendarEventNew { edit_naddr: None },
+                                    class: "sm:hidden p-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
+                                    svg {
+                                        class: "w-5 h-5",
+                                        xmlns: "http://www.w3.org/2000/svg",
+                                        fill: "none",
+                                        view_box: "0 0 24 24",
+                                        stroke: "currentColor",
+                                        stroke_width: "2",
+                                        path {
+                                            stroke_linecap: "round",
+                                            stroke_linejoin: "round",
+                                            d: "M12 4.5v15m7.5-7.5h-15",
+                                        }
+                                    }
+                                }
                             }
-                            button {
-                                class: if *view_mode.read() == ViewMode::Map { "px-3 py-1.5 text-sm font-medium bg-background rounded shadow-xs" } else { "px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition" },
-                                onclick: move |_| view_mode.set(ViewMode::Map),
-                                "Map"
+                            div { class: "flex items-center bg-muted rounded-lg p-1",
+                                button {
+                                    class: if *view_mode.read() == ViewMode::Grid { "px-3 py-1.5 text-sm font-medium bg-background rounded shadow-xs" } else { "px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition" },
+                                    onclick: move |_| view_mode.set(ViewMode::Grid),
+                                    "Grid"
+                                }
+                                button {
+                                    class: if *view_mode.read() == ViewMode::Map { "px-3 py-1.5 text-sm font-medium bg-background rounded shadow-xs" } else { "px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition" },
+                                    onclick: move |_| view_mode.set(ViewMode::Map),
+                                    "Map"
+                                }
                             }
                         }
                     }

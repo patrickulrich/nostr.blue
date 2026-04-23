@@ -1,5 +1,5 @@
 use crate::components::{
-    icons::*, ArticleContent, ClientInitializing, CommentComposer, ShareModal, ThreadedComment,
+    icons::*, ArticleContent, ClientInitializing, ReplyComposer, ShareModal, ThreadedComment,
 };
 use crate::hooks::use_relay_subscription;
 use crate::routes::Route;
@@ -412,9 +412,9 @@ pub fn ArticleDetail(naddr: String) -> Element {
                                     }}
                                 }
                                 if *show_comment_composer.read() {
-                                    CommentComposer {
-                                        comment_on: event.clone(),
-                                        parent_comment: None,
+                                    ReplyComposer {
+                                        target: event.clone(),
+                                        root_event: None,
                                         on_close: move |_| show_comment_composer.set(false),
                                         on_success: move |comment_event: NostrEvent| {
                                             show_comment_composer.set(false);

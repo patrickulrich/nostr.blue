@@ -1,243 +1,279 @@
-use crate::components::icons::{BarChartIcon, CameraIcon};
-use crate::components::{
-    EmojiPicker, GifPicker, MediaUploader, MentionAutocomplete, PollCreatorModal,
-};
+use crate::components::{ComposerBody, DraftDiscardModal};
+use crate::components::toast::show_queued_toast;
+use crate::hooks::use_composer_editor::{use_composer_editor, restore_draft_or_empty, ComposerConfig};
 use crate::stores::{auth_store, nostr_client::publish_note_tracked};
-use crate::utils::custom_emoji::EmojiSelection;
 use dioxus::prelude::*;
-const MAX_LENGTH: usize = 5000;
+use dioxus_primitives::toast::consume_toast;
+
+#[derive(Clone, PartialEq)]
+pub enum NoteMode {
+    Inline,
+    FullPage { quote: Option<String> },
+}
+
 #[component]
-pub fn NoteComposer() -> Element {
-    let mut content = use_signal(String::new);
-    let mut is_publishing = use_signal(|| false);
+pub fn NoteComposer(mode: NoteMode) -> Element {
+    let navigator = navigator();
+    let toast = consume_toast();
     let mut is_focused = use_signal(|| false);
-    let mut show_image_uploader = use_signal(|| false);
-    let mut show_poll_modal = use_signal(|| false);
     let mut publish_feedback = use_signal(|| Option::<(bool, String)>::None);
     let mut feedback_version = use_signal(|| 0u32);
+    let mut show_discard = use_signal(|| false);
     let is_authenticated = use_memo(move || auth_store::AUTH_STATE.read().is_authenticated);
-    let char_count = content.read().chars().count();
-    let remaining = MAX_LENGTH.saturating_sub(char_count);
-    let is_over_limit = char_count > MAX_LENGTH;
-    let show_warning = remaining < 100 && !is_over_limit;
-    let can_publish = char_count > 0 && !is_over_limit && !*is_publishing.read();
-    let counter_color = if is_over_limit {
-        "text-red-500"
-    } else if show_warning {
-        "text-yellow-500"
-    } else {
-        "text-gray-500"
+
+    let initial_content = match &mode {
+        NoteMode::FullPage { quote } => quote
+            .as_ref()
+            .map(|q| {
+                let clean = q.strip_prefix("nostr:").unwrap_or(q);
+                format!("\nnostr:{}", clean)
+            })
+            .unwrap_or_else(|| restore_draft_or_empty("root")),
+        NoteMode::Inline => restore_draft_or_empty("root"),
     };
-    let mut cursor_position = use_signal(|| 0usize);
+
+    let editor = use_composer_editor(ComposerConfig {
+        draft_context: Some("root".to_string()),
+        initial_content,
+    });
+
+    let mode_for_publish = mode.clone();
     let handle_publish = move |_| {
-        let content_value = content.read().clone();
-        if content_value.is_empty() || is_over_limit {
+        let content_value = editor.content_value();
+        if content_value.is_empty() || *editor.is_over_limit.read() {
             return;
         }
+        let mut is_publishing = editor.is_publishing;
         is_publishing.set(true);
-        publish_feedback.set(None);
-        spawn(async move {
-            match publish_note_tracked(content_value, Vec::new()).await {
-                Ok(result) => {
-                    let success_count = result.success_count();
-                    let total = result.total_attempted();
-                    log::info!(
-                        "Note published: {} ({}/{} relays)",
-                        result.event_id,
-                        success_count,
-                        total
-                    );
-                    if result.has_failures() && success_count > 0 {
-                        feedback_version.set(feedback_version() + 1);
-                        let current_version = feedback_version();
-                        publish_feedback.set(Some((
-                            true,
-                            format!("Published to {}/{} relays", success_count, total),
-                        )));
-                        content.set(String::new());
-                        show_image_uploader.set(false);
-                        is_publishing.set(false);
-                        crate::platform::timer::sleep_ms(3000).await;
-                        if feedback_version() == current_version {
-                            publish_feedback.set(None);
+
+        let content_warning = if *editor.is_sensitive.read() {
+            let reason = editor.sensitive_reason.read().clone();
+            Some(reason).filter(|r| !r.is_empty()).or(Some(String::new()))
+        } else {
+            None
+        };
+
+        match mode_for_publish {
+            NoteMode::Inline => {
+                let mut content = editor.content;
+                let mut show_media_uploader = editor.show_media_uploader;
+                let toast_api = toast;
+                publish_feedback.set(None);
+                spawn(async move {
+                    match publish_note_tracked(content_value, Vec::new(), content_warning.clone()).await {
+                        Ok(result) => {
+                            log::info!("Note published: {}", result.event_id);
+                            if result.is_success() {
+                                show_queued_toast(toast_api, "Note");
+                                content.set(String::new());
+                                editor.clear_draft();
+                                show_media_uploader.set(false);
+                                is_publishing.set(false);
+                            } else {
+                                feedback_version.set(feedback_version() + 1);
+                                let current_version = feedback_version();
+                                publish_feedback.set(Some((
+                                    false,
+                                    "Failed to publish".to_string(),
+                                )));
+                                is_publishing.set(false);
+                                crate::platform::timer::sleep_ms(3000).await;
+                                if feedback_version() == current_version {
+                                    publish_feedback.set(None);
+                                }
+                            }
                         }
-                    } else if success_count == 0 {
-                        feedback_version.set(feedback_version() + 1);
-                        let current_version = feedback_version();
-                        publish_feedback
-                            .set(Some((false, "Failed to publish to any relay".to_string())));
-                        is_publishing.set(false);
-                        crate::platform::timer::sleep_ms(3000).await;
-                        if feedback_version() == current_version {
-                            publish_feedback.set(None);
+                        Err(e) => {
+                            log::error!("Failed to publish note: {}", e);
+                            feedback_version.set(feedback_version() + 1);
+                            let current_version = feedback_version();
+                            publish_feedback.set(Some((false, format!("Error: {}", e))));
+                            is_publishing.set(false);
+                            crate::platform::timer::sleep_ms(5000).await;
+                            if feedback_version() == current_version {
+                                publish_feedback.set(None);
+                            }
                         }
-                    } else {
-                        content.set(String::new());
-                        show_image_uploader.set(false);
-                        is_publishing.set(false);
                     }
-                }
-                Err(e) => {
-                    log::error!("Failed to publish note: {}", e);
-                    feedback_version.set(feedback_version() + 1);
-                    let current_version = feedback_version();
-                    publish_feedback.set(Some((false, format!("Error: {}", e))));
+                });
+            }
+            NoteMode::FullPage { .. } => {
+                let nav = navigator;
+                let toast_api = toast;
+                spawn(async move {
+                    match publish_note_tracked(content_value, Vec::new(), content_warning.clone()).await {
+                        Ok(_) => {
+                            show_queued_toast(toast_api, "Note");
+                            editor.clear();
+                            editor.clear_draft();
+                            nav.push(crate::routes::Route::Home {
+                                list: String::new(),
+                            });
+                        }
+                        Err(e) => {
+                            log::error!("Failed to publish note: {}", e);
+                        }
+                    }
                     is_publishing.set(false);
-                    crate::platform::timer::sleep_ms(5000).await;
-                    if feedback_version() == current_version {
-                        publish_feedback.set(None);
-                    }
-                }
-            }
-        });
-    };
-    let handle_cancel = move |_| {
-        content.set(String::new());
-        show_image_uploader.set(false);
-        is_focused.set(false);
-    };
-    let mut insert_at_cursor = move |text: String| {
-        let mut current = content.read().clone();
-        let pos = *cursor_position.read();
-        let pos = pos.min(current.len());
-        current.insert_str(pos, &text);
-        content.set(current);
-        cursor_position.set(pos + text.len());
-    };
-    let mut insert_with_spacing = move |text: String| {
-        let mut text_with_space = text.clone();
-        {
-            let current = content.read();
-            let pos = *cursor_position.read();
-            if pos > 0 && pos <= current.len() {
-                if let Some(prev_char) = current[..pos].chars().last() {
-                    if !prev_char.is_whitespace() {
-                        text_with_space.insert(0, ' ');
-                    }
-                }
+                });
             }
         }
-        text_with_space.push(' ');
-        insert_at_cursor(text_with_space);
     };
-    let handle_image_uploaded = move |url: String| {
-        insert_with_spacing(url.clone());
-        log::info!("Image URL inserted: {}", url);
-    };
-    let handle_emoji_selected = move |selection: EmojiSelection| {
-        insert_at_cursor(selection.insertion_text());
-    };
-    let handle_gif_selected = move |gif_url: String| {
-        insert_with_spacing(gif_url.clone());
-        log::info!("GIF URL inserted: {}", gif_url);
-    };
-    let handle_poll_created = move |nevent_ref: String| {
-        insert_with_spacing(nevent_ref.clone());
-        show_poll_modal.set(false);
-        log::info!("Poll reference inserted: {}", nevent_ref);
-    };
-    rsx! {
-        div { class: "border-b border-border p-4 bg-background",
-            if !*is_authenticated.read() {
-                div { class: "text-center py-8 text-muted-foreground",
-                    p { "Sign in to create posts" }
-                }
+
+    let textarea_rows: u32 = match &mode {
+        NoteMode::Inline => {
+            if *is_focused.read() || *editor.char_count.read() > 0 {
+                4
             } else {
-                if let Some((is_success, message)) = publish_feedback.read().clone() {
-                    div { class: if is_success { "mb-3 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-600 dark:text-yellow-400 text-sm flex items-center gap-2" } else { "mb-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-sm flex items-center gap-2" },
-                        span { "{message}" }
-                        button {
-                            class: "ml-auto text-current opacity-60 hover:opacity-100",
-                            onclick: move |_| publish_feedback.set(None),
-                            "×"
+                2
+            }
+        }
+        NoteMode::FullPage { .. } => 8,
+    };
+
+    if matches!(mode, NoteMode::FullPage { .. }) && !*is_authenticated.read() {
+        return rsx! {
+            div {
+                class: "flex items-center justify-center h-screen",
+                onmounted: move |_| {
+                    navigator.push(crate::routes::Route::Home { list: String::new() });
+                },
+                "Redirecting..."
+            }
+        };
+    }
+
+    match &mode {
+        NoteMode::Inline => rsx! {
+            div { class: "border-b border-border p-4 bg-background",
+                if !*is_authenticated.read() {
+                    div { class: "text-center py-8 text-muted-foreground",
+                        p { "Sign in to create posts" }
+                    }
+                } else {
+                    if let Some((is_success, message)) = publish_feedback.read().clone() {
+                        div {
+                            class: if is_success {
+                                "mb-3 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-600 dark:text-yellow-400 text-sm flex items-center gap-2"
+                            } else {
+                                "mb-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-sm flex items-center gap-2"
+                            },
+                            span { "{message}" }
+                            button {
+                                class: "ml-auto text-current opacity-60 hover:opacity-100",
+                                onclick: move |_| publish_feedback.set(None),
+                                "×"
+                            }
                         }
                     }
-                }
-                div { class: "w-full",
-                    MentionAutocomplete {
-                        content,
-                        on_input: move |new_value: String| {
-                            content.set(new_value);
-                        },
+                    ComposerBody {
+                        editor,
                         placeholder: "What's happening?".to_string(),
-                        rows: if *is_focused.read() { 4 } else { 2 },
-                        disabled: *is_publishing.read(),
-                        onfocus: move |_| {
-                            is_focused.set(true);
+                        textarea_rows,
+                        publish_label: "Post".to_string(),
+                        on_publish: handle_publish,
+                        on_cancel: move |_| {
+                            if !editor.content.read().is_empty() {
+                                show_discard.set(true);
+                            } else {
+                                editor.clear();
+                                editor.clear_draft();
+                                is_focused.set(false);
+                            }
                         },
-                        cursor_position,
-                    }
-                    if *show_image_uploader.read() {
-                        div { class: "mt-3",
-                            MediaUploader {
-                                on_upload: handle_image_uploaded,
-                                button_label: "Upload Media",
-                            }
-                        }
-                    }
-                    if *is_focused.read() || char_count > 0 {
-                        div { class: "mt-3 flex items-center justify-between",
-                            div { class: "flex items-center gap-2",
-                                button {
-                                    class: if *show_image_uploader.read() { "p-2 rounded-full bg-primary text-primary-foreground transition" } else { "p-2 rounded-full hover:bg-accent transition" },
-                                    title: "Add media",
-                                    onclick: move |_| {
-                                        let current = *show_image_uploader.read();
-                                        show_image_uploader.set(!current);
-                                    },
-                                    disabled: *is_publishing.read(),
-                                    CameraIcon { class: "w-5 h-5".to_string() }
-                                }
-                                EmojiPicker {
-                                    on_emoji_selected: handle_emoji_selected,
-                                    icon_only: true,
-                                }
-                                GifPicker {
-                                    on_gif_selected: handle_gif_selected,
-                                    icon_only: true,
-                                }
-                                button {
-                                    class: "p-2 rounded-full hover:bg-accent transition",
-                                    title: "Create poll",
-                                    onclick: move |_| show_poll_modal.set(true),
-                                    disabled: *is_publishing.read(),
-                                    BarChartIcon { class: "w-5 h-5".to_string() }
-                                }
-                                div { class: "text-sm {counter_color} ml-2",
-                                    if is_over_limit {
-                                        span { "Over limit by {char_count - MAX_LENGTH}" }
-                                    } else {
-                                        span { "{char_count} / {MAX_LENGTH}" }
-                                    }
-                                }
-                            }
-                            div { class: "flex gap-2",
-                                button {
-                                    class: "px-4 py-2 text-sm font-medium hover:bg-accent rounded-full transition",
-                                    onclick: handle_cancel,
-                                    disabled: *is_publishing.read(),
-                                    "Cancel"
-                                }
-                                button {
-                                    class: "px-6 py-2 text-sm font-bold text-white bg-blue-500 hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-full transition flex items-center gap-2",
-                                    disabled: !can_publish,
-                                    onclick: handle_publish,
-                                    if *is_publishing.read() {
-                                        span { class: "inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" }
-                                        "Publishing..."
-                                    } else {
-                                        "Post"
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    PollCreatorModal {
-                        show: show_poll_modal,
-                        on_poll_created: handle_poll_created,
+                        on_focus: move |_| is_focused.set(true),
+                        thread_participants: None,
                     }
                 }
             }
-        }
+            if *show_discard.read() {
+                DraftDiscardModal {
+                    on_save: move |_| {
+                        editor.clear();
+                        show_discard.set(false);
+                        is_focused.set(false);
+                    },
+                    on_discard: move |_| {
+                        editor.clear();
+                        editor.clear_draft();
+                        show_discard.set(false);
+                        is_focused.set(false);
+                    },
+                    on_continue: move |_| {
+                        show_discard.set(false);
+                    },
+                }
+            }
+        },
+        NoteMode::FullPage { quote } => {
+            let mut try_close = move || {
+                if !editor.content.read().is_empty() {
+                    show_discard.set(true);
+                } else {
+                    navigator.go_back();
+                }
+            };
+            rsx! {
+                div {
+                    class: "fixed inset-0 bg-black/50 z-50 flex items-start justify-center overflow-y-auto",
+                    onclick: move |_| try_close(),
+                    div {
+                        class: "bg-background border border-border rounded-lg shadow-xl w-full max-w-2xl m-4 mt-20",
+                        onclick: move |e| e.stop_propagation(),
+                        div { class: "flex items-center justify-between p-4 border-b border-border",
+                            h2 { class: "text-xl font-bold",
+                                if quote.is_some() { "Quote Note" } else { "Create Note" }
+                            }
+                            button {
+                                class: "text-muted-foreground hover:text-foreground transition",
+                                onclick: move |_| try_close(),
+                                svg {
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    class: "w-6 h-6",
+                                    fill: "none",
+                                    view_box: "0 0 24 24",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    path {
+                                        stroke_linecap: "round",
+                                        stroke_linejoin: "round",
+                                        d: "M6 18L18 6M6 6l12 12",
+                                    }
+                                }
+                            }
+                        }
+                        div { class: "p-4",
+                            ComposerBody {
+                                editor,
+                                placeholder: "What's on your mind?".to_string(),
+                                textarea_rows,
+                                textarea_class: Some("w-full min-h-[200px] p-3 bg-background border border-border rounded-lg resize-y focus:outline-hidden focus:ring-2 focus:ring-blue-500".to_string()),
+                                publish_label: "Post".to_string(),
+                                on_publish: handle_publish,
+                                thread_participants: None,
+                            }
+                        }
+                    }
+                }
+                if *show_discard.read() {
+                    DraftDiscardModal {
+                        on_save: move |_| {
+                            editor.clear();
+                            show_discard.set(false);
+                            navigator.go_back();
+                        },
+                        on_discard: move |_| {
+                            editor.clear();
+                            editor.clear_draft();
+                            show_discard.set(false);
+                            navigator.go_back();
+                        },
+                        on_continue: move |_| {
+                            show_discard.set(false);
+                        },
+                    }
+                }
+            }
+        },
     }
 }

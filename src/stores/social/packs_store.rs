@@ -309,12 +309,6 @@ pub async fn publish_starter_pack(
     members: &[PackMember],
     d_tag: Option<&str>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
-
-    if !*crate::stores::nostr_client::HAS_SIGNER.read() {
-        return Err("No signer attached".to_string());
-    }
-
     let d = d_tag.map(|s| s.to_string()).unwrap_or_else(generate_d_tag);
 
     let mut tags: Vec<Tag> = vec![Tag::identifier(&d), Tag::title(name), Tag::alt("Starter pack")];
@@ -354,18 +348,17 @@ pub async fn publish_starter_pack(
     let builder = EventBuilder::new(Kind::Custom(STARTER_PACK_KIND), "")
         .tags(tags)
         .allow_self_tagging();
-    let builder = crate::utils::nips::nip89::tag_event_builder(builder);
-
-    let event = client
-        .sign_event_builder(builder)
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign starter pack: {}", e))?;
 
-    client
-        .pool()
-        .send_event(&event)
-        .await
-        .map_err(|e| format!("Failed to publish starter pack: {}", e))?;
+    crate::stores::publish_queue::enqueue_and_await(
+        event.clone(),
+        crate::stores::publish_queue::types::QueueEventType::Pack,
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await?;
 
     if let Some(pack) = StarterPack::from_event(&event) {
         cache_pack(&pack);
@@ -385,12 +378,6 @@ pub async fn publish_starter_pack(
 
 /// Delete a starter pack (NIP-09)
 pub async fn delete_starter_pack(pack: &StarterPack) -> StdResult<(), String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
-
-    if !*crate::stores::nostr_client::HAS_SIGNER.read() {
-        return Err("No signer attached".to_string());
-    }
-
     let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
     if pack.author_pubkey != current_pubkey {
         return Err("You can only delete your own packs".to_string());
@@ -404,10 +391,15 @@ pub async fn delete_starter_pack(pack: &StarterPack) -> StdResult<(), String> {
     let deletion_request = EventDeletionRequest::new().coordinate(coord);
     let builder = EventBuilder::delete(deletion_request);
 
-    client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to delete starter pack: {}", e))?;
+        .map_err(|e| format!("Failed to sign starter pack deletion: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Pack,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
 
     PACKS_CACHE.write().pop(&pack.naddr);
     log::info!("Starter pack deleted: {}", pack.naddr);

@@ -1,5 +1,7 @@
+use crate::components::SensitiveContent;
 use crate::stores::profiles;
 use crate::stores::zap_goals_store::{self, ZapGoalProgress};
+use crate::utils::nip36;
 use dioxus::prelude::*;
 use url::Url;
 
@@ -29,6 +31,7 @@ pub fn ZapGoalCard(props: ZapGoalCardProps) -> Element {
                 props.progress.goal.author_pubkey
             )
         });
+    let content_warning = nip36::get_content_warning(&props.progress.goal.event.tags);
     let card_class = if props.progress.goal.is_project_goal {
         "rounded-2xl border border-sky-300/60 bg-sky-500/8 p-4 shadow-sm"
     } else {
@@ -90,15 +93,24 @@ pub fn ZapGoalCard(props: ZapGoalCardProps) -> Element {
             }
 
             div { class: "mt-4 space-y-3",
-                div {
-                    h4 { class: "text-lg font-semibold text-foreground", "{summary}" }
-                    if !preview.is_empty() {
-                        p { class: "mt-1 text-sm leading-6 text-muted-foreground whitespace-pre-wrap",
-                            "{preview}"
-                            if content.len() > preview.len() {
-                                "…"
+                {
+                    let content_preview = rsx! {
+                        div {
+                            h4 { class: "text-lg font-semibold text-foreground", "{summary}" }
+                            if !preview.is_empty() {
+                                p { class: "mt-1 text-sm leading-6 text-muted-foreground whitespace-pre-wrap",
+                                    "{preview}"
+                                    if content.len() > preview.len() {
+                                        "…"
+                                    }
+                                }
                             }
                         }
+                    };
+                    if let Some(reason) = content_warning {
+                        rsx! { SensitiveContent { reason, {content_preview} } }
+                    } else {
+                        content_preview
                     }
                 }
 

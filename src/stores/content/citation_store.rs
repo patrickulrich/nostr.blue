@@ -498,7 +498,7 @@ pub async fn publish_internal_citation(
     author: Option<&str>,
     existing_d_tag: Option<&str>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -531,13 +531,17 @@ pub async fn publish_internal_citation(
         tags.push(mime_tag);
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_INTERNAL_REF), cited_text).tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish citation: {}", e))?;
-    ensure_relay_acceptance(&output, "")?;
-    log::info!("Internal citation published: {}", output.id().to_hex());
-    Ok(output.id().to_hex())
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("citation".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }
 /// Publish an external web citation (Kind 31)
 /// If existing_d_tag is provided (editing), it will be preserved to replace the existing event.
@@ -548,7 +552,7 @@ pub async fn publish_external_citation(
     author: Option<&str>,
     existing_d_tag: Option<&str>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -583,13 +587,17 @@ pub async fn publish_external_citation(
         tags.push(mime_tag);
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_EXTERNAL_WEB), cited_text).tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish citation: {}", e))?;
-    ensure_relay_acceptance(&output, "")?;
-    log::info!("External citation published: {}", output.id().to_hex());
-    Ok(output.id().to_hex())
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("citation".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }
 /// Publish a hardcopy citation (Kind 32)
 /// If existing_d_tag is provided (editing), it will be preserved to replace the existing event.
@@ -602,7 +610,7 @@ pub async fn publish_hardcopy_citation(
     doi: Option<&str>,
     existing_d_tag: Option<&str>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -640,13 +648,17 @@ pub async fn publish_hardcopy_citation(
         tags.push(mime_tag);
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_HARDCOPY), cited_text).tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish citation: {}", e))?;
-    ensure_relay_acceptance(&output, "")?;
-    log::info!("Hardcopy citation published: {}", output.id().to_hex());
-    Ok(output.id().to_hex())
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("citation".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }
 /// Publish a prompt/AI citation (Kind 33)
 /// If existing_d_tag is provided (editing), it will be preserved to replace the existing event.
@@ -659,7 +671,7 @@ pub async fn publish_prompt_citation(
     author: Option<&str>,
     existing_d_tag: Option<&str>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -706,13 +718,17 @@ pub async fn publish_prompt_citation(
         tags.push(mime_tag);
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_PROMPT), cited_text).tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish citation: {}", e))?;
-    ensure_relay_acceptance(&output, "")?;
-    log::info!("Prompt citation published: {}", output.id().to_hex());
-    Ok(output.id().to_hex())
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("citation".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }
 #[cfg(test)]
 mod tests {

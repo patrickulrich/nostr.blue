@@ -218,9 +218,9 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
             button {
                 id: "{button_id}",
                 class: if props.disabled {
-                    if props.icon_only { "p-2 rounded-lg opacity-50 cursor-not-allowed" } else { "px-3 py-2 bg-muted text-foreground rounded-lg text-sm font-medium opacity-50 cursor-not-allowed" }
+                    if props.icon_only { "p-2 rounded-full opacity-50 cursor-not-allowed" } else { "px-3 py-2 bg-muted text-foreground rounded-lg text-sm font-medium opacity-50 cursor-not-allowed" }
                 } else {
-                    if props.icon_only { "p-2 hover:bg-accent rounded-lg transition" } else { "px-3 py-2 bg-muted text-foreground hover:bg-accent rounded-lg text-sm font-medium transition" }
+                    if props.icon_only { "p-2 rounded-full hover:bg-accent transition" } else { "px-3 py-2 bg-muted text-foreground hover:bg-accent rounded-lg text-sm font-medium transition" }
                 },
                 title: if props.icon_only { "Add emoji" } else { "" },
                 aria_label: if props.icon_only { "{props.aria_label}" } else { "" },
@@ -273,7 +273,22 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                     }
                 },
                 if props.icon_only {
-                    "😀"
+                    svg {
+                        xmlns: "http://www.w3.org/2000/svg",
+                        class: "w-5 h-5",
+                        width: "24",
+                        height: "24",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        circle { cx: "12", cy: "12", r: "10" }
+                        path { d: "M8 14s1.5 2 4 2 4-2 4-2" }
+                        line { x1: "9", y1: "9", x2: "9.01", y2: "9" }
+                        line { x1: "15", y1: "9", x2: "15.01", y2: "9" }
+                    }
                 } else {
                     "😀 Emoji"
                 }

@@ -31,7 +31,7 @@ pub async fn publish_edit(
     summary: Option<String>,
     notify_pubkey: Option<PublicKey>,
 ) -> std::result::Result<EditPublishResult, String> {
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
@@ -74,21 +74,17 @@ pub async fn publish_edit(
     if let Some(ref notify) = notify_pubkey {
         builder = builder.tag(nostr::Tag::public_key(*notify));
     }
-    let builder = crate::utils::nips::nip89::tag_event_builder(builder);
-    let event = client
-        .sign_event_builder(builder)
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign edit: {}", e))?;
-    let output = client
-        .send_event(&event)
-        .await
-        .map_err(|e| format!("Failed to publish edit: {}", e))?;
-    let result = PublishResult::from_output(output);
-    log::info!(
-        "Edit published: {} ({}/{} relays)",
-        result.event_id,
-        result.success_count(),
-        result.total_attempted()
-    );
-    Ok(EditPublishResult { event, publish: result })
+    let event_id = event.id.to_hex();
+    let queue_id = crate::stores::publish_queue::enqueue(
+        event.clone(),
+        crate::stores::publish_queue::types::QueueEventType::Edit,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    let publish = PublishResult::queued(queue_id, event_id);
+    log::info!("Edit queued: {}", publish.event_id);
+    Ok(EditPublishResult { event, publish })
 }

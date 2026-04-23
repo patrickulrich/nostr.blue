@@ -1,6 +1,7 @@
 //! Event Card Component
 //!
 //! Display card for NIP-52 calendar events and NIP-53 live activities
+use crate::components::SensitiveContent;
 use crate::routes::Route;
 use crate::stores::calendar_store::{get_rsvp_count, UnifiedEvent};
 use crate::utils::nip52::is_online_location;
@@ -63,7 +64,7 @@ fn render_badges(event: &UnifiedEvent) -> Element {
 /// Event Card for grid/list display
 /// `from` parameter indicates source page for back navigation ("events" or "calendar")
 #[component]
-pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>) -> Element {
+pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>, #[props(default = None)] content_warning: Option<Option<String>>) -> Element {
     let time_display = format_event_time(&event);
     let location_info = get_location_info(&event);
     let rsvp_count = if event.is_calendar_event() {
@@ -81,7 +82,7 @@ pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>) ->
             class: "block rounded-lg border border-border bg-card overflow-hidden hover:shadow-md transition group",
             {
                 let safe_image_url = event.image().filter(|url| is_valid_http_url(url));
-                if let Some(image_url) = safe_image_url {
+                let image_section = if let Some(image_url) = safe_image_url {
                     rsx! {
                         div { class: "relative h-40 overflow-hidden bg-muted",
                             img {
@@ -113,6 +114,11 @@ pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>) ->
                             {render_badges(&event)}
                         }
                     }
+                };
+                if let Some(reason) = content_warning.clone() {
+                    rsx! { SensitiveContent { reason, {image_section} } }
+                } else {
+                    image_section
                 }
             }
             div { class: "p-4",
@@ -223,7 +229,7 @@ pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>) ->
 }
 /// Compact Event Card for sidebar/list views
 #[component]
-pub fn EventCardCompact(event: UnifiedEvent, #[props(default)] from: Option<String>) -> Element {
+pub fn EventCardCompact(event: UnifiedEvent, #[props(default)] from: Option<String>, #[props(default = None)] content_warning: Option<Option<String>>) -> Element {
     let time_display = format_event_time_short(&event);
     let detail_route = get_event_detail_route(&event, from);
     rsx! {
@@ -232,7 +238,7 @@ pub fn EventCardCompact(event: UnifiedEvent, #[props(default)] from: Option<Stri
             class: "flex items-center gap-3 p-3 hover:bg-accent/50 rounded-lg transition",
             {
                 let safe_image_url = event.image().filter(|url| is_valid_http_url(url));
-                if let Some(image_url) = safe_image_url {
+                let image_el = if let Some(image_url) = safe_image_url {
                     rsx! {
                         img {
                             src: "{image_url}",
@@ -260,6 +266,11 @@ pub fn EventCardCompact(event: UnifiedEvent, #[props(default)] from: Option<Stri
                             }
                         }
                     }
+                };
+                if let Some(reason) = content_warning.clone() {
+                    rsx! { SensitiveContent { reason, {image_el} } }
+                } else {
+                    image_el
                 }
             }
             div { class: "flex-1 min-w-0",

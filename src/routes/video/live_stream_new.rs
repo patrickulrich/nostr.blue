@@ -218,7 +218,7 @@ async fn publish_live_stream(
     hashtags: String,
     status: String,
 ) -> Result<String, String> {
-    let client = nostr_client::get_client().ok_or_else(|| "Client not initialized".to_string())?;
+    let _client = nostr_client::get_client().ok_or_else(|| "Client not initialized".to_string())?;
     let now = chrono::Utc::now();
     let timestamp_ms = now.timestamp_millis();
     let random_component = uuid::Uuid::new_v4()
@@ -261,10 +261,16 @@ async fn publish_live_stream(
             }
         }
     }
-    let _output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish event: {}", e))?;
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue_and_await(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("livestream".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await?;
     let pubkey = nostr_client::get_cached_pubkey()?;
     let naddr = format!("30311:{}:{}", pubkey.to_hex(), d_tag);
     Ok(naddr)

@@ -580,7 +580,7 @@ pub async fn publish_drive(
     description: Option<&str>,
     root_directories: &[String],
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -602,22 +602,24 @@ pub async fn publish_drive(
         tags.push(mime_tag);
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_DRIVE), "").tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish drive: {}", e))?;
-    if output.success.is_empty() {
-        return Err("No relays accepted event".to_string());
-    }
-    log::info!("Drive published: {}", output.id().to_hex());
-    Ok(output.id().to_hex())
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("directory".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }
 /// Publish a new directory
 pub async fn publish_directory(
     name: &str,
     entries: &[DirectoryEntry],
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -654,15 +656,17 @@ pub async fn publish_directory(
         tags.push(mime_tag);
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_DIRECTORY), "").tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish directory: {}", e))?;
-    if output.success.is_empty() {
-        return Err("No relays accepted event".to_string());
-    }
-    log::info!("Directory published: {}", output.id().to_hex());
-    Ok(output.id().to_hex())
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("directory".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }
 /// Publish a symlink
 pub async fn publish_symlink(
@@ -672,7 +676,7 @@ pub async fn publish_symlink(
     context_directory: Option<&str>,
     drive: Option<&str>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -705,15 +709,17 @@ pub async fn publish_symlink(
         tags.push(mime_tag);
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_SYMLINK), "").tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish symlink: {}", e))?;
-    if output.success.is_empty() {
-        return Err("No relays accepted event".to_string());
-    }
-    log::info!("Symlink published: {}", output.id().to_hex());
-    Ok(output.id().to_hex())
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("directory".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }
 /// Navigate into a directory
 pub fn navigate_into(directory_address: &str) {

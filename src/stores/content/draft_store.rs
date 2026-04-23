@@ -210,17 +210,19 @@ pub async fn set_private_relays(relays: Vec<String>) -> Result<String, String> {
         .await
         .map_err(|e| format!("Failed to encrypt: {}", e))?;
     let builder = EventBuilder::new(Kind::from(KIND_PRIVATE_RELAY_LIST), encrypted);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish Kind 10013: {}", e))?;
-    if output.success.is_empty() {
-        return Err("Failed to publish Kind 10013: no relay accepted the event".to_string());
-    }
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("draft".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     *PRIVATE_RELAYS.write() = relays;
     *PRIVATE_RELAYS_LOADED.write() = true;
-    log::info!("Published Kind 10013: {}", output.id().to_hex());
-    Ok(output.id().to_hex())
+    Ok(event_id)
 }
 /// Ensure user has private relays configured, creating default if needed
 pub async fn ensure_private_relays() -> Result<Vec<String>, String> {
@@ -271,19 +273,18 @@ pub async fn save_draft(draft: &ArticleDraft) -> Result<String, String> {
         Tag::expiration(expiration),
     ];
     let builder = EventBuilder::new(Kind::from(KIND_DRAFT), encrypted).tags(tags);
-    let event = client
-        .sign_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign draft event: {}", e))?;
-    let result =
-        nostr_client::send_presigned_event_to_relays(event.clone(), private_relays).await?;
-    log::info!(
-        "Draft saved: {} ({}/{} relays succeeded)",
-        result.event_id,
-        result.success_count(),
-        result.total_attempted()
-    );
-    Ok(result.event_id)
+    let relay_strs: Vec<String> = private_relays.iter().map(|u| u.to_string()).collect();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("draft".to_string()),
+        Some(relay_strs),
+        std::collections::HashMap::new(),
+    ).await;
+    log::info!("Draft saved and queued");
+    Ok(String::new())
 }
 /// Load all drafts for the current user
 pub async fn load_drafts() -> Result<Vec<LoadedDraft>, String> {
@@ -390,7 +391,6 @@ pub async fn load_draft(identifier: &str) -> Result<Option<ArticleDraft>, String
 }
 /// Delete a draft by publishing with empty content
 pub async fn delete_draft(identifier: &str) -> Result<(), String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
     let private_relays = get_private_relays()
         .await
         .unwrap_or_else(|_| default_private_relays());
@@ -402,11 +402,16 @@ pub async fn delete_draft(identifier: &str) -> Result<(), String> {
         ),
     ];
     let builder = EventBuilder::new(Kind::from(KIND_DRAFT), "").tags(tags);
-    let event = client
-        .sign_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign delete event: {}", e))?;
-    nostr_client::send_presigned_event_to_relays(event, private_relays).await?;
+    let relay_strs: Vec<String> = private_relays.iter().map(|u| u.to_string()).collect();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("draft".to_string()),
+        Some(relay_strs),
+        std::collections::HashMap::new(),
+    ).await;
     log::info!("Draft deleted: {}", identifier);
     Ok(())
 }

@@ -2,7 +2,7 @@
 
 A multi-platform Nostr client built using **Rust + Dioxus + rust-nostr** with integrated CDK wallet.
 
-![Version](https://img.shields.io/badge/version-0.8.6-blue)
+![Version](https://img.shields.io/badge/version-0.8.7-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Rust](https://img.shields.io/badge/rust-1.82+-orange)
 ![Platforms](https://img.shields.io/badge/platforms-Web%20%7C%20Android%20%7C%20Desktop-blue)
@@ -242,7 +242,7 @@ dx serve --platform desktop --no-default-features --features desktop
 | [NIP-03](https://github.com/nostr-protocol/nips/blob/master/03.md) | OpenTimestamps Attestations | ❌ |
 | [NIP-04](https://github.com/nostr-protocol/nips/blob/master/04.md) | Encrypted DM (legacy) | ✅ |
 | [NIP-05](https://github.com/nostr-protocol/nips/blob/master/05.md) | DNS Identifiers | ✅ |
-| [NIP-06](https://github.com/nostr-protocol/nips/blob/master/06.md) | Key derivation from mnemonic | ❌ |
+| [NIP-06](https://github.com/nostr-protocol/nips/blob/master/06.md) | Key derivation from mnemonic | ✅ |
 | [NIP-07](https://github.com/nostr-protocol/nips/blob/master/07.md) | Browser extension signing | ✅ |
 | [NIP-09](https://github.com/nostr-protocol/nips/blob/master/09.md) | Event Deletion | ✅ |
 | [NIP-10](https://github.com/nostr-protocol/nips/blob/master/10.md) | Text Notes and Threads | ✅ |
@@ -266,7 +266,7 @@ dx serve --platform desktop --no-default-features --features desktop
 | [NIP-32](https://github.com/nostr-protocol/nips/blob/master/32.md) | Labeling | ❌ |
 | [NIP-34](https://github.com/nostr-protocol/nips/blob/master/34.md) | Git stuff | ✅ |
 | [NIP-35](https://github.com/nostr-protocol/nips/blob/master/35.md) | Torrents | ❌ |
-| [NIP-36](https://github.com/nostr-protocol/nips/blob/master/36.md) | Sensitive Content | ❌ |
+| [NIP-36](https://github.com/nostr-protocol/nips/blob/master/36.md) | Sensitive Content | ✅ |
 | [NIP-37](https://github.com/nostr-protocol/nips/blob/master/37.md) | Draft Events | ✅ |
 | [NIP-38](https://github.com/nostr-protocol/nips/blob/master/38.md) | User Statuses | ✅ |
 | [NIP-39](https://github.com/nostr-protocol/nips/blob/master/39.md) | External Identities | ❌ |

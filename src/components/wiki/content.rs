@@ -9,6 +9,7 @@ use crate::routes::Route;
 use crate::stores::wiki_store::CachedWikiPage;
 use crate::utils::clipboard::copy_formatted_content;
 use dioxus::prelude::*;
+use nostr::ToBech32;
 /// Wiki page content renderer
 #[component]
 pub fn WikiPageContent(
@@ -104,6 +105,7 @@ pub fn WikiPageContent(
             AsciiDocContent {
                 content: page.event.content.clone(),
                 enable_wikilinks: true,
+                author_npub: Some(page.event.pubkey.to_bech32().unwrap_or_default()),
                 on_citations_loaded: move |metadata: CitationMetadata| {
                     citation_count.set(metadata.count);
                 },
@@ -164,11 +166,13 @@ pub fn WikiOutline(content: String, #[props(default = String::new())] class: Str
 #[component]
 pub fn WikiForwardLinks(
     links: Vec<String>,
+    #[props(default = None)] author_npub: Option<String>,
     #[props(default = String::new())] class: String,
 ) -> Element {
     if links.is_empty() {
         return rsx! {};
     }
+    let author_npub_clone = author_npub.clone();
     rsx! {
         div { class: "wiki-forward-links {class}",
             h4 { class: "text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3",
@@ -176,13 +180,32 @@ pub fn WikiForwardLinks(
             }
             div { class: "flex flex-wrap gap-2",
                 for link in links.iter() {
-                    Link {
-                        class: "inline-flex items-center gap-1 px-2 py-1 text-sm bg-accent rounded-md hover:bg-accent/80 transition-colors",
-                        to: Route::WikiDetail {
-                            identifier: link.clone(),
-                        },
-                        ExternalLinkIcon { class: "w-3 h-3" }
-                        "{link}"
+                    {
+                        let link = link.clone();
+                        let npub = author_npub_clone.clone();
+                        let cached = crate::stores::wiki_store::get_cached_wiki_page(&link);
+                        let route = if let Some(ref npub_str) = npub {
+                            Route::WikiDetail {
+                                npub: npub_str.clone(),
+                                identifier: link.clone(),
+                            }
+                        } else if let Some(ref page) = cached {
+                            Route::WikiDetail {
+                                npub: page.event.pubkey.to_bech32().unwrap_or_else(|_| page.article.pubkey.clone()),
+                                identifier: link.clone(),
+                            }
+                        } else {
+                            Route::WikiSlug { slug: link.clone() }
+                        };
+                        rsx! {
+                            Link {
+                                key: "{link}",
+                                class: "inline-flex items-center gap-1 px-2 py-1 text-sm bg-accent rounded-md hover:bg-accent/80 transition-colors",
+                                to: route,
+                                ExternalLinkIcon { class: "w-3 h-3" }
+                                "{link}"
+                            }
+                        }
                     }
                 }
             }

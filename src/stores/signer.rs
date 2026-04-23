@@ -125,9 +125,11 @@ pub static CURRENT_SIGNER: GlobalSignal<Option<SignerType>> = Signal::global(|| 
 /// Global signal for signer info (persisted)
 pub static SIGNER_INFO: GlobalSignal<Option<SignerInfo>> =
     Signal::global(|| crate::platform::storage::get("signer_info").ok());
-/// Set the current signer and persist session info
-pub async fn set_signer(signer: SignerType) -> Result<(), String> {
-    let public_key = signer.public_key().await?;
+/// Set the current signer with an already-known public key (avoids redundant external signer call)
+pub async fn set_signer_with_pubkey(
+    signer: SignerType,
+    public_key: PublicKey,
+) -> Result<(), String> {
     let backend = match &signer {
         SignerType::Keys(_) => SignerBackend::Keys,
         #[cfg(target_family = "wasm")]
@@ -145,6 +147,16 @@ pub async fn set_signer(signer: SignerType) -> Result<(), String> {
     *SIGNER_INFO.write() = Some(info);
     *CURRENT_SIGNER.write() = Some(signer);
     Ok(())
+}
+
+/// Set the current signer and persist session info
+///
+/// Prefer `set_signer_with_pubkey` when the public key is already known
+/// to avoid an unnecessary external signer call.
+#[allow(dead_code)]
+pub async fn set_signer(signer: SignerType) -> Result<(), String> {
+    let public_key = signer.public_key().await?;
+    set_signer_with_pubkey(signer, public_key).await
 }
 /// Clear the current signer and remove persisted session
 #[allow(dead_code)]

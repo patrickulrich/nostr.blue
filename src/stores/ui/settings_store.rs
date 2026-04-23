@@ -32,6 +32,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub cashu_wallet_auto_load: bool,
     #[serde(default)]
+    pub show_sensitive_content: bool,
+    #[serde(default)]
     pub version: u32,
 }
 fn default_mempool_endpoint() -> String {
@@ -61,6 +63,7 @@ impl Default for AppSettings {
             enable_negentropy_sync: default_enable_negentropy_sync(),
             negentropy_sync_interval_minutes: default_negentropy_sync_interval_minutes(),
             cashu_wallet_auto_load: false,
+            show_sensitive_content: false,
             version: 7,
         }
     }
@@ -213,7 +216,7 @@ pub async fn save_settings(settings: &AppSettings) -> Result<(), String> {
         log::info!("Not authenticated, skipping Nostr sync");
         return Ok(());
     }
-    let client = nostr_client::NOSTR_CLIENT
+    let _client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
@@ -224,31 +227,18 @@ pub async fn save_settings(settings: &AppSettings) -> Result<(), String> {
         .map_err(|e| format!("Failed to serialize settings: {}", e))?;
     let builder =
         EventBuilder::new(Kind::from(APP_DATA_KIND), content).tag(Tag::identifier(SETTINGS_D_TAG));
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder_with_enabled(
-            builder,
-            settings_to_save.publish_client_tag,
-        ))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish settings: {}", e))?;
-    let publish_error = if output.success.is_empty() {
-        let error = format!(
-            "Failed to publish settings: no relays accepted the event (failed_relays={})",
-            output.failed.len()
-        );
-        log::warn!("{}", error);
-        Some(error)
-    } else {
-        log::info!("Settings saved to Nostr successfully");
-        None
-    };
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("settings".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     cache_settings(&settings_to_save);
     SETTINGS.write().clone_from(&settings_to_save);
-    if let Some(error) = publish_error {
-        Err(error)
-    } else {
-        Ok(())
-    }
+    Ok(())
 }
 /// Update theme and save to Nostr
 #[allow(dead_code)]
@@ -376,6 +366,17 @@ pub async fn update_cashu_wallet_auto_load(enabled: bool) {
             e
         );
         cache_settings(&settings);
+    }
+}
+
+pub async fn update_show_sensitive_content(enabled: bool) {
+    let settings = {
+        let mut w = SETTINGS.write();
+        w.show_sensitive_content = enabled;
+        w.clone()
+    };
+    if let Err(e) = save_settings(&settings).await {
+        log::error!("Failed to save show_sensitive_content setting: {}", e);
     }
 }
 

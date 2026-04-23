@@ -431,6 +431,27 @@ pub fn MusicIcon(props: IconProps) -> Element {
     }
 }
 #[component]
+pub fn EmojiIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            circle { cx: "12", cy: "12", r: "10" }
+            path { d: "M8 14s1.5 2 4 2 4-2 4-2" }
+            line { x1: "9", y1: "9", x2: "9.01", y2: "9" }
+            line { x1: "15", y1: "9", x2: "15.01", y2: "9" }
+        }
+    }
+}
+#[component]
 pub fn CameraIcon(props: IconProps) -> Element {
     rsx! {
         svg {
@@ -1466,6 +1487,26 @@ pub fn NostrBlueMiniLogo(#[props(default = "w-3 h-3".to_string())] class: String
         }
     }
 }
+/// Vertical video / shorts icon (tall phone with play button)
+#[component]
+pub fn VertsIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            rect { x: "6", y: "2", width: "12", height: "20", rx: "2", ry: "2" }
+            polygon { points: "10,8 16,12 10,16", fill: "currentColor", stroke: "none" }
+        }
+    }
+}
 /// Live video icon (video camera with recording indicator)
 #[component]
 pub fn LiveVideoIcon(props: IconProps) -> Element {
@@ -1945,6 +1986,48 @@ pub fn EggIcon(props: IconProps) -> Element {
             stroke_linejoin: "round",
             path { d: "M12 2C8.5 2 4 7.5 4 13a8 8 0 0 0 16 0C20 7.5 15.5 2 12 2z" }
             path { d: "M10 11a2 2 0 0 0 1.5-1" }
+        }
+    }
+}
+
+#[component]
+pub fn EyeOffIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M9.88 9.88a3 3 0 1 0 4.24 4.24" }
+            path { d: "M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" }
+            path { d: "M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" }
+            line { x1: "2", y1: "2", x2: "22", y2: "22" }
+        }
+    }
+}
+
+#[component]
+pub fn EyeIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" }
+            circle { cx: "12", cy: "12", r: "3" }
         }
     }
 }

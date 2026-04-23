@@ -82,7 +82,7 @@ async fn publish_checked_at_if_enabled(timestamp: i64) {
         );
         return;
     }
-    let client = match nostr_client::get_client() {
+    let _client = match nostr_client::get_client() {
         Some(c) => c,
         None => {
             log::error!("No client available for NIP-78 publish");
@@ -90,21 +90,20 @@ async fn publish_checked_at_if_enabled(timestamp: i64) {
         }
     };
     let builder = notification_nip78::create_checked_at_event(timestamp);
-    match client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
-        .await
-    {
-        Ok(output) => {
-            log::info!(
-                "Published notification checked_at to NIP-78: {}",
-                output.id()
-            );
-            *LAST_PUBLISHED_AT.write() = timestamp;
-        }
+    let event = match crate::stores::publish_queue::signing::sign_event_builder(builder).await {
+        Ok(e) => e,
         Err(e) => {
-            log::error!("Failed to publish checked_at to NIP-78: {}", e);
+            log::error!("Failed to sign checked_at: {}", e);
+            return;
         }
-    }
+    };
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("notification".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    *LAST_PUBLISHED_AT.write() = timestamp;
 }
 /// Fetch and merge notification checked_at from NIP-78 relays
 /// Merges relay timestamp with localStorage (uses maximum of both)

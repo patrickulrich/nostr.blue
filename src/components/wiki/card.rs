@@ -10,6 +10,7 @@ use crate::utils::asciidoc::content_to_plain_text;
 use crate::utils::time::format_relative_time_ex;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
+use nostr::ToBech32;
 use nostr_sdk::Timestamp;
 /// Wiki page card for feed display
 #[component]
@@ -23,8 +24,10 @@ pub fn WikiCard(page: CachedWikiPage) -> Element {
         .unwrap_or_else(|| truncate_pubkey(&author_hex));
     let author_picture = author_profile.as_ref().and_then(|p| p.picture.clone());
     let identifier = page.article.identifier.clone();
+    let author_npub = page.event.pubkey.to_bech32().unwrap_or_else(|_| author_hex.clone());
     let card_click = move |_| {
         nav.push(Route::WikiDetail {
+            npub: author_npub.clone(),
             identifier: identifier.clone(),
         });
     };
@@ -94,8 +97,10 @@ pub fn WikiCard(page: CachedWikiPage) -> Element {
 pub fn WikiCardCompact(page: CachedWikiPage) -> Element {
     let nav = use_navigator();
     let identifier = page.article.identifier.clone();
+    let author_npub = page.event.pubkey.to_bech32().unwrap_or_else(|_| page.article.pubkey.clone());
     let card_click = move |_| {
         nav.push(Route::WikiDetail {
+            npub: author_npub.clone(),
             identifier: identifier.clone(),
         });
     };
@@ -126,8 +131,10 @@ pub fn WikiCardSearchResult(
 ) -> Element {
     let nav = use_navigator();
     let identifier = page.article.identifier.clone();
+    let author_npub = page.event.pubkey.to_bech32().unwrap_or_else(|_| page.article.pubkey.clone());
     let card_click = move |_| {
         nav.push(Route::WikiDetail {
+            npub: author_npub.clone(),
             identifier: identifier.clone(),
         });
     };
@@ -205,23 +212,38 @@ pub fn WikiMetadataCard(metadata: WikiMetadata) -> Element {
             dl { class: "space-y-2 text-sm",
                 div {
                     dt { class: "text-muted-foreground", "Identifier" }
-                    dd { class: "font-mono text-foreground", "{metadata.identifier}" }
+                    dd {
+                        Link {
+                            class: "font-mono text-foreground hover:text-primary hover:underline transition-colors",
+                            to: Route::WikiSlug { slug: metadata.identifier.clone() },
+                            "{metadata.identifier}"
+                        }
+                    }
                 }
                 div {
                     dt { class: "text-muted-foreground", "Author" }
                     dd { class: "flex items-center gap-2",
-                        if let Some(ref picture) = author_picture {
-                            img {
-                                class: "w-4 h-4 rounded-full object-cover",
-                                src: "{picture}",
-                                alt: "{author_name}",
+                        Link {
+                            class: "flex items-center gap-2 hover:text-primary transition-colors",
+                            to: Route::WikiSlug {
+                                slug: nostr::PublicKey::from_hex(&metadata.author_pubkey)
+                                    .ok()
+                                    .and_then(|pk| pk.to_bech32().ok())
+                                    .unwrap_or_else(|| metadata.author_pubkey.clone()),
+                            },
+                            if let Some(ref picture) = author_picture {
+                                img {
+                                    class: "w-4 h-4 rounded-full object-cover",
+                                    src: "{picture}",
+                                    alt: "{author_name}",
+                                }
+                            } else {
+                                div { class: "w-4 h-4 rounded-full bg-gradient-to-br from-primary/50 to-accent/50 flex items-center justify-center text-xs font-medium text-primary-foreground",
+                                    "{author_name.chars().next().unwrap_or('?').to_uppercase()}"
+                                }
                             }
-                        } else {
-                            div { class: "w-4 h-4 rounded-full bg-gradient-to-br from-primary/50 to-accent/50 flex items-center justify-center text-xs font-medium text-primary-foreground",
-                                "{author_name.chars().next().unwrap_or('?').to_uppercase()}"
-                            }
+                            span { "{author_name}" }
                         }
-                        span { "{author_name}" }
                     }
                 }
                 div {

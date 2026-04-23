@@ -4,7 +4,6 @@
 //! Includes counter backup/restore for mint re-addition.
 #![allow(dead_code)]
 use super::errors::CashuResult;
-use super::events::queue_signed_event_for_retry_result;
 use super::internal::create_ephemeral_wallet;
 use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof};
 use super::signals::{
@@ -85,46 +84,17 @@ async fn publish_wallet_snapshot(privkey: &str, mints: &[String]) -> Result<Even
 }
 
 async fn publish_or_queue_wallet_snapshot(event: Event) -> Result<(), String> {
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref().cloned();
-    if let Some(client) = client {
-        match client.send_event(&event).await {
-            Ok(output) if !output.success.is_empty() => return Ok(()),
-            Ok(_) => {
-                log::warn!("No relays accepted wallet event, queueing for retry");
-            }
-            Err(error) => {
-                log::warn!(
-                    "Failed to publish wallet event, queueing for retry: {}",
-                    error
-                );
-            }
-        }
-    } else {
-        log::warn!("Client not initialized, queueing wallet snapshot for retry");
-    }
-
-    if SHARED_LOCALSTORE.read().as_ref().is_none() {
-        return Err(
-            "Localstore not initialized; cannot persist queued wallet snapshot".to_string(),
-        );
-    }
-
-    queue_signed_event_for_retry_result(
+    let metadata = std::collections::HashMap::new();
+    crate::stores::publish_queue::enqueue(
         event,
-        super::types::PendingEventType::WalletSnapshot,
+        crate::stores::publish_queue::types::QueueEventType::Cashu,
         None,
-        None,
-    )
-    .await
+        metadata,
+    ).await;
+    Ok(())
 }
 
 async fn queue_mint_deletion_event_durably(builder: nostr_sdk::EventBuilder) -> Result<(), String> {
-    if SHARED_LOCALSTORE.read().as_ref().is_none() {
-        return Err(
-            "Localstore not initialized; cannot persist queued mint deletion event".to_string(),
-        );
-    }
-
     super::events::queue_event_for_retry(
         builder,
         super::types::PendingEventType::DeletionEvent,
@@ -765,32 +735,22 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
                 format!("Removed mint: {}", normalized_mint_url),
             )
             .tags(tags);
-            if let Some(client) = client.as_ref() {
-                match client
-                    .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
-                        deletion_builder.clone(),
-                    ))
-                    .await
-                {
-                    Ok(output) if !output.success.is_empty() => {
+            if let Some(_client) = client.as_ref() {
+                match crate::stores::publish_queue::signing::sign_event_builder(deletion_builder.clone()).await {
+                    Ok(signed_event) => {
+                        crate::stores::publish_queue::enqueue(
+                            signed_event,
+                            crate::stores::publish_queue::types::QueueEventType::Cashu,
+                            None,
+                            std::collections::HashMap::new(),
+    ).await;
                         log::info!(
-                            "Published deletion event for {} token events",
+                            "Queued deletion event for {} token events",
                             event_ids_to_delete.len()
                         );
                     }
-                    Ok(_) => {
-                        log::warn!("No relays accepted deletion event, queuing for retry");
-                        queue_mint_deletion_event_durably(deletion_builder)
-                            .await
-                            .map_err(|queue_err| {
-                                format!(
-                                    "Failed to queue mint deletion event for retry: {}",
-                                    queue_err
-                                )
-                            })?;
-                    }
                     Err(e) => {
-                        log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
+                        log::warn!("Failed to sign deletion event, queuing unsigned: {}", e);
                         queue_mint_deletion_event_durably(deletion_builder)
                             .await
                             .map_err(|queue_err| {
@@ -1187,7 +1147,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         .as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
     let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let client = nostr_client::NOSTR_CLIENT
+    let _client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
@@ -1210,100 +1170,21 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         .await
         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-    let mut unsigned = crate::utils::nips::nip89::tag_event_builder(builder.clone()).build(pubkey);
-    let pre_signed_event_id = unsigned.id().to_hex();
-    let signed_event = unsigned
-        .sign(&signer)
+    let signed_event = crate::stores::publish_queue::signing::sign_event_builder(builder.clone())
         .await
         .map_err(|e| format!("Failed to sign token event: {}", e))?;
-    let mut publish_succeeded = false;
-    let mut last_error = String::new();
-    let mut retryable = true;
-    let delays = [500u32, 1000, 2000];
-    for (attempt, delay_ms) in std::iter::once(0).chain(delays.iter().copied()).enumerate() {
-        if attempt > 0 {
-            #[cfg(feature = "web")]
-            {
-                let jitter = (js_sys::Math::random() * 200.0) as u32;
-                let effective_delay = delay_ms.saturating_sub(100) + jitter;
-                crate::platform::timer::sleep_ms(effective_delay).await;
-            }
-            #[cfg(feature = "native")]
-            {
-                crate::platform::timer::sleep_ms(delay_ms).await;
-            }
-            log::info!("Retrying token event publish (attempt {})", attempt + 1);
-        }
-        match client.send_event(&signed_event).await {
-            Ok(output) => {
-                if !output.success.is_empty() {
-                    log::info!(
-                        "Published token event {} to {}/{} relays",
-                        pre_signed_event_id,
-                        output.success.len(),
-                        output.success.len() + output.failed.len()
-                    );
-                    publish_succeeded = true;
-                    break;
-                } else {
-                    last_error = format!("All {} relays failed", output.failed.len());
-                    log::warn!("Publish attempt {} - all relays failed", attempt + 1);
-                }
-            }
-            Err(e) => {
-                last_error = e.to_string();
-                let err_str = last_error.to_lowercase();
-                if err_str.contains("banned")
-                    || err_str.contains("invalid")
-                    || err_str.contains("malformed")
-                    || err_str.contains("too large")
-                {
-                    log::error!("Non-retryable error: {}", last_error);
-                    retryable = false;
-                    break;
-                }
-                log::warn!("Publish attempt {} failed: {}", attempt + 1, e);
-            }
-        }
-    }
-    let new_event_id = if publish_succeeded {
-        pre_signed_event_id
-    } else if retryable {
-        log::error!(
-            "All publish attempts failed, using pending ID for background retry: {}",
-            last_error
-        );
-        let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-        super::events::queue_token_event_for_retry(builder, pending_id.clone(), mint_url.clone())
-            .await;
-        pending_id
-    } else {
-        log::error!("Non-retryable publish error: {}", last_error);
-        let local_only_id = format!("local_{}", uuid::Uuid::new_v4());
-        let local_token = TokenData {
-            event_id: local_only_id.clone(),
-            mint: mint_url.clone(),
-            unit: unit_str.clone(),
-            proofs: proof_data.clone(),
-            created_at: now_secs(),
-        };
-        if let Err(e) =
-            super::signals::atomic_token_replace(vec![local_token], &event_ids_to_delete)
-        {
-            log::error!("Failed to persist local-only token: {}", e);
-        } else {
-            super::proofs::register_proofs_in_event_map(&local_only_id, &proof_data);
-            super::proofs::rebuild_proof_event_map();
-            log::info!(
-                "Persisted {} proofs as local-only token {} (publish_error={})",
-                proof_data.len(),
-                &local_only_id[..16.min(local_only_id.len())],
-                &last_error[..50.min(last_error.len())]
-            );
-        }
-        super::signals::update_wallet_balances();
-        return Err(format!("Non-retryable publish error: {}", last_error));
-    };
+    let pre_signed_event_id = signed_event.id.to_hex();
+    let mut metadata = std::collections::HashMap::new();
+    metadata.insert("pending_token_id".to_string(), pre_signed_event_id.clone());
+    metadata.insert("mint_url".to_string(), mint_url.clone());
+    crate::stores::publish_queue::enqueue(
+        signed_event,
+        crate::stores::publish_queue::types::QueueEventType::Cashu,
+        None,
+        metadata,
+    ).await;
+    log::info!("Queued consolidation token event: {}", pre_signed_event_id);
+    let new_event_id = pre_signed_event_id;
     if let Some(ref emergency_id) = emergency_event_id {
         let replacement_token = TokenData {
             event_id: new_event_id.clone(),
@@ -1352,31 +1233,17 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
     }
     if !deletion_request.ids.is_empty() {
         let delete_builder = nostr_sdk::EventBuilder::delete(deletion_request);
-        match client
-            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
-                delete_builder.clone(),
-            ))
-            .await
-        {
-            Ok(output) if !output.success.is_empty() => {}
-            Ok(_) => {
-                log::warn!("Failed to publish deletion event: no relays accepted the event");
-                if let Err(queue_err) = super::events::queue_event_for_retry(
-                    delete_builder,
-                    super::types::PendingEventType::DeletionEvent,
+        match crate::stores::publish_queue::signing::sign_event_builder(delete_builder.clone()).await {
+            Ok(signed_event) => {
+                crate::stores::publish_queue::enqueue(
+                    signed_event,
+                    crate::stores::publish_queue::types::QueueEventType::Cashu,
                     None,
-                    None,
-                )
-                .await
-                {
-                    log::error!(
-                        "Failed to queue deletion event for retry after consolidation: {}",
-                        queue_err
-                    );
-                }
+                    std::collections::HashMap::new(),
+    ).await;
             }
             Err(e) => {
-                log::warn!("Failed to publish deletion event: {}", e);
+                log::warn!("Failed to sign consolidation deletion event: {}", e);
                 if let Err(queue_err) = super::events::queue_event_for_retry(
                     delete_builder,
                     super::types::PendingEventType::DeletionEvent,

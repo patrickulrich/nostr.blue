@@ -898,6 +898,13 @@ fn extract_nostr_blue(url: &str) -> Option<ContentToken> {
         && !path.starts_with("/wiki/new")
         && !path.starts_with("/wiki/author")
     {
+        let rest = &path["/wiki/".len()..];
+        if rest.starts_with("npub1/") {
+            let parts: Vec<&str> = rest.splitn(2, '/').collect();
+            if parts.len() == 2 {
+                return Some(ContentToken::NostrBlueWiki(format!("{}/{}", parts[0], parts[1])));
+            }
+        }
         return extract_id_from_path(path, "/wiki/").map(ContentToken::NostrBlueWiki);
     }
     if path.starts_with("/publications/")

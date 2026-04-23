@@ -604,7 +604,7 @@ pub fn set_servers(servers: Vec<String>) {
 }
 /// Publish user's Blossom servers as kind 10063 (NIP-B7)
 pub async fn publish_user_servers() -> Result<String, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = nostr_client::get_client().ok_or("Client not initialized")?;
     let signer = nostr_client::get_signer().ok_or("No signer available")?;
     let servers = BLOSSOM_SERVERS.read().data().read().clone();
     log::info!("Publishing {} Blossom servers to kind 10063", servers.len());
@@ -634,26 +634,14 @@ pub async fn publish_user_servers() -> Result<String, String> {
             .await
             .map_err(|e| format!("Failed to sign event: {}", e))?,
     };
-    nostr_client::ensure_relays_ready(&client).await;
-    use nostr_relay_pool::RelayStatus as PoolRelayStatus;
-    let relays = client.relays().await;
-    let connected_count = relays
-        .values()
-        .filter(|r| r.status() == PoolRelayStatus::Connected)
-        .count();
-    if connected_count == 0 {
-        return Err("No relays connected. Cannot publish server list.".to_string());
-    }
-    match client.send_event(&event).await {
-        Ok(output) => {
-            log::info!("Published Blossom server list: {}", output.id());
-            Ok(output.id().to_string())
-        }
-        Err(e) => {
-            log::error!("Failed to publish Blossom server list: {}", e);
-            Err(format!("Failed to publish: {}", e))
-        }
-    }
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Media,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }
 /// Response structure from Blossom server /list endpoint
 #[derive(Debug, Deserialize)]

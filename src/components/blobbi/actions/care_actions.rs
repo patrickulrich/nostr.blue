@@ -2,7 +2,6 @@ use crate::components::blobbi::actions::action_types::BlobbiActionType;
 use crate::components::blobbi::core::builders::{build_interaction_event, publish_blobbi_state};
 use crate::components::blobbi::core::decay::apply_decay;
 use crate::components::blobbi::core::types::BlobbiCompanion;
-use crate::stores::nostr_client;
 use crate::utils::nip_bb::constants::*;
 
 pub fn apply_action_to_blobbi(blobbi: &BlobbiCompanion, action: BlobbiActionType) -> BlobbiCompanion {
@@ -97,11 +96,15 @@ pub async fn execute_blobbi_action(blobbi: &BlobbiCompanion, action: BlobbiActio
         action.xp_value(),
     );
 
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    client
-        .send_event_builder(interaction_event)
+    let event = crate::stores::publish_queue::signing::sign_event_builder(interaction_event)
         .await
-        .map_err(|e| format!("Failed to publish interaction: {}", e))?;
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("blobbi".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
 
     Ok(updated)
 }
@@ -139,11 +142,15 @@ pub async fn execute_item_action(
         xp,
     );
 
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    client
-        .send_event_builder(interaction_event)
+    let event = crate::stores::publish_queue::signing::sign_event_builder(interaction_event)
         .await
-        .map_err(|e| format!("Failed to publish interaction: {}", e))?;
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("blobbi".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
 
     Ok(updated)
 }

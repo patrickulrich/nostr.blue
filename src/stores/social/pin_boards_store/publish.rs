@@ -1,11 +1,9 @@
 use super::*;
 
-/// Create a new pinboard or update an existing one
 pub async fn publish_pinboard(
     input: PinboardInput,
     existing_d_tag: Option<&str>,
 ) -> std::result::Result<String, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish pinboard.".to_string());
     }
@@ -38,14 +36,16 @@ pub async fn publish_pinboard(
         ));
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_PINBOARD), "").tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish pinboard: {}", e))?;
-    if output.success.is_empty() {
-        return Err("No relays accepted event".to_string());
-    }
-    let event_id = output.id().to_hex();
+        .map_err(|e| format!("Failed to sign pinboard: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::PinBoard,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     log::info!("Pinboard published: {}", event_id);
     let pubkey = crate::stores::nostr_client::get_cached_pubkey()
         .map_err(|e| format!("Failed to get pubkey: {}", e))?;
@@ -53,9 +53,7 @@ pub async fn publish_pinboard(
     Ok(naddr)
 }
 
-/// Create a new pin
 pub async fn publish_pin(input: PinInput) -> std::result::Result<String, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish pin.".to_string());
     }
@@ -132,21 +130,21 @@ pub async fn publish_pin(input: PinInput) -> std::result::Result<String, String>
         tags.push(Tag::hashtag(tag));
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_PIN), input.content).tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish pin: {}", e))?;
-    if output.success.is_empty() {
-        return Err("No relays accepted event".to_string());
-    }
-    let event_id = output.id().to_hex();
+        .map_err(|e| format!("Failed to sign pin: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::PinBoard,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     log::info!("Pin published: {}", event_id);
     Ok(event_id)
 }
 
-/// Delete a pin
 pub async fn delete_pin(pin_event_id: &str) -> std::result::Result<(), String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached. Cannot delete pin.".to_string());
     }
@@ -154,21 +152,21 @@ pub async fn delete_pin(pin_event_id: &str) -> std::result::Result<(), String> {
         EventId::from_hex(pin_event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
     let deletion_request = EventDeletionRequest::new().id(event_id);
     let builder = EventBuilder::delete(deletion_request);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to delete pin: {}", e))?;
-    if output.success.is_empty() {
-        return Err("No relays accepted event".to_string());
-    }
+        .map_err(|e| format!("Failed to sign pin deletion: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::PinBoard,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     remove_pin_from_cache(pin_event_id);
     log::info!("Pin deleted: {}", pin_event_id);
     Ok(())
 }
 
-/// Delete a pinboard
 pub async fn delete_pinboard(board: &Pinboard) -> std::result::Result<String, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached. Cannot delete pinboard.".to_string());
     }
@@ -180,19 +178,21 @@ pub async fn delete_pinboard(board: &Pinboard) -> std::result::Result<String, St
         Coordinate::new(Kind::Custom(KIND_PINBOARD), board.event.pubkey).identifier(&board.d_tag);
     let deletion_request = EventDeletionRequest::new().coordinate(coord);
     let builder = EventBuilder::delete(deletion_request);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to delete pinboard: {}", e))?;
-    if output.success.is_empty() {
-        return Err("No relays accepted event".to_string());
-    }
+        .map_err(|e| format!("Failed to sign pinboard deletion: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::PinBoard,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     remove_pinboard_from_cache(&board.a_tag);
-    log::info!("Pinboard deleted: {}", output.id().to_hex());
-    Ok(output.id().to_hex())
+    log::info!("Pinboard deleted: {}", event_id);
+    Ok(event_id)
 }
 
-/// Update pinboard metadata
 pub async fn update_pinboard_metadata(
     naddr: &str,
     title: Option<String>,
@@ -217,12 +217,10 @@ pub async fn update_pinboard_metadata(
     publish_pinboard(input, Some(&board.d_tag)).await
 }
 
-/// Toggle reaction on a pinboard (add or remove)
 pub async fn toggle_pinboard_reaction(
     board: &Pinboard,
     content: &str,
 ) -> std::result::Result<bool, String> {
-    let client = nostr_client::get_client().ok_or("Nostr client not initialized")?;
     let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
     let reactions = fetch_pinboard_reactions(&board.a_tag).await?;
     let existing_reaction = reactions.iter().find(|r| r.pubkey == current_pubkey);
@@ -231,13 +229,15 @@ pub async fn toggle_pinboard_reaction(
             .map_err(|e| format!("Invalid event ID: {}", e))?;
         let deletion_request = EventDeletionRequest::new().id(event_id);
         let builder = EventBuilder::delete(deletion_request);
-        let output = client
-            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+        let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
             .await
-            .map_err(|e| format!("Failed to delete reaction: {}", e))?;
-        if output.success.is_empty() {
-            return Err("No relays accepted event".to_string());
-        }
+            .map_err(|e| format!("Failed to sign reaction deletion: {}", e))?;
+        crate::stores::publish_queue::enqueue(
+            event,
+            crate::stores::publish_queue::types::QueueEventType::PinBoard,
+            None,
+            std::collections::HashMap::new(),
+        ).await;
         Ok(false)
     } else {
         let author_pubkey = PublicKey::from_hex(&board.pubkey)
@@ -252,19 +252,19 @@ pub async fn toggle_pinboard_reaction(
             Tag::public_key(author_pubkey),
         ];
         let builder = EventBuilder::new(Kind::Reaction, content).tags(tags);
-        let output = client
-            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+        let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
             .await
-            .map_err(|e| format!("Failed to send reaction: {}", e))?;
-        if output.success.is_empty() {
-            return Err("No relays accepted event".to_string());
-        }
+            .map_err(|e| format!("Failed to sign reaction: {}", e))?;
+        crate::stores::publish_queue::enqueue(
+            event,
+            crate::stores::publish_queue::types::QueueEventType::PinBoard,
+            None,
+            std::collections::HashMap::new(),
+        ).await;
         Ok(true)
     }
 }
 
-/// Get a shareable naddr with relay hints for a pinboard
-/// Per NIP-19, relay hints help other clients locate the event
 pub async fn get_shareable_naddr(board: &Pinboard) -> std::result::Result<String, String> {
     let pubkey =
         nostr::PublicKey::from_hex(&board.pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;

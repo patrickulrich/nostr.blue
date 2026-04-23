@@ -1,3 +1,4 @@
+use crate::components::SensitiveContent;
 use crate::routes::Route;
 use crate::services::trending::{get_trending_notes, truncate_content, TrendingNote};
 use crate::stores::{nostr_client, profiles};
@@ -130,6 +131,7 @@ fn TrendingNoteItem(note: TrendingNote) -> Element {
                 )
             })
     };
+    let content_warning: Option<Option<String>> = note.event.tags.iter().find(|t| t.first().map(|s| s.as_str()) == Some("content-warning")).map(|t| t.get(1).cloned());
     let content = truncate_content(&note.event.content, 100);
     rsx! {
         Link {
@@ -147,7 +149,16 @@ fn TrendingNoteItem(note: TrendingNote) -> Element {
                 }
                 div { class: "flex-1 min-w-0",
                     div { class: "text-sm font-semibold truncate mb-1", "{author_name}" }
-                    div { class: "text-sm mb-2 line-clamp-2", "{content}" }
+                    {
+                        let content_el = rsx! {
+                            div { class: "text-sm mb-2 line-clamp-2", "{content}" }
+                        };
+                        if let Some(reason) = content_warning {
+                            rsx! { SensitiveContent { reason, {content_el} } }
+                        } else {
+                            content_el
+                        }
+                    }
                     if let Some(stats) = &note.stats {
                         div { class: "flex items-center gap-3 text-xs text-muted-foreground",
                             if let Some(reactions) = stats.reactions {

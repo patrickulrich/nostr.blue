@@ -22,7 +22,7 @@ use crate::utils::podcast::parse_podcast_episode;
 use crate::utils::recipe::{extract_metadata as extract_recipe_metadata, is_recipe_event};
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip19::Nip19;
-use nostr_sdk::{Event, EventId, Filter, FromBech32, Kind, Metadata};
+use nostr_sdk::{Event, EventId, Filter, FromBech32, Kind, Metadata, ToBech32};
 
 use super::minicards::*;
 use crate::utils::validation::is_valid_http_url;
@@ -481,7 +481,9 @@ pub(super) fn NaddrMentionRenderer(mention: String) -> Element {
             });
         }
     });
-    if let Some((_pubkey, _ident, kind, _relays)) = coord_data {
+    if let Some(ref coord_ref) = coord_data {
+        let (ref _pubkey, ref _ident, ref kind, ref _relays) = coord_ref;
+        let kind = *kind;
         let naddr_for_link = identifier.to_string();
         let has_event = article_event.read().is_some();
         let event_clone = article_event.read().clone();
@@ -804,12 +806,17 @@ pub(super) fn NaddrMentionRenderer(mention: String) -> Element {
                     }
                 },
                 30818 => {
-                    // WIKI_ARTICLE
-                    // WikiDetail uses identifier, not naddr
-                    let identifier = naddr_for_link.clone();
+                    let (ref pubkey_hex, ref ident, ..) = coord_ref;
+                    let author_npub = nostr_sdk::prelude::PublicKey::from_hex(pubkey_hex)
+                        .ok()
+                        .and_then(|pk| pk.to_bech32().ok())
+                        .unwrap_or_else(|| naddr_for_link.clone());
                     rsx! {
                         Link {
-                            to: Route::WikiDetail { identifier },
+                            to: Route::WikiDetail {
+                                npub: author_npub,
+                                identifier: ident.clone(),
+                            },
                             class: fallback_class,
                             onclick: move |e: MouseEvent| e.stop_propagation(),
                             "📖 Wiki Article"

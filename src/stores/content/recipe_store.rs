@@ -521,7 +521,7 @@ pub async fn publish_recipe(
     content: &str,
     tags: Vec<String>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -558,11 +558,17 @@ pub async fn publish_recipe(
         )));
     }
     let builder = EventBuilder::long_form_text_note(content).tags(event_tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish recipe: {}", e))?;
-    log::info!("Recipe published: {}", output.id().to_hex());
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let _event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue_and_await(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("recipe".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await?;
     let pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
     let naddr =
         crate::stores::nostr_client::make_naddr_with_hints(KIND_RECIPE, &pubkey, &slug).await?;
@@ -575,7 +581,7 @@ pub async fn fork_recipe(
     new_content: &str,
     new_tags: Vec<String>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -611,11 +617,17 @@ pub async fn fork_recipe(
         )));
     }
     let builder = EventBuilder::long_form_text_note(new_content).tags(event_tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to fork recipe: {}", e))?;
-    log::info!("Recipe forked: {}", output.id().to_hex());
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let _event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue_and_await(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("recipe".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await?;
     let pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
     let naddr =
         crate::stores::nostr_client::make_naddr_with_hints(KIND_RECIPE, &pubkey, &slug).await?;
@@ -630,7 +642,7 @@ pub async fn update_recipe(
     content: &str,
     tags: Vec<String>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -666,11 +678,17 @@ pub async fn update_recipe(
         )));
     }
     let builder = EventBuilder::long_form_text_note(content).tags(event_tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to update recipe: {}", e))?;
-    log::info!("Recipe updated: {}", output.id().to_hex());
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let _event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue_and_await(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("recipe".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await?;
     let pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
     let naddr =
         crate::stores::nostr_client::make_naddr_with_hints(KIND_RECIPE, &pubkey, original_slug)
@@ -679,7 +697,7 @@ pub async fn update_recipe(
 }
 /// Delete a recipe (publish deletion event)
 pub async fn delete_recipe(recipe: &CachedRecipe) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -691,17 +709,22 @@ pub async fn delete_recipe(recipe: &CachedRecipe) -> StdResult<String, String> {
         .identifier(recipe.metadata.identifier.as_deref().unwrap_or(""));
     let deletion_request = EventDeletionRequest::new().coordinate(coord);
     let builder = EventBuilder::delete(deletion_request);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to delete recipe: {}", e))?;
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("recipe".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     RECIPES_CACHE.write().pop(&recipe.a_tag);
-    log::info!("Recipe deleted: {}", output.id().to_hex());
-    Ok(output.id().to_hex())
+    Ok(event_id)
 }
 /// Post a comment on a recipe
 pub async fn comment_on_recipe(recipe: &CachedRecipe, content: &str) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -716,12 +739,17 @@ pub async fn comment_on_recipe(recipe: &CachedRecipe, content: &str) -> StdResul
         Tag::public_key(recipe.event.pubkey),
     ];
     let builder = EventBuilder::text_note(content).tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to post comment: {}", e))?;
-    log::info!("Comment posted: {}", output.id().to_hex());
-    Ok(output.id().to_hex())
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("recipe".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }
 /// Recipe bookmark list kind (NIP-51)
 pub const KIND_BOOKMARK_LIST: u16 = 30001;
@@ -750,7 +778,7 @@ pub async fn fetch_recipe_bookmarks(user_pubkey: &str) -> StdResult<Vec<String>,
 }
 /// Toggle recipe bookmark
 pub async fn toggle_recipe_bookmark(recipe: &CachedRecipe) -> StdResult<bool, String> {
-    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -767,10 +795,15 @@ pub async fn toggle_recipe_bookmark(recipe: &CachedRecipe) -> StdResult<bool, St
         tags.push(Tag::custom(TagKind::a(), vec![bookmark.clone()]));
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_BOOKMARK_LIST), "").tags(tags);
-    client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to update bookmarks: {}", e))?;
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("recipe".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     log::info!("Bookmark toggled for {}: {}", recipe.a_tag, !is_bookmarked);
     Ok(!is_bookmarked)
 }

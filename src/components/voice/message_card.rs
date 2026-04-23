@@ -1,6 +1,7 @@
 use super::reply_composer::VoiceReplyComposer;
 use crate::components::icons::{MessageCircleIcon, Repeat2Icon, ZapIcon};
-use crate::components::{ReactionButton, ZapModal};
+use crate::components::{ReactionButton, SensitiveContent, ZapModal};
+use crate::utils::nip36;
 use crate::hooks::use_reaction;
 use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
@@ -427,6 +428,75 @@ pub fn VoiceMessageCard(
             }
         }
     };
+    let content_warning = nip36::get_content_warning(&event.tags);
+    let audio_player = rsx! {
+        div { class: "mb-3",
+            audio {
+                id: "{audio_id}",
+                src: "{audio_url}",
+                preload: "metadata",
+                style: "display: none;",
+                ontimeupdate: _handle_timeupdate,
+                onloadedmetadata: _handle_loadedmetadata,
+                onended: _handle_ended,
+            }
+            if cfg!(feature = "web") {
+                div { class: "flex items-center gap-4 bg-muted/30 rounded-lg p-3",
+                    button {
+                        class: "shrink-0 w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition flex items-center justify-center",
+                        onclick: toggle_play,
+                        if voice_messages_store::VOICE_PLAYBACK.read().currently_playing == Some(event_id) {
+                            svg {
+                                class: "w-5 h-5",
+                                view_box: "0 0 24 24",
+                                fill: "currentColor",
+                                rect {
+                                    x: "6",
+                                    y: "4",
+                                    width: "4",
+                                    height: "16",
+                                }
+                                rect {
+                                    x: "14",
+                                    y: "4",
+                                    width: "4",
+                                    height: "16",
+                                }
+                            }
+                        } else {
+                            svg {
+                                class: "w-5 h-5 ml-0.5",
+                                view_box: "0 0 24 24",
+                                fill: "currentColor",
+                                polygon { points: "8,5 19,12 8,19" }
+                            }
+                        }
+                    }
+                    div { class: "flex-1",
+                        div { class: "w-full h-1 bg-muted rounded-full overflow-hidden mb-1",
+                            div {
+                                class: "h-full bg-primary transition-all",
+                                style: "width: {progress_percent}%",
+                            }
+                        }
+                        div { class: "flex justify-between text-xs text-muted-foreground",
+                            span { "{current_time_str}" }
+                            span { "{duration_str}" }
+                        }
+                    }
+                }
+            } else {
+                div { class: "flex items-center gap-4 bg-muted/30 rounded-lg p-3",
+                    div { class: "shrink-0 w-10 h-10 rounded-full bg-muted flex items-center justify-center",
+                        span { class: "text-muted-foreground text-xs", "N/A" }
+                    }
+                    div { class: "flex-1 text-sm text-muted-foreground",
+                        "Playback not supported on this platform"
+                    }
+                }
+            }
+        }
+    };
     rsx! {
         div {
             class: "{card_class}",
@@ -504,71 +574,10 @@ pub fn VoiceMessageCard(
                     }
                 }
             }
-            div { class: "mb-3",
-                audio {
-                    id: "{audio_id}",
-                    src: "{audio_url}",
-                    preload: "metadata",
-                    style: "display: none;",
-                    ontimeupdate: _handle_timeupdate,
-                    onloadedmetadata: _handle_loadedmetadata,
-                    onended: _handle_ended,
-                }
-                if cfg!(feature = "web") {
-                    div { class: "flex items-center gap-4 bg-muted/30 rounded-lg p-3",
-                        button {
-                            class: "shrink-0 w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition flex items-center justify-center",
-                            onclick: toggle_play,
-                            if voice_messages_store::VOICE_PLAYBACK.read().currently_playing == Some(event_id) {
-                                svg {
-                                    class: "w-5 h-5",
-                                    view_box: "0 0 24 24",
-                                    fill: "currentColor",
-                                    rect {
-                                        x: "6",
-                                        y: "4",
-                                        width: "4",
-                                        height: "16",
-                                    }
-                                    rect {
-                                        x: "14",
-                                        y: "4",
-                                        width: "4",
-                                        height: "16",
-                                    }
-                                }
-                            } else {
-                                svg {
-                                    class: "w-5 h-5 ml-0.5",
-                                    view_box: "0 0 24 24",
-                                    fill: "currentColor",
-                                    polygon { points: "8,5 19,12 8,19" }
-                                }
-                            }
-                        }
-                        div { class: "flex-1",
-                            div { class: "w-full h-1 bg-muted rounded-full overflow-hidden mb-1",
-                                div {
-                                    class: "h-full bg-primary transition-all",
-                                    style: "width: {progress_percent}%",
-                                }
-                            }
-                            div { class: "flex justify-between text-xs text-muted-foreground",
-                                span { "{current_time_str}" }
-                                span { "{duration_str}" }
-                            }
-                        }
-                    }
-                } else {
-                    div { class: "flex items-center gap-4 bg-muted/30 rounded-lg p-3",
-                        div { class: "shrink-0 w-10 h-10 rounded-full bg-muted flex items-center justify-center",
-                            span { class: "text-muted-foreground text-xs", "N/A" }
-                        }
-                        div { class: "flex-1 text-sm text-muted-foreground",
-                            "Playback not supported on this platform"
-                        }
-                    }
-                }
+            if let Some(reason) = content_warning {
+                SensitiveContent { reason, {audio_player} }
+            } else {
+                {audio_player}
             }
             div { class: "flex items-center justify-between text-muted-foreground",
                 button {

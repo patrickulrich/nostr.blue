@@ -283,20 +283,3 @@ pub fn CashuWallet() -> Element {
         }
     }
 }
-
-#[cfg(not(feature = "cashu"))]
-#[component]
-pub fn CashuWallet() -> Element {
-    use dioxus::prelude::*;
-    rsx! {
-        div { class: "min-h-screen bg-background flex items-center justify-center",
-            div { class: "text-center py-12 px-4",
-                div { class: "text-6xl mb-4", "🔒" }
-                h3 { class: "text-xl font-semibold mb-2", "Not Available" }
-                p { class: "text-muted-foreground",
-                    "Wallet is not available on this platform."
-                }
-            }
-        }
-    }
-}

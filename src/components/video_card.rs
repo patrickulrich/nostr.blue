@@ -1,11 +1,12 @@
 use crate::components::icons::{BookmarkIcon, MessageCircleIcon, ZapIcon};
-use crate::components::{ReactionButton, ZapModal};
+use crate::components::{ReactionButton, SensitiveContent, ZapModal};
 use crate::hooks::use_reaction;
 use crate::routes::Route;
 use crate::stores::bookmarks;
 use crate::stores::nostr_client::{get_client, HAS_SIGNER};
 use crate::stores::signer::SIGNER_INFO;
 use crate::utils::duration::format_duration_timecode_padded;
+use crate::utils::nip36;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use nostr_sdk::{Event, Filter, FromBech32, JsonUtil, Kind, PublicKey};
@@ -127,6 +128,7 @@ pub fn VideoCard(event: Event) -> Element {
     let mut zap_amount_sats = use_signal(|| 0u64);
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
     let mut show_zap_modal = use_signal(|| false);
+    let content_warning = nip36::get_content_warning(&event.tags);
     if videos.is_empty() {
         return rsx! {
             div { class: "hidden" }
@@ -349,33 +351,84 @@ pub fn VideoCard(event: Event) -> Element {
                     }
                 }
             }
-            div { class: "relative bg-black",
-                video {
-                    class: "w-full max-h-[600px] object-contain",
-                    controls: true,
-                    preload: "metadata",
-                    poster: first_video.thumbnail.as_deref(),
-                    source {
-                        src: "{first_video.url}",
-                        r#type: first_video.mime_type.as_deref().unwrap_or("video/mp4"),
+            {
+                if let Some(reason) = content_warning.clone() {
+                    rsx! {
+                        SensitiveContent { reason,
+                            div { class: "relative bg-black",
+                                video {
+                                    class: "w-full max-h-[600px] object-contain",
+                                    controls: true,
+                                    preload: "metadata",
+                                    poster: first_video.thumbnail.as_deref(),
+                                    source {
+                                        src: "{first_video.url}",
+                                        r#type: first_video.mime_type.as_deref().unwrap_or("video/mp4"),
+                                    }
+                                    for fallback_url in &first_video.fallback_urls {
+                                        source { src: "{fallback_url}" }
+                                    }
+                                    "Your browser does not support the video tag."
+                                }
+                                if let Some(dur) = &formatted_duration {
+                                    div { class: "absolute bottom-2 right-2 bg-black/75 text-white text-xs px-2 py-1 rounded",
+                                        "{dur}"
+                                    }
+                                }
+                            }
+                        }
                     }
-                    for fallback_url in &first_video.fallback_urls {
-                        source { src: "{fallback_url}" }
-                    }
-                    "Your browser does not support the video tag."
-                }
-                if let Some(dur) = &formatted_duration {
-                    div { class: "absolute bottom-2 right-2 bg-black/75 text-white text-xs px-2 py-1 rounded",
-                        "{dur}"
+                } else {
+                    rsx! {
+                        div { class: "relative bg-black",
+                            video {
+                                class: "w-full max-h-[600px] object-contain",
+                                controls: true,
+                                preload: "metadata",
+                                poster: first_video.thumbnail.as_deref(),
+                                source {
+                                    src: "{first_video.url}",
+                                    r#type: first_video.mime_type.as_deref().unwrap_or("video/mp4"),
+                                }
+                                for fallback_url in &first_video.fallback_urls {
+                                    source { src: "{fallback_url}" }
+                                }
+                                "Your browser does not support the video tag."
+                            }
+                            if let Some(dur) = &formatted_duration {
+                                div { class: "absolute bottom-2 right-2 bg-black/75 text-white text-xs px-2 py-1 rounded",
+                                    "{dur}"
+                                }
+                            }
+                        }
                     }
                 }
             }
-            div { class: "p-4",
-                if let Some(title_text) = &title {
-                    h3 { class: "font-bold text-lg mb-2", "{title_text}" }
-                }
-                if !description.is_empty() {
-                    p { class: "text-sm whitespace-pre-wrap", "{description}" }
+            {
+                if let Some(reason) = content_warning.clone() {
+                    rsx! {
+                        SensitiveContent { reason,
+                            div { class: "p-4",
+                                if let Some(title_text) = &title {
+                                    h3 { class: "font-bold text-lg mb-2", "{title_text}" }
+                                }
+                                if !description.is_empty() {
+                                    p { class: "text-sm whitespace-pre-wrap", "{description}" }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    rsx! {
+                        div { class: "p-4",
+                            if let Some(title_text) = &title {
+                                h3 { class: "font-bold text-lg mb-2", "{title_text}" }
+                            }
+                            if !description.is_empty() {
+                                p { class: "text-sm whitespace-pre-wrap", "{description}" }
+                            }
+                        }
+                    }
                 }
             }
             div { class: "px-4 pb-4 flex items-center gap-6 text-muted-foreground",

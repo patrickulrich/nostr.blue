@@ -151,27 +151,17 @@ pub async fn publish_nutzap_info(
         [p2pk_pubkey.as_str()],
     ));
     let builder = nostr_sdk::EventBuilder::new(Kind::from(10019), "").tags(tags);
-    let client = nostr_client::NOSTR_CLIENT
-        .read()
-        .as_ref()
-        .ok_or("Client not initialized")?
-        .clone();
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish nutzap info: {}", e))?;
-    if output.success.is_empty() {
-        return Err(format!(
-            "Nutzap info failed on all relays: {:?}",
-            output.failed.keys().collect::<Vec<_>>(),
-        ));
-    }
-    let event_id = output.id().to_hex();
-    log::info!(
-        "Published nutzap info event: {} (to {} relays)",
-        event_id,
-        output.success.len()
-    );
+        .map_err(|e| format!("Failed to sign nutzap info: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Cashu,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    log::info!("Queued nutzap info event: {}", event_id);
     let info = NutzapInfo {
         pubkey: pubkey_str.clone(),
         p2pk_pubkey,
@@ -360,7 +350,7 @@ pub async fn send_nutzap(
     let _signer =
         crate::stores::signer::get_signer().ok_or("No signer available - cannot send nutzap")?;
     let _pubkey = auth_store::get_pubkey().ok_or("Not authenticated - cannot send nutzap")?;
-    let client = nostr_client::NOSTR_CLIENT
+    let _client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Nostr client not initialized - cannot send nutzap")?
@@ -446,28 +436,10 @@ pub async fn send_nutzap(
     }
     let content = comment.unwrap_or("");
     let builder = nostr_sdk::EventBuilder::new(Kind::from(9321), content).tags(tags.clone());
-    let tagged_builder = crate::utils::nips::nip89::tag_event_builder(builder.clone());
-    let recipient_relay_urls: Vec<nostr::RelayUrl> = recipient_info
-        .relays
-        .iter()
-        .filter_map(|r| nostr::RelayUrl::parse(r).ok())
-        .collect();
-    let output = if recipient_relay_urls.is_empty() {
-        log::debug!("No valid recipient relays, using default relay routing");
-        client.send_event_builder(tagged_builder.clone()).await
-    } else {
-        log::debug!(
-            "Publishing nutzap to {} recipient relays",
-            recipient_relay_urls.len()
-        );
-        client
-            .send_event_builder_to(recipient_relay_urls, tagged_builder.clone())
-            .await
-    };
-    let output = match output {
-        Ok(out) => out,
+    let signed_event = match crate::stores::publish_queue::signing::sign_event_builder(builder.clone()).await {
+        Ok(e) => e,
         Err(e) => {
-            log::warn!("Failed to publish nutzap, queuing for retry: {}", e);
+            log::warn!("Failed to sign nutzap, queuing unsigned for retry: {}", e);
             super::events::queue_event_for_retry(
                 builder,
                 super::types::PendingEventType::NutzapEvent,
@@ -502,35 +474,22 @@ pub async fn send_nutzap(
             });
         }
     };
-    let (event_id, is_pending_retry) = if output.success.is_empty() {
-        let builder_for_retry = nostr_sdk::EventBuilder::new(Kind::from(9321), content).tags(tags);
-        super::events::queue_event_for_retry(
-            builder_for_retry,
-            super::types::PendingEventType::NutzapEvent,
-            Some(pending_event_id.clone()),
-            Some(mint_url.to_string()),
-        )
-        .await
-        .map_err(|queue_err| {
-            format!(
-                "Failed to publish nutzap and persist retry state: {}",
-                queue_err
-            )
-        })?;
-        log::warn!(
-            "Nutzap failed on all relays, queued for retry: {:?}",
-            output.failed.keys().collect::<Vec<_>>()
-        );
-        (pending_event_id.clone(), true)
+    let recipient_relay_urls: Vec<String> = recipient_info
+        .relays
+        .to_vec();
+    let target_relays = if recipient_relay_urls.is_empty() {
+        None
     } else {
-        let real_event_id = output.id().to_hex();
-        log::info!(
-            "Published nutzap event: {} (to {} relays)",
-            real_event_id,
-            output.success.len()
-        );
-        (real_event_id, false)
+        Some(recipient_relay_urls)
     };
+    let event_id = signed_event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        signed_event,
+        crate::stores::publish_queue::types::QueueEventType::Cashu,
+        target_relays,
+        std::collections::HashMap::new(),
+    ).await;
+    log::info!("Queued nutzap event: {}", event_id);
     if let Err(e) =
         super::events::create_history_event("out", amount, vec![], event_ids_to_delete.clone())
             .await
@@ -544,7 +503,7 @@ pub async fn send_nutzap(
         event_id,
         amount,
         fee: fee_u64,
-        is_pending_retry,
+        is_pending_retry: false,
     })
 }
 /// RAII guard that clears subscription flag on drop
@@ -1100,46 +1059,33 @@ async fn publish_change_token_event(
         .nip44_encrypt(&pubkey, &json_content)
         .await
         .map_err(|e| format!("Failed to encrypt: {}", e))?;
-    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-    let client = nostr_client::NOSTR_CLIENT
-        .read()
-        .as_ref()
-        .ok_or("Client not initialized")?
-        .clone();
-    let output = match client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
-            builder.clone(),
-        ))
-        .await
-    {
-        Ok(out) => out,
+    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted.clone());
+    match crate::stores::publish_queue::signing::sign_event_builder(builder).await {
+        Ok(signed_event) => {
+            let event_id = signed_event.id.to_hex();
+            let mut metadata = std::collections::HashMap::new();
+            metadata.insert("pending_token_id".to_string(), event_id.clone());
+            metadata.insert("mint_url".to_string(), mint_url.to_string());
+            crate::stores::publish_queue::enqueue(
+                signed_event,
+                crate::stores::publish_queue::types::QueueEventType::Cashu,
+                None,
+                metadata,
+            ).await;
+            Ok(event_id)
+        }
         Err(e) => {
             let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-            log::warn!("Failed to publish token event, queuing for retry: {}", e);
+            log::warn!("Failed to sign change token event, queuing unsigned: {}", e);
             super::events::queue_token_event_for_retry(
-                builder,
+                nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted),
                 pending_id.clone(),
                 mint_url.to_string(),
             )
             .await;
-            return Ok(pending_id);
+            Ok(pending_id)
         }
-    };
-    if output.success.is_empty() {
-        let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-        log::warn!(
-            "No relays accepted change token event, using pending ID: {}",
-            pending_id
-        );
-        super::events::queue_token_event_for_retry(
-            builder,
-            pending_id.clone(),
-            mint_url.to_string(),
-        )
-        .await;
-        return Ok(pending_id);
     }
-    Ok(output.id().to_hex())
 }
 /// Publish a token event for redeemed nutzap proofs
 async fn publish_redeemed_token_event(

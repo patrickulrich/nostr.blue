@@ -3,9 +3,9 @@
 //! Functions for initializing the wallet, checking/accepting terms,
 //! and creating new wallets.
 use super::events::{
-    fetch_tokens, publish_signed_event, sign_event_builder_with_signer,
-    start_pending_events_processor,
+    fetch_tokens, sign_event_builder_with_signer,
 };
+use crate::stores::publish_queue;
 use super::history::fetch_history;
 use super::internal::{init_multi_mint_wallet, inject_nip60_proofs_to_cdk};
 use super::recovery::{recover_pending_operations, sync_state_with_all_mints};
@@ -86,7 +86,7 @@ async fn initialize_wallet_from_event(wallet_event: &Event) -> Result<(), String
     }
     super::signals::load_pending_secrets().await;
     super::signals::load_in_flight_melt_requests().await;
-    start_pending_events_processor();
+    publish_queue::start_processor();
     *WALLET_STATUS.write() = WalletStatus::Recovering;
     spawn(async move {
         crate::platform::timer::sleep_ms(500).await;
@@ -210,23 +210,21 @@ pub async fn accept_terms() -> Result<(), String> {
     if !auth_store::is_authenticated() {
         return Err("Not authenticated".to_string());
     }
-    let client = nostr_client::NOSTR_CLIENT
-        .read()
-        .as_ref()
-        .ok_or("Client not initialized")?
-        .clone();
-    nostr_client::ensure_relays_ready(&client).await;
     let now = crate::platform::timestamp::now_secs();
     let content = serde_json::json!({ "accepted_at" : now, "version" : 1 }).to_string();
     let builder = EventBuilder::new(Kind::from(30078), content).tag(Tag::identifier(TERMS_D_TAG));
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to publish terms acceptance: {}", e))?;
-    if output.success.is_empty() {
-        return Err("Failed to publish terms acceptance: no relay accepted".to_string());
-    }
-    log::info!("Terms acceptance published successfully");
+    crate::stores::publish_queue::enqueue_and_await(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Cashu,
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await
+    .map_err(|e| format!("Failed to publish terms acceptance: {}", e))?;
+    log::info!("Terms acceptance published to relays");
     *TERMS_ACCEPTED.write() = Some(true);
     Ok(())
 }
@@ -348,7 +346,7 @@ pub async fn create_wallet(mints: Vec<String>) -> Result<(), String> {
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
-    let client = nostr_client::NOSTR_CLIENT
+    let _client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
@@ -384,28 +382,22 @@ pub async fn create_wallet(mints: Vec<String>) -> Result<(), String> {
         .map_err(|e| format!("Failed to encrypt wallet data: {}", e))?;
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWallet, encrypted_content);
     let event = sign_event_builder_with_signer(builder, signer_type).await?;
-    match publish_signed_event(&client, &event).await {
-        Ok(output) if !output.success.is_empty() => {
-            log::info!("Wallet created successfully");
-            *WALLET_STATE.write() = Some(WalletState {
-                privkey: Some(wallet_privkey),
-                mints: mints.clone(),
-                initialized: true,
-            });
-            *WALLET_STATUS.write() = WalletStatus::Ready;
-            Ok(())
-        }
-        Ok(_) => {
-            let error = "Failed to create wallet: no relay accepted the event".to_string();
-            log::error!("{}", error);
-            Err(error)
-        }
-        Err(e) => {
-            let error = format!("Failed to create wallet: {}", e);
-            log::error!("{}", error);
-            Err(error)
-        }
-    }
+    crate::stores::publish_queue::enqueue_and_await(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Cashu,
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await
+    .map_err(|e| format!("Failed to publish wallet event: {}", e))?;
+    log::info!("Wallet creation published to relays");
+    *WALLET_STATE.write() = Some(WalletState {
+        privkey: Some(wallet_privkey),
+        mints: mints.clone(),
+        initialized: true,
+    });
+    *WALLET_STATUS.write() = WalletStatus::Ready;
+    Ok(())
 }
 /// Check if wallet is initialized
 pub fn is_wallet_initialized() -> bool {

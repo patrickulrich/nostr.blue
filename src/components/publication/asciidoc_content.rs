@@ -4,7 +4,8 @@ use crate::routes::Route;
 use crate::stores::citation_store::fetch_citations_by_identifiers;
 use crate::utils::asciidoc::{
     content_has_citations, content_to_plain_text, extract_citation_identifiers,
-    render_content_auto_with_options, render_content_with_citations,
+    render_content_auto_with_options, render_content_auto_with_options_and_author,
+    render_content_with_citations_and_author,
 };
 use crate::utils::markdown::sanitize_html;
 use crate::utils::nip54::extract_wikilinks;
@@ -46,6 +47,9 @@ pub fn AsciiDocContent(
     /// Callback when citation metadata is available
     #[props(default = None)]
     on_citations_loaded: Option<EventHandler<CitationMetadata>>,
+    /// Author npub for wikilink href generation (prefer current author's version)
+    #[props(default = None)]
+    author_npub: Option<String>,
 ) -> Element {
     let mut resolved_citations: Signal<HashMap<String, ResolvedCitation>> =
         use_signal(HashMap::new);
@@ -108,8 +112,13 @@ pub fn AsciiDocContent(
         });
     }));
     let (rendered, footnotes_html, endnotes_html, citation_metadata) = if enable_citations {
-        let result =
-            render_content_with_citations(&content, &resolved_citations.read(), enable_wikilinks);
+        let npub_ref = author_npub.as_deref();
+        let result = render_content_with_citations_and_author(
+            &content,
+            &resolved_citations.read(),
+            enable_wikilinks,
+            npub_ref,
+        );
         let mut html = result.html;
         if enable_book_links {
             html = render_book_wikilinks(&html);
@@ -126,7 +135,9 @@ pub fn AsciiDocContent(
             Some(metadata),
         )
     } else {
-        let mut html = render_content_auto_with_options(&content, enable_wikilinks);
+        let npub_ref = author_npub.as_deref();
+        let mut html =
+            render_content_auto_with_options_and_author(&content, enable_wikilinks, npub_ref);
         if enable_book_links {
             html = render_book_wikilinks(&html);
         }
@@ -263,11 +274,11 @@ pub fn AsciiDocPreview(
 /// Extract wikilinks from content for display
 #[component]
 pub fn WikilinksList(
-    /// The AsciiDoc source content
     content: String,
-    /// CSS classes
     #[props(default = String::new())]
     class: String,
+    #[props(default = None)]
+    author_npub: Option<String>,
 ) -> Element {
     let links = extract_wikilinks(&content);
     if links.is_empty() {
@@ -276,13 +287,26 @@ pub fn WikilinksList(
     rsx! {
         div { class: "flex flex-wrap gap-2 {class}",
             for (idx , link) in links.iter().enumerate() {
-                Link {
-                    key: "{link.target}-{idx}",
-                    class: "inline-flex items-center px-2 py-1 text-xs bg-accent rounded-md hover:bg-accent/80 transition-colors",
-                    to: Route::WikiDetail {
-                        identifier: link.target.clone(),
-                    },
-                    {link.display_text().to_string()}
+                {
+                    let target = link.target.clone();
+                    let display_text = link.display_text().to_string();
+                    let npub = author_npub.clone();
+                    let route = if let Some(ref npub_str) = npub {
+                        Route::WikiDetail {
+                            npub: npub_str.clone(),
+                            identifier: target.clone(),
+                        }
+                    } else {
+                        Route::WikiSlug { slug: target.clone() }
+                    };
+                    rsx! {
+                        Link {
+                            key: "{link.target}-{idx}",
+                            class: "inline-flex items-center px-2 py-1 text-xs bg-accent rounded-md hover:bg-accent/80 transition-colors",
+                            to: route,
+                            {display_text}
+                        }
+                    }
                 }
             }
         }

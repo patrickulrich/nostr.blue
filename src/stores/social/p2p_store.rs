@@ -319,10 +319,18 @@ pub async fn fetch_all_orders() -> std::result::Result<Vec<P2POrder>, String> {
     match result {
         Ok(events) => {
             cache_order_events(&events);
-            let orders: Vec<P2POrder> = events
-                .iter()
-                .filter_map(|e| parse_p2p_order(e).ok())
-                .collect();
+            let mut dedup = std::collections::HashMap::<String, P2POrder>::new();
+            for order in events.iter().filter_map(|e| parse_p2p_order(e).ok()) {
+                dedup
+                    .entry(order.naddr.clone())
+                    .and_modify(|existing| {
+                        if order.created_at > existing.created_at {
+                            *existing = order.clone();
+                        }
+                    })
+                    .or_insert(order);
+            }
+            let orders: Vec<P2POrder> = dedup.into_values().collect();
             log::info!("Fetched {} P2P orders for full order book", orders.len());
             Ok(orders)
         }

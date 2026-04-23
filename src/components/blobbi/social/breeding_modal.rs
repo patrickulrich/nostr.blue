@@ -2,7 +2,6 @@ use dioxus::prelude::*;
 
 use crate::components::blobbi::core::builders::build_breeding_event;
 use crate::components::blobbi::core::types::BlobbiCompanion;
-use crate::stores::nostr_client;
 
 #[derive(Clone, Debug)]
 struct BreedingResult {
@@ -125,26 +124,24 @@ pub fn BreedingModal(blobbi: BlobbiCompanion, on_close: EventHandler<()>) -> Ele
                                         content,
                                     );
 
-                                    if let Some(client) = nostr_client::NOSTR_CLIENT.read().as_ref() {
-                                        match client.send_event_builder(event).await {
-                                            Ok(_) => {}
-                                            Err(e) => {
-                                                log::error!("Breeding publish failed: {}", e);
-                                                result.set(Some(BreedingResult {
-                                                    success: false,
-                                                    offspring_id,
-                                                }));
-                                                breeding.set(false);
-                                                return;
-                                            }
+                                    match crate::stores::publish_queue::signing::sign_event_builder(event).await {
+                                        Ok(signed) => {
+                                            crate::stores::publish_queue::enqueue(
+                                                signed,
+                                                crate::stores::publish_queue::types::QueueEventType::Other("blobbi".to_string()),
+                                                None,
+                                                std::collections::HashMap::new(),
+                                            ).await;
                                         }
-                                    } else {
-                                        result.set(Some(BreedingResult {
-                                            success: false,
-                                            offspring_id,
-                                        }));
-                                        breeding.set(false);
-                                        return;
+                                        Err(e) => {
+                                            log::error!("Breeding sign failed: {}", e);
+                                            result.set(Some(BreedingResult {
+                                                success: false,
+                                                offspring_id,
+                                            }));
+                                            breeding.set(false);
+                                            return;
+                                        }
                                     }
 
                                     result.set(Some(BreedingResult {

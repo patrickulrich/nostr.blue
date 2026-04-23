@@ -203,12 +203,12 @@ impl OrderMessageContent {
 /// Creates NIP-17 gift wraps for both the recipient and sender (for their records),
 /// then sends both events. Returns (receiver_event_id, sender_event_id).
 async fn send_gift_wrapped_rumor(
-    client: &nostr_sdk::Client,
+    _client: &nostr_sdk::Client,
     signer: &impl nostr_sdk::NostrSigner,
     recipient_pk: PublicKey,
     sender_pk: PublicKey,
     rumor: nostr::UnsignedEvent,
-    log_context: &str,
+    _log_context: &str,
 ) -> Result<(String, String)> {
     let receiver_gift_wrap = EventBuilder::gift_wrap(signer, &recipient_pk, rumor.clone(), [])
         .await
@@ -216,25 +216,21 @@ async fn send_gift_wrapped_rumor(
     let sender_gift_wrap = EventBuilder::gift_wrap(signer, &sender_pk, rumor, [])
         .await
         .map_err(|e| format!("Failed to create sender gift wrap: {}", e))?;
-    let receiver_result = client
-        .send_event(&receiver_gift_wrap)
-        .await
-        .map_err(|e| format!("Failed to send to receiver: {}", e))?;
-    log::info!(
-        "Sent {} to receiver: {:?}",
-        log_context,
-        receiver_result.val
-    );
-    let sender_result = client
-        .send_event(&sender_gift_wrap)
-        .await
-        .map_err(|e| format!("Failed to send sender copy: {}", e))?;
-    log::info!(
-        "Sent {} copy to sender: {:?}",
-        log_context,
-        sender_result.val
-    );
-    Ok((receiver_result.val.to_hex(), sender_result.val.to_hex()))
+    let receiver_event_id = receiver_gift_wrap.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        receiver_gift_wrap,
+        crate::stores::publish_queue::types::QueueEventType::DirectMessage,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    let sender_event_id = sender_gift_wrap.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        sender_gift_wrap,
+        crate::stores::publish_queue::types::QueueEventType::DirectMessage,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok((receiver_event_id, sender_event_id))
 }
 
 /// Send an encrypted order message to a recipient via NIP-17 gift wrap

@@ -4,10 +4,12 @@ use crate::utils::article_meta::{
     calculate_read_time, get_hashtags, get_identifier, get_image, get_published_at, get_summary,
     get_title,
 };
+use crate::utils::nip36;
 use crate::utils::{format_relative_time_or, is_valid_http_url, truncate_pubkey};
 use dioxus::prelude::*;
 use nostr::prelude::{Coordinate, Nip19Coordinate, ToBech32};
 use nostr_sdk::Event as NostrEvent;
+use crate::components::SensitiveContent;
 #[component]
 pub fn ArticleCard(event: NostrEvent) -> Element {
     let title = get_title(&event);
@@ -27,6 +29,7 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
     let hashtags = get_hashtags(&event);
     let identifier = get_identifier(&event);
     let read_time = calculate_read_time(&event.content);
+    let content_warning = nip36::get_content_warning(&event.tags);
     let author_pubkey = event.pubkey.to_string();
     let author_metadata = use_author_metadata(author_pubkey.clone());
     let timestamp = format_relative_time_or(published_at, "Unknown date");
@@ -87,13 +90,34 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
                         naddr: naddr.clone(),
                     },
                     class: "block",
-                    if let Some(img_url) = image_url {
-                        div { class: "aspect-video w-full bg-muted overflow-hidden",
-                            img {
-                                src: "{img_url}",
-                                alt: "{title}",
-                                class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-200",
-                                loading: "lazy",
+                    {
+                        if let Some(reason) = content_warning.clone() {
+                            rsx! {
+                                SensitiveContent { reason,
+                                    if let Some(img_url) = image_url {
+                                        div { class: "aspect-video w-full bg-muted overflow-hidden",
+                                            img {
+                                                src: "{img_url}",
+                                                alt: "{title}",
+                                                class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-200",
+                                                loading: "lazy",
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            rsx! {
+                                if let Some(img_url) = image_url {
+                                    div { class: "aspect-video w-full bg-muted overflow-hidden",
+                                        img {
+                                            src: "{img_url}",
+                                            alt: "{title}",
+                                            class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-200",
+                                            loading: "lazy",
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -109,10 +133,29 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
                                 }
                             }
                         }
-                        h3 { class: "text-xl font-bold line-clamp-2 group-hover:text-primary transition-colors",
-                            "{title}"
+                        {
+                            if let Some(reason) = content_warning.clone() {
+                                rsx! {
+                                    SensitiveContent { reason,
+                                        div {
+                                            h3 { class: "text-xl font-bold line-clamp-2 group-hover:text-primary transition-colors",
+                                                "{title}"
+                                            }
+                                            p { class: "text-sm text-muted-foreground line-clamp-3", "{preview_text}" }
+                                        }
+                                    }
+                                }
+                            } else {
+                                rsx! {
+                                    div {
+                                        h3 { class: "text-xl font-bold line-clamp-2 group-hover:text-primary transition-colors",
+                                            "{title}"
+                                        }
+                                        p { class: "text-sm text-muted-foreground line-clamp-3", "{preview_text}" }
+                                    }
+                                }
+                            }
                         }
-                        p { class: "text-sm text-muted-foreground line-clamp-3", "{preview_text}" }
                         div { class: "flex items-center justify-between pt-2",
                             div { class: "flex items-center gap-2",
                                 Link {

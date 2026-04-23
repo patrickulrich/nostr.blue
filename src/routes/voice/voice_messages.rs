@@ -239,9 +239,12 @@ async fn load_following_voice_messages(until: Option<u64>) -> Result<Vec<Event>,
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch voice messages: {}", e))?;
+    let events = nostr_client::fetch_events_from_connected_relays(
+        filter,
+        Duration::from_secs(10),
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch voice messages: {}", e))?;
     let mut event_vec: Vec<Event> = events.into_iter().collect();
     event_vec.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(event_vec)
@@ -254,7 +257,10 @@ async fn load_global_voice_messages(until: Option<u64>) -> Result<Vec<Event>, St
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+    let events = nostr_client::fetch_events_from_connected_relays(
+        filter,
+        Duration::from_secs(10),
+    )
         .await
         .map_err(|e| format!("Failed to fetch voice messages: {}", e))?;
     let mut event_vec: Vec<Event> = events.into_iter().collect();

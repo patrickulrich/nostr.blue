@@ -5,7 +5,7 @@ use crate::routes::Route;
 use crate::services::podcast_index::{Episode as PodcastIndexEpisode, PodcastFeed};
 use crate::services::wavlake::WavlakeTrack;
 use crate::stores::nostr_music::{NostrTrack, TrackSource, KIND_MUSIC_TRACK};
-use crate::stores::{auth_store, nostr_client};
+use crate::stores::auth_store;
 use crate::utils::radio::{select_best_stream, NowPlaying, RadioStation};
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
@@ -405,13 +405,6 @@ async fn publish_music_status(track: &MusicTrack) {
     if !auth_store::is_authenticated() {
         return;
     }
-    let client = match nostr_client::get_client() {
-        Some(c) => c,
-        None => {
-            log::warn!("Nostr client not initialized, skipping music status");
-            return;
-        }
-    };
     let content = format!("{} - {}", track.title, track.artist);
     let track_reference = match &track.source {
         TrackSource::Wavlake { .. } => {
@@ -503,19 +496,23 @@ async fn publish_music_status(track: &MusicTrack) {
         }
     }
     let builder = EventBuilder::live_status(status, content);
-    match client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
-        .await
-    {
-        Ok(event_id) => {
+    match crate::stores::publish_queue::signing::sign_event_builder(builder).await {
+        Ok(event) => {
+            let event_id = event.id.to_hex();
+            crate::stores::publish_queue::enqueue(
+                event,
+                crate::stores::publish_queue::types::QueueEventType::Other("music".to_string()),
+                None,
+                std::collections::HashMap::new(),
+            ).await;
             log::info!(
-                "Music status published: {} (event: {})",
+                "Music status enqueued: {} (event: {})",
                 track.title,
-                event_id.to_hex()
+                event_id
             );
         }
         Err(e) => {
-            log::error!("Failed to publish music status: {}", e);
+            log::error!("Failed to sign music status: {}", e);
         }
     }
 }
@@ -524,21 +521,20 @@ async fn clear_music_status() {
     if !auth_store::is_authenticated() {
         return;
     }
-    let client = match nostr_client::get_client() {
-        Some(c) => c,
-        None => return,
-    };
     let status = LiveStatus::new(StatusType::Music);
     let builder = EventBuilder::live_status(status, "");
-    match client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
-        .await
-    {
-        Ok(_) => {
-            log::info!("Music status cleared");
+    match crate::stores::publish_queue::signing::sign_event_builder(builder).await {
+        Ok(event) => {
+            crate::stores::publish_queue::enqueue(
+                event,
+                crate::stores::publish_queue::types::QueueEventType::Other("music".to_string()),
+                None,
+                std::collections::HashMap::new(),
+            ).await;
+            log::info!("Music status clear enqueued");
         }
         Err(e) => {
-            log::error!("Failed to clear music status: {}", e);
+            log::error!("Failed to sign music status clear: {}", e);
         }
     }
 }
@@ -829,7 +825,6 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
     if !auth_store::is_authenticated() {
         return Err("You must be logged in to vote".to_string());
     }
-    let client = nostr_client::get_client().ok_or("Nostr client not initialized")?;
     let mut tags = vec![
         Tag::identifier("music-vote"),
         Tag::custom(TagKind::custom("title"), vec![track.title.clone()]),
@@ -937,22 +932,26 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
         TrackSource::Bible { .. } => {}
     }
     let builder = EventBuilder::new(Kind::from(KIND_MUSIC_VOTE), "").tags(tags);
-    match client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
-        .await
-    {
-        Ok(output) => {
+    match crate::stores::publish_queue::signing::sign_event_builder(builder).await {
+        Ok(event) => {
+            let event_id = event.id.to_hex();
+            crate::stores::publish_queue::enqueue(
+                event,
+                crate::stores::publish_queue::types::QueueEventType::Other("music".to_string()),
+                None,
+                std::collections::HashMap::new(),
+            ).await;
             log::info!(
-                "Vote submitted for '{}' by {} (event: {})",
+                "Vote enqueued for '{}' by {} (event: {})",
                 track.title,
                 track.artist,
-                output.id().to_hex()
+                event_id
             );
             Ok(())
         }
         Err(e) => {
-            log::error!("Failed to publish vote: {}", e);
-            Err(format!("Failed to publish vote: {}", e))
+            log::error!("Failed to sign vote: {}", e);
+            Err(format!("Failed to sign vote: {}", e))
         }
     }
 }

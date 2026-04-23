@@ -426,19 +426,9 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                                     match nostr_client::broadcast_presigned_event(event, relay_urls).await {
                                         Ok(result) => {
                                             if result.is_success() {
-                                                let title = if result.has_failures() {
-                                                    "Broadcast partially succeeded"
-                                                } else {
-                                                    "Broadcast complete"
-                                                };
                                                 toast_api.success(
-                                                    title.to_string(),
+                                                    "Broadcast queued".to_string(),
                                                     ToastOptions::new()
-                                                        .description(format!(
-                                                            "Delivered to {}/{} relays",
-                                                            result.success_count(),
-                                                            result.total_attempted()
-                                                        ))
                                                         .duration(Duration::from_secs(3))
                                                         .permanent(false),
                                                 );
@@ -446,10 +436,6 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                                                 toast_api.error(
                                                     "Broadcast failed".to_string(),
                                                     ToastOptions::new()
-                                                        .description(format!(
-                                                            "0/{} relays accepted the event",
-                                                            result.total_attempted()
-                                                        ))
                                                         .duration(Duration::from_secs(3))
                                                         .permanent(false),
                                                 );

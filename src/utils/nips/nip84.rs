@@ -313,17 +313,18 @@ pub async fn create_highlight(
             tags.push(Tag::hashtag(hashtag));
         }
     }
-    let event = EventBuilder::new(highlight_kind(), content).tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(event))
+    let builder = EventBuilder::new(highlight_kind(), content).tags(tags);
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish highlight: {}", e))?;
-    if output.success.is_empty() {
-        log::error!("Failed to publish highlight: no relays accepted the event");
-        return Err("Failed to publish highlight: no relays accepted the event".to_string());
-    }
-    log::info!("Highlight published: {}", output.id().to_hex());
-    Ok(*output.id())
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("highlight".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }
 /// Check if a highlight is a Bible highlight (has "bible" hashtag or nostr.blue/bible URL)
 pub fn is_bible_highlight(highlight: &Highlight) -> bool {

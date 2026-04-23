@@ -1,8 +1,10 @@
 //! Highlight Card Component (NIP-84)
 //!
 //! Display component for a single Kind 9802 highlight event.
+use crate::components::SensitiveContent;
 use crate::hooks::use_author_metadata;
 use crate::routes::Route;
+use crate::utils::nip36;
 use crate::utils::nip84::{self, HighlightSource};
 use crate::utils::{format_relative_time_or, is_valid_http_url, truncate_pubkey};
 use dioxus::prelude::*;
@@ -40,11 +42,21 @@ pub fn HighlightCard(props: HighlightCardProps) -> Element {
         .unwrap_or('?')
         .to_uppercase()
         .to_string();
+    let content_warning = nip36::get_content_warning(&props.event.tags);
     let source_display = get_source_display(&highlight.source);
     rsx! {
         div { class: "bg-card rounded-lg border border-border shadow-sm hover:border-primary/50 transition-all p-4",
             div { class: "border-l-4 border-primary pl-4 mb-3",
-                p { class: "font-serif text-foreground leading-8 text-lg", "{highlight.content}" }
+                {
+                    let highlight_text = rsx! {
+                        p { class: "font-serif text-foreground leading-8 text-lg", "{highlight.content}" }
+                    };
+                    if let Some(reason) = content_warning {
+                        rsx! { SensitiveContent { reason, {highlight_text} } }
+                    } else {
+                        highlight_text
+                    }
+                }
                 if let Some(comment) = &highlight.comment {
                     p { class: "text-muted-foreground italic mt-3 text-sm", "— {comment}" }
                 }
