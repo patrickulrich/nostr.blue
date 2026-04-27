@@ -60,6 +60,40 @@ async fn recipient_has_inbox_relays(client: &nostr_sdk::Client, recipient_pk: Pu
                 false
             }
         }
+        _ => recipient_has_inbox_relays_from_indexers(client, recipient_pk).await,
+    }
+}
+
+async fn recipient_has_inbox_relays_from_indexers(
+    client: &nostr_sdk::Client,
+    recipient_pk: PublicKey,
+) -> bool {
+    let indexer_urls = relay::nip65::get_indexer_relay_urls();
+    if indexer_urls.is_empty() {
+        return false;
+    }
+    let relay_urls: Vec<nostr_sdk::RelayUrl> = indexer_urls
+        .iter()
+        .filter_map(|s| nostr_sdk::RelayUrl::parse(s).ok())
+        .collect();
+    if relay_urls.is_empty() {
+        return false;
+    }
+    let filter = Filter::new()
+        .author(recipient_pk)
+        .kind(Kind::InboxRelays)
+        .limit(1);
+    match client
+        .fetch_events_from(relay_urls, filter, Duration::from_secs(3))
+        .await
+    {
+        Ok(events) if !events.is_empty() => {
+            if let Some(event) = events.into_iter().next() {
+                nip17::extract_relay_list(&event).next().is_some()
+            } else {
+                false
+            }
+        }
         _ => false,
     }
 }

@@ -224,7 +224,7 @@ pub async fn fetch_events_from_connected_relays(
 ///
 /// Dioxus pattern: Get client once, pass same instance through all async operations.
 /// No locks held across await points.
-async fn fetch_events_from_connected_relays_with_client(
+pub(crate) async fn fetch_events_from_connected_relays_with_client(
     client: &std::sync::Arc<Client>,
     filter: Filter,
     timeout: std::time::Duration,
@@ -269,6 +269,49 @@ async fn fetch_events_from_connected_relays_with_client(
     );
     Ok(result)
 }
+
+/// Fetch events from local nostrdb first (instant), then refresh from relays in background.
+/// Only available on native builds. Follows the channel bridge pattern.
+#[cfg(feature = "native")]
+pub async fn fetch_events_ndb_first(
+    filter: Filter,
+    timeout: std::time::Duration,
+) -> std::result::Result<Vec<nostr::Event>, String> {
+    let ndb_jsons =
+        crate::stores::ndb::queries::sdk_filters_to_ndb_jsons(std::slice::from_ref(&filter));
+    match crate::stores::ndb::queries::query_note_keys(ndb_jsons, 1000).await {
+        Ok(note_keys) if !note_keys.is_empty() => {
+            let mut events = Vec::new();
+            for (key, _) in note_keys {
+                match crate::stores::ndb::queries::get_note_data(key).await {
+                    Ok(note_data) => {
+                        if let Ok(event) =
+                            crate::stores::ndb::queries::note_data_to_event(&note_data)
+                        {
+                            events.push(event);
+                        }
+                    }
+                    Err(e) => log::warn!("Failed to get note data: {}", e),
+                }
+            }
+            if !events.is_empty() {
+                log::info!("Loaded {} events from nostrdb", events.len());
+                if let Some(client) = get_client() {
+                    let filter_clone = filter.clone();
+                    dioxus::prelude::spawn(async move {
+                        let _ = client.fetch_events(filter_clone, timeout).await;
+                    });
+                }
+                return Ok(events);
+            }
+        }
+        Ok(_) => {}
+        Err(e) => log::warn!("nostrdb query failed: {}, falling back to relays", e),
+    }
+
+    fetch_events_from_connected_relays(filter, timeout).await
+}
+
 /// Fetch video events from connected relays (bypasses gossip)
 ///
 /// Ensures video relay (relay.divine.video) is connected first,

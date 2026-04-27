@@ -62,6 +62,8 @@ pub mod grasp_servers;
 #[cfg(feature = "cashu")]
 pub mod indexeddb_database;
 pub mod nostr_client;
+#[cfg(feature = "native")]
+pub mod ndb;
 pub mod nwc_store;
 pub mod profiles;
 pub mod relay;

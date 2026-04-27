@@ -78,6 +78,10 @@ impl NotificationDispatcher {
                             ..
                         }) = notifications.recv().await
                         {
+                            #[cfg(feature = "native")]
+                            {
+                                crate::stores::ndb::unknown_ids::queue_event((*event).clone());
+                            }
                             let inner = inner.lock().unwrap();
                             if let Some(senders) = inner.subscribers.get(&subscription_id) {
                                 let event = Arc::new(*event.clone());

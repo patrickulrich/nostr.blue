@@ -417,10 +417,12 @@ async fn run_post_login_init() {
     // Critical for NIP-46 where signer restoration is slow and
     // relay application happens concurrently in set_signer()'s spawn_forever
     crate::stores::relay::wait_for_user_relays(
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(10),
         "run_post_login_init",
     )
     .await;
+    crate::stores::sidebar_store::load_sidebar_preferences().await;
+    crate::stores::reactions_store::load_preferred_reactions().await;
     crate::stores::notifications::start_realtime_subscription().await;
     crate::stores::relay::start_relay_list_subscription().await;
     crate::stores::emoji_store::init_emoji_fetch();

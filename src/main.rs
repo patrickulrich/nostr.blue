@@ -57,8 +57,6 @@ fn App() -> Element {
                     log::info!("Nostr client initialized");
                     auth_store::restore_session_async().await;
                     futures::join!(
-                        reactions_store::load_preferred_reactions(),
-                        sidebar_store::load_sidebar_preferences(),
                         nwc_store::restore_connection(),
                         async {
                             if let Err(e) = shop_store::init_shop_store().await {

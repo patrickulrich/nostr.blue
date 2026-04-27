@@ -54,15 +54,22 @@ pub use health::{
 };
 pub use hints::{get_write_relay_hints, make_naddr_with_hints};
 pub use nip65::{
-    apply_local_relays_to_client, default_dm_relays, default_relays, default_search_relays,
-    fetch_blocked_relays, fetch_relay_list, fetch_search_relays, get_dm_relays, get_read_relays,
-    get_write_relays, init_local_relays_from_cache, init_nip51_relay_lists, init_user_relay_lists,
+    add_indexer_relays_to_client, apply_local_relays_to_client, default_dm_relays,
+    default_favorite_relays, default_indexer_relays, default_relays, default_search_relays,
+    fetch_blocked_relays, fetch_favorite_relays, fetch_own_lists_from_indexers,
+    fetch_outbox_relays, fetch_relay_list, fetch_search_relays, get_dm_relays,
+    get_indexer_relay_urls, get_read_relays, get_write_relays, init_local_relays_from_cache,
+    init_nip51_relay_lists, init_private_relay_lists, init_user_relay_lists,
     load_broadcast_relays, load_local_relays, parse_dm_relay_list, parse_relay_list_event,
-    publish_blocked_relays, publish_dm_relay_list, publish_relay_list, publish_search_relays,
-    reset_dm_relays_to_default, reset_general_relays_to_default, save_broadcast_relays,
-    save_local_relays, start_relay_list_subscription, stop_relay_list_subscription, RelayConfig,
-    RelayListMetadata, BLOCKED_RELAYS, BROADCAST_RELAYS, DEFAULT_DM_RELAYS, DEFAULT_NIP65_RELAYS,
-    DEFAULT_SEARCH_RELAYS, LOCAL_RELAYS, SEARCH_RELAYS, USER_RELAY_METADATA,
+    publish_blocked_relays, publish_dm_relay_list, publish_favorite_relays,
+    publish_indexer_relays, publish_outbox_relays, publish_proxy_relays, publish_relay_list,
+    publish_search_relays, publish_trusted_relays, reset_dm_relays_to_default,
+    reset_general_relays_to_default, save_broadcast_relays, save_local_relays,
+    start_relay_list_subscription, stop_relay_list_subscription, RelayConfig,
+    RelayListMetadata, BLOCKED_RELAYS, BROADCAST_RELAYS, DEFAULT_DM_RELAYS,
+    DEFAULT_FAVORITE_RELAYS, DEFAULT_INDEXER_RELAYS, DEFAULT_NIP65_RELAYS,
+    DEFAULT_SEARCH_RELAYS, FAVORITE_RELAYS, INDEXER_RELAYS, LOCAL_RELAYS, OUTBOX_RELAYS,
+    PROXY_RELAYS, SEARCH_RELAYS, TRUSTED_RELAYS, USER_RELAY_METADATA,
 };
 pub use pool::{
     add_relay, apply_relay_lists_to_client, is_relay_blocked, remove_relay, DEFAULT_RELAYS,
@@ -73,6 +80,7 @@ pub use signals::{
 };
 pub use specialty::{
     add_relays, add_relays_from_strings, ensure_connected, ensure_dm_relays_connected,
-    ensure_gif_relay, ensure_search_relays_connected, ensure_video_relay, get_connected,
-    remove_relays, urls as specialty_urls,
+    ensure_favorite_relays_connected, ensure_gif_relay, ensure_indexer_relays_connected,
+    ensure_search_relays_connected, ensure_video_relay, get_connected, remove_relays,
+    urls as specialty_urls,
 };

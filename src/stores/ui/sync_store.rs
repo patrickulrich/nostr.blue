@@ -11,9 +11,14 @@ pub enum SyncPhase {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum SyncTarget {
     FollowingFeed,
     RelayList,
+    OwnIdentity,
+    OwnContent,
+    FollowedProfiles,
+    Notifications,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -47,6 +52,10 @@ pub struct SyncServiceState {
     pub last_error: Option<String>,
     pub following_feed: SyncTargetStats,
     pub relay_list: SyncTargetStats,
+    pub own_identity: SyncTargetStats,
+    pub own_content: SyncTargetStats,
+    pub followed_profiles: SyncTargetStats,
+    pub notifications: SyncTargetStats,
 }
 
 impl SyncServiceState {
@@ -54,6 +63,10 @@ impl SyncServiceState {
         match target {
             SyncTarget::FollowingFeed => &mut self.following_feed,
             SyncTarget::RelayList => &mut self.relay_list,
+            SyncTarget::OwnIdentity => &mut self.own_identity,
+            SyncTarget::OwnContent => &mut self.own_content,
+            SyncTarget::FollowedProfiles => &mut self.followed_profiles,
+            SyncTarget::Notifications => &mut self.notifications,
         }
     }
 }

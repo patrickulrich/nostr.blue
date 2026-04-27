@@ -157,12 +157,22 @@ pub async fn load_following_feed(
         let global = load_global_feed(until).await?;
         return Ok((global, true));
     }
-    let filter = build_following_feed_filter(authors, until, Timestamp::now());
+    let filter = build_following_feed_filter(authors.clone(), until, Timestamp::now());
     log::info!(
         "Fetching events from {} followed accounts",
         filter.authors.as_ref().map(|a| a.len()).unwrap_or(0)
     );
-    match nostr_client::fetch_events_from_connected_relays(filter, Duration::from_secs(10)).await {
+    let fetch_result = {
+        #[cfg(feature = "native")]
+        {
+            nostr_client::fetch_events_ndb_first(filter, Duration::from_secs(10)).await
+        }
+        #[cfg(not(feature = "native"))]
+        {
+            nostr_client::fetch_events_from_connected_relays(filter, Duration::from_secs(10)).await
+        }
+    };
+    match fetch_result {
         Ok(events) => {
             let raw_count = events.len();
             log::info!(
@@ -207,18 +217,99 @@ pub async fn load_following_feed(
                 raw_count
             );
             if feed_items.is_empty() {
-                log::info!("No posts from followed users");
-                return Ok((Vec::new(), false));
+                log::info!("No posts from followed users, trying favorite relays");
+                match try_feed_from_favorite_relays(&authors, until).await {
+                    Ok(extra_items) if !extra_items.is_empty() => {
+                        log::info!("Got {} items from favorite relays", extra_items.len());
+                        return Ok((extra_items, false));
+                    }
+                    _ => {
+                        return Ok((Vec::new(), false));
+                    }
+                }
             }
             Ok((feed_items, false))
         }
         Err(e) => {
             log::error!(
-                "Failed to fetch following feed: {}, falling back to global",
+                "Failed to fetch following feed: {}, trying favorite relays before global fallback",
                 e
             );
-            let global = load_global_feed(until).await?;
-            Ok((global, true))
+            match try_feed_from_favorite_relays(&authors, until).await {
+                Ok(extra_items) if !extra_items.is_empty() => {
+                    log::info!("Got {} items from favorite relays", extra_items.len());
+                    Ok((extra_items, false))
+                }
+                _ => {
+                    let global = load_global_feed(until).await?;
+                    Ok((global, true))
+                }
+            }
+        }
+    }
+}
+async fn try_feed_from_favorite_relays(
+    authors: &[PublicKey],
+    until: Option<u64>,
+) -> Result<Vec<FeedItem>, NostrBlueError> {
+    let favorite_urls = {
+        use dioxus::prelude::ReadableExt;
+        let relays = crate::stores::relay::nip65::FAVORITE_RELAYS.peek().clone();
+        if relays.is_empty() {
+            crate::stores::relay::nip65::default_favorite_relays()
+        } else {
+            relays
+        }
+    };
+    let relay_urls: Vec<nostr_sdk::RelayUrl> = favorite_urls
+        .iter()
+        .filter_map(|s| nostr_sdk::RelayUrl::parse(s).ok())
+        .collect();
+    if relay_urls.is_empty() || authors.is_empty() {
+        return Ok(Vec::new());
+    }
+    let client = match crate::stores::nostr_client::get_client() {
+        Some(c) => c,
+        None => return Ok(Vec::new()),
+    };
+    let filter = build_following_feed_filter(authors.to_vec(), until, Timestamp::now());
+    match client
+        .fetch_events_from(relay_urls, filter, std::time::Duration::from_secs(8))
+        .await
+    {
+        Ok(events) => {
+            let mut feed_items: Vec<FeedItem> = Vec::new();
+            for event in events.into_iter() {
+                if event.kind == Kind::Repost {
+                    if let Ok(original) = extract_reposted_event(&event) {
+                        feed_items.push(FeedItem::Repost {
+                            original,
+                            reposted_by: event.pubkey,
+                            repost_timestamp: event.created_at,
+                        });
+                    }
+                } else if event.kind == Kind::TextNote {
+                    let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
+                    if !is_reply {
+                        feed_items.push(FeedItem::OriginalPost(event));
+                    }
+                } else if event.kind == Kind::Comment
+                    && crate::stores::topic_store::is_topic_post(&event)
+                {
+                    let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
+                    if !is_reply {
+                        feed_items.push(FeedItem::OriginalPost(event));
+                    }
+                } else if event.kind.as_u16() == KIND_BLOBBI_STATE {
+                    feed_items.push(FeedItem::OriginalPost(event));
+                }
+            }
+            feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
+            Ok(feed_items)
+        }
+        Err(e) => {
+            log::warn!("Favorite relay feed fetch failed: {}", e);
+            Ok(Vec::new())
         }
     }
 }

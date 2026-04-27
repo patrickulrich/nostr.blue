@@ -110,7 +110,7 @@ async fn run_sync_cycle(trigger: &str, interval_minutes: u32) -> Result<u64, Str
         if authors.is_empty() {
             mark_target_skipped(SyncTarget::FollowingFeed);
         } else {
-            let filter = build_following_sync_filter(authors);
+            let filter = build_following_sync_filter(authors.clone());
             run_sync_target(
                 client.clone(),
                 relay_urls.clone(),
@@ -124,13 +124,99 @@ async fn run_sync_cycle(trigger: &str, interval_minutes: u32) -> Result<u64, Str
         let pubkey = current_pubkey()?;
         let relay_list_filter = Filter::new().author(pubkey).kind(Kind::RelayList).limit(1);
         run_sync_target(
-            client,
-            relay_urls,
+            client.clone(),
+            relay_urls.clone(),
             SyncTarget::RelayList,
             relay_list_filter,
             "relay list",
         )
-        .await
+        .await?;
+
+        // Native-only extended sync: pre-populate nostrdb with more event types
+        #[cfg(feature = "native")]
+        {
+            let pk = current_pubkey()?;
+
+            let identity_filter = Filter::new()
+                .author(pk)
+                .kinds(vec![
+                    Kind::Metadata,
+                    Kind::ContactList,
+                    Kind::RelayList,
+                    Kind::MuteList,
+                    Kind::PinList,
+                    Kind::Reporting,
+                ])
+                .limit(10);
+            run_sync_target(
+                client.clone(),
+                relay_urls.clone(),
+                SyncTarget::OwnIdentity,
+                identity_filter,
+                "own identity",
+            )
+            .await?;
+
+            let own_content_filter = Filter::new()
+                .author(pk)
+                .kinds(vec![
+                    Kind::TextNote,
+                    Kind::Repost,
+                    Kind::Reaction,
+                    Kind::Custom(20),
+                    Kind::LongFormTextNote,
+                    Kind::Custom(1010),
+                ])
+                .limit(200);
+            run_sync_target(
+                client.clone(),
+                relay_urls.clone(),
+                SyncTarget::OwnContent,
+                own_content_filter,
+                "own content",
+            )
+            .await?;
+
+            if !authors.is_empty() {
+                let profile_filter = Filter::new()
+                    .authors(authors.clone())
+                    .kind(Kind::Metadata)
+                    .limit(authors.len() as usize);
+                run_sync_target(
+                    client.clone(),
+                    relay_urls.clone(),
+                    SyncTarget::FollowedProfiles,
+                    profile_filter,
+                    "followed profiles",
+                )
+                .await?;
+            }
+
+            let notification_filter = Filter::new()
+                .pubkey(pk)
+                .kinds(vec![
+                    Kind::TextNote,
+                    Kind::Repost,
+                    Kind::Reaction,
+                    Kind::ZapReceipt,
+                ])
+                .limit(200);
+            run_sync_target(
+                client,
+                relay_urls,
+                SyncTarget::Notifications,
+                notification_filter,
+                "notifications",
+            )
+            .await?;
+        }
+
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = (client, relay_urls, pubkey, authors);
+        }
+
+        Ok(())
     }
     .await;
 

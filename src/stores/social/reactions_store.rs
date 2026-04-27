@@ -208,8 +208,13 @@ pub async fn load_preferred_reactions() {
             }
         }
     }
-    nostr_client::ensure_relays_ready(&client).await;
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
+    match nostr_client::fetch_events_from_connected_relays_with_client(
+        &client,
+        filter,
+        Duration::from_secs(10),
+    )
+    .await
+    {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 log::info!("Found reactions preference event from relays: {}", event.id);

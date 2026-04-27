@@ -9,6 +9,53 @@ static PROCESSOR_RUNNING: std::sync::atomic::AtomicBool =
 static PROCESSING_LOCK: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+const PROCESSING_TIMEOUT_SECS: u64 = 60;
+const SEND_TIMEOUT_SECS: u64 = 20;
+const MAX_EVENTS_PER_CYCLE: usize = 5;
+const STUCK_PUBLISHING_THRESHOLD_SECS: i64 = 60;
+
+struct ProcessingGuard;
+
+impl ProcessingGuard {
+    fn try_acquire() -> Option<Self> {
+        use std::sync::atomic::Ordering;
+        PROCESSING_LOCK
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()
+            .map(|_| Self)
+    }
+}
+
+impl Drop for ProcessingGuard {
+    fn drop(&mut self) {
+        use std::sync::atomic::Ordering;
+        PROCESSING_LOCK.store(false, Ordering::SeqCst);
+        log::debug!("ProcessingGuard dropped, lock released");
+    }
+}
+
+async fn with_timeout<F: std::future::Future>(
+    dur: std::time::Duration,
+    f: F,
+) -> Option<F::Output> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        tokio::time::timeout(dur, f).await.ok()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        use futures::future::{select, Either};
+        use futures::pin_mut;
+        let timeout = crate::platform::timer::sleep_ms(dur.as_millis() as u32);
+        pin_mut!(f);
+        pin_mut!(timeout);
+        match select(f, timeout).await {
+            Either::Left((result, _)) => Some(result),
+            Either::Right(_) => None,
+        }
+    }
+}
+
 pub fn start_publish_queue_processor() {
     use std::sync::atomic::Ordering;
     if PROCESSOR_RUNNING
@@ -53,21 +100,34 @@ pub fn start_publish_queue_processor() {
 }
 
 pub async fn process_once_guarded() -> Result<(), String> {
-    use std::sync::atomic::Ordering;
-    if PROCESSING_LOCK
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        log::debug!("process_once_guarded: already processing, skipping");
-        return Ok(());
-    }
+    let _guard = match ProcessingGuard::try_acquire() {
+        Some(g) => g,
+        None => {
+            log::debug!("process_once_guarded: already processing, skipping");
+            return Ok(());
+        }
+    };
     log::debug!("process_once_guarded: acquired lock, calling process_once");
-    let result = process_once().await;
-    PROCESSING_LOCK.store(false, Ordering::SeqCst);
-    result
+    match with_timeout(
+        std::time::Duration::from_secs(PROCESSING_TIMEOUT_SECS),
+        process_once(),
+    )
+    .await
+    {
+        Some(result) => result,
+        None => {
+            log::error!(
+                "[PQ] process_once timed out after {}s",
+                PROCESSING_TIMEOUT_SECS
+            );
+            Err("Processing timed out".to_string())
+        }
+    }
 }
 
 pub async fn process_once() -> Result<(), String> {
+    recover_stuck_publishing().await;
+
     let pending: Vec<QueuedEvent> = {
         let queue = PUBLISH_QUEUE.read();
         queue
@@ -75,6 +135,7 @@ pub async fn process_once() -> Result<(), String> {
             .read()
             .iter()
             .filter(|e| matches!(e.status, QueueEventStatus::Pending))
+            .take(MAX_EVENTS_PER_CYCLE)
             .cloned()
             .collect()
     };
@@ -86,9 +147,17 @@ pub async fn process_once() -> Result<(), String> {
         .ok_or("Client not initialized for publish queue")?;
     crate::stores::relay::connection::ensure_relays_ready(&client).await;
 
+    let send_timeout = std::time::Duration::from_secs(SEND_TIMEOUT_SECS);
+
     for event in pending {
         log::debug!("[PQ] setting event {} to Publishing", event.event_id);
         set_status(&event.id, QueueEventStatus::Publishing).await;
+        set_metadata(
+            &event.id,
+            "publishing_since",
+            &chrono::Utc::now().timestamp().to_string(),
+        )
+        .await;
 
         let event_obj: nostr_sdk::Event = match serde_json::from_str(&event.event_json) {
             Ok(e) => e,
@@ -101,35 +170,54 @@ pub async fn process_once() -> Result<(), String> {
             }
         };
 
-        let result = if let Some(ref urls) = event.target_relays {
-            let relay_urls: Vec<nostr_sdk::RelayUrl> = urls
-                .iter()
-                .filter_map(|u| nostr_sdk::RelayUrl::parse(u).ok())
-                .collect();
-            if relay_urls.is_empty() {
-                client.send_event(&event_obj).await
+        let result = match with_timeout(send_timeout, async {
+            if let Some(ref urls) = event.target_relays {
+                let relay_urls: Vec<nostr_sdk::RelayUrl> = urls
+                    .iter()
+                    .filter_map(|u| nostr_sdk::RelayUrl::parse(u).ok())
+                    .collect();
+                if relay_urls.is_empty() {
+                    client.send_event(&event_obj).await
+                } else {
+                    client.send_event_to(relay_urls, &event_obj).await
+                }
             } else {
-                client.send_event_to(relay_urls, &event_obj).await
+                let write_relays = client.pool().__write_relay_urls().await;
+                if write_relays.is_empty() {
+                    log::warn!(
+                        "[PQ] No WRITE relays, falling back to gossip path for {}",
+                        event.event_id
+                    );
+                    client.send_event(&event_obj).await
+                } else {
+                    log::debug!(
+                        "[PQ] Fast-path send to {} WRITE relays for {}",
+                        write_relays.len(),
+                        event.event_id
+                    );
+                    client
+                        .pool()
+                        .send_event_to(write_relays, &event_obj)
+                        .await
+                        .map_err(nostr_sdk::client::Error::from)
+                }
             }
-        } else {
-            let write_relays = client.pool().__write_relay_urls().await;
-            if write_relays.is_empty() {
-                log::warn!(
-                    "[PQ] No WRITE relays, falling back to gossip path for {}",
-                    event.event_id
+        })
+        .await
+        {
+            Some(inner) => inner,
+            None => {
+                log::error!(
+                    "[PQ] Send timed out for {} after {}s",
+                    event.event_id,
+                    SEND_TIMEOUT_SECS
                 );
-                client.send_event(&event_obj).await
-            } else {
-                log::debug!(
-                    "[PQ] Fast-path send to {} WRITE relays for {}",
-                    write_relays.len(),
-                    event.event_id
-                );
-                client
-                    .pool()
-                    .send_event_to(write_relays, &event_obj)
-                    .await
-                    .map_err(nostr_sdk::client::Error::from)
+                handle_failure(
+                    &event,
+                    &format!("Send timed out after {}s", SEND_TIMEOUT_SECS),
+                )
+                .await;
+                continue;
             }
         };
 
@@ -170,8 +258,7 @@ pub async fn process_once() -> Result<(), String> {
                     }
 
                     let has_p_tags = event_obj.tags.public_keys().next().is_some();
-                    let needs_gossip =
-                        has_p_tags && event.target_relays.is_none();
+                    let needs_gossip = has_p_tags && event.target_relays.is_none();
 
                     set_status(&event.id, QueueEventStatus::Success).await;
 
@@ -203,6 +290,36 @@ pub async fn process_once() -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+async fn recover_stuck_publishing() {
+    let stuck_ids: Vec<String> = {
+        let queue = PUBLISH_QUEUE.read();
+        let now_ts = chrono::Utc::now().timestamp();
+        queue
+            .events()
+            .read()
+            .iter()
+            .filter(|e| {
+                if !matches!(e.status, QueueEventStatus::Publishing) {
+                    return false;
+                }
+                e.metadata
+                    .get("publishing_since")
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .map(|since| now_ts - since > STUCK_PUBLISHING_THRESHOLD_SECS)
+                    .unwrap_or(true)
+            })
+            .map(|e| e.id.clone())
+            .collect()
+    };
+    for id in stuck_ids {
+        log::warn!(
+            "[PQ] Resetting stuck Publishing event to Pending: {}",
+            id
+        );
+        set_status(&id, QueueEventStatus::Pending).await;
+    }
 }
 
 fn spawn_gossip_task(event_obj: nostr_sdk::Event, queue_id: String) {

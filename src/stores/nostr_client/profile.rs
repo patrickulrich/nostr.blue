@@ -23,11 +23,20 @@ pub async fn publish_metadata_tracked(
         .map_err(|e| format!("Failed to sign metadata: {}", e))?;
     let event_id = event.id.to_hex();
     let queue_id = crate::stores::publish_queue::enqueue(
-        event,
+        event.clone(),
         crate::stores::publish_queue::types::QueueEventType::Profile,
         None,
         std::collections::HashMap::new(),
     ).await;
+    let indexer_urls = crate::stores::relay::nip65::get_indexer_relay_urls();
+    if !indexer_urls.is_empty() {
+        crate::stores::publish_queue::enqueue(
+            event,
+            crate::stores::publish_queue::types::QueueEventType::Profile,
+            Some(indexer_urls),
+            std::collections::HashMap::new(),
+        ).await;
+    }
     let result = PublishResult::queued(queue_id, event_id);
     log::info!("Metadata queued: {}", result.event_id);
     Ok(result)

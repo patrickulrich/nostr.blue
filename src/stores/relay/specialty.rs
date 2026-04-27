@@ -12,6 +12,7 @@
 //! - Adding relays temporarily and tracking which were newly added
 //! - Ensuring relays are connected before querying
 //! - Cleaning up temporary relays after use
+use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
 /// Well-known specialty relay URLs
@@ -260,6 +261,52 @@ pub async fn ensure_search_relays_connected(client: &Client) -> Vec<String> {
             search_relays.len(),
             connected
         );
+    }
+    connected
+}
+#[allow(dead_code)]
+pub async fn ensure_indexer_relays_connected(client: &Client) -> Vec<String> {
+    let indexer_relays = {
+        let relays = super::nip65::INDEXER_RELAYS.peek().clone();
+        if relays.is_empty() {
+            super::nip65::default_indexer_relays()
+        } else {
+            relays
+        }
+    };
+    let mut connected = Vec::new();
+    for relay_url in &indexer_relays {
+        if ensure_connected(client, relay_url).await {
+            connected.push(relay_url.clone());
+        }
+    }
+    if connected.is_empty() {
+        log::warn!("No indexer relays could be connected");
+    } else {
+        log::info!("Indexer relays connected: {}/{}", connected.len(), indexer_relays.len());
+    }
+    connected
+}
+#[allow(dead_code)]
+pub async fn ensure_favorite_relays_connected(client: &Client) -> Vec<String> {
+    let favorite_relays = {
+        let relays = super::nip65::FAVORITE_RELAYS.peek().clone();
+        if relays.is_empty() {
+            super::nip65::default_favorite_relays()
+        } else {
+            relays
+        }
+    };
+    let mut connected = Vec::new();
+    for relay_url in &favorite_relays {
+        if ensure_connected(client, relay_url).await {
+            connected.push(relay_url.clone());
+        }
+    }
+    if connected.is_empty() {
+        log::warn!("No favorite relays could be connected");
+    } else {
+        log::info!("Favorite relays connected: {}/{}", connected.len(), favorite_relays.len());
     }
     connected
 }

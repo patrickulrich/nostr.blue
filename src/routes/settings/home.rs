@@ -1632,6 +1632,10 @@ fn NegentropySyncSection() -> Element {
                                 match target {
                                     sync_store::SyncTarget::FollowingFeed => "Following feed",
                                     sync_store::SyncTarget::RelayList => "Relay list",
+                                    sync_store::SyncTarget::OwnIdentity => "Own identity",
+                                    sync_store::SyncTarget::OwnContent => "Own content",
+                                    sync_store::SyncTarget::FollowedProfiles => "Followed profiles",
+                                    sync_store::SyncTarget::Notifications => "Notifications",
                                 }
                             }
                         }

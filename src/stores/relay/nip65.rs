@@ -17,7 +17,7 @@ use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use nostr_sdk::{
     Client, EventBuilder, Filter, FromBech32, Kind, PublicKey, RelayUrl, SubscriptionId, Tag,
-    TagKind,
+    TagKind, Timestamp,
 };
 use serde::{Deserialize, Serialize};
 #[cfg(all(feature = "native", not(feature = "web")))]
@@ -72,6 +72,54 @@ pub static BLOCKED_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
 pub static LOCAL_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
 /// Broadcast relays (stored locally, used for manual re-broadcasting only)
 pub static BROADCAST_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
+/// Indexer relays (gift-wrapped NIP-59 kind 10086) for discovering user metadata
+pub static INDEXER_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
+/// Proxy relays (gift-wrapped NIP-59 kind 10087) for fallback when users lack NIP-65
+pub static PROXY_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
+/// Trusted relays (gift-wrapped NIP-59 kind 10089) for sensitive operations
+pub static TRUSTED_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
+/// Private outbox relays (kind 10013) for personal storage
+pub static OUTBOX_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
+/// Favorite/feed relays (kind 10012) for feed aggregation
+pub static FAVORITE_RELAYS: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
+pub const DEFAULT_INDEXER_RELAYS: &[&str] = &[
+    "wss://purplepag.es",
+    "wss://indexer.coracle.social",
+    "wss://user.kindpag.es",
+    "wss://directory.yabu.me",
+    "wss://profiles.nostr1.com",
+    "wss://relay.nos.social",
+];
+pub const DEFAULT_FAVORITE_RELAYS: &[&str] = &[
+    "wss://nostr.wine",
+    "wss://news.utxo.one",
+];
+pub fn default_indexer_relays() -> Vec<String> {
+    DEFAULT_INDEXER_RELAYS.iter().map(|s| s.to_string()).collect()
+}
+#[allow(dead_code)]
+pub fn default_outbox_relays() -> Vec<String> {
+    vec![]
+}
+#[allow(dead_code)]
+pub fn default_proxy_relays() -> Vec<String> {
+    vec![]
+}
+#[allow(dead_code)]
+pub fn default_trusted_relays() -> Vec<String> {
+    vec![]
+}
+pub fn default_favorite_relays() -> Vec<String> {
+    DEFAULT_FAVORITE_RELAYS.iter().map(|s| s.to_string()).collect()
+}
+pub fn get_indexer_relay_urls() -> Vec<String> {
+    let relays = INDEXER_RELAYS.peek().clone();
+    if relays.is_empty() {
+        default_indexer_relays()
+    } else {
+        relays
+    }
+}
 /// Default search relay URLs (NIP-50 compatible)
 pub const DEFAULT_SEARCH_RELAYS: &[&str] = &["wss://relay.nostr.band", "wss://search.nos.today"];
 /// Default search relays to use when no kind 10007 is found
@@ -108,6 +156,37 @@ pub fn reset_dm_relays_to_default() {
             });
         }
     }
+}
+fn parse_relay_tags(tags: &nostr_sdk::Tags) -> Vec<String> {
+    tags.iter()
+        .filter_map(|tag| {
+            if tag.kind() == TagKind::Custom("relay".into()) {
+                tag.content().map(|s| s.to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+#[allow(dead_code)]
+pub fn reset_indexer_relays_to_default() {
+    *INDEXER_RELAYS.write() = default_indexer_relays();
+}
+#[allow(dead_code)]
+pub fn reset_outbox_relays_to_default() {
+    *OUTBOX_RELAYS.write() = vec![];
+}
+#[allow(dead_code)]
+pub fn reset_proxy_relays_to_default() {
+    *PROXY_RELAYS.write() = vec![];
+}
+#[allow(dead_code)]
+pub fn reset_trusted_relays_to_default() {
+    *TRUSTED_RELAYS.write() = vec![];
+}
+#[allow(dead_code)]
+pub fn reset_favorite_relays_to_default() {
+    *FAVORITE_RELAYS.write() = default_favorite_relays();
 }
 /// Get the user's read-enabled relays (for discovering content)
 /// Returns relays from kind 10002 with read flag set, or defaults if none configured
@@ -493,6 +572,153 @@ pub async fn publish_blocked_relays(
     ).await;
     Ok(event_id)
 }
+pub async fn publish_outbox_relays(
+    relays: Vec<String>,
+    _client: Arc<Client>,
+) -> Result<String, String> {
+    log::info!("Publishing outbox relay list with {} relays", relays.len());
+    let urls: Vec<RelayUrl> = relays
+        .iter()
+        .filter_map(|s| RelayUrl::parse(s).ok())
+        .collect();
+    let tags: Vec<Tag> = urls.into_iter().map(Tag::relay).collect();
+    let builder = EventBuilder::new(Kind::Custom(10013), "").tags(tags);
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
+        .await
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::RelayList,
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await;
+    Ok(event_id)
+}
+pub async fn publish_favorite_relays(
+    relays: Vec<String>,
+    _client: Arc<Client>,
+) -> Result<String, String> {
+    log::info!("Publishing favorite relay list with {} relays", relays.len());
+    let urls: Vec<RelayUrl> = relays
+        .iter()
+        .filter_map(|s| RelayUrl::parse(s).ok())
+        .collect();
+    let tags: Vec<Tag> = urls.into_iter().map(Tag::relay).collect();
+    let builder = EventBuilder::new(Kind::Custom(10012), "").tags(tags);
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
+        .await
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::RelayList,
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await;
+    Ok(event_id)
+}
+pub async fn publish_indexer_relays(
+    relays: Vec<String>,
+    _client: Arc<Client>,
+) -> Result<String, String> {
+    log::info!("Publishing indexer relay list (gift-wrapped) with {} relays", relays.len());
+    let client = crate::stores::nostr_client::get_client()
+        .ok_or("Client not initialized")?;
+    let signer = client
+        .signer()
+        .await
+        .map_err(|e| format!("No signer: {}", e))?;
+    let my_pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
+    let urls: Vec<RelayUrl> = relays
+        .iter()
+        .filter_map(|s| RelayUrl::parse(s).ok())
+        .collect();
+    let tags: Vec<Tag> = urls.into_iter().map(Tag::relay).collect();
+    let rumor = EventBuilder::new(Kind::Custom(10086), "")
+        .tags(tags)
+        .build(my_pubkey);
+    let gift_wrap = EventBuilder::gift_wrap(&signer, &my_pubkey, rumor, [])
+        .await
+        .map_err(|e| format!("Failed to gift wrap: {}", e))?;
+    let event_id = gift_wrap.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        gift_wrap,
+        crate::stores::publish_queue::types::QueueEventType::RelayList,
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await;
+    Ok(event_id)
+}
+pub async fn publish_proxy_relays(
+    relays: Vec<String>,
+    _client: Arc<Client>,
+) -> Result<String, String> {
+    log::info!("Publishing proxy relay list (gift-wrapped) with {} relays", relays.len());
+    let client = crate::stores::nostr_client::get_client()
+        .ok_or("Client not initialized")?;
+    let signer = client
+        .signer()
+        .await
+        .map_err(|e| format!("No signer: {}", e))?;
+    let my_pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
+    let urls: Vec<RelayUrl> = relays
+        .iter()
+        .filter_map(|s| RelayUrl::parse(s).ok())
+        .collect();
+    let tags: Vec<Tag> = urls.into_iter().map(Tag::relay).collect();
+    let rumor = EventBuilder::new(Kind::Custom(10087), "")
+        .tags(tags)
+        .build(my_pubkey);
+    let gift_wrap = EventBuilder::gift_wrap(&signer, &my_pubkey, rumor, [])
+        .await
+        .map_err(|e| format!("Failed to gift wrap: {}", e))?;
+    let event_id = gift_wrap.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        gift_wrap,
+        crate::stores::publish_queue::types::QueueEventType::RelayList,
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await;
+    Ok(event_id)
+}
+pub async fn publish_trusted_relays(
+    relays: Vec<String>,
+    _client: Arc<Client>,
+) -> Result<String, String> {
+    log::info!("Publishing trusted relay list (gift-wrapped) with {} relays", relays.len());
+    let client = crate::stores::nostr_client::get_client()
+        .ok_or("Client not initialized")?;
+    let signer = client
+        .signer()
+        .await
+        .map_err(|e| format!("No signer: {}", e))?;
+    let my_pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
+    let urls: Vec<RelayUrl> = relays
+        .iter()
+        .filter_map(|s| RelayUrl::parse(s).ok())
+        .collect();
+    let tags: Vec<Tag> = urls.into_iter().map(Tag::relay).collect();
+    let rumor = EventBuilder::new(Kind::Custom(10089), "")
+        .tags(tags)
+        .build(my_pubkey);
+    let gift_wrap = EventBuilder::gift_wrap(&signer, &my_pubkey, rumor, [])
+        .await
+        .map_err(|e| format!("Failed to gift wrap: {}", e))?;
+    let event_id = gift_wrap.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        gift_wrap,
+        crate::stores::publish_queue::types::QueueEventType::RelayList,
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await;
+    Ok(event_id)
+}
 /// Fetch search relays (kind 10007) for a user
 pub async fn fetch_search_relays(
     pubkey: PublicKey,
@@ -556,6 +782,275 @@ pub async fn fetch_blocked_relays(
         })
         .unwrap_or_default();
     Ok(relays)
+}
+pub async fn fetch_outbox_relays(
+    pubkey: PublicKey,
+    client: Arc<Client>,
+) -> Result<Vec<String>, String> {
+    let filter = Filter::new()
+        .author(pubkey)
+        .kind(Kind::Custom(10013))
+        .limit(1);
+    let events = client
+        .fetch_events(filter, Duration::from_secs(5))
+        .await
+        .map_err(|e| e.to_string())?;
+    let relays = events
+        .into_iter()
+        .next()
+        .map(|event| parse_relay_tags(&event.tags))
+        .unwrap_or_default();
+    Ok(relays)
+}
+pub async fn fetch_favorite_relays(
+    pubkey: PublicKey,
+    client: Arc<Client>,
+) -> Result<Vec<String>, String> {
+    let filter = Filter::new()
+        .author(pubkey)
+        .kind(Kind::Custom(10012))
+        .limit(1);
+    let events = client
+        .fetch_events(filter, Duration::from_secs(5))
+        .await
+        .map_err(|e| e.to_string())?;
+    let relays = events
+        .into_iter()
+        .next()
+        .map(|event| parse_relay_tags(&event.tags))
+        .unwrap_or_default();
+    Ok(relays)
+}
+pub async fn init_private_relay_lists(client: Arc<Client>) -> Result<(), String> {
+    let my_pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
+    let filter = Filter::new()
+        .kind(Kind::GiftWrap)
+        .pubkey(my_pubkey)
+        .since(Timestamp::now() - 2_592_000u64)
+        .limit(50);
+    let events = client
+        .fetch_events(filter, Duration::from_secs(10))
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut indexer = vec![];
+    let mut proxy = vec![];
+    let mut trusted = vec![];
+    let mut found_indexer = false;
+    let mut found_proxy = false;
+    let mut found_trusted = false;
+    for event in events.iter() {
+        if found_indexer && found_proxy && found_trusted {
+            break;
+        }
+        match client.unwrap_gift_wrap(event).await {
+            Ok(unwrapped) => match unwrapped.rumor.kind.as_u16() {
+                10086 if !found_indexer => {
+                    found_indexer = true;
+                    indexer = parse_relay_tags(&unwrapped.rumor.tags);
+                }
+                10087 if !found_proxy => {
+                    found_proxy = true;
+                    proxy = parse_relay_tags(&unwrapped.rumor.tags);
+                }
+                10089 if !found_trusted => {
+                    found_trusted = true;
+                    trusted = parse_relay_tags(&unwrapped.rumor.tags);
+                }
+                _ => {}
+            },
+            Err(_) => continue,
+        }
+    }
+    *INDEXER_RELAYS.write() = if indexer.is_empty() {
+        default_indexer_relays()
+    } else {
+        indexer
+    };
+    *PROXY_RELAYS.write() = proxy;
+    *TRUSTED_RELAYS.write() = trusted;
+    Ok(())
+}
+pub async fn add_indexer_relays_to_client(client: Arc<Client>) {
+    let indexer_urls = INDEXER_RELAYS.peek().clone();
+    if indexer_urls.is_empty() {
+        return;
+    }
+    log::info!("Adding {} indexer relays to client pool", indexer_urls.len());
+    for url_str in &indexer_urls {
+        if let Ok(url) = RelayUrl::parse(url_str) {
+            let _ = client.add_relay(url.clone()).await;
+            let _ = client
+                .add_discovery_relay(url.clone())
+                .await;
+            let _ = client.add_read_relay(url).await;
+        }
+    }
+}
+pub async fn fetch_own_lists_from_indexers(client: Arc<Client>) {
+    let my_pubkey = match crate::stores::nostr_client::get_cached_pubkey() {
+        Ok(pk) => pk,
+        Err(_) => return,
+    };
+    let indexer_urls = INDEXER_RELAYS.peek().clone();
+    if indexer_urls.is_empty() {
+        return;
+    }
+    log::info!("Fetching own relay lists from indexer relays as backup");
+    let filter = Filter::new()
+        .author(my_pubkey)
+        .kinds(vec![
+            Kind::RelayList,
+            Kind::InboxRelays,
+            Kind::SearchRelays,
+            Kind::BlockedRelays,
+            Kind::Custom(10013),
+            Kind::Custom(10012),
+        ])
+        .limit(20);
+    match client
+        .fetch_events_from(
+            indexer_urls
+                .iter()
+                .filter_map(|s| RelayUrl::parse(s).ok())
+                .collect::<Vec<_>>(),
+            filter,
+            Duration::from_secs(8),
+        )
+        .await
+    {
+        Ok(events) => {
+            let mut found_relay_list = false;
+            let mut found_inbox = false;
+            let mut found_search = false;
+            let mut found_blocked = false;
+            let mut found_outbox = false;
+            let mut found_favorites = false;
+            for event in events.iter() {
+                match event.kind.as_u16() {
+                    10002 if !found_relay_list => {
+                        found_relay_list = true;
+                        let parsed = parse_relay_list_event(event);
+                        if !parsed.is_empty() {
+                            let current = USER_RELAY_METADATA.read().clone();
+                            match current {
+                                Some(ref m)
+                                    if m.updated_at
+                                        >= event.created_at.as_secs() =>
+                                {}
+                                _ => {
+                                    let mut metadata = current.unwrap_or_default();
+                                    metadata.relays = parsed;
+                                    metadata.updated_at = event.created_at.as_secs();
+                                    *USER_RELAY_METADATA.write() = Some(metadata);
+                                    log::info!(
+                                        "Updated relay list from indexer backup"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    10050 if !found_inbox => {
+                        found_inbox = true;
+                        let dm_relays: Vec<String> = event
+                            .tags
+                            .iter()
+                            .filter_map(|tag| {
+                                if tag.kind() == TagKind::Relay {
+                                    tag.content().map(|s| s.to_string())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+                        if !dm_relays.is_empty() {
+                            let current_dm = get_dm_relays_10050_only();
+                            if current_dm.is_empty() {
+                                let mut metadata =
+                                    USER_RELAY_METADATA.read().clone().unwrap_or_default();
+                                metadata.dm_relays = dm_relays;
+                                *USER_RELAY_METADATA.write() = Some(metadata);
+                                log::info!(
+                                    "Updated DM relays from indexer backup"
+                                );
+                            }
+                        }
+                    }
+                    10007 if !found_search => {
+                        found_search = true;
+                        let current = SEARCH_RELAYS.peek().clone();
+                        if current.is_empty() {
+                            let urls: Vec<String> = event
+                                .tags
+                                .iter()
+                                .filter_map(|tag| {
+                                    if tag.kind()
+                                        == TagKind::Custom("relay".into())
+                                    {
+                                        tag.content().map(|s| s.to_string())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
+                            if !urls.is_empty() {
+                                *SEARCH_RELAYS.write() = urls;
+                            }
+                        }
+                    }
+                    10006 if !found_blocked => {
+                        found_blocked = true;
+                        let current = BLOCKED_RELAYS.peek().clone();
+                        if current.is_empty() {
+                            let urls: Vec<String> = event
+                                .tags
+                                .iter()
+                                .filter_map(|tag| {
+                                    if tag.kind()
+                                        == TagKind::Custom("relay".into())
+                                    {
+                                        tag.content().map(|s| s.to_string())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
+                            if !urls.is_empty() {
+                                *BLOCKED_RELAYS.write() = urls;
+                            }
+                        }
+                    }
+                    10013 if !found_outbox => {
+                        found_outbox = true;
+                        let current = OUTBOX_RELAYS.peek().clone();
+                        if current.is_empty() {
+                            let urls = parse_relay_tags(&event.tags);
+                            if !urls.is_empty() {
+                                *OUTBOX_RELAYS.write() = urls;
+                            }
+                        }
+                    }
+                    10012 if !found_favorites => {
+                        found_favorites = true;
+                        let current = FAVORITE_RELAYS.peek().clone();
+                        if current.is_empty() {
+                            let urls = parse_relay_tags(&event.tags);
+                            if !urls.is_empty() {
+                                *FAVORITE_RELAYS.write() = urls;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            log::info!(
+                "Indexer backup fetch complete: relay_list={} inbox={} search={} blocked={} outbox={} favorites={}",
+                found_relay_list, found_inbox, found_search, found_blocked, found_outbox, found_favorites
+            );
+        }
+        Err(e) => {
+            log::warn!("Failed to fetch own lists from indexers: {}", e);
+        }
+    }
 }
 const LOCAL_RELAYS_KEY: &str = "nostr_blue_local_relays";
 const BROADCAST_RELAYS_KEY: &str = "nostr_blue_broadcast_relays";
@@ -778,12 +1273,14 @@ pub async fn apply_local_relays_to_client(client: Arc<Client>) {
 pub async fn init_nip51_relay_lists(client: Arc<Client>) -> Result<(), String> {
     let pubkey = nostr_client::get_cached_pubkey().map_err(|_| "No signer attached")?;
     log::info!(
-        "Fetching NIP-51 relay lists (search/blocked) for {}",
+        "Fetching NIP-51 relay lists (search/blocked/outbox/favorites) for {}",
         pubkey.to_hex()
     );
-    let (search_result, blocked_result) = tokio::join!(
+    let (search_result, blocked_result, outbox_result, favorites_result) = tokio::join!(
         fetch_search_relays(pubkey, client.clone()),
         fetch_blocked_relays(pubkey, client.clone()),
+        fetch_outbox_relays(pubkey, client.clone()),
+        fetch_favorite_relays(pubkey, client.clone()),
     );
     match search_result {
         Ok(relays) if !relays.is_empty() => {
@@ -806,6 +1303,32 @@ pub async fn init_nip51_relay_lists(client: Arc<Client>) -> Result<(), String> {
         }
         Err(e) => {
             log::warn!("Failed to fetch blocked relays: {}", e);
+        }
+    }
+    match outbox_result {
+        Ok(relays) if !relays.is_empty() => {
+            log::info!("Loaded {} outbox relays from Nostr", relays.len());
+            *OUTBOX_RELAYS.write() = relays;
+        }
+        Ok(_) => {
+            log::info!("No outbox relays found");
+        }
+        Err(e) => {
+            log::warn!("Failed to fetch outbox relays: {}", e);
+        }
+    }
+    match favorites_result {
+        Ok(relays) if !relays.is_empty() => {
+            log::info!("Loaded {} favorite relays from Nostr", relays.len());
+            *FAVORITE_RELAYS.write() = relays;
+        }
+        Ok(_) => {
+            log::info!("No favorite relays found, using defaults");
+            *FAVORITE_RELAYS.write() = default_favorite_relays();
+        }
+        Err(e) => {
+            log::warn!("Failed to fetch favorite relays: {}, using defaults", e);
+            *FAVORITE_RELAYS.write() = default_favorite_relays();
         }
     }
     Ok(())
