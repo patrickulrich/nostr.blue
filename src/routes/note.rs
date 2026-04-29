@@ -401,8 +401,8 @@ async fn fetch_replies_phase2(
     combined_relays.truncate(MAX_EPHEMERAL_RELAYS);
 
     if !combined_relays.is_empty() {
-        let connected = relay::coverage::connect_ephemeral_relays(&client, &combined_relays).await;
-        if !connected.is_empty() {
+        let ephemeral = relay::coverage::connect_ephemeral_relays(&client, &combined_relays).await;
+        if !ephemeral.connected.is_empty() {
             let reply_filter = Filter::new()
                 .kinds(vec![
                     Kind::TextNote,
@@ -415,13 +415,13 @@ async fn fetch_replies_phase2(
             if let Ok(events) = relay::connection::fetch_events_from_relays(
                 &client,
                 reply_filter,
-                connected.clone(),
+                ephemeral.connected.clone(),
                 Duration::from_secs(5),
             )
             .await
             {
                 if *load_generation.peek() != this_generation {
-                    relay::coverage::cleanup_ephemeral_relays(&client, &connected).await;
+                    relay::coverage::cleanup_ephemeral_relays(&client, &ephemeral.newly_added).await;
                     return;
                 }
                 let mut existing = replies_signal.read().clone();
@@ -431,7 +431,7 @@ async fn fetch_replies_phase2(
                 log::info!("Phase 2: added {} additional replies", merged.len());
                 replies_signal.set(merged);
             }
-            relay::coverage::cleanup_ephemeral_relays(&client, &connected).await;
+            relay::coverage::cleanup_ephemeral_relays(&client, &ephemeral.newly_added).await;
         }
     }
 

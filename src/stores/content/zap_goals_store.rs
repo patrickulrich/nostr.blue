@@ -659,17 +659,12 @@ pub async fn publish_zap_goal_tracked(
     relays: Vec<String>,
     url: Option<String>,
 ) -> Result<PublishResult, String> {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     let _client = nostr_client::get_client().ok_or("Client not initialized")?;
     if amount_sats == 0 {
         return Err("Amount must be greater than zero".to_string());
     }
     if let Some(closed_at) = closed_at {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_secs())
-            .unwrap_or(0);
+        let now = crate::platform::timestamp::now_secs();
         if closed_at <= now {
             return Err("closed_at must be a future timestamp".to_string());
         }

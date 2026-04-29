@@ -95,8 +95,9 @@ pub use edits::{publish_edit, EditPublishResult};
 pub use error::Error;
 pub use fetching::{
     fetch_event_targeted, fetch_events_aggregated, fetch_events_aggregated_outbox,
-    fetch_events_from_connected_relays, fetch_events_from_relays, fetch_profile_events_db,
-    fetch_profile_events_from_relays, parse_event_id, ParsedEventId,
+    fetch_events_from_connected_relays, fetch_events_from_relays, fetch_metadata_targeted,
+    fetch_profile_events_db, fetch_profile_events_from_relays, fetch_profile_events_targeted,
+    parse_event_id, ParsedEventId,
 };
 pub(crate) use fetching::fetch_events_from_connected_relays_with_client;
 #[cfg(feature = "native")]

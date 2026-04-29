@@ -287,6 +287,19 @@ fn extract_and_record_hints(event: &nostr::Event) {
     }
 }
 
+/// Result of connecting to relays temporarily for a targeted fetch.
+///
+/// Separates pre-existing connected relays from newly-added ones so that
+/// cleanup only removes relays we actually added, avoiding disconnecting
+/// the user's own persistent relays.
+#[derive(Clone, Debug, Default)]
+pub struct EphemeralResult {
+    /// All connected URLs (pre-existing + newly added) — use for querying.
+    pub connected: Vec<String>,
+    /// Only the URLs we added to the pool — use for cleanup.
+    pub newly_added: Vec<String>,
+}
+
 /// Connect to relays temporarily for a targeted fetch.
 ///
 /// Two-phase batch approach to avoid pool RwLock contention:
@@ -294,8 +307,8 @@ fn extract_and_record_hints(event: &nostr::Event) {
 /// - Phase B: Parallel `try_connect_relay` with bounded concurrency (read locks coexist)
 ///
 /// Uses `reconnect(false)` so failed connections are not auto-retried.
-/// Returns the subset of URLs that connected successfully.
-pub async fn connect_ephemeral_relays(client: &Client, urls: &[String]) -> Vec<String> {
+/// Returns an `EphemeralResult` distinguishing pre-existing relays from newly-added ones.
+pub async fn connect_ephemeral_relays(client: &Client, urls: &[String]) -> EphemeralResult {
     use futures::stream::{self, StreamExt};
 
     let relays = client.relays().await;
@@ -317,7 +330,10 @@ pub async fn connect_ephemeral_relays(client: &Client, urls: &[String]) -> Vec<S
     }
 
     if to_add.is_empty() {
-        return already_connected;
+        return EphemeralResult {
+            connected: already_connected,
+            newly_added: Vec::new(),
+        };
     }
 
     let opts = RelayOptions::new()
@@ -350,8 +366,12 @@ pub async fn connect_ephemeral_relays(client: &Client, urls: &[String]) -> Vec<S
         .collect()
         .await;
 
-    already_connected.extend(newly_connected);
-    already_connected
+    let mut connected = already_connected;
+    connected.extend(newly_connected.clone());
+    EphemeralResult {
+        connected,
+        newly_added: newly_connected,
+    }
 }
 
 /// Remove ephemeral relays from the pool after a targeted fetch.

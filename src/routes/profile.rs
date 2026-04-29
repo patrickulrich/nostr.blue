@@ -213,8 +213,8 @@ pub fn Profile(pubkey: String) -> Element {
                     loading.set(false);
                     return;
                 }
-                match client
-                    .fetch_metadata(public_key, Duration::from_secs(5))
+                let hex_pubkey = public_key.to_hex();
+                match nostr_client::fetch_metadata_targeted(&hex_pubkey, Duration::from_secs(5))
                     .await
                 {
                     Ok(Some(metadata)) => {
@@ -1498,7 +1498,8 @@ async fn load_tab_events_relays(
     }
     let filter = build_tab_filter(public_key, tab, until, 100);
     let events =
-        nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10)).await?;
+        nostr_client::fetch_profile_events_targeted(pubkey, filter, Duration::from_secs(10))
+            .await?;
     let relay_count = events.len();
     let mut processed = process_tab_events(events, tab);
     if matches!(tab, ProfileTab::Articles) {
@@ -1606,8 +1607,10 @@ async fn load_likes_relays(
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
+    let hex_pubkey = public_key.to_hex();
     let reactions =
-        nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10)).await?;
+        nostr_client::fetch_profile_events_targeted(&hex_pubkey, filter, Duration::from_secs(10))
+            .await?;
     let relay_count = if reactions.len() >= REACTIONS_LIMIT {
         REACTIONS_LIMIT
     } else {
@@ -1709,7 +1712,7 @@ async fn load_tab_events(
                     filter = filter.until(Timestamp::from(until_ts));
                 }
                 let events =
-                    nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
+                    nostr_client::fetch_profile_events_targeted(pubkey, filter, Duration::from_secs(10))
                         .await
                         .map_err(|e| format!("Failed to fetch events: {}", e))?;
                 let events_len = events.len();
@@ -1768,7 +1771,7 @@ async fn load_tab_events(
                     filter = filter.until(Timestamp::from(until_ts));
                 }
                 let events =
-                    nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
+                    nostr_client::fetch_profile_events_targeted(pubkey, filter, Duration::from_secs(10))
                         .await
                         .map_err(|e| format!("Failed to fetch events: {}", e))?;
                 let events_len = events.len();
@@ -1816,7 +1819,7 @@ async fn load_tab_events(
                 filter = filter.until(Timestamp::from(until_ts));
             }
             let events =
-                nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
+                nostr_client::fetch_profile_events_targeted(pubkey, filter, Duration::from_secs(10))
                     .await
                     .map_err(|e| format!("Failed to fetch events: {}", e))?;
             let relay_count = events.len();
@@ -1840,7 +1843,7 @@ async fn load_tab_events(
                 filter = filter.until(Timestamp::from(until_ts));
             }
             let events =
-                nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
+                nostr_client::fetch_profile_events_targeted(pubkey, filter, Duration::from_secs(10))
                     .await
                     .map_err(|e| format!("Failed to fetch events: {}", e))?;
             let relay_count = events.len();
@@ -1863,7 +1866,7 @@ async fn load_tab_events(
                 filter = filter.until(Timestamp::from(until_ts));
             }
             let events =
-                nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
+                nostr_client::fetch_profile_events_targeted(pubkey, filter, Duration::from_secs(10))
                     .await
                     .map_err(|e| format!("Failed to fetch events: {}", e))?;
             let relay_count = events.len();
@@ -1886,7 +1889,7 @@ async fn load_tab_events(
                 filter = filter.until(Timestamp::from(until_ts));
             }
             let events =
-                nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
+                nostr_client::fetch_profile_events_targeted(pubkey, filter, Duration::from_secs(10))
                     .await
                     .map_err(|e| format!("Failed to fetch events: {}", e))?;
             let relay_count = events.len();
@@ -1909,7 +1912,7 @@ async fn load_tab_events(
                 filter = filter.until(Timestamp::from(until_ts));
             }
             let reactions =
-                nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
+                nostr_client::fetch_profile_events_targeted(pubkey, filter, Duration::from_secs(10))
                     .await
                     .map_err(|e| format!("Failed to fetch reactions: {}", e))?;
             let relay_count = reactions.len();

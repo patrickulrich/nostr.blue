@@ -396,16 +396,16 @@ pub async fn fetch_event_targeted(
             relay::coverage::RelayPurpose::Write,
         )
         .await;
-        let connected = relay::coverage::connect_ephemeral_relays(&client, &relay_urls).await;
-        if !connected.is_empty() {
+        let ephemeral = relay::coverage::connect_ephemeral_relays(&client, &relay_urls).await;
+        if !ephemeral.connected.is_empty() {
             let result = relay::connection::fetch_events_from_relays(
                 &client,
                 filter.clone(),
-                connected.clone(),
+                ephemeral.connected.clone(),
                 timeout,
             )
             .await;
-            relay::coverage::cleanup_ephemeral_relays(&client, &connected).await;
+            relay::coverage::cleanup_ephemeral_relays(&client, &ephemeral.newly_added).await;
             if let Ok(events) = result {
                 if let Some(event) = events.into_iter().next() {
                     log::debug!("fetch_event_targeted: found via author relays");
@@ -417,16 +417,17 @@ pub async fn fetch_event_targeted(
 
     // Phase 4: Relay hints from nevent
     if !parsed.relay_hints.is_empty() {
-        let connected =
+        let ephemeral =
             relay::coverage::connect_ephemeral_relays(&client, &parsed.relay_hints).await;
-        if !connected.is_empty() {
+        if !ephemeral.connected.is_empty() {
             let result = relay::connection::fetch_events_from_relays(
                 &client,
                 filter.clone(),
-                connected,
+                ephemeral.connected.clone(),
                 timeout,
             )
             .await;
+            relay::coverage::cleanup_ephemeral_relays(&client, &ephemeral.newly_added).await;
             if let Ok(events) = result {
                 if let Some(event) = events.into_iter().next() {
                     log::debug!("fetch_event_targeted: found via relay hints");
@@ -453,4 +454,105 @@ pub async fn fetch_video_events_from_connected_relays(
     let client = get_client().ok_or("Client not initialized")?;
     ensure_video_relay_connected(&client).await;
     fetch_events_from_connected_relays_with_client(&client, filter, timeout).await
+}
+
+/// Fetch a user's events by targeting their NIP-65 write relays.
+///
+/// Resolves the user's relay list via the three-tier resolver, connects to those
+/// relays (ephemerally), and fetches events. Falls back to the standard
+/// `fetch_profile_events_from_relays` (SDK gossip) if no NIP-65 data is available
+/// or the targeted fetch returns no results.
+pub async fn fetch_profile_events_targeted(
+    pubkey_hex: &str,
+    filter: Filter,
+    timeout: Duration,
+) -> std::result::Result<Vec<nostr::Event>, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    let relay_urls = relay::coverage::resolve_user_relays(
+        pubkey_hex,
+        relay::coverage::RelayPurpose::Write,
+    )
+    .await;
+
+    if !relay_urls.is_empty() {
+        let ephemeral = relay::coverage::connect_ephemeral_relays(&client, &relay_urls).await;
+        if !ephemeral.connected.is_empty() {
+            let result = relay::connection::fetch_events_from_relays(
+                &client,
+                filter.clone(),
+                ephemeral.connected.clone(),
+                timeout,
+            )
+            .await;
+            relay::coverage::cleanup_ephemeral_relays(&client, &ephemeral.newly_added).await;
+            if let Ok(events) = result {
+                if !events.is_empty() {
+                    log::debug!(
+                        "fetch_profile_events_targeted: got {} events from author relays",
+                        events.len()
+                    );
+                    return Ok(events);
+                }
+            }
+        }
+    }
+
+    fetch_profile_events_from_relays(filter, timeout).await
+}
+
+/// Fetch a user's metadata (kind 0) by targeting their NIP-65 write relays.
+///
+/// Resolves the user's relay list via the three-tier resolver, connects to those
+/// relays (ephemerally), and queries for metadata. Falls back to the SDK's
+/// `client.fetch_metadata()` if no NIP-65 data is available or the targeted fetch
+/// returns no results.
+pub async fn fetch_metadata_targeted(
+    pubkey_hex: &str,
+    timeout: Duration,
+) -> std::result::Result<Option<nostr_sdk::Metadata>, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+    let public_key = PublicKey::from_hex(pubkey_hex).map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+    let relay_urls = relay::coverage::resolve_user_relays(
+        pubkey_hex,
+        relay::coverage::RelayPurpose::Write,
+    )
+    .await;
+
+    if !relay_urls.is_empty() {
+        let ephemeral = relay::coverage::connect_ephemeral_relays(&client, &relay_urls).await;
+        if !ephemeral.connected.is_empty() {
+            let filter = Filter::new()
+                .author(public_key)
+                .kind(Kind::Metadata)
+                .limit(1);
+            let result = relay::connection::fetch_events_from_relays(
+                &client,
+                filter,
+                ephemeral.connected.clone(),
+                timeout,
+            )
+            .await;
+            relay::coverage::cleanup_ephemeral_relays(&client, &ephemeral.newly_added).await;
+            if let Ok(events) = result {
+                if let Some(event) = events.into_iter().next() {
+                    match nostr_sdk::Metadata::from_json(&event.content) {
+                        Ok(metadata) => {
+                            log::debug!("fetch_metadata_targeted: found via author relays");
+                            return Ok(Some(metadata));
+                        }
+                        Err(e) => {
+                            log::warn!("fetch_metadata_targeted: failed to parse metadata: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    match client.fetch_metadata(public_key, timeout).await {
+        Ok(m) => Ok(m),
+        Err(e) => Err(format!("Failed to fetch metadata: {}", e)),
+    }
 }
