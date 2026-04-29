@@ -44,8 +44,11 @@ pub use connection::{
     wait_for_user_relays,
 };
 pub use coverage::{
-    clear_coverage, coverage_size, get_relays_for_pubkey, record_user_relays, RelayCoverageMap,
-    RELAY_COVERAGE,
+    clear_coverage, cleanup_ephemeral_relays, connect_ephemeral_relays, coverage_size,
+    get_relays_for_pubkey, prefetch_relay_lists_for_follows, record_provenance,
+    record_relay_hint, record_relay_list_from_event, record_relay_list_from_event_by_map,
+    record_user_relays, resolve_user_relays, start_provenance_recorder, RelayCoverageMap,
+    RelayPurpose, RELAY_COVERAGE,
 };
 pub use display::{get_relay_display_info, RelayDisplayInfo};
 pub use health::{

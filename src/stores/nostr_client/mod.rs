@@ -60,7 +60,7 @@ mod contacts;
 mod custom_nips;
 pub mod edits;
 mod error;
-mod fetching;
+pub mod fetching;
 mod media;
 mod muting;
 mod notes;
@@ -94,8 +94,9 @@ pub use custom_nips::{
 pub use edits::{publish_edit, EditPublishResult};
 pub use error::Error;
 pub use fetching::{
-    fetch_events_aggregated, fetch_events_aggregated_outbox, fetch_events_from_connected_relays,
-    fetch_events_from_relays, fetch_profile_events_db, fetch_profile_events_from_relays,
+    fetch_event_targeted, fetch_events_aggregated, fetch_events_aggregated_outbox,
+    fetch_events_from_connected_relays, fetch_events_from_relays, fetch_profile_events_db,
+    fetch_profile_events_from_relays, parse_event_id, ParsedEventId,
 };
 pub(crate) use fetching::fetch_events_from_connected_relays_with_client;
 #[cfg(feature = "native")]

@@ -312,6 +312,135 @@ pub async fn fetch_events_ndb_first(
     fetch_events_from_connected_relays(filter, timeout).await
 }
 
+/// Parsed event ID with optional author pubkey and relay hints from nevent decoding.
+#[derive(Clone, Debug)]
+pub struct ParsedEventId {
+    pub event_id: EventId,
+    pub author: Option<PublicKey>,
+    pub relay_hints: Vec<String>,
+}
+
+/// Parse an event ID from various formats (nevent, note, hex) with author and relay hints.
+pub fn parse_event_id(id: &str) -> Option<ParsedEventId> {
+    use nostr_sdk::nips::nip19::Nip19;
+    let trimmed = id.trim();
+    let normalized = trimmed
+        .strip_prefix("nostr:")
+        .or_else(|| trimmed.strip_prefix("NOSTR:"))
+        .unwrap_or(trimmed);
+
+    if let Ok(event_id) = EventId::from_hex(normalized) {
+        return Some(ParsedEventId {
+            event_id,
+            author: None,
+            relay_hints: vec![],
+        });
+    }
+
+    Nip19::from_bech32(normalized).ok().and_then(|n| match n {
+        Nip19::Event(e) => Some(ParsedEventId {
+            event_id: e.event_id,
+            author: e.author,
+            relay_hints: e.relays.iter().map(|r| r.to_string()).collect(),
+        }),
+        Nip19::EventId(id) => Some(ParsedEventId {
+            event_id: id,
+            author: None,
+            relay_hints: vec![],
+        }),
+        _ => None,
+    })
+}
+
+/// Targeted event fetch with hybrid broadcast+targeted strategy.
+///
+/// 1. DB check (instant)
+/// 2. Broadcast to connected relays (fast, uses existing connections)
+/// 3. Targeted author relays via NIP-65 resolution (if author known)
+/// 4. Relay hints from nevent (if available)
+/// 5. Fallback — gossip/outbox model
+pub async fn fetch_event_targeted(
+    parsed: ParsedEventId,
+    timeout: Duration,
+) -> std::result::Result<Option<nostr::Event>, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+    let filter = Filter::new().id(parsed.event_id).limit(1);
+
+    // Phase 1: DB check (instant)
+    if let Ok(events) = client.database().query(filter.clone()).await {
+        if let Some(event) = events.into_iter().next() {
+            log::debug!("fetch_event_targeted: found in DB cache");
+            return Ok(Some(event));
+        }
+    }
+
+    // Phase 2: Broadcast to connected relays (fast)
+    match fetch_events_from_connected_relays_with_client(
+        &client,
+        filter.clone(),
+        Duration::from_secs(3),
+    )
+    .await
+    {
+        Ok(events) if !events.is_empty() => {
+            log::debug!("fetch_event_targeted: found via broadcast");
+            return Ok(events.into_iter().next());
+        }
+        _ => {}
+    }
+
+    // Phase 3: Targeted author relays (if known)
+    if let Some(author) = &parsed.author {
+        let relay_urls = relay::coverage::resolve_user_relays(
+            &author.to_hex(),
+            relay::coverage::RelayPurpose::Write,
+        )
+        .await;
+        let connected = relay::coverage::connect_ephemeral_relays(&client, &relay_urls).await;
+        if !connected.is_empty() {
+            let result = relay::connection::fetch_events_from_relays(
+                &client,
+                filter.clone(),
+                connected.clone(),
+                timeout,
+            )
+            .await;
+            relay::coverage::cleanup_ephemeral_relays(&client, &connected).await;
+            if let Ok(events) = result {
+                if let Some(event) = events.into_iter().next() {
+                    log::debug!("fetch_event_targeted: found via author relays");
+                    return Ok(Some(event));
+                }
+            }
+        }
+    }
+
+    // Phase 4: Relay hints from nevent
+    if !parsed.relay_hints.is_empty() {
+        let connected =
+            relay::coverage::connect_ephemeral_relays(&client, &parsed.relay_hints).await;
+        if !connected.is_empty() {
+            let result = relay::connection::fetch_events_from_relays(
+                &client,
+                filter.clone(),
+                connected,
+                timeout,
+            )
+            .await;
+            if let Ok(events) = result {
+                if let Some(event) = events.into_iter().next() {
+                    log::debug!("fetch_event_targeted: found via relay hints");
+                    return Ok(Some(event));
+                }
+            }
+        }
+    }
+
+    // Phase 5: Fallback — outbox (gossip model)
+    let events = fetch_events_aggregated_outbox(filter, timeout).await?;
+    Ok(events.into_iter().next())
+}
+
 /// Fetch video events from connected relays (bypasses gossip)
 ///
 /// Ensures video relay (relay.divine.video) is connected first,

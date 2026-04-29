@@ -458,6 +458,10 @@ async fn run_post_login_init() {
             log::debug!("Skipping contact metadata prefetch: no client available");
         }
     });
+    // Prefetch relay lists for all followed users to warm the coverage map
+    spawn(async move {
+        crate::stores::relay::coverage::prefetch_relay_lists_for_follows().await;
+    });
 }
 /// Login with NIP-46 remote signer (nostr-connect)
 pub async fn login_with_nostr_connect(bunker_uri: &str) -> Result<(), String> {

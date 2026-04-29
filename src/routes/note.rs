@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
+use std::time:: Duration;
 
 use crate::components::{ClientInitializing, EditProposalCard, NoteCard, ThreadedComment, VoiceMessageCard};
 use crate::hooks::{use_mute_block_cache, use_relay_subscription};
@@ -12,16 +12,15 @@ use crate::services::aggregation::{
 };
 use crate::stores::back_navigation;
 use crate::stores::nostr_client;
+use crate::stores::nostr_client::fetching::{fetch_event_targeted, parse_event_id};
 use crate::stores::relay;
+use crate::stores::relay::coverage::RelayPurpose;
 use crate::utils::{build_thread_tree, event::is_voice_message};
 
-async fn fetch_main_note(event_id: EventId) -> std::result::Result<NostrEvent, String> {
-    let filter = Filter::new().id(event_id);
-    let events =
-        nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await?;
-    events
-        .into_iter()
-        .next()
+async fn fetch_main_note(note_id: &str) -> std::result::Result<NostrEvent, String> {
+    let parsed = parse_event_id(note_id).ok_or("Invalid note ID")?;
+    fetch_event_targeted(parsed, Duration::from_secs(10))
+        .await?
         .ok_or("Event not found".to_string())
 }
 
@@ -65,6 +64,21 @@ fn extract_relay_hints(note: &NostrEvent) -> Vec<(EventId, Option<String>)> {
         .collect()
 }
 
+fn extract_author_from_etags(note: &NostrEvent) -> HashMap<EventId, PublicKey> {
+    let mut author_map = HashMap::new();
+    for tag in note.tags.iter() {
+        if let Some(TagStandard::Event {
+            event_id,
+            public_key: Some(pk),
+            ..
+        }) = tag.as_standardized()
+        {
+            author_map.insert(*event_id, *pk);
+        }
+    }
+    author_map
+}
+
 async fn fetch_parents_with_hints(
     initial_ids: Vec<EventId>,
     clicked_note: &NostrEvent,
@@ -79,6 +93,8 @@ async fn fetch_parents_with_hints(
         .into_iter()
         .filter_map(|(id, url)| url.map(|u| (id, u)))
         .collect();
+
+    let clicked_author_hints = extract_author_from_etags(clicked_note);
 
     let mut ids_to_fetch: Vec<EventId> = initial_ids
         .into_iter()
@@ -126,21 +142,118 @@ async fn fetch_parents_with_hints(
         }
 
         if !unhinted_ids.is_empty() {
-            let filter = Filter::new().ids(unhinted_ids).kinds(vec![
-                Kind::TextNote,
-                Kind::VoiceMessage,
-                Kind::VoiceMessageReply,
-                Kind::Comment,
-            ]);
-            if let Ok(events) =
-                nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await
-            {
-                new_events.extend(events);
+            let client = nostr_client::get_client().unwrap();
+
+            // Try author-targeted fetch for unhinted parents where we know the author
+            let mut remaining_unhinted = Vec::new();
+            let mut author_targeted: HashMap<String, Vec<EventId>> = HashMap::new();
+
+            for id in &unhinted_ids {
+                if let Some(author) = clicked_author_hints.get(id) {
+                    let relay_urls = relay::coverage::resolve_user_relays(
+                        &author.to_hex(),
+                        RelayPurpose::Write,
+                    )
+                    .await;
+                    if !relay_urls.is_empty() {
+                        for url in &relay_urls {
+                            author_targeted
+                                .entry(url.clone())
+                                .or_default()
+                                .push(*id);
+                        }
+                        continue;
+                    }
+                }
+                remaining_unhinted.push(*id);
+            }
+
+            for (relay_url, ids) in &author_targeted {
+                let filter = Filter::new().ids(ids.clone()).kinds(vec![
+                    Kind::TextNote,
+                    Kind::VoiceMessage,
+                    Kind::VoiceMessageReply,
+                    Kind::Comment,
+                ]);
+                if let Ok(events) = relay::connection::fetch_events_from_relays(
+                    &client,
+                    filter,
+                    vec![relay_url.clone()],
+                    Duration::from_secs(5),
+                )
+                .await
+                {
+                    new_events.extend(events);
+                }
+            }
+
+            // Try clicked note author's relays for remaining unhinted parents
+            let still_missing: Vec<EventId> = remaining_unhinted
+                .iter()
+                .filter(|id| !new_events.iter().any(|e| e.id == **id))
+                .copied()
+                .collect();
+
+            if !still_missing.is_empty() {
+                let clicked_relays = relay::coverage::resolve_user_relays(
+                    &clicked_note.pubkey.to_hex(),
+                    RelayPurpose::Write,
+                )
+                .await;
+                if !clicked_relays.is_empty() {
+                    let filter = Filter::new().ids(still_missing.clone()).kinds(vec![
+                        Kind::TextNote,
+                        Kind::VoiceMessage,
+                        Kind::VoiceMessageReply,
+                        Kind::Comment,
+                    ]);
+                    if let Ok(events) = relay::connection::fetch_events_from_relays(
+                        &client,
+                        filter,
+                        clicked_relays,
+                        Duration::from_secs(5),
+                    )
+                    .await
+                    {
+                        new_events.extend(events);
+                    }
+                }
+            }
+
+            // Final fallback: outbox fetch for anything still missing
+            let final_missing: Vec<EventId> = remaining_unhinted
+                .iter()
+                .filter(|id| !new_events.iter().any(|e| e.id == **id))
+                .copied()
+                .collect();
+
+            if !final_missing.is_empty() {
+                let filter = Filter::new().ids(final_missing).kinds(vec![
+                    Kind::TextNote,
+                    Kind::VoiceMessage,
+                    Kind::VoiceMessageReply,
+                    Kind::Comment,
+                ]);
+                if let Ok(events) =
+                    nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10))
+                        .await
+                {
+                    new_events.extend(events);
+                }
             }
         }
 
         for id in &ids_to_fetch {
             fetched_ids.insert(*id);
+        }
+
+        // Build author hints from newly fetched events for the next iteration
+        let mut next_author_hints = HashMap::new();
+        for event in &new_events {
+            let event_authors = extract_author_from_etags(event);
+            next_author_hints.extend(event_authors);
+            // Record 10002 events eagerly
+            relay::coverage::record_relay_list_from_event(event);
         }
 
         ids_to_fetch = new_events
@@ -155,10 +268,44 @@ async fn fetch_parents_with_hints(
     Ok(all_parents)
 }
 
-async fn fetch_replies(
+fn dedup_replies(all_replies: Vec<NostrEvent>) -> Vec<NostrEvent> {
+    let mut seen_ids = std::collections::HashSet::new();
+    all_replies
+        .into_iter()
+        .filter(|event| seen_ids.insert(event.id))
+        .collect()
+}
+
+async fn fetch_author_relays_replies(
+    event_id: EventId,
+    root_author_pubkey: &PublicKey,
+) -> Vec<NostrEvent> {
+    let author_relays =
+        crate::stores::relay::coverage::get_relays_for_pubkey(&root_author_pubkey.to_hex());
+    if author_relays.is_empty() {
+        return Vec::new();
+    }
+    let reply_filter = Filter::new()
+        .kinds(vec![Kind::TextNote, Kind::Comment])
+        .event(event_id)
+        .limit(100);
+    let Some(client) = nostr_client::get_client() else {
+        return Vec::new();
+    };
+    relay::connection::fetch_events_from_relays(
+        &client,
+        reply_filter,
+        author_relays,
+        Duration::from_secs(5),
+    )
+    .await
+    .unwrap_or_default()
+}
+
+async fn fetch_replies_fast(
     event_id: EventId,
     root_author_pubkey: Option<PublicKey>,
-) -> std::result::Result<Vec<NostrEvent>, String> {
+) -> std::result::Result<(Vec<NostrEvent>, HashSet<PublicKey>), String> {
     let event_id_hex = event_id.to_hex();
 
     let filter_lower = Filter::new()
@@ -181,49 +328,136 @@ async fn fetch_replies(
         .custom_tag(upper_e_tag, event_id_hex)
         .limit(100);
 
-    let mut all_replies = Vec::new();
-
-    let (lower_result, upper_result) = tokio::join!(
-        nostr_client::fetch_events_aggregated_outbox(filter_lower, Duration::from_secs(10)),
-        nostr_client::fetch_events_aggregated_outbox(filter_upper, Duration::from_secs(10))
+    let (lower_result, upper_result, author_result) = tokio::join!(
+        nostr_client::fetch_events_aggregated_outbox(filter_lower, Duration::from_secs(5)),
+        nostr_client::fetch_events_aggregated_outbox(filter_upper, Duration::from_secs(5)),
+        async {
+            match root_author_pubkey {
+                Some(pk) => fetch_author_relays_replies(event_id, &pk).await,
+                None => Vec::new(),
+            }
+        }
     );
 
-    if let Ok(lower_replies) = lower_result {
-        all_replies.extend(lower_replies);
+    let mut all_replies = Vec::new();
+    if let Ok(replies) = lower_result {
+        all_replies.extend(replies);
     }
-    if let Ok(upper_replies) = upper_result {
-        all_replies.extend(upper_replies);
+    if let Ok(replies) = upper_result {
+        all_replies.extend(replies);
+    }
+    all_replies.extend(author_result);
+
+    let reply_authors: HashSet<PublicKey> = all_replies.iter().map(|e| e.pubkey).collect();
+    let unique_replies = dedup_replies(all_replies);
+    Ok((unique_replies, reply_authors))
+}
+
+const MAX_EPHEMERAL_RELAYS: usize = 5;
+
+async fn fetch_replies_phase2(
+    event_id: EventId,
+    reply_authors: HashSet<PublicKey>,
+    mut replies_signal: Signal<Vec<NostrEvent>>,
+    load_generation: Signal<u32>,
+    this_generation: u32,
+) {
+    if reply_authors.is_empty() {
+        return;
+    }
+    let Some(client) = nostr_client::get_client() else {
+        return;
+    };
+    let pubkeys: Vec<PublicKey> = reply_authors.into_iter().collect();
+
+    let Ok(relay_maps) = client.database().relay_lists(pubkeys.clone()).await else {
+        return;
+    };
+
+    let mut combined_relays: Vec<String> = Vec::new();
+    let mut authors_with_relays = HashSet::new();
+
+    for (pk, relays_map) in &relay_maps {
+        if !relays_map.is_empty() {
+            let urls: Vec<String> = relays_map
+                .iter()
+                .filter(|(_, m)| m.is_none() || matches!(m, Some(RelayMetadata::Write)))
+                .map(|(u, _)| u.to_string())
+                .collect();
+            combined_relays.extend(urls);
+            authors_with_relays.insert(*pk);
+        }
+        relay::coverage::record_relay_list_from_event_by_map(pk, relays_map);
     }
 
-    if let Some(author_pk) = root_author_pubkey {
-        let author_relays =
-            crate::stores::relay::coverage::get_relays_for_pubkey(&author_pk.to_hex());
-        if !author_relays.is_empty() {
+    let missing: Vec<String> = pubkeys
+        .iter()
+        .filter(|p| !authors_with_relays.contains(p))
+        .map(|p| p.to_hex())
+        .collect();
+
+    let mut seen = HashSet::new();
+    combined_relays.retain(|r| seen.insert(r.clone()));
+    combined_relays.truncate(MAX_EPHEMERAL_RELAYS);
+
+    if !combined_relays.is_empty() {
+        let connected = relay::coverage::connect_ephemeral_relays(&client, &combined_relays).await;
+        if !connected.is_empty() {
             let reply_filter = Filter::new()
-                .kinds(vec![Kind::TextNote, Kind::Comment])
+                .kinds(vec![
+                    Kind::TextNote,
+                    Kind::Comment,
+                    Kind::VoiceMessage,
+                    Kind::VoiceMessageReply,
+                ])
                 .event(event_id)
                 .limit(100);
-            if let Some(client) = nostr_client::get_client() {
-                if let Ok(events) = relay::connection::fetch_events_from_relays(
-                    &client,
-                    reply_filter,
-                    author_relays,
-                    Duration::from_secs(5),
-                )
-                .await
-                {
-                    all_replies.extend(events);
+            if let Ok(events) = relay::connection::fetch_events_from_relays(
+                &client,
+                reply_filter,
+                connected.clone(),
+                Duration::from_secs(5),
+            )
+            .await
+            {
+                if *load_generation.peek() != this_generation {
+                    relay::coverage::cleanup_ephemeral_relays(&client, &connected).await;
+                    return;
                 }
+                let mut existing = replies_signal.read().clone();
+                existing.extend(events);
+                let mut merged = dedup_replies(existing);
+                merged.sort_by_key(|a| a.created_at);
+                log::info!("Phase 2: added {} additional replies", merged.len());
+                replies_signal.set(merged);
             }
+            relay::coverage::cleanup_ephemeral_relays(&client, &connected).await;
         }
     }
 
-    let mut seen_ids = std::collections::HashSet::new();
-    let unique_replies: Vec<NostrEvent> = all_replies
-        .into_iter()
-        .filter(|event| seen_ids.insert(event.id))
-        .collect();
-    Ok(unique_replies)
+    if !missing.is_empty() {
+        dioxus::prelude::spawn(async move {
+            for chunk in missing.chunks(50) {
+                let chunk_pks: Vec<PublicKey> = chunk
+                    .iter()
+                    .filter_map(|p| PublicKey::from_hex(p).ok())
+                    .collect();
+                if chunk_pks.is_empty() {
+                    continue;
+                }
+                let filter = Filter::new()
+                    .authors(chunk_pks)
+                    .kind(Kind::RelayList);
+                if let Some(c) = nostr_client::get_client() {
+                    if let Ok(events) = c.fetch_events(filter, Duration::from_secs(5)).await {
+                        for event in events {
+                            relay::coverage::record_relay_list_from_event(&event);
+                        }
+                    }
+                }
+            }
+        });
+    }
 }
 
 #[component]
@@ -269,22 +503,23 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
         }
 
         spawn(async move {
-            let event_id = match EventId::from_bech32(&note_id_str)
-                .or_else(|_| EventId::from_hex(&note_id_str))
-            {
-                Ok(id) => id,
-                Err(e) => {
-                    error.set(Some(format!("Invalid note ID: {}", e)));
-                    loading.set(false);
-                    loading_parents.set(false);
-                    return;
-                }
-            };
-
-            let note_result = fetch_main_note(event_id).await;
+            let note_result = fetch_main_note(&note_id_str).await;
             if *load_generation.peek() != this_generation {
                 return;
             }
+
+            let event_id = match parse_event_id(&note_id_str) {
+                Some(p) => p.event_id,
+                None => match EventId::from_hex(&note_id_str) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        error.set(Some(format!("Invalid note ID: {}", e)));
+                        loading.set(false);
+                        loading_parents.set(false);
+                        return;
+                    }
+                },
+            };
 
             let parent_ids = match &note_result {
                 Ok(event) => {
@@ -310,7 +545,7 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
 
             let (parents_result, replies_result) = tokio::join!(
                 fetch_parents_with_hints(parent_ids, &clicked_note, 5),
-                fetch_replies(event_id, Some(root_author))
+                fetch_replies_fast(event_id, Some(root_author))
             );
 
             if *load_generation.peek() != this_generation {
@@ -326,10 +561,26 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                 );
                 parent_events.set(parents);
             }
-            if let Ok(mut reply_vec) = replies_result {
+            if let Ok((mut reply_vec, phase2_authors)) = replies_result {
                 reply_vec.sort_by_key(|a| a.created_at);
-                log::info!("Loaded {} replies", reply_vec.len());
+                log::info!("Phase 1: loaded {} replies", reply_vec.len());
                 replies.set(reply_vec);
+
+                if !phase2_authors.is_empty() {
+                    let replies_bg = replies;
+                    let gen = this_generation;
+                    let lg = load_generation;
+                    spawn(async move {
+                        fetch_replies_phase2(
+                            event_id,
+                            phase2_authors,
+                            replies_bg,
+                            lg,
+                            gen,
+                        )
+                        .await;
+                    });
+                }
             }
 
             use crate::utils::profile_prefetch;
