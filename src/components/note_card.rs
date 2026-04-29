@@ -4,7 +4,7 @@ use crate::components::icons::{
 };
 use crate::components::{
     ConfirmModal, EditStatus, ExternalContentList, NoteMenu, ReactionButton, ReplyComposer,
-    RichContent, ZapModal,
+    RichContent, SensitiveContent, ZapModal,
 };
 use crate::hooks::use_reaction;
 use crate::routes::Route;
@@ -16,6 +16,7 @@ use crate::stores::signer::SIGNER_INFO;
 use crate::utils::{
     format_relative_time_or, format_sats_compact, is_valid_http_url, nip48, nip73, truncate_pubkey,
 };
+use crate::utils::nip36;
 use dioxus::prelude::*;
 use nostr::nips::nip48::Protocol;
 use nostr_sdk::nips::nip19::Nip19Event;
@@ -650,13 +651,25 @@ pub fn NoteCard(
                                 .as_ref()
                                 .map(|e| e.edited_content.clone())
                                 .unwrap_or_else(|| content.clone());
+                            let content_warning = nip36::get_content_warning(&event.tags);
                             rsx! {
                                 div { class: "mb-3",
-                                    RichContent {
-                                        content: display_content,
-                                        tags: event.tags.iter().cloned().collect(),
-                                        collapsible,
-                                        interactive_media: true,
+                                    if let Some(reason) = content_warning {
+                                        SensitiveContent { reason,
+                                            RichContent {
+                                                content: display_content,
+                                                tags: event.tags.iter().cloned().collect(),
+                                                collapsible,
+                                                interactive_media: true,
+                                            }
+                                        }
+                                    } else {
+                                        RichContent {
+                                            content: display_content,
+                                            tags: event.tags.iter().cloned().collect(),
+                                            collapsible,
+                                            interactive_media: true,
+                                        }
                                     }
                                 }
                             }
@@ -883,7 +896,7 @@ pub fn NoteCard(
         }
         if *show_reply_modal.read() {
             ReplyComposer {
-                reply_to: event.clone(),
+                target: event.clone(),
                 root_event: root_event.clone(),
                 on_close: move |_| {
                     show_reply_modal.set(false);

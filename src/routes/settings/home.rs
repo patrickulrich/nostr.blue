@@ -29,9 +29,7 @@ enum VanishModalStep {
 
 #[derive(Clone)]
 struct VanishPublishSummary {
-    success_count: usize,
-    total_attempted: usize,
-    failed_count: usize,
+    queued: bool,
 }
 
 #[component]
@@ -631,7 +629,7 @@ pub fn Settings() -> Element {
                         h3 { class: "text-xl font-semibold text-gray-900 dark:text-white",
                             "🛡️ Content Moderation"
                         }
-                        span { class: "text-xs text-gray-500 dark:text-gray-400", "NIP-51 & NIP-56" }
+                        span { class: "text-xs text-gray-500 dark:text-gray-400", "NIP-36 & NIP-51 & NIP-56" }
                     }
                     p { class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
                         "Manage blocked users and muted posts"
@@ -668,6 +666,42 @@ pub fn Settings() -> Element {
                                 }
                             }
                             span { class: "text-gray-400", "→" }
+                        }
+                        div { class: "flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700 rounded-lg",
+                            div { class: "flex items-center gap-3",
+                                span { class: "text-lg", "👁️" }
+                                div {
+                                    span { class: "block font-medium text-gray-900 dark:text-white",
+                                        "Sensitive Content"
+                                    }
+                                    span { class: "block text-xs text-gray-500 dark:text-gray-400",
+                                        "Always show content warnings without blurring"
+                                    }
+                                }
+                            }
+                            div { class: "flex items-center gap-3",
+                                label { class: "relative inline-flex items-center cursor-pointer",
+                                    input {
+                                        r#type: "checkbox",
+                                        class: "sr-only peer",
+                                        checked: settings_store::SETTINGS.read().show_sensitive_content,
+                                        disabled: !auth.is_authenticated,
+                                        onchange: move |evt| {
+                                            let enabled = evt.checked();
+                                            spawn(async move {
+                                                settings_store::update_show_sensitive_content(enabled).await;
+                                            });
+                                        },
+                                    }
+                                    div { class: "w-11 h-6 bg-gray-300 dark:bg-gray-700 peer-focus:outline-hidden peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600" }
+                                }
+                                span { class: "text-sm font-medium text-gray-900 dark:text-white",
+                                    {
+                                        let is_enabled = settings_store::SETTINGS.read().show_sensitive_content;
+                                        if is_enabled { "Enabled" } else { "Disabled" }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1349,36 +1383,20 @@ fn VanishAccountModal(on_close: EventHandler<()>) -> Element {
                         VanishModalStep::Result => rsx! {
                             if let Some(summary) = publish_summary.read().as_ref() {
                                 div { class: "space-y-4",
-                                    div { class: if summary.success_count > 0 {
+                                    div { class: if summary.queued {
                                         "rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-4"
                                     } else {
                                         "rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-4"
                                     },
                                         p { class: "text-sm font-medium text-gray-900 dark:text-white",
-                                            if summary.success_count > 0 {
-                                                if summary.failed_count > 0 {
-                                                    "Vanish request partially delivered."
-                                                } else {
-                                                    "Vanish request delivered."
-                                                }
+                                            if summary.queued {
+                                                "Vanish request queued."
                                             } else {
                                                 "No relay accepted the vanish request."
                                             }
                                         }
-                                        p { class: "mt-1 text-sm text-gray-700 dark:text-gray-300",
-                                            {format!(
-                                                "Accepted by {}/{} relay(s).",
-                                                summary.success_count,
-                                                summary.total_attempted
-                                            )}
-                                        }
-                                        if summary.failed_count > 0 {
-                                            p { class: "mt-1 text-sm text-gray-700 dark:text-gray-300",
-                                                {format!("{} relay(s) rejected or missed the request.", summary.failed_count)}
-                                            }
-                                        }
                                     }
-                                    if summary.success_count > 0 {
+                                    if summary.queued {
                                         p { class: "text-sm text-gray-600 dark:text-gray-400",
                                             "The remote request has been sent. Continue to clear local auth state and log out of this device."
                                         }
@@ -1447,9 +1465,7 @@ fn VanishAccountModal(on_close: EventHandler<()>) -> Element {
                                         match nostr_client::publish_vanish_request_to_relays(relay_urls, reason_value).await {
                                             Ok(result) => {
                                                 publish_summary.set(Some(VanishPublishSummary {
-                                                    success_count: result.success_count(),
-                                                    total_attempted: result.total_attempted(),
-                                                    failed_count: result.failed_relays.len(),
+                                                    queued: result.is_success(),
                                                 }));
                                                 step.set(VanishModalStep::Result);
                                             }
@@ -1469,7 +1485,7 @@ fn VanishAccountModal(on_close: EventHandler<()>) -> Element {
                             }
                         },
                         VanishModalStep::Result => rsx! {
-                            if publish_summary.read().as_ref().is_some_and(|summary| summary.success_count > 0) {
+                            if publish_summary.read().as_ref().is_some_and(|summary| summary.queued) {
                                 button {
                                     class: "px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition disabled:opacity-50 disabled:cursor-not-allowed",
                                     disabled: *is_logging_out.read(),
@@ -1616,6 +1632,10 @@ fn NegentropySyncSection() -> Element {
                                 match target {
                                     sync_store::SyncTarget::FollowingFeed => "Following feed",
                                     sync_store::SyncTarget::RelayList => "Relay list",
+                                    sync_store::SyncTarget::OwnIdentity => "Own identity",
+                                    sync_store::SyncTarget::OwnContent => "Own content",
+                                    sync_store::SyncTarget::FollowedProfiles => "Followed profiles",
+                                    sync_store::SyncTarget::Notifications => "Notifications",
                                 }
                             }
                         }

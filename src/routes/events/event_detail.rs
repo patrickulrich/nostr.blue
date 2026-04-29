@@ -1,7 +1,7 @@
 //! Event Detail Page
 //!
 //! Display detailed view of a calendar event or live activity
-use crate::components::ClientInitializing;
+use crate::components::{icons::MoreHorizontalIcon, ClientInitializing};
 use crate::hooks::use_relay_subscription_opts;
 use crate::routes::Route;
 use crate::stores::calendar_store::{CalendarEventComment, UnifiedEvent};
@@ -11,9 +11,11 @@ use crate::utils::nip52::{is_online_location, parse_calendar_rsvp, RsvpStatus, K
 use crate::utils::nip53::{LiveActivityEvent, RoomPresence, KIND_ROOM_PRESENCE};
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
+use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use nostr_relay_pool::relay::ReqExitPolicy;
-use nostr_sdk::{Filter, Kind, SubscribeAutoCloseOptions};
+use nostr_sdk::{EventId, Filter, Kind, SubscribeAutoCloseOptions};
 use std::collections::HashSet;
+use std::time::Duration;
 #[component]
 pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
     let mut event = use_signal(|| None::<UnifiedEvent>);
@@ -30,6 +32,10 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
     let mut comment_input = use_signal(String::new);
     let mut comment_posting = use_signal(|| false);
     let mut comment_error = use_signal(|| None::<String>);
+    let mut is_menu_open = use_signal(|| false);
+    let mut is_broadcasting = use_signal(|| false);
+    let is_copying = use_signal(|| false);
+    let toast = consume_toast();
     let back_route = match from.as_deref() {
         Some("events") => Route::Events {},
         _ => Route::Calendar {},
@@ -363,25 +369,211 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/95 backdrop-blur border-b border-border",
-                div { class: "px-4 py-3 flex items-center gap-3",
-                    Link {
-                        to: back_route.clone(),
-                        class: "p-2 -ml-2 hover:bg-accent rounded-lg transition",
-                        svg {
-                            class: "w-5 h-5",
-                            xmlns: "http://www.w3.org/2000/svg",
-                            fill: "none",
-                            view_box: "0 0 24 24",
-                            stroke: "currentColor",
-                            stroke_width: "2",
-                            path {
-                                stroke_linecap: "round",
-                                stroke_linejoin: "round",
-                                d: "M10 19l-7-7m0 0l7-7m-7 7h18",
+                div { class: "px-4 py-3 flex items-center justify-between",
+                    div { class: "flex items-center gap-3",
+                        Link {
+                            to: back_route.clone(),
+                            class: "p-2 -ml-2 hover:bg-accent rounded-lg transition",
+                            svg {
+                                class: "w-5 h-5",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                fill: "none",
+                                view_box: "0 0 24 24",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                path {
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    d: "M10 19l-7-7m0 0l7-7m-7 7h18",
+                                }
+                            }
+                        }
+                        h1 { class: "text-lg font-bold", "Event Details" }
+                    }
+                    if event.read().is_some() {
+                        div { class: "relative",
+                            button {
+                                class: "p-2 rounded-full hover:bg-accent transition-colors text-muted-foreground hover:text-foreground",
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    is_menu_open.set(!is_menu_open());
+                                },
+                                MoreHorizontalIcon { class: "h-5 w-5".to_string(), filled: false }
+                            }
+                            if *is_menu_open.read() {
+                                div {
+                                    class: "fixed inset-0 z-40",
+                                    onclick: move |e: MouseEvent| {
+                                        e.stop_propagation();
+                                        is_menu_open.set(false);
+                                    },
+                                }
+                                div { class: "absolute right-0 mt-2 w-52 bg-background border border-border rounded-lg shadow-lg z-50 py-1",
+                                    if let Some(ref evt) = *event.read() {
+                                        {
+                                            let is_own = auth_store::get_pubkey()
+                                                .map(|pk| pk == evt.pubkey())
+                                                .unwrap_or(false);
+                                            let is_calendar = evt.is_calendar_event();
+                                            let event_id_hex = {
+                                                match evt {
+                                                    UnifiedEvent::Calendar(ref cal) => cal.event_id.clone(),
+                                                    UnifiedEvent::Live(crate::utils::nip53::LiveActivityEvent::Meeting(ref m)) => m.event_id.clone(),
+                                                    UnifiedEvent::Live(crate::utils::nip53::LiveActivityEvent::Space(ref s)) => s.event_id.clone(),
+                                                }
+                                            };
+                                            let naddr_val = evt.naddr().to_string();
+                                            let evt_clone = evt.clone();
+                                            rsx! {
+                                                if is_own && is_calendar {
+                                                    Link {
+                                                        to: Route::CalendarEventNew { edit_naddr: Some(naddr_val.clone()) },
+                                                        class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2 text-sm",
+                                                        onclick: move |_| is_menu_open.set(false),
+                                                        "Edit Event"
+                                                    }
+                                                }
+                                                if is_own {
+                                                    button {
+                                                        class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2 text-sm",
+                                                        disabled: *is_broadcasting.read(),
+                                                        onclick: move |e: MouseEvent| {
+                                                            e.stop_propagation();
+                                                            if *is_broadcasting.read() { return; }
+                                                            let eid = event_id_hex.clone();
+                                                            let toast_api = toast;
+                                                            is_broadcasting.set(true);
+                                                            is_menu_open.set(false);
+                                                            spawn(async move {
+                                                                let filter = Filter::new().id(
+                                                                    EventId::from_hex(&eid).unwrap_or_else(|_| {
+                                                                        EventId::all_zeros()
+                                                                    })
+                                                                ).limit(1);
+                                                                match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+                                                                    Ok(events) => {
+                                                                        if let Some(raw_event) = events.into_iter().next() {
+                                                                            let mut relay_urls = crate::stores::relay::get_write_relays();
+                                                                            relay_urls.extend(crate::stores::relay::BROADCAST_RELAYS.read().clone());
+                                                                            relay_urls.retain(|url| !crate::stores::relay::is_relay_blocked(url));
+                                                                            let mut seen = HashSet::new();
+                                                                            relay_urls.retain(|url| seen.insert(url.trim_end_matches('/').to_string()));
+                                                                            if relay_urls.is_empty() {
+                                                                                toast_api.warning(
+                                                                                    "No relays configured".to_string(),
+                                                                                    ToastOptions::new()
+                                                                                        .description("Add write relays or broadcast relays in Settings")
+                                                                                        .duration(Duration::from_secs(3))
+                                                                                        .permanent(false),
+                                                                                );
+                                                                            } else {
+                                                                                match nostr_client::broadcast_presigned_event(raw_event, relay_urls).await {
+                                                                                    Ok(result) => {
+                                                                                        if result.is_success() {
+                                                                                            toast_api.success(
+                                                                                                "Broadcast queued".to_string(),
+                                                                                                ToastOptions::new().duration(Duration::from_secs(3)).permanent(false),
+                                                                                            );
+                                                                                        } else {
+                                                                                            toast_api.error(
+                                                                                                "Broadcast failed".to_string(),
+                                                                                                ToastOptions::new().duration(Duration::from_secs(3)).permanent(false),
+                                                                                            );
+                                                                                        }
+                                                                                    }
+                                                                                    Err(e) => {
+                                                                                        toast_api.error(
+                                                                                            "Broadcast failed".to_string(),
+                                                                                            ToastOptions::new().description(e).duration(Duration::from_secs(3)).permanent(false),
+                                                                                        );
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                        } else {
+                                                                            toast_api.error(
+                                                                                "Event not found on relays".to_string(),
+                                                                                ToastOptions::new().duration(Duration::from_secs(3)).permanent(false),
+                                                                            );
+                                                                        }
+                                                                    }
+                                                                    Err(e) => {
+                                                                        toast_api.error(
+                                                                            "Failed to fetch event".to_string(),
+                                                                            ToastOptions::new().description(e).duration(Duration::from_secs(3)).permanent(false),
+                                                                        );
+                                                                    }
+                                                                }
+                                                                is_broadcasting.set(false);
+                                                            });
+                                                        },
+                                                        if *is_broadcasting.read() { "Broadcasting..." } else { "Broadcast" }
+                                                    }
+                                                }
+                                                button {
+                                                    class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2 text-sm",
+                                                    onclick: move |e: MouseEvent| {
+                                                        e.stop_propagation();
+                                                        let naddr_str = naddr_val.clone();
+                                                        let toast_api = toast;
+                                                        spawn(async move {
+                                                            let text = format!("nostr:{}", naddr_str);
+                                                            match crate::platform::clipboard::copy_to_clipboard(&text).await {
+                                                                Ok(()) => {
+                                                                    toast_api.success(
+                                                                        "Copied to clipboard".to_string(),
+                                                                        ToastOptions::new().duration(Duration::from_secs(2)).permanent(false),
+                                                                    );
+                                                                }
+                                                                Err(e) => {
+                                                                    log::error!("Failed to copy event ID: {:?}", e);
+                                                                    toast_api.error(
+                                                                        "Failed to copy".to_string(),
+                                                                        ToastOptions::new()
+                                                                            .description("Could not access clipboard".to_string())
+                                                                            .duration(Duration::from_secs(2))
+                                                                            .permanent(false),
+                                                                    );
+                                                                }
+                                                            }
+                                                        });
+                                                        is_menu_open.set(false);
+                                                    },
+                                                    if *is_copying.read() { "Copying..." } else { "Copy Event ID" }
+                                                }
+                                                if is_calendar {
+                                                    if let UnifiedEvent::Calendar(ref cal_event) = evt_clone {
+                                                        { rsx! {
+                                                            div { class: "h-px bg-border my-1" }
+                                                            button {
+                                                                class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2 text-sm",
+                                                                onclick: {
+                                                                    let cal = cal_event.clone();
+                                                                    move |e: MouseEvent| {
+                                                                        e.stop_propagation();
+                                                                        let ics_content = export_event_to_ics(&cal);
+                                                                        let filename = format!(
+                                                                            "{}.ics",
+                                                                            cal.title.replace(" ", "_").replace("/", "-"),
+                                                                        );
+                                                                        if let Err(e) = download_ics(&filename, &ics_content) {
+                                                                            log::error!("Failed to download event: {}", e);
+                                                                            export_error.set(Some(format!("Failed to export: {}", e)));
+                                                                        }
+                                                                        is_menu_open.set(false);
+                                                                    }
+                                                                },
+                                                                "Export to Calendar"
+                                                            }
+                                                        } }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
-                    h1 { class: "text-lg font-bold", "Event Details" }
                 }
             }
             if !*nostr_client::CLIENT_INITIALIZED.read() {
@@ -646,13 +838,13 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                         {
                             let content = evt.content();
                             if !content.is_empty() {
-                                let sanitized_content = ammonia::clean(content);
+                                let rendered_content = crate::utils::markdown::render_markdown(content);
                                 rsx! {
                                     div { class: "mb-4",
                                         h3 { class: "text-sm font-medium text-muted-foreground mb-2", "Details" }
                                         div {
                                             class: "prose prose-sm dark:prose-invert max-w-none",
-                                            dangerous_inner_html: "{sanitized_content}",
+                                            dangerous_inner_html: "{rendered_content}",
                                         }
                                     }
                                 }

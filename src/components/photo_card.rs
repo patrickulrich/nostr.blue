@@ -1,6 +1,6 @@
 use crate::components::icons::{BookmarkIcon, MessageCircleIcon, Repeat2Icon, ZapIcon};
 use crate::components::text_with_links::TextWithLinks;
-use crate::components::{ReactionButton, ZapModal};
+use crate::components::{ReactionButton, SensitiveContent, ZapModal};
 use crate::hooks::use_reaction;
 use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
@@ -9,6 +9,7 @@ use crate::stores::nostr_client::{
     get_client, publish_note_tracked, publish_repost, CLIENT_INITIALIZED, HAS_SIGNER,
 };
 use crate::stores::signer::SIGNER_INFO;
+use crate::utils::nip36;
 use crate::utils::{format_relative_time_or, format_sats_compact, truncate_pubkey};
 use dioxus::prelude::*;
 use nostr_sdk::{Event, Filter, FromBech32, Kind, PublicKey};
@@ -118,6 +119,7 @@ pub fn PhotoCard(
     let event_id_link = event_id.clone();
     let event_id_repost = event_id.clone();
     let images_carousel = images.clone();
+    let content_warning = nip36::get_content_warning(&event.tags);
     let mut is_zapped = use_signal(|| false);
     let mut is_bookmarking = use_signal(|| false);
     let is_bookmarked = bookmarks::is_bookmarked(&event_id_memo);
@@ -411,44 +413,97 @@ pub fn PhotoCard(
                 }
                 span { class: "text-xs text-muted-foreground", "{timestamp}" }
             }
-            div { class: "relative bg-black",
-                img {
-                    class: "w-full max-h-[600px] object-contain",
-                    src: "{images[*current_image_index.read()].url}",
-                    alt: "{images[*current_image_index.read()].alt.as_deref().unwrap_or(\"Photo\")}",
-                    loading: "lazy",
-                }
-                if images.len() > 1 {
-                    div { class: "absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5",
-                        for (idx , _) in images.iter().enumerate() {
-                            button {
-                                class: if idx == *current_image_index.read() { "w-2 h-2 rounded-full bg-white" } else { "w-2 h-2 rounded-full bg-white/50" },
-                                onclick: move |_| current_image_index.set(idx),
+            {
+                if let Some(reason) = content_warning.clone() {
+                    rsx! {
+                        SensitiveContent { reason,
+                            div { class: "relative bg-black",
+                                img {
+                                    class: "w-full max-h-[600px] object-contain",
+                                    src: "{images[*current_image_index.read()].url}",
+                                    alt: "{images[*current_image_index.read()].alt.as_deref().unwrap_or(\"Photo\")}",
+                                    loading: "lazy",
+                                }
+                                if images.len() > 1 {
+                                    div { class: "absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5",
+                                        for (idx , _) in images.iter().enumerate() {
+                                            button {
+                                                class: if idx == *current_image_index.read() { "w-2 h-2 rounded-full bg-white" } else { "w-2 h-2 rounded-full bg-white/50" },
+                                                onclick: move |_| current_image_index.set(idx),
+                                            }
+                                        }
+                                    }
+                                    if *current_image_index.read() > 0 {
+                                        button {
+                                            class: "absolute left-2 top-1/2 -translate-y-1/2 bg-black/50 text-white rounded-full p-2 hover:bg-black/70 transition",
+                                            onclick: move |_| {
+                                                let current = *current_image_index.read();
+                                                if current > 0 {
+                                                    current_image_index.set(current - 1);
+                                                }
+                                            },
+                                            "‹"
+                                        }
+                                    }
+                                    if *current_image_index.read() < images_carousel.len() - 1 {
+                                        button {
+                                            class: "absolute right-2 top-1/2 -translate-y-1/2 bg-black/50 text-white rounded-full p-2 hover:bg-black/70 transition",
+                                            onclick: move |_| {
+                                                let current = *current_image_index.read();
+                                                if current < images_carousel.len() - 1 {
+                                                    current_image_index.set(current + 1);
+                                                }
+                                            },
+                                            "›"
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
-                    if *current_image_index.read() > 0 {
-                        button {
-                            class: "absolute left-2 top-1/2 -translate-y-1/2 bg-black/50 text-white rounded-full p-2 hover:bg-black/70 transition",
-                            onclick: move |_| {
-                                let current = *current_image_index.read();
-                                if current > 0 {
-                                    current_image_index.set(current - 1);
+                } else {
+                    rsx! {
+                        div { class: "relative bg-black",
+                            img {
+                                class: "w-full max-h-[600px] object-contain",
+                                src: "{images[*current_image_index.read()].url}",
+                                alt: "{images[*current_image_index.read()].alt.as_deref().unwrap_or(\"Photo\")}",
+                                loading: "lazy",
+                            }
+                            if images.len() > 1 {
+                                div { class: "absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5",
+                                    for (idx , _) in images.iter().enumerate() {
+                                        button {
+                                            class: if idx == *current_image_index.read() { "w-2 h-2 rounded-full bg-white" } else { "w-2 h-2 rounded-full bg-white/50" },
+                                            onclick: move |_| current_image_index.set(idx),
+                                        }
+                                    }
                                 }
-                            },
-                            "‹"
-                        }
-                    }
-                    if *current_image_index.read() < images_carousel.len() - 1 {
-                        button {
-                            class: "absolute right-2 top-1/2 -translate-y-1/2 bg-black/50 text-white rounded-full p-2 hover:bg-black/70 transition",
-                            onclick: move |_| {
-                                let current = *current_image_index.read();
-                                if current < images_carousel.len() - 1 {
-                                    current_image_index.set(current + 1);
+                                if *current_image_index.read() > 0 {
+                                    button {
+                                        class: "absolute left-2 top-1/2 -translate-y-1/2 bg-black/50 text-white rounded-full p-2 hover:bg-black/70 transition",
+                                        onclick: move |_| {
+                                            let current = *current_image_index.read();
+                                            if current > 0 {
+                                                current_image_index.set(current - 1);
+                                            }
+                                        },
+                                        "‹"
+                                    }
                                 }
-                            },
-                            "›"
+                                if *current_image_index.read() < images_carousel.len() - 1 {
+                                    button {
+                                        class: "absolute right-2 top-1/2 -translate-y-1/2 bg-black/50 text-white rounded-full p-2 hover:bg-black/70 transition",
+                                        onclick: move |_| {
+                                            let current = *current_image_index.read();
+                                            if current < images_carousel.len() - 1 {
+                                                current_image_index.set(current + 1);
+                                            }
+                                        },
+                                        "›"
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -577,20 +632,49 @@ pub fn PhotoCard(
                     }
                 }
             }
-            div { class: "px-3 pb-2",
-                if let Some(title_text) = &title {
-                    div { class: "mb-1 break-all",
-                        span { class: "font-semibold text-sm mr-2", "{display_name}" }
-                        span { class: "font-bold", "{title_text}" }
-                    }
-                }
-                if !description.is_empty() {
-                    div { class: "text-sm break-words",
-                        if title.is_none() {
-                            span { class: "font-semibold text-sm mr-2", "{display_name}" }
+            {
+                if let Some(reason) = content_warning.clone() {
+                    rsx! {
+                        SensitiveContent { reason,
+                            div { class: "px-3 pb-2",
+                                if let Some(title_text) = &title {
+                                    div { class: "mb-1 break-all",
+                                        span { class: "font-semibold text-sm mr-2", "{display_name}" }
+                                        span { class: "font-bold", "{title_text}" }
+                                    }
+                                }
+                                if !description.is_empty() {
+                                    div { class: "text-sm break-words",
+                                        if title.is_none() {
+                                            span { class: "font-semibold text-sm mr-2", "{display_name}" }
+                                        }
+                                        TextWithLinks {
+                                            content: event.content.clone(),
+                                        }
+                                    }
+                                }
+                            }
                         }
-                        TextWithLinks {
-                            content: event.content.clone(),
+                    }
+                } else {
+                    rsx! {
+                        div { class: "px-3 pb-2",
+                            if let Some(title_text) = &title {
+                                div { class: "mb-1 break-all",
+                                    span { class: "font-semibold text-sm mr-2", "{display_name}" }
+                                    span { class: "font-bold", "{title_text}" }
+                                }
+                            }
+                            if !description.is_empty() {
+                                div { class: "text-sm break-words",
+                                    if title.is_none() {
+                                        span { class: "font-semibold text-sm mr-2", "{display_name}" }
+                                    }
+                                    TextWithLinks {
+                                        content: event.content.clone(),
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -636,17 +720,9 @@ pub fn PhotoCard(
                                         vec!["e".to_string(), event_id_clone],
                                         vec!["p".to_string(), author_clone],
                                     ];
-                                    match publish_note_tracked(text, tags).await {
+                                    match publish_note_tracked(text, tags, None).await {
                                         Ok(result) => {
-                                            log::info!(
-                                                "Photo comment published: {} ({}/{} relays)", result
-                                                .event_id, result.success_count(), result.total_attempted()
-                                            );
-                                            if result.has_failures() {
-                                                for (relay, error) in &result.failed_relays {
-                                                    log::warn!("Relay {} failed: {}", relay, error);
-                                                }
-                                            }
+                                            log::info!("Photo comment published: {}", result.event_id);
                                             let current_count = *reply_count.read();
                                             reply_count.set(current_count + 1);
                                             is_posting_comment.set(false);
@@ -678,17 +754,9 @@ pub fn PhotoCard(
                                         vec!["e".to_string(), event_id_clone],
                                         vec!["p".to_string(), author_clone],
                                     ];
-                                    match publish_note_tracked(text, tags).await {
+                                    match publish_note_tracked(text, tags, None).await {
                                         Ok(result) => {
-                                            log::info!(
-                                                "Photo comment published: {} ({}/{} relays)", result.event_id,
-                                                result.success_count(), result.total_attempted()
-                                            );
-                                            if result.has_failures() {
-                                                for (relay, error) in &result.failed_relays {
-                                                    log::warn!("Relay {} failed: {}", relay, error);
-                                                }
-                                            }
+                                            log::info!("Photo comment published: {}", result.event_id);
                                             let current_count = *reply_count.read();
                                             reply_count.set(current_count + 1);
                                             is_posting_comment.set(false);

@@ -4,16 +4,18 @@
 /// Result of publishing an event, including relay success/failure tracking
 /// Enables debugging which relays accepted/rejected events
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct PublishResult {
-    /// The event ID that was published
+    #[allow(dead_code)]
     pub event_id: String,
-    /// URLs of relays that successfully accepted the event
+    #[allow(dead_code)]
+    pub queue_id: Option<String>,
+    pub queued: bool,
     pub successful_relays: Vec<String>,
-    /// URLs of relays that failed to accept the event (with error messages)
     pub failed_relays: Vec<(String, String)>,
 }
+#[allow(dead_code)]
 impl PublishResult {
-    /// Create from SDK Output
     pub fn from_output(output: nostr_relay_pool::Output<nostr::EventId>) -> Self {
         let successful: Vec<String> = output.success.iter().map(|url| url.to_string()).collect();
         let failed: Vec<(String, String)> = output
@@ -23,25 +25,32 @@ impl PublishResult {
             .collect();
         Self {
             event_id: output.id().to_hex(),
+            queue_id: None,
+            queued: false,
             successful_relays: successful,
             failed_relays: failed,
         }
     }
-    /// Get total number of relays attempted
+    pub fn queued(queue_id: String, event_id: String) -> Self {
+        Self {
+            event_id,
+            queue_id: Some(queue_id),
+            queued: true,
+            successful_relays: vec![],
+            failed_relays: vec![],
+        }
+    }
     pub fn total_attempted(&self) -> usize {
         self.successful_relays.len() + self.failed_relays.len()
     }
-    /// Get number of successful relays
     pub fn success_count(&self) -> usize {
         self.successful_relays.len()
     }
-    /// Check if publish was at least partially successful
     pub fn is_success(&self) -> bool {
-        !self.successful_relays.is_empty()
+        self.queued || !self.successful_relays.is_empty()
     }
-    /// Check if any relays failed
     pub fn has_failures(&self) -> bool {
-        !self.failed_relays.is_empty()
+        !self.queued && !self.failed_relays.is_empty()
     }
 
     pub fn ignoring_duplicate_event_failures(mut self) -> Self {
@@ -68,6 +77,7 @@ impl PublishResult {
     }
 }
 
+#[allow(dead_code)]
 fn relay_error_is_duplicate_event(error: &str) -> bool {
     let error = error.trim().to_lowercase();
     [

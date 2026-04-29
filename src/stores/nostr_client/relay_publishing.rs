@@ -46,29 +46,24 @@ pub async fn publish_note_to_relays(
     tags: Vec<Vec<String>>,
     relay_urls: Vec<String>,
 ) -> std::result::Result<PublishResult, String> {
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
     let nostr_tags = super::types::convert_raw_tags(tags);
     let builder = nostr::EventBuilder::text_note(&content).tags(nostr_tags);
-    let urls = parse_relay_urls(&relay_urls)?;
-    let output = client
-        .send_event_builder_to(urls, builder)
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish: {}", e))?;
-    let result = PublishResult::from_output(output).ignoring_duplicate_event_failures();
-    log::info!(
-        "Note published to specific relays: {} ({}/{} relays succeeded)",
-        result.event_id,
-        result.success_count(),
-        result.total_attempted()
-    );
-    if result.has_failures() {
-        for (relay, error) in &result.failed_relays {
-            log::warn!("Relay {} failed: {}", relay, error);
-        }
-    }
+        .map_err(|e| format!("Failed to sign note: {}", e))?;
+    let event_id = event.id.to_hex();
+    let queue_id = crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Note,
+        Some(relay_urls),
+        std::collections::HashMap::new(),
+    ).await;
+    let result = PublishResult::queued(queue_id, event_id);
+    log::info!("Note queued for specific relays: {}", result.event_id);
     Ok(result)
 }
 /// Publish a reaction to specific relays only
@@ -79,7 +74,7 @@ pub async fn publish_reaction_to_relays(
     reaction: String,
     relay_urls: Vec<String>,
 ) -> std::result::Result<PublishResult, String> {
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -104,23 +99,18 @@ pub async fn publish_reaction_to_relays(
         relay_hint: None,
     };
     let builder = EventBuilder::reaction(target, reaction);
-    let urls = parse_relay_urls(&relay_urls)?;
-    let output = client
-        .send_event_builder_to(urls, builder)
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish reaction: {}", e))?;
-    let result = PublishResult::from_output(output).ignoring_duplicate_event_failures();
-    log::info!(
-        "Reaction published to specific relays: {} ({}/{} relays succeeded)",
-        result.event_id,
-        result.success_count(),
-        result.total_attempted()
-    );
-    if result.has_failures() {
-        for (relay, error) in &result.failed_relays {
-            log::warn!("Relay {} failed: {}", relay, error);
-        }
-    }
+        .map_err(|e| format!("Failed to sign reaction: {}", e))?;
+    let event_id = event.id.to_hex();
+    let queue_id = crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Reaction,
+        Some(relay_urls),
+        std::collections::HashMap::new(),
+    ).await;
+    let result = PublishResult::queued(queue_id, event_id);
+    log::info!("Reaction queued for specific relays: {}", result.event_id);
     Ok(result)
 }
 
@@ -129,7 +119,7 @@ pub async fn publish_vanish_request_to_relays(
     relay_urls: Vec<String>,
     reason: String,
 ) -> std::result::Result<PublishResult, String> {
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -145,23 +135,19 @@ pub async fn publish_vanish_request_to_relays(
     let target = VanishTarget::relays(urls.clone());
     let builder = EventBuilder::request_vanish_with_reason(target, reason.trim().to_string())
         .map_err(|e| format!("Failed to build vanish request: {}", e))?;
-
-    let output = client
-        .send_event_builder_to(urls, builder)
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish vanish request: {}", e))?;
-    let result = PublishResult::from_output(output).ignoring_duplicate_event_failures();
-    log::info!(
-        "Vanish request published: {} ({}/{} relays succeeded)",
-        result.event_id,
-        result.success_count(),
-        result.total_attempted()
-    );
-    if result.has_failures() {
-        for (relay, error) in &result.failed_relays {
-            log::warn!("Relay {} failed vanish request: {}", relay, error);
-        }
-    }
+        .map_err(|e| format!("Failed to sign vanish request: {}", e))?;
+    let event_id = event.id.to_hex();
+    let relay_strs: Vec<String> = urls.into_iter().map(|u| u.to_string()).collect();
+    let queue_id = crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("vanish".to_string()),
+        Some(relay_strs),
+        std::collections::HashMap::new(),
+    ).await;
+    let result = PublishResult::queued(queue_id, event_id);
+    log::info!("Vanish request queued: {}", result.event_id);
     Ok(result)
 }
 /// Send a pre-signed event to specific relays
@@ -172,43 +158,16 @@ pub async fn send_presigned_event_to_relays(
     event: nostr::Event,
     relay_urls: Vec<String>,
 ) -> std::result::Result<PublishResult, String> {
-    let client = get_client().ok_or("Client not initialized")?;
-    let urls = parse_relay_urls(&relay_urls)?
-        .into_iter()
-        .filter(|relay_url| !relay::is_relay_blocked(relay_url.as_str()))
-        .collect::<Vec<_>>();
-    if urls.is_empty() {
-        return Err("No unblocked relay URLs provided".to_string());
-    }
-    for (relay_url, connected) in join_all(urls.iter().map(|relay_url| {
-        let client = client.clone();
-        async move {
-            let connected = relay::ensure_connected(&client, relay_url.as_str()).await;
-            (relay_url, connected)
-        }
-    }))
-    .await
-    {
-        if !connected {
-            log::warn!("Broadcast relay unavailable: {}", relay_url);
-        }
-    }
-    let output = client
-        .send_event_to(urls, &event)
-        .await
-        .map_err(|e| format!("Failed to send event: {}", e))?;
-    let result = PublishResult::from_output(output).ignoring_duplicate_event_failures();
-    log::info!(
-        "Pre-signed event sent to specific relays: {} ({}/{} relays succeeded)",
-        result.event_id,
-        result.success_count(),
-        result.total_attempted()
-    );
-    if result.has_failures() {
-        for (relay, error) in &result.failed_relays {
-            log::warn!("Relay {} failed: {}", relay, error);
-        }
-    }
+    let _client = get_client().ok_or("Client not initialized")?;
+    let event_id = event.id.to_hex();
+    let queue_id = crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("broadcast".to_string()),
+        Some(relay_urls),
+        std::collections::HashMap::new(),
+    ).await;
+    let result = PublishResult::queued(queue_id, event_id);
+    log::info!("Pre-signed event queued: {}", result.event_id);
     Ok(result)
 }
 

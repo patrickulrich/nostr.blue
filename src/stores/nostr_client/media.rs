@@ -117,7 +117,7 @@ pub async fn publish_picture_tracked(
     hashtags: Vec<String>,
     location: String,
 ) -> std::result::Result<PublishResult, String> {
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
@@ -152,23 +152,18 @@ pub async fn publish_picture_tracked(
         tags.push(Tag::hashtag(hashtag));
     }
     let builder = nostr::EventBuilder::new(nostr::Kind::from(20), caption).tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish picture: {}", e))?;
-    let result = PublishResult::from_output(output);
-    log::info!(
-        "Picture '{}' published: {} ({}/{} relays succeeded)",
-        title,
-        result.event_id,
-        result.success_count(),
-        result.total_attempted()
-    );
-    if result.has_failures() {
-        for (relay, error) in &result.failed_relays {
-            log::warn!("Relay {} failed: {}", relay, error);
-        }
-    }
+        .map_err(|e| format!("Failed to sign picture: {}", e))?;
+    let event_id = event.id.to_hex();
+    let queue_id = crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Media,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    let result = PublishResult::queued(queue_id, event_id);
+    log::info!("Picture '{}' queued: {}", title, result.event_id);
     Ok(result)
 }
 /// Publish a picture post (Kind 20)
@@ -197,7 +192,7 @@ pub async fn publish_video_tracked(
     hashtags: Vec<String>,
     is_portrait: bool,
 ) -> std::result::Result<PublishResult, String> {
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
@@ -271,24 +266,18 @@ pub async fn publish_video_tracked(
     }
     let content = description;
     let builder = nostr::EventBuilder::new(nostr::Kind::from(kind), content).tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish video: {}", e))?;
-    let result = PublishResult::from_output(output);
-    log::info!(
-        "Addressable video '{}' published: {} (d-tag: {}, {}/{} relays succeeded)",
-        title,
-        result.event_id,
-        identifier,
-        result.success_count(),
-        result.total_attempted()
-    );
-    if result.has_failures() {
-        for (relay, error) in &result.failed_relays {
-            log::warn!("Relay {} failed: {}", relay, error);
-        }
-    }
+        .map_err(|e| format!("Failed to sign video: {}", e))?;
+    let event_id = event.id.to_hex();
+    let queue_id = crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Media,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    let result = PublishResult::queued(queue_id, event_id);
+    log::info!("Video '{}' queued: {} (d-tag: {})", title, result.event_id, identifier);
     Ok(result)
 }
 /// Publish a video post as addressable event (Kind 34235 for landscape, Kind 34236 for portrait)
@@ -321,7 +310,7 @@ pub async fn publish_voice_message_tracked(
     hashtags: Vec<String>,
     mime_type: Option<String>,
 ) -> std::result::Result<PublishResult, String> {
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
@@ -353,22 +342,18 @@ pub async fn publish_voice_message_tracked(
         tags.push(Tag::hashtag(hashtag));
     }
     builder = builder.tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish voice message: {}", e))?;
-    let result = PublishResult::from_output(output);
-    log::info!(
-        "Voice message published: {} ({}/{} relays succeeded)",
-        result.event_id,
-        result.success_count(),
-        result.total_attempted()
-    );
-    if result.has_failures() {
-        for (relay, error) in &result.failed_relays {
-            log::warn!("Relay {} failed: {}", relay, error);
-        }
-    }
+        .map_err(|e| format!("Failed to sign voice message: {}", e))?;
+    let event_id = event.id.to_hex();
+    let queue_id = crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Media,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    let result = PublishResult::queued(queue_id, event_id);
+    log::info!("Voice message queued: {}", result.event_id);
     Ok(result)
 }
 /// Publish a voice message (Kind 1222)
@@ -394,7 +379,7 @@ pub async fn publish_voice_message_reply_tracked(
     reply_to: nostr::Event,
     mime_type: Option<String>,
 ) -> std::result::Result<PublishResult, String> {
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
@@ -469,22 +454,18 @@ pub async fn publish_voice_message_reply_tracked(
         }
     }
     builder = builder.tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish voice message reply: {}", e))?;
-    let result = PublishResult::from_output(output);
-    log::info!(
-        "Voice message reply published: {} ({}/{} relays succeeded)",
-        result.event_id,
-        result.success_count(),
-        result.total_attempted()
-    );
-    if result.has_failures() {
-        for (relay, error) in &result.failed_relays {
-            log::warn!("Relay {} failed: {}", relay, error);
-        }
-    }
+        .map_err(|e| format!("Failed to sign voice message reply: {}", e))?;
+    let event_id = event.id.to_hex();
+    let queue_id = crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Media,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    let result = PublishResult::queued(queue_id, event_id);
+    log::info!("Voice message reply queued: {}", result.event_id);
     Ok(result)
 }
 /// Publish a voice message reply (Kind 1244) following NIP-22

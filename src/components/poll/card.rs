@@ -1,6 +1,7 @@
 use super::timer::PollTimer;
 use crate::components::icons::{BookmarkIcon, MessageCircleIcon, Repeat2Icon, ShareIcon, ZapIcon};
-use crate::components::{CommentComposer, ConfirmModal, ReactionButton, ZapModal};
+use crate::components::{ReplyComposer, ConfirmModal, ReactionButton, RichContent, SensitiveContent, ZapModal};
+use crate::utils::nip36;
 use crate::hooks::{use_reaction, use_relay_subscription};
 use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
@@ -229,7 +230,6 @@ pub fn PollCard(
         });
     };
     let poll = poll_data.read().clone();
-    let poll_title = poll.as_ref().map(|p| p.title.clone()).unwrap_or_default();
     let poll_type = poll
         .as_ref()
         .map(|p| p.r#type)
@@ -264,6 +264,7 @@ pub fn PollCard(
         "flex items-center text-muted-foreground hover:text-blue-500 transition"
     };
     let nav = use_navigator();
+    let content_warning = nip36::get_content_warning(&event.tags);
     rsx! {
         div { class: "p-4 hover:bg-accent/50 transition border-b border-border",
             div { class: "flex items-center gap-2 mb-3",
@@ -276,117 +277,125 @@ pub fn PollCard(
                 }
                 span { class: "text-muted-foreground text-sm", "· {time_ago}" }
             }
-            div { class: "mb-3",
-                Link {
-                    to: Route::PollView {
-                        noteid: event_id_str.clone(),
-                    },
-                    class: "text-lg font-medium mb-2 block hover:underline",
-                    "{poll_title}"
-                }
-                div { class: "flex items-center gap-3 text-sm text-muted-foreground",
-                    span { class: "px-2 py-1 rounded bg-accent text-foreground text-xs",
-                        {
-                            match poll_type {
-                                PollType::SingleChoice => "Single Choice",
-                                PollType::MultipleChoice => "Multiple Choice",
+            {
+                let poll_inner = rsx! {
+                    div { class: "mb-3",
+                        div { class: "text-lg font-medium mb-2 break-words",
+                            RichContent {
+                                content: event.content.clone(),
+                                tags: event.tags.iter().cloned().collect(),
+                            }
+                        }
+                        div { class: "flex items-center gap-3 text-sm text-muted-foreground",
+                            span { class: "px-2 py-1 rounded bg-accent text-foreground text-xs",
+                                {
+                                    match poll_type {
+                                        PollType::SingleChoice => "Single Choice",
+                                        PollType::MultipleChoice => "Multiple Choice",
+                                    }
+                                }
+                            }
+                            if let Some(ends_at) = poll_ends_at {
+                                PollTimer { ends_at }
+                            }
+                            span { "{total_votes} votes" }
+                        }
+                    }
+                    if show_voting_ui {
+                        div { class: "space-y-2 mb-3",
+                            for option in poll_options.iter() {
+                                {
+                                    let opt_id = option.id.clone();
+                                    let opt_text = option.text.clone();
+                                    let is_selected = selected_options.read().contains(&opt_id);
+                                    rsx! {
+                                        button {
+                                            key: "{opt_id}",
+                                            class: format!(
+                                                "w-full text-left p-3 rounded-lg border-2 transition {}",
+                                                if is_selected {
+                                                    "border-primary bg-primary/5"
+                                                } else {
+                                                    "border-border hover:border-primary/50"
+                                                },
+                                            ),
+                                            onclick: move |_| {
+                                                let poll = match poll_data.read().as_ref() {
+                                                    Some(p) => p.clone(),
+                                                    None => return,
+                                                };
+                                                let mut current = selected_options.read().clone();
+                                                match poll.r#type {
+                                                    PollType::SingleChoice => {
+                                                        selected_options.set(vec![opt_id.clone()]);
+                                                    }
+                                                    PollType::MultipleChoice => {
+                                                        if current.contains(&opt_id) {
+                                                            current.retain(|id| id != &opt_id);
+                                                        } else {
+                                                            current.push(opt_id.clone());
+                                                        }
+                                                        selected_options.set(current);
+                                                    }
+                                                }
+                                            },
+                                            "{opt_text}"
+                                        }
+                                    }
+                                }
+                            }
+                            button {
+                                class: "w-full mt-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90 disabled:opacity-50",
+                                disabled: selected_options.read().is_empty() || *is_voting.read(),
+                                onclick: submit_vote,
+                                if *is_voting.read() {
+                                    "Submitting..."
+                                } else {
+                                    "Submit Vote"
+                                }
                             }
                         }
                     }
-                    if let Some(ends_at) = poll_ends_at {
-                        PollTimer { ends_at }
-                    }
-                    span { "{total_votes} votes" }
-                }
-            }
-            if show_voting_ui {
-                div { class: "space-y-2 mb-3",
-                    for option in poll_options.iter() {
-                        {
-                            let opt_id = option.id.clone();
-                            let opt_text = option.text.clone();
-                            let is_selected = selected_options.read().contains(&opt_id);
-                            rsx! {
-                                button {
-                                    key: "{opt_id}",
-                                    class: format!(
-                                        "w-full text-left p-3 rounded-lg border-2 transition {}",
-                                        if is_selected {
-                                            "border-primary bg-primary/5"
-                                        } else {
-                                            "border-border hover:border-primary/50"
-                                        },
-                                    ),
-                                    onclick: move |_| {
-                                        let poll = match poll_data.read().as_ref() {
-                                            Some(p) => p.clone(),
-                                            None => return,
-                                        };
-                                        let mut current = selected_options.read().clone();
-                                        match poll.r#type {
-                                            PollType::SingleChoice => {
-                                                selected_options.set(vec![opt_id.clone()]);
+                    if *show_results.read() || has_voted || is_expired {
+                        div { class: "space-y-2",
+                            for option in poll_options.iter() {
+                                {
+                                    let opt_id = option.id.clone();
+                                    let opt_text = option.text.clone();
+                                    let vote_count = *results().get(&opt_id).unwrap_or(&0);
+                                    let percentage = if total_votes > 0 {
+                                        (vote_count as f32 / total_votes as f32) * 100.0
+                                    } else {
+                                        0.0
+                                    };
+                                    rsx! {
+                                        div { key: "{opt_id}", class: "relative p-3 rounded-lg border overflow-hidden",
+                                            div {
+                                                class: "absolute inset-0 bg-primary/10",
+                                                style: format!("width: {percentage}%"),
                                             }
-                                            PollType::MultipleChoice => {
-                                                if current.contains(&opt_id) {
-                                                    current.retain(|id| id != &opt_id);
-                                                } else {
-                                                    current.push(opt_id.clone());
-                                                }
-                                                selected_options.set(current);
+                                            div { class: "relative flex justify-between",
+                                                span { "{opt_text}" }
+                                                span { class: "font-medium", "{vote_count} ({percentage:.1}%)" }
                                             }
                                         }
-                                    },
-                                    "{opt_text}"
+                                    }
+                                }
+                            }
+                            if !is_expired && !has_voted {
+                                button {
+                                    class: "w-full mt-2 text-sm text-primary hover:underline",
+                                    onclick: move |_| show_results.set(false),
+                                    "Hide results and vote"
                                 }
                             }
                         }
                     }
-                    button {
-                        class: "w-full mt-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90 disabled:opacity-50",
-                        disabled: selected_options.read().is_empty() || *is_voting.read(),
-                        onclick: submit_vote,
-                        if *is_voting.read() {
-                            "Submitting..."
-                        } else {
-                            "Submit Vote"
-                        }
-                    }
-                }
-            }
-            if *show_results.read() || has_voted || is_expired {
-                div { class: "space-y-2",
-                    for option in poll_options.iter() {
-                        {
-                            let opt_id = option.id.clone();
-                            let opt_text = option.text.clone();
-                            let vote_count = *results().get(&opt_id).unwrap_or(&0);
-                            let percentage = if total_votes > 0 {
-                                (vote_count as f32 / total_votes as f32) * 100.0
-                            } else {
-                                0.0
-                            };
-                            rsx! {
-                                div { key: "{opt_id}", class: "relative p-3 rounded-lg border overflow-hidden",
-                                    div {
-                                        class: "absolute inset-0 bg-primary/10",
-                                        style: format!("width: {percentage}%"),
-                                    }
-                                    div { class: "relative flex justify-between",
-                                        span { "{opt_text}" }
-                                        span { class: "font-medium", "{vote_count} ({percentage:.1}%)" }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if !is_expired && !has_voted {
-                        button {
-                            class: "w-full mt-2 text-sm text-primary hover:underline",
-                            onclick: move |_| show_results.set(false),
-                            "Hide results and vote"
-                        }
-                    }
+                };
+                if let Some(reason) = content_warning {
+                    rsx! { SensitiveContent { reason, {poll_inner} } }
+                } else {
+                    poll_inner
                 }
             }
             // Interaction bar
@@ -635,9 +644,9 @@ pub fn PollCard(
             }
             }
             if *show_comment_composer.read() {
-                CommentComposer {
-                    comment_on: event.clone(),
-                    parent_comment: None,
+                ReplyComposer {
+                    target: event.clone(),
+                    root_event: None,
                     on_close: move |_| {
                         show_comment_composer.set(false);
                     },

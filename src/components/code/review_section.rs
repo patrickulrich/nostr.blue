@@ -22,7 +22,7 @@ pub async fn publish_review_event(
     state: crate::utils::nip34::ReviewState,
     content: &str,
 ) -> std::result::Result<String, String> {
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -37,11 +37,17 @@ pub async fn publish_review_event(
             TagKind::Custom(Cow::Borrowed("state")),
             [state.as_str()],
         ));
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish review: {}", e))?;
-    Ok(output.id().to_hex())
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("code_review".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }
 
 /// Local review state enum for form selection

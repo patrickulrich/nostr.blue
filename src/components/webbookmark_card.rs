@@ -1,9 +1,11 @@
 use crate::components::icons::BookmarkIcon;
+use crate::components::SensitiveContent;
 use crate::stores::webbookmarks::{
     delete_webbookmark, get_display_hashtags, get_domain, get_image, get_published_at, get_title,
     get_url, is_archived, is_favorite, toggle_favorite,
 };
 use crate::utils::format_relative_time_or;
+use crate::utils::nip36;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::consume_toast;
 #[cfg(not(feature = "web"))]
@@ -27,6 +29,7 @@ fn redact_url_for_log(url: &str) -> String {
 }
 #[component]
 pub fn WebBookmarkCard(event: NostrEvent, on_edit: Option<EventHandler<NostrEvent>>) -> Element {
+    let content_warning = nip36::get_content_warning(&event.tags);
     let url = get_url(&event);
     let title = get_title(&event);
     let description = if event.content.is_empty() {
@@ -265,7 +268,16 @@ pub fn WebBookmarkCard(event: NostrEvent, on_edit: Option<EventHandler<NostrEven
                     }
                 }
                 if let Some(desc) = description {
-                    p { class: "text-sm text-muted-foreground line-clamp-3", "{desc}" }
+                    {
+                        let desc_el = rsx! {
+                            p { class: "text-sm text-muted-foreground line-clamp-3", "{desc}" }
+                        };
+                        if let Some(reason) = content_warning.clone() {
+                            rsx! { SensitiveContent { reason, {desc_el} } }
+                        } else {
+                            desc_el
+                        }
+                    }
                 }
                 div { class: "flex items-center justify-between pt-2 text-xs text-muted-foreground",
                     span { "{timestamp_str}" }

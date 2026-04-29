@@ -1,5 +1,5 @@
 use crate::components::{
-    icons::MessageCircleIcon, ClientInitializing, CommentComposer, ShareModal, ThreadedComment,
+    icons::MessageCircleIcon, ClientInitializing, ReplyComposer, ShareModal, ThreadedComment,
 };
 use crate::error::NostrBlueError;
 use crate::hooks::use_relay_subscription;
@@ -280,9 +280,9 @@ fn LandscapePlayer(event: Event) -> Element {
                     }}
                 }
                 if *show_comment_composer.read() {
-                    CommentComposer {
-                        comment_on: event.clone(),
-                        parent_comment: None,
+                    ReplyComposer {
+                        target: event.clone(),
+                        root_event: None,
                         on_close: move |_| show_comment_composer.set(false),
                         on_success: move |_| {
                             show_comment_composer.set(false);
@@ -342,7 +342,7 @@ pub(crate) fn ShortsPlayer(
     title: &'static str,
 ) -> Element {
     let mut events = use_signal(Vec::<Event>::new);
-    let mut loading = use_signal(|| false);
+    let mut loading = use_signal(|| true);
     let mut load_error = use_signal(|| None::<String>);
     let mut empty_message = use_signal(|| None::<String>);
     let mut current_video_index = use_signal(|| 0usize);
@@ -1047,9 +1047,9 @@ fn VideoInfo(
                 }
             }
             if *show_comment_composer.read() {
-                CommentComposer {
-                    comment_on: event.clone(),
-                    parent_comment: None,
+                ReplyComposer {
+                    target: event.clone(),
+                    root_event: None,
                     on_close: move |_| show_comment_composer.set(false),
                     on_success: move |_| {
                         show_comment_composer.set(false);
@@ -1538,7 +1538,7 @@ async fn load_shorts_following(
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+    match nostr_client::fetch_events_from_connected_relays(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             let mut event_vec: Vec<Event> = events.into_iter().collect();
             event_vec.sort_by_key(|b| std::cmp::Reverse(b.created_at));
@@ -1576,7 +1576,7 @@ async fn load_shorts_global(until: Option<u64>) -> std::result::Result<Vec<Event
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+    match nostr_client::fetch_events_from_relays(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             let mut event_vec: Vec<Event> = events.into_iter().collect();
             event_vec.sort_by_key(|b| std::cmp::Reverse(b.created_at));

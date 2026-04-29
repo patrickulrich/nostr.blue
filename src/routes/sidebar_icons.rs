@@ -40,6 +40,11 @@ pub(super) fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 crate::components::icons::LiveVideoIcon { class: class.to_string() }
             }
         }
+        SidebarItem::Verts => {
+            rsx! {
+                crate::components::icons::VertsIcon { class: class.to_string() }
+            }
+        }
         SidebarItem::Notifications => {
             rsx! {
                 crate::components::icons::BellIcon { class: class.to_string() }

@@ -60,6 +60,40 @@ async fn recipient_has_inbox_relays(client: &nostr_sdk::Client, recipient_pk: Pu
                 false
             }
         }
+        _ => recipient_has_inbox_relays_from_indexers(client, recipient_pk).await,
+    }
+}
+
+async fn recipient_has_inbox_relays_from_indexers(
+    client: &nostr_sdk::Client,
+    recipient_pk: PublicKey,
+) -> bool {
+    let indexer_urls = relay::nip65::get_indexer_relay_urls();
+    if indexer_urls.is_empty() {
+        return false;
+    }
+    let relay_urls: Vec<nostr_sdk::RelayUrl> = indexer_urls
+        .iter()
+        .filter_map(|s| nostr_sdk::RelayUrl::parse(s).ok())
+        .collect();
+    if relay_urls.is_empty() {
+        return false;
+    }
+    let filter = Filter::new()
+        .author(recipient_pk)
+        .kind(Kind::InboxRelays)
+        .limit(1);
+    match client
+        .fetch_events_from(relay_urls, filter, Duration::from_secs(3))
+        .await
+    {
+        Ok(events) if !events.is_empty() => {
+            if let Some(event) = events.into_iter().next() {
+                nip17::extract_relay_list(&event).next().is_some()
+            } else {
+                false
+            }
+        }
         _ => false,
     }
 }
@@ -112,6 +146,12 @@ impl ConversationMessage {
         match self {
             Self::Nip04 { .. } => "NIP-04",
             Self::Nip17 { .. } => "NIP-17",
+        }
+    }
+    pub fn tags(&self) -> &nostr_sdk::Tags {
+        match self {
+            Self::Nip04 { event } => &event.tags,
+            Self::Nip17 { rumor, .. } => &rumor.tags,
         }
     }
 }
@@ -334,88 +374,33 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<Publis
     let sender_gift_wrap = EventBuilder::gift_wrap(&signer, &sender_pk, rumor, [])
         .await
         .map_err(|e| format!("Failed to create sender gift wrap: {}", e))?;
-    log::info!("Sending receiver gift wrap via SDK gossip routing");
-    let receiver_output = client
-        .send_event(&receiver_gift_wrap)
-        .await
-        .map_err(|e| format!("Failed to send to receiver: {}", e))?;
-    if receiver_output.success.is_empty() {
-        log::warn!(
-            "No relays accepted gift wrap for recipient - they may not have NIP-17 inbox relays configured"
-        );
-        return Err(
-            "Recipient has no inbox relays configured (NIP-17 kind 10050). \
-                    They may not be able to receive private messages."
-                .to_string(),
-        );
-    }
-    let receiver_result = PublishResult::from_output(receiver_output);
-    log::info!(
-        "Sent gift wrap to receiver: {} ({} success, {} failed)",
-        receiver_result.event_id,
-        receiver_result.success_count(),
-        receiver_result.failed_relays.len()
-    );
-    log::info!("Sending sender gift wrap via SDK gossip routing");
-    let sender_output = client
-        .send_event(&sender_gift_wrap)
-        .await
-        .map_err(|e| format!("Failed to send sender copy: {}", e))?;
-    let sender_result = PublishResult::from_output(sender_output);
-    log::info!(
-        "Sent gift wrap to sender: {} ({} success, {} failed)",
-        sender_result.event_id,
-        sender_result.success_count(),
-        sender_result.failed_relays.len()
-    );
-    let mut successful_relays: Vec<String> = receiver_result
-        .successful_relays
-        .iter()
-        .chain(sender_result.successful_relays.iter())
-        .cloned()
-        .collect();
-    successful_relays.sort();
-    successful_relays.dedup();
-    let mut failed_relays: Vec<(String, String)> = receiver_result
-        .failed_relays
-        .iter()
-        .chain(sender_result.failed_relays.iter())
-        .cloned()
-        .collect();
-    failed_relays.sort_by(|a, b| a.0.cmp(&b.0));
-    failed_relays.dedup_by(|a, b| a.0 == b.0);
-    let combined_result = PublishResult {
-        event_id: receiver_result.event_id,
-        successful_relays,
-        failed_relays,
-    };
-    if combined_result.success_count() == 0 {
-        for (relay, error) in &combined_result.failed_relays {
-            log::error!("Failed to send to {}: {}", relay, error);
-        }
-        return Err(format!(
-            "Failed to deliver DM to any relay. {} relays failed.",
-            combined_result.failed_relays.len(),
-        ));
-    }
-    if combined_result.success_count() < 2 {
-        log::warn!(
-            "DM only delivered to {} relay(s) - low redundancy",
-            combined_result.success_count()
-        );
-    }
-    log::info!(
-        "DM sent: {} relays succeeded, {} failed",
-        combined_result.success_count(),
-        combined_result.failed_relays.len()
-    );
+    let receiver_event_id = receiver_gift_wrap.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        receiver_gift_wrap,
+        crate::stores::publish_queue::types::QueueEventType::DirectMessage,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    crate::stores::publish_queue::enqueue(
+        sender_gift_wrap,
+        crate::stores::publish_queue::types::QueueEventType::DirectMessage,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    log::info!("DM enqueued: {}", receiver_event_id);
     if let Err(e) = init_dms().await {
         log::error!(
             "Failed to refresh DM conversations after sending message: {}",
             e
         );
     }
-    Ok(combined_result)
+    Ok(PublishResult {
+        event_id: receiver_event_id,
+        queue_id: None,
+        queued: true,
+        successful_relays: vec![],
+        failed_relays: vec![],
+    })
 }
 
 /// Send an encrypted DM using a temporary generated key instead of the current
@@ -463,23 +448,21 @@ pub async fn send_dm_with_temporary_keys(
         .await
         .map_err(|e| format!("Failed to create receiver gift wrap: {}", e))?;
 
-    let receiver_output = client
-        .send_event(&receiver_gift_wrap)
-        .await
-        .map_err(|e| format!("Failed to send to receiver: {}", e))?;
-    if receiver_output.success.is_empty() {
-        return Err("Failed to deliver DM to any relay for the recipient. \
-                   You can also contact abuse@nostr.blue by email."
-            .to_string());
-    }
-
-    let result = PublishResult::from_output(receiver_output);
-    log::info!(
-        "Temporary-key DM sent: {} success, {} failed",
-        result.success_count(),
-        result.failed_relays.len()
-    );
-    Ok(result)
+    let receiver_event_id = receiver_gift_wrap.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        receiver_gift_wrap,
+        crate::stores::publish_queue::types::QueueEventType::DirectMessage,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    log::info!("Temporary-key DM enqueued: {}", receiver_event_id);
+    Ok(PublishResult {
+        event_id: receiver_event_id,
+        queue_id: None,
+        queued: true,
+        successful_relays: vec![],
+        failed_relays: vec![],
+    })
 }
 /// Decrypt a DM message (supports NIP-04 and NIP-17)
 /// NIP-04 results are cached to avoid repeated signer popup spam.

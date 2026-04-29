@@ -1,13 +1,18 @@
 //! Relay Settings Page
 //!
-//! Dedicated relay management page with 7 sections:
+//! Dedicated relay management page with 12 sections:
 //! 1. General Relays (NIP-65 kind 10002)
 //! 2. DM Inbox Relays (NIP-17 kind 10050)
 //! 3. Search Relays (NIP-51 kind 10007)
 //! 4. Blocked Relays (NIP-51 kind 10006)
-//! 5. Local Relays (web: browser storage; native: config directory)
-//! 6. Broadcast Relays (web: browser storage; native: config directory)
-//! 7. Connected Relays (read-only live stats)
+//! 5. Indexer Relays (kind 10086, gift-wrapped)
+//! 6. Private Outbox Relays (kind 10013)
+//! 7. Favorite / Feed Relays (kind 10012)
+//! 8. Proxy Relays (kind 10087, gift-wrapped)
+//! 9. Trusted Relays (kind 10089, gift-wrapped)
+//! 10. Local Relays (web: browser storage; native: config directory)
+//! 11. Broadcast Relays (web: browser storage; native: config directory)
+//! 12. Connected Relays (read-only live stats)
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, relay};
 use crate::utils::format_bytes;
@@ -48,6 +53,21 @@ pub fn SettingsRelays() -> Element {
     let mut blocked_error = use_signal(|| None::<String>);
     let mut local_error = use_signal(|| None::<String>);
     let mut broadcast_error = use_signal(|| None::<String>);
+    let mut indexer_relays = use_signal(|| relay::INDEXER_RELAYS.peek().clone());
+    let mut outbox_relays = use_signal(|| relay::OUTBOX_RELAYS.peek().clone());
+    let mut favorite_relays = use_signal(|| relay::FAVORITE_RELAYS.peek().clone());
+    let mut proxy_relays = use_signal(|| relay::PROXY_RELAYS.peek().clone());
+    let mut trusted_relays = use_signal(|| relay::TRUSTED_RELAYS.peek().clone());
+    let mut new_indexer_relay = use_signal(String::new);
+    let mut new_outbox_relay = use_signal(String::new);
+    let mut new_favorite_relay = use_signal(String::new);
+    let mut new_proxy_relay = use_signal(String::new);
+    let mut new_trusted_relay = use_signal(String::new);
+    let mut indexer_error = use_signal(|| None::<String>);
+    let mut outbox_error = use_signal(|| None::<String>);
+    let mut favorite_error = use_signal(|| None::<String>);
+    let mut proxy_error = use_signal(|| None::<String>);
+    let mut trusted_error = use_signal(|| None::<String>);
     let mut save_status = use_signal(|| None::<String>);
     let mut publishing = use_signal(|| false);
     use_effect(move || {
@@ -67,6 +87,21 @@ pub fn SettingsRelays() -> Element {
     });
     use_effect(move || {
         broadcast_relays.set(relay::BROADCAST_RELAYS.read().clone());
+    });
+    use_effect(move || {
+        indexer_relays.set(relay::INDEXER_RELAYS.read().clone());
+    });
+    use_effect(move || {
+        outbox_relays.set(relay::OUTBOX_RELAYS.read().clone());
+    });
+    use_effect(move || {
+        favorite_relays.set(relay::FAVORITE_RELAYS.read().clone());
+    });
+    use_effect(move || {
+        proxy_relays.set(relay::PROXY_RELAYS.read().clone());
+    });
+    use_effect(move || {
+        trusted_relays.set(relay::TRUSTED_RELAYS.read().clone());
     });
     let connection_info = use_resource(move || async move {
         let _initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -345,6 +380,111 @@ pub fn SettingsRelays() -> Element {
             }
         }
     };
+    let add_indexer_relay = move |_| {
+        let url = new_indexer_relay.read().clone();
+        match normalize_relay_url(&url) {
+            Ok(normalized) => {
+                if indexer_relays.read().contains(&normalized) {
+                    indexer_error.set(Some("Relay already exists".to_string()));
+                    return;
+                }
+                indexer_relays.write().push(normalized);
+                new_indexer_relay.set(String::new());
+                indexer_error.set(None);
+            }
+            Err(e) => indexer_error.set(Some(e)),
+        }
+    };
+    let mut remove_indexer_relay = move |index: usize| {
+        let mut relays = indexer_relays.write();
+        if index < relays.len() {
+            relays.remove(index);
+        }
+    };
+    let add_outbox_relay = move |_| {
+        let url = new_outbox_relay.read().clone();
+        match normalize_relay_url(&url) {
+            Ok(normalized) => {
+                if outbox_relays.read().contains(&normalized) {
+                    outbox_error.set(Some("Relay already exists".to_string()));
+                    return;
+                }
+                outbox_relays.write().push(normalized);
+                new_outbox_relay.set(String::new());
+                outbox_error.set(None);
+            }
+            Err(e) => outbox_error.set(Some(e)),
+        }
+    };
+    let mut remove_outbox_relay = move |index: usize| {
+        let mut relays = outbox_relays.write();
+        if index < relays.len() {
+            relays.remove(index);
+        }
+    };
+    let add_favorite_relay = move |_| {
+        let url = new_favorite_relay.read().clone();
+        match normalize_relay_url(&url) {
+            Ok(normalized) => {
+                if favorite_relays.read().contains(&normalized) {
+                    favorite_error.set(Some("Relay already exists".to_string()));
+                    return;
+                }
+                favorite_relays.write().push(normalized);
+                new_favorite_relay.set(String::new());
+                favorite_error.set(None);
+            }
+            Err(e) => favorite_error.set(Some(e)),
+        }
+    };
+    let mut remove_favorite_relay = move |index: usize| {
+        let mut relays = favorite_relays.write();
+        if index < relays.len() {
+            relays.remove(index);
+        }
+    };
+    let add_proxy_relay = move |_| {
+        let url = new_proxy_relay.read().clone();
+        match normalize_relay_url(&url) {
+            Ok(normalized) => {
+                if proxy_relays.read().contains(&normalized) {
+                    proxy_error.set(Some("Relay already exists".to_string()));
+                    return;
+                }
+                proxy_relays.write().push(normalized);
+                new_proxy_relay.set(String::new());
+                proxy_error.set(None);
+            }
+            Err(e) => proxy_error.set(Some(e)),
+        }
+    };
+    let mut remove_proxy_relay = move |index: usize| {
+        let mut relays = proxy_relays.write();
+        if index < relays.len() {
+            relays.remove(index);
+        }
+    };
+    let add_trusted_relay = move |_| {
+        let url = new_trusted_relay.read().clone();
+        match normalize_relay_url(&url) {
+            Ok(normalized) => {
+                if trusted_relays.read().contains(&normalized) {
+                    trusted_error.set(Some("Relay already exists".to_string()));
+                    return;
+                }
+                trusted_relays.write().push(normalized);
+                new_trusted_relay.set(String::new());
+                trusted_error.set(None);
+            }
+            Err(e) => trusted_error.set(Some(e)),
+        }
+    };
+    let mut remove_trusted_relay = move |index: usize| {
+        let mut relays = trusted_relays.write();
+        if index < relays.len() {
+            relays.remove(index);
+        }
+    };
     let publish_relay_lists = move |_| {
         if *publishing.read() {
             return;
@@ -354,6 +494,11 @@ pub fn SettingsRelays() -> Element {
         let dm = dm_relays.read().clone();
         let search = search_relays.read().clone();
         let blocked = blocked_relays.read().clone();
+        let indexer = indexer_relays.read().clone();
+        let outbox = outbox_relays.read().clone();
+        let favorites = favorite_relays.read().clone();
+        let proxy = proxy_relays.read().clone();
+        let trusted = trusted_relays.read().clone();
         spawn(async move {
             save_status.set(Some("Publishing...".to_string()));
             let client = match nostr_client::get_client() {
@@ -384,6 +529,29 @@ pub fn SettingsRelays() -> Element {
                 publishing.set(false);
                 return;
             }
+            if !indexer.is_empty() {
+                if let Err(e) = relay::publish_indexer_relays(indexer.clone(), client.clone()).await {
+                    log::warn!("Failed to publish indexer relays: {}", e);
+                }
+            }
+            if !outbox.is_empty() {
+                if let Err(e) = relay::publish_outbox_relays(outbox.clone(), client.clone()).await {
+                    log::warn!("Failed to publish outbox relays: {}", e);
+                }
+            }
+            if let Err(e) = relay::publish_favorite_relays(favorites.clone(), client.clone()).await {
+                log::warn!("Failed to publish favorite relays: {}", e);
+            }
+            if !proxy.is_empty() {
+                if let Err(e) = relay::publish_proxy_relays(proxy.clone(), client.clone()).await {
+                    log::warn!("Failed to publish proxy relays: {}", e);
+                }
+            }
+            if !trusted.is_empty() {
+                if let Err(e) = relay::publish_trusted_relays(trusted.clone(), client.clone()).await {
+                    log::warn!("Failed to publish trusted relays: {}", e);
+                }
+            }
             let mut metadata = relay::USER_RELAY_METADATA.write();
             let now_secs = crate::platform::timestamp::now_secs();
             *metadata = Some(relay::RelayListMetadata {
@@ -393,6 +561,11 @@ pub fn SettingsRelays() -> Element {
             });
             *relay::SEARCH_RELAYS.write() = search;
             *relay::BLOCKED_RELAYS.write() = blocked;
+            *relay::INDEXER_RELAYS.write() = indexer;
+            *relay::OUTBOX_RELAYS.write() = outbox;
+            *relay::FAVORITE_RELAYS.write() = favorites;
+            *relay::PROXY_RELAYS.write() = proxy;
+            *relay::TRUSTED_RELAYS.write() = trusted;
             crate::services::search_relays::invalidate_search_relay_cache().await;
             save_status.set(Some("Relay lists published successfully!".to_string()));
             crate::platform::timer::sleep_ms(3000).await;
@@ -793,6 +966,396 @@ pub fn SettingsRelays() -> Element {
                     div { class: "flex items-center justify-between mb-4",
                         div {
                             h3 { class: "text-lg font-semibold text-gray-900 dark:text-white",
+                                "Indexer Relays"
+                            }
+                            p { class: "text-xs text-gray-500 dark:text-gray-400 mt-1",
+                                "Discover users' relays and metadata (gift-wrapped, private)"
+                            }
+                        }
+                        div { class: "flex items-center gap-2",
+                            span { class: "px-2 py-1 bg-muted text-muted-foreground rounded text-xs",
+                                "kind 10086"
+                            }
+                            span { class: "px-2 py-1 bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 rounded text-xs",
+                                "private"
+                            }
+                            button {
+                                class: "text-xs text-blue-600 hover:underline dark:text-blue-400",
+                                onclick: move |_| {
+                                    indexer_relays.set(relay::default_indexer_relays());
+                                },
+                                "Reset"
+                            }
+                        }
+                    }
+                    div { class: "space-y-2 mb-4",
+                        for (index , url) in indexer_relays.read().iter().enumerate() {
+                            {
+                                let url_clone = url.clone();
+                                let stats = stats_map.read().get(&url_clone).cloned();
+                                rsx! {
+                                    div { key: "{url_clone}", class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
+                                        div { class: "flex items-center justify-between",
+                                            div { class: "flex items-center gap-1 min-w-0",
+                                                span { "📡" }
+                                                if can_open_relay_detail(&url_clone) {
+                                                    Link {
+                                                        to: relay_detail_route(&url_clone),
+                                                        class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",
+                                                        {display_relay_url(&url_clone)}
+                                                    }
+                                                } else {
+                                                    span {
+                                                        class: "font-mono text-sm text-gray-900 dark:text-white break-all",
+                                                        {display_relay_url(&url_clone)}
+                                                    }
+                                                }
+                                            }
+                                            button {
+                                                class: "px-2 py-1 bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-800 text-red-800 dark:text-red-200 rounded text-xs transition",
+                                                onclick: move |_| remove_indexer_relay(index),
+                                                "✕"
+                                            }
+                                        }
+                                        if let Some(info) = stats {
+                                            div { class: "flex items-center gap-4 mt-2 text-xs text-gray-500 dark:text-gray-400",
+                                                span {
+                                                    class: match info.status_str() {
+                                                        "Connected" => "text-green-600 dark:text-green-400",
+                                                        "Connecting" | "Pending" => "text-yellow-600 dark:text-yellow-400",
+                                                        _ => "text-gray-500 dark:text-gray-400",
+                                                    },
+                                                    "● {info.status_str()}"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    div { class: "flex gap-2",
+                        input {
+                            class: "flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                            r#type: "text",
+                            placeholder: "wss://purplepag.es",
+                            value: "{new_indexer_relay}",
+                            oninput: move |evt| new_indexer_relay.set(evt.value()),
+                        }
+                        button {
+                            class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition",
+                            onclick: add_indexer_relay,
+                            "+ Add"
+                        }
+                    }
+                    if let Some(err) = indexer_error.read().as_ref() {
+                        div { class: "mt-2 p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
+                            "{err}"
+                        }
+                    }
+                }
+            }
+            if auth.is_authenticated {
+                div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                    div { class: "flex items-center justify-between mb-4",
+                        div {
+                            h3 { class: "text-lg font-semibold text-gray-900 dark:text-white",
+                                "Private Outbox Relays"
+                            }
+                            p { class: "text-xs text-gray-500 dark:text-gray-400 mt-1",
+                                "Extra relays for your outgoing events (plain, visible)"
+                            }
+                        }
+                        span { class: "px-2 py-1 bg-muted text-muted-foreground rounded text-xs",
+                            "kind 10013"
+                        }
+                    }
+                    div { class: "space-y-2 mb-4",
+                        if outbox_relays.read().is_empty() {
+                            div { class: "text-center py-4 text-gray-500 dark:text-gray-400 text-sm",
+                                "No outbox relays configured"
+                            }
+                        }
+                        for (index , url) in outbox_relays.read().iter().enumerate() {
+                            {
+                                let url_clone = url.clone();
+                                rsx! {
+                                    div { key: "{url_clone}", class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
+                                        div { class: "flex items-center justify-between",
+                                            div { class: "flex items-center gap-1 min-w-0",
+                                                span { "📤" }
+                                                span { class: "font-mono text-sm text-gray-900 dark:text-white break-all",
+                                                    {display_relay_url(&url_clone)}
+                                                }
+                                            }
+                                            button {
+                                                class: "px-2 py-1 bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-800 text-red-800 dark:text-red-200 rounded text-xs transition",
+                                                onclick: move |_| remove_outbox_relay(index),
+                                                "✕"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    div { class: "flex gap-2",
+                        input {
+                            class: "flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                            r#type: "text",
+                            placeholder: "wss://relay.example.com",
+                            value: "{new_outbox_relay}",
+                            oninput: move |evt| new_outbox_relay.set(evt.value()),
+                        }
+                        button {
+                            class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition",
+                            onclick: add_outbox_relay,
+                            "+ Add"
+                        }
+                    }
+                    if let Some(err) = outbox_error.read().as_ref() {
+                        div { class: "mt-2 p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
+                            "{err}"
+                        }
+                    }
+                }
+            }
+            if auth.is_authenticated {
+                div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                    div { class: "flex items-center justify-between mb-4",
+                        div {
+                            h3 { class: "text-lg font-semibold text-gray-900 dark:text-white",
+                                "Favorite / Feed Relays"
+                            }
+                            p { class: "text-xs text-gray-500 dark:text-gray-400 mt-1",
+                                "Your preferred relays for reading feeds (plain, visible)"
+                            }
+                        }
+                        div { class: "flex items-center gap-2",
+                            span { class: "px-2 py-1 bg-muted text-muted-foreground rounded text-xs",
+                                "kind 10012"
+                            }
+                            button {
+                                class: "text-xs text-blue-600 hover:underline dark:text-blue-400",
+                                onclick: move |_| {
+                                    favorite_relays.set(relay::default_favorite_relays());
+                                },
+                                "Reset"
+                            }
+                        }
+                    }
+                    div { class: "space-y-2 mb-4",
+                        for (index , url) in favorite_relays.read().iter().enumerate() {
+                            {
+                                let url_clone = url.clone();
+                                let stats = stats_map.read().get(&url_clone).cloned();
+                                rsx! {
+                                    div { key: "{url_clone}", class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
+                                        div { class: "flex items-center justify-between",
+                                            div { class: "flex items-center gap-1 min-w-0",
+                                                span { "⭐" }
+                                                if can_open_relay_detail(&url_clone) {
+                                                    Link {
+                                                        to: relay_detail_route(&url_clone),
+                                                        class: "font-mono text-sm text-gray-900 dark:text-white hover:underline break-all",
+                                                        {display_relay_url(&url_clone)}
+                                                    }
+                                                } else {
+                                                    span {
+                                                        class: "font-mono text-sm text-gray-900 dark:text-white break-all",
+                                                        {display_relay_url(&url_clone)}
+                                                    }
+                                                }
+                                            }
+                                            button {
+                                                class: "px-2 py-1 bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-800 text-red-800 dark:text-red-200 rounded text-xs transition",
+                                                onclick: move |_| remove_favorite_relay(index),
+                                                "✕"
+                                            }
+                                        }
+                                        if let Some(info) = stats {
+                                            div { class: "flex items-center gap-4 mt-2 text-xs text-gray-500 dark:text-gray-400",
+                                                span {
+                                                    class: match info.status_str() {
+                                                        "Connected" => "text-green-600 dark:text-green-400",
+                                                        "Connecting" | "Pending" => "text-yellow-600 dark:text-yellow-400",
+                                                        _ => "text-gray-500 dark:text-gray-400",
+                                                    },
+                                                    "● {info.status_str()}"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    div { class: "flex gap-2",
+                        input {
+                            class: "flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                            r#type: "text",
+                            placeholder: "wss://nostr.wine",
+                            value: "{new_favorite_relay}",
+                            oninput: move |evt| new_favorite_relay.set(evt.value()),
+                        }
+                        button {
+                            class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition",
+                            onclick: add_favorite_relay,
+                            "+ Add"
+                        }
+                    }
+                    if let Some(err) = favorite_error.read().as_ref() {
+                        div { class: "mt-2 p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
+                            "{err}"
+                        }
+                    }
+                }
+            }
+            if auth.is_authenticated {
+                div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                    div { class: "flex items-center justify-between mb-4",
+                        div {
+                            h3 { class: "text-lg font-semibold text-gray-900 dark:text-white",
+                                "Proxy Relays"
+                            }
+                            p { class: "text-xs text-gray-500 dark:text-gray-400 mt-1",
+                                "Relays used as proxies for posting (gift-wrapped, private)"
+                            }
+                        }
+                        div { class: "flex items-center gap-2",
+                            span { class: "px-2 py-1 bg-muted text-muted-foreground rounded text-xs",
+                                "kind 10087"
+                            }
+                            span { class: "px-2 py-1 bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 rounded text-xs",
+                                "private"
+                            }
+                        }
+                    }
+                    div { class: "space-y-2 mb-4",
+                        if proxy_relays.read().is_empty() {
+                            div { class: "text-center py-4 text-gray-500 dark:text-gray-400 text-sm",
+                                "No proxy relays configured"
+                            }
+                        }
+                        for (index , url) in proxy_relays.read().iter().enumerate() {
+                            {
+                                let url_clone = url.clone();
+                                rsx! {
+                                    div { key: "{url_clone}", class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
+                                        div { class: "flex items-center justify-between",
+                                            div { class: "flex items-center gap-1 min-w-0",
+                                                span { "🔄" }
+                                                span { class: "font-mono text-sm text-gray-900 dark:text-white break-all",
+                                                    {display_relay_url(&url_clone)}
+                                                }
+                                            }
+                                            button {
+                                                class: "px-2 py-1 bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-800 text-red-800 dark:text-red-200 rounded text-xs transition",
+                                                onclick: move |_| remove_proxy_relay(index),
+                                                "✕"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    div { class: "flex gap-2",
+                        input {
+                            class: "flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                            r#type: "text",
+                            placeholder: "wss://relay.example.com",
+                            value: "{new_proxy_relay}",
+                            oninput: move |evt| new_proxy_relay.set(evt.value()),
+                        }
+                        button {
+                            class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition",
+                            onclick: add_proxy_relay,
+                            "+ Add"
+                        }
+                    }
+                    if let Some(err) = proxy_error.read().as_ref() {
+                        div { class: "mt-2 p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
+                            "{err}"
+                        }
+                    }
+                }
+            }
+            if auth.is_authenticated {
+                div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                    div { class: "flex items-center justify-between mb-4",
+                        div {
+                            h3 { class: "text-lg font-semibold text-gray-900 dark:text-white",
+                                "Trusted Relays"
+                            }
+                            p { class: "text-xs text-gray-500 dark:text-gray-400 mt-1",
+                                "Relays you trust for accurate data (gift-wrapped, private)"
+                            }
+                        }
+                        div { class: "flex items-center gap-2",
+                            span { class: "px-2 py-1 bg-muted text-muted-foreground rounded text-xs",
+                                "kind 10089"
+                            }
+                            span { class: "px-2 py-1 bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 rounded text-xs",
+                                "private"
+                            }
+                        }
+                    }
+                    div { class: "space-y-2 mb-4",
+                        if trusted_relays.read().is_empty() {
+                            div { class: "text-center py-4 text-gray-500 dark:text-gray-400 text-sm",
+                                "No trusted relays configured"
+                            }
+                        }
+                        for (index , url) in trusted_relays.read().iter().enumerate() {
+                            {
+                                let url_clone = url.clone();
+                                rsx! {
+                                    div { key: "{url_clone}", class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
+                                        div { class: "flex items-center justify-between",
+                                            div { class: "flex items-center gap-1 min-w-0",
+                                                span { "🔒" }
+                                                span { class: "font-mono text-sm text-gray-900 dark:text-white break-all",
+                                                    {display_relay_url(&url_clone)}
+                                                }
+                                            }
+                                            button {
+                                                class: "px-2 py-1 bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-800 text-red-800 dark:text-red-200 rounded text-xs transition",
+                                                onclick: move |_| remove_trusted_relay(index),
+                                                "✕"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    div { class: "flex gap-2",
+                        input {
+                            class: "flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                            r#type: "text",
+                            placeholder: "wss://relay.example.com",
+                            value: "{new_trusted_relay}",
+                            oninput: move |evt| new_trusted_relay.set(evt.value()),
+                        }
+                        button {
+                            class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition",
+                            onclick: add_trusted_relay,
+                            "+ Add"
+                        }
+                    }
+                    if let Some(err) = trusted_error.read().as_ref() {
+                        div { class: "mt-2 p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
+                            "{err}"
+                        }
+                    }
+                }
+            }
+            if auth.is_authenticated {
+                div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                    div { class: "flex items-center justify-between mb-4",
+                        div {
+                            h3 { class: "text-lg font-semibold text-gray-900 dark:text-white",
                                 "Local Relays"
                             }
                             p { class: "text-xs text-gray-500 dark:text-gray-400 mt-1",
@@ -1056,7 +1619,7 @@ pub fn SettingsRelays() -> Element {
                         }
                     }
                     p { class: "text-xs text-gray-500 dark:text-gray-400 mt-3 text-center",
-                        "This publishes your General, DM, Search, and Blocked relay lists to Nostr. Local and Broadcast relays are stored locally on this device."
+                        "Publishes General, DM, Search, Blocked, Indexer, Outbox, Favorites, Proxy, and Trusted relay lists. Local and Broadcast relays are stored locally on this device."
                     }
                 }
             }

@@ -271,7 +271,7 @@ pub async fn execute_mpp_melt(
             .as_nostr_signer();
         let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
         let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
-        let client = nostr_client::NOSTR_CLIENT
+        let _client = nostr_client::NOSTR_CLIENT
             .read()
             .as_ref()
             .ok_or("Client not initialized")?
@@ -315,15 +315,19 @@ pub async fn execute_mpp_melt(
                         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
                     let builder =
                         nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-                    match client
-                        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
-                            builder.clone(),
-                        ))
-                        .await
-                    {
-                        Ok(event_output) if !event_output.success.is_empty() => {
-                            let real_id = event_output.id().to_hex();
-                            log::info!("Published MPP token event for {}: {}", mint_url, real_id);
+                    match crate::stores::publish_queue::signing::sign_event_builder(builder.clone()).await {
+                        Ok(signed_event) => {
+                            let real_id = signed_event.id.to_hex();
+                            log::info!("Queued MPP token event for {}: {}", mint_url, real_id);
+                            let mut metadata = std::collections::HashMap::new();
+                            metadata.insert("pending_token_id".to_string(), real_id.clone());
+                            metadata.insert("mint_url".to_string(), mint_url.clone());
+                            crate::stores::publish_queue::enqueue(
+                                signed_event,
+                                crate::stores::publish_queue::types::QueueEventType::Cashu,
+                                None,
+                                metadata,
+                            ).await;
                             new_event_ids.push(real_id.clone());
                             new_tokens.push(TokenData {
                                 event_id: real_id,
@@ -333,37 +337,9 @@ pub async fn execute_mpp_melt(
                                 created_at: super::proofs::now_secs(),
                             });
                         }
-                        Ok(_) => {
-                            log::warn!(
-                                "No relays accepted MPP token event for {}, queuing for retry",
-                                mint_url
-                            );
-                            let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
-                            if let Err(queue_err) = queue_event_for_retry(
-                                builder,
-                                PendingEventType::TokenEvent,
-                                Some(pending_id.clone()),
-                                Some(mint_url.clone()),
-                            )
-                            .await
-                            {
-                                log::error!(
-                                    "Failed to queue MPP token event for retry: {}",
-                                    queue_err
-                                );
-                            }
-                            new_tokens.push(TokenData {
-                                event_id: pending_id,
-                                mint: mint_url.clone(),
-                                unit: "sat".to_string(),
-                                proofs: proof_data,
-                                created_at: super::proofs::now_secs(),
-                            });
-                            publish_failures += 1;
-                        }
                         Err(e) => {
                             log::warn!(
-                                "Failed to publish MPP token event for {}, queuing for retry: {}",
+                                "Failed to sign MPP token event for {}, queuing unsigned: {}",
                                 mint_url,
                                 e
                             );
@@ -434,39 +410,21 @@ pub async fn execute_mpp_melt(
                 ));
                 let deletion_builder =
                     nostr_sdk::EventBuilder::new(Kind::from(5), "MPP melted tokens").tags(tags);
-                match client
-                    .send_event_builder(crate::utils::nips::nip89::tag_event_builder(
-                        deletion_builder.clone(),
-                    ))
-                    .await
-                {
-                    Ok(output) if !output.success.is_empty() => {
+                match crate::stores::publish_queue::signing::sign_event_builder(deletion_builder.clone()).await {
+                    Ok(signed_event) => {
+                        crate::stores::publish_queue::enqueue(
+                            signed_event,
+                            crate::stores::publish_queue::types::QueueEventType::Cashu,
+                            None,
+                            std::collections::HashMap::new(),
+                            ).await;
                         log::info!(
-                            "Published MPP deletion events for {} token events",
+                            "Queued MPP deletion events for {} token events",
                             valid_event_ids.len()
                         );
                     }
-                    Ok(_) => {
-                        log::warn!("No relays accepted MPP deletion event, will queue for retry");
-                        if let Err(queue_err) = queue_event_for_retry(
-                            deletion_builder,
-                            PendingEventType::DeletionEvent,
-                            None,
-                            None,
-                        )
-                        .await
-                        {
-                            log::error!(
-                                "Failed to queue MPP deletion event for retry: {}",
-                                queue_err
-                            );
-                        }
-                    }
                     Err(e) => {
-                        log::warn!(
-                            "Failed to publish MPP deletion event, will queue for retry: {}",
-                            e
-                        );
+                        log::warn!("Failed to sign MPP deletion event, queuing unsigned: {}", e);
                         if let Err(queue_err) = queue_event_for_retry(
                             deletion_builder,
                             PendingEventType::DeletionEvent,

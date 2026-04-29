@@ -8,10 +8,11 @@ pub mod cashu;
 pub mod citation;
 pub mod client_initializing;
 pub mod code;
-pub mod comment_composer;
+pub mod composer_body;
 pub mod confirm_modal;
 pub mod content_menu;
 pub mod dvm_selector_modal;
+pub mod draft_discard_modal;
 pub mod edit_post;
 pub mod edit_proposal;
 pub mod edit_status;
@@ -48,6 +49,7 @@ pub mod rich_content;
 pub mod right_discovery_sidebar;
 pub mod search_input;
 pub mod share_modal;
+pub mod sensitive_content;
 pub mod sheet;
 pub mod shop;
 pub mod threaded_comment;
@@ -70,7 +72,7 @@ pub use ai_settings_panel::AiSettingsPanel;
 pub use article_card::{ArticleCard, ArticleCardSkeleton};
 pub use article_content::ArticleContent;
 pub use client_initializing::ClientInitializing;
-pub use comment_composer::CommentComposer;
+pub use composer_body::ComposerBody;
 pub use confirm_modal::ConfirmModal;
 #[allow(unused_imports)]
 pub use live::{
@@ -82,11 +84,14 @@ pub use mobile_search_slideout::MobileSearchSlideout;
 pub use note_card::{NoteCard, NoteCardSkeleton};
 pub use note_composer::NoteComposer;
 pub use photo_card::PhotoCard;
+pub use draft_discard_modal::DraftDiscardModal;
 #[allow(unused_imports)]
 pub use ppq_settings_panel::PpqSettingsPanel;
 pub use reply_composer::ReplyComposer;
 pub use rich_content::RichContent;
 pub use search_input::SearchInput;
+#[allow(unused_imports)]
+pub use sensitive_content::SensitiveContent;
 #[allow(unused_imports)]
 pub use sheet::{
     Sheet, SheetClose, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetSide,
@@ -178,6 +183,8 @@ pub mod topic;
 pub use topic::{
     ThreadView, TopicBadge, TopicCard, TopicPostCard, TopicPostComposer, TopicSidebar, VoteColumn,
 };
+pub mod publish_queue_indicator;
+pub use publish_queue_indicator::PublishQueueIndicator;
 pub mod pwa_update_banner;
 pub use pwa_update_banner::PwaUpdateBanner;
 

@@ -60,7 +60,7 @@ mod contacts;
 mod custom_nips;
 pub mod edits;
 mod error;
-mod fetching;
+pub mod fetching;
 mod media;
 mod muting;
 mod notes;
@@ -94,9 +94,14 @@ pub use custom_nips::{
 pub use edits::{publish_edit, EditPublishResult};
 pub use error::Error;
 pub use fetching::{
-    fetch_events_aggregated, fetch_events_aggregated_outbox, fetch_events_from_connected_relays,
-    fetch_events_from_relays, fetch_profile_events_db, fetch_profile_events_from_relays,
+    fetch_event_targeted, fetch_events_aggregated, fetch_events_aggregated_outbox,
+    fetch_events_from_connected_relays, fetch_events_from_relays, fetch_metadata_targeted,
+    fetch_profile_events_db, fetch_profile_events_from_relays, fetch_profile_events_targeted,
+    parse_event_id, ParsedEventId,
 };
+pub(crate) use fetching::fetch_events_from_connected_relays_with_client;
+#[cfg(feature = "native")]
+pub use fetching::fetch_events_ndb_first;
 pub use media::{
     publish_picture, publish_picture_tracked, publish_video, publish_video_tracked,
     publish_voice_message, publish_voice_message_reply, publish_voice_message_reply_tracked,
@@ -122,8 +127,8 @@ pub use relay_publishing::{
 };
 pub use reposts::{delete_repost, publish_repost, publish_repost_tracked};
 pub use signals::{
-    invalidate_contacts_cache, invalidate_mute_block_cache, CLIENT_INITIALIZED, CURRENT_SIGNER,
-    HAS_SIGNER, MUTE_BLOCK_INVALIDATE, NOSTR_CLIENT,
+    get_contacts_cache, invalidate_contacts_cache, invalidate_mute_block_cache, CLIENT_INITIALIZED,
+    CURRENT_SIGNER, HAS_SIGNER, MUTE_BLOCK_INVALIDATE, NOSTR_CLIENT,
 };
 pub use streaming::{
     stream_events_batched, stream_events_collected, stream_events_from_connected_relays_batched,
@@ -138,13 +143,10 @@ pub async fn platform_sleep_ms(ms: u64) {
     #[cfg(not(target_arch = "wasm32"))]
     tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
 }
-/// Discovery relays for gossip model fallback
-/// These are used by the SDK to find users' relay lists (NIP-65/NIP-17)
-/// when gossip data is outdated or missing
-const DISCOVERY_RELAYS: &[&str] = &[
-    "wss://relay.damus.io",
+const DEFAULT_DISCOVERY_RELAYS: &[&str] = &[
     "wss://purplepag.es",
-    "wss://nos.lol",
+    "wss://relay.nos.social",
+    "wss://relay.damus.io",
 ];
 /// Initialize the Nostr client and connect to relays
 pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
@@ -193,8 +195,26 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
         std::fs::create_dir_all(&db_path)
             .map_err(|e| format!("Failed to create NDB dir: {}", e))?;
         let db_path_str = db_path.to_string_lossy().to_string();
-        let database =
-            NdbDatabase::open(&db_path_str).map_err(|e| format!("Failed to open NDB: {}", e))?;
+
+        let (wake_tx, wake_rx) = std::sync::mpsc::channel::<()>();
+        let wake_tx = std::sync::Mutex::new(wake_tx);
+
+        let config = nostrdb::Config::new()
+            .set_ingester_threads(2)
+            .set_mapsize(1024usize * 1024 * 1024 * 1024)
+            .set_sub_callback(move |_sub_id: u64| {
+                let _ = wake_tx.lock().unwrap().send(());
+            });
+
+        let ndb = nostrdb::Ndb::new(&db_path_str, &config)
+            .map_err(|e| format!("Failed to open NDB: {}", e))?;
+        let database = NdbDatabase::from(ndb);
+
+        let raw_db = database.clone();
+        crate::stores::ndb::set_ndb(raw_db)
+            .map_err(|_| "NDB already initialized".to_string())?;
+        crate::stores::ndb::worker::set_wake_receiver(wake_rx);
+
         let gossip = nostr_gossip_memory::store::NostrGossipMemory::bounded(
             NonZeroUsize::new(10_000).expect("10_000 is non-zero"),
         );
@@ -249,8 +269,14 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
     RELAY_POOL.read().data().write().clone_from(&relay_infos);
     *NOSTR_CLIENT.write() = Some(client.clone());
     log::info!("Adding discovery relays for gossip...");
-    for discovery_url in DISCOVERY_RELAYS {
-        if let Err(e) = client.add_discovery_relay(*discovery_url).await {
+    let discovery_urls = crate::stores::relay::nip65::get_indexer_relay_urls();
+    let discovery_urls = if discovery_urls.is_empty() {
+        DEFAULT_DISCOVERY_RELAYS.iter().map(|s| s.to_string()).collect::<Vec<_>>()
+    } else {
+        discovery_urls
+    };
+    for discovery_url in &discovery_urls {
+        if let Err(e) = client.add_discovery_relay(discovery_url).await {
             log::warn!("Failed to add discovery relay {}: {}", discovery_url, e);
         }
     }
@@ -281,6 +307,36 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
         });
     }
     *CLIENT_INITIALIZED.write() = true;
+    #[cfg(feature = "native")]
+    {
+        if crate::stores::ndb::get_ndb().is_some() {
+            if let Err(e) = crate::stores::ndb::start_ndb_worker() {
+                log::error!("Failed to start NdbWorker: {}", e);
+            }
+            crate::stores::ndb::start_ndb_event_processor();
+            spawn_forever(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    let mut ids = {
+                        let mut guard = crate::stores::ndb::unknown_ids::UNKNOWN_IDS.lock().unwrap();
+                        std::mem::take(&mut *guard)
+                    };
+                    if !ids.is_empty() {
+                        let _ = ids.process_queued_events().await;
+                        if ids.ready_to_send() {
+                            if let Some(c) = crate::stores::nostr_client::get_client() {
+                                let _ = ids.send_and_clear(&c).await;
+                            }
+                        }
+                    }
+                    {
+                        let mut guard = crate::stores::ndb::unknown_ids::UNKNOWN_IDS.lock().unwrap();
+                        std::mem::swap(&mut *guard, &mut ids);
+                    }
+                }
+            });
+        }
+    }
     relay::start_health_poll(client.clone());
     crate::stores::notification_dispatcher::NotificationDispatcher::init(client.clone());
     if let Some(dispatcher) = crate::stores::notification_dispatcher::NotificationDispatcher::instance() {
@@ -313,20 +369,30 @@ pub async fn set_signer(signer: SignerType) -> std::result::Result<(), String> {
     let client_clone = client.clone();
     spawn_forever(async move {
         relay::apply_local_relays_to_client(client_clone.clone()).await;
-        *relay::USER_RELAYS_APPLIED.write() = true;
-        log::info!("User relays applied, feed fetching unblocked");
         if let Err(e) = relay::init_user_relay_lists(client_clone.clone()).await {
             log::warn!("Failed to load user relay lists: {}", e);
         }
+        *relay::USER_RELAYS_APPLIED.write() = true;
+        log::info!("User relays applied, feed fetching unblocked");
         if let Err(e) = relay::init_nip51_relay_lists(client_clone.clone()).await {
             log::warn!("Failed to load NIP-51 relay lists: {}", e);
         }
+        if let Err(e) = relay::init_private_relay_lists(client_clone.clone()).await {
+            log::warn!("Failed to load private relay lists: {}", e);
+        }
+        relay::nip65::add_indexer_relays_to_client(client_clone.clone()).await;
         relay::pool::remove_blocked_relays_from_pool(&client_clone).await;
+        relay::nip65::fetch_own_lists_from_indexers(client_clone.clone()).await;
     });
     spawn_forever(async move {
         if let Err(e) = pinned_notes::init_pinned_notes().await {
             log::warn!("Failed to load user pinned notes: {}", e);
         }
+    });
+    spawn_forever(async move {
+        crate::stores::publish_queue::load_from_storage().await;
+        crate::stores::publish_queue::start_processor();
+        log::info!("Publish queue loaded and processor started");
     });
     log::info!("Signer updated successfully");
     Ok(())
@@ -338,6 +404,10 @@ pub async fn set_read_only() -> std::result::Result<(), String> {
     client.unset_signer().await;
     *HAS_SIGNER.write() = false;
     *CURRENT_SIGNER.write() = None;
+    if let Err(e) = crate::stores::publish_queue::processor::process_once_guarded().await {
+        log::warn!("Flush before read-only failed: {}", e);
+    }
+    crate::stores::publish_queue::stop_processor();
     log::info!("Switched to read-only mode");
     Ok(())
 }

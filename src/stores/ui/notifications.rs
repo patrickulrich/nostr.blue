@@ -3,7 +3,9 @@ use crate::stores::{auth_store, nostr_client, settings_store, subscription_manag
 use crate::utils::notification_nip78;
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
-use nostr_sdk::{Filter, FromBech32, Kind, PublicKey, SubscriptionId};
+use nostr_sdk::{
+    Filter, FromBech32, Kind, PublicKey, SingleLetterTag, SubscriptionId, Alphabet, EventId,
+};
 const NOTIFICATIONS_CHECKED_AT_KEY: &str = "notifications_checked_at";
 /// Minimum interval between NIP-78 publishes (10 minutes)
 const PUBLISH_THROTTLE_SECONDS: i64 = 10 * 60;
@@ -82,7 +84,7 @@ async fn publish_checked_at_if_enabled(timestamp: i64) {
         );
         return;
     }
-    let client = match nostr_client::get_client() {
+    let _client = match nostr_client::get_client() {
         Some(c) => c,
         None => {
             log::error!("No client available for NIP-78 publish");
@@ -90,21 +92,20 @@ async fn publish_checked_at_if_enabled(timestamp: i64) {
         }
     };
     let builder = notification_nip78::create_checked_at_event(timestamp);
-    match client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
-        .await
-    {
-        Ok(output) => {
-            log::info!(
-                "Published notification checked_at to NIP-78: {}",
-                output.id()
-            );
-            *LAST_PUBLISHED_AT.write() = timestamp;
-        }
+    let event = match crate::stores::publish_queue::signing::sign_event_builder(builder).await {
+        Ok(e) => e,
         Err(e) => {
-            log::error!("Failed to publish checked_at to NIP-78: {}", e);
+            log::error!("Failed to sign checked_at: {}", e);
+            return;
         }
-    }
+    };
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("notification".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    *LAST_PUBLISHED_AT.write() = timestamp;
 }
 /// Fetch and merge notification checked_at from NIP-78 relays
 /// Merges relay timestamp with localStorage (uses maximum of both)
@@ -255,6 +256,7 @@ pub async fn start_realtime_subscription() {
             SUBSCRIPTION_ID.write().replace(sub_id.clone());
             log::info!("Real-time notification subscription started: {:?}", sub_id);
             let my_pubkey_clone = my_pubkey;
+            let client_for_etag = client.clone();
             spawn(async move {
                 let mut notifications = client.notifications();
                 while let Ok(notification) = notifications.recv().await {
@@ -288,6 +290,10 @@ pub async fn start_realtime_subscription() {
                 );
                 *SUBSCRIPTION_ID.write() = None;
             });
+
+            spawn(async move {
+                spawn_etag_qtag_subscriptions(client_for_etag, my_pubkey_clone).await;
+            });
         }
         Err(e) => {
             log::error!("Failed to start notification subscription: {}", e);
@@ -304,4 +310,61 @@ pub async fn stop_realtime_subscription() {
         }
         *SUBSCRIPTION_ID.write() = None;
     }
+}
+
+async fn spawn_etag_qtag_subscriptions(client: std::sync::Arc<nostr_sdk::Client>, my_pubkey: PublicKey) {
+    let my_event_ids: Vec<EventId> = {
+        let filter = Filter::new()
+            .author(my_pubkey)
+            .kinds(vec![Kind::TextNote, Kind::Custom(20), Kind::LongFormTextNote])
+            .limit(500);
+        match client
+            .fetch_events(filter, std::time::Duration::from_secs(5))
+            .await
+        {
+            Ok(events) => events.into_iter().map(|e| e.id).collect(),
+            Err(e) => {
+                log::warn!("Failed to fetch own event IDs for e-tag/q-tag subscriptions: {}", e);
+                return;
+            }
+        }
+    };
+
+    if my_event_ids.is_empty() {
+        return;
+    }
+
+    let since = get_checked_at();
+    let since_ts = nostr_sdk::Timestamp::from(since as u64);
+
+    for chunk in my_event_ids.chunks(50) {
+        let reply_filter = Filter::new()
+            .kind(Kind::TextNote)
+            .events(chunk.to_vec())
+            .since(since_ts)
+            .limit(100);
+        if let Err(e) = subscription_manager::subscribe_realtime(&client, reply_filter, Some(600))
+            .await
+        {
+            log::debug!("Failed to subscribe for e-tag replies: {}", e);
+        }
+
+        let quote_filter = Filter::new()
+            .kind(Kind::TextNote)
+            .custom_tags(
+                SingleLetterTag::lowercase(Alphabet::Q),
+                chunk.iter().map(|id| id.to_hex()),
+            )
+            .since(since_ts)
+            .limit(100);
+        if let Err(e) = subscription_manager::subscribe_realtime(&client, quote_filter, Some(600))
+            .await
+        {
+            log::debug!("Failed to subscribe for q-tag quotes: {}", e);
+        }
+    }
+    log::info!(
+        "Started e-tag/q-tag subscriptions for {} own events",
+        my_event_ids.len()
+    );
 }

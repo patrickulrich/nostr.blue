@@ -49,6 +49,7 @@ pub enum SidebarItem {
     Photos,
     Videos,
     Live,
+    Verts,
     Notifications,
     Messages,
     Bookmarks,
@@ -121,6 +122,7 @@ impl SidebarItem {
                 | SidebarItem::Trending
                 | SidebarItem::Nips
                 | SidebarItem::Dvm
+                | SidebarItem::Blobbi
         )
     }
     /// Human-readable display label
@@ -133,6 +135,7 @@ impl SidebarItem {
             SidebarItem::Photos => "Photos",
             SidebarItem::Videos => "Videos",
             SidebarItem::Live => "Live",
+            SidebarItem::Verts => "Verts",
             SidebarItem::Notifications => "Notifications",
             SidebarItem::Messages => "Messages",
             SidebarItem::Bookmarks => "Bookmarks",
@@ -186,6 +189,7 @@ impl SidebarItem {
             SidebarItem::Photos => Some(Route::Photos {}),
             SidebarItem::Videos => Some(Route::Videos {}),
             SidebarItem::Live => Some(Route::VideosLive {}),
+            SidebarItem::Verts => Some(Route::VideosVerts {}),
             SidebarItem::Notifications => Some(Route::Notifications {}),
             SidebarItem::Messages => Some(Route::DMs {}),
             SidebarItem::Bookmarks => Some(Route::Bookmarks {}),
@@ -200,9 +204,9 @@ impl SidebarItem {
             SidebarItem::Radio => Some(Route::RadioHome {}),
             #[cfg(feature = "cashu")]
             SidebarItem::Wallet => Some(Route::CashuWallet {}),
-            #[cfg(not(feature = "cashu"))]
-            SidebarItem::Wallet => None,
-            SidebarItem::P2PTrading => Some(Route::P2PHome {}),
+        #[cfg(not(feature = "cashu"))]
+        SidebarItem::Wallet => None,
+        SidebarItem::P2PTrading => Some(Route::P2PHome {}),
             SidebarItem::Communities => Some(Route::Communities {}),
             SidebarItem::Topics => Some(Route::TopicsHome {}),
             SidebarItem::Events => Some(Route::Events {}),
@@ -293,41 +297,42 @@ pub fn default_sidebar_items() -> Vec<SidebarItem> {
     vec![
         SidebarItem::Home,
         SidebarItem::Explore,
-        SidebarItem::Articles,
         SidebarItem::Music,
         SidebarItem::Podcasts,
         SidebarItem::Photos,
-        SidebarItem::Videos,
+        SidebarItem::Verts,
         SidebarItem::Events,
-        SidebarItem::Lists,
-        SidebarItem::Packs,
+        SidebarItem::AIChat,
+        SidebarItem::PinBoards,
         SidebarItem::Notifications,
-        SidebarItem::Messages,
         SidebarItem::Profile,
+        SidebarItem::Settings,
+        SidebarItem::Packs,
+        SidebarItem::Messages,
+        SidebarItem::Articles,
+        SidebarItem::Shop,
+        SidebarItem::Communities,
+        SidebarItem::Topics,
+        SidebarItem::Radio,
+        SidebarItem::Videos,
+        SidebarItem::Live,
+        SidebarItem::Bible,
         SidebarItem::P2PTrading,
         SidebarItem::VoiceMessages,
         SidebarItem::Polls,
         SidebarItem::Chats,
-        SidebarItem::Communities,
-        SidebarItem::Topics,
-        SidebarItem::Radio,
-        SidebarItem::PinBoards,
-        SidebarItem::Wiki,
-        SidebarItem::Code,
+        SidebarItem::Lists,
         SidebarItem::Recipes,
-        SidebarItem::Shop,
-        SidebarItem::Settings,
-        SidebarItem::Live,
+        SidebarItem::Wiki,
         SidebarItem::Bookmarks,
         #[cfg(feature = "cashu")]
         SidebarItem::Wallet,
         SidebarItem::Calendar,
         SidebarItem::Badges,
+        SidebarItem::Code,
         SidebarItem::Publications,
         SidebarItem::Blossom,
-        SidebarItem::Bible,
         SidebarItem::Highlights,
-        SidebarItem::AIChat,
     ]
 }
 /// Global state for sidebar items
@@ -486,8 +491,13 @@ pub async fn load_sidebar_preferences() {
             }
         }
     }
-    nostr_client::ensure_relays_ready(&client).await;
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
+    match nostr_client::fetch_events_from_connected_relays_with_client(
+        &client,
+        filter,
+        Duration::from_secs(10),
+    )
+    .await
+    {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 log::info!("Found sidebar preference event from relays: {}", event.id);
@@ -568,11 +578,15 @@ pub async fn save_sidebar_preferences(
         .map_err(|e| format!("Failed to serialize sidebar data: {}", e))?;
     let builder =
         EventBuilder::new(Kind::from(APP_DATA_KIND), content).tag(Tag::identifier(SIDEBAR_D_TAG));
-    client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish sidebar preferences: {}", e))?;
-    log::info!("Sidebar preferences saved to Nostr successfully");
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("sidebar".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     cache_sidebar(&data);
     *SIDEBAR_ITEMS.write() = items;
     *SIDEBAR_SLOT_COUNT.write() = items_per_page;

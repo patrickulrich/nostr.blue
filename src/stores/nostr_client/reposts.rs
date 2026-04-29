@@ -41,22 +41,25 @@ pub async fn publish_repost_tracked(
         None => None,
     };
     let builder = nostr::EventBuilder::repost(&event, relay);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let signed_event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish repost: {}", e))?;
-    let result = PublishResult::from_output(output);
-    log::info!(
-        "Repost published: {} ({}/{} relays succeeded)",
-        result.event_id,
-        result.success_count(),
-        result.total_attempted()
-    );
-    if result.has_failures() {
-        for (relay, error) in &result.failed_relays {
-            log::warn!("Relay {} failed: {}", relay, error);
-        }
-    }
+        .map_err(|e| format!("Failed to sign repost: {}", e))?;
+    let event_id = signed_event.id.to_hex();
+    let write_relays: Vec<String> = client
+        .pool()
+        .__write_relay_urls()
+        .await
+        .into_iter()
+        .map(|u| u.to_string())
+        .collect();
+    let queue_id = crate::stores::publish_queue::enqueue(
+        signed_event,
+        crate::stores::publish_queue::types::QueueEventType::Repost,
+        Some(write_relays),
+        std::collections::HashMap::new(),
+    ).await;
+    let result = PublishResult::queued(queue_id, event_id);
+    log::info!("Repost queued: {}", result.event_id);
     Ok(result)
 }
 /// Publish a repost (kind 6 event) of another event
@@ -84,10 +87,22 @@ pub async fn delete_repost(repost_event_id: String) -> std::result::Result<(), S
         nostr::TagKind::k(),
         vec![nostr::Kind::Repost.as_u16().to_string()],
     ));
-    client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let signed_event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish deletion: {}", e))?;
-    log::info!("Repost deleted successfully");
+        .map_err(|e| format!("Failed to sign deletion: {}", e))?;
+    let write_relays: Vec<String> = client
+        .pool()
+        .__write_relay_urls()
+        .await
+        .into_iter()
+        .map(|u| u.to_string())
+        .collect();
+    crate::stores::publish_queue::enqueue(
+        signed_event,
+        crate::stores::publish_queue::types::QueueEventType::Repost,
+        Some(write_relays),
+        std::collections::HashMap::new(),
+    ).await;
+    log::info!("Repost deletion queued");
     Ok(())
 }

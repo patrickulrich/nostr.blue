@@ -6,7 +6,7 @@ use crate::utils::article_meta::get_identifier;
 use crate::utils::FeedItem;
 use dioxus::prelude::*;
 use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum FeedType {
@@ -103,7 +103,9 @@ pub fn Articles() -> Element {
                         cache_key.clone()
                     };
                     if let Some(last_event) = feed_events.last() {
-                        oldest_timestamp.set(Some(last_event.created_at.as_secs()));
+                        oldest_timestamp.set(Some(
+                            last_event.created_at.as_secs().saturating_sub(1),
+                        ));
                     }
                     let feed_items: Vec<FeedItem> = feed_events
                         .iter()
@@ -154,13 +156,21 @@ pub fn Articles() -> Element {
                 FeedType::Global => load_articles(until).await,
             };
             match result {
-                Ok(mut new_articles) => {
+                Ok(new_articles) => {
                     if let Some(last_event) = new_articles.last() {
-                        oldest_timestamp.set(Some(last_event.created_at.as_secs()));
+                        oldest_timestamp.set(Some(
+                            last_event.created_at.as_secs().saturating_sub(1),
+                        ));
                     }
                     has_more.set(new_articles.len() >= 20);
                     let mut current = articles.read().clone();
-                    current.append(&mut new_articles);
+                    let existing_ids: HashSet<_> =
+                        current.iter().map(|e| e.id).collect();
+                    for article in new_articles {
+                        if !existing_ids.contains(&article.id) {
+                            current.push(article);
+                        }
+                    }
                     articles.set(current);
                     loading.set(false);
                 }

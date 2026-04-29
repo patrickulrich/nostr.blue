@@ -1,4 +1,4 @@
-use crate::components::{ClientInitializing, CommentComposer, PhotoCard, ThreadedComment};
+use crate::components::{ClientInitializing, ReplyComposer, PhotoCard, ThreadedComment};
 use crate::hooks::use_relay_subscription;
 use crate::stores::nostr_client;
 use crate::utils::build_thread_tree;
@@ -178,9 +178,9 @@ pub fn PhotoDetail(photo_id: String) -> Element {
                         }
                     }
                     if *show_comment_composer.read() {
-                        CommentComposer {
-                            comment_on: event.clone(),
-                            parent_comment: None,
+                        ReplyComposer {
+                            target: event.clone(),
+                            root_event: None,
                             on_close: move |_| show_comment_composer.set(false),
                             on_success: move |_| {
                                 show_comment_composer.set(false);

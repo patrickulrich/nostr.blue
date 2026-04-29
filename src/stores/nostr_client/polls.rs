@@ -1,10 +1,8 @@
 //! Polls (kind 1068)
 //!
 //! Functions for creating and voting on polls (NIP-88).
-use super::fetching::{ensure_relays_ready, get_client};
 use super::signals::HAS_SIGNER;
 use super::types::PublishResult;
-use crate::stores::relay;
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
 /// Get user's public key from cache (no signer call needed)
@@ -26,7 +24,6 @@ pub async fn publish_poll_vote_tracked(
     response: nostr::nips::nip88::PollResponse,
     poll_relays: Vec<nostr::RelayUrl>,
 ) -> std::result::Result<PublishResult, String> {
-    let client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
@@ -47,72 +44,23 @@ pub async fn publish_poll_vote_tracked(
     }
     log::info!("Publishing poll vote for poll: {}", poll_id.to_hex());
     let builder = nostr::EventBuilder::poll_response(response);
-    let output = if !poll_relays.is_empty() {
-        let added_relays = relay::add_relays(&client, &poll_relays).await;
-        ensure_relays_ready(&client).await;
-        let connected_poll_relays = relay::get_connected(&client, &poll_relays).await;
-        if connected_poll_relays.is_empty() {
-            log::warn!(
-                "None of the {} poll relays are connected, falling back to default relays",
-                poll_relays.len()
-            );
-        } else {
-            log::debug!(
-                "{}/{} poll relays connected",
-                connected_poll_relays.len(),
-                poll_relays.len()
-            );
-        }
-        let relay_urls: Vec<nostr::Url> = if !connected_poll_relays.is_empty() {
-            connected_poll_relays
-                .iter()
-                .filter_map(|r| nostr::Url::parse(r.as_str()).ok())
-                .collect()
-        } else {
-            vec![]
-        };
-        let result = if !relay_urls.is_empty() {
-            log::info!(
-                "Publishing vote to {} connected poll relays",
-                relay_urls.len()
-            );
-            client
-                .send_event_builder_to(
-                    relay_urls,
-                    crate::utils::nips::nip89::tag_event_builder(builder),
-                )
-                .await
-                .map_err(|e| format!("Failed to publish poll vote to poll relays: {}", e))
-        } else {
-            client
-                .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
-                .await
-                .map_err(|e| format!("Failed to publish poll vote: {}", e))
-        };
-        relay::remove_relays(&client, &added_relays).await;
-        result?
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
+        .await
+        .map_err(|e| format!("Failed to sign poll vote: {}", e))?;
+    let event_id = event.id.to_hex();
+    let target_relays: Option<Vec<String>> = if !poll_relays.is_empty() {
+        Some(poll_relays.iter().map(|r| r.to_string()).collect())
     } else {
-        client
-            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
-            .await
-            .map_err(|e| format!("Failed to publish poll vote: {}", e))?
+        None
     };
-    if output.success.is_empty() {
-        return Err("No relays accepted event".to_string());
-    }
-    let result = PublishResult::from_output(output);
-    log::info!(
-        "Poll vote published: {} ({}/{} relays succeeded)",
-        result.event_id,
-        result.success_count(),
-        result.total_attempted()
-    );
-    if result.has_failures() {
-        for (relay, error) in &result.failed_relays {
-            log::warn!("Relay {} failed: {}", relay, error);
-        }
-    }
-    Ok(result)
+    let queue_id = crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Poll,
+        target_relays,
+        std::collections::HashMap::new(),
+    ).await;
+    log::info!("Poll vote enqueued: {} (queue: {})", event_id, queue_id);
+    Ok(PublishResult::queued(queue_id, event_id))
 }
 /// Publish a poll vote (Kind 1018) following NIP-88
 /// For relay feedback, use publish_poll_vote_tracked instead
@@ -135,7 +83,6 @@ pub async fn publish_poll_tracked(
     ends_at: Option<nostr::Timestamp>,
     hashtags: Vec<String>,
 ) -> std::result::Result<PublishResult, String> {
-    let client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
@@ -169,63 +116,28 @@ pub async fn publish_poll_tracked(
     use nostr::Tag;
     let hashtag_tags: Vec<Tag> = hashtags.into_iter().map(Tag::hashtag).collect();
     let builder = nostr::EventBuilder::poll(poll).tags(hashtag_tags);
-    let output = if !relay_urls.is_empty() {
-        let added_relays = relay::add_relays(&client, &relay_urls).await;
-        ensure_relays_ready(&client).await;
-        let connected_poll_relays = relay::get_connected(&client, &relay_urls).await;
-        if connected_poll_relays.is_empty() {
-            log::warn!(
-                "None of the {} poll relays are connected, falling back to default relays",
-                relay_urls.len()
-            );
-        } else {
-            log::debug!(
-                "{}/{} poll relays connected",
-                connected_poll_relays.len(),
-                relay_urls.len()
-            );
-        }
-        let result = if !connected_poll_relays.is_empty() {
-            let urls: Vec<nostr::Url> = connected_poll_relays
-                .iter()
-                .filter_map(|r| nostr::Url::parse(r.as_str()).ok())
-                .collect();
-            log::info!("Publishing poll to {} connected poll relays", urls.len());
-            client
-                .send_event_builder_to(urls, crate::utils::nips::nip89::tag_event_builder(builder))
-                .await
-                .map_err(|e| format!("Failed to publish poll to specified relays: {}", e))
-        } else {
-            client
-                .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
-                .await
-                .map_err(|e| format!("Failed to publish poll: {}", e))
-        };
-        relay::remove_relays(&client, &added_relays).await;
-        result?
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
+        .await
+        .map_err(|e| format!("Failed to sign poll: {}", e))?;
+    let event_id = event.id.to_hex();
+    let target_relays: Option<Vec<String>> = if !relay_urls.is_empty() {
+        Some(relay_urls.iter().map(|r| r.to_string()).collect())
     } else {
-        client
-            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
-            .await
-            .map_err(|e| format!("Failed to publish poll: {}", e))?
+        None
     };
-    if output.success.is_empty() {
-        return Err("No relays accepted event".to_string());
-    }
-    let result = PublishResult::from_output(output);
+    let queue_id = crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Poll,
+        target_relays,
+        std::collections::HashMap::new(),
+    ).await;
     log::info!(
-        "Poll '{}' published: {} ({}/{} relays succeeded)",
+        "Poll '{}' enqueued: {} (queue: {})",
         title,
-        result.event_id,
-        result.success_count(),
-        result.total_attempted()
+        event_id,
+        queue_id
     );
-    if result.has_failures() {
-        for (relay, error) in &result.failed_relays {
-            log::warn!("Relay {} failed: {}", relay, error);
-        }
-    }
-    Ok(result)
+    Ok(PublishResult::queued(queue_id, event_id))
 }
 /// Publish a poll (Kind 1068) following NIP-88
 /// For relay feedback, use publish_poll_tracked instead

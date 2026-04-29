@@ -13,6 +13,7 @@ use crate::stores::{auth_store, nostr_client, wiki_store};
 use crate::utils::nip54::normalize_wiki_dtag;
 use dioxus::events::{KeyboardData, MouseData};
 use dioxus::prelude::*;
+use nostr::ToBech32;
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 #[cfg(feature = "web")]
@@ -181,7 +182,13 @@ pub fn WikiNew() -> Element {
             {
                 Ok(naddr) => {
                     log::info!("Published wiki page: {}", naddr);
+                    let author_npub = crate::stores::auth_store::AUTH_STATE.read().pubkey
+                        .as_ref()
+                        .and_then(|hex| nostr::PublicKey::from_hex(hex).ok())
+                        .and_then(|pk| pk.to_bech32().ok())
+                        .unwrap_or_default();
                     nav.push(Route::WikiDetail {
+                        npub: author_npub,
                         identifier: identifier_val,
                     });
                 }

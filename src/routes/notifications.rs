@@ -1,11 +1,15 @@
-use crate::components::{ClientInitializing, NoteCard};
+use crate::components::{
+    ArticleCard, ClientInitializing, NoteCard, PhotoCard, PollCard, VideoCard,
+    VoiceMessageCard,
+};
 use crate::error::NostrBlueError;
 use crate::hooks::{use_infinite_scroll, use_mute_block_cache};
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, notifications as notif_store, profiles};
 use crate::utils::bolt11::parse_bolt11_amount;
 use dioxus::prelude::*;
-use nostr_sdk::{Event as NostrEvent, Filter, Kind, Timestamp};
+use nostr_sdk::ToBech32;
+use nostr_sdk::{Event as NostrEvent, Filter, Kind, TagStandard, Timestamp};
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::Duration;
@@ -16,6 +20,7 @@ enum NotificationType {
     Reply(NostrEvent),
     Reaction(NostrEvent),
     Repost(NostrEvent),
+    Quote(NostrEvent),
     Zap(NostrEvent),
 }
 #[derive(Clone, Copy, PartialEq)]
@@ -44,11 +49,88 @@ impl NotificationFilter {
             Self::Replies => matches!(notification, NotificationType::Reply(_)),
             Self::Mentions => matches!(notification, NotificationType::Mention(_)),
             Self::Reactions => matches!(notification, NotificationType::Reaction(_)),
-            Self::Reposts => matches!(notification, NotificationType::Repost(_)),
+            Self::Reposts => matches!(
+                notification,
+                NotificationType::Repost(_) | NotificationType::Quote(_)
+            ),
             Self::Zaps => matches!(notification, NotificationType::Zap(_)),
         }
     }
 }
+struct DailySummary {
+    replies: usize,
+    reactions: usize,
+    reposts: usize,
+    mentions: usize,
+    zap_sats: u64,
+}
+
+fn route_for_event(event: &NostrEvent, event_id_hex: &str) -> Route {
+    match event.kind.as_u16() {
+        20 => Route::PhotoDetail {
+            photo_id: event_id_hex.to_string(),
+        },
+        21 | 22 => Route::VideoDetail {
+            video_id: event_id_hex.to_string(),
+        },
+        1040 => Route::VoiceMessageDetail {
+            voice_id: event_id_hex.to_string(),
+        },
+        1068 => Route::PollView {
+            noteid: event_id_hex.to_string(),
+        },
+        1621 => Route::CodeIssueDetail {
+            note_id: event_id_hex.to_string(),
+        },
+        1622 => Route::CodePullDetail {
+            note_id: event_id_hex.to_string(),
+        },
+        _ => {
+            if event.kind.is_addressable() {
+                if let Some(coord) = event.coordinate() {
+                    if let Ok(naddr) = coord.to_bech32() {
+                        return match event.kind.as_u16() {
+                            30023 => Route::ArticleDetail { naddr },
+                            _ => Route::Note {
+                                note_id: event_id_hex.to_string(),
+                                from_voice: None,
+                            },
+                        };
+                    }
+                }
+            }
+            Route::Note {
+                note_id: event_id_hex.to_string(),
+                from_voice: None,
+            }
+        }
+    }
+}
+
+#[component]
+fn EventCard(
+    event: NostrEvent,
+    #[props(default = true)] collapsible: bool,
+    #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+) -> Element {
+    match event.kind.as_u16() {
+        20 => rsx! { PhotoCard { event } },
+        21 | 22 => rsx! { VideoCard { event } },
+        1040 => rsx! { VoiceMessageCard { event } },
+        1068 => rsx! { PollCard { event } },
+        30023 => rsx! { ArticleCard { event } },
+        _ => rsx! {
+            NoteCard {
+                event,
+                collapsible,
+                cached_muted_posts,
+                cached_blocked_users,
+            }
+        },
+    }
+}
+
 #[component]
 pub fn Notifications() -> Element {
     let mut notifications = use_signal(Vec::<NotificationType>::new);
@@ -267,6 +349,44 @@ pub fn Notifications() -> Element {
         .filter(|n| active_filter.read().matches(n))
         .cloned()
         .collect();
+    let summary = {
+        let all = notifications.read();
+        let now_secs = crate::platform::timestamp::now_secs();
+        let today_start = now_secs - (now_secs % 86400);
+        let today: Vec<_> = all
+            .iter()
+            .filter(|n| get_timestamp(n) >= today_start)
+            .collect();
+        let replies = today
+            .iter()
+            .filter(|n| matches!(n, NotificationType::Reply(_)))
+            .count();
+        let reactions = today
+            .iter()
+            .filter(|n| matches!(n, NotificationType::Reaction(_)))
+            .count();
+        let reposts = today
+            .iter()
+            .filter(|n| {
+                matches!(
+                    n,
+                    NotificationType::Repost(_) | NotificationType::Quote(_)
+                )
+            })
+            .count();
+        let mentions = today
+            .iter()
+            .filter(|n| matches!(n, NotificationType::Mention(_)))
+            .count();
+        let zap_sats: u64 = today
+            .iter()
+            .filter_map(|n| match n {
+                NotificationType::Zap(e) => extract_zap_amount(e),
+                _ => None,
+            })
+            .sum();
+        DailySummary { replies, reactions, reposts, mentions, zap_sats }
+    };
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
@@ -313,6 +433,54 @@ pub fn Notifications() -> Element {
                                     }
                                 }
                             }
+                        }
+                    }
+                    {
+                        let has_any = summary.replies + summary.reactions + summary.reposts + summary.mentions + (summary.zap_sats as usize) > 0;
+                        if has_any {
+                            rsx! {
+                                div { class: "px-4 py-2",
+                                    div { class: "bg-muted rounded-lg p-3 flex items-center gap-3 text-sm overflow-x-auto",
+                                        if summary.replies > 0 {
+                                            button {
+                                                class: "flex items-center gap-1 hover:bg-accent rounded px-2 py-1 transition whitespace-nowrap",
+                                                onclick: move |_| active_filter.set(NotificationFilter::Replies),
+                                                span { "💬 {summary.replies}" }
+                                            }
+                                        }
+                                        if summary.reactions > 0 {
+                                            button {
+                                                class: "flex items-center gap-1 hover:bg-accent rounded px-2 py-1 transition whitespace-nowrap",
+                                                onclick: move |_| active_filter.set(NotificationFilter::Reactions),
+                                                span { "❤️ {summary.reactions}" }
+                                            }
+                                        }
+                                        if summary.zap_sats > 0 {
+                                            button {
+                                                class: "flex items-center gap-1 hover:bg-accent rounded px-2 py-1 transition whitespace-nowrap",
+                                                onclick: move |_| active_filter.set(NotificationFilter::Zaps),
+                                                span { "⚡ {summary.zap_sats} sats" }
+                                            }
+                                        }
+                                        if summary.reposts > 0 {
+                                            button {
+                                                class: "flex items-center gap-1 hover:bg-accent rounded px-2 py-1 transition whitespace-nowrap",
+                                                onclick: move |_| active_filter.set(NotificationFilter::Reposts),
+                                                span { "🔁 {summary.reposts}" }
+                                            }
+                                        }
+                                        if summary.mentions > 0 {
+                                            button {
+                                                class: "flex items-center gap-1 hover:bg-accent rounded px-2 py-1 transition whitespace-nowrap",
+                                                onclick: move |_| active_filter.set(NotificationFilter::Mentions),
+                                                span { "@ {summary.mentions}" }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            rsx! {}
                         }
                     }
                 }
@@ -408,7 +576,7 @@ fn render_notification(
                             }
                         }
                     }
-                    NoteCard {
+                    EventCard {
                         event: event.clone(),
                         collapsible: true,
                         cached_muted_posts: cached_muted_posts.clone(),
@@ -437,6 +605,16 @@ fn render_notification(
                 }
             }
         }
+        NotificationType::Quote(event) => {
+            rsx! {
+                QuoteNotification {
+                    key: "{event.id}",
+                    event: event.clone(),
+                    cached_muted_posts: cached_muted_posts.clone(),
+                    cached_blocked_users: cached_blocked_users.clone(),
+                }
+            }
+        }
         NotificationType::Zap(event) => {
             rsx! {
                 ZapNotification {
@@ -458,6 +636,7 @@ fn ReactionNotification(
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let mut reacted_post = use_signal(|| None::<NostrEvent>);
     let mut loading = use_signal(|| true);
+    let mut hidden = use_signal(|| false);
     let reactor_pubkey = event.pubkey.to_string();
     let custom_emoji_url = if event.content.starts_with(':') && event.content.ends_with(':') {
         let shortcode = event.content.trim_matches(':');
@@ -499,10 +678,13 @@ fn ReactionNotification(
     let reacted_eid_for_link = reacted_event_id.clone();
     let validated_reacted_eid = reacted_eid_for_link
         .as_ref()
-        .filter(|eid| nostr_sdk::EventId::from_hex(eid).is_ok());
+        .filter(|eid| nostr_sdk::EventId::from_hex(eid).is_ok())
+        .cloned();
+    let my_pubkey_for_verify = auth_store::get_pubkey().unwrap_or_default();
     use_effect(move || {
         let pubkey = reactor_pubkey_for_effect.clone();
         let event_id = reacted_event_id.clone();
+        let my_pk = my_pubkey_for_verify.clone();
         spawn(async move {
             if let Ok(p) = profiles::fetch_profile(pubkey).await {
                 profile.set(Some(p));
@@ -515,7 +697,11 @@ fn ReactionNotification(
                     {
                         Ok(events) => {
                             if let Some(original_event) = events.into_iter().next() {
-                                reacted_post.set(Some(original_event));
+                                if original_event.pubkey.to_hex() != my_pk {
+                                    hidden.set(true);
+                                } else {
+                                    reacted_post.set(Some(original_event));
+                                }
                             }
                         }
                         Err(e) => log::error!("Failed to fetch referenced event: {}", e),
@@ -525,6 +711,9 @@ fn ReactionNotification(
             loading.set(false);
         });
     });
+    if *hidden.read() {
+        return rsx! {};
+    }
     let display_name = profile
         .read()
         .as_ref()
@@ -540,6 +729,10 @@ fn ReactionNotification(
                 reactor_pubkey_for_avatar,
             )
         });
+    let post_route = reacted_post
+        .read()
+        .as_ref()
+        .map(|p| route_for_event(p, validated_reacted_eid.as_deref().unwrap_or("")));
     rsx! {
         div { class: "p-4 hover:bg-accent/50 transition",
             div { class: "flex items-center gap-3 mb-2",
@@ -573,9 +766,18 @@ fn ReactionNotification(
                         "{display_name}"
                     }
                     span { class: "text-muted-foreground", "reacted to" }
-                    if let Some(eid) = validated_reacted_eid {
+                    if let Some(route) = post_route {
                         Link {
-                            to: Route::Note { note_id: eid.clone(), from_voice: None },
+                            to: route,
+                            class: "text-muted-foreground hover:underline",
+                            "your post"
+                        }
+                    } else if validated_reacted_eid.is_some() {
+                        Link {
+                            to: Route::Note {
+                                note_id: validated_reacted_eid.clone().unwrap(),
+                                from_voice: None,
+                            },
                             class: "text-muted-foreground hover:underline",
                             "your post"
                         }
@@ -586,7 +788,7 @@ fn ReactionNotification(
             }
             if let Some(post) = reacted_post.read().as_ref() {
                 div { class: "ml-13 mt-2",
-                    NoteCard {
+                    EventCard {
                         event: post.clone(),
                         collapsible: true,
                         cached_muted_posts: cached_muted_posts.clone(),
@@ -608,6 +810,7 @@ fn RepostNotification(
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let mut reposted_post = use_signal(|| None::<NostrEvent>);
     let mut loading = use_signal(|| true);
+    let mut hidden = use_signal(|| false);
     let reposter_pubkey = event.pubkey.to_string();
     let reposted_event_id = event
         .tags
@@ -627,10 +830,13 @@ fn RepostNotification(
     let reposted_eid_for_link = reposted_event_id.clone();
     let validated_reposted_eid = reposted_eid_for_link
         .as_ref()
-        .filter(|eid| nostr_sdk::EventId::from_hex(eid).is_ok());
+        .filter(|eid| nostr_sdk::EventId::from_hex(eid).is_ok())
+        .cloned();
+    let my_pubkey_for_verify = auth_store::get_pubkey().unwrap_or_default();
     use_effect(move || {
         let pubkey = reposter_pubkey_for_effect.clone();
         let event_id = reposted_event_id.clone();
+        let my_pk = my_pubkey_for_verify.clone();
         spawn(async move {
             if let Ok(p) = profiles::fetch_profile(pubkey).await {
                 profile.set(Some(p));
@@ -643,7 +849,11 @@ fn RepostNotification(
                     {
                         Ok(events) => {
                             if let Some(original_event) = events.into_iter().next() {
-                                reposted_post.set(Some(original_event));
+                                if original_event.pubkey.to_hex() != my_pk {
+                                    hidden.set(true);
+                                } else {
+                                    reposted_post.set(Some(original_event));
+                                }
                             }
                         }
                         Err(e) => log::error!("Failed to fetch referenced event: {}", e),
@@ -653,6 +863,9 @@ fn RepostNotification(
             loading.set(false);
         });
     });
+    if *hidden.read() {
+        return rsx! {};
+    }
     let display_name = profile
         .read()
         .as_ref()
@@ -668,6 +881,10 @@ fn RepostNotification(
                 reposter_pubkey_for_avatar,
             )
         });
+    let post_route = reposted_post
+        .read()
+        .as_ref()
+        .map(|p| route_for_event(p, validated_reposted_eid.as_deref().unwrap_or("")));
     rsx! {
         div { class: "p-4 hover:bg-accent/50 transition",
             div { class: "flex items-center gap-3 mb-2",
@@ -693,9 +910,18 @@ fn RepostNotification(
                         "{display_name}"
                     }
                     span { class: "text-muted-foreground", "reposted" }
-                    if let Some(eid) = validated_reposted_eid {
+                    if let Some(route) = post_route {
                         Link {
-                            to: Route::Note { note_id: eid.clone(), from_voice: None },
+                            to: route,
+                            class: "text-muted-foreground hover:underline",
+                            "your post"
+                        }
+                    } else if validated_reposted_eid.is_some() {
+                        Link {
+                            to: Route::Note {
+                                note_id: validated_reposted_eid.clone().unwrap(),
+                                from_voice: None,
+                            },
                             class: "text-muted-foreground hover:underline",
                             "your post"
                         }
@@ -706,7 +932,7 @@ fn RepostNotification(
             }
             if let Some(post) = reposted_post.read().as_ref() {
                 div { class: "ml-13 mt-2",
-                    NoteCard {
+                    EventCard {
                         event: post.clone(),
                         collapsible: true,
                         cached_muted_posts: cached_muted_posts.clone(),
@@ -728,6 +954,7 @@ fn ZapNotification(
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let mut zapped_post = use_signal(|| None::<NostrEvent>);
     let mut loading = use_signal(|| true);
+    let mut hidden = use_signal(|| false);
     let zapper_pubkey = extract_zapper_pubkey(&event).unwrap_or_else(|| event.pubkey.to_string());
     let zap_amount_sats = extract_zap_amount(&event);
     let zapped_event_id = event
@@ -741,6 +968,7 @@ fn ZapNotification(
         })
         .and_then(|tag| tag.content())
         .map(|s| s.to_string());
+    let is_profile_zap = zapped_event_id.is_none();
     let zapper_pubkey_for_effect = zapper_pubkey.clone();
     let zapper_pubkey_for_display = zapper_pubkey.clone();
     let zapper_pubkey_for_avatar = zapper_pubkey.clone();
@@ -748,10 +976,13 @@ fn ZapNotification(
     let zapped_eid_for_link = zapped_event_id.clone();
     let validated_zapped_eid = zapped_eid_for_link
         .as_ref()
-        .filter(|eid| nostr_sdk::EventId::from_hex(eid).is_ok());
+        .filter(|eid| nostr_sdk::EventId::from_hex(eid).is_ok())
+        .cloned();
+    let my_pubkey_for_verify = auth_store::get_pubkey().unwrap_or_default();
     use_effect(move || {
         let pubkey = zapper_pubkey_for_effect.clone();
         let event_id = zapped_event_id.clone();
+        let my_pk = my_pubkey_for_verify.clone();
         spawn(async move {
             if let Ok(p) = profiles::fetch_profile(pubkey).await {
                 profile.set(Some(p));
@@ -764,7 +995,11 @@ fn ZapNotification(
                     {
                         Ok(events) => {
                             if let Some(original_event) = events.into_iter().next() {
-                                zapped_post.set(Some(original_event));
+                                if original_event.pubkey.to_hex() != my_pk {
+                                    hidden.set(true);
+                                } else {
+                                    zapped_post.set(Some(original_event));
+                                }
                             }
                         }
                         Err(e) => log::error!("Failed to fetch referenced event: {}", e),
@@ -774,6 +1009,9 @@ fn ZapNotification(
             loading.set(false);
         });
     });
+    if *hidden.read() {
+        return rsx! {};
+    }
     let display_name = profile
         .read()
         .as_ref()
@@ -789,6 +1027,10 @@ fn ZapNotification(
                 zapper_pubkey_for_avatar,
             )
         });
+    let post_route = zapped_post
+        .read()
+        .as_ref()
+        .map(|p| route_for_event(p, validated_zapped_eid.as_deref().unwrap_or("")));
     rsx! {
         div { class: "p-4 hover:bg-accent/50 transition",
             div { class: "flex items-center gap-3 mb-2",
@@ -814,9 +1056,20 @@ fn ZapNotification(
                         "{display_name}"
                     }
                     span { class: "text-muted-foreground", "zapped" }
-                    if let Some(eid) = validated_zapped_eid {
+                    if is_profile_zap {
+                        span { class: "text-muted-foreground", "you" }
+                    } else if let Some(route) = post_route {
                         Link {
-                            to: Route::Note { note_id: eid.clone(), from_voice: None },
+                            to: route,
+                            class: "text-muted-foreground hover:underline",
+                            "your post"
+                        }
+                    } else if validated_zapped_eid.is_some() {
+                        Link {
+                            to: Route::Note {
+                                note_id: validated_zapped_eid.clone().unwrap(),
+                                from_voice: None,
+                            },
                             class: "text-muted-foreground hover:underline",
                             "your post"
                         }
@@ -830,9 +1083,158 @@ fn ZapNotification(
                     }
                 }
             }
-            if let Some(post) = zapped_post.read().as_ref() {
+            if !is_profile_zap {
+                if let Some(post) = zapped_post.read().as_ref() {
+                    div { class: "ml-13 mt-2",
+                        EventCard {
+                            event: post.clone(),
+                            collapsible: true,
+                            cached_muted_posts: cached_muted_posts.clone(),
+                            cached_blocked_users: cached_blocked_users.clone(),
+                        }
+                    }
+                } else if *loading.read() {
+                    div { class: "ml-13 mt-2 text-sm text-muted-foreground", "Loading post..." }
+                }
+            }
+        }
+    }
+}
+#[component]
+fn QuoteNotification(
+    event: NostrEvent,
+    #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+) -> Element {
+    let mut profile = use_signal(|| None::<profiles::Profile>);
+    let mut quoted_post = use_signal(|| None::<NostrEvent>);
+    let mut loading = use_signal(|| true);
+    let mut hidden = use_signal(|| false);
+    let quoter_pubkey = event.pubkey.to_string();
+    let quoted_event_id = event.tags.iter().find_map(|tag| {
+        if let Some(TagStandard::Quote { event_id, .. }) = tag.as_standardized() {
+            Some(event_id.to_hex())
+        } else {
+            None
+        }
+    });
+    let quoter_pubkey_for_effect = quoter_pubkey.clone();
+    let quoter_pubkey_for_display = quoter_pubkey.clone();
+    let quoter_pubkey_for_avatar = quoter_pubkey.clone();
+    let quoter_pubkey_for_link = quoter_pubkey.clone();
+    let validated_quoted_eid = quoted_event_id
+        .as_ref()
+        .filter(|eid| nostr_sdk::EventId::from_hex(eid).is_ok())
+        .cloned();
+    let my_pubkey_for_verify = auth_store::get_pubkey().unwrap_or_default();
+    use_effect(move || {
+        let pubkey = quoter_pubkey_for_effect.clone();
+        let event_id = quoted_event_id.clone();
+        let my_pk = my_pubkey_for_verify.clone();
+        spawn(async move {
+            if let Ok(p) = profiles::fetch_profile(pubkey).await {
+                profile.set(Some(p));
+            }
+            if let Some(eid) = event_id {
+                if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
+                    let filter = Filter::new().id(event_id).limit(1);
+                    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+                        .await
+                    {
+                        Ok(events) => {
+                            if let Some(original_event) = events.into_iter().next() {
+                                if original_event.pubkey.to_hex() != my_pk {
+                                    hidden.set(true);
+                                } else {
+                                    quoted_post.set(Some(original_event));
+                                }
+                            }
+                        }
+                        Err(e) => log::error!("Failed to fetch referenced event: {}", e),
+                    }
+                }
+            }
+            loading.set(false);
+        });
+    });
+    if *hidden.read() {
+        return rsx! {};
+    }
+    let display_name = profile
+        .read()
+        .as_ref()
+        .map(|p| p.get_display_name())
+        .unwrap_or_else(|| format!("{}...", &quoter_pubkey_for_display[..16]));
+    let avatar_url = profile
+        .read()
+        .as_ref()
+        .map(|p| p.get_avatar_url())
+        .unwrap_or_else(|| {
+            format!(
+                "https://api.dicebear.com/7.x/identicon/svg?seed={}",
+                quoter_pubkey_for_avatar,
+            )
+        });
+    let post_route = quoted_post
+        .read()
+        .as_ref()
+        .map(|p| route_for_event(p, validated_quoted_eid.as_deref().unwrap_or("")));
+    rsx! {
+        div { class: "p-4 hover:bg-accent/50 transition",
+            div { class: "flex items-center gap-3 mb-2",
+                Link {
+                    to: Route::Profile {
+                        pubkey: quoter_pubkey_for_link.clone(),
+                    },
+                    onclick: move |e: MouseEvent| e.stop_propagation(),
+                    img {
+                        src: "{avatar_url}",
+                        alt: "{display_name}",
+                        class: "w-10 h-10 rounded-full object-cover shrink-0",
+                    }
+                }
+                div { class: "flex items-center gap-2 text-sm",
+                    span { class: "text-blue-500 text-2xl", "📝" }
+                    Link {
+                        to: Route::Profile {
+                            pubkey: quoter_pubkey_for_link.clone(),
+                        },
+                        onclick: move |e: MouseEvent| e.stop_propagation(),
+                        class: "font-semibold hover:underline",
+                        "{display_name}"
+                    }
+                    span { class: "text-muted-foreground", "quoted" }
+                    if let Some(route) = post_route {
+                        Link {
+                            to: route,
+                            class: "text-muted-foreground hover:underline",
+                            "your post"
+                        }
+                    } else if validated_quoted_eid.is_some() {
+                        Link {
+                            to: Route::Note {
+                                note_id: validated_quoted_eid.clone().unwrap(),
+                                from_voice: None,
+                            },
+                            class: "text-muted-foreground hover:underline",
+                            "your post"
+                        }
+                    } else {
+                        span { class: "text-muted-foreground", "your post" }
+                    }
+                }
+            }
+            div { class: "ml-13 mt-2",
+                NoteCard {
+                    event: event.clone(),
+                    collapsible: true,
+                    cached_muted_posts: cached_muted_posts.clone(),
+                    cached_blocked_users: cached_blocked_users.clone(),
+                }
+            }
+            if let Some(post) = quoted_post.read().as_ref() {
                 div { class: "ml-13 mt-2",
-                    NoteCard {
+                    EventCard {
                         event: post.clone(),
                         collapsible: true,
                         cached_muted_posts: cached_muted_posts.clone(),
@@ -899,6 +1301,7 @@ fn get_timestamp(notification: &NotificationType) -> u64 {
         | NotificationType::Reply(e)
         | NotificationType::Reaction(e)
         | NotificationType::Repost(e)
+        | NotificationType::Quote(e)
         | NotificationType::Zap(e) => e.created_at.as_secs(),
     }
 }
@@ -910,6 +1313,7 @@ fn get_event_id(notification: &NotificationType) -> nostr_sdk::EventId {
         | NotificationType::Reply(e)
         | NotificationType::Reaction(e)
         | NotificationType::Repost(e)
+        | NotificationType::Quote(e)
         | NotificationType::Zap(e) => e.id,
     }
 }
@@ -923,8 +1327,12 @@ fn classify_notification(event: &NostrEvent, my_pubkey: &str) -> Option<Notifica
 
     match event.kind {
         Kind::TextNote => {
-            // NIP-10: Only e tags with root/reply markers indicate thread replies
-            // Unmarked e tags are mentions in the preferred scheme
+            let has_quote = event.tags.iter().any(|tag| {
+                matches!(tag.as_standardized(), Some(TagStandard::Quote { .. }))
+            });
+            if has_quote {
+                return Some(NotificationType::Quote(event.clone()));
+            }
             let is_reply = event.tags.iter().any(|tag| {
                 matches!(
                     tag.as_standardized(),
@@ -1048,24 +1456,29 @@ async fn load_notifications(until: Option<u64>) -> Result<Vec<NotificationType>,
         }
         match event.kind {
             Kind::TextNote => {
-                // NIP-10: Only e tags with root/reply markers indicate thread replies
-                // Unmarked e tags are mentions in the preferred scheme
-                let is_reply = event.tags.iter().any(|tag| {
-                    matches!(
-                        tag.as_standardized(),
-                        Some(nostr_sdk::TagStandard::Event {
-                            marker: Some(nostr_sdk::nips::nip10::Marker::Root),
-                            ..
-                        }) | Some(nostr_sdk::TagStandard::Event {
-                            marker: Some(nostr_sdk::nips::nip10::Marker::Reply),
-                            ..
-                        })
-                    )
+                let has_quote = event.tags.iter().any(|tag| {
+                    matches!(tag.as_standardized(), Some(TagStandard::Quote { .. }))
                 });
-                if is_reply {
-                    all_notifications.push(NotificationType::Reply(event));
+                if has_quote {
+                    all_notifications.push(NotificationType::Quote(event));
                 } else {
-                    all_notifications.push(NotificationType::Mention(event));
+                    let is_reply = event.tags.iter().any(|tag| {
+                        matches!(
+                            tag.as_standardized(),
+                            Some(nostr_sdk::TagStandard::Event {
+                                marker: Some(nostr_sdk::nips::nip10::Marker::Root),
+                                ..
+                            }) | Some(nostr_sdk::TagStandard::Event {
+                                marker: Some(nostr_sdk::nips::nip10::Marker::Reply),
+                                ..
+                            })
+                        )
+                    });
+                    if is_reply {
+                        all_notifications.push(NotificationType::Reply(event));
+                    } else {
+                        all_notifications.push(NotificationType::Mention(event));
+                    }
                 }
             }
             Kind::Reaction => {
@@ -1095,6 +1508,7 @@ async fn prefetch_notification_authors(notifications: &[NotificationType]) {
         NotificationType::Reply(e) => e.pubkey,
         NotificationType::Reaction(e) => e.pubkey,
         NotificationType::Repost(e) => e.pubkey,
+        NotificationType::Quote(e) => e.pubkey,
         NotificationType::Zap(e) => e.pubkey,
     });
     profile_prefetch::prefetch_pubkeys(pubkeys).await;

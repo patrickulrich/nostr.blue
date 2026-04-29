@@ -290,18 +290,11 @@ pub fn use_reaction(
             {
                 Ok(result) => {
                     log::info!(
-                        "{} event {}, reaction ID: {} ({}/{} relays)",
+                        "{} event {}, reaction ID: {}",
                         if was_liked { "Unliked" } else { "Liked" },
                         event_id_clone,
                         result.event_id,
-                        result.success_count(),
-                        result.total_attempted()
                     );
-                    if result.has_failures() {
-                        for (relay, error) in &result.failed_relays {
-                            log::warn!("Relay {} failed for reaction: {}", relay, error);
-                        }
-                    }
                     state.set(ReactionState::Success);
                     invalidate_interaction_counts(&event_id_clone);
                     crate::platform::timer::sleep_ms(500).await;
@@ -367,25 +360,18 @@ pub fn use_reaction(
             )
             .await
             {
-                Ok(result) => {
-                    log::info!(
-                        "Reacted to event {} with '{}', reaction ID: {} ({}/{} relays)",
-                        event_id_clone,
-                        content,
-                        result.event_id,
-                        result.success_count(),
-                        result.total_attempted()
-                    );
-                    if result.has_failures() {
-                        for (relay, error) in &result.failed_relays {
-                            log::warn!("Relay {} failed for reaction: {}", relay, error);
-                        }
+                    Ok(result) => {
+                        log::info!(
+                            "Reacted to event {} with '{}', reaction ID: {}",
+                            event_id_clone,
+                            content,
+                            result.event_id,
+                        );
+                        state.set(ReactionState::Success);
+                        invalidate_interaction_counts(&event_id_clone);
+                        crate::platform::timer::sleep_ms(500).await;
+                        state.set(ReactionState::Idle);
                     }
-                    state.set(ReactionState::Success);
-                    invalidate_interaction_counts(&event_id_clone);
-                    crate::platform::timer::sleep_ms(500).await;
-                    state.set(ReactionState::Idle);
-                }
                 Err(e) => {
                     log::error!("Failed to react with '{}': {}", content, e);
                     is_liked.set(prev_liked);

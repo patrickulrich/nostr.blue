@@ -675,7 +675,7 @@ pub async fn publish_track(
     genres: Vec<String>,
     ai_generated: bool,
 ) -> Result<String, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = nostr_client::get_client().ok_or("Client not initialized")?;
     if !nostr_client::has_signer() {
         return Err("No signer attached".to_string());
     }
@@ -706,11 +706,17 @@ pub async fn publish_track(
         ));
     }
     let builder = EventBuilder::new(Kind::from(KIND_MUSIC_TRACK), "").tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish track: {}", e))?;
-    Ok(output.id().to_hex())
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("music".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }
 /// Publish a new playlist (Kind 34139)
 #[allow(clippy::too_many_arguments)]
@@ -724,7 +730,7 @@ pub async fn publish_playlist(
     is_public: bool,
     is_collaborative: bool,
 ) -> Result<String, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = nostr_client::get_client().ok_or("Client not initialized")?;
     if !nostr_client::has_signer() {
         return Err("No signer attached".to_string());
     }
@@ -760,11 +766,17 @@ pub async fn publish_playlist(
         ));
     }
     let builder = EventBuilder::new(Kind::from(KIND_PLAYLIST), "").tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish playlist: {}", e))?;
-    Ok(output.id().to_hex())
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_hex();
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("music".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(event_id)
 }
 /// Get a cached track if available and not expired
 #[allow(dead_code)]

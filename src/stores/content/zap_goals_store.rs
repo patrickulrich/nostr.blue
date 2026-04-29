@@ -659,17 +659,12 @@ pub async fn publish_zap_goal_tracked(
     relays: Vec<String>,
     url: Option<String>,
 ) -> Result<PublishResult, String> {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
+    let _client = nostr_client::get_client().ok_or("Client not initialized")?;
     if amount_sats == 0 {
         return Err("Amount must be greater than zero".to_string());
     }
     if let Some(closed_at) = closed_at {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_secs())
-            .unwrap_or(0);
+        let now = crate::platform::timestamp::now_secs();
         if closed_at <= now {
             return Err("closed_at must be a future timestamp".to_string());
         }
@@ -722,11 +717,17 @@ pub async fn publish_zap_goal_tracked(
         ));
     }
 
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish zap goal: {e}"))?;
-    Ok(PublishResult::from_output(output).ignoring_duplicate_event_failures())
+        .map_err(|e| format!("Failed to sign: {e}"))?;
+    let event_id = event.id.to_hex();
+    let queue_id = crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("zap_goal".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
+    Ok(PublishResult::queued(queue_id, event_id))
 }
 
 pub fn format_time_remaining(closed_at: Option<u64>) -> String {

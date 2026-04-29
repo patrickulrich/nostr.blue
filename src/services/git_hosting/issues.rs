@@ -134,7 +134,7 @@ pub async fn publish_issue(
     assignees: &[&str],
 ) -> Result<EventId, String> {
     use nostr::nips::nip34::GitIssue;
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
@@ -165,11 +165,16 @@ pub async fn publish_issue(
     for pk in &parsed_assignees {
         builder = builder.tag(Tag::public_key(*pk));
     }
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish: {}", e))?;
-    let event_id = *output.id();
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::GitHosting,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     let filter = Filter::new().id(event_id);
     if let Ok(events) = fetch_events_aggregated(filter, Duration::from_secs(2)).await {
         cache_issue_events(&events);
@@ -181,17 +186,22 @@ pub async fn update_issue_status(
     issue_id: EventId,
     status: IssueStatus,
 ) -> Result<EventId, String> {
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
     let kind = status.to_kind();
     let builder = EventBuilder::new(kind, "").tag(Tag::event(issue_id));
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish status: {}", e))?;
-    let event_id = *output.id();
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::GitHosting,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     let filter = Filter::new().id(event_id);
     if let Ok(events) = fetch_events_aggregated(filter, Duration::from_secs(2)).await {
         update_issue_statuses(&events);
@@ -206,7 +216,7 @@ pub async fn publish_issue_comment(
     content: &str,
 ) -> Result<EventId, String> {
     use nostr::nips::nip22::CommentTarget;
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
@@ -215,11 +225,18 @@ pub async fn publish_issue_comment(
     if let Some(coord) = repository {
         builder = builder.tag(Tag::coordinate(coord.clone(), None));
     }
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let output = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish comment: {}", e))?;
-    Ok(*output.id())
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = output.id;
+    crate::stores::publish_queue::enqueue(
+        output,
+        crate::stores::publish_queue::types::QueueEventType::GitHosting,
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await;
+    Ok(event_id)
 }
 /// Fetch comments for an issue (by EventId)
 pub async fn fetch_issue_comments(issue_id: EventId) -> Result<Vec<GitComment>, String> {

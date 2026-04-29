@@ -40,7 +40,7 @@ pub(crate) struct CachedContacts {
 }
 static CONTACTS_CACHE: OnceLock<Mutex<Option<CachedContacts>>> = OnceLock::new();
 /// Get the contacts cache mutex
-pub(crate) fn get_contacts_cache() -> &'static Mutex<Option<CachedContacts>> {
+pub fn get_contacts_cache() -> &'static Mutex<Option<CachedContacts>> {
     CONTACTS_CACHE.get_or_init(|| Mutex::new(None))
 }
 /// Invalidate the contacts cache (call after follow/unfollow)

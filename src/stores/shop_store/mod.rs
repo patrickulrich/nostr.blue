@@ -367,7 +367,7 @@ pub struct ProductFormData {
 /// Publish a new product (Kind 30402)
 pub async fn publish_product(data: ProductFormData) -> Result<String> {
     use nostr_sdk::TagKind;
-    let client = nostr_client::NOSTR_CLIENT
+    let _client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
@@ -441,18 +441,15 @@ pub async fn publish_product(data: ProductFormData) -> Result<String> {
     }
     let content = data.description.clone();
     let event_builder = EventBuilder::new(Kind::Custom(KIND_PRODUCT), content).tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(event_builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(event_builder)
         .await
-        .map_err(|e| format!("Failed to publish product: {}", e))?;
-    if output.success.is_empty() {
-        return Err("Failed to publish product: no relay accepted the event".to_string());
-    }
-    log::info!(
-        "Published product: {} (event: {:?})",
-        data.title,
-        output.val
-    );
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Shop,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     spawn(async {
         if let Err(e) = fetch_my_products().await {
             log::error!("Failed to refresh my products: {}", e);
@@ -472,7 +469,7 @@ pub async fn publish_review(
     communication_rating: Option<f64>,
 ) -> Result<String> {
     use nostr_sdk::TagKind;
-    let client = nostr_client::NOSTR_CLIENT
+    let _client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
@@ -514,18 +511,15 @@ pub async fn publish_review(
         ));
     }
     let event_builder = EventBuilder::new(Kind::Custom(KIND_REVIEW), content).tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(event_builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(event_builder)
         .await
-        .map_err(|e| format!("Failed to publish review: {}", e))?;
-    if output.success.is_empty() {
-        return Err("Failed to publish review: no relay accepted the event".to_string());
-    }
-    log::info!(
-        "Published review for {}: {:?}",
-        product_coordinate,
-        output.val
-    );
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Shop,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     Ok(d_tag)
 }
 
@@ -636,7 +630,7 @@ pub async fn publish_collection(
     existing_d_tag: Option<String>,
 ) -> Result<String> {
     use nostr_sdk::TagKind;
-    let client = nostr_client::NOSTR_CLIENT
+    let _client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
@@ -673,21 +667,22 @@ pub async fn publish_collection(
         ));
     }
     let builder = EventBuilder::new(Kind::Custom(KIND_COLLECTION), &data.description).tags(tags);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish collection: {}", e))?;
-    if output.success.is_empty() {
-        return Err("Failed to publish collection: no relay accepted the event".to_string());
-    }
-    log::info!("Published collection: {} (event: {})", d_tag, output.id());
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Shop,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     let _ = fetch_my_collections().await;
     Ok(d_tag)
 }
 
 /// Delete a collection
 pub async fn delete_collection(d_tag: &str) -> Result<()> {
-    let client = nostr_client::NOSTR_CLIENT
+    let _client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
@@ -703,15 +698,16 @@ pub async fn delete_collection(d_tag: &str) -> Result<()> {
     use nostr::nips::nip09::EventDeletionRequest;
     let deletion_request = EventDeletionRequest::new().id(event_id);
     let delete_builder = EventBuilder::delete(deletion_request);
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(delete_builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(delete_builder)
         .await
-        .map_err(|e| format!("Failed to delete collection: {}", e))?;
-    if output.success.is_empty() {
-        return Err("Failed to delete collection: no relay accepted the event".into());
-    }
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Shop,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     MY_COLLECTIONS.write().retain(|c| c.d_tag != d_tag);
-    log::info!("Deleted collection: {}", d_tag);
     Ok(())
 }
 
@@ -775,7 +771,7 @@ pub async fn delete_product(product_naddr: &str, d_tag: &str) -> Result<()> {
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
-    let signer = client
+    let _signer = client
         .signer()
         .await
         .map_err(|e| format!("Failed to get signer: {}", e))?;
@@ -783,29 +779,26 @@ pub async fn delete_product(product_naddr: &str, d_tag: &str) -> Result<()> {
         .map_err(|e| format!("Failed to get pubkey: {}", e))?;
     let coordinate = format!("{}:{}:{}", KIND_PRODUCT, pubkey.to_hex(), d_tag);
     let tags = vec![Tag::custom(TagKind::custom("a"), vec![coordinate])];
-    let event = crate::utils::nips::nip89::tag_event_builder(
+    let event = crate::stores::publish_queue::signing::sign_event_builder(
         EventBuilder::new(Kind::EventDeletion, "Product deleted").tags(tags),
     )
-    .sign(&signer)
     .await
     .map_err(|e| format!("Failed to sign deletion event: {}", e))?;
-    let output = client
-        .send_event(&event)
-        .await
-        .map_err(|e| format!("Failed to send deletion event: {}", e))?;
-    if output.success.is_empty() {
-        return Err("Failed to delete product: no relay accepted the event".into());
-    }
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Shop,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     MY_PRODUCTS.write().retain(|p| p.naddr != product_naddr);
     PRODUCTS_CACHE.write().pop(&product_naddr.to_string());
-    log::info!("Product deleted: {}", d_tag);
     Ok(())
 }
 
 /// Update a product by republishing with the same d-tag
 pub async fn update_product(d_tag: &str, data: ProductFormData) -> Result<String> {
     use nostr_sdk::TagKind;
-    let client = nostr_client::NOSTR_CLIENT
+    let _client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
@@ -882,23 +875,16 @@ pub async fn update_product(d_tag: &str, data: ProductFormData) -> Result<String
             ));
         }
     }
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("Failed to get signer: {}", e))?;
-    let event = crate::utils::nips::nip89::tag_event_builder(
+    let event = crate::stores::publish_queue::signing::sign_event_builder(
         EventBuilder::new(Kind::Custom(KIND_PRODUCT), data.description.clone()).tags(tags),
     )
-    .sign(&signer)
     .await
     .map_err(|e| format!("Failed to sign product event: {}", e))?;
-    let output = client
-        .send_event(&event)
-        .await
-        .map_err(|e| format!("Failed to send product event: {}", e))?;
-    if output.success.is_empty() {
-        return Err("Failed to update product: no relay accepted the event".into());
-    }
-    log::info!("Product updated: {}", d_tag);
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Shop,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     Ok(d_tag.to_string())
 }

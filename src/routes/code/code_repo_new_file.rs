@@ -475,7 +475,7 @@ async fn submit_new_file(
     content: &str,
     commit_message: &str,
 ) -> Result<(), String> {
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Please sign in first.".to_string());
     }
@@ -515,10 +515,15 @@ async fn submit_new_file(
         .tag(Tag::custom(TagKind::Subject, [commit_message]))
         .tag(Tag::hashtag("new-file"));
 
-    client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish patch: {}", e))?;
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::GitHosting,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
 
     Ok(())
 }

@@ -334,10 +334,15 @@ async fn publish_subscriptions(subscriptions: &[PodcastSubscription]) -> Result<
         }
     }
     let builder = EventBuilder::new(Kind::from(LIST_KIND), "").tags(tags);
-    client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish subscriptions: {}", e))?;
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("podcast".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     log::info!("Podcast subscriptions saved to Nostr successfully");
     Ok(())
 }

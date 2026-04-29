@@ -15,7 +15,7 @@ use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 use dioxus_primitives::hover_card::{HoverCard, HoverCardContent, HoverCardTrigger};
 use dioxus_primitives::ContentSide;
-use nostr_sdk::{Event, Metadata};
+use nostr_sdk::{Event, Metadata, ToBech32};
 
 pub(super) fn render_embedded_article(
     event: &Event,
@@ -115,12 +115,17 @@ pub(super) fn render_wiki_minicard(
 ) -> Element {
     let title = wiki.title.clone();
     let identifier = wiki.identifier.clone();
+    let author_npub = nostr_sdk::PublicKey::from_hex(&wiki.pubkey)
+        .ok()
+        .and_then(|pk| pk.to_bech32().ok())
+        .unwrap_or_else(|| wiki.pubkey.clone());
     rsx! {
         div {
             class: "relative my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
             Link {
                 to: Route::WikiDetail {
+                    npub: author_npub,
                     identifier: identifier.clone(),
                 },
                 class: "flex items-center gap-2 p-2 bg-card border border-border rounded-lg hover:bg-accent/50 transition",

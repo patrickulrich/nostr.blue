@@ -4,15 +4,15 @@ use crate::components::icons::{ArrowLeftIcon, Link2Icon};
 use crate::routes::Route;
 use crate::stores::wiki_store::{fetch_wiki_backlinks, CachedWikiPage};
 use dioxus::prelude::*;
+use nostr_sdk::ToBech32;
 /// Backlinks panel for wiki pages
 #[component]
 pub fn WikiBacklinks(
-    /// The wiki page identifier to find backlinks for
     identifier: String,
-    /// Pre-loaded backlinks (optional)
     #[props(default = None)]
     backlinks: Option<Vec<CachedWikiPage>>,
-    /// Custom CSS classes
+    #[props(default = None)]
+    author_npub: Option<String>,
     #[props(default = String::new())]
     class: String,
 ) -> Element {
@@ -73,8 +73,10 @@ pub fn WikiBacklinks(
 fn BacklinkItem(page: CachedWikiPage) -> Element {
     let nav = use_navigator();
     let identifier = page.article.identifier.clone();
+    let author_npub = page.event.pubkey.to_bech32().unwrap_or_else(|_| page.article.pubkey.clone());
     let item_click = move |_| {
         nav.push(Route::WikiDetail {
+            npub: author_npub.clone(),
             identifier: identifier.clone(),
         });
     };
@@ -136,6 +138,7 @@ pub fn WikiBacklinksCompact(
                         key: "{page.event.id.to_hex()}",
                         class: "inline-flex items-center px-2 py-1 text-xs bg-accent rounded-md hover:bg-accent/80 transition-colors",
                         to: Route::WikiDetail {
+                            npub: page.event.pubkey.to_bech32().unwrap_or_else(|_| page.article.pubkey.clone()),
                             identifier: page.article.identifier.clone(),
                         },
                         "{page.article.title}"
@@ -182,8 +185,8 @@ pub fn WikiBacklinksGraph(
                     for link in backward_links.iter().take(5) {
                         Link {
                             class: "text-xs px-2 py-1 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded truncate hover:bg-blue-500/20 transition-colors",
-                            to: Route::WikiDetail {
-                                identifier: link.clone(),
+                            to: Route::WikiSlug {
+                                slug: link.clone(),
                             },
                             "{link}"
                         }
@@ -201,8 +204,8 @@ pub fn WikiBacklinksGraph(
                     for link in forward_links.iter().take(5) {
                         Link {
                             class: "text-xs px-2 py-1 bg-green-500/10 text-green-600 dark:text-green-400 rounded truncate hover:bg-green-500/20 transition-colors",
-                            to: Route::WikiDetail {
-                                identifier: link.clone(),
+                            to: Route::WikiSlug {
+                                slug: link.clone(),
                             },
                             "{link}"
                         }

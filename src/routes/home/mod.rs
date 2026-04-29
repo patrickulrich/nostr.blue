@@ -6,6 +6,7 @@ mod engagement;
 use crate::components::{
     ArticleCard, ClientInitializing, NoteCard, NoteCardSkeleton, NoteComposer,
 };
+use crate::components::note_composer::NoteMode;
 use crate::error::NostrBlueError;
 use crate::hooks::{use_infinite_scroll, use_user_lists};
 use crate::services::aggregation::{InteractionCounts, InteractionStreamHandle};
@@ -216,6 +217,14 @@ pub fn Home(list: String) -> Element {
             });
         }
         subscription_ids.write().clear();
+        #[cfg(feature = "native")]
+        {
+            spawn(async move {
+                let _ = crate::stores::ndb::subscriptions::unsubscribe(
+                    crate::stores::ndb::subscriptions::SubKey::FollowingFeed,
+                ).await;
+            });
+        }
         if let Some(handle) = interaction_stream_handle.peek().clone() {
             spawn(async move {
                 log::info!("Cleaning up interaction stream due to refresh");
@@ -659,6 +668,14 @@ pub fn Home(list: String) -> Element {
         }
         subscription_ids.write().clear();
         realtime_started.set(false);
+        #[cfg(feature = "native")]
+        {
+            spawn(async move {
+                let _ = crate::stores::ndb::subscriptions::unsubscribe(
+                    crate::stores::ndb::subscriptions::SubKey::FollowingFeed,
+                ).await;
+            });
+        }
         if let Some(handle) = interaction_stream_handle.peek().clone() {
             spawn(async move {
                 log::info!("Cleaning up interaction stream due to feed type change");
@@ -846,9 +863,31 @@ pub fn Home(list: String) -> Element {
                                     );
                                 }
                             }
-                        }
-                    }
-                });
+                }
+            }
+
+            #[cfg(feature = "native")]
+            {
+                let ndb_authors: Vec<PublicKey> = contacts
+                    .iter()
+                    .filter_map(|c| PublicKey::parse(c).ok())
+                    .collect();
+                let ndb_filter = Filter::new()
+                    .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment, Kind::Custom(crate::utils::nip_bb::KIND_BLOBBI_STATE)])
+                    .authors(ndb_authors)
+                    .since(since_timestamp)
+                    .limit(0);
+                let filter_jsons = crate::stores::ndb::queries::sdk_filters_to_ndb_jsons(&[ndb_filter]);
+                if let Err(e) = crate::stores::ndb::subscriptions::subscribe(
+                    crate::stores::ndb::subscriptions::SubKey::FollowingFeed,
+                    filter_jsons,
+                ).await {
+                    log::warn!("NDB subscription failed: {}", e);
+                } else {
+                    log::info!("NDB subscription active for following feed");
+                }
+            }
+        });
             }
 
             for (batch_idx, author_batch) in authors.chunks(BATCH_SIZE).enumerate() {
@@ -893,6 +932,71 @@ pub fn Home(list: String) -> Element {
             }
         });
     });
+
+    // NDB live events poller (native only) — drains events from nostrdb
+    // subscriptions and adds matching new posts to pending_posts
+    #[cfg(feature = "native")]
+    {
+        let mut ndb_pending = pending_posts;
+        let fstate = feed_state;
+        use_future(move || async move {
+            loop {
+                crate::platform::timer::sleep_ms(500).await;
+                let events = crate::stores::ndb::drain_ndb_live_events();
+                if events.is_empty() {
+                    continue;
+                }
+                log::debug!("NDB live: {} new events", events.len());
+                let existing_ids: HashSet<nostr_sdk::EventId> = match &*fstate.peek() {
+                    DataState::Loaded(items) => items.iter().map(|i| i.event().id).collect(),
+                    _ => HashSet::new(),
+                };
+                let buffered_ids: HashSet<nostr_sdk::EventId> = ndb_pending
+                    .read()
+                    .iter()
+                    .map(|i| i.event().id)
+                    .collect();
+                for event in events {
+                    if existing_ids.contains(&event.id) || buffered_ids.contains(&event.id) {
+                        continue;
+                    }
+                    let feed_item = if event.kind == Kind::Repost {
+                        match crate::utils::extract_reposted_event(&event) {
+                            Ok(original) => Some(FeedItem::Repost {
+                                original,
+                                reposted_by: event.pubkey,
+                                repost_timestamp: event.created_at,
+                            }),
+                            Err(_) => None,
+                        }
+                    } else if event.kind == Kind::TextNote {
+                        let is_reply = event.tags.iter().any(|t| t.is_reply() || t.is_root());
+                        if !is_reply {
+                            Some(FeedItem::OriginalPost(event))
+                        } else {
+                            None
+                        }
+                    } else if event.kind == Kind::Comment {
+                        if crate::stores::topic_store::is_topic_post(&event) {
+                            let is_reply = event.tags.iter().any(|t| t.is_reply() || t.is_root());
+                            if !is_reply {
+                                Some(FeedItem::OriginalPost(event))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    if let Some(item) = feed_item {
+                        ndb_pending.write().push(item);
+                    }
+                }
+            }
+        });
+    }
 
     // Scroll position tracking — polls window.scrollY into a Signal so
     // use_drop can read it synchronously (document::eval is async and
@@ -1237,7 +1341,7 @@ pub fn Home(list: String) -> Element {
                 }
             }
             if auth.is_authenticated {
-                NoteComposer {}
+                NoteComposer { mode: NoteMode::Inline }
             }
             if !auth.is_authenticated {
                 div { class: "border-b border-border p-6 bg-blue-50 dark:bg-blue-900/20",

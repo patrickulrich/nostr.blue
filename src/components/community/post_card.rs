@@ -1,7 +1,7 @@
 //! Community Post Card Component
 //! Displays a community post with approval status badges, moderation actions,
 //! reactions, zaps, and threading support
-use crate::components::{CommunityPostComposer, RichContent, ZapModal};
+use crate::components::{CommunityPostComposer, RichContent, SensitiveContent, ZapModal};
 use crate::hooks::{use_reaction, ReactionState};
 use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
@@ -14,6 +14,7 @@ use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::profiles::get_cached_profile;
 use crate::utils::format::{format_relative_time_or, format_sats_human};
 use crate::utils::validation::is_valid_http_url;
+use crate::utils::nip36;
 use dioxus::prelude::*;
 /// Maximum depth for visual indentation
 const MAX_VISUAL_DEPTH: usize = 4;
@@ -167,10 +168,27 @@ pub fn CommunityPostCard(
                 ApprovalBadge { status: post.approval_status.clone() }
             }
             div { class: "mb-3",
-                RichContent {
-                    content: post.content.clone(),
-                    tags: post.event.tags.iter().cloned().collect(),
-                    interactive_media: true,
+                {
+                    let content_warning = nip36::get_content_warning(&post.event.tags);
+                    if let Some(reason) = content_warning {
+                        rsx! {
+                            SensitiveContent { reason,
+                                RichContent {
+                                    content: post.content.clone(),
+                                    tags: post.event.tags.iter().cloned().collect(),
+                                    interactive_media: true,
+                                }
+                            }
+                        }
+                    } else {
+                        rsx! {
+                            RichContent {
+                                content: post.content.clone(),
+                                tags: post.event.tags.iter().cloned().collect(),
+                                interactive_media: true,
+                            }
+                        }
+                    }
                 }
             }
             if show_actions {

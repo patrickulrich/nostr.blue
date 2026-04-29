@@ -13,7 +13,7 @@ use std::time::Duration;
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 /// Star a repository (publish reaction event)
 pub async fn publish_star(coordinate: &Coordinate) -> Result<EventId, NostrBlueError> {
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".into());
     }
@@ -28,17 +28,22 @@ pub async fn publish_star(coordinate: &Coordinate) -> Result<EventId, NostrBlueE
     }
     let builder =
         EventBuilder::new(Kind::Reaction, "+").tag(Tag::coordinate(coordinate.clone(), None));
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
-        .map_err(|e| format!("Failed to publish star: {}", e))?;
-    let event_id = *output.id();
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::GitHosting,
+        None,
+        std::collections::HashMap::new(),
+    ).await;
     star_repo(&coord_str);
     Ok(event_id)
 }
 /// Unstar a repository (publish delete event for the reaction)
 pub async fn remove_star(coordinate: &Coordinate) -> Result<(), NostrBlueError> {
-    let client = get_client().ok_or("Client not initialized")?;
+    let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".into());
     }
@@ -67,10 +72,15 @@ pub async fn remove_star(coordinate: &Coordinate) -> Result<(), NostrBlueError> 
         use nostr::nips::nip09::EventDeletionRequest;
         let request = EventDeletionRequest::new().id(star_event.id);
         let builder = EventBuilder::delete(request);
-        client
-            .send_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
+        let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
             .await
-            .map_err(|e| format!("Failed to publish delete: {}", e))?;
+            .map_err(|e| format!("Failed to sign: {}", e))?;
+        crate::stores::publish_queue::enqueue(
+            event,
+            crate::stores::publish_queue::types::QueueEventType::GitHosting,
+            None,
+            std::collections::HashMap::new(),
+        ).await;
     }
     unstar_repo(&coord_str);
     Ok(())

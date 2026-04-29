@@ -1,6 +1,8 @@
+use crate::components::SensitiveContent;
 use crate::routes::Route;
 use crate::stores::dms::ConversationMessage;
 use crate::stores::{auth_store, dms, nostr_client, profiles};
+use crate::utils::nip36;
 use crate::utils::time;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
@@ -622,6 +624,7 @@ fn ConversationView(pubkey: String) -> Element {
                             let is_mine = msg.sender().to_string() == my_pubkey;
                             let sender_pubkey = msg.sender().to_string();
                             let enc_type = msg.encryption_type().to_string();
+                            let content_warning = nip36::get_content_warning(msg.tags());
                             rsx! {
                                 MessageBubble {
                                     key: "{msg.id()}",
@@ -630,6 +633,7 @@ fn ConversationView(pubkey: String) -> Element {
                                     timestamp: msg.created_at(),
                                     sender_pubkey,
                                     encryption_type: enc_type,
+                                    content_warning,
                                 }
                             }
                         }
@@ -682,6 +686,7 @@ fn MessageBubble(
     timestamp: nostr_sdk::Timestamp,
     sender_pubkey: String,
     #[props(default = "NIP-17".to_string())] encryption_type: String,
+    #[props(default = None)] content_warning: Option<Option<String>>,
 ) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let sender_pk = sender_pubkey.clone();
@@ -747,9 +752,18 @@ fn MessageBubble(
                 class: "w-8 h-8 rounded-full object-cover shrink-0",
             }
             div { class: "flex flex-col gap-1 max-w-[70%] min-w-0 {items_align}",
-                div { class: "{bg_color} rounded-2xl px-4 py-2 overflow-hidden",
-                    p { class: "text-sm whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
-                        "{content}"
+                {
+                    let message_content = rsx! {
+                        div { class: "{bg_color} rounded-2xl px-4 py-2 overflow-hidden",
+                            p { class: "text-sm whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
+                                "{content}"
+                            }
+                        }
+                    };
+                    if let Some(reason) = content_warning {
+                        rsx! { SensitiveContent { reason, {message_content} } }
+                    } else {
+                        message_content
                     }
                 }
                 div { class: "flex items-center gap-2 px-2",

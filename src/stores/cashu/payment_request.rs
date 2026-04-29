@@ -26,7 +26,6 @@ use crate::platform::http::http_client;
 /// Error message returned when a payment request is cancelled by the user.
 /// This is NOT an error condition - it indicates a clean shutdown.
 pub const PAYMENT_CANCELLED_MSG: &str = "Payment request cancelled";
-use super::events::queue_signed_event_for_retry_result;
 use super::internal::create_ephemeral_wallet;
 use super::mint_mgmt::{get_mint_balance, get_mints};
 use super::proofs::{
@@ -72,7 +71,7 @@ async fn sign_cashu_event_builder(
 }
 
 async fn send_tagged_event_with_retry(
-    client: &nostr_sdk::Client,
+    _client: &nostr_sdk::Client,
     event: nostr_sdk::Event,
     event_type: PendingEventType,
     pending_token_id: Option<String>,
@@ -87,52 +86,22 @@ async fn send_tagged_event_with_retry(
         PendingEventType::NutzapEvent => "nutzap",
     };
 
-    match client.send_event(&event).await {
-        Ok(event_output) if !event_output.success.is_empty() => Ok(event_output.id().to_hex()),
-        Ok(_) => {
-            log::warn!(
-                "No relays accepted {} event, queuing for retry",
-                event_label
-            );
-            let pending_id = pending_token_id
-                .clone()
-                .unwrap_or_else(|| format!("pending_{}", uuid::Uuid::new_v4()));
-            queue_signed_event_for_retry_result(
-                event,
-                event_type,
-                Some(pending_id.clone()),
-                mint_url,
-            )
-            .await
-            .map_err(|queue_error| {
-                format!(
-                    "Failed to persist signed {} event for retry: {}",
-                    event_label, queue_error
-                )
-            })?;
-            Ok(pending_id)
-        }
-        Err(error) => {
-            log::warn!("Failed to publish {} event: {}", event_label, error);
-            let pending_id = pending_token_id
-                .clone()
-                .unwrap_or_else(|| format!("pending_{}", uuid::Uuid::new_v4()));
-            queue_signed_event_for_retry_result(
-                event,
-                event_type,
-                Some(pending_id.clone()),
-                mint_url,
-            )
-            .await
-            .map_err(|queue_error| {
-                format!(
-                    "Failed to persist signed {} event for retry: {}",
-                    event_label, queue_error
-                )
-            })?;
-            Ok(pending_id)
-        }
+    let event_id = event.id.to_hex();
+    let mut metadata = std::collections::HashMap::new();
+    if let Some(tid) = pending_token_id {
+        metadata.insert("pending_token_id".to_string(), tid);
     }
+    if let Some(mu) = mint_url {
+        metadata.insert("mint_url".to_string(), mu);
+    }
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Cashu,
+        None,
+        metadata,
+    ).await;
+    log::debug!("Queued {} event: {}", event_label, event_id);
+    Ok(event_id)
 }
 
 /// Create a payment request (NUT-18)

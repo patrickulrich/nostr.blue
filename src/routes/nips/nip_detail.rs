@@ -1,5 +1,5 @@
 use crate::components::{
-    ArticleContent, ClientInitializing, CommentComposer, ShareModal, ThreadedComment,
+    ArticleContent, ClientInitializing, ReplyComposer, ShareModal, ThreadedComment,
 };
 use crate::hooks::{use_author_metadata, use_relay_subscription};
 use crate::routes::Route;
@@ -461,9 +461,9 @@ pub fn NipDetail(nip_id: String) -> Element {
                     if *show_comment_composer.read() && has_signer {
                         if let Some(event) = custom_event.read().clone() {
                             div { class: "mb-6",
-                                CommentComposer {
-                                    comment_on: event,
-                                    parent_comment: None,
+                                ReplyComposer {
+                                    target: event,
+                                    root_event: None,
                                     on_close: move |_| show_comment_composer.set(false),
                                     on_success: move |_| show_comment_composer.set(false),
                                 }

@@ -1,10 +1,9 @@
-use crate::components::icons::{BarChartIcon, CameraIcon};
-use crate::components::{
-    EmojiPicker, GifPicker, MediaUploader, MentionAutocomplete, PollCreatorModal, RichContent,
-};
-use crate::stores::nostr_client::{get_client, send_presigned_event_to_relays, HAS_SIGNER};
+use crate::components::toast::show_queued_toast;
+use crate::components::{ComposerBody, DraftDiscardModal, RichContent};
+use crate::hooks::use_composer_editor::{use_composer_editor, restore_draft_or_empty, ComposerConfig};
+use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::relay;
-use crate::utils::custom_emoji::{build_custom_emoji_tags, EmojiSelection};
+use crate::utils::custom_emoji::build_custom_emoji_tags;
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
@@ -13,7 +12,7 @@ use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 use std::time::Duration;
 
-fn get_relay_hint_for_reply(parent_tags: &nostr_sdk::Tags) -> String {
+fn get_relay_hint(parent_tags: &nostr_sdk::Tags) -> String {
     for tag in parent_tags.iter() {
         let tag_vec = tag.clone().to_vec();
         if tag_vec.len() >= 3 && tag_vec[0] == "e" && !tag_vec[2].is_empty() {
@@ -26,188 +25,122 @@ fn get_relay_hint_for_reply(parent_tags: &nostr_sdk::Tags) -> String {
         .unwrap_or_default()
 }
 
-const MAX_LENGTH: usize = 5000;
-
 #[component]
 pub fn ReplyComposer(
-    reply_to: NostrEvent,
+    target: NostrEvent,
     #[props(default = None)] root_event: Option<NostrEvent>,
     on_close: EventHandler<()>,
     on_success: EventHandler<NostrEvent>,
 ) -> Element {
-    let mut content = use_signal(String::new);
-    let mut is_publishing = use_signal(|| false);
-    let mut show_media_uploader = use_signal(|| false);
-    let mut uploaded_media = use_signal(Vec::<String>::new);
-    let mut show_poll_modal = use_signal(|| false);
+    let has_signer = *HAS_SIGNER.read();
+    let mut show_discard = use_signal(|| false);
     let toast = consume_toast();
 
-    let content_len = content.read().len();
-    let media_len = if !uploaded_media.read().is_empty() {
-        let separator_len = if content_len > 0 { 2 } else { 0 };
-        let urls_with_newlines: usize = uploaded_media.read().iter().map(|url| url.len() + 1).sum();
-        separator_len + urls_with_newlines
-    } else {
-        0
-    };
-    let char_count = content_len + media_len;
-    let remaining = MAX_LENGTH.saturating_sub(char_count);
-    let is_over_limit = char_count > MAX_LENGTH;
-    let show_warning = remaining < 100 && !is_over_limit;
+    let is_note = target.kind == Kind::TextNote;
+    let draft_ctx = format!(
+        "{}_{}",
+        if is_note { "reply" } else { "comment" },
+        target.id.to_hex()
+    );
+    let initial_content = restore_draft_or_empty(&draft_ctx);
 
-    let has_signer = *HAS_SIGNER.read();
-    let can_publish = char_count > 0 && !is_over_limit && !*is_publishing.read() && has_signer;
-
-    let counter_color = if is_over_limit {
-        "text-red-500"
-    } else if show_warning {
-        "text-yellow-500"
-    } else {
-        "text-gray-500"
-    };
-
-    let author_pubkey = reply_to.pubkey.to_hex();
-    let short_author = truncate_pubkey(&author_pubkey);
-    let reply_content = reply_to.content.clone();
-    let reply_tags: Vec<_> = reply_to.tags.iter().cloned().collect();
+    let editor = use_composer_editor(ComposerConfig {
+        draft_context: Some(draft_ctx.clone()),
+        initial_content,
+    });
 
     let mut thread_participants = Vec::new();
-    thread_participants.push(reply_to.pubkey);
-    for public_key in reply_to.tags.public_keys() {
-        if !thread_participants.contains(public_key) {
-            thread_participants.push(*public_key);
+    thread_participants.push(target.pubkey);
+    for pk in target.tags.public_keys() {
+        if !thread_participants.contains(pk) {
+            thread_participants.push(*pk);
         }
     }
 
-    let handle_media_uploaded = move |url: String| {
-        uploaded_media.write().push(url);
-        show_media_uploader.set(false);
+    let publish_label = if is_note {
+        "Reply".to_string()
+    } else {
+        "Comment".to_string()
+    };
+    let header_title = if is_note {
+        "Reply".to_string()
+    } else if root_event.is_some() {
+        "Reply to Comment".to_string()
+    } else {
+        "Add Comment".to_string()
+    };
+    let placeholder = if is_note || root_event.is_some() {
+        "Write your reply...".to_string()
+    } else {
+        "Write your comment...".to_string()
     };
 
-    let mut handle_remove_media = move |index: usize| {
-        let mut media = uploaded_media.write();
-        if index < media.len() {
-            media.remove(index);
-        } else {
-            log::warn!("Attempted to remove media at invalid index: {}", index);
-        }
-    };
+    let short_author = truncate_pubkey(&target.pubkey.to_hex());
+    let reply_content = target.content.clone();
+    let reply_tags: Vec<_> = target.tags.iter().cloned().collect();
 
-    let mut cursor_position = use_signal(|| 0usize);
-    let mut insert_at_cursor = move |text: String| {
-        let mut current = content.read().clone();
-        let pos = *cursor_position.read();
-        let pos = to_char_boundary(&current, pos);
-        current.insert_str(pos, &text);
-        content.set(current);
-        cursor_position.set(pos + text.len());
-    };
-
-    let mut insert_with_spacing = move |text: String| {
-        let mut text_with_space = text;
-        let current = content.read().clone();
-        let pos = to_char_boundary(&current, *cursor_position.read());
-        if pos > 0 {
-            if let Some(prev_char) = current[..pos].chars().last() {
-                if !prev_char.is_whitespace() {
-                    text_with_space.insert(0, ' ');
-                }
-            }
-        }
-        if pos < current.len() {
-            if let Some(next_char) = current[pos..].chars().next() {
-                if !next_char.is_whitespace() {
-                    text_with_space.push(' ');
-                }
-            }
-        }
-        insert_at_cursor(text_with_space);
-    };
-
-    let handle_emoji_selected = move |selection: EmojiSelection| {
-        insert_at_cursor(selection.insertion_text());
-    };
-
-    let handle_gif_selected = move |gif_url: String| {
-        log::info!("GIF URL inserted: {}", gif_url);
-        insert_with_spacing(gif_url);
-    };
-
-    let handle_poll_created = move |nevent_ref: String| {
-        log::info!("Poll reference inserted: {}", nevent_ref);
-        insert_with_spacing(nevent_ref);
-        show_poll_modal.set(false);
-    };
-
+    let draft_ctx_for_publish = draft_ctx.clone();
     let handle_publish = move |_| {
-        let mut content_value = content.read().clone();
-        if !uploaded_media.read().is_empty() {
-            if !content_value.is_empty() {
-                content_value.push_str("\n\n");
-            }
-            for url in uploaded_media.read().iter() {
-                content_value.push_str(url);
-                content_value.push('\n');
-            }
-        }
-
-        if content_value.is_empty() || is_over_limit {
+        let content_value = editor.content_value();
+        if content_value.is_empty() || *editor.is_over_limit.read() {
             return;
         }
-
+        let mut is_publishing = editor.is_publishing;
         is_publishing.set(true);
 
-        let reply_to_event = reply_to.clone();
+        let target_event = target.clone();
         let root = root_event.clone();
-        let thread_root_id = root
-            .as_ref()
-            .map(|r| r.id.to_hex())
-            .unwrap_or_else(|| reply_to_event.id.to_hex());
         let content_for_publish = content_value.clone();
-        let relay_hint = get_relay_hint_for_reply(&reply_to_event.tags);
-        let toast_for_async = toast;
+        let ctx_for_clear = draft_ctx_for_publish.clone();
+        let toast_api = toast;
 
         spawn(async move {
-            let client = match get_client() {
-                Some(c) => c,
-                None => {
-                    log::error!("Client not initialized");
-                    toast_for_async.error(
-                        "Unable to publish".to_string(),
-                        ToastOptions::new()
-                            .description("Client not initialized")
-                            .duration(Duration::from_secs(3)),
-                    );
-                    is_publishing.set(false);
-                    return;
-                }
-            };
-
-            let relay_url = if relay_hint.is_empty() {
-                None
+            let content_owned = content_for_publish;
+            let emoji_tags = build_custom_emoji_tags(&content_owned);
+            let event_builder = if target_event.kind == Kind::TextNote {
+                let hint = get_relay_hint(&target_event.tags);
+                let relay_url = if hint.is_empty() {
+                    None
+                } else {
+                    RelayUrl::parse(&hint).ok()
+                };
+                EventBuilder::text_note_reply(
+                    &content_owned,
+                    &target_event,
+                    root.as_ref(),
+                    relay_url,
+                )
             } else {
-                RelayUrl::parse(&relay_hint).ok()
+                let (comment_to, comment_root) = match &root {
+                    Some(parent) => (parent, Some(&target_event)),
+                    None => (&target_event, None),
+                };
+                EventBuilder::comment(content_owned, comment_to, comment_root)
             };
-
-            let builder = EventBuilder::text_note_reply(
-                &content_for_publish,
-                &reply_to_event,
-                root.as_ref(),
-                relay_url,
+            let event_builder = event_builder.tags(emoji_tags);
+            let event_builder = if *editor.is_sensitive.read() {
+                let reason = editor.sensitive_reason.read().clone();
+                let cw_tag = nostr::Tag::from_standardized_without_cell(
+                    nostr::event::tag::TagStandard::ContentWarning {
+                        reason: if reason.is_empty() { None } else { Some(reason) },
+                    },
+                );
+                event_builder.tag(cw_tag)
+            } else {
+                event_builder
+            };
+            let signed_event = match crate::stores::publish_queue::signing::sign_event_builder(
+                event_builder,
             )
-            .tags(build_custom_emoji_tags(&content_for_publish));
-
-            let signed_event = match client
-                .sign_event_builder(crate::utils::nips::nip89::tag_event_builder(builder))
-                .await
+            .await
             {
                 Ok(e) => e,
                 Err(e) => {
-                    log::error!("Failed to sign reply: {}", e);
-                    toast_for_async.error(
+                    log::error!("Failed to sign event: {}", e);
+                    toast_api.error(
                         "Failed to publish".to_string(),
                         ToastOptions::new()
-                            .description(e.to_string())
+                            .description(e)
                             .duration(Duration::from_secs(3)),
                     );
                     is_publishing.set(false);
@@ -215,124 +148,76 @@ pub fn ReplyComposer(
                 }
             };
 
-            let mut success = false;
-            match client.send_event(&signed_event).await {
-                Ok(output) => {
-                    if !output.success.is_empty() {
-                        log::info!(
-                            "Reply published: {} ({}/{} relays)",
-                            output.id().to_hex(),
-                            output.success.len(),
-                            output.success.len() + output.failed.len(),
-                        );
-                        for (relay, error) in &output.failed {
-                            log::warn!("Relay {} failed for reply: {}", relay, error);
-                        }
-                        success = true;
-                    } else {
-                        log::warn!(
-                            "Gossip publish had 0 successes for reply {}, retrying with broadcast",
-                            output.id().to_hex()
-                        );
-                    }
-                }
-                Err(e) => {
-                    log::warn!(
-                        "Gossip publish failed for reply: {}, retrying with broadcast",
-                        e
-                    );
-                }
-            }
+            let event_id = signed_event.id.to_hex();
+            crate::stores::publish_queue::enqueue(
+                signed_event.clone(),
+                crate::stores::publish_queue::types::QueueEventType::Note,
+                None,
+                std::collections::HashMap::new(),
+            ).await;
+            log::info!("Enqueued reply: {}", event_id);
+            show_queued_toast(toast_api, "Reply");
 
-            if !success {
-                let write_relays = relay::nip65::get_write_relays();
-                if write_relays.is_empty() {
-                    toast_for_async.error(
-                        "Failed to publish".to_string(),
-                        ToastOptions::new()
-                            .description("No write relays configured")
-                            .duration(Duration::from_secs(3)),
-                    );
-                    is_publishing.set(false);
-                    return;
-                }
-                match send_presigned_event_to_relays(signed_event.clone(), write_relays).await {
-                    Ok(result) if result.success_count() > 0 => {
-                        log::info!(
-                            "Reply published via broadcast: {} ({}/{} relays)",
-                            result.event_id,
-                            result.success_count(),
-                            result.total_attempted()
-                        );
-                        success = true;
-                    }
-                    Ok(result) => {
-                        log::warn!(
-                            "Broadcast publish also had 0 successes for reply {}",
-                            result.event_id
-                        );
-                        toast_for_async.error(
-                            "Failed to publish".to_string(),
-                            ToastOptions::new()
-                                .description("No relay accepted the event")
-                                .duration(Duration::from_secs(3)),
-                        );
-                    }
-                    Err(e) => {
-                        log::error!("Broadcast publish failed for reply: {}", e);
-                        toast_for_async.error(
-                            "Failed to publish".to_string(),
-                            ToastOptions::new()
-                                .description(e.to_string())
-                                .duration(Duration::from_secs(3)),
-                        );
-                    }
-                }
+            if let Ok(root_event_id) = EventId::from_hex(&target_event.id.to_hex()) {
+                invalidate_thread_tree_cache(&root_event_id);
             }
-
-            if success {
-                if let Ok(root_event_id) = EventId::from_hex(&thread_root_id) {
-                    invalidate_thread_tree_cache(&root_event_id);
-                }
-                content.set(String::new());
-                uploaded_media.set(Vec::new());
-                on_success.call(signed_event);
+            editor.clear();
+            if let Some(pk) = crate::stores::auth_store::get_pubkey() {
+                crate::stores::note_draft_store::clear_note_draft(&pk, &ctx_for_clear);
             }
+            on_success.call(signed_event);
 
             is_publishing.set(false);
         });
     };
 
-    let handle_cancel = move |_| {
-        content.set(String::new());
-        uploaded_media.set(Vec::new());
-        show_media_uploader.set(false);
-        on_close.call(());
+    let mut try_close = move || {
+        if !editor.content.read().is_empty() {
+            show_discard.set(true);
+        } else {
+            on_close.call(());
+        }
     };
+
+    let ctx_for_discard = draft_ctx.clone();
 
     rsx! {
         div {
-            class: "fixed inset-0 bg-black/50 z-50 flex items-start justify-center pt-16 px-4",
-            onclick: move |_| on_close.call(()),
+            class: "fixed inset-0 bg-black/50 z-50 flex items-start justify-center overflow-y-auto",
+            onclick: move |_| try_close(),
             div {
-                class: "bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto",
+                class: "bg-background border border-border rounded-lg shadow-xl w-full max-w-2xl m-4 mt-20",
                 onclick: move |e| e.stop_propagation(),
                 div { class: "flex items-center justify-between p-4 border-b border-border",
-                    h3 { class: "text-lg font-bold", "Reply" }
+                    h2 { class: "text-xl font-bold", "{header_title}" }
                     button {
-                        class: "p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition",
-                        onclick: handle_cancel,
-                        "✕"
+                        class: "text-muted-foreground hover:text-foreground transition",
+                        onclick: move |_| try_close(),
+                        svg {
+                            xmlns: "http://www.w3.org/2000/svg",
+                            class: "w-6 h-6",
+                            fill: "none",
+                            view_box: "0 0 24 24",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            path {
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                d: "M6 18L18 6M6 6l12 12",
+                            }
+                        }
                     }
                 }
-                div { class: "p-4 bg-gray-50 dark:bg-gray-900 border-b border-border",
-                    div { class: "text-sm text-gray-600 dark:text-gray-400 mb-2",
-                        "Replying to @{short_author}"
-                    }
-                    div { class: "text-sm text-gray-700 dark:text-gray-300 line-clamp-3 overflow-hidden",
-                        RichContent {
-                            content: reply_content.clone(),
-                            tags: reply_tags.clone(),
+                if is_note {
+                    div { class: "p-4 bg-muted border-b border-border",
+                        div { class: "text-sm text-muted-foreground mb-2",
+                            "Replying to @{short_author}"
+                        }
+                        div { class: "text-sm text-foreground line-clamp-3 overflow-hidden",
+                            RichContent {
+                                content: reply_content.clone(),
+                                tags: reply_tags.clone(),
+                            }
                         }
                     }
                 }
@@ -342,130 +227,44 @@ pub fn ReplyComposer(
                     }
                 } else {
                     div { class: "p-4",
-                        MentionAutocomplete {
-                            content,
-                            on_input: move |new_value: String| {
-                                content.set(new_value);
-                            },
-                            placeholder: "Write your reply...".to_string(),
-                            rows: 6,
-                            disabled: *is_publishing.read(),
-                            thread_participants: thread_participants.clone(),
-                            cursor_position,
-                        }
-                        div { class: "text-sm {counter_color}",
-                            if is_over_limit {
-                                span { "Over limit by {char_count - MAX_LENGTH}" }
-                            } else {
-                                span { "{char_count} / {MAX_LENGTH}" }
-                            }
-                        }
-                        if *show_media_uploader.read() {
-                            div { class: "mt-3",
-                                MediaUploader {
-                                    on_upload: handle_media_uploaded,
-                                    button_label: "Upload Media",
-                                }
-                            }
-                        }
-                        if !uploaded_media.read().is_empty() {
-                            div { class: "mt-3 space-y-2",
-                                p { class: "text-sm font-medium", "Uploaded Media:" }
-                                for (index , url) in uploaded_media.read().iter().enumerate() {
-                                    div {
-                                        key: "{index}",
-                                        class: "flex items-center gap-2 p-2 bg-accent rounded-lg",
-                                        if url.ends_with(".mp4") || url.ends_with(".webm") || url.contains("video") {
-                                            span { class: "text-sm", "Video" }
-                                        } else {
-                                            span { class: "text-sm", "Image" }
-                                        }
-                                        a {
-                                            class: "text-sm text-primary hover:underline truncate flex-1",
-                                            href: "{url}",
-                                            target: "_blank",
-                                            "{url}"
-                                        }
-                                        button {
-                                            class: "px-2 py-1 text-xs text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300",
-                                            onclick: move |_| handle_remove_media(index),
-                                            "Remove"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        div { class: "mt-3 flex items-center justify-between",
-                            div { class: "flex gap-2",
-                                button {
-                                    class: if *show_media_uploader.read() { "p-2 rounded-full bg-primary text-primary-foreground transition" } else { "p-2 rounded-full hover:bg-accent transition" },
-                                    title: "Add media",
-                                    onclick: move |_| {
-                                        let current = *show_media_uploader.read();
-                                        show_media_uploader.set(!current);
-                                    },
-                                    disabled: *is_publishing.read(),
-                                    CameraIcon { class: "w-5 h-5".to_string() }
-                                }
-                                EmojiPicker {
-                                    on_emoji_selected: handle_emoji_selected,
-                                    icon_only: true,
-                                }
-                                GifPicker {
-                                    on_gif_selected: handle_gif_selected,
-                                    icon_only: true,
-                                }
-                                button {
-                                    class: "p-2 rounded-full hover:bg-accent transition",
-                                    title: "Create poll",
-                                    "aria-label": "Create poll",
-                                    onclick: move |_| show_poll_modal.set(true),
-                                    disabled: *is_publishing.read(),
-                                    BarChartIcon { class: "w-5 h-5".to_string() }
-                                }
-                            }
-                            div { class: "flex gap-2",
-                                button {
-                                    class: "px-4 py-2 text-sm font-medium hover:bg-accent rounded-full transition",
-                                    onclick: handle_cancel,
-                                    disabled: *is_publishing.read(),
-                                    "Cancel"
-                                }
-                                button {
-                                    class: "px-6 py-2 text-sm font-bold text-white bg-blue-500 hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-full transition flex items-center gap-2",
-                                    disabled: !can_publish,
-                                    onclick: handle_publish,
-                                    if *is_publishing.read() {
-                                        span { class: "inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" }
-                                        "Replying..."
-                                    } else {
-                                        "Reply"
-                                    }
-                                }
-                            }
+                        ComposerBody {
+                            editor,
+                            placeholder,
+                            textarea_rows: 6,
+                            publish_label,
+                            on_publish: handle_publish,
+                            on_cancel: move |_| try_close(),
+                            thread_participants: Some(thread_participants.clone()),
                         }
                     }
                 }
             }
         }
-        PollCreatorModal { show: show_poll_modal, on_poll_created: handle_poll_created }
-    }
-}
-
-/// Find the nearest valid UTF-8 char boundary at or before the given byte position.
-/// This prevents panics when inserting text at cursor positions in strings with
-/// multi-byte characters (emojis, accented characters, etc.).
-fn to_char_boundary(s: &str, pos: usize) -> usize {
-    if pos >= s.len() {
-        return s.len();
-    }
-    if s.is_char_boundary(pos) {
-        return pos;
-    }
-    for offset in 1..=3 {
-        if pos >= offset && s.is_char_boundary(pos - offset) {
-            return pos - offset;
+        if *show_discard.read() {
+            DraftDiscardModal {
+                on_save: {
+                    let ctx = ctx_for_discard.clone();
+                    move |_| {
+                        editor.clear();
+                        show_discard.set(false);
+                        on_close.call(());
+                        let _ = ctx;
+                    }
+                },
+                on_discard: {
+                    let ctx = ctx_for_discard.clone();
+                    move |_| {
+                        editor.clear();
+                        editor.clear_draft();
+                        show_discard.set(false);
+                        on_close.call(());
+                        let _ = ctx;
+                    }
+                },
+                on_continue: move |_| {
+                    show_discard.set(false);
+                },
+            }
         }
     }
-    0
 }

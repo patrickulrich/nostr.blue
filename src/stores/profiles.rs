@@ -204,7 +204,7 @@ async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> {
         .kind(Kind::Metadata)
         .author(public_key)
         .limit(1);
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+    match nostr_client::fetch_events_aggregated(filter.clone(), Duration::from_secs(10)).await {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 let profile = parse_profile_event(&event)?;
@@ -213,48 +213,76 @@ async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> {
                     .put(pubkey.to_string(), profile.clone());
                 Ok(profile)
             } else {
-                let profile = Profile {
-                    pubkey: pubkey.to_string(),
-                    name: None,
-                    display_name: None,
-                    about: None,
-                    picture: None,
-                    banner: None,
-                    nip05: None,
-                    lud16: None,
-                    lud06: None,
-                    website: None,
-                    bot: None,
-                    birthday: None,
-                    fetched_at: Utc::now(),
-                    raw_metadata_json: None,
-                };
-                PROFILE_CACHE
-                    .write()
-                    .put(pubkey.to_string(), profile.clone());
-                Ok(profile)
+                fetch_profile_from_indexers(pubkey, public_key).await
             }
         }
         Err(e) => {
-            log::error!("Failed to fetch profile: {}", e);
-            let profile = Profile {
-                pubkey: pubkey.to_string(),
-                name: None,
-                display_name: None,
-                about: None,
-                picture: None,
-                banner: None,
-                nip05: None,
-                lud16: None,
-                lud06: None,
-                website: None,
-                bot: None,
-                birthday: None,
-                fetched_at: Utc::now(),
-                raw_metadata_json: None,
-            };
-            Ok(profile)
+            log::warn!("Primary profile fetch failed for {}: {}, trying indexers", pubkey, e);
+            fetch_profile_from_indexers(pubkey, public_key).await
         }
+    }
+}
+async fn fetch_profile_from_indexers(
+    pubkey: &str,
+    public_key: PublicKey,
+) -> Result<Profile, String> {
+    let indexer_urls = crate::stores::relay::nip65::get_indexer_relay_urls();
+    if indexer_urls.is_empty() {
+        return Ok(empty_profile(pubkey));
+    }
+    let client = match nostr_client::get_client() {
+        Some(c) => c,
+        None => return Ok(empty_profile(pubkey)),
+    };
+    let filter = Filter::new()
+        .kind(Kind::Metadata)
+        .author(public_key)
+        .limit(1);
+    let relay_urls: Vec<nostr_sdk::RelayUrl> = indexer_urls
+        .iter()
+        .filter_map(|s| nostr_sdk::RelayUrl::parse(s).ok())
+        .collect();
+    if relay_urls.is_empty() {
+        return Ok(empty_profile(pubkey));
+    }
+    match client
+        .fetch_events_from(relay_urls, filter, std::time::Duration::from_secs(5))
+        .await
+    {
+        Ok(events) => {
+            if let Some(event) = events.into_iter().next() {
+                let profile = parse_profile_event(&event)?;
+                PROFILE_CACHE
+                    .write()
+                    .put(pubkey.to_string(), profile.clone());
+                log::info!("Fetched profile for {} from indexer relays", pubkey);
+                Ok(profile)
+            } else {
+                Ok(empty_profile(pubkey))
+            }
+        }
+        Err(e) => {
+            log::warn!("Indexer profile fetch also failed for {}: {}", pubkey, e);
+            Ok(empty_profile(pubkey))
+        }
+    }
+}
+fn empty_profile(pubkey: &str) -> Profile {
+    Profile {
+        pubkey: pubkey.to_string(),
+        name: None,
+        display_name: None,
+        about: None,
+        picture: None,
+        banner: None,
+        nip05: None,
+        lud16: None,
+        lud06: None,
+        website: None,
+        bot: None,
+        birthday: None,
+        fetched_at: Utc::now(),
+        raw_metadata_json: None,
     }
 }
 /// Parse a Kind 0 event into a Profile struct

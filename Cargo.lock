@@ -4897,7 +4897,7 @@ dependencies = [
 
 [[package]]
 name = "nostrblue"
-version = "0.8.6"
+version = "0.8.7"
 dependencies = [
  "ammonia",
  "arboard",
@@ -4944,6 +4944,7 @@ dependencies = [
  "nostr-ndb",
  "nostr-relay-pool",
  "nostr-sdk",
+ "nostrdb",
  "nwc",
  "once_cell",
  "pulldown-cmark",
@@ -4961,6 +4962,7 @@ dependencies = [
  "strum",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-stream",
  "url",
  "urlencoding",
  "uuid",

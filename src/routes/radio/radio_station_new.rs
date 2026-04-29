@@ -475,15 +475,17 @@ async fn publish_station(form: StationFormData) -> std::result::Result<String, S
         tags.push(Tag::custom(TagKind::custom("stream"), stream_values));
     }
     let event_builder = EventBuilder::new(Kind::from(31237), "").tags(tags);
-    let client = nostr_client::get_client().ok_or_else(|| "Failed to get client".to_string())?;
-    let output = client
-        .send_event_builder(crate::utils::nips::nip89::tag_event_builder(event_builder))
+    let event = crate::stores::publish_queue::signing::sign_event_builder(event_builder)
         .await
-        .map_err(|e| format!("Failed to publish event: {}", e))?;
-    if output.success.is_empty() {
-        return Err("No relays accepted event".to_string());
-    }
-    let event_id = output.id().to_string();
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+    let event_id = event.id.to_string();
+    crate::stores::publish_queue::enqueue_and_await(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other("radio".to_string()),
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await?;
     let pubkey = nostr_client::get_cached_pubkey()?;
     let coordinate = Coordinate::new(Kind::from(31237), pubkey).identifier(d_tag);
     let naddr = coordinate

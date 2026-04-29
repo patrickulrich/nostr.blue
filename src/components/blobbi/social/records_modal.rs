@@ -167,8 +167,13 @@ fn RecordButton(blobbi: BlobbiCompanion, label: String, record_type: String, ico
                             (TAG_BASE_COLOR, b.visual_traits.base_color.clone()),
                         ];
                         let event = build_record_event(&b.d, &rt, b.generation, extra, content);
-                        if let Some(client) = nostr_client::NOSTR_CLIENT.read().as_ref() {
-                            let _ = client.send_event_builder(event).await;
+                        if let Ok(signed) = crate::stores::publish_queue::signing::sign_event_builder(event).await {
+                            crate::stores::publish_queue::enqueue(
+                                signed,
+                                crate::stores::publish_queue::types::QueueEventType::Other("blobbi".to_string()),
+                                None,
+                                std::collections::HashMap::new(),
+                            ).await;
                         }
                     });
                 }

@@ -30,7 +30,7 @@
 //! Currently marked as dead_code - functions not yet wired to UI.
 #![allow(dead_code)]
 use super::denomination::DenominationStrategy;
-use super::events::{queue_signed_event_for_retry_result, update_token_event_id};
+use super::events::update_token_event_id;
 use super::internal::get_or_create_wallet;
 use super::proofs::{
     cdk_proof_to_proof_data, get_event_ids_for_proofs, proof_data_to_cdk_proof,
@@ -524,7 +524,7 @@ async fn publish_swap_events(
         .as_nostr_signer();
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
     let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let client = nostr_client::NOSTR_CLIENT
+    let _client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
@@ -561,69 +561,23 @@ async fn publish_swap_events(
         .await
         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-    let signed_event = crate::utils::nips::nip89::tag_event_builder(builder)
-        .build(pubkey)
-        .sign(&signer)
+    let signed_event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign token event: {}", e))?;
     let event_id_hex = signed_event.id.to_hex();
-    match client.send_event(&signed_event).await {
-        Ok(output) => {
-            if output.success.is_empty() {
-                let all_duplicates = !output.failed.is_empty()
-                    && output
-                        .failed
-                        .values()
-                        .all(|err| err.to_lowercase().starts_with("duplicate:"));
-                if all_duplicates {
-                    log::debug!(
-                        "Swap token event {} already exists on all relays (duplicate)",
-                        event_id_hex
-                    );
-                    Ok(SwapPublishOutcome::Published {
-                        event_id: event_id_hex,
-                    })
-                } else {
-                    log::warn!(
-                        "No relays accepted swap token event (failed: {:?}), queuing for retry",
-                        output.failed.keys().collect::<Vec<_>>()
-                    );
-                    queue_signed_event_for_retry_result(
-                        signed_event,
-                        PendingEventType::TokenEvent,
-                        Some(pending_event_id.to_string()),
-                        Some(mint_url.to_string()),
-                    )
-                    .await?;
-                    Ok(SwapPublishOutcome::RetryQueued)
-                }
-            } else {
-                log::info!(
-                    "Published swap token event: {} (to {}/{} relays)",
-                    event_id_hex,
-                    output.success.len(),
-                    output.success.len() + output.failed.len()
-                );
-                Ok(SwapPublishOutcome::Published {
-                    event_id: event_id_hex,
-                })
-            }
-        }
-        Err(e) => {
-            log::warn!(
-                "Failed to publish swap token event, queuing for retry: {}",
-                e
-            );
-            queue_signed_event_for_retry_result(
-                signed_event,
-                PendingEventType::TokenEvent,
-                Some(pending_event_id.to_string()),
-                Some(mint_url.to_string()),
-            )
-            .await?;
-            Ok(SwapPublishOutcome::RetryQueued)
-        }
-    }
+    let mut metadata = std::collections::HashMap::new();
+    metadata.insert("pending_token_id".to_string(), pending_event_id.to_string());
+    metadata.insert("mint_url".to_string(), mint_url.to_string());
+    crate::stores::publish_queue::enqueue(
+        signed_event,
+        crate::stores::publish_queue::types::QueueEventType::Cashu,
+        None,
+        metadata,
+    ).await;
+    log::info!("Queued swap token event: {}", event_id_hex);
+    Ok(SwapPublishOutcome::Published {
+        event_id: event_id_hex,
+    })
 }
 
 fn record_deletion_follow_up(
@@ -663,7 +617,7 @@ fn build_deletion_tags(event_ids: &[EventId]) -> Vec<nostr_sdk::Tag> {
 /// could be replayed before the token is accepted. If publishing fails, this function
 /// handles its own retry logic via queue_event_for_retry.
 async fn publish_deletion_events(
-    client: &nostr_sdk::Client,
+    _client: &nostr_sdk::Client,
     event_ids_to_delete: &[String],
 ) -> Result<(), String> {
     if event_ids_to_delete.is_empty() {
@@ -678,35 +632,21 @@ async fn publish_deletion_events(
     }
     let tags = build_deletion_tags(&valid_event_ids);
     let deletion_builder = nostr_sdk::EventBuilder::new(Kind::from(5), "Swapped token").tags(tags);
-    let tagged_builder = crate::utils::nips::nip89::tag_event_builder(deletion_builder.clone());
-    match client.send_event_builder(tagged_builder).await {
-        Ok(output) => {
-            if output.success.is_empty() {
-                log::warn!("No relays accepted deletion event, queuing for retry");
-                if let Err(queue_err) = super::events::queue_event_for_retry(
-                    deletion_builder.clone(),
-                    PendingEventType::DeletionEvent,
-                    None,
-                    None,
-                )
-                .await
-                {
-                    return Err(format!(
-                        "Failed to queue swap deletion event for retry: {}",
-                        queue_err
-                    ));
-                }
-            } else {
-                log::info!(
-                    "Published deletion events for {} token events (to {}/{} relays)",
-                    valid_event_ids.len(),
-                    output.success.len(),
-                    output.success.len() + output.failed.len()
-                );
-            }
+    match crate::stores::publish_queue::signing::sign_event_builder(deletion_builder.clone()).await {
+        Ok(signed_event) => {
+            crate::stores::publish_queue::enqueue(
+                signed_event,
+                crate::stores::publish_queue::types::QueueEventType::Cashu,
+                None,
+                std::collections::HashMap::new(),
+    ).await;
+            log::info!(
+                "Queued deletion events for {} token events",
+                valid_event_ids.len()
+            );
         }
         Err(e) => {
-            log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
+            log::warn!("Failed to sign swap deletion event, queuing unsigned: {}", e);
             if let Err(queue_err) = super::events::queue_event_for_retry(
                 deletion_builder,
                 PendingEventType::DeletionEvent,

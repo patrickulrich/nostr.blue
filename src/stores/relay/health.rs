@@ -1,14 +1,15 @@
 //! Relay health tracking and quarantine
 //!
 //! Periodically polls SDK relay status to maintain an accurate health picture.
-//! Relays with sustained failures are quarantined (removed from the active pool)
-//! to avoid wasting reconnection attempts.
+//! Relays with sustained failures are soft-quarantined (logged + tracked) but
+//! NOT removed from the pool. The SDK's built-in auto-reconnection handles
+//! retrying with incremental backoff.
 //!
 //! # Architecture
 //!
 //! - `RELAY_HEALTH` GlobalSignal stores per-relay health snapshots
 //! - `poll_relay_health()` queries the SDK pool and updates the signal
-//! - `quarantine_dead_relays()` removes relays with excessive failures
+//! - `quarantine_dead_relays()` marks relays with excessive failures (soft quarantine)
 //! - `start_health_poll()` spawns the periodic background task
 use super::signals::RelayPoolStoreStoreExt;
 use dioxus::prelude::*;
@@ -106,53 +107,52 @@ pub async fn poll_relay_health(client: &Client) -> usize {
     connected
 }
 
-/// Remove relays that have exceeded the failure threshold.
-/// Returns URLs of removed relays.
-pub async fn quarantine_dead_relays(client: &Client) -> Vec<String> {
-    let to_remove: Vec<String> = {
+/// Mark relays that have exceeded the failure threshold as quarantined.
+///
+/// Soft quarantine: does NOT remove relays from the pool. The SDK's built-in
+/// auto-reconnection (per-relay `connection_task` with incremental backoff) will
+/// continue retrying. Previous hard-quarantine via `remove_relay()` permanently
+/// killed the reconnect task, shrinking the pool until empty.
+///
+/// Returns URLs of newly quarantined relays.
+pub async fn quarantine_dead_relays(_client: &Client) -> Vec<String> {
+    let to_quarantine: Vec<String> = {
         let health = RELAY_HEALTH.peek();
         health
             .relays
             .iter()
             .filter(|(_, entry)| {
-                entry.consecutive_failures >= QUARANTINE_THRESHOLD && !entry.connected
+                entry.consecutive_failures >= QUARANTINE_THRESHOLD
+                    && !entry.connected
+                    && entry.quarantine_count == 0
             })
             .map(|(url, _)| url.clone())
             .collect()
     };
 
-    if to_remove.is_empty() {
+    if to_quarantine.is_empty() {
         return Vec::new();
     }
 
-    for url in &to_remove {
+    for url in &to_quarantine {
         log::warn!(
-            "Quarantining relay {} after sustained failures",
-            url
+            "Relay {} has {} consecutive failures, marking as quarantined (SDK auto-reconnect will retry)",
+            url,
+            QUARANTINE_THRESHOLD
         );
-        if let Ok(relay_url) = RelayUrl::parse(url.as_str()) {
-            let _ = client.remove_relay(relay_url).await;
-        }
     }
 
     {
         let mut state = RELAY_HEALTH.write();
-        for url in &to_remove {
+        for url in &to_quarantine {
             if let Some(entry) = state.relays.get_mut(url) {
                 entry.quarantine_count = entry.quarantine_count.saturating_add(1);
             }
         }
     }
 
-    {
-        let pool_data = super::signals::RELAY_POOL.read();
-        let mut data = pool_data.data();
-        let mut relays = data.write();
-        relays.retain(|r| !to_remove.contains(&r.url));
-    }
-
-    log::info!("Quarantined {} dead relays", to_remove.len());
-    to_remove
+    log::info!("Soft-quarantined {} relays (not removed from pool)", to_quarantine.len());
+    to_quarantine
 }
 
 /// Update the `RELAY_CONNECTED` and `RELAY_POOL` UI signals from SDK state.
@@ -208,10 +208,13 @@ pub fn start_health_poll(client: Arc<Client>) {
         wasm_bindgen_futures::spawn_local(async move {
             loop {
                 crate::stores::nostr_client::platform_sleep_ms(POLL_INTERVAL_MS).await;
-                let connected = poll_relay_health(&client).await;
-                let _ = connected;
-                sync_ui_signals(&client).await;
-                quarantine_dead_relays(&client).await;
+                let c = client.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    let connected = poll_relay_health(&c).await;
+                    let _ = connected;
+                    sync_ui_signals(&c).await;
+                    quarantine_dead_relays(&c).await;
+                });
             }
         });
     }
