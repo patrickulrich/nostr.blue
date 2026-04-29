@@ -405,6 +405,21 @@ jobs:
             git push origin "refs/tags/$TAG"
           fi
 
+      - name: Resolve release notes
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          FILE="docs/changelogs/${VERSION}.md"
+          if [ -f "$FILE" ]; then
+            echo "Using changelog from $FILE"
+            {
+              echo 'RELEASE_NOTES<<EOF'
+              cat "$FILE"
+              echo ''
+              echo 'EOF'
+            } >> "$GITHUB_ENV"
+          fi
+
       - name: Create release
         id: create_release
         env:
