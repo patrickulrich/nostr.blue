@@ -423,6 +423,7 @@ async fn run_post_login_init() {
     .await;
     crate::stores::sidebar_store::load_sidebar_preferences().await;
     crate::stores::reactions_store::load_preferred_reactions().await;
+    crate::stores::ai_provider_store::sync_provider_state_from_relays().await;
     crate::stores::notifications::start_realtime_subscription().await;
     crate::stores::relay::start_relay_list_subscription().await;
     crate::stores::emoji_store::init_emoji_fetch();
@@ -583,6 +584,7 @@ pub async fn logout() -> Result<(), String> {
 fn clear_auth() {
     *AUTH_STATE.write() = AuthState::default();
     *KEYS.write() = None;
+    crate::stores::ai_provider_store::clear_relay_state();
 }
 /// Restore session by decrypting stored ncryptsec with password
 ///

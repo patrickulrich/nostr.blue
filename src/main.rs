@@ -127,6 +127,23 @@ fn App() -> Element {
             }
         }
     });
+    use_effect(move || {
+        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
+        if is_authenticated {
+            let sidebar_failed = sidebar_store::SIDEBAR_STATE.peek().is_failed();
+            let reactions_failed = reactions_store::REACTIONS_STATE.peek().is_failed();
+            if sidebar_failed || reactions_failed {
+                spawn(async move {
+                    if sidebar_store::SIDEBAR_STATE.peek().is_failed() {
+                        sidebar_store::load_sidebar_preferences().await;
+                    }
+                    if reactions_store::REACTIONS_STATE.peek().is_failed() {
+                        reactions_store::load_preferred_reactions().await;
+                    }
+                });
+            }
+        }
+    });
     let tailwind_css: Option<Asset> = option_asset!("/public/tailwind.css");
     rsx! {
         if let Some(css) = tailwind_css {

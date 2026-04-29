@@ -298,12 +298,19 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let client_for_connect = client.clone();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<bool>();
         tokio::spawn(async move {
-            // Don't call ensure_relays_ready here — it accesses Dioxus GlobalSignals
-            // which aren't available on tokio worker threads (no Dioxus runtime).
-            // Just attempt the connection; signal updates happen on the UI thread.
-            let _ = client_for_connect.try_connect(Duration::from_secs(3)).await;
-            log::info!("Background relay connections completed");
+            let output = client_for_connect.try_connect(Duration::from_secs(3)).await;
+            let success = !output.success.is_empty();
+            let _ = tx.send(success);
+            log::info!("Background relay connections completed (success={})", success);
+        });
+        spawn_forever(async move {
+            if let Some(success) = rx.recv().await {
+                if success && !*RELAY_CONNECTED.peek() {
+                    *RELAY_CONNECTED.write() = true;
+                }
+            }
         });
     }
     *CLIENT_INITIALIZED.write() = true;
