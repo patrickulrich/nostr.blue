@@ -1,16 +1,21 @@
 use dioxus::core::spawn_forever;
 use dioxus::prelude::*;
+use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::result::Result;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use crate::platform::storage;
 use crate::services::ppq::PPQ_CHAT_BASE_URL;
+use crate::stores::nostr_client;
 
 const STORAGE_KEY: &str = "nostr_blue_ai_provider_state";
 const SHAKESPEARE_PROVIDER_ID: &str = "shakespeare";
 const PPQ_PROVIDER_ID: &str = "ppq";
+const APP_DATA_KIND: u16 = 30078;
+const CREDENTIALS_D_TAG: &str = "nostr.blue/ai_credentials";
 static PROVIDER_STATE_SAVE_EVENT_ID: AtomicU64 = AtomicU64::new(0);
 pub static PROVIDER_STATE_SAVE_EVENT: GlobalSignal<Option<ProviderStateSaveEvent>> =
     Signal::global(|| None);
@@ -179,6 +184,117 @@ fn migrate_legacy_state(mut state: AiProviderState) -> AiProviderState {
     state
 }
 
+static PENDING_RELAY_STATE: OnceLock<Mutex<Option<AiProviderState>>> = OnceLock::new();
+
+fn pending_relay_state() -> &'static Mutex<Option<AiProviderState>> {
+    PENDING_RELAY_STATE.get_or_init(|| Mutex::new(None))
+}
+
+pub fn clear_relay_state() {
+    *pending_relay_state().lock().expect("relay state lock poisoned") = None;
+}
+
+pub async fn sync_provider_state_from_relays() {
+    if !crate::stores::auth_store::is_authenticated() {
+        return;
+    }
+    let client = match nostr_client::get_client() {
+        Some(c) => c,
+        None => return,
+    };
+    let pubkey = match nostr_client::get_cached_pubkey() {
+        Ok(pk) => pk,
+        Err(_) => return,
+    };
+    let signer = match client.signer().await {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!("sync_provider_state: no signer: {}", e);
+            return;
+        }
+    };
+    let filter = Filter::new()
+        .author(pubkey)
+        .kind(Kind::from(APP_DATA_KIND))
+        .identifier(CREDENTIALS_D_TAG)
+        .limit(1);
+    let events = match nostr_client::fetch_events_from_connected_relays_with_client(
+        &client,
+        filter,
+        std::time::Duration::from_secs(10),
+    )
+    .await
+    {
+        Ok(e) => e,
+        Err(e) => {
+            log::warn!("sync_provider_state: fetch failed: {}", e);
+            return;
+        }
+    };
+    let event = match events.into_iter().next() {
+        Some(e) => e,
+        None => {
+            log::debug!("sync_provider_state: no encrypted event found on relays");
+            return;
+        }
+    };
+    if event.content.is_empty() {
+        return;
+    }
+    let decrypted = match signer.nip44_decrypt(&event.pubkey, &event.content).await {
+        Ok(d) => d,
+        Err(e) => {
+            log::warn!("sync_provider_state: decrypt failed: {}", e);
+            return;
+        }
+    };
+    match serde_json::from_str::<AiProviderState>(&decrypted) {
+        Ok(relay_state) => {
+            log::info!(
+                "sync_provider_state: loaded state from relays (provider={}, {} custom providers)",
+                relay_state.selected_provider_id,
+                relay_state.custom_providers.len()
+            );
+            *pending_relay_state().lock().expect("relay state lock poisoned") =
+                Some(migrate_legacy_state(relay_state));
+        }
+        Err(e) => {
+            log::warn!("sync_provider_state: parse failed: {}", e);
+        }
+    }
+}
+
+async fn save_encrypted_provider_state(state: &AiProviderState) -> Result<(), String> {
+    if !crate::stores::auth_store::is_authenticated() {
+        return Ok(());
+    }
+    let client = nostr_client::get_client().ok_or("Client not initialized")?;
+    let signer = client
+        .signer()
+        .await
+        .map_err(|e| format!("No signer: {}", e))?;
+    let pubkey = nostr_client::get_cached_pubkey()?;
+    let json = serde_json::to_string(state).map_err(|e| format!("Serialize: {}", e))?;
+    let encrypted = signer
+        .nip44_encrypt(&pubkey, &json)
+        .await
+        .map_err(|e| format!("Encrypt: {}", e))?;
+    let builder = EventBuilder::new(Kind::from(APP_DATA_KIND), encrypted)
+        .tag(Tag::identifier(CREDENTIALS_D_TAG));
+    let event = crate::stores::publish_queue::signing::sign_event_builder(builder).await?;
+    crate::stores::publish_queue::enqueue(
+        event,
+        crate::stores::publish_queue::types::QueueEventType::Other(
+            "ai_credentials".to_string(),
+        ),
+        None,
+        std::collections::HashMap::new(),
+    )
+    .await;
+    log::info!("save_encrypted_provider_state: published to relay queue");
+    Ok(())
+}
+
 fn pending_provider_state_save() -> &'static Mutex<PendingProviderStateSave> {
     static PENDING_SAVE: OnceLock<Mutex<PendingProviderStateSave>> = OnceLock::new();
     PENDING_SAVE.get_or_init(|| Mutex::new(PendingProviderStateSave::default()))
@@ -225,6 +341,10 @@ pub fn process_queued_provider_state_saves(initial_snapshot: AiProviderState) {
         let mut next_snapshot = Some(initial_snapshot);
         while let Some(current_snapshot) = next_snapshot {
             let result = save_provider_state(&current_snapshot).await;
+            let encrypted_result = save_encrypted_provider_state(&current_snapshot).await;
+            if let Err(e) = encrypted_result {
+                log::warn!("Failed to save encrypted provider state: {}", e);
+            }
             emit_provider_state_save_event(current_snapshot, result);
             next_snapshot = finish_provider_state_save();
         }
@@ -319,20 +439,33 @@ mod web_db {
 }
 
 pub async fn load_provider_state() -> Result<AiProviderState, String> {
-    #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
-    {
-        if let Ok(cached_state) = storage::get(STORAGE_KEY) {
-            return Ok(migrate_legacy_state(cached_state));
+    let mut state = {
+        #[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
+        {
+            if let Ok(cached_state) = storage::get(STORAGE_KEY) {
+                migrate_legacy_state(cached_state)
+            } else {
+                web_db::AiProviderDb::new().await?.load_state().await?
+            }
         }
-        return web_db::AiProviderDb::new().await?.load_state().await;
+
+        #[cfg(not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))))]
+        {
+            migrate_legacy_state(storage::get(STORAGE_KEY).unwrap_or_default())
+        }
+    };
+
+    if let Some(relay_state) = pending_relay_state()
+        .lock()
+        .expect("relay state lock poisoned")
+        .take()
+    {
+        log::info!("load_provider_state: merging relay state into local cache");
+        state = relay_state;
+        let _ = cache_provider_state(&state);
     }
 
-    #[cfg(not(all(target_arch = "wasm32", feature = "web", not(feature = "native"))))]
-    {
-        Ok(migrate_legacy_state(
-            storage::get(STORAGE_KEY).unwrap_or_default(),
-        ))
-    }
+    Ok(state)
 }
 
 pub async fn save_provider_state(state: &AiProviderState) -> Result<(), String> {
