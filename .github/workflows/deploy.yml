@@ -409,7 +409,7 @@ jobs:
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
         run: |
-          FILE="docs/changelogs/${VERSION}.md"
+          FILE="public/docs/changelogs/${VERSION}.md"
           if [ -f "$FILE" ]; then
             echo "Using changelog from $FILE"
             {
