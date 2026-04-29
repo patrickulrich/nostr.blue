@@ -23,10 +23,10 @@ web = [
     "chrono/wasmbind", "uuid/js", "getrandom/js", "instant/wasm-bindgen",
     "cashu",
 ]
-desktop = ["dioxus/desktop", "dioxus-motion/desktop", "native", "dep:arboard", "dep:rfd", "dep:webbrowser", "cashu"]
-mobile = ["dioxus/mobile", "dioxus-motion/desktop", "native", "dep:jni", "dep:ndk-context", "cashu", "mobile_platform"]
+desktop = ["dioxus/desktop", "dioxus-motion/desktop", "native", "dep:arboard", "dep:rfd", "dep:webbrowser", "cashu", "dep:cdk-sqlite"]
+mobile = ["dioxus/mobile", "dioxus-motion/desktop", "native", "dep:jni", "dep:ndk-context", "cashu", "dep:cdk-sqlite", "mobile_platform"]
 native = [
-    "dep:nostr-ndb", "dep:nostrdb", "dep:cdk-sqlite", "dep:git2",
+    "dep:nostr-ndb", "dep:nostrdb", "dep:git2",
     "dep:dirs", "dep:env_logger", "dep:rusqlite",
     "tokio/rt-multi-thread", "tokio/fs", "getrandom/std",
 ]
