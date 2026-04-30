@@ -6,7 +6,7 @@ use crate::services::podcast_index::{Episode as PodcastIndexEpisode, PodcastFeed
 use crate::services::wavlake::WavlakeTrack;
 use crate::stores::nostr_music::{NostrTrack, TrackSource, KIND_MUSIC_TRACK};
 use crate::stores::auth_store;
-use crate::utils::radio::{select_best_stream, NowPlaying, RadioStation};
+use crate::utils::radio::{select_best_stream, NowPlaying, RadioStation, KIND_RADIO_STATION};
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use nostr_sdk::nips::nip01::Coordinate;
@@ -236,6 +236,68 @@ impl MusicTrack {
             }),
             _ => None,
         }
+    }
+    pub fn share_url(&self) -> String {
+        match &self.source {
+            TrackSource::Wavlake { .. } => {
+                format!("https://nostr.blue/music/track/{}", self.id)
+            }
+            TrackSource::Nostr { pubkey, d_tag, .. } => {
+                Self::build_naddr_url(KIND_MUSIC_TRACK, pubkey, d_tag)
+                    .map(|n| format!("https://nostr.blue/music/track/{}", n))
+                    .unwrap_or_else(|| format!("https://nostr.blue/music/track/{}", self.id))
+            }
+            TrackSource::NostrPodcast { pubkey, d_tag, .. } => {
+                Self::build_naddr_url(30054, pubkey, d_tag)
+                    .map(|n| format!("https://nostr.blue/podcast/nostr/episode/{}", n))
+                    .unwrap_or_else(|| format!("https://nostr.blue/podcast/nostr/episode/{}", self.id))
+            }
+            TrackSource::RssPodcast {
+                podcast_id,
+                episode_guid,
+                feed_url,
+                ..
+            } => {
+                let id_str = podcast_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| feed_url.clone());
+                format!(
+                    "https://nostr.blue/podcast/rss/episode/{}/{}",
+                    urlencoding::encode(&id_str),
+                    urlencoding::encode(episode_guid),
+                )
+            }
+            TrackSource::RssMusic {
+                feed_id, episode_id, ..
+            } => {
+                format!(
+                    "https://nostr.blue/music/rss/album/{}#track-{}",
+                    feed_id, episode_id,
+                )
+            }
+            TrackSource::Radio { pubkey, d_tag, .. } => {
+                Self::build_naddr_url(KIND_RADIO_STATION, pubkey, d_tag)
+                    .map(|n| format!("https://nostr.blue/radio/{}", n))
+                    .unwrap_or_else(|| format!("https://nostr.blue/radio/{}", self.id))
+            }
+            TrackSource::Bible {
+                translation,
+                book,
+                chapter,
+                ..
+            } => {
+                format!(
+                    "https://nostr.blue/bible/{}/{}/{}",
+                    translation, book, chapter
+                )
+            }
+        }
+    }
+    fn build_naddr_url(kind: u16, pubkey: &str, d_tag: &str) -> Option<String> {
+        let pk = nostr_sdk::PublicKey::from_hex(pubkey).ok()?;
+        let coord = Coordinate::new(Kind::Custom(kind), pk).identifier(d_tag);
+        use nostr_sdk::nips::nip19::ToBech32;
+        coord.to_bech32().ok()
     }
     /// Create MusicTrack from RSS music album track (Podcast Index medium="music")
     pub fn from_rss_music_track(episode: &PodcastIndexEpisode, feed: &PodcastFeed) -> Self {

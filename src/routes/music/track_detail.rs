@@ -102,7 +102,7 @@ fn TrackDetailContent(props: TrackDetailContentProps) -> Element {
     // Determine routes for artist and album links
     let artist_route = get_artist_route(&track);
     let album_route = get_album_route(&track);
-    let share_url = get_share_url(&track);
+    let share_url = track.share_url();
 
     rsx! {
         div {
@@ -473,42 +473,6 @@ fn get_album_route(track: &music_player::MusicTrack) -> Option<Route> {
             Some(Route::MusicRssAlbum { feed_id: *feed_id })
         }
         _ => None,
-    }
-}
-
-/// Get share URL for track
-fn get_share_url(track: &music_player::MusicTrack) -> String {
-    match &track.source {
-        nostr_music::TrackSource::Wavlake { .. } => {
-            format!("https://nostr.blue/music/track/{}", track.id)
-        }
-        nostr_music::TrackSource::Nostr { pubkey, d_tag, .. } => {
-            // Create naddr for sharing
-            use nostr::prelude::*;
-            if let Ok(pk) = PublicKey::from_hex(pubkey) {
-                let coord = nostr::nips::nip01::Coordinate::new(
-                    nostr::Kind::from(nostr_music::KIND_MUSIC_TRACK),
-                    pk,
-                )
-                .identifier(d_tag);
-                let nip19_coord = nostr::nips::nip19::Nip19Coordinate::new(coord, vec![]);
-                if let Ok(naddr) = nip19_coord.to_bech32() {
-                    return format!("https://nostr.blue/music/track/{}", naddr);
-                }
-            }
-            format!("https://nostr.blue/music/track/{}", track.id)
-        }
-        nostr_music::TrackSource::RssMusic {
-            feed_id,
-            episode_id,
-            ..
-        } => {
-            format!(
-                "https://nostr.blue/music/track/rss:{}:{}",
-                feed_id, episode_id
-            )
-        }
-        _ => format!("https://nostr.blue/music/track/{}", track.id),
     }
 }
 

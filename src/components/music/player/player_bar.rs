@@ -22,35 +22,13 @@ pub fn PlayerBar() -> Element {
     let mut seek_gen = use_signal(|| 0u32);
     let mut show_share_modal = use_signal(|| false);
 
-    let (share_url, share_content_type) = match &track.source {
-        crate::stores::nostr_music::TrackSource::Wavlake { .. } => (
-            format!("https://nostr.blue/music/track/{}", track.id),
-            ContentType::MusicTrack,
-        ),
-        crate::stores::nostr_music::TrackSource::Nostr { coordinate, .. } => (
-            format!("https://nostr.blue/music/track/{}", coordinate),
-            ContentType::MusicTrack,
-        ),
-        crate::stores::nostr_music::TrackSource::NostrPodcast { coordinate, .. } => (
-            format!("https://nostr.blue/podcast/episode/{}", coordinate),
-            ContentType::PodcastEpisode,
-        ),
-        crate::stores::nostr_music::TrackSource::RssPodcast { .. } => (
-            format!("https://nostr.blue/music/track/{}", track.id),
-            ContentType::PodcastEpisode,
-        ),
-        crate::stores::nostr_music::TrackSource::RssMusic { .. } => (
-            format!("https://nostr.blue/music/track/{}", track.id),
-            ContentType::MusicTrack,
-        ),
-        crate::stores::nostr_music::TrackSource::Radio { .. } => (
-            format!("https://nostr.blue/music/track/{}", track.id),
-            ContentType::MusicTrack,
-        ),
-        crate::stores::nostr_music::TrackSource::Bible { .. } => (
-            format!("https://nostr.blue/music/track/{}", track.id),
-            ContentType::MusicTrack,
-        ),
+    let share_url = track.share_url();
+    let share_content_type = match &track.source {
+        crate::stores::nostr_music::TrackSource::NostrPodcast { .. }
+        | crate::stores::nostr_music::TrackSource::RssPodcast { .. } => ContentType::PodcastEpisode,
+        crate::stores::nostr_music::TrackSource::Radio { .. } => ContentType::RadioStation,
+        crate::stores::nostr_music::TrackSource::Bible { .. } => ContentType::BibleVerse,
+        _ => ContentType::MusicTrack,
     };
 
     let on_seek_click = {
