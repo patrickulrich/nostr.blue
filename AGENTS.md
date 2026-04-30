@@ -25,6 +25,8 @@ cargo clippy --no-default-features --features desktop -- -D warnings
 # Mobile
 cargo check --no-default-features --features mobile
 cargo clippy --no-default-features --features mobile -- -D warnings
+cargo check --no-default-features --features playstore
+cargo clippy --no-default-features --features playstore -- -D warnings
 
 # Tests
 cargo test
