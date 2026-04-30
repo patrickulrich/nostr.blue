@@ -19,9 +19,9 @@ pub fn MusicHome() -> Element {
     let mut unified_tracks = use_signal(Vec::<MusicTrack>::new);
     let mut loading = use_signal(|| true);
     let mut error_msg = use_signal(|| None::<String>);
-    let mut rss_music_tracks = use_signal(Vec::<MusicTrack>::new);
-    let mut rss_loading = use_signal(|| true);
-    let mut rss_error = use_signal(|| None::<String>);
+    let mut chart_tracks = use_signal(Vec::<(u32, String, MusicTrack)>::new);
+    let mut chart_loading = use_signal(|| true);
+    let mut chart_error = use_signal(|| None::<String>);
     let genres = [
         "all",
         "Rock",
@@ -136,39 +136,58 @@ pub fn MusicHome() -> Element {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         let has_signer = nostr_client::has_signer();
         if !client_initialized || !has_signer {
-            rss_loading.set(false);
-            rss_error.set(Some("Sign in to browse RSS music".into()));
+            chart_loading.set(false);
+            chart_error.set(Some("Sign in to browse V4V Music Chart".into()));
             return;
         }
-        rss_loading.set(true);
-        rss_error.set(None);
+        chart_loading.set(true);
+        chart_error.set(None);
         spawn(async move {
-            match podcast_index::get_music_albums(Some(20)).await {
-                Ok(albums) => {
-                    let fetch_futures: Vec<_> = albums
+            match podcast_index::get_v4v_music_chart().await {
+                Ok(chart) => {
+                    let fetch_futures: Vec<_> = chart
+                        .items
                         .iter()
-                        .take(15)
-                        .map(|album| {
-                            let album = album.clone();
+                        .take(30)
+                        .map(|item| {
+                            let item = item.clone();
                             async move {
-                                match podcast_index::get_episodes_by_feed_id(
-                                    album.id,
-                                    Some(5),
-                                    None,
+                                match podcast_index::get_episode_by_guid(
+                                    &item.item_guid,
+                                    Some(&item.feed_guid),
                                 )
                                 .await
                                 {
-                                    Ok(episodes) => {
-                                        let tracks: Vec<MusicTrack> = episodes
-                                            .iter()
-                                            .map(|ep| MusicTrack::from_rss_music_track(ep, &album))
-                                            .collect();
-                                        Some(tracks)
+                                    Ok((episode, feed)) => {
+                                        let feed = feed.unwrap_or_else(|| {
+                                            podcast_index::PodcastFeed {
+                                                id: item.feed_id,
+                                                title: item.author.clone().unwrap_or_default(),
+                                                url: item.feed_url.clone(),
+                                                original_url: None,
+                                                link: None,
+                                                description: None,
+                                                author: item.author.clone(),
+                                                owner_name: None,
+                                                image: item.image.clone(),
+                                                artwork: None,
+                                                language: None,
+                                                itunes_id: None,
+                                                podcast_guid: Some(item.feed_guid.clone()),
+                                                episode_count: None,
+                                                categories: None,
+                                                trending_score: None,
+                                                value: None,
+                                            }
+                                        });
+                                        let track =
+                                            MusicTrack::from_rss_music_track(&episode, &feed);
+                                        Some((item.rank, item.boosts, track))
                                     }
                                     Err(e) => {
                                         log::warn!(
-                                            "Failed to fetch tracks for album {}: {}",
-                                            album.id,
+                                            "Failed to fetch episode for chart item {}: {}",
+                                            item.rank,
                                             e
                                         );
                                         None
@@ -178,16 +197,17 @@ pub fn MusicHome() -> Element {
                         })
                         .collect();
                     let results = futures::future::join_all(fetch_futures).await;
-                    let tracks: Vec<MusicTrack> = results.into_iter().flatten().flatten().collect();
-                    rss_music_tracks.set(tracks);
-                    rss_error.set(None);
+                    let tracks: Vec<(u32, String, MusicTrack)> =
+                        results.into_iter().flatten().collect();
+                    chart_tracks.set(tracks);
+                    chart_error.set(None);
                 }
                 Err(e) => {
-                    log::error!("Failed to fetch RSS music: {}", e);
-                    rss_error.set(Some(e));
+                    log::error!("Failed to fetch V4V music chart: {}", e);
+                    chart_error.set(Some(e));
                 }
             }
-            rss_loading.set(false);
+            chart_loading.set(false);
         });
     });
     let handle_search = move |_| {
@@ -350,11 +370,17 @@ pub fn MusicHome() -> Element {
                 if *discovery_tab.read() == DiscoveryTab::Playlists {
                     PlaylistSection { platform_filter: selected_platform.read().clone() }
                 } else if *discovery_tab.read() == DiscoveryTab::Rss {
-                    if *rss_loading.read() {
+                    div { class: "mb-4",
+                        h2 { class: "text-lg font-semibold", "V4V Music Chart" }
+                        p { class: "text-sm text-muted-foreground",
+                            "Top tracks by listener boosts over the last 7 days. Updated hourly."
+                        }
+                    }
+                    if *chart_loading.read() {
                         for i in 0..8 {
                             UnifiedTrackCardSkeleton { key: "{i}" }
                         }
-                    } else if let Some(ref err) = *rss_error.read() {
+                    } else if let Some(ref err) = *chart_error.read() {
                         div { class: "text-center py-16",
                             div { class: "w-16 h-16 mx-auto mb-4 rounded-full bg-destructive/10 flex items-center justify-center",
                                 svg {
@@ -371,12 +397,12 @@ pub fn MusicHome() -> Element {
                                     }
                                 }
                             }
-                            p { class: "text-destructive font-medium", "Failed to load RSS music" }
+                            p { class: "text-destructive font-medium", "Failed to load V4V Music Chart" }
                             p { class: "text-sm text-muted-foreground mt-1 max-w-md mx-auto",
                                 "{err}"
                             }
                         }
-                    } else if rss_music_tracks.read().is_empty() {
+                    } else if chart_tracks.read().is_empty() {
                         div { class: "text-center py-16",
                             div { class: "w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center",
                                 svg {
@@ -393,26 +419,52 @@ pub fn MusicHome() -> Element {
                                     }
                                 }
                             }
-                            p { class: "text-muted-foreground font-medium", "No RSS music found" }
+                            p { class: "text-muted-foreground font-medium", "No chart data available" }
                             p { class: "text-sm text-muted-foreground/70 mt-1",
-                                "Check back later for Podcasting 2.0 music"
+                                "Check back later for the latest V4V Music Chart"
                             }
                         }
                     } else {
                         div { class: "py-2 text-sm text-muted-foreground",
-                            span { "{rss_music_tracks.read().len()} tracks from RSS feeds" }
+                            span { "Top {chart_tracks.read().len()} tracks by listener boosts" }
                         }
                         div { class: "divide-y divide-border/50",
                             {
-                                let tracks = Arc::new(rss_music_tracks.read().clone());
+                                let tracks_with_playlist: Vec<MusicTrack> =
+                                    chart_tracks.read().iter().map(|(_, _, t)| t.clone()).collect();
+                                let playlist = Arc::new(tracks_with_playlist);
+                                let entries = chart_tracks.read().clone();
                                 rsx! {
-                                    for track in tracks.iter() {
-                                        UnifiedTrackCard {
-                                            key: "{track.id}",
-                                            track: track.clone(),
-                                            show_album: true,
-                                            show_sats: true,
-                                            playlist: Some(tracks.clone()),
+                                    for (rank, boosts, track) in entries {
+                                        div { class: "flex items-center gap-2",
+                                            div {
+                                                class: if rank <= 3 { "w-10 shrink-0 text-center font-bold text-lg" } else { "w-10 shrink-0 text-center font-semibold text-muted-foreground" },
+                                                class: if rank == 1 { " text-amber-400" } else if rank == 2 { " text-gray-400" } else if rank == 3 { " text-amber-700" },
+                                                "#{rank}"
+                                            }
+                                            div { class: "flex-1 min-w-0",
+                                                UnifiedTrackCard {
+                                                    key: "{track.id}",
+                                                    track: track.clone(),
+                                                    show_album: true,
+                                                    show_sats: false,
+                                                    playlist: Some(playlist.clone()),
+                                                }
+                                            }
+                                            div { class: "flex items-center gap-1 text-xs font-medium text-amber-500 shrink-0 pr-2",
+                                                svg {
+                                                    xmlns: "http://www.w3.org/2000/svg",
+                                                    class: "w-3.5 h-3.5",
+                                                    view_box: "0 0 24 24",
+                                                    fill: "none",
+                                                    stroke: "currentColor",
+                                                    stroke_width: "2",
+                                                    stroke_linecap: "round",
+                                                    stroke_linejoin: "round",
+                                                    polygon { points: "13 2 3 14 12 14 11 22 21 10 12 10 13 2" }
+                                                }
+                                                span { "{boosts}" }
+                                            }
                                         }
                                     }
                                 }

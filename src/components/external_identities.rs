@@ -64,7 +64,7 @@ fn platform_icon(platform: &str) -> Element {
 #[component]
 fn IdentityBadge(identity: ExternalIdentityInfo) -> Element {
     let proof_url = identity.proof_url();
-    let display = identity.display_name().to_string();
+    let display = identity.display_name();
     let platform = identity.platform.clone();
     let platform_label = match platform.as_str() {
         "github" => "GitHub",

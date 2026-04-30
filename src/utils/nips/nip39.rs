@@ -31,13 +31,15 @@ impl ExternalIdentityInfo {
         }
     }
 
-    pub fn display_name(&self) -> &str {
+    pub fn display_name(&self) -> String {
         if self.platform == "mastodon" {
             if let Some(pos) = self.ident.find("/@") {
-                return &self.ident[..pos];
+                let domain = &self.ident[..pos];
+                let username = &self.ident[pos + 2..];
+                return format!("{}@{}", username, domain);
             }
         }
-        &self.ident
+        self.ident.clone()
     }
 }
 
@@ -274,7 +276,7 @@ mod tests {
             ident: "bitcoinhackers.org/@semisol".to_string(),
             proof: "109775066355589974".to_string(),
         };
-        assert_eq!(info.display_name(), "bitcoinhackers.org");
+        assert_eq!(info.display_name(), "semisol@bitcoinhackers.org");
     }
 
     #[test]
