@@ -60,6 +60,7 @@ pub fn PlayerBar() -> Element {
             let mut seek_gen = seek_gen;
             let mut is_seeking = is_seeking;
             move |evt: Event<MouseData>| {
+                evt.stop_propagation();
                 let client_x = evt.client_coordinates().x;
                 let client_y = evt.client_coordinates().y;
                 spawn(async move {
@@ -101,6 +102,7 @@ pub fn PlayerBar() -> Element {
             let mut seek_gen = seek_gen;
             let mut is_seeking = is_seeking;
             move |evt: Event<MouseData>| {
+                evt.stop_propagation();
                 let client_x = evt.client_coordinates().x;
                 let client_y = evt.client_coordinates().y;
                 spawn(async move {
@@ -143,6 +145,7 @@ pub fn PlayerBar() -> Element {
             let mut seek_gen = seek_gen;
             let mut is_seeking = is_seeking;
             move |evt: Event<MouseData>| {
+                evt.stop_propagation();
                 let client_x = evt.client_coordinates().x;
                 let client_y = evt.client_coordinates().y;
                 spawn(async move {
@@ -198,6 +201,7 @@ pub fn PlayerBar() -> Element {
         div {
             class: "fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur border-t border-border shadow-lg z-50",
             style: "backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);",
+            onclick: move |_| music_player::set_view_mode(PlayerViewMode::Expanded),
             div { class: "flex items-center justify-between w-full pt-3 px-4 gap-3 pb-safe-controls",
                 // LEFT: Album art + title/artist
                 div { class: "flex items-center gap-3 min-w-0 flex-1 md:flex-initial md:w-80",
@@ -230,12 +234,14 @@ pub fn PlayerBar() -> Element {
                             } else if let Some(episode_route) = track.get_episode_route() {
                                 Link {
                                     to: episode_route,
+                                    onclick: move |evt: Event<MouseData>| { evt.stop_propagation(); },
                                     class: "font-semibold text-sm truncate hover:text-primary hover:underline",
                                     "{track.title}"
                                 }
                             } else if let Some(track_route) = track.get_track_route() {
                                 Link {
                                     to: track_route,
+                                    onclick: move |evt: Event<MouseData>| { evt.stop_propagation(); },
                                     class: "font-semibold text-sm truncate hover:text-primary hover:underline",
                                     "{track.title}"
                                 }
@@ -266,6 +272,7 @@ pub fn PlayerBar() -> Element {
                                 if let Some(show_route) = track.get_show_route() {
                                     Link {
                                         to: show_route,
+                                        onclick: move |evt: Event<MouseData>| { evt.stop_propagation(); },
                                         class: "hover:text-foreground hover:underline",
                                         "{track.artist}"
                                     }
@@ -274,6 +281,7 @@ pub fn PlayerBar() -> Element {
                                         to: Route::MusicArtist {
                                             artist_id: artist_id.clone(),
                                         },
+                                        onclick: move |evt: Event<MouseData>| { evt.stop_propagation(); },
                                         class: "hover:text-foreground hover:underline",
                                         "{track.artist}"
                                     }
@@ -291,41 +299,41 @@ pub fn PlayerBar() -> Element {
                         if track.is_live_stream {
                             button {
                                 class: "h-10 w-10 p-0 inline-flex items-center justify-center rounded-md bg-primary hover:bg-primary/90 text-primary-foreground transition-colors",
-                                onclick: move |_| music_player::toggle_play(),
+                                onclick: move |evt| { evt.stop_propagation(); music_player::toggle_play(); },
                                 dangerous_inner_html: if state.is_playing { icons::PAUSE } else { icons::PLAY },
                             }
                         } else if track.is_podcast {
                             button {
                                 class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
                                 title: "Rewind 15 seconds",
-                                onclick: move |_| music_player::skip_backward(15.0),
+                                onclick: move |evt| { evt.stop_propagation(); music_player::skip_backward(15.0); },
                                 dangerous_inner_html: icons::REWIND_15,
                             }
                             button {
                                 class: "h-10 w-10 p-0 inline-flex items-center justify-center rounded-md bg-primary hover:bg-primary/90 text-primary-foreground transition-colors",
-                                onclick: move |_| music_player::toggle_play(),
+                                onclick: move |evt| { evt.stop_propagation(); music_player::toggle_play(); },
                                 dangerous_inner_html: if state.is_playing { icons::PAUSE } else { icons::PLAY },
                             }
                             button {
                                 class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
                                 title: "Forward 15 seconds",
-                                onclick: move |_| music_player::skip_forward(15.0),
+                                onclick: move |evt| { evt.stop_propagation(); music_player::skip_forward(15.0); },
                                 dangerous_inner_html: icons::FORWARD_15,
                             }
                         } else {
                             button {
                                 class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
-                                onclick: move |_| music_player::previous_track(),
+                                onclick: move |evt| { evt.stop_propagation(); music_player::previous_track(); },
                                 dangerous_inner_html: icons::SKIP_BACK,
                             }
                             button {
                                 class: "h-10 w-10 p-0 inline-flex items-center justify-center rounded-md bg-primary hover:bg-primary/90 text-primary-foreground transition-colors",
-                                onclick: move |_| music_player::toggle_play(),
+                                onclick: move |evt| { evt.stop_propagation(); music_player::toggle_play(); },
                                 dangerous_inner_html: if state.is_playing { icons::PAUSE } else { icons::PLAY },
                             }
                             button {
                                 class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
-                                onclick: move |_| music_player::next_track(),
+                                onclick: move |evt| { evt.stop_propagation(); music_player::next_track(); },
                                 dangerous_inner_html: icons::SKIP_FORWARD,
                             }
                         }
@@ -352,7 +360,7 @@ pub fn PlayerBar() -> Element {
                     div { class: "flex items-center gap-1",
                         button {
                             class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
-                            onclick: move |_| music_player::toggle_mute(),
+                            onclick: move |evt| { evt.stop_propagation(); music_player::toggle_mute(); },
                             dangerous_inner_html: if state.is_muted { icons::VOLUME_X } else { icons::VOLUME_2 },
                         }
                         div { class: "relative w-16",
@@ -362,6 +370,7 @@ pub fn PlayerBar() -> Element {
                                 max: "100",
                                 value: "{(state.volume * 100.0) as u32}",
                                 class: "w-full h-2 appearance-none bg-secondary rounded-full cursor-pointer accent-primary [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-primary [&::-moz-range-thumb]:border-0",
+                                onclick: move |evt| { evt.stop_propagation(); },
                                 oninput: move |evt| {
                                     if let Ok(value) = evt.value().parse::<f64>() {
                                         music_player::set_volume(value / 100.0);
@@ -381,6 +390,7 @@ pub fn PlayerBar() -> Element {
                             select {
                                 class: "bg-transparent text-xs text-muted-foreground cursor-pointer hover:text-foreground border-none focus:outline-hidden appearance-none pr-4",
                                 value: "{state.playback_speed}",
+                                onclick: move |evt| { evt.stop_propagation(); },
                                 onchange: move |evt| {
                                     if let Ok(speed) = evt.value().parse::<f64>() {
                                         music_player::set_playback_speed(speed);
@@ -405,39 +415,39 @@ pub fn PlayerBar() -> Element {
                     if track.is_live_stream {
                         button {
                             class: "h-10 w-10 p-0 inline-flex items-center justify-center rounded-md bg-primary hover:bg-primary/90 text-primary-foreground transition-colors",
-                            onclick: move |_| music_player::toggle_play(),
+                            onclick: move |evt| { evt.stop_propagation(); music_player::toggle_play(); },
                             dangerous_inner_html: if state.is_playing { icons::PAUSE } else { icons::PLAY },
                         }
                     } else if track.is_podcast {
                         button {
                             class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
-                            onclick: move |_| music_player::skip_backward(15.0),
+                            onclick: move |evt| { evt.stop_propagation(); music_player::skip_backward(15.0); },
                             dangerous_inner_html: icons::REWIND_15,
                         }
                         button {
                             class: "h-10 w-10 p-0 inline-flex items-center justify-center rounded-md bg-primary hover:bg-primary/90 text-primary-foreground transition-colors",
-                            onclick: move |_| music_player::toggle_play(),
+                            onclick: move |evt| { evt.stop_propagation(); music_player::toggle_play(); },
                             dangerous_inner_html: if state.is_playing { icons::PAUSE } else { icons::PLAY },
                         }
                         button {
                             class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
-                            onclick: move |_| music_player::skip_forward(15.0),
+                            onclick: move |evt| { evt.stop_propagation(); music_player::skip_forward(15.0); },
                             dangerous_inner_html: icons::FORWARD_15,
                         }
                     } else {
                         button {
                             class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
-                            onclick: move |_| music_player::previous_track(),
+                            onclick: move |evt| { evt.stop_propagation(); music_player::previous_track(); },
                             dangerous_inner_html: icons::SKIP_BACK,
                         }
                         button {
                             class: "h-10 w-10 p-0 inline-flex items-center justify-center rounded-md bg-primary hover:bg-primary/90 text-primary-foreground transition-colors",
-                            onclick: move |_| music_player::toggle_play(),
+                            onclick: move |evt| { evt.stop_propagation(); music_player::toggle_play(); },
                             dangerous_inner_html: if state.is_playing { icons::PAUSE } else { icons::PLAY },
                         }
                         button {
                             class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
-                            onclick: move |_| music_player::next_track(),
+                            onclick: move |evt| { evt.stop_propagation(); music_player::next_track(); },
                             dangerous_inner_html: icons::SKIP_FORWARD,
                         }
                     }
@@ -445,38 +455,31 @@ pub fn PlayerBar() -> Element {
 
                 // RIGHT: Action buttons
                 div { class: "flex items-center gap-1 shrink-0",
-                    // Expand button (both mobile and desktop)
-                    button {
-                        class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
-                        title: "Expand player",
-                        onclick: move |_| music_player::set_view_mode(PlayerViewMode::Expanded),
-                        dangerous_inner_html: icons::CHEVRON_UP,
-                    }
                     // Minimize button (both mobile and desktop)
                     button {
                         class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
                         title: "Minimize to floating",
-                        onclick: move |_| music_player::minimize_to_floating(),
+                        onclick: move |evt| { evt.stop_propagation(); music_player::minimize_to_floating(); },
                         dangerous_inner_html: icons::MINIMIZE,
                     }
                     // Share (desktop only)
                     button {
-                        class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors hidden md:inline-flex",
+                        class: "h-8 w-8 p-0 items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors hidden md:inline-flex",
                         title: "Share",
-                        onclick: move |_| show_share_modal.set(true),
+                        onclick: move |evt| { evt.stop_propagation(); show_share_modal.set(true); },
                         dangerous_inner_html: icons::SHARE,
                     }
                     // Zap (desktop only)
                     button {
-                        class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors hidden md:inline-flex",
+                        class: "h-8 w-8 p-0 items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors hidden md:inline-flex",
                         title: "Zap the artist",
-                        onclick: move |_| music_player::show_zap_dialog(),
+                        onclick: move |evt| { evt.stop_propagation(); music_player::show_zap_dialog(); },
                         dangerous_inner_html: icons::ZAP,
                     }
                     // Close
                     button {
                         class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
-                        onclick: move |_| music_player::close_player(),
+                        onclick: move |evt| { evt.stop_propagation(); music_player::close_player(); },
                         dangerous_inner_html: icons::X,
                     }
                 }
