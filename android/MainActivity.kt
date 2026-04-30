@@ -97,7 +97,7 @@ class MainActivity : WryActivity() {
                         }
                     } else {
                         val returnedPackage = result.data?.getStringExtra("package")
-                        if (launchedSignerPackage != null && launchedSignerPackage != returnedPackage) {
+                        if (launchedSignerPackage != null && returnedPackage != null && launchedSignerPackage != returnedPackage) {
                             pendingOperationResult = null
                             pendingOperationEvent = null
                             pendingOperationPackage = null
