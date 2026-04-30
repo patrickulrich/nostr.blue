@@ -1,6 +1,8 @@
 use crate::components::MediaUploader;
 use crate::stores::{auth_store, nostr_client, profiles};
+use crate::utils::nips::nip39;
 use dioxus::prelude::*;
+use nostr::nips::nip39::Identity;
 use nostr_sdk::Metadata;
 #[derive(Props, Clone, PartialEq)]
 pub struct ProfileEditorModalProps {
@@ -27,6 +29,9 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
     let mut modal_session = use_signal(|| 0u64);
     let mut show_picture_uploader = use_signal(|| false);
     let mut show_banner_uploader = use_signal(|| false);
+    let mut github_proof = use_signal(String::new);
+    let mut twitter_proof = use_signal(String::new);
+    let mut mastodon_proof = use_signal(String::new);
     use_effect(use_reactive(&*props.show.read(), move |is_shown| {
         if is_shown {
             modal_session.with_mut(|s| *s = s.wrapping_add(1));
@@ -59,6 +64,19 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
                         }
                         Err(e) => {
                             log::error!("Failed to load profile for editing: {}", e);
+                        }
+                    }
+                    if let Ok(identities) = nip39::fetch_external_identities(&pubkey).await {
+                        if *modal_session.read() != session {
+                            return;
+                        }
+                        for info in &identities {
+                            match info.platform.as_str() {
+                                "github" => github_proof.set(info.proof_url()),
+                                "twitter" => twitter_proof.set(info.proof_url()),
+                                "mastodon" => mastodon_proof.set(info.proof_url()),
+                                _ => {}
+                            }
                         }
                     }
                 }
@@ -112,7 +130,48 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
             match nostr_client::publish_metadata(metadata).await {
                 Ok(_) => {
                     log::info!("Profile updated successfully");
-                    success.set(true);
+                    let mut identity_errors: Vec<String> = Vec::new();
+                    let mut identities_to_publish: Vec<Identity> = Vec::new();
+                    if !github_proof.read().is_empty() {
+                        match nip39::parse_github_proof_url(&github_proof.read()) {
+                            Some(id) => identities_to_publish.push(id),
+                            None => {
+                                if github_proof.read().trim().starts_with("http") {
+                                    identity_errors.push("Invalid GitHub proof URL".to_string());
+                                }
+                            }
+                        }
+                    }
+                    if !twitter_proof.read().is_empty() {
+                        match nip39::parse_twitter_proof_url(&twitter_proof.read()) {
+                            Some(id) => identities_to_publish.push(id),
+                            None => {
+                                if twitter_proof.read().trim().starts_with("http") {
+                                    identity_errors.push("Invalid Twitter proof URL".to_string());
+                                }
+                            }
+                        }
+                    }
+                    if !mastodon_proof.read().is_empty() {
+                        match nip39::parse_mastodon_proof_url(&mastodon_proof.read()) {
+                            Some(id) => identities_to_publish.push(id),
+                            None => {
+                                if mastodon_proof.read().trim().starts_with("http") {
+                                    identity_errors.push("Invalid Mastodon proof URL".to_string());
+                                }
+                            }
+                        }
+                    }
+                    if let Err(e) =
+                        nip39::publish_external_identities(identities_to_publish).await
+                    {
+                        identity_errors.push(e);
+                    }
+                    if identity_errors.is_empty() {
+                        success.set(true);
+                    } else {
+                        error.set(Some(identity_errors.join(", ")));
+                    }
                     let session = *modal_session.read();
                     spawn(async move {
                         crate::platform::timer::sleep_ms(1500).await;
@@ -436,6 +495,50 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
                                 {(1920..=2024).rev().map(|y| rsx! {
                                     option { value: "{y}", selected: *birthday_year.read() == Some(y), "{y}" }
                                 })}
+                            }
+                        }
+                    }
+                    div { class: "space-y-3",
+                        label { class: "block text-sm font-medium text-gray-700 dark:text-gray-300",
+                            "External Identities"
+                        }
+                        p { class: "text-xs text-gray-500 dark:text-gray-400",
+                            "Link your external accounts to verify your identity"
+                        }
+                        div {
+                            label { class: "block text-xs text-gray-600 dark:text-gray-400 mb-1",
+                                "GitHub Proof URL"
+                            }
+                            input {
+                                class: "w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                                r#type: "url",
+                                placeholder: "https://gist.github.com/<user>/<gist>",
+                                value: "{github_proof}",
+                                oninput: move |evt| github_proof.set(evt.value()),
+                            }
+                        }
+                        div {
+                            label { class: "block text-xs text-gray-600 dark:text-gray-400 mb-1",
+                                "X (Twitter) Proof URL"
+                            }
+                            input {
+                                class: "w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                                r#type: "url",
+                                placeholder: "https://x.com/<user>/status/<proof>",
+                                value: "{twitter_proof}",
+                                oninput: move |evt| twitter_proof.set(evt.value()),
+                            }
+                        }
+                        div {
+                            label { class: "block text-xs text-gray-600 dark:text-gray-400 mb-1",
+                                "Mastodon Proof URL"
+                            }
+                            input {
+                                class: "w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                                r#type: "url",
+                                placeholder: "https://<server>/@<user>/<post>",
+                                value: "{mastodon_proof}",
+                                oninput: move |evt| mastodon_proof.set(evt.value()),
                             }
                         }
                     }

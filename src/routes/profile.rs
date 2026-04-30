@@ -1,7 +1,7 @@
 use crate::components::dialog::{DialogDescription, DialogRoot, DialogTitle};
 use crate::components::icons::{InfoIcon, ListIcon, MailIcon};
 use crate::components::{
-    AddToPeopleListModal, ArticleCard, ArticleCardSkeleton, ClientInitializing, NoteCard,
+    AddToPeopleListModal, ArticleCard, ArticleCardSkeleton, ClientInitializing, ExternalIdentitiesSection, NoteCard,
     PhotoCard, PinnedNotesCarousel, ProfileBadgesSection, ProfileEditorModal, VideoCard,
 };
 use crate::hooks::{use_infinite_scroll, use_mute_block_cache};
@@ -846,6 +846,7 @@ pub fn Profile(pubkey: String) -> Element {
                 }
             }
             ProfileBadgesSection { pubkey: pubkey.clone() }
+            ExternalIdentitiesSection { pubkey: pubkey.clone() }
             div { class: "border-b border-border sticky top-[57px] bg-background z-10",
                 div { class: "flex overflow-x-auto scrollbar-hide",
                     ProfileTabButton {

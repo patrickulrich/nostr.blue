@@ -1,5 +1,6 @@
-pub mod nip36;
 pub mod nip34;
+pub mod nip36;
+pub mod nip39;
 pub mod nip48;
 pub mod nip49;
 pub mod nip52;
