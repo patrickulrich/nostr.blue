@@ -390,6 +390,7 @@ pub(super) fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -
             onkeydown: move |evt: KeyboardEvent| {
                 let activate = matches!(evt.key(), Key::Enter);
                 if !activate { return; }
+                evt.stop_propagation();
                 #[cfg(feature = "web")]
                 {
                     if let Some(target) = evt.data.as_web_event().target() {
@@ -407,6 +408,7 @@ pub(super) fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -
                 });
             },
             onclick: move |_evt: MouseEvent| {
+                _evt.stop_propagation();
                 #[cfg(feature = "web")]
                 {
                     if let Some(target) = _evt.data.as_web_event().target() {

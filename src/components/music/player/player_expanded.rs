@@ -49,16 +49,10 @@ pub fn PlayerExpanded() -> Element {
 
     rsx! {
         div {
-            class: "fixed inset-0 z-[60] bg-background/98 flex flex-col",
-            style: "backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);",
+            class: "fixed inset-0 z-[60] bg-background flex flex-col",
 
             // Header
             div { class: "flex items-center justify-between px-4 pt-safe-top pb-2",
-                button {
-                    class: "h-10 w-10 p-0 inline-flex items-center justify-center rounded-full hover:bg-accent transition-colors",
-                    onclick: move |_| music_player::set_view_mode(PlayerViewMode::Bar),
-                    dangerous_inner_html: icons::CHEVRON_DOWN,
-                }
                 div { class: "text-xs text-muted-foreground uppercase tracking-wider font-medium",
                     if track.is_live_stream { "Live Stream" }
                     else if track.is_podcast { "Now Playing" }
@@ -66,9 +60,8 @@ pub fn PlayerExpanded() -> Element {
                 }
                 button {
                     class: "h-10 w-10 p-0 inline-flex items-center justify-center rounded-full hover:bg-accent transition-colors",
-                    title: "Minimize to floating",
-                    onclick: move |_| music_player::minimize_to_floating(),
-                    dangerous_inner_html: icons::MINIMIZE,
+                    onclick: move |_| music_player::set_view_mode(PlayerViewMode::Bar),
+                    dangerous_inner_html: icons::CHEVRON_DOWN,
                 }
             }
 

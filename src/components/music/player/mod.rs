@@ -447,7 +447,7 @@ pub fn PersistentMusicPlayer() -> Element {
     #[cfg(feature = "mobile_platform")]
     let _native_snapshot_poller = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
         loop {
-            crate::platform::timer::sleep_ms(250).await;
+            crate::platform::timer::sleep_ms(1000).await;
             if *is_seeking.read() {
                 continue;
             }
