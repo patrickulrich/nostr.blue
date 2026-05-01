@@ -106,59 +106,12 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
         .album_art_url
         .clone()
         .unwrap_or_else(|| "https://api.dicebear.com/7.x/shapes/svg?seed=music".to_string());
-    let (share_url, share_content_type) = match &track.source {
-        TrackSource::Wavlake { .. } => (
-            format!("https://wavlake.com/track/{}", track.id),
-            ContentType::MusicTrack,
-        ),
-        TrackSource::Nostr { coordinate, .. } => (
-            format!("https://nostr.blue/music/track/{}", coordinate),
-            ContentType::MusicTrack,
-        ),
-        TrackSource::NostrPodcast { coordinate, .. } => (
-            format!("https://nostr.blue/podcast/episode/{}", coordinate),
-            ContentType::PodcastEpisode,
-        ),
-        TrackSource::RssPodcast {
-            feed_url,
-            episode_guid,
-            podcast_id,
-            ..
-        } => (
-            if let Some(id) = podcast_id {
-                format!(
-                    "https://nostr.blue/podcast/rss/episode/{}/{}",
-                    id,
-                    urlencoding::encode(episode_guid),
-                )
-            } else {
-                format!(
-                    "https://nostr.blue/podcast/rss/episode/{}/{}",
-                    urlencoding::encode(feed_url),
-                    urlencoding::encode(episode_guid),
-                )
-            },
-            ContentType::PodcastEpisode,
-        ),
-        TrackSource::RssMusic {
-            feed_id,
-            episode_id,
-            ..
-        } => (
-            format!(
-                "https://nostr.blue/music/rss/album/{}#track-{}",
-                feed_id, episode_id,
-            ),
-            ContentType::MusicTrack,
-        ),
-        TrackSource::Radio { d_tag, .. } => (
-            format!("https://nostr.blue/radio/{}", urlencoding::encode(d_tag)),
-            ContentType::MusicTrack,
-        ),
-        TrackSource::Bible { translation, book, chapter, .. } => (
-            format!("https://nostr.blue/bible/{}/{}/{}", translation, book, chapter),
-            ContentType::BibleVerse,
-        ),
+    let share_url = track.share_url();
+    let share_content_type = match &track.source {
+        TrackSource::NostrPodcast { .. } | TrackSource::RssPodcast { .. } => ContentType::PodcastEpisode,
+        TrackSource::Radio { .. } => ContentType::RadioStation,
+        TrackSource::Bible { .. } => ContentType::BibleVerse,
+        _ => ContentType::MusicTrack,
     };
     let artist_route = match &track.source {
         TrackSource::Wavlake { artist_id, .. } => Some(Route::MusicArtist {

@@ -216,6 +216,32 @@ pub struct SoundbiteInfo {
     pub start_time: Option<f64>,
     pub duration: Option<f64>,
 }
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct V4VMusicChartItem {
+    pub rank: u32,
+    pub boosts: String,
+    #[allow(dead_code)]
+    pub title: String,
+    #[serde(default)]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub image: Option<String>,
+    pub feed_id: u64,
+    pub feed_url: String,
+    pub feed_guid: String,
+    pub item_guid: String,
+}
+#[derive(Debug, Clone, Deserialize)]
+pub struct V4VMusicChart {
+    #[allow(dead_code)]
+    pub title: String,
+    #[allow(dead_code)]
+    pub description: String,
+    #[allow(dead_code)]
+    pub timestamp: i64,
+    pub items: Vec<V4VMusicChartItem>,
+}
 /// Search podcasts by term
 pub async fn search_podcasts(query: &str, max: Option<u32>) -> Result<Vec<PodcastFeed>, String> {
     let max = max.unwrap_or(20);
@@ -399,6 +425,7 @@ pub async fn get_podcasts_by_medium(
     Ok(data.data.feeds)
 }
 /// Get music albums from Podcast Index (medium="music")
+#[allow(dead_code)]
 pub async fn get_music_albums(max: Option<u32>) -> Result<Vec<PodcastFeed>, String> {
     get_podcasts_by_medium("music", max).await
 }
@@ -413,6 +440,14 @@ pub async fn search_music(query: &str, max: Option<u32>) -> Result<Vec<PodcastFe
     );
     let data: ApiResponse<SearchData> = authenticated_get(&url).await?;
     Ok(data.data.feeds)
+}
+/// Fetch the V4V Music Chart (top music tracks by boosts over 7 days)
+pub async fn get_v4v_music_chart() -> Result<V4VMusicChart, String> {
+    fetch_via_proxy(
+        "https://stats.podcastindex.org/v4vmusic.json",
+        "v4v_music_chart",
+    )
+    .await
 }
 /// Generic helper to fetch JSON content through the proxy.
 ///

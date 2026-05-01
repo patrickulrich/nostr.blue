@@ -65,8 +65,11 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
         is_searching: use_signal(|| false),
         relay_search_task: use_signal(|| None::<Task>),
     };
+    #[cfg_attr(not(feature = "web"), allow(unused_mut))]
     let mut dropdown_top = use_signal(|| 0.0);
+    #[cfg_attr(not(feature = "web"), allow(unused_mut))]
     let mut dropdown_left = use_signal(|| 0.0);
+    #[cfg_attr(not(feature = "web"), allow(unused_mut))]
     let mut show_below = use_signal(|| true);
     #[allow(unused_mut)]
     let mut is_mobile = use_signal(|| false);
@@ -81,29 +84,55 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
     let handle_input = move |evt: DioxusEvent<FormData>| {
         let new_value = evt.value().clone();
         props.on_input.call(new_value.clone());
-        let Some(cursor_pos) = get_cursor_position(&textarea_id.read(), &new_value) else {
-            autocomplete.show.set(false);
-            return;
-        };
-        if let Some(mut signal) = props.cursor_position {
-            let cursor_utf8 = utf16_to_utf8_index(&new_value, cursor_pos);
-            signal.set(cursor_utf8);
-        }
-        detect_mention(
-            &new_value,
-            cursor_pos,
-            &mut autocomplete,
-            contact_pubkeys,
-            &props.thread_participants,
-        );
-        if *autocomplete.show.read() {
-            update_dropdown_position(
-                &textarea_id.read(),
-                &mut dropdown_top,
-                &mut dropdown_left,
-                &mut show_below,
-                &mut is_mobile,
+
+        #[cfg(feature = "web")]
+        {
+            let Some(cursor_pos) = get_cursor_position(&textarea_id.read(), &new_value) else {
+                autocomplete.show.set(false);
+                return;
+            };
+            if let Some(mut signal) = props.cursor_position {
+                let cursor_utf8 = utf16_to_utf8_index(&new_value, cursor_pos);
+                signal.set(cursor_utf8);
+            }
+            detect_mention(
+                &new_value,
+                cursor_pos,
+                &mut autocomplete,
+                contact_pubkeys,
+                &props.thread_participants,
             );
+            if *autocomplete.show.read() {
+                update_dropdown_position(
+                    &textarea_id.read(),
+                    &mut dropdown_top,
+                    &mut dropdown_left,
+                    &mut show_below,
+                    &mut is_mobile,
+                );
+            }
+        }
+
+        #[cfg(not(feature = "web"))]
+        {
+            let textarea_id_str = (*textarea_id.read()).clone();
+            let mut ac = autocomplete;
+            let contacts = contact_pubkeys;
+            let thread = props.thread_participants.clone();
+            let cursor_signal = props.cursor_position;
+            let mut mobile_sig = is_mobile;
+            spawn(async move {
+                let cursor_pos = get_cursor_position_eval(&textarea_id_str)
+                    .await
+                    .unwrap_or_else(|| new_value.chars().map(|c| c.len_utf16()).sum());
+                if let Some(mut signal) = cursor_signal {
+                    signal.set(utf16_to_utf8_index(&new_value, cursor_pos));
+                }
+                detect_mention(&new_value, cursor_pos, &mut ac, contacts, &thread);
+                if *ac.show.read() {
+                    mobile_sig.set(true);
+                }
+            });
         }
     };
     let handle_keydown = move |evt: DioxusEvent<KeyboardData>| {
@@ -120,14 +149,10 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
                 if current < max {
                     let new_index = current + 1;
                     autocomplete.selected_index.set(new_index);
-                    #[cfg(feature = "web")]
-                    {
-                        use dioxus::document;
-                        let _ = document::eval(&format!(
-                            r#"document.getElementById('mention-option-{}')?.scrollIntoView({{ block: 'nearest', behavior: 'smooth' }})"#,
-                            new_index,
-                        ));
-                    }
+                    let _ = document::eval(&format!(
+                        r#"document.getElementById('mention-option-{}')?.scrollIntoView({{ block: 'nearest', behavior: 'smooth' }})"#,
+                        new_index,
+                    ));
                 }
             }
             Key::ArrowUp => {
@@ -136,14 +161,10 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
                 if current > 0 {
                     let new_index = current - 1;
                     autocomplete.selected_index.set(new_index);
-                    #[cfg(feature = "web")]
-                    {
-                        use dioxus::document;
-                        let _ = document::eval(&format!(
-                            r#"document.getElementById('mention-option-{}')?.scrollIntoView({{ block: 'nearest', behavior: 'smooth' }})"#,
-                            new_index,
-                        ));
-                    }
+                    let _ = document::eval(&format!(
+                        r#"document.getElementById('mention-option-{}')?.scrollIntoView({{ block: 'nearest', behavior: 'smooth' }})"#,
+                        new_index,
+                    ));
                 }
             }
             Key::Enter if !results.is_empty() => {
@@ -458,7 +479,7 @@ fn utf8_to_utf16_index(text: &str, utf8_index: usize) -> usize {
     }
     utf16_count
 }
-/// Get cursor position from textarea
+/// Get cursor position from textarea (synchronous, web-only)
 #[allow(unused_variables)]
 fn get_cursor_position(textarea_id: &str, current_text: &str) -> Option<usize> {
     #[cfg(feature = "web")]
@@ -476,10 +497,31 @@ fn get_cursor_position(textarea_id: &str, current_text: &str) -> Option<usize> {
                 }
             }
         }
+        None
     }
-    None
+    #[cfg(not(feature = "web"))]
+    {
+        let _ = textarea_id;
+        Some(current_text.chars().map(|c| c.len_utf16()).sum())
+    }
+}
+
+/// Get cursor position from textarea via async JS eval (non-web WebView)
+#[cfg(not(feature = "web"))]
+async fn get_cursor_position_eval(textarea_id: &str) -> Option<usize> {
+    let script = format!(
+        "return document.getElementById('{}')?.selectionStart ?? -1",
+        textarea_id
+    );
+    let result = document::eval(&script).await;
+    result
+        .ok()
+        .and_then(|v| v.as_f64())
+        .filter(|&v| v >= 0.0)
+        .map(|v| v as usize)
 }
 /// Update dropdown position based on cursor
+#[cfg(feature = "web")]
 #[allow(unused_variables)]
 fn update_dropdown_position(
     textarea_id: &str,
@@ -554,9 +596,21 @@ fn render_dropdown(
         div {
             role: "listbox",
             aria_label: "Profile suggestions",
-            class: "fixed bg-white dark:bg-gray-800 shadow-lg rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden z-50",
-            class: "w-[calc(100vw-2rem)] sm:w-[300px] max-h-[50vh] sm:max-h-[300px]",
-            style: if is_mobile { format!("top: {}px; left: 1rem; right: 1rem;", top) } else { format!("top: {}px; left: {}px;", top, left) },
+            class: if cfg!(feature = "web") {
+                "fixed bg-white dark:bg-gray-800 shadow-lg rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden z-50"
+            } else {
+                "absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 shadow-lg rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden z-50"
+            },
+            class: if cfg!(feature = "web") {
+                "w-[calc(100vw-2rem)] sm:w-[300px] max-h-[50vh] sm:max-h-[300px]"
+            } else {
+                "w-full max-h-[50vh]"
+            },
+            style: if cfg!(feature = "web") {
+                if is_mobile { format!("top: {}px; left: 1rem; right: 1rem;", top) } else { format!("top: {}px; left: {}px;", top, left) }
+            } else {
+                String::new()
+            },
             if !is_searching && !results.is_empty() {
                 {
                     let plural = if result_count == 1 { "" } else { "s" };

@@ -22,13 +22,7 @@ pub async fn copy_to_clipboard(text: &str) -> Result<(), String> {
     }
     #[cfg(feature = "mobile_platform")]
     {
-        // On mobile, clipboard is handled via WebView's JavaScript bridge
-        // Wrap in async IIFE to properly await the clipboard Promise
-        let eval = dioxus::prelude::document::eval(&format!(
-            "(async () => {{ await navigator.clipboard.writeText({}); }})()",
-            serde_json::json!(text)
-        ));
-        eval.await.map(|_| ()).map_err(|e| format!("{e:?}"))
+        crate::platform::mobile::copy_to_clipboard_native(text)
     }
     #[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile_platform")))]
     {
@@ -60,13 +54,7 @@ pub async fn read_text_from_clipboard() -> Result<String, String> {
     }
     #[cfg(feature = "mobile_platform")]
     {
-        let eval =
-            dioxus::prelude::document::eval("(async () => await navigator.clipboard.readText())()");
-        let value = eval.await.map_err(|e| format!("{e:?}"))?;
-        value
-            .as_str()
-            .map(|s| s.to_string())
-            .ok_or_else(|| "No text in clipboard".to_string())
+        crate::platform::mobile::read_text_from_clipboard_native()
     }
     #[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile_platform")))]
     {

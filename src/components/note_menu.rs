@@ -107,6 +107,7 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
     let event_id_modal_report = event_id.clone();
     let event_id_modal_list = event_id.clone();
     let event_id_copy = event_id.clone();
+    let event_content_copy = event.content.clone();
     let event_id_pin = event_id.clone();
     let event_id_pin_check = event_id.clone();
     let event_id_pin_board = event_id.clone();
@@ -349,6 +350,40 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                             }
                         },
                         span { class: "text-sm", "Copy Note ID" }
+                    }
+                    button {
+                        class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
+                        onclick: move |e: MouseEvent| {
+                            e.stop_propagation();
+                            is_open.set(false);
+                            let content = event_content_copy.clone();
+                            let toast_api = toast;
+                            spawn(async move {
+                                match copy_to_clipboard(&content).await {
+                                    Ok(_) => {
+                                        toast_api
+                                            .success(
+                                                "Copied!".to_string(),
+                                                ToastOptions::new()
+                                                    .description("Note content copied to clipboard")
+                                                    .duration(Duration::from_secs(2))
+                                                    .permanent(false),
+                                            );
+                                    }
+                                    Err(_) => {
+                                        toast_api
+                                            .error(
+                                                "Error".to_string(),
+                                                ToastOptions::new()
+                                                    .description("Failed to copy to clipboard")
+                                                    .duration(Duration::from_secs(2))
+                                                    .permanent(false),
+                                            );
+                                    }
+                                }
+                            });
+                        },
+                        span { class: "text-sm", "Copy Note" }
                     }
                     button {
                         class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",

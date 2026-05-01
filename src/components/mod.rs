@@ -19,6 +19,7 @@ pub mod edit_status;
 pub mod emoji_pack_manager_modal;
 pub mod emoji_picker;
 pub mod external_content_card;
+pub mod external_identities;
 pub mod gif_picker;
 pub mod gif_upload_modal;
 pub mod icons;
@@ -165,6 +166,7 @@ pub use code::{
     FileTreeSkeleton, LabelPicker, PRReviewSection,
 };
 pub use external_content_card::ExternalContentList;
+pub use external_identities::ExternalIdentitiesSection;
 pub use nip_card::{CustomNipCard, DocSpecCard, NipCardSkeleton, OfficialNipCard};
 pub use profile_badges::ProfileBadgesSection;
 pub mod p2p;

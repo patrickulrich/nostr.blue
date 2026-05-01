@@ -23,35 +23,13 @@ pub fn PlayerExpanded() -> Element {
     let mut seek_bar_width = use_signal(|| 1.0f64);
     let mut gesture_id = use_signal(|| 0u32);
 
-    let (share_url, share_content_type) = match &track.source {
-        crate::stores::nostr_music::TrackSource::Wavlake { .. } => (
-            format!("https://nostr.blue/music/track/{}", track.id),
-            ContentType::MusicTrack,
-        ),
-        crate::stores::nostr_music::TrackSource::Nostr { coordinate, .. } => (
-            format!("https://nostr.blue/music/track/{}", coordinate),
-            ContentType::MusicTrack,
-        ),
-        crate::stores::nostr_music::TrackSource::NostrPodcast { coordinate, .. } => (
-            format!("https://nostr.blue/podcast/episode/{}", coordinate),
-            ContentType::PodcastEpisode,
-        ),
-        crate::stores::nostr_music::TrackSource::RssPodcast { .. } => (
-            format!("https://nostr.blue/music/track/{}", track.id),
-            ContentType::PodcastEpisode,
-        ),
-        crate::stores::nostr_music::TrackSource::RssMusic { .. } => (
-            format!("https://nostr.blue/music/track/{}", track.id),
-            ContentType::MusicTrack,
-        ),
-        crate::stores::nostr_music::TrackSource::Radio { .. } => (
-            format!("https://nostr.blue/music/track/{}", track.id),
-            ContentType::MusicTrack,
-        ),
-        crate::stores::nostr_music::TrackSource::Bible { .. } => (
-            format!("https://nostr.blue/music/track/{}", track.id),
-            ContentType::MusicTrack,
-        ),
+    let share_url = track.share_url();
+    let share_content_type = match &track.source {
+        crate::stores::nostr_music::TrackSource::NostrPodcast { .. }
+        | crate::stores::nostr_music::TrackSource::RssPodcast { .. } => ContentType::PodcastEpisode,
+        crate::stores::nostr_music::TrackSource::Radio { .. } => ContentType::RadioStation,
+        crate::stores::nostr_music::TrackSource::Bible { .. } => ContentType::BibleVerse,
+        _ => ContentType::MusicTrack,
     };
 
     let display_progress = if let Some(pos) = scrub_position() {
@@ -71,16 +49,10 @@ pub fn PlayerExpanded() -> Element {
 
     rsx! {
         div {
-            class: "fixed inset-0 z-[60] bg-background/98 flex flex-col",
-            style: "backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);",
+            class: "fixed inset-0 z-[60] bg-background flex flex-col",
 
             // Header
             div { class: "flex items-center justify-between px-4 pt-safe-top pb-2",
-                button {
-                    class: "h-10 w-10 p-0 inline-flex items-center justify-center rounded-full hover:bg-accent transition-colors",
-                    onclick: move |_| music_player::set_view_mode(PlayerViewMode::Bar),
-                    dangerous_inner_html: icons::CHEVRON_DOWN,
-                }
                 div { class: "text-xs text-muted-foreground uppercase tracking-wider font-medium",
                     if track.is_live_stream { "Live Stream" }
                     else if track.is_podcast { "Now Playing" }
@@ -88,9 +60,8 @@ pub fn PlayerExpanded() -> Element {
                 }
                 button {
                     class: "h-10 w-10 p-0 inline-flex items-center justify-center rounded-full hover:bg-accent transition-colors",
-                    title: "Minimize to floating",
-                    onclick: move |_| music_player::minimize_to_floating(),
-                    dangerous_inner_html: icons::MINIMIZE,
+                    onclick: move |_| music_player::set_view_mode(PlayerViewMode::Bar),
+                    dangerous_inner_html: icons::CHEVRON_DOWN,
                 }
             }
 
