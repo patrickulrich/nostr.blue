@@ -1,3 +1,4 @@
+pub mod expanded_seek_bar;
 pub mod player_bar;
 pub mod player_expanded;
 pub mod player_floating;
@@ -13,6 +14,7 @@ use wasm_bindgen::JsCast;
 #[cfg(feature = "web")]
 use web_sys;
 
+pub use expanded_seek_bar::ExpandedSeekBar;
 pub use player_bar::PlayerBar;
 pub use player_expanded::PlayerExpanded;
 pub use player_floating::PlayerFloating;

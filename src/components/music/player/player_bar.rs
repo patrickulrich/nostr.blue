@@ -147,7 +147,7 @@ pub fn PlayerBar() -> Element {
                             if (!element) return null;
                             let progressBar = element.closest('.cursor-pointer') || element;
                             let rect = progressBar.getBoundingClientRect();
-                            let percent = Math.max(0, Math.min(1, ({client_x} - rect.left) / rect.width));
+                            let percent = Math.max(0, Math.min(1, ({client_x} - rect.width));
                             let newTime = percent * audio.duration;
                             if (!isNaN(newTime) && isFinite(newTime)) {{
                                 audio.currentTime = newTime;
@@ -441,28 +441,24 @@ pub fn PlayerBar() -> Element {
 
                 // RIGHT: Action buttons
                 div { class: "flex items-center gap-1 shrink-0",
-                    // Minimize button (both mobile and desktop)
                     button {
                         class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
                         title: "Minimize to floating",
                         onclick: move |evt| { evt.stop_propagation(); music_player::minimize_to_floating(); },
                         dangerous_inner_html: icons::MINIMIZE,
                     }
-                    // Share (desktop only)
                     button {
                         class: "h-8 w-8 p-0 items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors hidden md:inline-flex",
                         title: "Share",
                         onclick: move |evt| { evt.stop_propagation(); show_share_modal.set(true); },
                         dangerous_inner_html: icons::SHARE,
                     }
-                    // Zap (desktop only)
                     button {
                         class: "h-8 w-8 p-0 items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors hidden md:inline-flex",
                         title: "Zap the artist",
                         onclick: move |evt| { evt.stop_propagation(); music_player::show_zap_dialog(); },
                         dangerous_inner_html: icons::ZAP,
                     }
-                    // Close
                     button {
                         class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
                         onclick: move |evt| { evt.stop_propagation(); music_player::close_player(); },

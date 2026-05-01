@@ -11,7 +11,7 @@ use crate::services::{
     podcast_index,
     podcast_rss::format_duration,
 };
-use crate::stores::{music_player, settings_store};
+use crate::stores::{music_player, music_player::MusicPlayerStateStoreExt, settings_store};
 use crate::utils::format::format_sats_with_unit;
 use crate::utils::nip73;
 use crate::utils::validation::is_valid_http_url;
@@ -772,9 +772,10 @@ fn PodcastEpisodeGuidCard(props: PodcastEpisodeGuidCardProps) -> Element {
         if ep_id.is_empty() {
             return false;
         }
-        let player_state = music_player::MUSIC_PLAYER.read();
-        if let Some(ref current) = player_state.current_track {
-            current.id == ep_id && player_state.is_playing
+        let store = music_player::MUSIC_PLAYER.resolve();
+        let current = store.current_track().cloned();
+        if let Some(ref cur) = current {
+            cur.id == ep_id && store.is_playing().cloned()
         } else {
             false
         }
