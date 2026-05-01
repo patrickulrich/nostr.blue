@@ -2,7 +2,7 @@ pub mod player_bar;
 pub mod player_expanded;
 pub mod player_floating;
 
-use crate::stores::music_player::{self, MUSIC_PLAYER, PlayerViewMode};
+use crate::stores::music_player::{self, MusicPlayerStateStoreExt, MUSIC_PLAYER, PlayerViewMode};
 #[cfg(not(feature = "mobile_platform"))]
 use crate::utils::radio::NowPlaying;
 use dioxus::prelude::*;
@@ -69,7 +69,10 @@ pub(crate) async fn ensure_audio_hls_manager() -> Result<(), String> {
 
 #[component]
 pub fn PersistentMusicPlayer() -> Element {
-    let state = MUSIC_PLAYER.read().clone();
+    let store = MUSIC_PLAYER.resolve();
+    let current_track = store.current_track().cloned();
+    let is_visible = store.is_visible().cloned();
+    let view_mode = store.view_mode().cloned();
     #[allow(unused_mut)]
     let mut is_seeking = use_signal(|| false);
     #[allow(unused_mut, unused_variables)]
@@ -97,9 +100,12 @@ pub fn PersistentMusicPlayer() -> Element {
     }
 
     #[cfg(not(feature = "mobile_platform"))]
-    use_effect(use_reactive(
-        (&state.current_track, &state.is_playing),
-        move |(current_track, is_playing)| {
+    {
+        let current_track_for_bind = store.current_track().cloned();
+        let is_playing_for_bind = store.is_playing().cloned();
+        use_effect(use_reactive(
+            (&current_track_for_bind, &is_playing_for_bind),
+            move |(current_track, is_playing)| {
             native_source_bound.set(false);
             let bind_token = native_bind_token.with_mut(|token| {
                 *token = token.wrapping_add(1);
@@ -286,18 +292,20 @@ pub fn PersistentMusicPlayer() -> Element {
                     }
                 }
             });
-        },
+            },
     ));
+    }
 
     #[cfg(not(feature = "mobile_platform"))]
     {
         let audio_id_for_volume = audio_id.to_string();
         let volume_memo = use_memo(move || {
-            let state = MUSIC_PLAYER.read();
-            if state.is_muted {
+            let store = MUSIC_PLAYER.resolve();
+            let is_muted = store.is_muted().cloned();
+            if is_muted {
                 0.0
             } else {
-                state.volume
+                store.volume().cloned()
             }
         });
         use_effect(move || {
@@ -323,8 +331,8 @@ pub fn PersistentMusicPlayer() -> Element {
 
     #[cfg(all(not(feature = "web"), not(feature = "mobile_platform")))]
     use_effect(move || {
-        let state = MUSIC_PLAYER.read();
-        let current_time = state.current_time;
+        let store = MUSIC_PLAYER.resolve();
+        let current_time = store.current_time().cloned();
         let last_time = last_synced_time();
         if (current_time - last_time).abs() > 0.5 {
             last_synced_time.set(current_time);
@@ -365,7 +373,7 @@ pub fn PersistentMusicPlayer() -> Element {
         let _time_poller = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
             loop {
                 crate::platform::timer::sleep_ms(250).await;
-                if !MUSIC_PLAYER.read().is_playing || *is_seeking.read() {
+                if !MUSIC_PLAYER.resolve().is_playing().cloned() || *is_seeking.read() {
                     continue;
                 }
                 let result = document::eval(
@@ -407,7 +415,7 @@ pub fn PersistentMusicPlayer() -> Element {
     }
 
     #[cfg(not(feature = "mobile_platform"))]
-    let playback_speed = use_memo(move || MUSIC_PLAYER.read().playback_speed);
+    let playback_speed = use_memo(move || MUSIC_PLAYER.resolve().playback_speed().cloned());
     #[cfg(not(feature = "mobile_platform"))]
     use_effect(move || {
         let speed = playback_speed();
@@ -432,14 +440,15 @@ pub fn PersistentMusicPlayer() -> Element {
 
     let is_live = use_memo(move || {
         MUSIC_PLAYER
-            .read()
-            .current_track
+            .resolve()
+            .current_track()
+            .cloned()
             .as_ref()
             .map(|t| t.is_live_stream)
             .unwrap_or(false)
     });
     use_effect(move || {
-        if !is_live() && MUSIC_PLAYER.read().now_playing.is_some() {
+        if !is_live() && MUSIC_PLAYER.resolve().now_playing().cloned().is_some() {
             music_player::clear_now_playing();
         }
     });
@@ -508,7 +517,7 @@ pub fn PersistentMusicPlayer() -> Element {
         }
     };
 
-    if !state.is_visible || state.current_track.is_none() {
+    if !is_visible || current_track.is_none() {
         #[cfg(feature = "mobile_platform")]
         {
             return rsx! {};
@@ -551,7 +560,7 @@ pub fn PersistentMusicPlayer() -> Element {
         };
     }
 
-    let track = state.current_track.as_ref().unwrap();
+    let track = current_track.as_ref().unwrap();
     let is_hls_track = track.media_url.to_lowercase().contains(".m3u8");
 
     rsx! {
@@ -603,13 +612,13 @@ pub fn PersistentMusicPlayer() -> Element {
                 },
             }
         }
-        if matches!(state.view_mode, PlayerViewMode::Bar) {
+        if matches!(view_mode, PlayerViewMode::Bar) {
             PlayerBar { }
         }
-        if matches!(state.view_mode, PlayerViewMode::Expanded) {
+        if matches!(view_mode, PlayerViewMode::Expanded) {
             PlayerExpanded { }
         }
-        if matches!(state.view_mode, PlayerViewMode::Floating) {
+        if matches!(view_mode, PlayerViewMode::Floating) {
             PlayerFloating { }
         }
     }

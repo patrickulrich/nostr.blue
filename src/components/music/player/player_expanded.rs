@@ -1,17 +1,27 @@
 use crate::components::icons;
 use crate::components::{ContentShareModal, ContentType};
 use crate::routes::Route;
-use crate::stores::music_player::{self, PlayerViewMode, MUSIC_PLAYER};
+use crate::stores::music_player::{self, MusicPlayerStateStoreExt, PlayerViewMode, MUSIC_PLAYER};
 use dioxus::prelude::*;
 
 use super::format_time;
 
 #[component]
 pub fn PlayerExpanded() -> Element {
-    let state = MUSIC_PLAYER.read().clone();
-    let track = state.current_track.as_ref().unwrap();
-    let progress = if state.duration > 0.0 {
-        (state.current_time / state.duration * 100.0).clamp(0.0, 100.0)
+    let store = MUSIC_PLAYER.resolve();
+    let track = store.current_track().cloned().unwrap();
+    let current_time = store.current_time().cloned();
+    let duration = store.duration().cloned();
+    let is_playing = store.is_playing().cloned();
+    let is_buffering = store.is_buffering().cloned();
+    let volume = store.volume().cloned();
+    let is_muted = store.is_muted().cloned();
+    let playback_speed = store.playback_speed().cloned();
+    let now_playing = store.now_playing().cloned();
+    let playback_error = store.playback_error().cloned();
+
+    let progress = if duration > 0.0 {
+        (current_time / duration * 100.0).clamp(0.0, 100.0)
     } else {
         0.0
     };
@@ -38,14 +48,16 @@ pub fn PlayerExpanded() -> Element {
         progress
     };
     let display_time = if let Some(pos) = scrub_position() {
-        if state.duration > 0.0 {
-            pos / 100.0 * state.duration
+        if duration > 0.0 {
+            pos / 100.0 * duration
         } else {
             0.0
         }
     } else {
-        state.current_time
+        current_time
     };
+
+    let duration_for_seek = duration;
 
     rsx! {
         div {
@@ -94,7 +106,7 @@ pub fn PlayerExpanded() -> Element {
                         }
                         h2 { class: "text-xl font-bold truncate",
                             if track.is_live_stream {
-                                if let Some(ref np) = state.now_playing {
+                                if let Some(ref np) = now_playing {
                                     if let Some(display) = np.display_string() {
                                         "{display}"
                                     } else {
@@ -125,12 +137,12 @@ pub fn PlayerExpanded() -> Element {
                             "{track.artist}"
                         }
                     }
-                    if let Some(ref error) = state.playback_error {
+                    if let Some(ref error) = playback_error {
                         p { class: "text-xs text-red-400 mt-1 flex items-center justify-center gap-1",
                             icons::AlertTriangleIcon { class: "w-3 h-3 shrink-0".to_string() }
                             "{error}"
                         }
-                    } else if state.is_buffering {
+                    } else if is_buffering {
                         p { class: "text-xs text-muted-foreground mt-1 flex items-center justify-center gap-1",
                             icons::RefreshIcon { class: "w-3 h-3 animate-spin shrink-0".to_string() }
                             "Buffering..."
@@ -188,7 +200,7 @@ pub fn PlayerExpanded() -> Element {
                             onpointerup: move |_| {
                                 gesture_id.set(gesture_id().wrapping_add(1));
                                 if let Some(pos) = scrub_position() {
-                                    let new_time = pos / 100.0 * state.duration;
+                                    let new_time = pos / 100.0 * duration_for_seek;
                                     if new_time.is_finite() && new_time >= 0.0 {
                                         music_player::seek_to(new_time);
                                     }
@@ -200,7 +212,7 @@ pub fn PlayerExpanded() -> Element {
                                 if *is_scrubbing.read() {
                                     gesture_id.set(gesture_id().wrapping_add(1));
                                     if let Some(pos) = scrub_position() {
-                                        let new_time = pos / 100.0 * state.duration;
+                                        let new_time = pos / 100.0 * duration_for_seek;
                                         if new_time.is_finite() && new_time >= 0.0 {
                                             music_player::seek_to(new_time);
                                         }
@@ -227,7 +239,7 @@ pub fn PlayerExpanded() -> Element {
                                 "{format_time(display_time)}"
                             }
                             span { class: "text-xs text-muted-foreground",
-                                "{format_time(state.duration)}"
+                                "{format_time(duration)}"
                             }
                         }
                     }
@@ -252,7 +264,7 @@ pub fn PlayerExpanded() -> Element {
                     button {
                         class: "h-16 w-16 p-0 inline-flex items-center justify-center rounded-full bg-primary hover:bg-primary/90 text-primary-foreground transition-colors shadow-lg",
                         onclick: move |_| music_player::toggle_play(),
-                        dangerous_inner_html: if state.is_playing { icons::PAUSE } else { icons::PLAY },
+                        dangerous_inner_html: if is_playing { icons::PAUSE } else { icons::PLAY },
                     }
                     if track.is_podcast && !track.is_live_stream {
                         button {
@@ -276,14 +288,14 @@ pub fn PlayerExpanded() -> Element {
                         button {
                             class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent transition-colors",
                             onclick: move |_| music_player::toggle_mute(),
-                            dangerous_inner_html: if state.is_muted { icons::VOLUME_X } else { icons::VOLUME_2 },
+                            dangerous_inner_html: if is_muted { icons::VOLUME_X } else { icons::VOLUME_2 },
                         }
                         div { class: "flex-1 relative",
                             input {
                                 r#type: "range",
                                 min: "0",
                                 max: "100",
-                                value: "{(state.volume * 100.0) as u32}",
+                                value: "{(volume * 100.0) as u32}",
                                 class: "w-full h-2 appearance-none bg-secondary rounded-full cursor-pointer accent-primary [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-primary [&::-moz-range-thumb]:border-0",
                                 oninput: move |evt| {
                                     if let Ok(value) = evt.value().parse::<f64>() {
@@ -303,7 +315,7 @@ pub fn PlayerExpanded() -> Element {
                         }
                         select {
                             class: "bg-transparent text-sm text-foreground cursor-pointer hover:text-foreground border border-border rounded-md px-2 py-1 focus:outline-hidden appearance-none",
-                            value: "{state.playback_speed}",
+                            value: "{playback_speed}",
                             onchange: move |evt| {
                                 if let Ok(speed) = evt.value().parse::<f64>() {
                                     music_player::set_playback_speed(speed);

@@ -790,7 +790,7 @@ pub fn toggle_mute() {
 /// Set current time
 #[cfg(not(feature = "mobile_platform"))]
 pub fn set_current_time(time: f64) {
-    MUSIC_PLAYER.write().current_time = time;
+    *MUSIC_PLAYER.resolve().current_time().write() = time;
 }
 /// Seek to a specific time in the track (in seconds)
 /// This sets the current time in state and triggers audio element seek via JS
@@ -821,7 +821,7 @@ pub fn seek_to(time: f64) {
 /// Set duration
 #[cfg(not(feature = "mobile_platform"))]
 pub fn set_duration(duration: f64) {
-    MUSIC_PLAYER.write().duration = duration;
+    *MUSIC_PLAYER.resolve().duration().write() = duration;
 }
 /// Close/hide the player
 pub fn close_player() {
@@ -843,22 +843,22 @@ pub fn close_player() {
     });
 }
 pub fn set_view_mode(mode: PlayerViewMode) {
-    MUSIC_PLAYER.write().view_mode = mode;
+    *MUSIC_PLAYER.resolve().view_mode().write() = mode;
 }
 pub fn set_floating_pos(x: f64, y: f64) {
-    MUSIC_PLAYER.write().floating_pos = (x, y);
+    *MUSIC_PLAYER.resolve().floating_pos().write() = (x, y);
 }
 pub fn minimize_to_floating() {
-    MUSIC_PLAYER.write().view_mode = PlayerViewMode::Floating;
+    *MUSIC_PLAYER.resolve().view_mode().write() = PlayerViewMode::Floating;
 }
 pub fn restore_from_floating() {
-    MUSIC_PLAYER.write().view_mode = PlayerViewMode::Bar;
+    *MUSIC_PLAYER.resolve().view_mode().write() = PlayerViewMode::Bar;
 }
 /// Show zap dialog for a specific track (or current track if None)
 pub fn show_zap_dialog_for_track(track: Option<MusicTrack>) {
-    let mut state = MUSIC_PLAYER.write();
-    state.zap_track = track.or_else(|| state.current_track.clone());
-    state.show_zap_dialog = true;
+    let store = MUSIC_PLAYER.resolve();
+    *store.zap_track().write() = track.or_else(|| store.current_track().peek().clone());
+    *store.show_zap_dialog().write() = true;
 }
 /// Show zap dialog for current track
 pub fn show_zap_dialog() {
@@ -866,9 +866,9 @@ pub fn show_zap_dialog() {
 }
 /// Hide zap dialog
 pub fn hide_zap_dialog() {
-    let mut state = MUSIC_PLAYER.write();
-    state.show_zap_dialog = false;
-    state.zap_track = None;
+    let store = MUSIC_PLAYER.resolve();
+    *store.show_zap_dialog().write() = false;
+    *store.zap_track().write() = None;
 }
 /// Vote for a track using Kind 33169 (Music Vote - addressable, one per user)
 /// Supports both Wavlake and Nostr tracks via TrackSource
@@ -1042,11 +1042,11 @@ pub fn skip_backward(seconds: f64) {
 }
 /// Set playback error message
 pub fn set_playback_error(error: Option<String>) {
-    MUSIC_PLAYER.write().playback_error = error;
+    *MUSIC_PLAYER.resolve().playback_error().write() = error;
 }
 /// Set buffering state
 pub fn set_buffering(buffering: bool) {
-    MUSIC_PLAYER.write().is_buffering = buffering;
+    *MUSIC_PLAYER.resolve().is_buffering().write() = buffering;
 }
 /// Try next available stream when current one fails
 /// Returns true if there's a fallback stream to try, false if all failed
@@ -1074,28 +1074,29 @@ pub fn try_next_stream() -> bool {
 /// Returns true if a fallback stream was started, false if all failed
 #[cfg(feature = "mobile_platform")]
 pub fn try_next_stream_mobile() -> bool {
-    let mut state = MUSIC_PLAYER.write();
-    if state.available_streams.is_empty() {
+    let store = MUSIC_PLAYER.resolve();
+    if store.available_streams().peek().is_empty() {
         return false;
     }
-    let next_idx = state.current_stream_index + 1;
-    if next_idx >= state.available_streams.len() {
-        state.is_buffering = false;
-        state.playback_error =
+    let prev_idx = *store.current_stream_index().peek();
+    let next_idx = prev_idx + 1;
+    let stream_count = store.available_streams().peek().len();
+    if next_idx >= stream_count {
+        *store.is_buffering().write() = false;
+        *store.playback_error().write() =
             Some("All streams failed - station may be offline".to_string());
         return false;
     }
-    let new_url = state.available_streams[next_idx].clone();
-    let total_streams = state.available_streams.len();
-    state.current_stream_index = next_idx;
-    state.playback_error = None;
-    state.is_buffering = true;
-    if let Some(ref mut track) = state.current_track {
+    let new_url = store.available_streams().peek()[next_idx].clone();
+    let total_streams = stream_count;
+    *store.current_stream_index().write() = next_idx;
+    *store.playback_error().write() = None;
+    *store.is_buffering().write() = true;
+    if let Some(ref mut track) = store.current_track().write().as_mut() {
         track.media_url = new_url;
     }
-    let playlist = state.playlist.clone();
-    let index = state.current_index;
-    drop(state);
+    let playlist = store.playlist().peek().clone();
+    let index = *store.current_index().peek();
     log::info!(
         "Falling back to stream {}/{} on Android",
         next_idx + 1,
@@ -1103,9 +1104,9 @@ pub fn try_next_stream_mobile() -> bool {
     );
     if let Err(e) = crate::platform::android_media::set_queue(&playlist, index, true) {
         log::error!("Failed to start Android fallback stream: {}", e);
-        MUSIC_PLAYER.write().playback_error =
-            Some(format!("Fallback stream failed: {}", e));
-        MUSIC_PLAYER.write().is_buffering = false;
+        let store = MUSIC_PLAYER.resolve();
+        *store.playback_error().write() = Some(format!("Fallback stream failed: {}", e));
+        *store.is_buffering().write() = false;
         return false;
     }
     true
@@ -1120,41 +1121,43 @@ pub fn set_available_streams(streams: Vec<String>) {
 /// Set now playing metadata from HLS ID3 tags
 #[cfg(not(feature = "mobile_platform"))]
 pub fn set_now_playing(now_playing: Option<NowPlaying>) {
-    MUSIC_PLAYER.write().now_playing = now_playing;
+    *MUSIC_PLAYER.resolve().now_playing().write() = now_playing;
 }
 /// Clear now playing metadata
 pub fn clear_now_playing() {
-    MUSIC_PLAYER.write().now_playing = None;
+    *MUSIC_PLAYER.resolve().now_playing().write() = None;
 }
 
 #[cfg(feature = "mobile_platform")]
 pub fn sync_native_playback_snapshot(snapshot: AndroidPlaybackSnapshot) {
-    let has_error = snapshot.playback_error.is_some();
-    let mut state = MUSIC_PLAYER.write();
-    if !state.playlist.is_empty() && snapshot.current_index < state.playlist.len() {
-        state.current_index = snapshot.current_index;
-        state.current_track = state.playlist.get(snapshot.current_index).cloned();
+    let store = MUSIC_PLAYER.resolve();
+    let prev_index = *store.current_index().peek();
+    if !store.playlist().peek().is_empty() && snapshot.current_index < store.playlist().peek().len()
+        && prev_index != snapshot.current_index {
+        *store.current_index().write() = snapshot.current_index;
+        *store.current_track().write() =
+            store.playlist().peek().get(snapshot.current_index).cloned();
     }
-    state.is_playing = snapshot.is_playing;
-    state.is_buffering = snapshot.is_buffering;
+    *store.is_playing().write() = snapshot.is_playing;
+    *store.is_buffering().write() = snapshot.is_buffering;
     if snapshot.current_time.is_finite() && snapshot.current_time >= 0.0 {
-        state.current_time = snapshot.current_time;
+        *store.current_time().write() = snapshot.current_time;
     }
     if snapshot.duration.is_finite() && snapshot.duration >= 0.0 {
-        state.duration = snapshot.duration;
+        *store.duration().write() = snapshot.duration;
     }
-    state.playback_error = snapshot.playback_error;
-    if !state
-        .current_track
+    *store.playback_error().write() = snapshot.playback_error.clone();
+    let is_live = store
+        .current_track()
+        .peek()
         .as_ref()
-        .map(|track| track.is_live_stream)
-        .unwrap_or(false)
-    {
-        state.now_playing = None;
+        .map(|t| t.is_live_stream)
+        .unwrap_or(false);
+    if !is_live {
+        *store.now_playing().write() = None;
     }
-    if has_error {
-        state.is_buffering = false;
-        drop(state);
+    if snapshot.playback_error.is_some() {
+        *store.is_buffering().write() = false;
         try_next_stream_mobile();
     }
 }

@@ -1,14 +1,16 @@
 use crate::components::icons;
-use crate::stores::music_player::{self, MUSIC_PLAYER};
+use crate::stores::music_player::{self, MusicPlayerStateStoreExt, MUSIC_PLAYER};
 use dioxus::prelude::*;
 
 #[component]
 pub fn PlayerFloating() -> Element {
-    let state = MUSIC_PLAYER.read().clone();
-    let track = state.current_track.as_ref().unwrap();
+    let store = MUSIC_PLAYER.resolve();
+    let track = store.current_track().cloned().unwrap();
+    let floating_pos = store.floating_pos().cloned();
+    let is_playing = store.is_playing().cloned();
 
     let mut is_dragging = use_signal(|| false);
-    let mut pos = use_signal(|| state.floating_pos);
+    let mut pos = use_signal(|| floating_pos);
     let mut drag_offset = use_signal(|| (0.0_f64, 0.0_f64));
     let mut total_drag_distance = use_signal(|| 0.0_f64);
     let mut drag_start_pos = use_signal(|| (0.0_f64, 0.0_f64));
@@ -153,7 +155,7 @@ pub fn PlayerFloating() -> Element {
                         evt.stop_propagation();
                         music_player::toggle_play();
                     },
-                    dangerous_inner_html: if state.is_playing { icons::PAUSE } else { icons::PLAY },
+                    dangerous_inner_html: if is_playing { icons::PAUSE } else { icons::PLAY },
                 }
 
                 button {

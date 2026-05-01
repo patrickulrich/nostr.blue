@@ -1,17 +1,27 @@
 use crate::components::icons;
 use crate::components::{ContentShareModal, ContentType};
 use crate::routes::Route;
-use crate::stores::music_player::{self, MUSIC_PLAYER, PlayerViewMode};
+use crate::stores::music_player::{self, MusicPlayerStateStoreExt, MUSIC_PLAYER, PlayerViewMode};
 use dioxus::prelude::*;
 
 use super::format_time;
 
 #[component]
 pub fn PlayerBar() -> Element {
-    let state = MUSIC_PLAYER.read().clone();
-    let track = state.current_track.as_ref().unwrap();
-    let progress = if state.duration > 0.0 {
-        (state.current_time / state.duration * 100.0).clamp(0.0, 100.0)
+    let store = MUSIC_PLAYER.resolve();
+    let track = store.current_track().cloned().unwrap();
+    let current_time = store.current_time().cloned();
+    let duration = store.duration().cloned();
+    let is_playing = store.is_playing().cloned();
+    let is_buffering = store.is_buffering().cloned();
+    let volume = store.volume().cloned();
+    let is_muted = store.is_muted().cloned();
+    let playback_speed = store.playback_speed().cloned();
+    let now_playing = store.now_playing().cloned();
+    let playback_error = store.playback_error().cloned();
+
+    let progress = if duration > 0.0 {
+        (current_time / duration * 100.0).clamp(0.0, 100.0)
     } else {
         0.0
     };
@@ -34,7 +44,6 @@ pub fn PlayerBar() -> Element {
     let on_seek_click = {
         #[cfg(feature = "web")]
         {
-            let duration = state.duration;
             let mut seek_gen = seek_gen;
             let mut is_seeking = is_seeking;
             move |evt: Event<MouseData>| {
@@ -76,7 +85,6 @@ pub fn PlayerBar() -> Element {
         }
         #[cfg(all(not(feature = "web"), feature = "mobile_platform"))]
         {
-            let duration = state.duration;
             let mut seek_gen = seek_gen;
             let mut is_seeking = is_seeking;
             move |evt: Event<MouseData>| {
@@ -196,7 +204,7 @@ pub fn PlayerBar() -> Element {
                     div { class: "flex flex-col min-w-0",
                         div { class: "flex items-center gap-2",
                             if track.is_live_stream {
-                                if let Some(ref np) = state.now_playing {
+                                if let Some(ref np) = now_playing {
                                     if let Some(display) = np.display_string() {
                                         div { class: "font-semibold text-sm truncate text-primary",
                                             "{display}"
@@ -233,17 +241,17 @@ pub fn PlayerBar() -> Element {
                                 }
                             }
                         }
-                        if let Some(ref error) = state.playback_error {
+                        if let Some(ref error) = playback_error {
                             div { class: "text-xs text-red-400 truncate flex items-center gap-1",
                                 icons::AlertTriangleIcon { class: "w-3 h-3 shrink-0".to_string() }
                                 "{error}"
                             }
-                        } else if state.is_buffering {
+                        } else if is_buffering {
                             div { class: "text-xs text-muted-foreground truncate flex items-center gap-1",
                                 icons::RefreshIcon { class: "w-3 h-3 animate-spin shrink-0".to_string() }
                                 "Buffering..."
                             }
-                        } else if track.is_live_stream && state.now_playing.is_some() {
+                        } else if track.is_live_stream && now_playing.is_some() {
                             div { class: "text-xs text-muted-foreground truncate", "{track.title}" }
                         } else {
                             div { class: "text-xs text-muted-foreground truncate",
@@ -278,7 +286,7 @@ pub fn PlayerBar() -> Element {
                             button {
                                 class: "h-10 w-10 p-0 inline-flex items-center justify-center rounded-md bg-primary hover:bg-primary/90 text-primary-foreground transition-colors",
                                 onclick: move |evt| { evt.stop_propagation(); music_player::toggle_play(); },
-                                dangerous_inner_html: if state.is_playing { icons::PAUSE } else { icons::PLAY },
+                                dangerous_inner_html: if is_playing { icons::PAUSE } else { icons::PLAY },
                             }
                         } else if track.is_podcast {
                             button {
@@ -290,7 +298,7 @@ pub fn PlayerBar() -> Element {
                             button {
                                 class: "h-10 w-10 p-0 inline-flex items-center justify-center rounded-md bg-primary hover:bg-primary/90 text-primary-foreground transition-colors",
                                 onclick: move |evt| { evt.stop_propagation(); music_player::toggle_play(); },
-                                dangerous_inner_html: if state.is_playing { icons::PAUSE } else { icons::PLAY },
+                                dangerous_inner_html: if is_playing { icons::PAUSE } else { icons::PLAY },
                             }
                             button {
                                 class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
@@ -307,7 +315,7 @@ pub fn PlayerBar() -> Element {
                             button {
                                 class: "h-10 w-10 p-0 inline-flex items-center justify-center rounded-md bg-primary hover:bg-primary/90 text-primary-foreground transition-colors",
                                 onclick: move |evt| { evt.stop_propagation(); music_player::toggle_play(); },
-                                dangerous_inner_html: if state.is_playing { icons::PAUSE } else { icons::PLAY },
+                                dangerous_inner_html: if is_playing { icons::PAUSE } else { icons::PLAY },
                             }
                             button {
                                 class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
@@ -319,7 +327,7 @@ pub fn PlayerBar() -> Element {
                     if !track.is_live_stream {
                         div { class: "flex items-center gap-2 flex-1 max-w-md",
                             span { class: "text-xs text-muted-foreground w-8 text-right",
-                                "{format_time(state.current_time)}"
+                                "{format_time(current_time)}"
                             }
                             div {
                                 class: "flex-1 relative h-2 bg-secondary rounded-full overflow-hidden cursor-pointer",
@@ -330,7 +338,7 @@ pub fn PlayerBar() -> Element {
                                 }
                             }
                             span { class: "text-xs text-muted-foreground w-8",
-                                "{format_time(state.duration)}"
+                                "{format_time(duration)}"
                             }
                         }
                     }
@@ -339,14 +347,14 @@ pub fn PlayerBar() -> Element {
                         button {
                             class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
                             onclick: move |evt| { evt.stop_propagation(); music_player::toggle_mute(); },
-                            dangerous_inner_html: if state.is_muted { icons::VOLUME_X } else { icons::VOLUME_2 },
+                            dangerous_inner_html: if is_muted { icons::VOLUME_X } else { icons::VOLUME_2 },
                         }
                         div { class: "relative w-16",
                             input {
                                 r#type: "range",
                                 min: "0",
                                 max: "100",
-                                value: "{(state.volume * 100.0) as u32}",
+                                value: "{(volume * 100.0) as u32}",
                                 class: "w-full h-2 appearance-none bg-secondary rounded-full cursor-pointer accent-primary [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-primary [&::-moz-range-thumb]:border-0",
                                 onclick: move |evt| { evt.stop_propagation(); },
                                 oninput: move |evt| {
@@ -367,7 +375,7 @@ pub fn PlayerBar() -> Element {
                             }
                             select {
                                 class: "bg-transparent text-xs text-muted-foreground cursor-pointer hover:text-foreground border-none focus:outline-hidden appearance-none pr-4",
-                                value: "{state.playback_speed}",
+                                value: "{playback_speed}",
                                 onclick: move |evt| { evt.stop_propagation(); },
                                 onchange: move |evt| {
                                     if let Ok(speed) = evt.value().parse::<f64>() {
@@ -394,7 +402,7 @@ pub fn PlayerBar() -> Element {
                         button {
                             class: "h-10 w-10 p-0 inline-flex items-center justify-center rounded-md bg-primary hover:bg-primary/90 text-primary-foreground transition-colors",
                             onclick: move |evt| { evt.stop_propagation(); music_player::toggle_play(); },
-                            dangerous_inner_html: if state.is_playing { icons::PAUSE } else { icons::PLAY },
+                            dangerous_inner_html: if is_playing { icons::PAUSE } else { icons::PLAY },
                         }
                     } else if track.is_podcast {
                         button {
@@ -405,7 +413,7 @@ pub fn PlayerBar() -> Element {
                         button {
                             class: "h-10 w-10 p-0 inline-flex items-center justify-center rounded-md bg-primary hover:bg-primary/90 text-primary-foreground transition-colors",
                             onclick: move |evt| { evt.stop_propagation(); music_player::toggle_play(); },
-                            dangerous_inner_html: if state.is_playing { icons::PAUSE } else { icons::PLAY },
+                            dangerous_inner_html: if is_playing { icons::PAUSE } else { icons::PLAY },
                         }
                         button {
                             class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
@@ -421,7 +429,7 @@ pub fn PlayerBar() -> Element {
                         button {
                             class: "h-10 w-10 p-0 inline-flex items-center justify-center rounded-md bg-primary hover:bg-primary/90 text-primary-foreground transition-colors",
                             onclick: move |evt| { evt.stop_propagation(); music_player::toggle_play(); },
-                            dangerous_inner_html: if state.is_playing { icons::PAUSE } else { icons::PLAY },
+                            dangerous_inner_html: if is_playing { icons::PAUSE } else { icons::PLAY },
                         }
                         button {
                             class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
