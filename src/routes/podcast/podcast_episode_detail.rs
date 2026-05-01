@@ -19,6 +19,8 @@ use crate::services::podcast_rss::{self, format_duration};
 use crate::stores::{music_player, nostr_client, nostr_music};
 use crate::utils::podcast::{self, PodcastMetadata};
 use dioxus::prelude::*;
+use nostr_sdk::nips::nip01::Coordinate;
+use nostr_sdk::nips::nip19::ToBech32;
 use nostr_sdk::prelude::{Filter, Kind, PublicKey, SingleLetterTag};
 use std::time::Duration;
 
@@ -326,11 +328,19 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
             }
             {
                 let share_url = match &episode.source {
-                    nostr_music::TrackSource::NostrPodcast { coordinate, .. } => {
-                        format!("https://nostr.blue/podcast/episode/{}", coordinate)
+                    nostr_music::TrackSource::NostrPodcast { pubkey, d_tag, .. } => {
+                        if let Ok(pk) = PublicKey::from_hex(pubkey) {
+                            let coord = Coordinate::new(Kind::Custom(30054), pk).identifier(d_tag);
+                            if let Ok(naddr) = coord.to_bech32() {
+                                format!("https://nostr.blue/podcast/nostr/episode/{}", naddr)
+                            } else {
+                                format!("https://nostr.blue/podcast/nostr/episode/{}", episode.id)
+                            }
+                        } else {
+                            format!("https://nostr.blue/podcast/nostr/episode/{}", episode.id)
+                        }
                     }
                     nostr_music::TrackSource::RssPodcast {
-                        feed_url,
                         podcast_id,
                         episode_guid,
                         ..
@@ -344,7 +354,7 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
                         } else {
                             format!(
                                 "https://nostr.blue/podcast/rss/episode/{}/{}",
-                                urlencoding::encode(feed_url),
+                                urlencoding::encode(episode.id.as_str()),
                                 urlencoding::encode(episode_guid),
                             )
                         }

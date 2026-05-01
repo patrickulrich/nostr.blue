@@ -97,7 +97,7 @@ class MainActivity : WryActivity() {
                         }
                     } else {
                         val returnedPackage = result.data?.getStringExtra("package")
-                        if (launchedSignerPackage != null && launchedSignerPackage != returnedPackage) {
+                        if (launchedSignerPackage != null && returnedPackage != null && launchedSignerPackage != returnedPackage) {
                             pendingOperationResult = null
                             pendingOperationEvent = null
                             pendingOperationPackage = null
@@ -1335,6 +1335,35 @@ class MainActivity : WryActivity() {
         @JvmStatic
         fun getNativePlaybackSnapshot(context: Context): String {
             return NativeAudioBridge.getSnapshot(context)
+        }
+
+        @JvmStatic
+        fun copyToClipboard(context: Context, text: String): String {
+            return try {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                    as android.content.ClipboardManager
+                val clip = android.content.ClipData.newPlainText("text", text)
+                clipboard.setPrimaryClip(clip)
+                "success"
+            } catch (e: Exception) {
+                Log.e(TAG, "copyToClipboard failed", e)
+                "error:${e.message}"
+            }
+        }
+
+        @JvmStatic
+        fun readFromClipboard(context: Context): String {
+            return try {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                    as android.content.ClipboardManager
+                if (!clipboard.hasPrimaryClip()) return "empty"
+                val item = clipboard.primaryClip?.getItemAt(0) ?: return "empty"
+                val text = item.text?.toString() ?: return "empty"
+                text
+            } catch (e: Exception) {
+                Log.e(TAG, "readFromClipboard failed", e)
+                "error:${e.message}"
+            }
         }
     }
 }

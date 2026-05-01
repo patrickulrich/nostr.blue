@@ -2,7 +2,7 @@
 
 A multi-platform Nostr client built using **Rust + Dioxus + rust-nostr** with integrated CDK wallet.
 
-![Version](https://img.shields.io/badge/version-0.8.8-blue)
+![Version](https://img.shields.io/badge/version-0.8.9-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Rust](https://img.shields.io/badge/rust-1.82+-orange)
 ![Platforms](https://img.shields.io/badge/platforms-Web%20%7C%20Android%20%7C%20Desktop-blue)
@@ -269,7 +269,7 @@ dx serve --platform desktop --no-default-features --features desktop
 | [NIP-36](https://github.com/nostr-protocol/nips/blob/master/36.md) | Sensitive Content | ✅ |
 | [NIP-37](https://github.com/nostr-protocol/nips/blob/master/37.md) | Draft Events | ✅ |
 | [NIP-38](https://github.com/nostr-protocol/nips/blob/master/38.md) | User Statuses | ✅ |
-| [NIP-39](https://github.com/nostr-protocol/nips/blob/master/39.md) | External Identities | ❌ |
+| [NIP-39](https://github.com/nostr-protocol/nips/blob/master/39.md) | External Identities | ✅ |
 | [NIP-40](https://github.com/nostr-protocol/nips/blob/master/40.md) | Expiration Timestamp | ✅ |
 | [NIP-41](https://github.com/vitorpamplona/nips/blob/09da0dd779db90f41a557f199cc483be6f4916c5/41.md) | Editable Short Notes | ✅ |
 | [NIP-42](https://github.com/nostr-protocol/nips/blob/master/42.md) | Client Auth to Relays | ✅ |

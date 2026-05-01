@@ -28,6 +28,7 @@ pub enum ContentType {
     PodcastEpisode,
     MusicAlbum,
     MusicTrack,
+    RadioStation,
     BibleVerse,
 }
 impl ContentType {
@@ -37,6 +38,7 @@ impl ContentType {
             ContentType::PodcastEpisode => "Episode",
             ContentType::MusicAlbum => "Album",
             ContentType::MusicTrack => "Track",
+            ContentType::RadioStation => "Station",
             ContentType::BibleVerse => "Bible",
         }
     }
@@ -46,6 +48,7 @@ impl ContentType {
             ContentType::PodcastEpisode => "Share Episode",
             ContentType::MusicAlbum => "Share Album",
             ContentType::MusicTrack => "Share Track",
+            ContentType::RadioStation => "Share Station",
             ContentType::BibleVerse => "Share Verses",
         }
     }
@@ -55,6 +58,7 @@ impl ContentType {
             ContentType::PodcastEpisode => "Share your thoughts about this episode...",
             ContentType::MusicAlbum => "Share your thoughts about this album...",
             ContentType::MusicTrack => "Share your thoughts about this track...",
+            ContentType::RadioStation => "Share your thoughts about this station...",
             ContentType::BibleVerse => "Share your thoughts about these verses...",
         }
     }
@@ -71,6 +75,9 @@ impl ContentType {
             }
             ContentType::MusicTrack => {
                 format!("Check out this track on nostr.blue: {}", url)
+            }
+            ContentType::RadioStation => {
+                format!("Check out this radio station on nostr.blue: {}", url)
             }
             ContentType::BibleVerse => {
                 format!("Check out this Bible passage on nostr.blue: {}", url)
@@ -393,6 +400,9 @@ pub fn ContentShareModal(
                                             RssIcon { class: "w-6 h-6 text-white" }
                                         },
                                         ContentType::MusicAlbum | ContentType::MusicTrack => rsx! {
+                                            MusicIcon { class: "w-6 h-6 text-white" }
+                                        },
+                                        ContentType::RadioStation => rsx! {
                                             MusicIcon { class: "w-6 h-6 text-white" }
                                         },
                                         ContentType::BibleVerse => rsx! {

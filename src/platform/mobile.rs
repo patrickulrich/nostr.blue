@@ -213,6 +213,49 @@ pub fn open_lightning_uri(uri: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub fn copy_to_clipboard_native(text: &str) -> Result<(), String> {
+    let vm = get_jvm().ok_or("Failed to get JavaVM")?;
+    let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
+
+    let ctx = ndk_context::android_context();
+    let context = unsafe { jni::objects::JObject::from_raw(ctx.context().cast()) };
+
+    let class = find_app_class(&mut env, &context, "dev.dioxus.main.MainActivity")
+        .ok_or("Failed to find MainActivity class")?;
+
+    let result =
+        call_static_string_method_with_string_arg(&mut env, &class, "copyToClipboard", text)?;
+
+    if result == "success" {
+        Ok(())
+    } else if result.starts_with("error:") {
+        Err(result)
+    } else {
+        Err(format!("Unexpected clipboard result: {result}"))
+    }
+}
+
+pub fn read_text_from_clipboard_native() -> Result<String, String> {
+    let vm = get_jvm().ok_or("Failed to get JavaVM")?;
+    let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
+
+    let ctx = ndk_context::android_context();
+    let context = unsafe { jni::objects::JObject::from_raw(ctx.context().cast()) };
+
+    let class = find_app_class(&mut env, &context, "dev.dioxus.main.MainActivity")
+        .ok_or("Failed to find MainActivity class")?;
+
+    let result = call_static_string_method(&mut env, &class, "readFromClipboard")?;
+
+    if result == "empty" {
+        Err("No text in clipboard".to_string())
+    } else if result.starts_with("error:") {
+        Err(result)
+    } else {
+        Ok(result)
+    }
+}
+
 pub async fn pick_file() -> Result<(Vec<u8>, String), String> {
     pick_from_android("pickFile", "pollFileResult").await
 }

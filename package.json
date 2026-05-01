@@ -1,6 +1,6 @@
 {
   "name": "nostrblue",
-  "version": "0.8.8",
+  "version": "0.8.9",
   "description": "Nostr.blue Rust client",
   "scripts": {
     "dev": "npm run build:assets && dx serve",

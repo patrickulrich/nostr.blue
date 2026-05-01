@@ -24,8 +24,18 @@ use dioxus::prelude::*;
 use nostr_sdk::nips::nip19::Nip19;
 use nostr_sdk::{Event, EventId, Filter, FromBech32, Kind, Metadata, ToBech32};
 
+use super::RichContent;
 use super::minicards::*;
 use crate::utils::validation::is_valid_http_url;
+
+#[cfg(feature = "web")]
+use dioxus::web::WebEventExt;
+#[cfg(feature = "web")]
+use wasm_bindgen::JsCast;
+
+#[cfg(feature = "web")]
+const INTERACTIVE_ELEMENT_SELECTOR: &str =
+    "a, button, input, textarea, select, summary, [role='button'], [role='link']:not([data-embedded-note]), [contenteditable='true'], video, audio, iframe, [data-interactive]";
 
 #[component]
 pub(super) fn MentionRenderer(mention: String) -> Element {
@@ -347,18 +357,12 @@ pub(super) fn EventMentionRenderer(mention: String) -> Element {
 
 pub(super) fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -> Element {
     let event_id = event.id.to_hex();
-    let content = &event.content;
+    let content = event.content.clone();
+    let tags = event.tags.iter().cloned().collect();
     let pubkey = event.pubkey;
     let pubkey_str = pubkey.to_hex();
-    let display_content = {
-        let char_count = content.chars().count();
-        if char_count > 280 {
-            let truncated: String = content.chars().take(280).collect();
-            format!("{}...", truncated)
-        } else {
-            content.clone()
-        }
-    };
+    let event_id_nav = event_id.clone();
+    let event_id_click = event_id.clone();
     let display_name = if let Some(meta) = metadata {
         meta.display_name
             .clone()
@@ -378,37 +382,73 @@ pub(super) fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -
         )
     };
     rsx! {
-        Link {
-            to: Route::Note {
-                note_id: event_id.clone(),
-                from_voice: None,
-            },
-            class: "block my-2",
-            onclick: move |e: MouseEvent| e.stop_propagation(),
-            div { class: "bg-card border border-border rounded-lg p-4 hover:bg-accent/10 transition cursor-pointer",
-                div { class: "flex items-center gap-2 mb-2",
-                    if let Some(meta) = metadata {
-                        if let Some(picture) = meta.picture.as_ref().filter(|u| is_valid_http_url(u)) {
-                            img {
-                                class: "w-8 h-8 rounded-full",
-                                src: "{picture}",
-                                alt: "Avatar",
+        div {
+            class: "block my-2 bg-card border border-border rounded-lg p-4 hover:bg-accent/10 transition cursor-pointer",
+            "data-embedded-note": "true",
+            role: "link",
+            tabindex: "0",
+            onkeydown: move |evt: KeyboardEvent| {
+                let activate = matches!(evt.key(), Key::Enter);
+                if !activate { return; }
+                evt.stop_propagation();
+                #[cfg(feature = "web")]
+                {
+                    if let Some(target) = evt.data.as_web_event().target() {
+                        if let Some(element) = target.dyn_ref::<web_sys::Element>() {
+                            if element.closest(INTERACTIVE_ELEMENT_SELECTOR).ok().flatten().is_some() {
+                                return;
                             }
-                        } else {
-                            div { class: "w-8 h-8 rounded-full bg-accent flex items-center justify-center text-foreground text-xs font-bold",
-                                "{display_name.chars().next().unwrap_or('?').to_uppercase()}"
-                            }
-                        }
-                    } else {
-                        div { class: "w-8 h-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground text-xs",
-                            "?"
                         }
                     }
-                    span { class: "font-semibold text-sm", "{display_name}" }
                 }
-                div { class: "text-sm text-muted-foreground whitespace-pre-wrap break-words",
-                    "{display_content}"
+                evt.prevent_default();
+                navigator().push(Route::Note {
+                    note_id: event_id_nav.clone(),
+                    from_voice: None,
+                });
+            },
+            onclick: move |_evt: MouseEvent| {
+                _evt.stop_propagation();
+                #[cfg(feature = "web")]
+                {
+                    if let Some(target) = _evt.data.as_web_event().target() {
+                        if let Some(element) = target.dyn_ref::<web_sys::Element>() {
+                            if element.closest(INTERACTIVE_ELEMENT_SELECTOR).ok().flatten().is_some() {
+                                return;
+                            }
+                        }
+                    }
                 }
+                navigator().push(Route::Note {
+                    note_id: event_id_click.clone(),
+                    from_voice: None,
+                });
+            },
+            div { class: "flex items-center gap-2 mb-2",
+                if let Some(meta) = metadata {
+                    if let Some(picture) = meta.picture.as_ref().filter(|u| is_valid_http_url(u)) {
+                        img {
+                            class: "w-8 h-8 rounded-full",
+                            src: "{picture}",
+                            alt: "Avatar",
+                        }
+                    } else {
+                        div { class: "w-8 h-8 rounded-full bg-accent flex items-center justify-center text-foreground text-xs font-bold",
+                            "{display_name.chars().next().unwrap_or('?').to_uppercase()}"
+                        }
+                    }
+                } else {
+                    div { class: "w-8 h-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground text-xs",
+                        "?"
+                    }
+                }
+                span { class: "font-semibold text-sm", "{display_name}" }
+            }
+            RichContent {
+                content,
+                tags,
+                collapsible: true,
+                interactive_media: true,
             }
         }
     }

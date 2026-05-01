@@ -6,9 +6,9 @@ use crate::services::podcast_index::{Episode as PodcastIndexEpisode, PodcastFeed
 use crate::services::wavlake::WavlakeTrack;
 use crate::stores::nostr_music::{NostrTrack, TrackSource, KIND_MUSIC_TRACK};
 use crate::stores::auth_store;
-use crate::utils::radio::{select_best_stream, NowPlaying, RadioStation};
+use crate::utils::radio::{select_best_stream, NowPlaying, RadioStation, KIND_RADIO_STATION};
 use dioxus::prelude::*;
-use dioxus::signals::ReadableExt;
+use dioxus_stores::Store;
 use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::nips::nip38::{LiveStatus, StatusType};
 use nostr_sdk::{EventBuilder, Kind, Tag, TagKind, Timestamp};
@@ -237,6 +237,68 @@ impl MusicTrack {
             _ => None,
         }
     }
+    pub fn share_url(&self) -> String {
+        match &self.source {
+            TrackSource::Wavlake { .. } => {
+                format!("https://nostr.blue/music/track/{}", self.id)
+            }
+            TrackSource::Nostr { pubkey, d_tag, .. } => {
+                Self::build_naddr_url(KIND_MUSIC_TRACK, pubkey, d_tag)
+                    .map(|n| format!("https://nostr.blue/music/track/{}", n))
+                    .unwrap_or_else(|| format!("https://nostr.blue/music/track/{}", self.id))
+            }
+            TrackSource::NostrPodcast { pubkey, d_tag, .. } => {
+                Self::build_naddr_url(30054, pubkey, d_tag)
+                    .map(|n| format!("https://nostr.blue/podcast/nostr/episode/{}", n))
+                    .unwrap_or_else(|| format!("https://nostr.blue/podcast/nostr/episode/{}", self.id))
+            }
+            TrackSource::RssPodcast {
+                podcast_id,
+                episode_guid,
+                feed_url,
+                ..
+            } => {
+                let id_str = podcast_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| feed_url.clone());
+                format!(
+                    "https://nostr.blue/podcast/rss/episode/{}/{}",
+                    urlencoding::encode(&id_str),
+                    urlencoding::encode(episode_guid),
+                )
+            }
+            TrackSource::RssMusic {
+                feed_id, episode_id, ..
+            } => {
+                format!(
+                    "https://nostr.blue/music/rss/album/{}#track-{}",
+                    feed_id, episode_id,
+                )
+            }
+            TrackSource::Radio { pubkey, d_tag, .. } => {
+                Self::build_naddr_url(KIND_RADIO_STATION, pubkey, d_tag)
+                    .map(|n| format!("https://nostr.blue/radio/{}", n))
+                    .unwrap_or_else(|| format!("https://nostr.blue/radio/{}", self.id))
+            }
+            TrackSource::Bible {
+                translation,
+                book,
+                chapter,
+                ..
+            } => {
+                format!(
+                    "https://nostr.blue/bible/{}/{}/{}",
+                    translation, book, chapter
+                )
+            }
+        }
+    }
+    fn build_naddr_url(kind: u16, pubkey: &str, d_tag: &str) -> Option<String> {
+        let pk = nostr_sdk::PublicKey::from_hex(pubkey).ok()?;
+        let coord = Coordinate::new(Kind::Custom(kind), pk).identifier(d_tag);
+        use nostr_sdk::nips::nip19::ToBech32;
+        coord.to_bech32().ok()
+    }
     /// Create MusicTrack from RSS music album track (Podcast Index medium="music")
     pub fn from_rss_music_track(episode: &PodcastIndexEpisode, feed: &PodcastFeed) -> Self {
         let value_block = episode.value.as_ref().or(feed.value.as_ref()).map(|v| {
@@ -303,8 +365,7 @@ pub enum PlayerViewMode {
     Floating,
 }
 
-/// Music player state
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Store)]
 pub struct MusicPlayerState {
     pub current_track: Option<MusicTrack>,
     pub playlist: Vec<MusicTrack>,
@@ -377,14 +438,14 @@ impl Default for MusicPlayerState {
     }
 }
 /// Global music player state
-pub static MUSIC_PLAYER: GlobalSignal<MusicPlayerState> = Signal::global(MusicPlayerState::default);
+pub static MUSIC_PLAYER: GlobalStore<MusicPlayerState> = Global::new(MusicPlayerState::default);
 const STORAGE_KEY_VOLUME: &str = "music_player_volume";
 const STORAGE_KEY_MUTED: &str = "music_player_muted";
 const STORAGE_KEY_PLAYBACK_SPEED: &str = "music_player_playback_speed";
 static VOLUME_PERSIST_GEN: AtomicU64 = AtomicU64::new(0);
 /// Initialize music player from localStorage
 pub fn init_player() {
-    let mut state = MusicPlayerState::default();
+    let mut state = MUSIC_PLAYER.write();
     if let Ok(volume) = storage::get::<f64>(STORAGE_KEY_VOLUME) {
         state.volume = volume.clamp(0.0, 1.0);
     }
@@ -394,7 +455,6 @@ pub fn init_player() {
     if let Ok(speed) = storage::get::<f64>(STORAGE_KEY_PLAYBACK_SPEED) {
         state.playback_speed = speed.clamp(0.5, 3.0);
     }
-    *MUSIC_PLAYER.write() = state;
     log::info!("Music player initialized");
 }
 /// Publish NIP-38 music status (Kind 30315)
@@ -730,8 +790,7 @@ pub fn toggle_mute() {
 /// Set current time
 #[cfg(not(feature = "mobile_platform"))]
 pub fn set_current_time(time: f64) {
-    let mut state = MUSIC_PLAYER.write();
-    state.current_time = time;
+    MUSIC_PLAYER.write().current_time = time;
 }
 /// Seek to a specific time in the track (in seconds)
 /// This sets the current time in state and triggers audio element seek via JS
@@ -762,8 +821,7 @@ pub fn seek_to(time: f64) {
 /// Set duration
 #[cfg(not(feature = "mobile_platform"))]
 pub fn set_duration(duration: f64) {
-    let mut state = MUSIC_PLAYER.write();
-    state.duration = duration;
+    MUSIC_PLAYER.write().duration = duration;
 }
 /// Close/hide the player
 pub fn close_player() {
@@ -785,20 +843,16 @@ pub fn close_player() {
     });
 }
 pub fn set_view_mode(mode: PlayerViewMode) {
-    let mut state = MUSIC_PLAYER.write();
-    state.view_mode = mode;
+    MUSIC_PLAYER.write().view_mode = mode;
 }
 pub fn set_floating_pos(x: f64, y: f64) {
-    let mut state = MUSIC_PLAYER.write();
-    state.floating_pos = (x, y);
+    MUSIC_PLAYER.write().floating_pos = (x, y);
 }
 pub fn minimize_to_floating() {
-    let mut state = MUSIC_PLAYER.write();
-    state.view_mode = PlayerViewMode::Floating;
+    MUSIC_PLAYER.write().view_mode = PlayerViewMode::Floating;
 }
 pub fn restore_from_floating() {
-    let mut state = MUSIC_PLAYER.write();
-    state.view_mode = PlayerViewMode::Bar;
+    MUSIC_PLAYER.write().view_mode = PlayerViewMode::Bar;
 }
 /// Show zap dialog for a specific track (or current track if None)
 pub fn show_zap_dialog_for_track(track: Option<MusicTrack>) {
