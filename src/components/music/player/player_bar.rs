@@ -147,7 +147,7 @@ pub fn PlayerBar() -> Element {
                             if (!element) return null;
                             let progressBar = element.closest('.cursor-pointer') || element;
                             let rect = progressBar.getBoundingClientRect();
-                            let percent = Math.max(0, Math.min(1, ({client_x} - rect.width));
+                            let percent = Math.max(0, Math.min(1, ({client_x} - rect.left) / rect.width));
                             let newTime = percent * audio.duration;
                             if (!isNaN(newTime) && isFinite(newTime)) {{
                                 audio.currentTime = newTime;
