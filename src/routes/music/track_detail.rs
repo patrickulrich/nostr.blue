@@ -411,7 +411,7 @@ fn TrackDetailSkeleton() -> Element {
 }
 
 /// Fetch track by ID (handles Wavlake, Nostr, and RSS sources)
-async fn fetch_track(id: &str) -> Result<music_player::MusicTrack, String> {
+pub(crate) async fn fetch_track(id: &str) -> Result<music_player::MusicTrack, String> {
     if id.starts_with("naddr1") {
         // Nostr track (kind 36787)
         let (pubkey, d_tag) = parse_naddr(id)?;
@@ -458,7 +458,7 @@ async fn fetch_track(id: &str) -> Result<music_player::MusicTrack, String> {
 }
 
 /// Parse naddr into pubkey and d-tag
-fn parse_naddr(naddr: &str) -> Result<(String, String), String> {
+pub(crate) fn parse_naddr(naddr: &str) -> Result<(String, String), String> {
     use nostr::prelude::*;
 
     let nip19 = Nip19::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
