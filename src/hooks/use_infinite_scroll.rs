@@ -322,7 +322,7 @@ where
                         }
                     }
 
-                    crate::platform::timer::sleep_ms(250).await;
+                    crate::platform::timer::sleep_ms(1000).await;
                 }
             });
 

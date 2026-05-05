@@ -1,6 +1,7 @@
 use instant::{Duration, Instant};
 use lru::LruCache;
-use nostr_sdk::{Event, EventId, TagKind};
+use nostr_sdk::nips::nip10::Marker;
+use nostr_sdk::{Event, EventId, TagKind, TagStandard};
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::{Mutex, OnceLock};
@@ -33,45 +34,46 @@ impl ThreadNode {
 ///   - Looks for lowercase 'e' tag (parent reference)
 ///   - Falls back to uppercase 'E' tag (root reference) if no lowercase 'e' tag
 fn get_parent_id(event: &Event) -> Option<EventId> {
-    let e_tags: Vec<_> = event
-        .tags
-        .iter()
-        .filter(|tag| {
-            tag.kind()
-                == TagKind::SingleLetter(nostr_sdk::SingleLetterTag::lowercase(
-                    nostr_sdk::Alphabet::E,
-                ))
-        })
-        .collect();
-    if !e_tags.is_empty() {
-        for tag in &e_tags {
-            let content = tag.content();
-            if let Some(parts) = content {
-                let parts_vec: Vec<&str> = parts.split('\t').collect();
-                if parts_vec.len() >= 3 && parts_vec[2] == "reply" {
-                    if let Ok(event_id) = EventId::from_hex(parts_vec[0]) {
-                        return Some(event_id);
+    let mut reply_marker_id = None;
+    let mut root_marker_id = None;
+    let mut last_unmarked_id = None;
+
+    for tag in event.tags.iter() {
+        if let Some(TagStandard::Event {
+            event_id,
+            marker,
+            uppercase: false,
+            ..
+        }) = tag.as_standardized()
+        {
+            match marker {
+                Some(Marker::Reply) => {
+                    if reply_marker_id.is_none() {
+                        reply_marker_id = Some(*event_id);
                     }
                 }
-            }
-        }
-        if e_tags.len() == 1 {
-            if let Some(content) = e_tags[0].content() {
-                let parts: Vec<&str> = content.split('\t').collect();
-                if let Ok(event_id) = EventId::from_hex(parts[0]) {
-                    return Some(event_id);
+                Some(Marker::Root) => {
+                    if root_marker_id.is_none() {
+                        root_marker_id = Some(*event_id);
+                    }
                 }
-            }
-        }
-        if let Some(last_tag) = e_tags.last() {
-            if let Some(content) = last_tag.content() {
-                let parts: Vec<&str> = content.split('\t').collect();
-                if let Ok(event_id) = EventId::from_hex(parts[0]) {
-                    return Some(event_id);
+                None => {
+                    last_unmarked_id = Some(*event_id);
                 }
             }
         }
     }
+
+    if reply_marker_id.is_some() {
+        return reply_marker_id;
+    }
+    if root_marker_id.is_some() {
+        return root_marker_id;
+    }
+    if last_unmarked_id.is_some() {
+        return last_unmarked_id;
+    }
+
     if event.kind == nostr_sdk::Kind::Comment {
         let upper_e_tags: Vec<_> = event
             .tags
@@ -84,11 +86,8 @@ fn get_parent_id(event: &Event) -> Option<EventId> {
             })
             .collect();
         if let Some(first_tag) = upper_e_tags.first() {
-            if let Some(content) = first_tag.content() {
-                let parts: Vec<&str> = content.split('\t').collect();
-                if let Ok(event_id) = EventId::from_hex(parts[0]) {
-                    return Some(event_id);
-                }
+            if let Some(TagStandard::Event { event_id, .. }) = first_tag.as_standardized() {
+                return Some(*event_id);
             }
         }
     }

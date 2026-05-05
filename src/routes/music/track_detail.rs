@@ -14,7 +14,7 @@
 use crate::components::{icons, ContentShareModal, ContentType};
 use crate::routes::Route;
 use crate::services::{podcast_index, wavlake::WavlakeAPI};
-use crate::stores::{music_player, nostr_client, nostr_music, profiles};
+use crate::stores::{music_player, music_player::MusicPlayerStateStoreExt, nostr_client, nostr_music, profiles};
 use dioxus::prelude::*;
 
 /// Detail page for a music track (supports Wavlake, Nostr, and RSS sources)
@@ -78,15 +78,15 @@ struct TrackDetailContentProps {
 #[component]
 fn TrackDetailContent(props: TrackDetailContentProps) -> Element {
     let track = props.track.clone();
-    let player_state = music_player::MUSIC_PLAYER.read();
+    let store = music_player::MUSIC_PLAYER.resolve();
     let mut show_share_modal = use_signal(|| false);
 
-    let is_current_track = player_state
-        .current_track
+    let current_track = store.current_track().cloned();
+    let is_current_track = current_track
         .as_ref()
         .map(|t| t.id == track.id)
         .unwrap_or(false);
-    let is_playing = is_current_track && player_state.is_playing;
+    let is_playing = is_current_track && store.is_playing().cloned();
 
     let image_url = track
         .album_art_url

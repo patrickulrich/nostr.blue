@@ -158,8 +158,10 @@ pub fn ReplyComposer(
             log::info!("Enqueued reply: {}", event_id);
             show_queued_toast(toast_api, "Reply");
 
-            if let Ok(root_event_id) = EventId::from_hex(&target_event.id.to_hex()) {
-                invalidate_thread_tree_cache(&root_event_id);
+            if let Some(ref r) = root {
+                invalidate_thread_tree_cache(&r.id);
+            } else {
+                invalidate_thread_tree_cache(&target_event.id);
             }
             editor.clear();
             if let Some(pk) = crate::stores::auth_store::get_pubkey() {

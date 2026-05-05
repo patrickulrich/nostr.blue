@@ -1,6 +1,6 @@
 use crate::components::icons;
 use crate::routes::Route;
-use crate::stores::music_player::{self, MusicTrack, MUSIC_PLAYER};
+use crate::stores::music_player::{self, MusicPlayerStateStoreExt, MusicTrack, MUSIC_PLAYER};
 use crate::stores::nostr_client;
 use crate::utils::radio::{
     fetch_station_by_naddr, get_ranked_stream_urls, RadioStation as RadioStationData,
@@ -41,9 +41,10 @@ pub fn RadioStation(naddr: String) -> Element {
         .unwrap_or_default();
     let station_id_for_memo = station_id.clone();
     let is_playing = use_memo(move || {
-        let player_state = MUSIC_PLAYER.read();
-        if let Some(ref current) = player_state.current_track {
-            current.id == station_id_for_memo && player_state.is_playing
+        let store = MUSIC_PLAYER.resolve();
+        let current = store.current_track().cloned();
+        if let Some(ref cur) = current {
+            cur.id == station_id_for_memo && store.is_playing().cloned()
         } else {
             false
         }

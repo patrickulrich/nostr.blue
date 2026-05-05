@@ -34,8 +34,8 @@ native = [
 
 [dependencies]
 # Dioxus web framework
-dioxus = { version = "0.7.5", default-features = false, features = ["router", "launch", "logger", "lib"] }
-dioxus-stores = "0.7.4"
+dioxus = { version = "0.7.7", default-features = false, features = ["router", "launch", "logger", "lib"] }
+dioxus-stores = "0.7.7"
 dioxus-motion = { version = "0.3.5", default-features = false, optional = true }
 
 # Nostr protocol

@@ -1,7 +1,7 @@
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::wavlake::WavlakeTrack;
-use crate::stores::music_player::{self, MusicTrack};
+use crate::stores::music_player::{self, MusicPlayerStateStoreExt, MusicTrack};
 use dioxus::prelude::*;
 #[cfg(feature = "web")]
 use dioxus::web::WebEventExt;
@@ -42,9 +42,10 @@ pub fn TrackCard(props: TrackCardProps) -> Element {
     let track_id_for_effect = track_id.clone();
     let mut is_playing = use_signal(|| false);
     use_effect(move || {
-        let player_state = music_player::MUSIC_PLAYER.read();
-        if let Some(ref current) = player_state.current_track {
-            is_playing.set(current.id == track_id_for_effect && player_state.is_playing);
+        let store = music_player::MUSIC_PLAYER.resolve();
+        let current = store.current_track().cloned();
+        if let Some(ref cur) = current {
+            is_playing.set(cur.id == track_id_for_effect && store.is_playing().cloned());
         } else {
             is_playing.set(false);
         }

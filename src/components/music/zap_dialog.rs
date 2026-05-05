@@ -1,6 +1,6 @@
 use crate::services::lnurl;
 use crate::services::wavlake::WavlakeAPI;
-use crate::stores::music_player::{self, MUSIC_PLAYER};
+use crate::stores::music_player::{self, MusicPlayerStateStoreExt, MUSIC_PLAYER};
 use crate::stores::nostr_client;
 use crate::stores::nostr_music::TrackSource;
 use crate::stores::profiles;
@@ -79,9 +79,9 @@ struct InvoiceResponse {
 }
 #[component]
 pub fn MusicZapDialog() -> Element {
-    let state = MUSIC_PLAYER.read();
-    let show_dialog = state.show_zap_dialog;
-    let track = state.zap_track.clone();
+    let store = MUSIC_PLAYER.resolve();
+    let show_dialog = *store.show_zap_dialog().read();
+    let track = store.zap_track().cloned();
     if !show_dialog {
         return rsx! {};
     }

@@ -1,27 +1,26 @@
 use crate::components::icons;
 use crate::components::{ContentShareModal, ContentType};
 use crate::routes::Route;
-use crate::stores::music_player::{self, PlayerViewMode, MUSIC_PLAYER};
+use crate::stores::music_player::{self, MusicPlayerStateStoreExt, PlayerViewMode, MUSIC_PLAYER};
 use dioxus::prelude::*;
 
-use super::format_time;
+use super::ExpandedSeekBar;
 
 #[component]
 pub fn PlayerExpanded() -> Element {
-    let state = MUSIC_PLAYER.read().clone();
-    let track = state.current_track.as_ref().unwrap();
-    let progress = if state.duration > 0.0 {
-        (state.current_time / state.duration * 100.0).clamp(0.0, 100.0)
-    } else {
-        0.0
-    };
+    let store = MUSIC_PLAYER.resolve();
+    let track = store.current_track().cloned().unwrap();
+    let is_playing = store.is_playing().cloned();
+    let is_buffering = store.is_buffering().cloned();
+    let volume = store.volume().cloned();
+    let is_muted = store.is_muted().cloned();
+    let playback_speed = store.playback_speed().cloned();
+    let now_playing = store.now_playing().cloned();
+    let playback_error = store.playback_error().cloned();
+    let current_time = *store.current_time().read();
+    let duration = *store.duration().read();
 
-    let mut is_scrubbing = use_signal(|| false);
-    let mut scrub_position = use_signal(|| None::<f64>);
     let mut show_share_modal = use_signal(|| false);
-    let mut seek_bar_left = use_signal(|| 0.0f64);
-    let mut seek_bar_width = use_signal(|| 1.0f64);
-    let mut gesture_id = use_signal(|| 0u32);
 
     let share_url = track.share_url();
     let share_content_type = match &track.source {
@@ -30,21 +29,6 @@ pub fn PlayerExpanded() -> Element {
         crate::stores::nostr_music::TrackSource::Radio { .. } => ContentType::RadioStation,
         crate::stores::nostr_music::TrackSource::Bible { .. } => ContentType::BibleVerse,
         _ => ContentType::MusicTrack,
-    };
-
-    let display_progress = if let Some(pos) = scrub_position() {
-        pos
-    } else {
-        progress
-    };
-    let display_time = if let Some(pos) = scrub_position() {
-        if state.duration > 0.0 {
-            pos / 100.0 * state.duration
-        } else {
-            0.0
-        }
-    } else {
-        state.current_time
     };
 
     rsx! {
@@ -94,7 +78,7 @@ pub fn PlayerExpanded() -> Element {
                         }
                         h2 { class: "text-xl font-bold truncate",
                             if track.is_live_stream {
-                                if let Some(ref np) = state.now_playing {
+                                if let Some(ref np) = now_playing {
                                     if let Some(display) = np.display_string() {
                                         "{display}"
                                     } else {
@@ -125,12 +109,12 @@ pub fn PlayerExpanded() -> Element {
                             "{track.artist}"
                         }
                     }
-                    if let Some(ref error) = state.playback_error {
+                    if let Some(ref error) = playback_error {
                         p { class: "text-xs text-red-400 mt-1 flex items-center justify-center gap-1",
                             icons::AlertTriangleIcon { class: "w-3 h-3 shrink-0".to_string() }
                             "{error}"
                         }
-                    } else if state.is_buffering {
+                    } else if is_buffering {
                         p { class: "text-xs text-muted-foreground mt-1 flex items-center justify-center gap-1",
                             icons::RefreshIcon { class: "w-3 h-3 animate-spin shrink-0".to_string() }
                             "Buffering..."
@@ -138,99 +122,9 @@ pub fn PlayerExpanded() -> Element {
                     }
                 }
 
-                // Seek bar (draggable)
+                // Seek bar (isolated child component - only this re-renders on time ticks)
                 if !track.is_live_stream {
-                    div { class: "w-full mb-4",
-                        div {
-                            id: "expanded-seek-bar",
-                            class: "relative h-6 flex items-center cursor-pointer touch-none",
-                            onpointerdown: move |evt: Event<PointerData>| {
-                                let client_x = evt.client_coordinates().x;
-                                gesture_id.set(gesture_id().wrapping_add(1));
-                                let current_gesture = gesture_id();
-                                spawn(async move {
-                                    let result = document::eval(&format!(
-                                        r#"
-                                        let el = document.getElementById('expanded-seek-bar');
-                                        if (!el) return [0, 1, 0];
-                                        let r = el.getBoundingClientRect();
-                                        let w = r.width || 1;
-                                        let p = Math.max(0, Math.min(100, (({client_x} - r.left) / w) * 100));
-                                        return [r.left, w, p];
-                                        "#,
-                                    ))
-                                    .await;
-                                    if gesture_id() != current_gesture {
-                                        return;
-                                    }
-                                    if let Ok(val) = result {
-                                        if let Some(arr) = val.as_array() {
-                                            let left = arr.first().and_then(|v| v.as_f64()).unwrap_or(0.0);
-                                            let width = arr.get(1).and_then(|v| v.as_f64()).unwrap_or(1.0).max(1.0);
-                                            let percent = arr.get(2).and_then(|v| v.as_f64()).unwrap_or(0.0);
-                                            seek_bar_left.set(left);
-                                            seek_bar_width.set(width);
-                                            scrub_position.set(Some(percent));
-                                            is_scrubbing.set(true);
-                                        }
-                                    }
-                                });
-                            },
-                            onpointermove: move |evt: Event<PointerData>| {
-                                if *is_scrubbing.read() && *seek_bar_width.read() > 1.0 {
-                                    let client_x = evt.client_coordinates().x;
-                                    let left = *seek_bar_left.read();
-                                    let width = *seek_bar_width.read();
-                                    let percent = ((client_x - left) / width * 100.0).clamp(0.0, 100.0);
-                                    scrub_position.set(Some(percent));
-                                }
-                            },
-                            onpointerup: move |_| {
-                                gesture_id.set(gesture_id().wrapping_add(1));
-                                if let Some(pos) = scrub_position() {
-                                    let new_time = pos / 100.0 * state.duration;
-                                    if new_time.is_finite() && new_time >= 0.0 {
-                                        music_player::seek_to(new_time);
-                                    }
-                                }
-                                is_scrubbing.set(false);
-                                scrub_position.set(None);
-                            },
-                            onpointerleave: move |_| {
-                                if *is_scrubbing.read() {
-                                    gesture_id.set(gesture_id().wrapping_add(1));
-                                    if let Some(pos) = scrub_position() {
-                                        let new_time = pos / 100.0 * state.duration;
-                                        if new_time.is_finite() && new_time >= 0.0 {
-                                            music_player::seek_to(new_time);
-                                        }
-                                    }
-                                    is_scrubbing.set(false);
-                                    scrub_position.set(None);
-                                }
-                            },
-                            // Track background
-                            div { class: "absolute inset-x-0 top-1/2 -translate-y-1/2 h-1.5 bg-secondary rounded-full",
-                                div {
-                                    class: "absolute h-full bg-primary rounded-full transition-[width] duration-75",
-                                    style: "width: {display_progress}%",
-                                }
-                            }
-                            // Thumb indicator
-                            div {
-                                class: "absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-primary rounded-full shadow-md transition-[left] duration-75",
-                                style: "left: calc({display_progress}% - 8px);",
-                            }
-                        }
-                        div { class: "flex justify-between mt-1",
-                            span { class: "text-xs text-muted-foreground",
-                                "{format_time(display_time)}"
-                            }
-                            span { class: "text-xs text-muted-foreground",
-                                "{format_time(state.duration)}"
-                            }
-                        }
-                    }
+                    ExpandedSeekBar { current_time, duration }
                 }
 
                 // Transport controls
@@ -252,7 +146,7 @@ pub fn PlayerExpanded() -> Element {
                     button {
                         class: "h-16 w-16 p-0 inline-flex items-center justify-center rounded-full bg-primary hover:bg-primary/90 text-primary-foreground transition-colors shadow-lg",
                         onclick: move |_| music_player::toggle_play(),
-                        dangerous_inner_html: if state.is_playing { icons::PAUSE } else { icons::PLAY },
+                        dangerous_inner_html: if is_playing { icons::PAUSE } else { icons::PLAY },
                     }
                     if track.is_podcast && !track.is_live_stream {
                         button {
@@ -276,14 +170,14 @@ pub fn PlayerExpanded() -> Element {
                         button {
                             class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent transition-colors",
                             onclick: move |_| music_player::toggle_mute(),
-                            dangerous_inner_html: if state.is_muted { icons::VOLUME_X } else { icons::VOLUME_2 },
+                            dangerous_inner_html: if is_muted { icons::VOLUME_X } else { icons::VOLUME_2 },
                         }
                         div { class: "flex-1 relative",
                             input {
                                 r#type: "range",
                                 min: "0",
                                 max: "100",
-                                value: "{(state.volume * 100.0) as u32}",
+                                value: "{(volume * 100.0) as u32}",
                                 class: "w-full h-2 appearance-none bg-secondary rounded-full cursor-pointer accent-primary [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-primary [&::-moz-range-thumb]:border-0",
                                 oninput: move |evt| {
                                     if let Ok(value) = evt.value().parse::<f64>() {
@@ -303,7 +197,7 @@ pub fn PlayerExpanded() -> Element {
                         }
                         select {
                             class: "bg-transparent text-sm text-foreground cursor-pointer hover:text-foreground border border-border rounded-md px-2 py-1 focus:outline-hidden appearance-none",
-                            value: "{state.playback_speed}",
+                            value: "{playback_speed}",
                             onchange: move |evt| {
                                 if let Ok(speed) = evt.value().parse::<f64>() {
                                     music_player::set_playback_speed(speed);

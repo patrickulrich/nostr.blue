@@ -45,6 +45,9 @@ yarn-error.log*
 # Worktrees
 .worktrees/
 
+# OpenCode
+.opencode/
+
 # Playwright MCP
 .playwright-mcp/
 
