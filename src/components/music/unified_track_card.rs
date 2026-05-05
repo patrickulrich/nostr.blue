@@ -1,7 +1,7 @@
 use crate::components::icons;
 use crate::components::{ContentShareModal, ContentType};
 use crate::routes::Route;
-use crate::stores::music_player::{self, MusicTrack};
+use crate::stores::music_player::{self, MusicPlayerStateStoreExt, MusicTrack};
 use crate::stores::nostr_music::TrackSource;
 use crate::stores::profiles;
 use dioxus::prelude::*;
@@ -26,9 +26,10 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
     let track_id = track.id.clone();
     let track_id_for_memo = track_id.clone();
     let is_playing = use_memo(move || {
-        let player_state = music_player::MUSIC_PLAYER.read();
-        if let Some(ref current) = player_state.current_track {
-            current.id == track_id_for_memo && player_state.is_playing
+        let store = music_player::MUSIC_PLAYER.resolve();
+        let current = store.current_track().cloned();
+        if let Some(ref cur) = current {
+            cur.id == track_id_for_memo && store.is_playing().cloned()
         } else {
             false
         }

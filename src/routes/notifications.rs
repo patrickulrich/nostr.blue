@@ -13,6 +13,7 @@ use nostr_sdk::{Event as NostrEvent, Filter, Kind, TagStandard, Timestamp};
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::Duration;
+use futures::join;
 #[derive(Clone, Debug, PartialEq)]
 #[allow(dead_code)]
 enum NotificationType {
@@ -231,7 +232,10 @@ pub fn Notifications() -> Element {
                         oldest_timestamp.set(oldest);
                         has_more.set(count >= 100);
                         spawn(async move {
-                            prefetch_notification_authors(&notifs).await;
+                            join!(
+                                prefetch_notification_authors(&notifs),
+                                prefetch_notification_posts(&notifs),
+                            );
                         });
                     } else {
                         has_more.set(false);
@@ -278,7 +282,10 @@ pub fn Notifications() -> Element {
                         oldest_timestamp.set(oldest);
                         has_more.set(count >= 100);
                         spawn(async move {
-                            prefetch_notification_authors(&notifs).await;
+                            join!(
+                                prefetch_notification_authors(&notifs),
+                                prefetch_notification_posts(&notifs),
+                            );
                         });
                     }
                 }
@@ -328,7 +335,10 @@ pub fn Notifications() -> Element {
                             .cloned()
                             .collect::<Vec<_>>();
                         spawn(async move {
-                            prefetch_notification_authors(&new_notifs).await;
+                            join!(
+                                prefetch_notification_authors(&new_notifs),
+                                prefetch_notification_posts(&new_notifs),
+                            );
                         });
                     } else {
                         has_more.set(false);
@@ -686,28 +696,36 @@ fn ReactionNotification(
         let event_id = reacted_event_id.clone();
         let my_pk = my_pubkey_for_verify.clone();
         spawn(async move {
-            if let Ok(p) = profiles::fetch_profile(pubkey).await {
-                profile.set(Some(p));
-            }
-            if let Some(eid) = event_id {
-                if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
-                    let filter = Filter::new().id(event_id).limit(1);
-                    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            let profile_fut = async {
+                if let Ok(p) = profiles::fetch_profile(pubkey).await {
+                    profile.set(Some(p));
+                }
+            };
+            let post_fut = async {
+                if let Some(eid) = event_id {
+                    if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
+                        let filter = Filter::new().id(event_id).limit(1);
+                        match nostr_client::fetch_events_aggregated(
+                            filter,
+                            Duration::from_secs(10),
+                        )
                         .await
-                    {
-                        Ok(events) => {
-                            if let Some(original_event) = events.into_iter().next() {
-                                if original_event.pubkey.to_hex() != my_pk {
-                                    hidden.set(true);
-                                } else {
-                                    reacted_post.set(Some(original_event));
+                        {
+                            Ok(events) => {
+                                if let Some(original_event) = events.into_iter().next() {
+                                    if original_event.pubkey.to_hex() != my_pk {
+                                        hidden.set(true);
+                                    } else {
+                                        reacted_post.set(Some(original_event));
+                                    }
                                 }
                             }
+                            Err(e) => log::error!("Failed to fetch referenced event: {}", e),
                         }
-                        Err(e) => log::error!("Failed to fetch referenced event: {}", e),
                     }
                 }
-            }
+            };
+            join!(profile_fut, post_fut);
             loading.set(false);
         });
     });
@@ -838,28 +856,36 @@ fn RepostNotification(
         let event_id = reposted_event_id.clone();
         let my_pk = my_pubkey_for_verify.clone();
         spawn(async move {
-            if let Ok(p) = profiles::fetch_profile(pubkey).await {
-                profile.set(Some(p));
-            }
-            if let Some(eid) = event_id {
-                if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
-                    let filter = Filter::new().id(event_id).limit(1);
-                    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            let profile_fut = async {
+                if let Ok(p) = profiles::fetch_profile(pubkey).await {
+                    profile.set(Some(p));
+                }
+            };
+            let post_fut = async {
+                if let Some(eid) = event_id {
+                    if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
+                        let filter = Filter::new().id(event_id).limit(1);
+                        match nostr_client::fetch_events_aggregated(
+                            filter,
+                            Duration::from_secs(10),
+                        )
                         .await
-                    {
-                        Ok(events) => {
-                            if let Some(original_event) = events.into_iter().next() {
-                                if original_event.pubkey.to_hex() != my_pk {
-                                    hidden.set(true);
-                                } else {
-                                    reposted_post.set(Some(original_event));
+                        {
+                            Ok(events) => {
+                                if let Some(original_event) = events.into_iter().next() {
+                                    if original_event.pubkey.to_hex() != my_pk {
+                                        hidden.set(true);
+                                    } else {
+                                        reposted_post.set(Some(original_event));
+                                    }
                                 }
                             }
+                            Err(e) => log::error!("Failed to fetch referenced event: {}", e),
                         }
-                        Err(e) => log::error!("Failed to fetch referenced event: {}", e),
                     }
                 }
-            }
+            };
+            join!(profile_fut, post_fut);
             loading.set(false);
         });
     });
@@ -984,28 +1010,36 @@ fn ZapNotification(
         let event_id = zapped_event_id.clone();
         let my_pk = my_pubkey_for_verify.clone();
         spawn(async move {
-            if let Ok(p) = profiles::fetch_profile(pubkey).await {
-                profile.set(Some(p));
-            }
-            if let Some(eid) = event_id {
-                if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
-                    let filter = Filter::new().id(event_id).limit(1);
-                    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            let profile_fut = async {
+                if let Ok(p) = profiles::fetch_profile(pubkey).await {
+                    profile.set(Some(p));
+                }
+            };
+            let post_fut = async {
+                if let Some(eid) = event_id {
+                    if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
+                        let filter = Filter::new().id(event_id).limit(1);
+                        match nostr_client::fetch_events_aggregated(
+                            filter,
+                            Duration::from_secs(10),
+                        )
                         .await
-                    {
-                        Ok(events) => {
-                            if let Some(original_event) = events.into_iter().next() {
-                                if original_event.pubkey.to_hex() != my_pk {
-                                    hidden.set(true);
-                                } else {
-                                    zapped_post.set(Some(original_event));
+                        {
+                            Ok(events) => {
+                                if let Some(original_event) = events.into_iter().next() {
+                                    if original_event.pubkey.to_hex() != my_pk {
+                                        hidden.set(true);
+                                    } else {
+                                        zapped_post.set(Some(original_event));
+                                    }
                                 }
                             }
+                            Err(e) => log::error!("Failed to fetch referenced event: {}", e),
                         }
-                        Err(e) => log::error!("Failed to fetch referenced event: {}", e),
                     }
                 }
-            }
+            };
+            join!(profile_fut, post_fut);
             loading.set(false);
         });
     });
@@ -1132,28 +1166,36 @@ fn QuoteNotification(
         let event_id = quoted_event_id.clone();
         let my_pk = my_pubkey_for_verify.clone();
         spawn(async move {
-            if let Ok(p) = profiles::fetch_profile(pubkey).await {
-                profile.set(Some(p));
-            }
-            if let Some(eid) = event_id {
-                if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
-                    let filter = Filter::new().id(event_id).limit(1);
-                    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            let profile_fut = async {
+                if let Ok(p) = profiles::fetch_profile(pubkey).await {
+                    profile.set(Some(p));
+                }
+            };
+            let post_fut = async {
+                if let Some(eid) = event_id {
+                    if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
+                        let filter = Filter::new().id(event_id).limit(1);
+                        match nostr_client::fetch_events_aggregated(
+                            filter,
+                            Duration::from_secs(10),
+                        )
                         .await
-                    {
-                        Ok(events) => {
-                            if let Some(original_event) = events.into_iter().next() {
-                                if original_event.pubkey.to_hex() != my_pk {
-                                    hidden.set(true);
-                                } else {
-                                    quoted_post.set(Some(original_event));
+                        {
+                            Ok(events) => {
+                                if let Some(original_event) = events.into_iter().next() {
+                                    if original_event.pubkey.to_hex() != my_pk {
+                                        hidden.set(true);
+                                    } else {
+                                        quoted_post.set(Some(original_event));
+                                    }
                                 }
                             }
+                            Err(e) => log::error!("Failed to fetch referenced event: {}", e),
                         }
-                        Err(e) => log::error!("Failed to fetch referenced event: {}", e),
                     }
                 }
-            }
+            };
+            join!(profile_fut, post_fut);
             loading.set(false);
         });
     });
@@ -1512,4 +1554,46 @@ async fn prefetch_notification_authors(notifications: &[NotificationType]) {
         NotificationType::Zap(e) => e.pubkey,
     });
     profile_prefetch::prefetch_pubkeys(pubkeys).await;
+}
+
+async fn prefetch_notification_posts(notifications: &[NotificationType]) {
+    if notifications.is_empty() {
+        return;
+    }
+    let mut event_ids: Vec<nostr_sdk::EventId> = Vec::new();
+    let mut seen: HashSet<nostr_sdk::EventId> = HashSet::new();
+    for notif in notifications {
+        let event = match notif {
+            NotificationType::Reaction(e)
+            | NotificationType::Repost(e)
+            | NotificationType::Quote(e)
+            | NotificationType::Zap(e) => e,
+            _ => continue,
+        };
+        for tag in event.tags.iter() {
+            if let Some(nostr_sdk::TagStandard::Event { event_id, .. }) = tag.as_standardized() {
+                if seen.insert(*event_id) {
+                    event_ids.push(*event_id);
+                }
+            }
+        }
+    }
+    if event_ids.is_empty() {
+        return;
+    }
+    event_ids.truncate(100);
+    let filter = Filter::new()
+        .ids(event_ids.clone())
+        .limit(event_ids.len());
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await {
+        Ok(events) => {
+            log::info!(
+                "Pre-fetched {} referenced posts for notifications",
+                events.len()
+            );
+        }
+        Err(e) => {
+            log::warn!("Failed to prefetch notification posts: {}", e);
+        }
+    }
 }

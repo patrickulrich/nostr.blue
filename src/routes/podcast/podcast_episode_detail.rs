@@ -16,7 +16,7 @@ use crate::routes::podcast::podcast_shared_states::{
 };
 use crate::routes::Route;
 use crate::services::podcast_rss::{self, format_duration};
-use crate::stores::{music_player, nostr_client, nostr_music};
+use crate::stores::{music_player, music_player::MusicPlayerStateStoreExt, nostr_client, nostr_music};
 use crate::utils::podcast::{self, PodcastMetadata};
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip01::Coordinate;
@@ -173,17 +173,18 @@ struct EpisodeDetailContentProps {
 #[component]
 fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
     let episode = props.episode.clone();
-    let player_state = music_player::MUSIC_PLAYER.read();
+    let store = music_player::MUSIC_PLAYER.resolve();
     let mut show_chapters = use_signal(|| true);
     let mut show_share_modal = use_signal(|| false);
-    let is_current_track = player_state
-        .current_track
+    let current_track = store.current_track().cloned();
+    let is_current_track = current_track
         .as_ref()
         .map(|t| t.id == episode.id)
         .unwrap_or(false);
-    let is_playing = is_current_track && player_state.is_playing;
+    let is_playing_state = store.is_playing().cloned();
+    let is_playing = is_current_track && is_playing_state;
     let current_time = if is_current_track {
-        player_state.current_time
+        store.current_time().cloned()
     } else {
         0.0
     };

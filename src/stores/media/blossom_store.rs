@@ -1,3 +1,4 @@
+use crate::platform::http::http_client;
 use crate::stores::{auth_store, nostr_client};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use dioxus::prelude::*;
@@ -19,9 +20,6 @@ pub const KIND_USER_BLOSSOM_SERVERS: u16 = 10063;
 /// Local storage key for blossom servers (persists across page reloads)
 #[allow(dead_code)]
 const BLOSSOM_SERVERS_STORAGE_KEY: &str = "nostr_blue_blossom_servers";
-/// HTTP request timeout in milliseconds
-#[cfg(target_arch = "wasm32")]
-const REQUEST_TIMEOUT_MS: u32 = 10_000;
 /// Save servers to local storage (WASM only)
 #[cfg(target_arch = "wasm32")]
 fn save_servers_to_storage(servers: &[String]) {
@@ -814,44 +812,22 @@ async fn list_files_inner() -> Result<Vec<MediaItem>, String> {
     Ok(items)
 }
 /// Internal helper to fetch file list from a single server
-#[allow(unused_variables)]
 async fn fetch_server_list(url: &str, auth_header: &str) -> Result<Vec<BlobDescriptor>, String> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        use gloo_net::http::Request;
-        use gloo_timers::callback::Timeout;
-        let controller = web_sys::AbortController::new()
-            .map_err(|_| "Failed to create AbortController".to_string())?;
-        let signal = controller.signal();
-        let controller_for_timeout = controller.clone();
-        let _timeout = Timeout::new(REQUEST_TIMEOUT_MS, move || {
-            controller_for_timeout.abort();
-        });
-        let response = Request::get(url)
-            .header("Authorization", auth_header)
-            .abort_signal(Some(&signal))
-            .send()
-            .await
-            .map_err(|e| {
-                if signal.aborted() {
-                    "Request timeout".to_string()
-                } else {
-                    format!("Request failed: {}", e)
-                }
-            })?;
-        if !response.ok() {
-            return Err(format!("Server returned status: {}", response.status()));
-        }
-        let blobs: Vec<BlobDescriptor> = response
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
-        Ok(blobs)
+    let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(url)
+        .header("Authorization", auth_header)
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    if !response.status().is_success() {
+        return Err(format!("Server returned status: {}", response.status()));
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        Err("Not implemented for non-WASM targets".to_string())
-    }
+    let blobs: Vec<BlobDescriptor> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+    Ok(blobs)
 }
 /// Delete a single file from all configured servers
 ///
@@ -908,40 +884,18 @@ pub async fn delete_files(sha256_list: &[String]) -> Result<usize, String> {
     Ok(deleted_count)
 }
 /// Internal helper to delete file from a single server
-#[allow(unused_variables)]
 async fn delete_from_server(url: &str, auth_header: &str) -> Result<(), String> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        use gloo_net::http::Request;
-        use gloo_timers::callback::Timeout;
-        let controller = web_sys::AbortController::new()
-            .map_err(|_| "Failed to create AbortController".to_string())?;
-        let signal = controller.signal();
-        let controller_for_timeout = controller.clone();
-        let _timeout = Timeout::new(REQUEST_TIMEOUT_MS, move || {
-            controller_for_timeout.abort();
-        });
-        let response = Request::delete(url)
-            .header("Authorization", auth_header)
-            .abort_signal(Some(&signal))
-            .send()
-            .await
-            .map_err(|e| {
-                if signal.aborted() {
-                    "Request timeout".to_string()
-                } else {
-                    format!("Request failed: {}", e)
-                }
-            })?;
-        if response.ok() {
-            Ok(())
-        } else {
-            Err(format!("Server returned status: {}", response.status()))
-        }
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        Err("Not implemented for non-WASM targets".to_string())
+    let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .delete(url)
+        .header("Authorization", auth_header)
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("Server returned status: {}", response.status()))
     }
 }
 /// Mirror a file to other servers that don't have it yet
@@ -1032,52 +986,29 @@ struct MirrorResponse {
     sha256: Option<String>,
 }
 /// Internal helper to mirror file to a single server
-#[allow(unused_variables)]
 async fn mirror_to_server(
     mirror_url: &str,
     source_url: &str,
     auth_header: &str,
 ) -> Result<String, String> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        use gloo_net::http::Request;
-        use gloo_timers::callback::Timeout;
-        let controller = web_sys::AbortController::new()
-            .map_err(|_| "Failed to create AbortController".to_string())?;
-        let signal = controller.signal();
-        let controller_for_timeout = controller.clone();
-        let _timeout = Timeout::new(REQUEST_TIMEOUT_MS, move || {
-            controller_for_timeout.abort();
-        });
-        let body = serde_json::json!({ "url" : source_url });
-        let response = Request::put(mirror_url)
-            .header("Authorization", auth_header)
-            .header("Content-Type", "application/json")
-            .abort_signal(Some(&signal))
-            .body(body.to_string())
-            .map_err(|e| format!("Failed to build request: {}", e))?
-            .send()
-            .await
-            .map_err(|e| {
-                if signal.aborted() {
-                    "Request timeout".to_string()
-                } else {
-                    format!("Request failed: {}", e)
-                }
-            })?;
-        if !response.ok() {
-            return Err(format!("Server returned status: {}", response.status()));
-        }
-        let mirror_response: MirrorResponse = response
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
-        Ok(mirror_response.url)
+    let body = serde_json::json!({ "url": source_url });
+    let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .put(mirror_url)
+        .header("Authorization", auth_header)
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    if !response.status().is_success() {
+        return Err(format!("Server returned status: {}", response.status()));
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        Err("Not implemented for non-WASM targets".to_string())
-    }
+    let mirror_response: MirrorResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+    Ok(mirror_response.url)
 }
 /// Mirror multiple files to all servers
 pub async fn mirror_files(items: &[MediaItem]) -> Result<usize, String> {

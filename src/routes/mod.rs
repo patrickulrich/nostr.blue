@@ -768,7 +768,7 @@ pub extern "system" fn Java_dev_dioxus_main_MainActivity_handleAndroidBackPresse
 #[component]
 fn Layout() -> Element {
     use crate::stores::{
-        auth_store, back_navigation, music_player::{MUSIC_PLAYER, PlayerViewMode}, notifications as notif_store,
+        auth_store, back_navigation, music_player::{MusicPlayerStateStoreExt, MUSIC_PLAYER, PlayerViewMode}, notifications as notif_store,
     };
     let auth = auth_store::AUTH_STATE.read();
     let notif_count = use_memo(notif_store::get_unread_count);
@@ -1042,11 +1042,14 @@ fn Layout() -> Element {
             Route::AboutDonate {} | Route::ZapGoalsHome {} | Route::ZapGoalsNew {} | Route::BlobbiHome {}
         );
     let player_offset = {
-        let state = MUSIC_PLAYER.read();
-        if !state.is_visible || state.current_track.is_none() {
+        let store = MUSIC_PLAYER.resolve();
+        let is_visible = *store.is_visible().read();
+        let has_track = store.current_track().read().is_some();
+        let view_mode = store.view_mode().cloned();
+        if !is_visible || !has_track {
             "0px"
         } else {
-            match state.view_mode {
+            match view_mode {
                 PlayerViewMode::Floating => "0px",
                 _ => "6rem",
             }
