@@ -185,6 +185,31 @@ impl GitService {
             .map_err(|e| e.to_string())?
         }
     }
+    /// Read file content as raw bytes (binary-safe)
+    pub async fn read_file_bytes(
+        &self,
+        repo: &Repository,
+        filepath: &str,
+        git_ref: Option<&str>,
+    ) -> Result<Vec<u8>, String> {
+        let dir = self.ensure_cloned(repo).await?;
+        let git_ref_str = git_ref.unwrap_or("HEAD").to_string();
+        #[cfg(feature = "web")]
+        {
+            GitWorkerManager::read_file_bytes(&dir, filepath, &git_ref_str).await
+        }
+        #[cfg(not(feature = "web"))]
+        {
+            let filepath = filepath.to_string();
+            let dir_clone = Self::native_path(&dir);
+            tokio::task::spawn_blocking(move || {
+                crate::services::git_native::read_file_bytes(&dir_clone, &filepath, &git_ref_str)
+            })
+            .await
+            .map_err(|e| e.to_string())?
+        }
+    }
+
     /// Read file content
     pub async fn read_file(
         &self,

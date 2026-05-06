@@ -78,12 +78,12 @@ use citations::{CitationDetail, CitationsHome};
 use code::{
     CodeBounties, CodeDiscussionDetail, CodeDiscussionNew, CodeExplore, CodeGlobalIssues,
     CodeGlobalPulls, CodeHome, CodeImport, CodeIssueDetail, CodeIssueNew, CodeNew,
-    CodeNotifications, CodePullDetail, CodePullNew, CodeRepo, CodeRepoArchitecture, CodeRepoBlame,
-    CodeRepoBlob, CodeRepoCommit, CodeRepoCommits, CodeRepoCompare, CodeRepoDiscussions,
-    CodeRepoEditFile, CodeRepoInsights, CodeRepoIssues, CodeRepoNewFile, CodeRepoProjects,
-    CodeRepoPulls, CodeRepoReleases, CodeRepoSettings, CodeRepoTree, CodeRepoUpload,
-    CodeRepositories, CodeSearch, CodeSettings, CodeSnippetDetail, CodeSnippetNew, CodeSnippets,
-    CodeStars, CodeUserProfile,
+    CodeNotifications, CodePages, CodePullDetail, CodePullNew, CodeRepo, CodeRepoArchitecture,
+    CodeRepoBlame, CodeRepoBlob, CodeRepoCommit, CodeRepoCommits, CodeRepoCompare,
+    CodeRepoDiscussions, CodeRepoEditFile, CodeRepoInsights, CodeRepoIssues, CodeRepoNewFile,
+    CodeRepoPages, CodeRepoProjects, CodeRepoPulls, CodeRepoReleases, CodeRepoSettings,
+    CodeRepoTree, CodeRepoUpload, CodeRepositories, CodeSearch, CodeSettings, CodeSnippetDetail,
+    CodeSnippetNew, CodeSnippets, CodeStars, CodeUserProfile,
 };
 use community::{Communities, CommunityNew, CommunityPage};
 use cookies::Cookies;
@@ -316,6 +316,10 @@ pub enum Route {
     CodeDiscussionDetail { note_id: String },
     #[route("/code/profile/:pubkey")]
     CodeUserProfile { pubkey: String },
+    #[route("/code/pages")]
+    CodePages {},
+    #[route("/code/repo/:naddr/pages")]
+    CodeRepoPages { naddr: String },
     #[route("/p2p")]
     P2PHome {},
     #[route("/p2p/order/:naddr")]
@@ -676,7 +680,9 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::CodeIssueDetail { .. }
         | Route::CodePullDetail { .. }
         | Route::CodeDiscussionDetail { .. }
-        | Route::CodeUserProfile { .. } => Some(Route::CodeHome {}),
+        | Route::CodeUserProfile { .. }
+        | Route::CodePages {}
+        | Route::CodeRepoPages { .. } => Some(Route::CodeHome {}),
         Route::P2POrderDetail { .. } => Some(Route::P2PHome {}),
         Route::ChatNew {} | Route::ChatDetail { .. } => Some(Route::Chats {}),
         Route::CommunityNew {} | Route::CommunityPage { .. } => Some(Route::Communities {}),
@@ -930,6 +936,8 @@ fn Layout() -> Element {
             | Route::CodeRepoBlob { .. }
             | Route::CodeUserProfile { .. }
             | Route::CodeNotifications {}
+            | Route::CodePages {}
+            | Route::CodeRepoPages { .. }
     );
     let is_p2p_page = matches!(
         current_route,
