@@ -8,7 +8,7 @@ use regex::Regex;
 use std::collections::{HashMap, HashSet};
 
 pub static CUSTOM_EMOJI_SHORTCODE_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r":([A-Za-z0-9_]+):").expect("custom emoji shortcode regex should compile")
+    Regex::new(r":([A-Za-z0-9_-]+):").expect("custom emoji shortcode regex should compile")
 });
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,7 +36,7 @@ pub fn is_valid_shortcode(shortcode: &str) -> bool {
     !shortcode.is_empty()
         && shortcode
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 pub fn collect_installed_custom_emojis() -> Vec<CustomEmoji> {
