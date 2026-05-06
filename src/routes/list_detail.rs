@@ -411,7 +411,7 @@ fn EventListView(list: UserList) -> Element {
 #[component]
 fn EventCard(event: Event) -> Element {
     let navigator = use_navigator();
-    let note_id = event.id.to_bech32().unwrap_or_else(|_| event.id.to_hex());
+    let route = crate::utils::route_for_kind::route_for_event(&event);
     let author = event.pubkey.to_hex();
     let author_name = get_member_display_name(&author);
     let content_preview = if event.content.len() > 200 {
@@ -419,17 +419,12 @@ fn EventCard(event: Event) -> Element {
     } else {
         event.content.clone()
     };
-    let kind_label = match event.kind.as_u16() {
-        1 => "Note",
-        30023 => "Article",
-        1063 => "File",
-        _ => "Event",
-    };
+    let kind_label = crate::utils::route_for_kind::content_label_for_kind(event.kind.as_u16());
     rsx! {
         div {
             class: "border border-border rounded-lg p-4 hover:bg-muted/50 transition cursor-pointer",
             onclick: move |_| {
-                navigator.push(format!("/note/{}", note_id.clone()));
+                navigator.push(route.clone());
             },
             div { class: "flex items-center gap-2 mb-2",
                 span { class: "text-xs px-2 py-0.5 bg-muted rounded text-muted-foreground",

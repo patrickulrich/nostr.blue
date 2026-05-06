@@ -1,6 +1,6 @@
 use crate::components::icons::{ArrowLeftIcon, ShareIcon, ZapIcon};
 use crate::components::live::stream_card::{parse_live_stream_event, LiveStreamMeta};
-use crate::components::{LiveChat, LiveStreamPlayer, LiveStreamShareModal, StreamStatus, ZapModal};
+use crate::components::{LiveChat, LiveStreamPlayer, ShareModal, StreamStatus, ZapModal};
 use crate::routes::Route;
 use crate::stores::nostr_client::{fetch_events_aggregated, CLIENT_INITIALIZED, HAS_SIGNER};
 use crate::stores::profiles;
@@ -349,14 +349,10 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                 }
             }
             if *show_share_modal.read() {
-                if let Some(meta) = stream_meta.read().as_ref() {
-                    if let Some(event) = stream_event.read().as_ref() {
-                        LiveStreamShareModal {
-                            event: event.clone(),
-                            d_tag: meta.d_tag.clone(),
-                            title: meta.title.clone(),
-                            on_close: move |_| show_share_modal.set(false),
-                        }
+                if let Some(event) = stream_event.read().as_ref() {
+                    ShareModal {
+                        event: event.clone(),
+                        on_close: move |_| show_share_modal.set(false),
                     }
                 }
             }
