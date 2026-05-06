@@ -792,6 +792,22 @@ fn Layout() -> Element {
     let mut last_handled_android_back_nonce = use_signal(|| 0u64);
     let current_route = use_route::<Route>();
     let navigator = navigator();
+    {
+        let route = current_route.clone();
+        use_effect(move || {
+            let _ = route.clone();
+            spawn(async move {
+                if !crate::stores::ui::scroll_restore::was_popstate_nav().await {
+                    #[cfg(feature = "web")]
+                    if let Some(window) = web_sys::window() {
+                        window.scroll_to_with_x_and_y(0.0, 0.0);
+                    }
+                }
+                crate::platform::timer::sleep_ms(100).await;
+                crate::stores::ui::scroll_restore::clear_popstate_flag().await;
+            });
+        });
+    }
     #[cfg(feature = "mobile_platform")]
     let _android_back_poller = use_future(move || async move {
         let mut last_seen = 0;

@@ -1028,7 +1028,7 @@ pub fn Home(list: String) -> Element {
         }
     });
 
-    // Restore scroll position after feed content loads
+    // Restore scroll position after feed content loads (only for popstate/back navigation)
     use_effect(move || {
         if let DataState::Loaded(items) = &*feed_state.read() {
             if !items.is_empty() {
@@ -1040,10 +1040,12 @@ pub fn Home(list: String) -> Element {
                     let current_label = feed_type.read().label();
                     if label == current_label {
                         spawn(async move {
-                            crate::platform::timer::sleep_ms(100).await;
-                            scroll_restore::set_scroll_y(scroll_y).await;
+                            if scroll_restore::was_popstate_nav().await {
+                                crate::platform::timer::sleep_ms(100).await;
+                                scroll_restore::set_scroll_y(scroll_y).await;
+                                log::debug!("Restored scroll position (popstate): y={}", scroll_y);
+                            }
                             scroll_restore::HOME_SCROLL_ANCHOR.write().is_set = false;
-                            log::debug!("Restored scroll position: y={}", scroll_y);
                         });
                     }
                 }

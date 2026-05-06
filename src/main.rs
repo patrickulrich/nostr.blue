@@ -44,6 +44,11 @@ fn App() -> Element {
     services::scheduler::use_background_scheduler();
     services::sync::use_sync_service();
     use_effect(move || {
+        spawn(async move {
+            stores::ui::scroll_restore::setup_popstate_flag().await;
+        });
+    });
+    use_effect(move || {
         theme_store::init_theme();
         auth_store::init_auth();
         music_player::init_player();
