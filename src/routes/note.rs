@@ -101,6 +101,8 @@ async fn fetch_parents_with_hints(
         .filter(|id| !fetched_ids.contains(id))
         .collect();
 
+    let client = nostr_client::get_client().unwrap();
+
     for _ in 0..max_depth {
         if ids_to_fetch.is_empty() {
             break;
@@ -122,29 +124,51 @@ async fn fetch_parents_with_hints(
 
         let mut new_events = Vec::new();
 
-        for (relay_url, ids) in &hinted_grouped {
-            let filter = Filter::new().ids(ids.clone()).kinds(vec![
-                Kind::TextNote,
-                Kind::VoiceMessage,
-                Kind::VoiceMessageReply,
-                Kind::Comment,
-            ]);
-            if let Ok(events) = relay::connection::fetch_events_from_relays(
-                &nostr_client::get_client().unwrap(),
-                filter,
-                vec![relay_url.clone()],
-                Duration::from_secs(5),
-            )
-            .await
-            {
-                new_events.extend(events);
+        // Phase 1: Fetch from hinted relays (e-tag relay_url)
+        if !hinted_grouped.is_empty() {
+            let hint_urls: Vec<String> = hinted_grouped.keys().cloned().collect();
+            let ephemeral =
+                relay::coverage::connect_ephemeral_relays(&client, &hint_urls).await;
+            if !ephemeral.connected.is_empty() {
+                for (relay_url, ids) in &hinted_grouped {
+                    if !ephemeral.connected.contains(relay_url) {
+                        continue;
+                    }
+                    let filter = Filter::new().ids(ids.clone()).kinds(vec![
+                        Kind::TextNote,
+                        Kind::VoiceMessage,
+                        Kind::VoiceMessageReply,
+                        Kind::Comment,
+                    ]);
+                    match relay::connection::fetch_events_from_relays(
+                        &client,
+                        filter,
+                        vec![relay_url.clone()],
+                        Duration::from_secs(5),
+                    )
+                    .await
+                    {
+                        Ok(events) => new_events.extend(events),
+                        Err(e) => log::warn!("Hinted relay fetch failed for {}: {}", relay_url, e),
+                    }
+                }
+            }
+            relay::coverage::cleanup_ephemeral_relays(&client, &ephemeral.newly_added).await;
+
+            // Add unfetched hinted IDs to unhinted so they get fallback attempts
+            let fetched_ids_this_round: HashSet<EventId> =
+                new_events.iter().map(|e| e.id).collect();
+            for ids in hinted_grouped.values() {
+                for id in ids {
+                    if !fetched_ids_this_round.contains(id) {
+                        unhinted_ids.push(*id);
+                    }
+                }
             }
         }
 
         if !unhinted_ids.is_empty() {
-            let client = nostr_client::get_client().unwrap();
-
-            // Try author-targeted fetch for unhinted parents where we know the author
+            // Phase 2: Author-targeted fetch for parents where we know the author
             let mut remaining_unhinted = Vec::new();
             let mut author_targeted: HashMap<String, Vec<EventId>> = HashMap::new();
 
@@ -168,26 +192,40 @@ async fn fetch_parents_with_hints(
                 remaining_unhinted.push(*id);
             }
 
-            for (relay_url, ids) in &author_targeted {
-                let filter = Filter::new().ids(ids.clone()).kinds(vec![
-                    Kind::TextNote,
-                    Kind::VoiceMessage,
-                    Kind::VoiceMessageReply,
-                    Kind::Comment,
-                ]);
-                if let Ok(events) = relay::connection::fetch_events_from_relays(
-                    &client,
-                    filter,
-                    vec![relay_url.clone()],
-                    Duration::from_secs(5),
-                )
-                .await
-                {
-                    new_events.extend(events);
+            if !author_targeted.is_empty() {
+                let author_urls: Vec<String> = author_targeted.keys().cloned().collect();
+                let ephemeral =
+                    relay::coverage::connect_ephemeral_relays(&client, &author_urls).await;
+                if !ephemeral.connected.is_empty() {
+                    for (relay_url, ids) in &author_targeted {
+                        if !ephemeral.connected.contains(relay_url) {
+                            continue;
+                        }
+                        let filter = Filter::new().ids(ids.clone()).kinds(vec![
+                            Kind::TextNote,
+                            Kind::VoiceMessage,
+                            Kind::VoiceMessageReply,
+                            Kind::Comment,
+                        ]);
+                        match relay::connection::fetch_events_from_relays(
+                            &client,
+                            filter,
+                            vec![relay_url.clone()],
+                            Duration::from_secs(5),
+                        )
+                        .await
+                        {
+                            Ok(events) => new_events.extend(events),
+                            Err(e) => {
+                                log::warn!("Author relay fetch failed for {}: {}", relay_url, e)
+                            }
+                        }
+                    }
                 }
+                relay::coverage::cleanup_ephemeral_relays(&client, &ephemeral.newly_added).await;
             }
 
-            // Try clicked note author's relays for remaining unhinted parents
+            // Phase 3: Try clicked note author's relays for remaining parents
             let still_missing: Vec<EventId> = remaining_unhinted
                 .iter()
                 .filter(|id| !new_events.iter().any(|e| e.id == **id))
@@ -201,26 +239,35 @@ async fn fetch_parents_with_hints(
                 )
                 .await;
                 if !clicked_relays.is_empty() {
-                    let filter = Filter::new().ids(still_missing.clone()).kinds(vec![
-                        Kind::TextNote,
-                        Kind::VoiceMessage,
-                        Kind::VoiceMessageReply,
-                        Kind::Comment,
-                    ]);
-                    if let Ok(events) = relay::connection::fetch_events_from_relays(
-                        &client,
-                        filter,
-                        clicked_relays,
-                        Duration::from_secs(5),
-                    )
-                    .await
-                    {
-                        new_events.extend(events);
+                    let ephemeral =
+                        relay::coverage::connect_ephemeral_relays(&client, &clicked_relays).await;
+                    if !ephemeral.connected.is_empty() {
+                        let filter = Filter::new().ids(still_missing.clone()).kinds(vec![
+                            Kind::TextNote,
+                            Kind::VoiceMessage,
+                            Kind::VoiceMessageReply,
+                            Kind::Comment,
+                        ]);
+                        match relay::connection::fetch_events_from_relays(
+                            &client,
+                            filter,
+                            ephemeral.connected.clone(),
+                            Duration::from_secs(5),
+                        )
+                        .await
+                        {
+                            Ok(events) => new_events.extend(events),
+                            Err(e) => {
+                                log::warn!("Clicked-author relay fetch failed: {}", e)
+                            }
+                        }
                     }
+                    relay::coverage::cleanup_ephemeral_relays(&client, &ephemeral.newly_added)
+                        .await;
                 }
             }
 
-            // Final fallback: outbox fetch for anything still missing
+            // Phase 4: Final fallback — outbox fetch for anything still missing
             let final_missing: Vec<EventId> = remaining_unhinted
                 .iter()
                 .filter(|id| !new_events.iter().any(|e| e.id == **id))
@@ -292,14 +339,20 @@ async fn fetch_author_relays_replies(
     let Some(client) = nostr_client::get_client() else {
         return Vec::new();
     };
-    relay::connection::fetch_events_from_relays(
+    let ephemeral = relay::coverage::connect_ephemeral_relays(&client, &author_relays).await;
+    if ephemeral.connected.is_empty() {
+        return Vec::new();
+    }
+    let result = relay::connection::fetch_events_from_relays(
         &client,
         reply_filter,
-        author_relays,
+        ephemeral.connected.clone(),
         Duration::from_secs(5),
     )
     .await
-    .unwrap_or_default()
+    .unwrap_or_default();
+    relay::coverage::cleanup_ephemeral_relays(&client, &ephemeral.newly_added).await;
+    result
 }
 
 async fn fetch_replies_fast(
