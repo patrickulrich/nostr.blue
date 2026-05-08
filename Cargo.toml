@@ -12,7 +12,7 @@ default = ["web"]
 cashu = ["dep:cdk", "dep:cdk-common", "nostr/nip60"]
 cashu_native = ["cashu", "dep:cdk-sqlite"]
 mobile_platform = []
-playstore = ["dioxus/mobile", "native", "dep:jni", "dep:ndk-context", "mobile_platform"]
+playstore = ["dioxus/mobile", "dioxus-motion/desktop", "native", "dep:jni", "dep:ndk-context", "mobile_platform"]
 web = [
     "dioxus/web",
     "dioxus-motion/web",

@@ -1092,7 +1092,14 @@ fn Layout() -> Element {
                 }
             },
             div { class: "flex justify-center max-w-[1600px] mx-auto",
-                aside { class: "w-[275px] shrink-0 border-r border-border sticky top-0 h-screen hidden lg:block bg-background",
+                aside {
+                    class: "w-[275px] shrink-0 border-r border-border sticky top-0 h-screen hidden lg:block bg-background",
+                    onmouseenter: move |_| {
+                        crate::components::blobbi::companion::behavior_loop::set_gaze_target(120.0, 400.0);
+                    },
+                    onmouseleave: move |_| {
+                        crate::components::blobbi::companion::behavior_loop::clear_gaze_target();
+                    },
                     div { class: "h-full flex flex-col p-4 overflow-y-auto scrollbar-hide",
                         {
                             let total_pages = crate::stores::sidebar_store::get_total_pages(auth.is_authenticated);

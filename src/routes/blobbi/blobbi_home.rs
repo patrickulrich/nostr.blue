@@ -1,10 +1,10 @@
 use dioxus::prelude::*;
 
 use crate::components::blobbi::core::types::BlobbiCompanion;
-use crate::components::blobbi::onboarding::onboarding_flow::OnboardingFlow;
+use crate::components::blobbi::onboarding::hatching_ceremony::HatchingCeremony;
 use crate::components::blobbi::rooms::room_shell::RoomShell;
-use crate::hooks::blobbi::{use_blobbi_collection, use_blobbi_decay, use_blobbi_profile};
-use crate::stores::{auth_store, blobbi_store};
+use crate::hooks::blobbi::{use_blobbi_collection, use_blobbi_decay, use_blobbi_profile, use_blobbi_quest_watcher};
+use crate::stores::{auth_store, blobbi_profile_store, blobbi_store, nostr_client};
 
 static CEREMONY_IN_PROGRESS: GlobalSignal<bool> = Signal::global(|| false);
 
@@ -38,12 +38,13 @@ pub fn BlobbiHome() -> Element {
     use_blobbi_collection();
     use_blobbi_profile();
     use_blobbi_decay();
+    use_blobbi_quest_watcher();
 
     let collection = {
         let store = blobbi_store::BLOBBI_COLLECTION.read();
         store.collection.clone()
     };
-    let loading = {
+    let collection_loading = {
         let store = blobbi_store::BLOBBI_COLLECTION.read();
         store.loading
     };
@@ -56,22 +57,69 @@ pub fn BlobbiHome() -> Element {
         store.selected_d.clone()
     };
 
-    // ── CASE A: Ceremony in progress ──
-    // Stay mounted until ceremony calls on_complete, regardless of data changes.
+    let profile_loading = blobbi_profile_store::BLOBBI_PROFILE.read().loading;
+
+    let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+    let profile = blobbi_profile_store::BLOBBI_PROFILE.read();
+    let onboarding_done = profile.profile.as_ref().map(|p| p.onboarding_done).unwrap_or(false);
+    drop(profile);
+
+    let mut ceremony_check_done = use_signal(|| false);
+    let mut existing_egg: Signal<Option<BlobbiCompanion>> = use_signal(|| None);
+    let mut ceremony_egg_only = use_signal(|| false);
+
+    {
+        let coll = collection.clone();
+        use_effect(move || {
+            if ceremony_check_done() {
+                return;
+            }
+            if !client_initialized {
+                return;
+            }
+            if collection_loading || profile_loading {
+                return;
+            }
+            if ceremony_active() {
+                return;
+            }
+
+            ceremony_check_done.set(true);
+
+            if onboarding_done {
+                return;
+            }
+
+            let has_any = !coll.is_empty();
+
+            if has_any {
+                let egg = coll.iter().find(|b| b.is_egg()).cloned();
+                existing_egg.set(egg);
+            }
+
+            ceremony_egg_only.set(true);
+            set_ceremony_active(true);
+        });
+    }
+
     if ceremony_active() {
         return rsx! {
-            div { class: "max-w-[600px] mx-auto w-full",
-                OnboardingFlow {
-                    on_complete: move |_| {
-                        set_ceremony_active(false);
-                    },
-                }
+            HatchingCeremony {
+                blobbi: existing_egg(),
+                egg_only: ceremony_egg_only(),
+                on_complete: move |_name| {
+                    set_ceremony_active(false);
+                    ceremony_check_done.set(false);
+                },
             }
         };
     }
 
-    // ── CASE B: Loading + no data ──
-    if loading && collection.is_empty() {
+    if (collection_loading || profile_loading || !client_initialized)
+        && collection.is_empty()
+        && error.is_none()
+    {
         return rsx! {
             div { class: "flex flex-col items-center justify-center min-h-[60vh]",
                 span { class: "inline-block w-8 h-8 border-2 border-current border-t-transparent rounded-full animate-spin text-muted-foreground" }
@@ -82,8 +130,7 @@ pub fn BlobbiHome() -> Element {
         };
     }
 
-    // ── CASE C: Error + no data ──
-    if !loading && collection.is_empty() && error.is_some() {
+    if !collection_loading && collection.is_empty() && error.is_some() {
         let err_msg = error.unwrap_or_default();
         return rsx! {
             div { class: "flex flex-col items-center justify-center min-h-[60vh] p-8 text-center",
@@ -103,21 +150,25 @@ pub fn BlobbiHome() -> Element {
         };
     }
 
-    // ── CASE D: No pets, start ceremony ──
-    if !loading && collection.is_empty() {
-        set_ceremony_active(true);
+    if !collection_loading && collection.is_empty() {
         return rsx! {
-            div { class: "max-w-[600px] mx-auto w-full",
-                OnboardingFlow {
-                    on_complete: move |_| {
-                        set_ceremony_active(false);
-                    },
+            div { class: "flex flex-col items-center justify-center min-h-[60vh] p-8 text-center",
+                div { class: "text-4xl mb-4", "🥚" }
+                h2 { class: "text-lg font-bold text-foreground mb-2",
+                    "No Blobbis found"
+                }
+                p { class: "text-muted-foreground text-sm mb-4",
+                    "Something went wrong. Please try again."
+                }
+                button {
+                    class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-80 transition",
+                    onclick: move |_| ceremony_check_done.set(false),
+                    "Try Again"
                 }
             }
         };
     }
 
-    // ── CASE E: Has pets, show dashboard ──
     let selected_blobbi = if let Some(d) = &selected_d {
         collection.iter().find(|b| &b.d == d).cloned()
     } else {

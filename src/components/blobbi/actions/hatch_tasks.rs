@@ -9,6 +9,7 @@ pub struct TaskDefinition {
     pub description: &'static str,
     pub icon: &'static str,
     pub target: u32,
+    pub is_dynamic: bool,
 }
 
 pub fn egg_tasks() -> Vec<TaskDefinition> {
@@ -19,6 +20,7 @@ pub fn egg_tasks() -> Vec<TaskDefinition> {
             description: "Publish your first kind:1 post with #Blobbi hashtag",
             icon: "\u{1F4DD}",
             target: 1,
+            is_dynamic: false,
         },
         TaskDefinition {
             id: TASK_POST_BLOBBI_PHOTO,
@@ -26,20 +28,23 @@ pub fn egg_tasks() -> Vec<TaskDefinition> {
             description: "Post a photo of your Blobbi (image in kind:1)",
             icon: "\u{1F4F8}",
             target: 1,
+            is_dynamic: false,
         },
         TaskDefinition {
-            id: TASK_INTERACT_6,
-            name: "Interact 6 Times",
-            description: "Perform 6 care interactions with your egg",
+            id: TASK_INTERACT_7,
+            name: "Interact 7 Times",
+            description: "Perform 7 care interactions with your egg",
             icon: "\u{1F446}",
-            target: 6,
+            target: 7,
+            is_dynamic: false,
         },
         TaskDefinition {
-            id: TASK_SHELL_INTEGRITY_ABOVE_50,
-            name: "Keep Shell Strong",
-            description: "Maintain shell integrity above 50",
-            icon: "\u{1F95A}",
+            id: TASK_SHARE_YOUR_EGG,
+            name: "Share Your Egg",
+            description: "Post mentioning your egg with #BlobbiEgg hashtag",
+            icon: "\u{1F31F}",
             target: 1,
+            is_dynamic: false,
         },
     ]
 }
@@ -52,6 +57,7 @@ pub fn baby_quests() -> Vec<TaskDefinition> {
             description: "Post 5 kind:1 events authored by you",
             icon: "\u{1F4DD}",
             target: 5,
+            is_dynamic: false,
         },
         TaskDefinition {
             id: QUEST_SHARE_SONG,
@@ -59,6 +65,7 @@ pub fn baby_quests() -> Vec<TaskDefinition> {
             description: "Post a kind:1 event with a YouTube link",
             icon: "\u{1F3B5}",
             target: 1,
+            is_dynamic: false,
         },
         TaskDefinition {
             id: QUEST_USE_BLOBBI_HASHTAGS,
@@ -66,6 +73,7 @@ pub fn baby_quests() -> Vec<TaskDefinition> {
             description: "Post with #Blobbi and #Evolving<Name>",
             icon: "\u{1F3F7}\u{FE0F}",
             target: 1,
+            is_dynamic: false,
         },
         TaskDefinition {
             id: QUEST_MENTION_USER,
@@ -73,6 +81,7 @@ pub fn baby_quests() -> Vec<TaskDefinition> {
             description: "Post tagging another user with p tag",
             icon: "\u{1F4AC}",
             target: 1,
+            is_dynamic: false,
         },
         TaskDefinition {
             id: QUEST_REPLY_TO_POST,
@@ -80,13 +89,15 @@ pub fn baby_quests() -> Vec<TaskDefinition> {
             description: "Post a reply with e and p tags",
             icon: "\u{1F4AC}",
             target: 1,
+            is_dynamic: false,
         },
         TaskDefinition {
             id: QUEST_FOLLOW_5_USERS,
             name: "Follow 5 Users",
             description: "Send a kind:3 event with at least 5 p tags",
             icon: "\u{1F91D}",
-            target: 1,
+            target: 5,
+            is_dynamic: false,
         },
         TaskDefinition {
             id: QUEST_REACT_TO_5_POSTS,
@@ -94,6 +105,7 @@ pub fn baby_quests() -> Vec<TaskDefinition> {
             description: "Send 5 unique kind:7 reaction events",
             icon: "\u{2764}\u{FE0F}",
             target: 5,
+            is_dynamic: false,
         },
         TaskDefinition {
             id: QUEST_REPOST_3_POSTS,
@@ -101,6 +113,7 @@ pub fn baby_quests() -> Vec<TaskDefinition> {
             description: "Send 3 kind:6 repost events",
             icon: "\u{1F504}",
             target: 3,
+            is_dynamic: false,
         },
         TaskDefinition {
             id: QUEST_REACT_OR_REPOST_BLOBBI,
@@ -108,6 +121,23 @@ pub fn baby_quests() -> Vec<TaskDefinition> {
             description: "React to or repost a #Blobbi post",
             icon: "\u{2B50}",
             target: 1,
+            is_dynamic: false,
+        },
+        TaskDefinition {
+            id: QUEST_MAINTAIN_STATS,
+            name: "Peak Condition",
+            description: "Keep all stats above 80",
+            icon: "\u{1F4AA}",
+            target: EVOLVE_STAT_THRESHOLD as u32,
+            is_dynamic: true,
+        },
+        TaskDefinition {
+            id: QUEST_EDIT_PROFILE,
+            name: "Edit Your Profile",
+            description: "Update your profile info or customize your profile tabs",
+            icon: "\u{270F}\u{FE0F}",
+            target: 1,
+            is_dynamic: false,
         },
     ]
 }
@@ -121,6 +151,13 @@ pub fn tasks_for_stage(stage: BlobbiStage) -> Vec<TaskDefinition> {
 }
 
 pub fn is_task_completed(blobbi: &BlobbiCompanion, task_id: &str) -> bool {
+    if task_id == QUEST_MAINTAIN_STATS {
+        return blobbi.stats.hunger >= EVOLVE_STAT_THRESHOLD
+            && blobbi.stats.happiness >= EVOLVE_STAT_THRESHOLD
+            && blobbi.stats.health >= EVOLVE_STAT_THRESHOLD
+            && blobbi.stats.hygiene >= EVOLVE_STAT_THRESHOLD
+            && blobbi.stats.energy >= EVOLVE_STAT_THRESHOLD;
+    }
     blobbi.tasks.iter().any(|t| t.id == task_id && t.completed)
 }
 
@@ -135,8 +172,9 @@ pub fn all_tasks_completed(blobbi: &BlobbiCompanion) -> bool {
 pub fn update_task_progress(blobbi: &mut BlobbiCompanion, action_name: &str) {
     let defs = tasks_for_stage(blobbi.stage);
     for def in &defs {
-        let _progress_tag = format!("{}_progress", def.id);
-        let _confirmed_tag = format!("{}_confirmed", def.id);
+        if def.is_dynamic {
+            continue;
+        }
 
         if action_name == def.id || matches_interaction_action(action_name, def.id) {
             if let Some(task) = blobbi.tasks.iter_mut().find(|t| t.id == def.id) {
@@ -148,23 +186,12 @@ pub fn update_task_progress(blobbi: &mut BlobbiCompanion, action_name: &str) {
                 }
             }
         }
-
-        if def.id == TASK_SHELL_INTEGRITY_ABOVE_50 && blobbi.is_egg() {
-            if let Some(shell) = blobbi.shell_integrity {
-                if shell >= 50.0 {
-                    if let Some(task) = blobbi.tasks.iter_mut().find(|t| t.id == def.id) {
-                        task.completed = true;
-                        task.progress = 1;
-                    }
-                }
-            }
-        }
     }
 }
 
 fn matches_interaction_action(action: &str, task_id: &str) -> bool {
-    if task_id == TASK_INTERACT_6 {
-        return ["warm", "check", "sing", "talk", "clean", "medicine"].contains(&action);
+    if task_id == TASK_INTERACT_7 {
+        return ["clean", "medicine", "sing", "play_music", "feed", "play"].contains(&action);
     }
     false
 }
@@ -182,6 +209,7 @@ pub fn initialize_tasks_for_stage(blobbi: &mut BlobbiCompanion) {
     let defs = tasks_for_stage(blobbi.stage);
     blobbi.tasks = defs
         .into_iter()
+        .filter(|d| !d.is_dynamic)
         .map(|d| {
             let existing = blobbi.tasks.iter().find(|t| t.id == d.id);
             BlobbiTaskProgress {

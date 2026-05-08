@@ -41,6 +41,8 @@ pub enum BlobbiState {
     Active,
     Sleeping,
     Hibernating,
+    Incubating,
+    Evolving,
 }
 
 impl BlobbiState {
@@ -49,6 +51,8 @@ impl BlobbiState {
             BlobbiState::Active => "active",
             BlobbiState::Sleeping => "sleeping",
             BlobbiState::Hibernating => "hibernating",
+            BlobbiState::Incubating => "incubating",
+            BlobbiState::Evolving => "evolving",
         }
     }
 
@@ -56,6 +60,8 @@ impl BlobbiState {
         match s {
             "sleeping" => BlobbiState::Sleeping,
             "hibernating" => BlobbiState::Hibernating,
+            "incubating" => BlobbiState::Incubating,
+            "evolving" => BlobbiState::Evolving,
             _ => BlobbiState::Active,
         }
     }
@@ -171,6 +177,10 @@ pub struct BlobbiCompanion {
     pub shell_integrity: Option<f64>,
     pub start_incubation: Option<u64>,
     pub start_evolution: Option<u64>,
+    pub state_started_at: Option<u64>,
+    pub tasks_completed: Vec<String>,
+    pub care_streak_last_at: Option<u64>,
+    pub care_streak_last_day: Option<String>,
     pub theme: Option<String>,
     pub crossover_app: Option<String>,
     pub manifestation: Option<String>,
@@ -283,5 +293,6 @@ pub struct BlobbonautProfile {
     pub style: Option<String>,
     pub background: Option<String>,
     pub title: Option<String>,
+    pub content_json: String,
     pub raw_event: Option<Event>,
 }

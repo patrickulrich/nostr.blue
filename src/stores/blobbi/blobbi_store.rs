@@ -48,5 +48,7 @@ pub fn update_blobbi_in_collection(blobbi: &BlobbiCompanion) {
     let mut store = BLOBBI_COLLECTION.write();
     if let Some(existing) = store.collection.iter_mut().find(|b| b.d == blobbi.d) {
         *existing = blobbi.clone();
+    } else {
+        store.collection.push(blobbi.clone());
     }
 }

@@ -1,4 +1,6 @@
 use crate::components::blobbi::core::builders::{build_interaction_event, publish_blobbi_state};
+use crate::components::blobbi::core::decay::apply_decay;
+use crate::components::blobbi::core::streak;
 use crate::components::blobbi::core::types::{BlobbiCompanion, BlobbiState};
 use crate::stores::blobbi_store;
 use crate::stores::nostr_client;
@@ -10,12 +12,14 @@ pub async fn put_to_sleep(blobbi: &BlobbiCompanion) -> Result<BlobbiCompanion, S
     }
 
     let now = nostr_sdk::Timestamp::now().as_secs();
-    let mut updated = blobbi.clone();
+    let mut updated = apply_decay(blobbi, now);
+
     updated.is_sleeping = true;
     updated.state = BlobbiState::Sleeping;
     updated.sleep_started_at = Some(now);
     updated.last_sleep_update = Some(now);
     updated.last_interaction = Some(now);
+    updated.last_decay_at = Some(now);
     updated.source = Some("user".to_string());
 
     publish_blobbi_state(&updated).await?;
@@ -40,6 +44,11 @@ pub async fn put_to_sleep(blobbi: &BlobbiCompanion) -> Result<BlobbiCompanion, S
     ).await;
 
     blobbi_store::update_blobbi_in_collection(&updated);
+
+    crate::components::blobbi::actions::mission_tracker::track_mission_progress(
+        crate::components::blobbi::actions::action_types::BlobbiActionType::Rest,
+    );
+
     Ok(updated)
 }
 
@@ -49,18 +58,21 @@ pub async fn wake_up(blobbi: &BlobbiCompanion) -> Result<BlobbiCompanion, String
     }
 
     let now = nostr_sdk::Timestamp::now().as_secs();
-    let happiness_delta = if blobbi.stats.energy >= 50.0 { 5.0 } else { -5.0 };
+    let mut updated = apply_decay(blobbi, now);
 
-    let mut updated = blobbi.clone();
+    let happiness_delta = if updated.stats.energy >= 50.0 { 5.0 } else { -5.0 };
+
     updated.is_sleeping = false;
     updated.state = BlobbiState::Active;
     updated.sleep_started_at = None;
     updated.last_sleep_update = None;
     updated.last_interaction = Some(now);
+    updated.last_decay_at = Some(now);
     updated.stats.happiness = (updated.stats.happiness + happiness_delta).round().clamp(STAT_MIN, STAT_MAX);
     updated.experience = updated.experience.saturating_add(2);
-    updated.care_streak = updated.care_streak.saturating_add(1);
     updated.source = Some("user".to_string());
+
+    streak::record_care_action(&mut updated, "rest");
 
     publish_blobbi_state(&updated).await?;
 
@@ -89,5 +101,10 @@ pub async fn wake_up(blobbi: &BlobbiCompanion) -> Result<BlobbiCompanion, String
     ).await;
 
     blobbi_store::update_blobbi_in_collection(&updated);
+
+    crate::components::blobbi::actions::mission_tracker::track_mission_progress(
+        crate::components::blobbi::actions::action_types::BlobbiActionType::Rest,
+    );
+
     Ok(updated)
 }

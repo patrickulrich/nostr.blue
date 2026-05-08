@@ -1,10 +1,11 @@
 use dioxus::prelude::*;
 
 use crate::components::blobbi::core::types::BlobbiCompanion;
+use crate::components::blobbi::visual::baby_visual::render_body_effects;
 use crate::components::blobbi::visual::recipe::*;
 
 #[component]
-pub fn AdultVisual(blobbi: BlobbiCompanion, recipe: VisualRecipe) -> Element {
+pub fn AdultVisual(blobbi: BlobbiCompanion, recipe: ComposableRecipe) -> Element {
     let base_color = &blobbi.visual_traits.base_color;
     let eye_color = &blobbi.visual_traits.eye_color;
     let adult_type = blobbi.adult_type.as_deref().unwrap_or("blobbi");
@@ -101,44 +102,62 @@ fn base_svg(
     }
 }
 
-// ── NOSTRICH (default / base "blobbi") ──────────────────────────
+#[allow(clippy::too_many_arguments)]
+fn render_species(
+    animation_class: &str,
+    gradient_id: &str,
+    base_color: &str,
+    body: Element,
+    face: Element,
+    recipe: &ComposableRecipe,
+    left_x: f64,
+    right_x: f64,
+    eye_y: f64,
+    mouth_y: f64,
+) -> Element {
+    let brow_y = eye_y - 12.0;
+    let brow = render_adult_eyebrow(&recipe.eyebrow, left_x, right_x, brow_y);
+    let ext = render_adult_extras(&recipe.extras, left_x, right_x, eye_y, mouth_y);
+    let effect = render_body_effects(&recipe.body_effects);
+    let all_extras = rsx! {
+        {face}
+        {brow}
+        {ext}
+        {effect}
+    };
+    base_svg(animation_class, gradient_id, base_color, body, all_extras)
+}
 #[component]
 fn NostrichVisual(
     base_color: String,
     eye_color: String,
-    recipe: VisualRecipe,
+    recipe: ComposableRecipe,
     animation_class: String,
 ) -> Element {
     let mouth = render_adult_mouth(recipe.mouth_type, 80.0, 108.0);
     let eyes = render_adult_eyes(recipe.eye_type, &eye_color, 68.0, 92.0, 50.0);
-    base_svg(
+    render_species(
         &animation_class,
         "nostrich-body",
         &base_color,
         rsx! {
-            // body
             ellipse { cx: "80", cy: "120", rx: "32", ry: "28", fill: "url(#nostrich-body)" }
-            // neck
             path { d: "M 72 95 Q 70 75 72 55 L 88 55 Q 90 75 88 95", fill: "url(#nostrich-body)" }
-            // head
             circle { cx: "80", cy: "45", r: "18", fill: "url(#nostrich-body)" }
-            // beak
             path { d: "M 96 42 L 110 47 L 96 50 Z", fill: "#f59e0b" }
-            // legs
             line { x1: "70", y1: "145", x2: "70", y2: "128", stroke: "#f59e0b", stroke_width: "3", stroke_linecap: "round" }
             line { x1: "90", y1: "145", x2: "90", y2: "128", stroke: "#f59e0b", stroke_width: "3", stroke_linecap: "round" }
-            // feet
             path { d: "M 62 145 L 70 145 L 75 148", fill: "none", stroke: "#f59e0b", stroke_width: "2", stroke_linecap: "round" }
             path { d: "M 82 148 L 90 145 L 98 145", fill: "none", stroke: "#f59e0b", stroke_width: "2", stroke_linecap: "round" }
-            // tail
             path { d: "M 110 115 Q 120 105 115 95 Q 125 100 120 110 Q 130 108 122 118", fill: "{lighten(&base_color, 10)}" }
-            // wing
             path { d: "M 60 100 Q 48 105 52 120 Q 55 115 62 115", fill: "{lighten(&base_color, 8)}", opacity: "0.7" }
         },
         rsx! {
             {eyes}
             {mouth}
         },
+        &recipe,
+        68.0, 92.0, 50.0, 108.0,
     )
 }
 
@@ -147,12 +166,12 @@ fn NostrichVisual(
 fn PandiVisual(
     base_color: String,
     eye_color: String,
-    recipe: VisualRecipe,
+    recipe: ComposableRecipe,
     animation_class: String,
 ) -> Element {
     let mouth = render_adult_mouth(recipe.mouth_type, 80.0, 100.0);
     let eyes = render_adult_eyes(recipe.eye_type, &eye_color, 55.0, 90.0, 30.0);
-    base_svg(
+    render_species(
         &animation_class,
         "pandi-body",
         &base_color,
@@ -169,6 +188,8 @@ fn PandiVisual(
             ellipse { cx: "50", cy: "95", rx: "10", ry: "6", fill: "rgba(255,150,150,0.25)" }
             ellipse { cx: "110", cy: "95", rx: "10", ry: "6", fill: "rgba(255,150,150,0.25)" }
         },
+        &recipe,
+        55.0, 90.0, 30.0, 100.0,
     )
 }
 
@@ -177,12 +198,12 @@ fn PandiVisual(
 fn OwliVisual(
     base_color: String,
     eye_color: String,
-    recipe: VisualRecipe,
+    recipe: ComposableRecipe,
     animation_class: String,
 ) -> Element {
     let mouth = render_adult_mouth(recipe.mouth_type, 80.0, 108.0);
     let eyes = render_adult_eyes(recipe.eye_type, &eye_color, 50.0, 105.0, 35.0);
-    base_svg(
+    render_species(
         &animation_class,
         "owli-body",
         &base_color,
@@ -194,6 +215,8 @@ fn OwliVisual(
             circle { cx: "105", cy: "70", r: "16", fill: "white" }
         },
         rsx! { {eyes} {mouth} },
+        &recipe,
+        50.0, 105.0, 35.0, 108.0,
     )
 }
 
@@ -202,34 +225,31 @@ fn OwliVisual(
 fn CattiVisual(
     base_color: String,
     eye_color: String,
-    recipe: VisualRecipe,
+    recipe: ComposableRecipe,
     animation_class: String,
 ) -> Element {
     let mouth = render_adult_mouth(recipe.mouth_type, 80.0, 105.0);
     let eyes = render_adult_eyes(recipe.eye_type, &eye_color, 60.0, 100.0, 55.0);
-    base_svg(
+    render_species(
         &animation_class,
         "catti-body",
         &base_color,
         rsx! {
-            // body
             ellipse { cx: "80", cy: "100", rx: "40", ry: "42", fill: "url(#catti-body)" }
-            // head
             circle { cx: "80", cy: "58", r: "28", fill: "url(#catti-body)" }
-            // ears
             polygon { points: "55,38 48,12 68,32", fill: "{base_color}" }
             polygon { points: "105,38 112,12 92,32", fill: "{base_color}" }
             polygon { points: "57,36 52,18 66,33", fill: "{lighten(&base_color, 15)}" }
             polygon { points: "103,36 108,18 94,33", fill: "{lighten(&base_color, 15)}" }
-            // tail
             path { d: "M 118 95 Q 140 80 135 65 Q 145 70 140 85 Q 148 78 142 95", fill: "{base_color}" }
-            // whiskers
             line { x1: "42", y1: "62", x2: "20", y2: "58", stroke: "currentColor", stroke_width: "1", class: "text-foreground/30" }
             line { x1: "42", y1: "66", x2: "20", y2: "68", stroke: "currentColor", stroke_width: "1", class: "text-foreground/30" }
             line { x1: "118", y1: "62", x2: "140", y2: "58", stroke: "currentColor", stroke_width: "1", class: "text-foreground/30" }
             line { x1: "118", y1: "66", x2: "140", y2: "68", stroke: "currentColor", stroke_width: "1", class: "text-foreground/30" }
         },
         rsx! { {eyes} {mouth} },
+        &recipe,
+        60.0, 100.0, 55.0, 105.0,
     )
 }
 
@@ -238,12 +258,12 @@ fn CattiVisual(
 fn FroggiVisual(
     base_color: String,
     eye_color: String,
-    recipe: VisualRecipe,
+    recipe: ComposableRecipe,
     animation_class: String,
 ) -> Element {
     let mouth = render_adult_mouth(recipe.mouth_type, 80.0, 108.0);
     let eyes = render_adult_eyes(recipe.eye_type, &eye_color, 50.0, 105.0, 35.0);
-    base_svg(
+    render_species(
         &animation_class,
         "froggi-body",
         &base_color,
@@ -255,6 +275,8 @@ fn FroggiVisual(
             circle { cx: "110", cy: "53", r: "14", fill: "white" }
         },
         rsx! { {eyes} {mouth} },
+        &recipe,
+        50.0, 105.0, 35.0, 108.0,
     )
 }
 
@@ -263,27 +285,26 @@ fn FroggiVisual(
 fn CloudiVisual(
     base_color: String,
     eye_color: String,
-    recipe: VisualRecipe,
+    recipe: ComposableRecipe,
     animation_class: String,
 ) -> Element {
     let mouth = render_adult_mouth(recipe.mouth_type, 80.0, 95.0);
     let eyes = render_adult_eyes(recipe.eye_type, &eye_color, 62.0, 98.0, 62.0);
-    base_svg(
+    render_species(
         &animation_class,
         "cloudi-body",
         &base_color,
         rsx! {
-            // main cloud body
             circle { cx: "55", cy: "80", r: "30", fill: "url(#cloudi-body)" }
             circle { cx: "105", cy: "80", r: "30", fill: "url(#cloudi-body)" }
             circle { cx: "80", cy: "65", r: "35", fill: "url(#cloudi-body)" }
-            // bottom flat
             rect { x: "25", y: "90", width: "110", height: "25", rx: "12", fill: "url(#cloudi-body)" }
-            // small wisps
             circle { cx: "35", cy: "95", r: "15", fill: "{lighten(&base_color, 10)}", opacity: "0.4" }
             circle { cx: "125", cy: "95", r: "12", fill: "{lighten(&base_color, 10)}", opacity: "0.4" }
         },
         rsx! { {eyes} {mouth} },
+        &recipe,
+        62.0, 98.0, 62.0, 95.0,
     )
 }
 
@@ -292,29 +313,27 @@ fn CloudiVisual(
 fn CrystiVisual(
     base_color: String,
     eye_color: String,
-    recipe: VisualRecipe,
+    recipe: ComposableRecipe,
     animation_class: String,
 ) -> Element {
     let mouth = render_adult_mouth(recipe.mouth_type, 80.0, 100.0);
     let eyes = render_adult_eyes(recipe.eye_type, &eye_color, 60.0, 100.0, 55.0);
-    base_svg(
+    render_species(
         &animation_class,
         "crysti-body",
         &base_color,
         rsx! {
-            // main crystal
             polygon { points: "80,20 110,55 100,120 60,120 50,55", fill: "url(#crysti-body)" }
-            // facets
             polygon { points: "80,20 110,55 80,65", fill: "{lighten(&base_color, 20)}", opacity: "0.5" }
             polygon { points: "80,20 50,55 80,65", fill: "{lighten(&base_color, 10)}", opacity: "0.3" }
             polygon { points: "80,65 100,120 80,120", fill: "{lighten(&base_color, 5)}", opacity: "0.3" }
-            // side crystals
             polygon { points: "45,60 30,90 50,100", fill: "{lighten(&base_color, 12)}", opacity: "0.6" }
             polygon { points: "115,60 130,90 110,100", fill: "{lighten(&base_color, 12)}", opacity: "0.6" }
-            // shine
             line { x1: "75", y1: "30", x2: "72", y2: "50", stroke: "rgba(255,255,255,0.5)", stroke_width: "2", stroke_linecap: "round" }
         },
         rsx! { {eyes} {mouth} },
+        &recipe,
+        60.0, 100.0, 55.0, 100.0,
     )
 }
 
@@ -323,32 +342,30 @@ fn CrystiVisual(
 fn BloomiVisual(
     base_color: String,
     eye_color: String,
-    recipe: VisualRecipe,
+    recipe: ComposableRecipe,
     animation_class: String,
 ) -> Element {
     let mouth = render_adult_mouth(recipe.mouth_type, 80.0, 100.0);
     let eyes = render_adult_eyes(recipe.eye_type, &eye_color, 68.0, 92.0, 72.0);
-    base_svg(
+    render_species(
         &animation_class,
         "bloomi-body",
         &base_color,
         rsx! {
-            // stem
             path { d: "M 80 130 Q 80 110 80 95", fill: "none", stroke: "#22c55e", stroke_width: "4", stroke_linecap: "round" }
-            // leaves on stem
             path { d: "M 80 115 Q 65 108 60 118 Q 68 115 80 115", fill: "#22c55e" }
             path { d: "M 80 110 Q 95 103 100 113 Q 92 110 80 110", fill: "#22c55e" }
-            // petals (6 around center)
             ellipse { cx: "80", cy: "55", rx: "18", ry: "28", fill: "url(#bloomi-body)" }
             ellipse { cx: "80", cy: "55", rx: "18", ry: "28", fill: "url(#bloomi-body)", transform: "rotate(60 80 80)" }
             ellipse { cx: "80", cy: "55", rx: "18", ry: "28", fill: "url(#bloomi-body)", transform: "rotate(120 80 80)" }
             ellipse { cx: "80", cy: "55", rx: "18", ry: "28", fill: "url(#bloomi-body)", transform: "rotate(180 80 80)" }
             ellipse { cx: "80", cy: "55", rx: "18", ry: "28", fill: "url(#bloomi-body)", transform: "rotate(240 80 80)" }
             ellipse { cx: "80", cy: "55", rx: "18", ry: "28", fill: "url(#bloomi-body)", transform: "rotate(300 80 80)" }
-            // center
             circle { cx: "80", cy: "80", r: "18", fill: "{lighten(&base_color, 25)}" }
         },
         rsx! { {eyes} {mouth} },
+        &recipe,
+        68.0, 92.0, 72.0, 100.0,
     )
 }
 
@@ -357,12 +374,12 @@ fn BloomiVisual(
 fn StarriVisual(
     base_color: String,
     eye_color: String,
-    recipe: VisualRecipe,
+    recipe: ComposableRecipe,
     animation_class: String,
 ) -> Element {
     let mouth = render_adult_mouth(recipe.mouth_type, 80.0, 105.0);
     let eyes = render_adult_eyes(recipe.eye_type, &eye_color, 55.0, 90.0, 30.0);
-    base_svg(
+    render_species(
         &animation_class,
         "starri-body",
         &base_color,
@@ -370,6 +387,8 @@ fn StarriVisual(
             polygon { points: "80,25 90,60 127,60 97,82 108,118 80,97 52,118 63,82 33,60 70,60", fill: "url(#starri-body)" }
         },
         rsx! { {eyes} {mouth} },
+        &recipe,
+        55.0, 90.0, 30.0, 105.0,
     )
 }
 
@@ -378,12 +397,12 @@ fn StarriVisual(
 fn FlammiVisual(
     base_color: String,
     eye_color: String,
-    recipe: VisualRecipe,
+    recipe: ComposableRecipe,
     animation_class: String,
 ) -> Element {
     let mouth = render_adult_mouth(recipe.mouth_type, 80.0, 105.0);
     let eyes = render_adult_eyes(recipe.eye_type, &eye_color, 55.0, 90.0, 30.0);
-    base_svg(
+    render_species(
         &animation_class,
         "flammi-body",
         &base_color,
@@ -392,6 +411,8 @@ fn FlammiVisual(
             path { d: "M 50 55 Q 55 40 65 50 Q 75 35 85 48", fill: "{lighten(&base_color, 20)}", opacity: "0.5" }
         },
         rsx! { {eyes} {mouth} },
+        &recipe,
+        55.0, 90.0, 30.0, 105.0,
     )
 }
 
@@ -400,22 +421,22 @@ fn FlammiVisual(
 fn DroppiVisual(
     base_color: String,
     eye_color: String,
-    recipe: VisualRecipe,
+    recipe: ComposableRecipe,
     animation_class: String,
 ) -> Element {
     let mouth = render_adult_mouth(recipe.mouth_type, 80.0, 95.0);
     let eyes = render_adult_eyes(recipe.eye_type, &eye_color, 68.0, 92.0, 70.0);
-    base_svg(
+    render_species(
         &animation_class,
         "droppi-body",
         &base_color,
         rsx! {
-            // teardrop shape
             path { d: "M 80 25 Q 45 70 45 95 Q 45 130 80 135 Q 115 130 115 95 Q 115 70 80 25 Z", fill: "url(#droppi-body)" }
-            // highlight
             path { d: "M 72 45 Q 62 70 60 85 Q 58 95 65 90 Q 68 70 72 45 Z", fill: "rgba(255,255,255,0.3)" }
         },
         rsx! { {eyes} {mouth} },
+        &recipe,
+        68.0, 92.0, 70.0, 95.0,
     )
 }
 
@@ -424,24 +445,24 @@ fn DroppiVisual(
 fn BreezyVisual(
     base_color: String,
     eye_color: String,
-    recipe: VisualRecipe,
+    recipe: ComposableRecipe,
     animation_class: String,
 ) -> Element {
     let mouth = render_adult_mouth(recipe.mouth_type, 80.0, 90.0);
     let eyes = render_adult_eyes(recipe.eye_type, &eye_color, 68.0, 92.0, 60.0);
-    base_svg(
+    render_species(
         &animation_class,
         "breezy-body",
         &base_color,
         rsx! {
-            // swirling body
             path { d: "M 50 80 Q 35 65 45 50 Q 55 35 75 40 Q 90 30 105 45 Q 120 55 115 75 Q 125 85 115 100 Q 110 120 90 115 Q 75 125 60 115 Q 40 110 50 80 Z", fill: "url(#breezy-body)" }
-            // wind swirls
             path { d: "M 30 95 Q 20 90 25 80", fill: "none", stroke: "{lighten(&base_color, 20)}", stroke_width: "2", stroke_linecap: "round", opacity: "0.6" }
             path { d: "M 25 105 Q 15 100 20 88", fill: "none", stroke: "{lighten(&base_color, 20)}", stroke_width: "1.5", stroke_linecap: "round", opacity: "0.4" }
             path { d: "M 130 85 Q 140 80 135 70", fill: "none", stroke: "{lighten(&base_color, 20)}", stroke_width: "2", stroke_linecap: "round", opacity: "0.6" }
         },
         rsx! { {eyes} {mouth} },
+        &recipe,
+        68.0, 92.0, 60.0, 90.0,
     )
 }
 
@@ -450,12 +471,12 @@ fn BreezyVisual(
 fn RockyVisual(
     base_color: String,
     eye_color: String,
-    recipe: VisualRecipe,
+    recipe: ComposableRecipe,
     animation_class: String,
 ) -> Element {
     let mouth = render_adult_mouth(recipe.mouth_type, 80.0, 105.0);
     let eyes = render_adult_eyes(recipe.eye_type, &eye_color, 55.0, 90.0, 30.0);
-    base_svg(
+    render_species(
         &animation_class,
         "rocky-body",
         &base_color,
@@ -465,6 +486,8 @@ fn RockyVisual(
             polygon { points: "110,75 125,85 118,100", fill: "{lighten(&base_color, 8)}", opacity: "0.5" }
         },
         rsx! { {eyes} {mouth} },
+        &recipe,
+        55.0, 90.0, 30.0, 105.0,
     )
 }
 
@@ -473,33 +496,30 @@ fn RockyVisual(
 fn CactiVisual(
     base_color: String,
     eye_color: String,
-    recipe: VisualRecipe,
+    recipe: ComposableRecipe,
     animation_class: String,
 ) -> Element {
     let mouth = render_adult_mouth(recipe.mouth_type, 80.0, 95.0);
     let eyes = render_adult_eyes(recipe.eye_type, &eye_color, 70.0, 90.0, 58.0);
-    base_svg(
+    render_species(
         &animation_class,
         "cacti-body",
         &base_color,
         rsx! {
-            // main body
             rect { x: "62", y: "40", width: "36", height: "80", rx: "18", fill: "url(#cacti-body)" }
-            // left arm
             rect { x: "30", y: "65", width: "35", height: "18", rx: "9", fill: "url(#cacti-body)" }
             rect { x: "30", y: "55", width: "18", height: "28", rx: "9", fill: "url(#cacti-body)" }
-            // right arm
             rect { x: "95", y: "55", width: "35", height: "18", rx: "9", fill: "url(#cacti-body)" }
             rect { x: "112", y: "45", width: "18", height: "28", rx: "9", fill: "url(#cacti-body)" }
-            // pot
             path { d: "M 50 120 L 110 120 L 105 145 L 55 145 Z", fill: "#a0522d" }
-            // spines
             line { x1: "60", y1: "60", x2: "55", y2: "55", stroke: "currentColor", stroke_width: "1", class: "text-foreground/30" }
             line { x1: "100", y1: "50", x2: "105", y2: "45", stroke: "currentColor", stroke_width: "1", class: "text-foreground/30" }
             line { x1: "60", y1: "85", x2: "54", y2: "83", stroke: "currentColor", stroke_width: "1", class: "text-foreground/30" }
             line { x1: "100", y1: "80", x2: "106", y2: "78", stroke: "currentColor", stroke_width: "1", class: "text-foreground/30" }
         },
         rsx! { {eyes} {mouth} },
+        &recipe,
+        70.0, 90.0, 58.0, 95.0,
     )
 }
 
@@ -508,30 +528,28 @@ fn CactiVisual(
 fn MushieVisual(
     base_color: String,
     eye_color: String,
-    recipe: VisualRecipe,
+    recipe: ComposableRecipe,
     animation_class: String,
 ) -> Element {
     let mouth = render_adult_mouth(recipe.mouth_type, 80.0, 108.0);
     let eyes = render_adult_eyes(recipe.eye_type, &eye_color, 68.0, 92.0, 72.0);
-    base_svg(
+    render_species(
         &animation_class,
         "mushie-body",
         &base_color,
         rsx! {
-            // stem
             rect { x: "65", y: "95", width: "30", height: "40", rx: "8", fill: "#fef3c7" }
-            // cap
             ellipse { cx: "80", cy: "75", rx: "50", ry: "35", fill: "url(#mushie-body)" }
-            // spots
             circle { cx: "60", cy: "65", r: "8", fill: "rgba(255,255,255,0.4)" }
             circle { cx: "95", cy: "60", r: "6", fill: "rgba(255,255,255,0.4)" }
             circle { cx: "75", cy: "50", r: "5", fill: "rgba(255,255,255,0.3)" }
             circle { cx: "100", cy: "75", r: "4", fill: "rgba(255,255,255,0.3)" }
-            // gills
             path { d: "M 40 80 Q 60 95 80 95", fill: "none", stroke: "{lighten(&base_color, 10)}", stroke_width: "1", opacity: "0.4" }
             path { d: "M 120 80 Q 100 95 80 95", fill: "none", stroke: "{lighten(&base_color, 10)}", stroke_width: "1", opacity: "0.4" }
         },
         rsx! { {eyes} {mouth} },
+        &recipe,
+        68.0, 92.0, 72.0, 108.0,
     )
 }
 
@@ -540,31 +558,29 @@ fn MushieVisual(
 fn LeafyVisual(
     base_color: String,
     eye_color: String,
-    recipe: VisualRecipe,
+    recipe: ComposableRecipe,
     animation_class: String,
 ) -> Element {
     let mouth = render_adult_mouth(recipe.mouth_type, 80.0, 95.0);
     let eyes = render_adult_eyes(recipe.eye_type, &eye_color, 68.0, 92.0, 68.0);
-    base_svg(
+    render_species(
         &animation_class,
         "leafy-body",
         &base_color,
         rsx! {
-            // main leaf
             path { d: "M 80 25 Q 35 60 40 100 Q 50 135 80 140 Q 110 135 120 100 Q 125 60 80 25 Z", fill: "url(#leafy-body)" }
-            // center vein
             line { x1: "80", y1: "35", x2: "80", y2: "130", stroke: "{lighten(&base_color, 15)}", stroke_width: "2", opacity: "0.5" }
-            // side veins
             path { d: "M 80 55 Q 60 60 52 72", fill: "none", stroke: "{lighten(&base_color, 15)}", stroke_width: "1.5", opacity: "0.4" }
             path { d: "M 80 55 Q 100 60 108 72", fill: "none", stroke: "{lighten(&base_color, 15)}", stroke_width: "1.5", opacity: "0.4" }
             path { d: "M 80 80 Q 55 85 48 98", fill: "none", stroke: "{lighten(&base_color, 15)}", stroke_width: "1.5", opacity: "0.4" }
             path { d: "M 80 80 Q 105 85 112 98", fill: "none", stroke: "{lighten(&base_color, 15)}", stroke_width: "1.5", opacity: "0.4" }
             path { d: "M 80 105 Q 60 110 55 120", fill: "none", stroke: "{lighten(&base_color, 15)}", stroke_width: "1.5", opacity: "0.4" }
             path { d: "M 80 105 Q 100 110 105 120", fill: "none", stroke: "{lighten(&base_color, 15)}", stroke_width: "1.5", opacity: "0.4" }
-            // stem
             line { x1: "80", y1: "25", x2: "80", y2: "12", stroke: "#22c55e", stroke_width: "3", stroke_linecap: "round" }
         },
         rsx! { {eyes} {mouth} },
+        &recipe,
+        68.0, 92.0, 68.0, 95.0,
     )
 }
 
@@ -573,34 +589,30 @@ fn LeafyVisual(
 fn RoseyVisual(
     base_color: String,
     eye_color: String,
-    recipe: VisualRecipe,
+    recipe: ComposableRecipe,
     animation_class: String,
 ) -> Element {
     let mouth = render_adult_mouth(recipe.mouth_type, 80.0, 100.0);
     let eyes = render_adult_eyes(recipe.eye_type, &eye_color, 68.0, 92.0, 72.0);
-    base_svg(
+    render_species(
         &animation_class,
         "rosey-body",
         &base_color,
         rsx! {
-            // stem
             line { x1: "80", y1: "105", x2: "80", y2: "145", stroke: "#22c55e", stroke_width: "4", stroke_linecap: "round" }
-            // thorns
             path { d: "M 80 120 L 74 115 L 80 118", fill: "#22c55e" }
             path { d: "M 80 132 L 86 127 L 80 130", fill: "#22c55e" }
-            // leaf
             path { d: "M 80 125 Q 65 118 60 128 Q 68 122 80 125", fill: "#22c55e" }
-            // outer petals
             path { d: "M 80 40 Q 40 55 45 85 Q 55 75 65 80 Q 50 95 60 110 Q 70 95 80 100", fill: "url(#rosey-body)" }
             path { d: "M 80 40 Q 120 55 115 85 Q 105 75 95 80 Q 110 95 100 110 Q 90 95 80 100", fill: "url(#rosey-body)" }
-            // inner petals
             path { d: "M 80 50 Q 55 65 60 85 Q 70 75 80 80", fill: "{lighten(&base_color, 10)}" }
             path { d: "M 80 50 Q 105 65 100 85 Q 90 75 80 80", fill: "{lighten(&base_color, 10)}" }
-            // center spiral
             circle { cx: "80", cy: "80", r: "10", fill: "{lighten(&base_color, 25)}" }
             path { d: "M 80 72 Q 86 76 84 82 Q 80 86 76 82 Q 74 78 80 72 Z", fill: "{lighten(&base_color, 30)}" }
         },
         rsx! { {eyes} {mouth} },
+        &recipe,
+        68.0, 92.0, 72.0, 100.0,
     )
 }
 
@@ -628,9 +640,97 @@ fn render_adult_eyes(
             circle { cx: "{right_x}", cy: "{y}", r: "7", fill: "{eye_color}" }
             circle { cx: "{right_x - 2.0}", cy: "{y - 2.0}", r: "2.5", fill: "white" }
         },
+        EyeType::Watery => rsx! {
+            circle { cx: "{left_x}", cy: "{y}", r: "7", fill: "{eye_color}" }
+            circle { cx: "{left_x - 1.8}", cy: "{y - 2.1}", r: "2.8", fill: "white", opacity: "0.9" }
+            circle { cx: "{left_x + 1.0}", cy: "{y + 2.5}", r: "1.8", fill: "white", opacity: "0.8" }
+            path {
+                d: "M {left_x - 6.0} {y + 1.5} Q {left_x - 6.0} {y + 6.0} {left_x} {y + 6.0} Q {left_x + 6.0} {y + 6.0} {left_x + 6.0} {y + 1.5} Z",
+                fill: "#7dd3fc", opacity: "0.4",
+            }
+            circle { cx: "{right_x}", cy: "{y}", r: "7", fill: "{eye_color}" }
+            circle { cx: "{right_x - 1.8}", cy: "{y - 2.1}", r: "2.8", fill: "white", opacity: "0.9" }
+            circle { cx: "{right_x + 1.0}", cy: "{y + 2.5}", r: "1.8", fill: "white", opacity: "0.8" }
+            path {
+                d: "M {right_x - 6.0} {y + 1.5} Q {right_x - 6.0} {y + 6.0} {right_x} {y + 6.0} Q {right_x + 6.0} {y + 6.0} {right_x + 6.0} {y + 1.5} Z",
+                fill: "#7dd3fc", opacity: "0.4",
+            }
+        },
+        EyeType::Dizzy => rsx! {
+            g {
+                path {
+                    d: "M {left_x} {y - 1.0} Q {left_x + 5.0} {y - 5.0} {left_x + 3.0} {y - 7.0} Q {left_x} {y - 9.0} {left_x - 3.0} {y - 5.0} Q {left_x - 5.0} {y} {left_x - 1.0} {y + 3.0} Q {left_x + 3.0} {y + 6.0} {left_x + 6.0} {y + 2.0}",
+                    fill: "none", stroke: "{eye_color}", stroke_width: "2", stroke_linecap: "round",
+                }
+                animateTransform {
+                    attribute_name: "transform",
+                    type: "rotate",
+                    from: "360 {left_x} {y}",
+                    to: "0 {left_x} {y}",
+                    dur: "2s",
+                    repeat_count: "indefinite",
+                }
+            }
+            g {
+                path {
+                    d: "M {right_x} {y - 1.0} Q {right_x + 5.0} {y - 5.0} {right_x + 3.0} {y - 7.0} Q {right_x} {y - 9.0} {right_x - 3.0} {y - 5.0} Q {right_x - 5.0} {y} {right_x - 1.0} {y + 3.0} Q {right_x + 3.0} {y + 6.0} {right_x + 6.0} {y + 2.0}",
+                    fill: "none", stroke: "{eye_color}", stroke_width: "2", stroke_linecap: "round",
+                }
+                animateTransform {
+                    attribute_name: "transform",
+                    type: "rotate",
+                    from: "360 {right_x} {y}",
+                    to: "0 {right_x} {y}",
+                    dur: "2s",
+                    repeat_count: "indefinite",
+                }
+            }
+        },
+        EyeType::SleepyBlink => rsx! {
+            path { d: "M {left_x - 7.0} {y} Q {left_x} {y - 3.0} {left_x + 7.0} {y}", fill: "none", stroke: "{eye_color}", stroke_width: "3", stroke_linecap: "round" }
+            path { d: "M {right_x - 7.0} {y} Q {right_x} {y - 3.0} {right_x + 7.0} {y}", fill: "none", stroke: "{eye_color}", stroke_width: "3", stroke_linecap: "round" }
+        },
+        EyeType::Star => rsx! {
+            polygon {
+                points: "{left_x},{y - 8.0} {left_x + 2.0},{y - 3.0} {left_x + 7.0},{y - 3.0} {left_x + 3.0},{y} {left_x + 4.0},{y + 5.0} {left_x},{y + 2.0} {left_x - 4.0},{y + 5.0} {left_x - 3.0},{y} {left_x - 7.0},{y - 3.0} {left_x - 2.0},{y - 3.0}",
+                fill: "#fbbf24",
+                stroke: "#f59e0b",
+                stroke_width: "0.5",
+            }
+            polygon {
+                points: "{right_x},{y - 8.0} {right_x + 2.0},{y - 3.0} {right_x + 7.0},{y - 3.0} {right_x + 3.0},{y} {right_x + 4.0},{y + 5.0} {right_x},{y + 2.0} {right_x - 4.0},{y + 5.0} {right_x - 3.0},{y} {right_x - 7.0},{y - 3.0} {right_x - 2.0},{y - 3.0}",
+                fill: "#fbbf24",
+                stroke: "#f59e0b",
+                stroke_width: "0.5",
+            }
+            circle { cx: "{left_x - 1.6}", cy: "{y - 2.4}", r: "1.2", fill: "white", opacity: "0.7" }
+            circle { cx: "{right_x - 1.6}", cy: "{y - 2.4}", r: "1.2", fill: "white", opacity: "0.7" }
+        },
+        EyeType::Surprised => rsx! {
+            circle { cx: "{left_x}", cy: "{y}", r: "9", fill: "white", stroke: "{eye_color}", stroke_width: "2" }
+            circle { cx: "{left_x}", cy: "{y}", r: "4.5", fill: "{eye_color}" }
+            circle { cx: "{left_x - 2.0}", cy: "{y - 2.0}", r: "1.5", fill: "white" }
+            circle { cx: "{right_x}", cy: "{y}", r: "9", fill: "white", stroke: "{eye_color}", stroke_width: "2" }
+            circle { cx: "{right_x}", cy: "{y}", r: "4.5", fill: "{eye_color}" }
+            circle { cx: "{right_x - 2.0}", cy: "{y - 2.0}", r: "1.5", fill: "white" }
+        },
+        EyeType::Curious => rsx! {
+            circle { cx: "{left_x}", cy: "{y}", r: "7", fill: "{eye_color}" }
+            circle { cx: "{left_x + 2.0}", cy: "{y - 2.0}", r: "2.5", fill: "white" }
+            circle { cx: "{right_x}", cy: "{y}", r: "7", fill: "{eye_color}" }
+            circle { cx: "{right_x - 2.0}", cy: "{y - 2.0}", r: "2.5", fill: "white" }
+        },
+        EyeType::Bored => rsx! {
+            ellipse { cx: "{left_x}", cy: "{y}", rx: "7", ry: "4", fill: "{eye_color}" }
+            line { x1: "{left_x - 8.0}", y1: "{y - 3.0}", x2: "{left_x + 8.0}", y2: "{y - 3.0}", stroke: "{eye_color}", stroke_width: "2" }
+            ellipse { cx: "{right_x}", cy: "{y}", rx: "7", ry: "4", fill: "{eye_color}" }
+            line { x1: "{right_x - 8.0}", y1: "{y - 3.0}", x2: "{right_x + 8.0}", y2: "{y - 3.0}", stroke: "{eye_color}", stroke_width: "2" }
+        },
         _ => rsx! {
             circle { cx: "{left_x}", cy: "{y}", r: "7", fill: "{eye_color}" }
+            circle { cx: "{left_x - 2.0}", cy: "{y - 2.0}", r: "2", fill: "white", opacity: "0.6" }
             circle { cx: "{right_x}", cy: "{y}", r: "7", fill: "{eye_color}" }
+            circle { cx: "{right_x - 2.0}", cy: "{y - 2.0}", r: "2", fill: "white", opacity: "0.6" }
         },
     }
 }
@@ -649,23 +749,128 @@ fn render_adult_mouth(mouth_type: MouthType, cx: f64, cy: f64) -> Element {
         MouthType::Open => rsx! {
             ellipse { cx: "{cx}", cy: "{cy}", rx: "8", ry: "10", fill: "currentColor", class: "text-foreground/40" }
         },
+        MouthType::Sad => rsx! {
+            path { d: "M {cx - 10.0} {cy + 5.0} Q {cx} {cy - 3.0} {cx + 10.0} {cy + 5.0}", fill: "none", stroke: "currentColor", stroke_width: "2.5", stroke_linecap: "round", class: "text-foreground/60" }
+        },
+        MouthType::Droopy => rsx! {
+            path { d: "M {cx - 10.0} {cy + 2.0} Q {cx - 5.0} {cy - 1.0} {cx} {cy + 1.0} Q {cx + 5.0} {cy - 1.0} {cx + 10.0} {cy + 2.0}", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", class: "text-foreground/60" }
+        },
+        MouthType::Sleepy => rsx! {
+            path { d: "M {cx - 8.0} {cy} Q {cx} {cy - 3.0} {cx + 8.0} {cy}", fill: "none", stroke: "currentColor", stroke_width: "1.5", stroke_linecap: "round", class: "text-foreground/40" }
+        },
+        MouthType::Round => rsx! {
+            circle { cx: "{cx}", cy: "{cy}", r: "5", fill: "currentColor", class: "text-foreground/40" }
+        },
+        MouthType::Small => rsx! {
+            path { d: "M {cx - 5.0} {cy} Q {cx} {cy + 4.0} {cx + 5.0} {cy}", fill: "none", stroke: "currentColor", stroke_width: "1.5", stroke_linecap: "round", class: "text-foreground/60" }
+        },
+        MouthType::Smirk => rsx! {
+            path { d: "M {cx - 8.0} {cy} Q {cx} {cy + 6.0} {cx + 8.0} {cy - 2.0} Q {cx + 4.0} {cy + 1.0} {cx + 2.0} {cy}", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", class: "text-foreground/60" }
+        },
         _ => rsx! {
             line { x1: "{cx - 8.0}", y1: "{cy}", x2: "{cx + 8.0}", y2: "{cy}", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", class: "text-foreground/60" }
         },
     }
 }
 
-fn lighten(hex: &str, percent: u32) -> String {
-    let hex = hex.trim_start_matches('#');
-    if hex.len() != 6 {
-        return "#ffffff".to_string();
+use super::utils::lighten;
+
+fn render_adult_eyebrow(config: &Option<EyebrowConfig>, left_x: f64, right_x: f64, y: f64) -> Element {
+    match config {
+        Some(brow) => {
+            let angle = brow.angle;
+            let oy = brow.offset_y;
+            let by = y + oy;
+            let opacity = if brow.worried { "0.7" } else { "0.5" };
+            let curve = if brow.worried { 2.0 } else { 0.0 };
+            let half_len = 12.0;
+            rsx! {
+                g {
+                    path {
+                        d: "M {left_x - half_len} {by + angle * 0.3} Q {left_x} {by + angle * 0.3 - curve - 3.0} {left_x + half_len} {by - angle * 0.3}",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2.5",
+                        stroke_linecap: "round",
+                        class: "text-foreground",
+                        opacity: "{opacity}",
+                    }
+                    path {
+                        d: "M {right_x - half_len} {by - angle * 0.3} Q {right_x} {by - angle * 0.3 - curve - 3.0} {right_x + half_len} {by + angle * 0.3}",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2.5",
+                        stroke_linecap: "round",
+                        class: "text-foreground",
+                        opacity: "{opacity}",
+                    }
+                }
+            }
+        }
+        None => rsx! { g {} },
     }
-    let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(0);
-    let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(0);
-    let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0);
-    let f = percent as f32 / 100.0;
-    let r = ((r as f32 + (255.0 - r as f32) * f).min(255.0)) as u8;
-    let g = ((g as f32 + (255.0 - g as f32) * f).min(255.0)) as u8;
-    let b = ((b as f32 + (255.0 - b as f32) * f).min(255.0)) as u8;
-    format!("#{:02x}{:02x}{:02x}", r, g, b)
+}
+
+fn render_adult_extras(extras: &Extras, left_x: f64, right_x: f64, eye_y: f64, mouth_y: f64) -> Element {
+    let mut parts: Vec<Element> = Vec::new();
+
+    if let Some(tears) = &extras.tears {
+        let (left_tears, right_tears) = match tears.eye {
+            TearEye::Both => (true, true),
+            TearEye::Left => (true, false),
+            TearEye::Right => (false, true),
+            TearEye::Alternating => (true, true),
+        };
+        let alt_class = matches!(tears.eye, TearEye::Alternating)
+            .then(|| " animate-[blobbi-tear-alt_1.5s_ease-in-out_infinite]")
+            .unwrap_or("");
+        if left_tears {
+            parts.push(rsx! {
+                g { class: "animate-[blobbi-tear-fall_2s_ease-in_infinite]{alt_class}",
+                    ellipse { cx: "{left_x}", cy: "{eye_y + 12.0}", rx: "2", ry: "3", fill: "rgba(100,180,255,0.6)" }
+                    ellipse { cx: "{left_x - 1.0}", cy: "{eye_y + 20.0}", rx: "1.5", ry: "2", fill: "rgba(100,180,255,0.4)" }
+                }
+            });
+        }
+        if right_tears {
+            let delay = if matches!(tears.eye, TearEye::Alternating) {
+                " animation-delay: 0.75s;"
+            } else {
+                ""
+            };
+            parts.push(rsx! {
+                g { class: "animate-[blobbi-tear-fall_2s_ease-in_infinite]",
+                    style: "{delay}",
+                    ellipse { cx: "{right_x}", cy: "{eye_y + 12.0}", rx: "2", ry: "3", fill: "rgba(100,180,255,0.6)" }
+                    ellipse { cx: "{right_x + 1.0}", cy: "{eye_y + 20.0}", rx: "1.5", ry: "2", fill: "rgba(100,180,255,0.4)" }
+                }
+            });
+        }
+    }
+
+    if extras.drool {
+        parts.push(rsx! {
+            g { class: "animate-[blobbi-drool_3s_ease-in-out_infinite]",
+                ellipse { cx: "{(left_x + right_x) / 2.0 + 2.0}", cy: "{mouth_y + 8.0}", rx: "2", ry: "4", fill: "rgba(100,200,255,0.5)" }
+            }
+        });
+    }
+
+    if extras.food_icon {
+        let mx = (left_x + right_x) / 2.0 + 18.0;
+        parts.push(rsx! {
+            text {
+                x: "{mx}",
+                y: "{mouth_y + 4.0}",
+                font_size: "10",
+                "🍽️",
+            }
+        });
+    }
+
+    if parts.is_empty() {
+        rsx! { g {} }
+    } else {
+        rsx! { g { {parts.into_iter()} } }
+    }
 }

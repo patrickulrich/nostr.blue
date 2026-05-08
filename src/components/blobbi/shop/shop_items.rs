@@ -217,7 +217,7 @@ pub fn all_shop_items() -> Vec<ShopItem> {
         ShopItem {
             id: "med_elixir",
             name: "Health Elixir",
-            icon: "\u{2697}\u{FE0F}",
+            icon: "\u{1F9EA}",
             category: ItemCategory::Medicine,
             price: 150,
             stat_changes: vec![("health", 80.0), ("happiness", 20.0), ("energy", 10.0)],
@@ -262,7 +262,7 @@ pub fn all_shop_items() -> Vec<ShopItem> {
         ShopItem {
             id: "hyg_bubble",
             name: "Bubble Bath",
-            icon: "\u{1F6C0}",
+            icon: "\u{1F6C1}",
             category: ItemCategory::Hygiene,
             price: 40,
             stat_changes: vec![("hygiene", 60.0), ("happiness", 20.0)],
