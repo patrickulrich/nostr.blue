@@ -4,7 +4,7 @@ use crate::hooks::{use_author_metadata, use_reaction};
 use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
 use crate::stores::bookmarks;
-use crate::stores::nostr_client::{get_client, publish_repost, HAS_SIGNER};
+use crate::stores::nostr_client::{self, get_client, publish_repost, HAS_SIGNER};
 use crate::stores::signer::SIGNER_INFO;
 use crate::stores::voice_messages_store;
 use crate::utils::format_sats_compact;
@@ -16,6 +16,8 @@ use dioxus::prelude::*;
 #[cfg(feature = "web")]
 use dioxus::web::WebEventExt;
 use nostr_sdk::{Event as NostrEvent, Filter, Kind};
+use std::collections::HashSet;
+use std::rc::Rc;
 use std::time::Duration;
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
@@ -32,6 +34,8 @@ pub fn ThreadedComment(
     #[props(default)] on_reply: Option<EventHandler<NostrEvent>>,
     #[props(default)] precomputed_counts: Option<InteractionCounts>,
     #[props(default = None)] root_event: Option<NostrEvent>,
+    #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
 ) -> Element {
     let event = &node.event;
     let children = &node.children;
@@ -65,6 +69,10 @@ pub fn ThreadedComment(
     let mut repost_count = use_signal(|| 0usize);
     let mut zap_amount_sats = use_signal(|| 0u64);
 
+    let mut is_muted = use_signal(|| None::<bool>);
+    let mut is_author_blocked = use_signal(|| None::<bool>);
+    let mut show_hidden_anyway = use_signal(|| false);
+
     let has_precomputed = precomputed_counts.is_some();
 
     use_effect(use_reactive(&precomputed_counts, move |counts_opt| {
@@ -75,6 +83,50 @@ pub fn ThreadedComment(
             is_reposted.set(counts.user_reposted.unwrap_or(false));
         }
     }));
+
+    {
+        let event_id_mute_check = event_id.clone();
+        let author_pubkey_block_check = author_pubkey_str.clone();
+        let cached_muted_posts_reactive = cached_muted_posts.clone();
+        let cached_blocked_users_reactive = cached_blocked_users.clone();
+        use_effect(use_reactive!(|(
+            cached_muted_posts_reactive,
+            cached_blocked_users_reactive,
+            event_id_mute_check,
+            author_pubkey_block_check,
+        )| {
+            let event_id = event_id_mute_check.clone();
+            let author_pubkey = author_pubkey_block_check.clone();
+            if let Some(ref muted_set) = cached_muted_posts_reactive {
+                if let Ok(muted) = nostr_client::is_post_muted_cached(&event_id, muted_set) {
+                    is_muted.set(Some(muted));
+                }
+            }
+            if let Some(ref blocked_set) = cached_blocked_users_reactive {
+                if let Ok(blocked) = nostr_client::is_user_blocked_cached(&author_pubkey, blocked_set) {
+                    is_author_blocked.set(Some(blocked));
+                }
+            }
+            if cached_muted_posts_reactive.is_none() || cached_blocked_users_reactive.is_none() {
+                let need_muted = cached_muted_posts_reactive.is_none();
+                let need_blocked = cached_blocked_users_reactive.is_none();
+                spawn(async move {
+                    if need_muted {
+                        match nostr_client::is_post_muted(event_id.clone()).await {
+                            Ok(muted) => is_muted.set(Some(muted)),
+                            Err(_) => is_muted.set(Some(false)),
+                        }
+                    }
+                    if need_blocked {
+                        match nostr_client::is_user_blocked(author_pubkey).await {
+                            Ok(blocked) => is_author_blocked.set(Some(blocked)),
+                            Err(_) => is_author_blocked.set(Some(false)),
+                        }
+                    }
+                });
+            }
+        }));
+    }
 
     let is_voice = is_voice_message(event);
     let audio_url = if is_voice {
@@ -317,8 +369,32 @@ pub fn ThreadedComment(
     let event_id_nav = event.id.to_hex();
     let nav = use_navigator();
 
+    let is_hidden = (is_muted.read().unwrap_or(false) || is_author_blocked.read().unwrap_or(false))
+        && !*show_hidden_anyway.read();
+
     rsx! {
         div { class: "comment-thread", style: "margin-left: {margin_left}px;",
+            if is_hidden {
+                div { class: "border-l-2 border-border pl-3 py-2",
+                    div { class: "flex items-center gap-3 py-2",
+                        div { class: "flex-1 text-muted-foreground text-sm",
+                            if is_author_blocked.read().unwrap_or(false) {
+                                "Post from blocked user"
+                            } else if is_muted.read().unwrap_or(false) {
+                                "Muted post"
+                            }
+                        }
+                        button {
+                            class: "px-3 py-1 text-sm text-primary hover:underline",
+                            onclick: move |e: MouseEvent| {
+                                e.stop_propagation();
+                                show_hidden_anyway.set(true);
+                            },
+                            "Show anyway"
+                        }
+                    }
+                }
+            } else {
             div {
                 class: "border-l-2 border-border pl-3 py-2 hover:bg-accent/20 transition cursor-pointer",
                 onclick: {
@@ -613,6 +689,7 @@ pub fn ThreadedComment(
                     }
                 }
             }
+            }
             if !children.is_empty() && depth < MAX_DEPTH {
                 div { class: "space-y-1 mt-1",
                     for child in children {
@@ -622,6 +699,8 @@ pub fn ThreadedComment(
                             depth: depth + 1,
                             root_event: root_event.clone(),
                             on_reply,
+                            cached_muted_posts: cached_muted_posts.clone(),
+                            cached_blocked_users: cached_blocked_users.clone(),
                         }
                     }
                 }

@@ -798,6 +798,8 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                                         depth: 0,
                                         root_event: Some(event.clone()),
                                         precomputed_counts: interaction_counts.read().get(&node.event.id.to_hex()).cloned(),
+                                        cached_muted_posts: cached_muted_posts.read().clone(),
+                                        cached_blocked_users: cached_blocked_users.read().clone(),
                                         on_reply: move |reply_event: NostrEvent| {
                                             let already_exists = replies.read().iter().any(|e| e.id == reply_event.id);
                                             if !already_exists {

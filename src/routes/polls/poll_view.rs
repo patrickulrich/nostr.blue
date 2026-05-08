@@ -1,5 +1,5 @@
 use crate::components::{ClientInitializing, PollCard, ThreadedComment};
-use crate::hooks::use_relay_subscription;
+use crate::hooks::{use_mute_block_cache, use_relay_subscription};
 use crate::services::aggregation::get_counts_with_count_fallback;
 use crate::stores::nostr_client;
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
@@ -42,6 +42,7 @@ pub fn PollView(noteid: String) -> Element {
     let mut loading_comments = use_signal(|| false);
     let mut reply_total = use_signal(|| 0usize);
     let mut comments_refresh = use_signal(|| 0u64);
+    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
 
     use_effect(move || {
         let noteid_str = noteid.clone();
@@ -270,6 +271,8 @@ pub fn PollView(noteid: String) -> Element {
                                                 node: node.clone(),
                                                 depth: 0,
                                                 root_event: Some(event.clone()),
+                                                cached_muted_posts: cached_muted_posts.read().clone(),
+                                                cached_blocked_users: cached_blocked_users.read().clone(),
                                                 on_reply: move |reply_event: NostrEvent| {
                                                     let already_exists = comments.read().iter().any(|e| e.id == reply_event.id);
                                                     if !already_exists {

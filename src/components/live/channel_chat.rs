@@ -1,8 +1,8 @@
 use crate::components::icons::{MaximizeIcon, XIcon};
 use crate::components::{EmojiPicker, RichContent};
-use crate::hooks::use_relay_subscription;
+use crate::hooks::{use_mute_block_cache, use_relay_subscription};
 use crate::routes::Route;
-use crate::stores::nostr_client::{fetch_events_aggregated, HAS_SIGNER};
+use crate::stores::nostr_client::{self, fetch_events_aggregated, HAS_SIGNER};
 use crate::stores::profiles;
 use crate::stores::social::channel_store::{
     cache_channel, cache_channel_metadata, channel_creation_by_id_filter, channel_messages_filter,
@@ -426,6 +426,37 @@ pub fn ChannelChat(channel_id: String) -> Element {
 #[component]
 fn ChannelChatMessage(event: Event) -> Element {
     let author_pubkey = event.pubkey.to_string();
+    let (_cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
+    let mut is_author_blocked = use_signal(|| None::<bool>);
+    let author_pubkey_check = author_pubkey.clone();
+
+    {
+        let cached_blocked_users_val = cached_blocked_users.read().clone();
+        use_effect(use_reactive!(|(
+            cached_blocked_users_val,
+            author_pubkey_check,
+        )| {
+            let author_pubkey = author_pubkey_check.clone();
+            if let Some(ref blocked_set) = cached_blocked_users_val {
+                if let Ok(blocked) = nostr_client::is_user_blocked_cached(&author_pubkey, blocked_set) {
+                    is_author_blocked.set(Some(blocked));
+                }
+            }
+            if cached_blocked_users_val.is_none() {
+                spawn(async move {
+                    match nostr_client::is_user_blocked(author_pubkey).await {
+                        Ok(blocked) => is_author_blocked.set(Some(blocked)),
+                        Err(_) => is_author_blocked.set(Some(false)),
+                    }
+                });
+            }
+        }));
+    }
+
+    if is_author_blocked.read().unwrap_or(false) {
+        return rsx! {};
+    }
+
     let timestamp = event.created_at;
     let author_pk_for_metadata = author_pubkey.clone();
     let author_pk_for_name = author_pubkey.clone();

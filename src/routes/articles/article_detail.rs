@@ -1,7 +1,7 @@
 use crate::components::{
     icons::*, ArticleContent, ClientInitializing, ReplyComposer, ShareModal, ThreadedComment,
 };
-use crate::hooks::use_relay_subscription;
+use crate::hooks::{use_mute_block_cache, use_relay_subscription};
 use crate::routes::Route;
 use crate::stores::bookmarks;
 use crate::stores::nostr_client;
@@ -27,6 +27,7 @@ pub fn ArticleDetail(naddr: String) -> Element {
     let mut is_liked = use_signal(|| false);
     let mut like_count = use_signal(|| 0usize);
     let has_signer = *nostr_client::HAS_SIGNER.read();
+    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
     use_effect(move || {
         let naddr_str = naddr.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -394,6 +395,8 @@ pub fn ArticleDetail(naddr: String) -> Element {
                                                             key: "{node.event.id}",
                                                             node: node.clone(),
                                                             depth: 0,
+                                                            cached_muted_posts: cached_muted_posts.read().clone(),
+                                                            cached_blocked_users: cached_blocked_users.read().clone(),
                                                             on_reply: move |reply_event: NostrEvent| {
                                                                 // Add the reply optimistically
                                                                 // nostr-sdk excludes self-published events from RelayPoolNotification::Event
