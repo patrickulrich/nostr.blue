@@ -312,7 +312,7 @@ async fn fetch_parents_with_hints(
         all_parents.extend(new_events);
     }
 
-    Ok(all_parents)
+    Ok(dedup_replies(all_parents))
 }
 
 fn dedup_replies(all_replies: Vec<NostrEvent>) -> Vec<NostrEvent> {
