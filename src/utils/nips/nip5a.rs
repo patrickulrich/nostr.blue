@@ -90,12 +90,6 @@ pub fn parse_manifest(event: &Event) -> SiteManifest {
         }
     }
 
-    if let Some(t) = &title {
-        if title.is_none() {
-            title = Some(t.clone());
-        }
-    }
-
     SiteManifest {
         d_tag,
         paths,
@@ -338,7 +332,7 @@ const SKIP_PREFIXES: &[&str] = &[
 
 const STATIC_EXTENSIONS: &[&str] = &[
     "html", "htm", "css", "js", "mjs", "cjs", "json", "webmanifest", "map", "txt", "md", "xml",
-    "svg", "png", "jpg", "jpeg", "gif", "webp", "ico", "webp", "woff", "woff2", "ttf", "otf",
+    "svg", "png", "jpg", "jpeg", "gif", "webp", "ico", "woff", "woff2", "ttf", "otf",
     "wasm", "webm", "mp4", "weba", "mp3", "ogg", "pdf",
 ];
 

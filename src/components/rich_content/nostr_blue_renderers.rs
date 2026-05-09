@@ -1127,23 +1127,20 @@ fn render_music_error_card(err: &str, label: &str, route: Route) -> Element {
 #[component]
 pub(super) fn NostrBlueRssMusicAlbumRenderer(feed_id: String) -> Element {
     let feed_id_for_link = feed_id.clone();
-    let feed_id_for_play = feed_id.clone();
-    let resource: Resource<Result<(String, Option<String>, String, u64), String>> =        use_resource(move || {
-            let fid = feed_id.clone();
-            async move {
-                let id = fid.parse::<u64>().map_err(|_| "Invalid album ID".to_string())?;
-                let feed = podcast_index::get_podcast_by_id(id)
-                    .await
-                    .map_err(|e| e.to_string())?;
-                let episodes = podcast_index::get_episodes_by_feed_id(id, Some(100), None)
-                    .await
-                    .unwrap_or_default();
-                let image = feed.get_image().map(String::from);
-                let artist = feed.author.clone().unwrap_or_else(|| "Unknown Artist".to_string());
-                let track_count = episodes.len() as u64;
-                Ok((feed.title, image, artist, track_count))
-            }
-        });
+    let resource: Resource<Result<(podcast_index::PodcastFeed, Vec<podcast_index::Episode>), String>> =
+        use_resource(move || {
+        let fid = feed_id.clone();
+        async move {
+            let id = fid.parse::<u64>().map_err(|_| "Invalid album ID".to_string())?;
+            let feed = podcast_index::get_podcast_by_id(id)
+                .await
+                .map_err(|e| e.to_string())?;
+            let episodes = podcast_index::get_episodes_by_feed_id(id, Some(100), None)
+                .await
+                .unwrap_or_default();
+            Ok((feed, episodes))
+        }
+    });
     rsx! {
         div { class: "my-2", onclick: move |e: MouseEvent| e.stop_propagation(),
             match resource.read_unchecked().as_ref() {
@@ -1153,36 +1150,27 @@ pub(super) fn NostrBlueRssMusicAlbumRenderer(feed_id: String) -> Element {
                     "Album",
                     Route::MusicRssAlbum { feed_id: feed_id_for_link.parse().unwrap_or(0) },
                 ),
-                Some(Ok((title, image, artist, count))) => {
-                    let title_clone = title.clone();
-                    let image_clone = image.clone();
-                    let artist_clone = artist.clone();
-                    let count_val = *count;
-                    let fid = feed_id_for_play.parse::<u64>().unwrap_or(0);
+                Some(Ok((feed, episodes))) => {
+                    let title = feed.title.clone();
+                    let image = feed.get_image().map(String::from);
+                    let artist = feed.author.clone().unwrap_or_else(|| "Unknown Artist".to_string());
+                    let count = episodes.len() as u64;
                     rsx! {
                         {
                             render_music_compact_card(
-                                image_clone.as_deref(),
-                                &title_clone,
-                                &format!("{} · {} {}", artist_clone, count_val, if count_val == 1 { "track" } else { "tracks" }),
+                                image.as_deref(),
+                                &title,
+                                &format!("{} · {} {}", artist, count, if count == 1 { "track" } else { "tracks" }),
                                 move |_: MouseEvent| {
-                                    let fid = fid;
-                                    spawn(async move {
-                                        let feed = match podcast_index::get_podcast_by_id(fid).await {
-                                            Ok(f) => f,
-                                            Err(_) => return,
-                                        };
-                                        let episodes = podcast_index::get_episodes_by_feed_id(fid, Some(100), None)
-                                            .await
-                                            .unwrap_or_default();
-                                        let tracks: Vec<MusicTrack> = episodes
+                                    if let Some(Ok((f, eps))) = resource.read_unchecked().as_ref() {
+                                        let tracks: Vec<MusicTrack> = eps
                                             .iter()
-                                            .map(|ep| MusicTrack::from_rss_music_track(ep, &feed))
+                                            .map(|ep| MusicTrack::from_rss_music_track(ep, f))
                                             .collect();
                                         if let Some(first) = tracks.first().cloned() {
                                             music_player::play_track(first, Some(tracks), Some(0));
                                         }
-                                    });
+                                    }
                                 },
                                 Route::MusicRssAlbum { feed_id: feed_id_for_link.parse().unwrap_or(0) },
                             )
@@ -1235,20 +1223,14 @@ pub(super) fn NostrBlueTrackRenderer(track_id: String) -> Element {
     }
 }
 
-#[allow(clippy::type_complexity)]
 #[component]
 pub(super) fn NostrBlueAlbumRenderer(album_id: String) -> Element {
     let album_id_for_link = album_id.clone();
-    let album_id_for_play = album_id.clone();
-    let resource: Resource<Result<(String, Option<String>, String, usize), String>> =
+    let resource: Resource<Result<wavlake::WavlakeAlbum, String>> =
         use_resource(move || {
-            let id = album_id.clone();
-            async move {
-                let album = wavlake::get_album(&id).await?;
-                let image = album.album_art_url.clone();
-                Ok((album.title, image, album.artist, album.tracks.len()))
-            }
-        });
+        let id = album_id.clone();
+        async move { wavlake::get_album(&id).await }
+    });
     rsx! {
         div { class: "my-2", onclick: move |e: MouseEvent| e.stop_propagation(),
             match resource.read_unchecked().as_ref() {
@@ -1258,31 +1240,25 @@ pub(super) fn NostrBlueAlbumRenderer(album_id: String) -> Element {
                     "Album",
                     Route::MusicAlbum { album_id: album_id_for_link },
                 ),
-                Some(Ok((title, image, artist, count))) => {
-                    let title_clone = title.clone();
-                    let image_clone = image.clone();
-                    let artist_clone = artist.clone();
-                    let count_val = *count;
-                    let aid = album_id_for_play.clone();
+                Some(Ok(album)) => {
+                    let title = album.title.clone();
+                    let image = album.album_art_url.clone();
+                    let artist = album.artist.clone();
+                    let count = album.tracks.len();
                     rsx! {
                         {
                             render_music_compact_card(
-                                image_clone.as_deref(),
-                                &title_clone,
-                                &format!("{} · {} {}", artist_clone, count_val, if count_val == 1 { "track" } else { "tracks" }),
+                                image.as_deref(),
+                                &title,
+                                &format!("{} · {} {}", artist, count, if count == 1 { "track" } else { "tracks" }),
                                 move |_: MouseEvent| {
-                                    let aid = aid.clone();
-                                    spawn(async move {
-                                        let album = match wavlake::get_album(&aid).await {
-                                            Ok(a) => a,
-                                            Err(_) => return,
-                                        };
+                                    if let Some(Ok(a)) = resource.read_unchecked().as_ref() {
                                         let tracks: Vec<MusicTrack> =
-                                            album.tracks.iter().map(|t| t.clone().into()).collect();
+                                            a.tracks.iter().map(|t| t.clone().into()).collect();
                                         if let Some(first) = tracks.first().cloned() {
                                             music_player::play_track(first, Some(tracks), Some(0));
                                         }
-                                    });
+                                    }
                                 },
                                 Route::MusicAlbum { album_id: album_id_for_link.clone() },
                             )

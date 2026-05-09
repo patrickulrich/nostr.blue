@@ -207,17 +207,6 @@ pub fn should_emit_shell_penalty(pet: &BlobbiCompanion) -> bool {
     pet.is_egg() && pet.shell_integrity.unwrap_or(STAT_MAX) < 50.0
 }
 
-#[allow(dead_code)]
-pub fn shell_penalty_hours(pet: &BlobbiCompanion, now_secs: u64) -> f64 {
-    let shell = pet.shell_integrity.unwrap_or(STAT_MAX);
-    if shell >= 50.0 {
-        return 0.0;
-    }
-    let _rate = 2.0 + 2.0 * ((50.0 - shell) / 50.0).min(1.0);
-    let elapsed = now_secs.saturating_sub(pet.last_decay_at.unwrap_or(now_secs)) as f64 / 3600.0;
-    elapsed.max(0.0)
-}
-
 pub fn get_decay_warning(pet: &BlobbiCompanion) -> Option<&'static str> {
     if pet.is_egg() {
         let temp = pet.egg_temperature.unwrap_or(STAT_DEFAULT);
