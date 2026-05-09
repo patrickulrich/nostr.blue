@@ -1,5 +1,6 @@
 use crate::components::code::repo_pages_panel::RepoPagesPanel;
 use crate::services::git_hosting::repository::fetch_repository;
+use crate::stores::auth_store;
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
 
@@ -8,6 +9,8 @@ pub fn CodeRepoPages(naddr: String) -> Element {
     let mut repo = use_signal(|| None::<Repository>);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
+    let auth = auth_store::AUTH_STATE.read();
+    let user_pubkey = auth.pubkey.clone().unwrap_or_default();
 
     use_effect(use_reactive(&naddr, move |naddr| {
         spawn(async move {
@@ -50,7 +53,7 @@ pub fn CodeRepoPages(naddr: String) -> Element {
                         RepoPagesPanel {
                             repo: r.clone(),
                             naddr: naddr.clone(),
-                            is_owner: true,
+                            is_owner: user_pubkey == r.pubkey,
                         }
                     }
                 }

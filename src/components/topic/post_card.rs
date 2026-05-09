@@ -51,7 +51,7 @@ pub fn TopicPostCard(
                 is_muted.set(Some(muted));
             }
         }
-        if let Some(ref blocked_set) = cached_blocked_users {
+        if let Some(ref blocked_set) = cached_blocked_users_reactive {
             if let Ok(blocked) = nostr_client::is_user_blocked_cached(&author_pubkey, blocked_set) {
                 is_author_blocked.set(Some(blocked));
             }
