@@ -2,6 +2,7 @@ use crate::components::icons::*;
 use crate::components::{
     ContentShareModal, ContentType, UnifiedTrackCard, UnifiedTrackCardSkeleton,
 };
+use crate::routes::podcast::podcast_shared_states::PodcastApiAuthRequiredState;
 use crate::routes::Route;
 use crate::services::podcast_index::{self, Episode, PodcastFeed};
 use crate::stores::music_player::{self, MusicTrack};
@@ -13,12 +14,18 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
     let mut feed_state = use_signal(|| None::<PodcastFeed>);
     let mut episodes_state = use_signal(Vec::<Episode>::new);
     let mut loading = use_signal(|| true);
+    let mut auth_required = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
     let mut show_share_modal = use_signal(|| false);
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         let has_signer = nostr_client::has_signer();
-        if !client_initialized || !has_signer {
+        if !client_initialized {
+            return;
+        }
+        if !has_signer {
+            loading.set(false);
+            auth_required.set(true);
             return;
         }
         let feed_id = feed_id;
@@ -71,7 +78,9 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
                 ArrowLeftIcon { class: "w-4 h-4".to_string() }
                 "Back to Music"
             }
-            if *loading.read() {
+            if *auth_required.read() {
+                PodcastApiAuthRequiredState { item_label: "album" }
+            } else if *loading.read() {
                 div { class: "bg-muted/30 rounded-lg border border-border p-6",
                     div { class: "flex items-center gap-6",
                         div { class: "w-48 h-48 bg-muted rounded-lg animate-pulse" }

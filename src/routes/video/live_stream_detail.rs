@@ -1,16 +1,18 @@
 use crate::components::icons::{ArrowLeftIcon, ShareIcon, ZapIcon};
 use crate::components::live::stream_card::{parse_live_stream_event, LiveStreamMeta};
-use crate::components::{LiveChat, LiveStreamPlayer, LiveStreamShareModal, StreamStatus, ZapModal};
+use crate::components::{LiveChat, LiveStreamPlayer, ShareModal, StreamStatus, ZapModal};
 use crate::routes::Route;
 use crate::stores::nostr_client::{fetch_events_aggregated, CLIENT_INITIALIZED, HAS_SIGNER};
 use crate::stores::profiles;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
-use nostr_sdk::{Filter, FromBech32, Kind, PublicKey};
+use nostr_sdk::{Filter, Kind, PublicKey};
 use std::time::Duration;
 #[component]
 pub fn LiveStreamDetail(note_id: String) -> Element {
-    let parsed_naddr = use_memo(move || parse_naddr(&note_id));
+    let parsed_naddr = use_memo(move || {
+        crate::utils::nip19::parse_naddr(&note_id).unwrap_or((String::new(), String::new()))
+    });
     let mut stream_event = use_signal(|| None::<nostr_sdk::Event>);
     let mut stream_meta = use_signal(|| None::<LiveStreamMeta>);
     let mut loading = use_signal(|| true);
@@ -349,36 +351,13 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                 }
             }
             if *show_share_modal.read() {
-                if let Some(meta) = stream_meta.read().as_ref() {
-                    if let Some(event) = stream_event.read().as_ref() {
-                        LiveStreamShareModal {
-                            event: event.clone(),
-                            d_tag: meta.d_tag.clone(),
-                            title: meta.title.clone(),
-                            on_close: move |_| show_share_modal.set(false),
-                        }
+                if let Some(event) = stream_event.read().as_ref() {
+                    ShareModal {
+                        event: event.clone(),
+                        on_close: move |_| show_share_modal.set(false),
                     }
                 }
             }
-        }
-    }
-}
-/// Parse naddr format - supports both NIP-19 bech32 and "30311:pubkey:dtag" formats
-fn parse_naddr(note_id: &str) -> (String, String) {
-    if let Ok(nostr_sdk::nips::nip19::Nip19::Coordinate(coord)) =
-        nostr_sdk::nips::nip19::Nip19::from_bech32(note_id)
-    {
-        return (coord.public_key.to_hex(), coord.identifier.clone());
-    }
-    let parts: Vec<&str> = note_id.splitn(3, ':').collect();
-    if parts.len() >= 3 {
-        (parts[1].to_string(), parts[2].to_string())
-    } else {
-        let parts: Vec<&str> = note_id.splitn(2, ':').collect();
-        if parts.len() == 2 {
-            (parts[0].to_string(), parts[1].to_string())
-        } else {
-            (String::new(), String::new())
         }
     }
 }

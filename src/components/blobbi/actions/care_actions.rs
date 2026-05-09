@@ -3,10 +3,15 @@ use crate::components::blobbi::core::builders::{build_interaction_event, publish
 use crate::components::blobbi::core::decay::apply_decay;
 use crate::components::blobbi::core::types::BlobbiCompanion;
 use crate::utils::nip_bb::constants::*;
+use dioxus_primitives::toast::{consume_toast, ToastOptions};
+use std::time::Duration;
 
 pub fn apply_action_to_blobbi(blobbi: &BlobbiCompanion, action: BlobbiActionType) -> BlobbiCompanion {
     let now = nostr_sdk::Timestamp::now().as_secs();
     let mut updated = apply_decay(blobbi, now);
+    let is_egg = updated.is_egg();
+
+    let happiness_before = updated.stats.happiness;
 
     for (stat, delta) in action.stat_changes() {
         let current = updated.stat_value(stat);
@@ -14,9 +19,22 @@ pub fn apply_action_to_blobbi(blobbi: &BlobbiCompanion, action: BlobbiActionType
         updated.set_stat_value(stat, new_val);
     }
 
+    if is_egg {
+        updated.stats.energy = 100.0;
+        updated.stats.hunger = 100.0;
+    }
+
     updated.last_interaction = Some(now);
     updated.last_decay_at = Some(now);
-    updated.experience = updated.experience.saturating_add(action.xp_value());
+
+    let happiness_changed = updated.stats.happiness != happiness_before;
+    let grant_xp = match action {
+        BlobbiActionType::Sing | BlobbiActionType::PlayMusic => happiness_changed,
+        _ => true,
+    };
+    if grant_xp {
+        updated.experience = updated.experience.saturating_add(action.xp_value());
+    }
     updated.source = Some("user".to_string());
 
     match action {
@@ -69,9 +87,18 @@ pub fn apply_item_action(blobbi: &BlobbiCompanion, stat_changes: &[(&str, f64)],
 }
 
 pub async fn execute_blobbi_action(blobbi: &BlobbiCompanion, action: BlobbiActionType) -> Result<BlobbiCompanion, String> {
-    let mut updated = apply_action_to_blobbi(blobbi, action);
+    let mut blobbi = blobbi.clone();
+    crate::components::blobbi::core::migration::ensure_canonical_before_action(&mut blobbi);
+
+    let mut updated = apply_action_to_blobbi(&blobbi, action);
 
     super::hatch_tasks::update_task_progress(&mut updated, action.as_str());
+
+    crate::components::blobbi::core::streak::record_care_action(&mut updated, action.as_str());
+
+    super::mission_tracker::track_mission_progress(action);
+
+    crate::components::blobbi::visual::status_reaction::trigger_action_emotion(action);
 
     publish_blobbi_state(&updated).await?;
 
@@ -105,6 +132,24 @@ pub async fn execute_blobbi_action(blobbi: &BlobbiCompanion, action: BlobbiActio
         None,
         std::collections::HashMap::new(),
     ).await;
+
+    let xp_earned = updated.experience.saturating_sub(blobbi.experience);
+
+    let toast = consume_toast();
+    if xp_earned > 0 {
+        toast.success(
+            format!("{} performed!", action.label()),
+            ToastOptions::new()
+                .description(format!("+{} XP", xp_earned))
+                .duration(Duration::from_secs(2)),
+        );
+    } else {
+        toast.success(
+            format!("{} performed!", action.label()),
+            ToastOptions::new()
+                .duration(Duration::from_secs(2)),
+        );
+    }
 
     Ok(updated)
 }

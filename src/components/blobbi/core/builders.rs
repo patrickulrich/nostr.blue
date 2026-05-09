@@ -2,6 +2,14 @@ use crate::components::blobbi::core::types::*;
 use crate::utils::nip_bb::*;
 use nostr_sdk::{EventBuilder, Tag, TagKind, Timestamp};
 
+pub fn upsert_level_tag(tags: &mut Vec<Tag>, level: u32) {
+    tags.retain(|t| {
+        let kind = t.kind();
+        kind.to_string() != TAG_LEVEL
+    });
+    tags.push(Tag::custom(TagKind::custom(TAG_LEVEL), vec![level.to_string()]));
+}
+
 fn sorted_tags(tags: Vec<Tag>) -> Vec<Tag> {
     let mut tags = tags;
     tags.sort_by_key(|t| tag_priority(&t.kind().to_string()));
@@ -44,10 +52,10 @@ impl StateTags {
 
         tags.push(Tag::custom(
             TagKind::custom(TAG_IS_SLEEPING),
-            vec![if blobbi.is_sleeping { "true" } else { "false" }.to_string()],
+            vec![if blobbi.is_sleeping() { "true" } else { "false" }.to_string()],
         ));
 
-        if blobbi.is_sleeping {
+        if blobbi.is_sleeping() {
             if let Some(v) = blobbi.sleep_started_at {
                 tags.push(Tag::custom(TagKind::custom(TAG_SLEEP_STARTED_AT), vec![v.to_string()]));
             }
@@ -123,6 +131,21 @@ impl StateTags {
             tags.push(Tag::custom(TagKind::custom(TAG_START_EVOLUTION), vec![v.to_string()]));
         }
 
+    if let Some(v) = blobbi.state_started_at {
+        tags.push(Tag::custom(TagKind::custom(TAG_STATE_STARTED_AT), vec![v.to_string()]));
+    }
+
+    for task_id in &blobbi.tasks_completed {
+        tags.push(Tag::custom(TagKind::custom(TAG_TASK_COMPLETED), vec![task_id.clone()]));
+    }
+
+    if let Some(v) = blobbi.care_streak_last_at {
+        tags.push(Tag::custom(TagKind::custom(TAG_CARE_STREAK_LAST_AT), vec![v.to_string()]));
+    }
+    if let Some(ref v) = blobbi.care_streak_last_day {
+        tags.push(Tag::custom(TagKind::custom(TAG_CARE_STREAK_LAST_DAY), vec![v.clone()]));
+    }
+
         for task in &blobbi.tasks {
             if task.progress > 0 {
                 tags.push(Tag::custom(
@@ -149,9 +172,6 @@ impl StateTags {
         }
         if let Some(ref v) = blobbi.blessing {
             tags.push(Tag::custom(TagKind::custom(TAG_BLESSING), vec![v.clone()]));
-        }
-        if let Some(ref v) = blobbi.visual_effect {
-            tags.push(Tag::custom(TagKind::custom(TAG_VISUAL_EFFECT), vec![v.clone()]));
         }
 
         if let Some(v) = blobbi.last_meal {
@@ -265,7 +285,7 @@ pub async fn publish_profile(profile: &BlobbonautProfile) -> Result<(), String> 
     }
     tags.push(Tag::custom(TagKind::custom(TAG_COINS), vec![profile.coins.to_string()]));
     tags.push(Tag::custom(TagKind::custom(TAG_PETTING_LEVEL), vec![profile.petting_level.to_string()]));
-    tags.push(Tag::custom(TagKind::custom("level"), vec![profile.level.to_string()]));
+    tags.push(Tag::custom(TagKind::custom(TAG_LEVEL), vec![profile.level.to_string()]));
 
     if let Some(ref companion) = profile.current_companion {
         tags.push(Tag::custom(TagKind::custom(TAG_CURRENT_COMPANION), vec![companion.clone()]));
@@ -306,7 +326,13 @@ pub async fn publish_profile(profile: &BlobbonautProfile) -> Result<(), String> 
 
     let tags = sorted_tags(tags);
 
-    let builder = EventBuilder::new(blobbonaut_profile_kind(), "").tags(tags);
+    let content = if profile.content_json.is_empty() {
+        String::new()
+    } else {
+        profile.content_json.clone()
+    };
+
+    let builder = EventBuilder::new(blobbonaut_profile_kind(), content).tags(tags);
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;

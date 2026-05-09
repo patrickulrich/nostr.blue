@@ -8,9 +8,11 @@ use crate::utils::nip_bb::*;
 
 use super::egg_preview::EggPreview;
 
+#[allow(dead_code)]
 static EGG_CREATION_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum OnboardingStep {
     #[default]
     Welcome,
@@ -175,6 +177,7 @@ fn NamingStep(mut step: Signal<OnboardingStep>, on_complete: EventHandler<()>) -
     }
 }
 
+#[allow(dead_code)]
 async fn create_egg_and_profile(name: &str, color: &str) -> Result<(), String> {
     if EGG_CREATION_IN_FLIGHT.load(Ordering::SeqCst) {
         return Err("Egg creation already in progress".to_string());
@@ -187,6 +190,7 @@ async fn create_egg_and_profile(name: &str, color: &str) -> Result<(), String> {
     result
 }
 
+#[allow(dead_code)]
 async fn create_egg_and_profile_inner(name: &str, color: &str) -> Result<(), String> {
     let pubkey = crate::stores::auth_store::get_pubkey()
         .ok_or("Not authenticated")?;
@@ -217,7 +221,7 @@ async fn create_egg_and_profile_inner(name: &str, color: &str) -> Result<(), Str
     }
     profile.coins = profile.coins.saturating_sub(ADOPTION_FEE);
 
-    let pet_id = crate::utils::generate_option_id();
+    let pet_id = crate::utils::nip_bb::generate_blobbi_pet_id();
     let d = blobbi_d_tag(&pubkey, &pet_id);
     let now = nostr_sdk::Timestamp::now().as_secs();
 

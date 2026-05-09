@@ -2,12 +2,29 @@ use dioxus::prelude::*;
 
 use crate::components::blobbi::core::builders::publish_blobbi_state;
 use crate::components::blobbi::core::types::BlobbiCompanion;
+use crate::components::blobbi::visual::recipe::EmotionPreset;
 use crate::stores::blobbi_store;
 use crate::utils::nip_bb::*;
 
+fn is_dev() -> bool {
+    #[cfg(debug_assertions)]
+    {
+        true
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        false
+    }
+}
+
 #[component]
 pub fn DevTools(blobbi: BlobbiCompanion) -> Element {
+    if !is_dev() {
+        return rsx! { div {} };
+    }
+
     let mut show = use_signal(|| false);
+    let mut emotion_override = use_signal(|| None::<EmotionPreset>);
 
     rsx! {
         div { class: "mt-4 px-4",
@@ -60,6 +77,40 @@ pub fn DevTools(blobbi: BlobbiCompanion) -> Element {
                         div { class: "text-center",
                             div { "⚡" }
                             div { "{blobbi.stats.energy:.0}" }
+                        }
+                    }
+
+                    div { class: "font-medium mt-2", "Emotion Presets" }
+                    div { class: "flex flex-wrap gap-1",
+                        for emotion in EmotionPreset::all() {
+                            {
+                                let is_active = emotion_override() == Some(*emotion);
+                                let label = emotion.as_str();
+                                rsx! {
+                                    button {
+                                        class: if is_active {
+                                            "px-1.5 py-0.5 rounded bg-purple-500/30 text-purple-300 text-[9px] border border-purple-500/50"
+                                        } else {
+                                            "px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[9px] hover:bg-accent transition"
+                                        },
+                                        onclick: move |_| {
+                                            if emotion_override() == Some(*emotion) {
+                                                emotion_override.set(None);
+                                            } else {
+                                                emotion_override.set(Some(*emotion));
+                                            }
+                                        },
+                                        "{label}"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if emotion_override().is_some() {
+                        button {
+                            class: "px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 text-[9px]",
+                            onclick: move |_| emotion_override.set(None),
+                            "Clear Emotion"
                         }
                     }
 

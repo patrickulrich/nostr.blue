@@ -1,7 +1,8 @@
+use crate::components::blobbi::core::decay::apply_decay;
 use crate::components::blobbi::core::seed::{
     derive_adult_type, derive_seed, generate_eye_color_at_hatching, generate_random_blessing,
     generate_random_food, generate_random_memory, generate_random_personality,
-    generate_random_title, generate_random_visual_effect, generate_random_voice,
+    generate_random_title, generate_random_voice,
 };
 use crate::components::blobbi::core::streak::{check_evolve_readiness, check_hatch_readiness};
 use crate::components::blobbi::core::types::{
@@ -17,13 +18,88 @@ pub fn can_evolve(blobbi: &BlobbiCompanion) -> bool {
     check_evolve_readiness(blobbi).ready
 }
 
+pub fn start_incubation(blobbi: &BlobbiCompanion) -> BlobbiCompanion {
+    if !blobbi.is_egg() || blobbi.state == BlobbiState::Incubating {
+        return blobbi.clone();
+    }
+
+    let now = nostr_sdk::Timestamp::now().as_secs();
+    let mut egg = apply_decay(blobbi, now);
+    egg.state = BlobbiState::Incubating;
+    egg.state_started_at = Some(now);
+    egg.start_incubation = Some(now);
+    egg.last_interaction = Some(now);
+    egg.last_decay_at = Some(now);
+
+    egg.tasks.clear();
+    super::hatch_tasks::initialize_tasks_for_stage(&mut egg);
+
+    egg.source = Some("incubation_start".to_string());
+    egg
+}
+
+pub fn stop_incubation(blobbi: &BlobbiCompanion) -> BlobbiCompanion {
+    if blobbi.state != BlobbiState::Incubating {
+        return blobbi.clone();
+    }
+
+    let now = nostr_sdk::Timestamp::now().as_secs();
+    let mut egg = apply_decay(blobbi, now);
+
+    egg.state = BlobbiState::Active;
+    egg.state_started_at = None;
+    egg.last_interaction = Some(now);
+    egg.last_decay_at = Some(now);
+
+    egg.source = Some("incubation_stop".to_string());
+    egg
+}
+
+pub fn start_evolution(blobbi: &BlobbiCompanion) -> BlobbiCompanion {
+    if !blobbi.is_baby() || blobbi.state == BlobbiState::Evolving {
+        return blobbi.clone();
+    }
+
+    let now = nostr_sdk::Timestamp::now().as_secs();
+    let mut baby = apply_decay(blobbi, now);
+
+    baby.state = BlobbiState::Evolving;
+    baby.state_started_at = Some(now);
+    baby.start_evolution = Some(now);
+    baby.last_interaction = Some(now);
+    baby.last_decay_at = Some(now);
+
+    baby.tasks.clear();
+    super::hatch_tasks::initialize_tasks_for_stage(&mut baby);
+
+    baby.source = Some("evolution_start".to_string());
+    baby
+}
+
+pub fn stop_evolution(blobbi: &BlobbiCompanion) -> BlobbiCompanion {
+    if blobbi.state != BlobbiState::Evolving {
+        return blobbi.clone();
+    }
+
+    let now = nostr_sdk::Timestamp::now().as_secs();
+    let mut baby = apply_decay(blobbi, now);
+
+    baby.state = BlobbiState::Active;
+    baby.state_started_at = None;
+    baby.last_interaction = Some(now);
+    baby.last_decay_at = Some(now);
+
+    baby.source = Some("evolution_stop".to_string());
+    baby
+}
+
 pub fn hatch_egg(blobbi: &BlobbiCompanion, pubkey: &str) -> BlobbiCompanion {
     if !blobbi.is_egg() {
         return blobbi.clone();
     }
 
     let now = nostr_sdk::Timestamp::now().as_secs();
-    let mut baby = blobbi.clone();
+    let mut baby = apply_decay(blobbi, now);
 
     baby.stage = BlobbiStage::Baby;
     baby.state = BlobbiState::Active;
@@ -32,13 +108,11 @@ pub fn hatch_egg(blobbi: &BlobbiCompanion, pubkey: &str) -> BlobbiCompanion {
     baby.last_sleep_update = None;
 
     baby.stats = BlobbiStats {
-        hunger: baby.stats.hunger,
-        happiness: (baby.stats.happiness + 20.0)
-            .round()
-            .clamp(STAT_MIN, STAT_MAX),
-        health: baby.stats.health,
-        hygiene: baby.stats.hygiene,
-        energy: (baby.stats.energy + 15.0).round().clamp(STAT_MIN, STAT_MAX),
+        hunger: 100.0,
+        happiness: 100.0,
+        health: 100.0,
+        hygiene: 100.0,
+        energy: 100.0,
     };
 
     let seed = baby
@@ -114,7 +188,7 @@ pub fn evolve_baby(blobbi: &BlobbiCompanion, pubkey: &str) -> BlobbiCompanion {
     }
 
     let now = nostr_sdk::Timestamp::now().as_secs();
-    let mut adult = blobbi.clone();
+    let mut adult = apply_decay(blobbi, now);
 
     adult.stage = BlobbiStage::Adult;
     adult.state = BlobbiState::Active;
@@ -159,12 +233,6 @@ pub fn evolve_baby(blobbi: &BlobbiCompanion, pubkey: &str) -> BlobbiCompanion {
         if adult.visual_traits.base_color.is_empty() {
             adult.visual_traits =
                 crate::components::blobbi::core::seed::derive_visual_traits_from_seed(seed);
-        }
-    }
-
-    if let Some(eff) = generate_random_visual_effect(0.5) {
-        if adult.visual_effect.is_none() {
-            adult.visual_effect = Some(eff.to_string());
         }
     }
 

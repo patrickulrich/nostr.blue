@@ -95,6 +95,10 @@ pub enum ContentToken {
     NostrBluePodcastEpisode(String),
     NostrBlueMusicPlaylist(String),
     NostrBlueRadioStation(String),
+    NostrBlueRssMusicAlbum(String),
+    NostrBlueTrack(String),
+    NostrBlueAlbum(String),
+    NostrBlueArtist(String),
     NostrBlueArticle(String),
     NostrBlueRecipe(String),
     NostrBlueNote(String),
@@ -865,6 +869,20 @@ fn extract_nostr_blue(url: &str) -> Option<ContentToken> {
     if path.starts_with("/podcast/nostr/") {
         return extract_id_from_path(path, "/podcast/nostr/")
             .map(ContentToken::NostrBluePodcastShow);
+    }
+    if path.starts_with("/music/rss/album/") {
+        return extract_id_from_path(path, "/music/rss/album/")
+            .map(ContentToken::NostrBlueRssMusicAlbum);
+    }
+    if path.starts_with("/music/track/") && !path.starts_with("/music/track/new") {
+        return extract_id_from_path(path, "/music/track/").map(ContentToken::NostrBlueTrack);
+    }
+    if path.starts_with("/music/album/") {
+        return extract_id_from_path(path, "/music/album/").map(ContentToken::NostrBlueAlbum);
+    }
+    if path.starts_with("/music/artist/") {
+        return extract_id_from_path(path, "/music/artist/")
+            .map(ContentToken::NostrBlueArtist);
     }
     if path.starts_with("/music/playlist/") && !path.starts_with("/music/playlist/new") {
         return extract_id_from_path(path, "/music/playlist/")

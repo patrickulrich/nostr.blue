@@ -46,6 +46,7 @@ pub mod git_types;
 pub mod git_worker;
 pub mod github_nips;
 pub mod openlibrary;
+pub mod pages;
 pub mod profile_stats;
 pub mod scheduler;
 pub mod sync;

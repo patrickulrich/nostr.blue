@@ -22,7 +22,7 @@ use crate::utils::podcast::parse_podcast_episode;
 use crate::utils::recipe::{extract_metadata as extract_recipe_metadata, is_recipe_event};
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip19::Nip19;
-use nostr_sdk::{Event, EventId, Filter, FromBech32, Kind, Metadata, ToBech32};
+use nostr_sdk::{Event, EventId, Filter, FromBech32, Kind, Metadata};
 
 use super::RichContent;
 use super::minicards::*;
@@ -796,100 +796,31 @@ pub(super) fn NaddrMentionRenderer(mention: String) -> Element {
         } else {
             let fallback_class =
                 "text-foreground hover:text-foreground/70 font-medium hover:underline";
-            match kind {
-                30023 => rsx! { // ARTICLE
+            let (ref pubkey_hex, ref ident, ..) = coord_ref;
+            let route = if let Ok(pk) = nostr_sdk::PublicKey::from_hex(pubkey_hex) {
+                crate::utils::route_for_kind::route_for_naddr(
+                    kind,
+                    naddr_for_link.clone(),
+                    pk,
+                    ident.clone(),
+                )
+            } else {
+                None
+            };
+            if let Some(route) = route {
+                let label = crate::utils::route_for_kind::content_label_for_kind(kind);
+                rsx! {
                     Link {
-                        to: Route::ArticleDetail { naddr: naddr_for_link.clone() },
+                        to: route,
                         class: fallback_class,
                         onclick: move |e: MouseEvent| e.stop_propagation(),
-                        "📄 Article"
-                    }
-                },
-                30054 => rsx! { // PODCAST_EPISODE
-                    Link {
-                        to: Route::PodcastNostrDetail { naddr: naddr_for_link.clone() },
-                        class: fallback_class,
-                        onclick: move |e: MouseEvent| e.stop_propagation(),
-                        "🎙️ Podcast Episode"
-                    }
-                },
-                34139 => rsx! { // PLAYLIST
-                    Link {
-                        to: Route::MusicPlaylistDetail { naddr: naddr_for_link.clone() },
-                        class: fallback_class,
-                        onclick: move |e: MouseEvent| e.stop_propagation(),
-                        "🎵 Playlist"
-                    }
-                },
-                30617 => rsx! { // GIT_REPO
-                    Link {
-                        to: Route::CodeRepo { naddr: naddr_for_link.clone() },
-                        class: fallback_class,
-                        onclick: move |e: MouseEvent| e.stop_propagation(),
-                        "📦 Repository"
-                    }
-                },
-                38383 => rsx! { // P2P_ORDER
-                    Link {
-                        to: Route::P2POrderDetail { naddr: naddr_for_link.clone() },
-                        class: fallback_class,
-                        onclick: move |e: MouseEvent| e.stop_propagation(),
-                        "🤝 P2P Order"
-                    }
-                },
-                30009 => rsx! { // BADGE_DEFINITION
-                    Link {
-                        to: Route::BadgeDetail { naddr: naddr_for_link.clone() },
-                        class: fallback_class,
-                        onclick: move |e: MouseEvent| e.stop_propagation(),
-                        "🏅 Badge"
-                    }
-                },
-                30818 => {
-                    let (ref pubkey_hex, ref ident, ..) = coord_ref;
-                    let author_npub = nostr_sdk::prelude::PublicKey::from_hex(pubkey_hex)
-                        .ok()
-                        .and_then(|pk| pk.to_bech32().ok())
-                        .unwrap_or_else(|| naddr_for_link.clone());
-                    rsx! {
-                        Link {
-                            to: Route::WikiDetail {
-                                npub: author_npub,
-                                identifier: ident.clone(),
-                            },
-                            class: fallback_class,
-                            onclick: move |e: MouseEvent| e.stop_propagation(),
-                            "📖 Wiki Article"
-                        }
+                        "{label}"
                     }
                 }
-                30040 => rsx! { // PUBLICATION_INDEX
-                    Link {
-                        to: Route::PublicationDetail { naddr: naddr_for_link.clone() },
-                        class: fallback_class,
-                        onclick: move |e: MouseEvent| e.stop_propagation(),
-                        "📰 Publication"
-                    }
-                },
-                30067 => rsx! { // PINBOARD
-                    Link {
-                        to: Route::PinBoardDetail { naddr: naddr_for_link.clone() },
-                        class: fallback_class,
-                        onclick: move |e: MouseEvent| e.stop_propagation(),
-                        "📌 Pin Board"
-                    }
-                },
-                30405 => rsx! { // COLLECTION
-                    Link {
-                        to: Route::ShopCollection { naddr: naddr_for_link.clone() },
-                        class: fallback_class,
-                        onclick: move |e: MouseEvent| e.stop_propagation(),
-                        "🛍️ Collection"
-                    }
-                },
-                _ => rsx! {
+            } else {
+                rsx! {
                     span { class: "text-muted-foreground font-medium", "📄 {mention}" }
-                },
+                }
             }
         }
     } else {

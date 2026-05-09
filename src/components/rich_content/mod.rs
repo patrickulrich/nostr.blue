@@ -14,14 +14,15 @@ use embeds::{
 };
 use mentions::{EventMentionRenderer, MentionRenderer};
 use nostr_blue_renderers::{
-    NostrBlueArticleRenderer, NostrBlueBadgeRenderer, NostrBlueCalendarEventRenderer,
-    NostrBlueChannelRenderer, NostrBlueCodeRepoRenderer, NostrBlueCommunityRenderer,
-    NostrBlueLiveStreamRenderer, NostrBlueMusicPlaylistRenderer, NostrBlueNoteRenderer,
-    NostrBluePhotoRenderer, NostrBluePinboardRenderer, NostrBluePodcastEpisodeRenderer,
-    NostrBluePodcastShowRenderer, NostrBlueProductRenderer, NostrBlueProfileRenderer,
-    NostrBluePublicationRenderer, NostrBlueRadioStationRenderer, NostrBlueRecipeRenderer,
-    NostrBlueRssPodcastEpisodeRenderer, NostrBlueRssPodcastShowRenderer, NostrBlueVideoRenderer,
-    NostrBlueVoiceRenderer, NostrBlueWikiRenderer,
+    NostrBlueAlbumRenderer, NostrBlueArtistRenderer, NostrBlueArticleRenderer,
+    NostrBlueBadgeRenderer, NostrBlueCalendarEventRenderer, NostrBlueChannelRenderer,
+    NostrBlueCodeRepoRenderer, NostrBlueCommunityRenderer, NostrBlueLiveStreamRenderer,
+    NostrBlueMusicPlaylistRenderer, NostrBlueNoteRenderer, NostrBluePhotoRenderer,
+    NostrBluePinboardRenderer, NostrBluePodcastEpisodeRenderer, NostrBluePodcastShowRenderer,
+    NostrBlueProductRenderer, NostrBlueProfileRenderer, NostrBluePublicationRenderer,
+    NostrBlueRadioStationRenderer, NostrBlueRecipeRenderer, NostrBlueRssMusicAlbumRenderer,
+    NostrBlueRssPodcastEpisodeRenderer, NostrBlueRssPodcastShowRenderer, NostrBlueTrackRenderer,
+    NostrBlueVideoRenderer, NostrBlueVoiceRenderer, NostrBlueWikiRenderer,
 };
 
 #[cfg(feature = "cashu")]
@@ -82,6 +83,10 @@ pub fn RichContent(
                         | ContentToken::NostrBlueChannel(_)
                         | ContentToken::NostrBlueRssPodcastEpisode(_, _)
                         | ContentToken::NostrBlueRssPodcastShow(_)
+                        | ContentToken::NostrBlueRssMusicAlbum(_)
+                        | ContentToken::NostrBlueTrack(_)
+                        | ContentToken::NostrBlueAlbum(_)
+                        | ContentToken::NostrBlueArtist(_)
                 )
             })
             .count();
@@ -394,6 +399,18 @@ fn token_key(token: &ContentToken, idx: usize) -> String {
         }
         ContentToken::NostrBlueRssPodcastShow(id) => {
             format!("nb-rss-show-{}-{:x}", idx, hash_str(id))
+        }
+        ContentToken::NostrBlueRssMusicAlbum(id) => {
+            format!("nb-rss-album-{}-{:x}", idx, hash_str(id))
+        }
+        ContentToken::NostrBlueTrack(id) => {
+            format!("nb-track-{}-{:x}", idx, hash_str(id))
+        }
+        ContentToken::NostrBlueAlbum(id) => {
+            format!("nb-album-{}-{:x}", idx, hash_str(id))
+        }
+        ContentToken::NostrBlueArtist(id) => {
+            format!("nb-artist-{}-{:x}", idx, hash_str(id))
         }
     }
 }
@@ -761,6 +778,26 @@ fn render_token(token: &ContentToken, emoji_map: &HashMap<String, String>) -> El
                 NostrBlueRssPodcastShowRenderer { podcast_id: podcast_id.clone() }
             }
         }
+        ContentToken::NostrBlueRssMusicAlbum(feed_id) => {
+            rsx! {
+                NostrBlueRssMusicAlbumRenderer { feed_id: feed_id.clone() }
+            }
+        }
+        ContentToken::NostrBlueTrack(track_id) => {
+            rsx! {
+                NostrBlueTrackRenderer { track_id: track_id.clone() }
+            }
+        }
+        ContentToken::NostrBlueAlbum(album_id) => {
+            rsx! {
+                NostrBlueAlbumRenderer { album_id: album_id.clone() }
+            }
+        }
+        ContentToken::NostrBlueArtist(artist_id) => {
+            rsx! {
+                NostrBlueArtistRenderer { artist_id: artist_id.clone() }
+            }
+        }
     }
 }
 #[cfg(test)]
@@ -837,17 +874,21 @@ mod tests {
             ContentToken::NostrBlueChannel("channel-id".to_string()),
             ContentToken::NostrBlueRssPodcastEpisode("podcast123".to_string(), "ep456".to_string()),
             ContentToken::NostrBlueRssPodcastShow("podcast123".to_string()),
+            ContentToken::NostrBlueRssMusicAlbum("7808481".to_string()),
+            ContentToken::NostrBlueTrack("rss:7808481:12345".to_string()),
+            ContentToken::NostrBlueAlbum("wavlake-uuid".to_string()),
+            ContentToken::NostrBlueArtist("artist-id".to_string()),
         ];
         #[cfg(feature = "cashu")]
         assert_eq!(
             test_cases.len(),
-            61,
+            65,
             "Test cases should cover all ContentToken variants. If you added a new variant, add it to this test.",
         );
         #[cfg(not(feature = "cashu"))]
         assert_eq!(
             test_cases.len(),
-            60,
+            64,
             "Test cases should cover all ContentToken variants. If you added a new variant, add it to this test.",
         );
         for (idx, token) in test_cases.iter().enumerate() {

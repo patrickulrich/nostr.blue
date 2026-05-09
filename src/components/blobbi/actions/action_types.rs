@@ -16,6 +16,7 @@ pub enum BlobbiActionType {
     Medicine,
     Cruzar,
     UseItem,
+    PlayMusic,
 }
 
 impl BlobbiActionType {
@@ -32,6 +33,7 @@ impl BlobbiActionType {
             BlobbiActionType::Medicine => "medicine",
             BlobbiActionType::Cruzar => "cruzar",
             BlobbiActionType::UseItem => "use_item",
+            BlobbiActionType::PlayMusic => "play_music",
         }
     }
 
@@ -47,6 +49,8 @@ impl BlobbiActionType {
             "talk" => Some(BlobbiActionType::Talk),
             "medicine" => Some(BlobbiActionType::Medicine),
             "cruzar" => Some(BlobbiActionType::Cruzar),
+            "use_item" => Some(BlobbiActionType::UseItem),
+            "play_music" => Some(BlobbiActionType::PlayMusic),
             _ => None,
         }
     }
@@ -64,6 +68,7 @@ impl BlobbiActionType {
             BlobbiActionType::Medicine => "health",
             BlobbiActionType::Cruzar => "breeding",
             BlobbiActionType::UseItem => "inventory",
+            BlobbiActionType::PlayMusic => "entertainment",
         }
     }
 
@@ -80,14 +85,15 @@ impl BlobbiActionType {
             BlobbiActionType::Medicine => "Medicine",
             BlobbiActionType::Cruzar => "Cruzar",
             BlobbiActionType::UseItem => "Use Item",
+            BlobbiActionType::PlayMusic => "Music",
         }
     }
 
     pub fn icon(&self) -> &'static str {
         match self {
-            BlobbiActionType::Feed => "\u{1F354}",
-            BlobbiActionType::Play => "\u{1F3AE}",
-            BlobbiActionType::Clean => "\u{1F9F9}",
+            BlobbiActionType::Feed => "\u{1F34E}",
+            BlobbiActionType::Play => "\u{26BD}",
+            BlobbiActionType::Clean => "\u{1F9FC}",
             BlobbiActionType::Rest => "\u{1F634}",
             BlobbiActionType::Warm => "\u{1F525}",
             BlobbiActionType::Check => "\u{1F50D}",
@@ -96,6 +102,7 @@ impl BlobbiActionType {
             BlobbiActionType::Medicine => "\u{1F48A}",
             BlobbiActionType::Cruzar => "\u{1F43E}",
             BlobbiActionType::UseItem => "\u{1F9EA}",
+            BlobbiActionType::PlayMusic => "\u{1F3B5}",
         }
     }
 
@@ -109,25 +116,27 @@ impl BlobbiActionType {
             BlobbiActionType::Rest => vec![("energy", 50.0), ("happiness", 5.0)],
             BlobbiActionType::Warm => vec![("health", 5.0), ("happiness", 2.0)],
             BlobbiActionType::Check => vec![("health", 2.0)],
-            BlobbiActionType::Sing => vec![("happiness", 15.0), ("energy", -5.0)],
+            BlobbiActionType::Sing => vec![("happiness", 20.0), ("energy", -5.0)],
             BlobbiActionType::Talk => vec![("happiness", 10.0)],
             BlobbiActionType::Medicine => vec![("health", 30.0), ("happiness", -5.0)],
             BlobbiActionType::Cruzar => vec![("happiness", 20.0), ("energy", -10.0)],
+            BlobbiActionType::PlayMusic => vec![("happiness", 15.0), ("energy", -3.0)],
             BlobbiActionType::UseItem => vec![],
         }
     }
 
     pub fn xp_value(&self) -> u64 {
         match self {
-            BlobbiActionType::Play => 10,
+            BlobbiActionType::Play => 8,
+            BlobbiActionType::Sing => 9,
+            BlobbiActionType::PlayMusic => 7,
+            BlobbiActionType::Medicine => 10,
+            BlobbiActionType::Clean => 6,
             BlobbiActionType::Feed
-            | BlobbiActionType::Clean
             | BlobbiActionType::Rest
             | BlobbiActionType::Warm
             | BlobbiActionType::Check
-            | BlobbiActionType::Sing
             | BlobbiActionType::Talk
-            | BlobbiActionType::Medicine
             | BlobbiActionType::Cruzar => 5,
             BlobbiActionType::UseItem => 3,
         }
@@ -148,10 +157,10 @@ impl BlobbiActionType {
         match stage {
             BlobbiStage::Egg => matches!(
                 self,
-                BlobbiActionType::Warm
-                    | BlobbiActionType::Check
+                BlobbiActionType::Clean
+                    | BlobbiActionType::Medicine
                     | BlobbiActionType::Sing
-                    | BlobbiActionType::Talk
+                    | BlobbiActionType::PlayMusic
             ),
             BlobbiStage::Baby => matches!(
                 self,
@@ -162,6 +171,7 @@ impl BlobbiActionType {
                     | BlobbiActionType::Medicine
                     | BlobbiActionType::Talk
                     | BlobbiActionType::Sing
+                    | BlobbiActionType::PlayMusic
             ),
             BlobbiStage::Adult => matches!(
                 self,
@@ -170,8 +180,10 @@ impl BlobbiActionType {
                     | BlobbiActionType::Clean
                     | BlobbiActionType::Rest
                     | BlobbiActionType::Talk
+                    | BlobbiActionType::Medicine
                     | BlobbiActionType::Sing
                     | BlobbiActionType::Cruzar
+                    | BlobbiActionType::PlayMusic
             ),
         }
     }

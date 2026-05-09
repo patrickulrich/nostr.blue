@@ -7,6 +7,16 @@ fn clamp_stat(v: f64) -> f64 {
     v.round().clamp(STAT_MIN, STAT_MAX)
 }
 
+fn trunc_toward_zero(delta: f64) -> f64 {
+    if delta > 0.0 {
+        delta.floor()
+    } else if delta < 0.0 {
+        delta.ceil()
+    } else {
+        0.0
+    }
+}
+
 pub fn apply_decay(pet: &BlobbiCompanion, now_secs: u64) -> BlobbiCompanion {
     let last = pet
         .last_decay_at
@@ -20,6 +30,10 @@ pub fn apply_decay(pet: &BlobbiCompanion, now_secs: u64) -> BlobbiCompanion {
 
     let mut result = pet.clone();
 
+    if matches!(pet.state, BlobbiState::Incubating | BlobbiState::Evolving) {
+        return result;
+    }
+
     match pet.stage {
         BlobbiStage::Egg => apply_egg_decay(&mut result, capped_hours),
         BlobbiStage::Baby | BlobbiStage::Adult => apply_post_hatch_decay(&mut result, capped_hours),
@@ -30,49 +44,24 @@ pub fn apply_decay(pet: &BlobbiCompanion, now_secs: u64) -> BlobbiCompanion {
 }
 
 fn apply_egg_decay(pet: &mut BlobbiCompanion, hours: f64) {
+    pet.stats.hunger = STAT_MAX;
+    pet.stats.energy = STAT_MAX;
+
     let cur_temp = pet.egg_temperature.unwrap_or(STAT_DEFAULT);
-    let cur_hygiene = pet.stats.hygiene;
-    let cur_happiness = pet.stats.happiness;
-    let cur_shell = pet.shell_integrity.unwrap_or(STAT_MAX);
-
-    let new_temp = clamp_stat(cur_temp + (-3.0 * hours));
-    let new_hygiene = clamp_stat(cur_hygiene + (-2.0 * hours));
-    let new_happiness = clamp_stat(cur_happiness + (-3.0 * hours));
-
-    let mut shell_rate = 0.0;
-
-    if new_temp < 40.0 {
-        shell_rate += -4.0;
-    } else if new_temp < 70.0 {
-        shell_rate += -2.0;
-    }
-
-    if new_hygiene < 20.0 {
-        shell_rate += -3.0;
-    } else if new_hygiene < 50.0 {
-        shell_rate += -1.5;
-    }
-
-    if new_happiness < 40.0 {
-        shell_rate += -2.0;
-    } else if new_happiness < 70.0 {
-        shell_rate += -1.0;
-    }
-
-    let shell_change =
-        if new_temp >= STAT_MAX && new_hygiene >= STAT_MAX && new_happiness >= STAT_MAX {
-            1.0 * hours
-        } else if new_temp >= 90.0 && new_hygiene >= 90.0 && new_happiness >= 90.0 {
-            0.0
-        } else {
-            shell_rate * hours
-        };
-
-    let new_shell = clamp_stat(cur_shell + shell_change);
-
+    let new_temp = clamp_stat(cur_temp + trunc_toward_zero(-0.5 * hours));
     pet.egg_temperature = Some(new_temp);
-    pet.stats.hygiene = new_hygiene;
-    pet.stats.happiness = new_happiness;
+
+    let cur_shell = pet.shell_integrity.unwrap_or(STAT_MAX);
+    let shell_rate = if new_temp < 20.0 {
+        -2.0
+    } else if new_temp < 40.0 {
+        -1.0
+    } else if new_temp >= 90.0 && pet.stats.hygiene >= 80.0 {
+        0.5
+    } else {
+        0.0
+    };
+    let new_shell = clamp_stat(cur_shell + (shell_rate * hours));
     pet.shell_integrity = Some(new_shell);
 }
 
@@ -83,42 +72,94 @@ fn apply_post_hatch_decay(pet: &mut BlobbiCompanion, hours: f64) {
 
     let is_sleeping = pet.is_sleeping();
 
-    let (hunger_rate, happiness_rate, energy_drain, hygiene_rate, health_base) = match pet.stage {
-        BlobbiStage::Baby => (-5.0, -3.0, -6.0, -4.0, -1.0),
-        BlobbiStage::Adult => (-4.0, -3.0, -5.0, -4.0, -1.0),
+    let (hunger_rate, happiness_rate, energy_rate, hygiene_rate, health_base) = match pet.stage {
+        BlobbiStage::Baby if is_sleeping => (-7.0, -4.0, 6.0, -5.0, -0.75),
+        BlobbiStage::Baby => (-7.0, -4.0, -8.0, -5.0, -0.75),
+        BlobbiStage::Adult if is_sleeping => (-4.5, -2.5, 5.0, -3.5, -0.4),
+        BlobbiStage::Adult => (-4.5, -2.5, -5.0, -3.5, -0.4),
         _ => return,
     };
 
-    let new_hunger = clamp_stat(pet.stats.hunger + (hunger_rate * hours));
-    let new_happiness = clamp_stat(pet.stats.happiness + (happiness_rate * hours));
-    let new_hygiene = clamp_stat(pet.stats.hygiene + (hygiene_rate * hours));
-
-    let new_energy = if is_sleeping {
-        clamp_stat(pet.stats.energy + (4.0 * hours))
-    } else {
-        clamp_stat(pet.stats.energy + (energy_drain * hours))
-    };
+    let new_hunger = clamp_stat(pet.stats.hunger + trunc_toward_zero(hunger_rate * hours));
+    let new_happiness = clamp_stat(pet.stats.happiness + trunc_toward_zero(happiness_rate * hours));
+    let new_hygiene = clamp_stat(pet.stats.hygiene + trunc_toward_zero(hygiene_rate * hours));
+    let new_energy = clamp_stat(pet.stats.energy + trunc_toward_zero(energy_rate * hours));
 
     let mut health_rate = health_base;
 
-    if new_hunger < 30.0 {
-        health_rate -= 1.5;
-    }
-    if new_hygiene < 20.0 {
-        health_rate -= 1.0;
-    }
-    if new_energy < 20.0 {
-        health_rate -= 1.0;
-    }
-    if new_happiness < 30.0 {
-        health_rate -= 1.0;
+    match pet.stage {
+        BlobbiStage::Baby => {
+            if new_hunger < 70.0 {
+                health_rate -= 0.75;
+            }
+            if new_hunger < 40.0 {
+                health_rate -= 1.25;
+            }
+            if new_hygiene < 70.0 {
+                health_rate -= 0.75;
+            }
+            if new_hygiene < 40.0 {
+                health_rate -= 1.25;
+            }
+            if new_energy < 50.0 {
+                health_rate -= 0.5;
+            }
+            if new_energy < 25.0 {
+                health_rate -= 1.0;
+            }
+            if new_happiness < 50.0 {
+                health_rate -= 0.5;
+            }
+            if new_happiness < 25.0 {
+                health_rate -= 1.0;
+            }
+
+            if new_hunger >= 80.0
+                && new_happiness >= 80.0
+                && new_hygiene >= 80.0
+                && new_energy >= 80.0
+            {
+                health_rate += 1.5;
+            }
+        }
+        BlobbiStage::Adult => {
+            if new_hunger < 60.0 {
+                health_rate -= 0.5;
+            }
+            if new_hunger < 30.0 {
+                health_rate -= 1.0;
+            }
+            if new_hygiene < 60.0 {
+                health_rate -= 0.5;
+            }
+            if new_hygiene < 30.0 {
+                health_rate -= 1.0;
+            }
+            if new_energy < 40.0 {
+                health_rate -= 0.4;
+            }
+            if new_energy < 20.0 {
+                health_rate -= 0.8;
+            }
+            if new_happiness < 40.0 {
+                health_rate -= 0.4;
+            }
+            if new_happiness < 20.0 {
+                health_rate -= 0.8;
+            }
+
+            if new_hunger >= 80.0
+                && new_happiness >= 80.0
+                && new_hygiene >= 80.0
+                && new_energy >= 80.0
+            {
+                health_rate += 1.0;
+            }
+        }
+        _ => {}
     }
 
-    if new_hunger >= 80.0 && new_happiness >= 80.0 && new_hygiene >= 80.0 && new_energy >= 80.0 {
-        health_rate = 2.0;
-    }
-
-    let new_health = clamp_stat(pet.stats.health + (health_rate * hours));
+    let new_health = clamp_stat(pet.stats.health + trunc_toward_zero(health_rate * hours));
 
     pet.stats = BlobbiStats {
         hunger: new_hunger,
@@ -166,17 +207,6 @@ pub fn should_emit_shell_penalty(pet: &BlobbiCompanion) -> bool {
     pet.is_egg() && pet.shell_integrity.unwrap_or(STAT_MAX) < 50.0
 }
 
-pub fn shell_penalty_hours(pet: &BlobbiCompanion, now_secs: u64) -> f64 {
-    let shell = pet.shell_integrity.unwrap_or(STAT_MAX);
-    if shell >= 50.0 {
-        return 0.0;
-    }
-    let rate = 2.0 + 2.0 * ((50.0 - shell) / 50.0).min(1.0);
-    let _hours_to_drop = shell / rate;
-    let elapsed = now_secs.saturating_sub(pet.last_decay_at.unwrap_or(now_secs)) as f64 / 3600.0;
-    elapsed.max(0.0)
-}
-
 pub fn get_decay_warning(pet: &BlobbiCompanion) -> Option<&'static str> {
     if pet.is_egg() {
         let temp = pet.egg_temperature.unwrap_or(STAT_DEFAULT);
@@ -211,4 +241,33 @@ pub fn get_decay_warning(pet: &BlobbiCompanion) -> Option<&'static str> {
         }
     }
     None
+}
+
+#[allow(dead_code)]
+pub fn get_stat_status(stage: BlobbiStage, stat: &str, value: f64) -> &'static str {
+    let (warning, critical) = if stage == BlobbiStage::Egg {
+        (75.0, 45.0)
+    } else if stage == BlobbiStage::Baby {
+        (65.0, 35.0)
+    } else {
+        (60.0, 30.0)
+    };
+
+    let _ = stat;
+    if value < critical {
+        "critical"
+    } else if value < warning {
+        "warning"
+    } else {
+        "normal"
+    }
+}
+
+#[allow(dead_code)]
+pub fn get_visible_stats(stage: BlobbiStage) -> Vec<&'static str> {
+    if stage == BlobbiStage::Egg {
+        vec!["happiness", "hygiene", "health"]
+    } else {
+        vec!["hunger", "happiness", "health", "hygiene", "energy"]
+    }
 }

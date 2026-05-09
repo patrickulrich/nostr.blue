@@ -4,6 +4,7 @@ use crate::components::blobbi::core::builders::build_breeding_event;
 use crate::components::blobbi::core::types::BlobbiCompanion;
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 struct BreedingResult {
     success: bool,
     offspring_id: String,

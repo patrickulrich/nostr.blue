@@ -6,26 +6,55 @@ use crate::components::blobbi::core::types::BlobbiCompanion;
 use crate::hooks::blobbi::use_blobbi_sleep;
 use crate::stores::blobbi_store;
 
-#[component]
-pub fn ActionMenu(x: f32, y: f32, blobbi: BlobbiCompanion, on_close: EventHandler<()>) -> Element {
-    let actions: Vec<BlobbiActionType> = if blobbi.is_egg() {
+const ARC_RADIUS: f32 = 85.0;
+const ARC_DEGREES: f32 = 140.0;
+const ARC_CENTER_DEG: f32 = 270.0;
+const BUTTON_SIZE: f32 = 44.0;
+
+struct MenuAction {
+    action: Option<BlobbiActionType>,
+    icon: &'static str,
+    label: &'static str,
+    is_sleep: bool,
+}
+
+fn menu_actions(is_egg: bool) -> Vec<MenuAction> {
+    if is_egg {
         vec![
-            BlobbiActionType::Warm,
-            BlobbiActionType::Check,
-            BlobbiActionType::Sing,
+            MenuAction { action: Some(BlobbiActionType::Warm), icon: "🔥", label: "Warm", is_sleep: false },
+            MenuAction { action: Some(BlobbiActionType::Check), icon: "🔍", label: "Check", is_sleep: false },
+            MenuAction { action: Some(BlobbiActionType::Sing), icon: "🎤", label: "Sing", is_sleep: false },
         ]
     } else {
         vec![
-            BlobbiActionType::Feed,
-            BlobbiActionType::Play,
-            BlobbiActionType::Clean,
-            BlobbiActionType::Rest,
+            MenuAction { action: Some(BlobbiActionType::Feed), icon: "🍔", label: "Feed", is_sleep: false },
+            MenuAction { action: Some(BlobbiActionType::Play), icon: "🎮", label: "Play", is_sleep: false },
+            MenuAction { action: Some(BlobbiActionType::Clean), icon: "🧹", label: "Clean", is_sleep: false },
+            MenuAction { action: Some(BlobbiActionType::Medicine), icon: "💊", label: "Med", is_sleep: false },
+            MenuAction { action: None, icon: "🌙", label: "Sleep", is_sleep: true },
         ]
-    };
+    }
+}
 
-    let menu_x = x;
-    let menu_y = (y - 80.0).max(0.0);
+fn arc_position(index: usize, total: usize) -> (f32, f32) {
+    let start = ARC_CENTER_DEG - ARC_DEGREES / 2.0;
+    let step = if total > 1 {
+        ARC_DEGREES / (total - 1) as f32
+    } else {
+        0.0
+    };
+    let angle_deg = start + index as f32 * step;
+    let angle_rad = angle_deg.to_radians();
+    let x = ARC_RADIUS * angle_rad.cos();
+    let y = ARC_RADIUS * angle_rad.sin();
+    (x, y)
+}
+
+#[component]
+pub fn ActionMenu(x: f32, y: f32, blobbi: BlobbiCompanion, on_close: EventHandler<()>) -> Element {
+    let actions = menu_actions(blobbi.is_egg());
     let sleeping = blobbi.is_sleeping();
+    let total = actions.len();
 
     rsx! {
         div {
@@ -33,27 +62,51 @@ pub fn ActionMenu(x: f32, y: f32, blobbi: BlobbiCompanion, on_close: EventHandle
             onclick: move |_| on_close.call(()),
 
             div {
-                class: "absolute bg-card border border-border rounded-2xl shadow-2xl p-3 flex gap-2",
-                style: "left: {menu_x}px; top: {menu_y}px; transform: translateX(-25%);",
+                class: "absolute",
+                style: "left: {x}px; top: {y}px; transform: translate(-50%, -50%);",
                 onclick: move |e| e.stop_propagation(),
 
-                for action in &actions {
-                    {render_action_button(*action, blobbi.clone(), on_close)}
-                }
+                for (i, ma) in actions.iter().enumerate() {
+                    {
+                        let (ax, ay) = arc_position(i, total);
+                        let delay_ms = i as u32 * 30;
+                        let icon = ma.icon.to_string();
+                        let label = ma.label.to_string();
+                        let is_sleep = ma.is_sleep;
+                        let action = ma.action;
+                        let blobbi_clone = blobbi.clone();
+                        let on_close_clone = on_close;
 
-                button {
-                    class: "flex flex-col items-center gap-0.5 p-2 rounded-xl hover:bg-accent transition",
-                    onclick: {
-                        move |_| {
-                            toggle_blobbi_sleep_state();
-                            on_close.call(());
+                        rsx! {
+                            button {
+                                key: "{i}",
+                                class: "absolute flex flex-col items-center gap-0.5 rounded-xl hover:bg-accent transition animate-[blobbi-menu-pop_0.2s_ease-out]",
+                                style: "left: {ax}px; top: {ay}px; width: {BUTTON_SIZE}px; height: {BUTTON_SIZE}px; transform: translate(-50%, -50%); animation-delay: {delay_ms}ms; animation-fill-mode: both;",
+
+                                onclick: move |e| {
+                                    e.stop_propagation();
+                                    if is_sleep {
+                                        toggle_blobbi_sleep_state();
+                                    } else if let Some(act) = action {
+                                        let b = blobbi_clone.clone();
+                                        spawn(async move {
+                                            match execute_blobbi_action(&b, act).await {
+                                                Ok(updated) => blobbi_store::update_blobbi_in_collection(&updated),
+                                                Err(e) => log::error!("Companion action failed: {}", e),
+                                            }
+                                        });
+                                    }
+                                    on_close_clone.call(());
+                                },
+
+                                div { class: "text-lg",
+                                    if is_sleep && sleeping { "☀️" } else { "{icon}" }
+                                }
+                                span { class: "text-[7px] text-muted-foreground",
+                                    if is_sleep && sleeping { "Wake" } else { "{label}" }
+                                }
+                            }
                         }
-                    },
-                    span { class: "text-lg",
-                        if sleeping { "\u{2600}\u{FE0F}" } else { "\u{1F319}" }
-                    }
-                    span { class: "text-[8px] text-muted-foreground",
-                        if sleeping { "Wake" } else { "Sleep" }
                     }
                 }
             }
@@ -73,35 +126,5 @@ fn toggle_blobbi_sleep_state() {
                 log::error!("Sleep toggle failed: {}", e);
             }
         });
-    }
-}
-
-fn render_action_button(
-    action: BlobbiActionType,
-    blobbi: BlobbiCompanion,
-    on_close: EventHandler<()>,
-) -> Element {
-    let icon = action.icon();
-    let label = action.label();
-
-    rsx! {
-        button {
-            class: "flex flex-col items-center gap-0.5 p-2 rounded-xl hover:bg-accent transition",
-            onclick: {
-                let blobbi = blobbi.clone();
-                move |_| {
-                    let b = blobbi.clone();
-                    spawn(async move {
-                        match execute_blobbi_action(&b, action).await {
-                            Ok(updated) => blobbi_store::update_blobbi_in_collection(&updated),
-                            Err(e) => log::error!("Companion action failed: {}", e),
-                        }
-                    });
-                    on_close.call(());
-                }
-            },
-            span { class: "text-lg", "{icon}" }
-            span { class: "text-[8px] text-muted-foreground", "{label}" }
-        }
     }
 }

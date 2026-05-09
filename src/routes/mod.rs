@@ -78,12 +78,12 @@ use citations::{CitationDetail, CitationsHome};
 use code::{
     CodeBounties, CodeDiscussionDetail, CodeDiscussionNew, CodeExplore, CodeGlobalIssues,
     CodeGlobalPulls, CodeHome, CodeImport, CodeIssueDetail, CodeIssueNew, CodeNew,
-    CodeNotifications, CodePullDetail, CodePullNew, CodeRepo, CodeRepoArchitecture, CodeRepoBlame,
-    CodeRepoBlob, CodeRepoCommit, CodeRepoCommits, CodeRepoCompare, CodeRepoDiscussions,
-    CodeRepoEditFile, CodeRepoInsights, CodeRepoIssues, CodeRepoNewFile, CodeRepoProjects,
-    CodeRepoPulls, CodeRepoReleases, CodeRepoSettings, CodeRepoTree, CodeRepoUpload,
-    CodeRepositories, CodeSearch, CodeSettings, CodeSnippetDetail, CodeSnippetNew, CodeSnippets,
-    CodeStars, CodeUserProfile,
+    CodeNotifications, CodePages, CodePullDetail, CodePullNew, CodeRepo, CodeRepoArchitecture,
+    CodeRepoBlame, CodeRepoBlob, CodeRepoCommit, CodeRepoCommits, CodeRepoCompare,
+    CodeRepoDiscussions, CodeRepoEditFile, CodeRepoInsights, CodeRepoIssues, CodeRepoNewFile,
+    CodeRepoPages, CodeRepoProjects, CodeRepoPulls, CodeRepoReleases, CodeRepoSettings,
+    CodeRepoTree, CodeRepoUpload, CodeRepositories, CodeSearch, CodeSettings, CodeSnippetDetail,
+    CodeSnippetNew, CodeSnippets, CodeStars, CodeUserProfile,
 };
 use community::{Communities, CommunityNew, CommunityPage};
 use cookies::Cookies;
@@ -316,6 +316,10 @@ pub enum Route {
     CodeDiscussionDetail { note_id: String },
     #[route("/code/profile/:pubkey")]
     CodeUserProfile { pubkey: String },
+    #[route("/code/pages")]
+    CodePages {},
+    #[route("/code/repo/:naddr/pages")]
+    CodeRepoPages { naddr: String },
     #[route("/p2p")]
     P2PHome {},
     #[route("/p2p/order/:naddr")]
@@ -676,7 +680,9 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::CodeIssueDetail { .. }
         | Route::CodePullDetail { .. }
         | Route::CodeDiscussionDetail { .. }
-        | Route::CodeUserProfile { .. } => Some(Route::CodeHome {}),
+        | Route::CodeUserProfile { .. }
+        | Route::CodePages {}
+        | Route::CodeRepoPages { .. } => Some(Route::CodeHome {}),
         Route::P2POrderDetail { .. } => Some(Route::P2PHome {}),
         Route::ChatNew {} | Route::ChatDetail { .. } => Some(Route::Chats {}),
         Route::CommunityNew {} | Route::CommunityPage { .. } => Some(Route::Communities {}),
@@ -792,6 +798,22 @@ fn Layout() -> Element {
     let mut last_handled_android_back_nonce = use_signal(|| 0u64);
     let current_route = use_route::<Route>();
     let navigator = navigator();
+    {
+        let route = current_route.clone();
+        use_effect(move || {
+            let _ = route.clone();
+            spawn(async move {
+                if !crate::stores::ui::scroll_restore::was_popstate_nav().await {
+                    #[cfg(feature = "web")]
+                    if let Some(window) = web_sys::window() {
+                        window.scroll_to_with_x_and_y(0.0, 0.0);
+                    }
+                }
+                crate::platform::timer::sleep_ms(100).await;
+                crate::stores::ui::scroll_restore::clear_popstate_flag().await;
+            });
+        });
+    }
     #[cfg(feature = "mobile_platform")]
     let _android_back_poller = use_future(move || async move {
         let mut last_seen = 0;
@@ -914,6 +936,8 @@ fn Layout() -> Element {
             | Route::CodeRepoBlob { .. }
             | Route::CodeUserProfile { .. }
             | Route::CodeNotifications {}
+            | Route::CodePages {}
+            | Route::CodeRepoPages { .. }
     );
     let is_p2p_page = matches!(
         current_route,
@@ -1068,7 +1092,14 @@ fn Layout() -> Element {
                 }
             },
             div { class: "flex justify-center max-w-[1600px] mx-auto",
-                aside { class: "w-[275px] shrink-0 border-r border-border sticky top-0 h-screen hidden lg:block bg-background",
+                aside {
+                    class: "w-[275px] shrink-0 border-r border-border sticky top-0 h-screen hidden lg:block bg-background",
+                    onmouseenter: move |_| {
+                        crate::components::blobbi::companion::behavior_loop::set_gaze_target(120.0, 400.0);
+                    },
+                    onmouseleave: move |_| {
+                        crate::components::blobbi::companion::behavior_loop::clear_gaze_target();
+                    },
                     div { class: "h-full flex flex-col p-4 overflow-y-auto scrollbar-hide",
                         {
                             let total_pages = crate::stores::sidebar_store::get_total_pages(auth.is_authenticated);

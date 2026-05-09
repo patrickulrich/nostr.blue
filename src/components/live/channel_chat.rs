@@ -1,8 +1,8 @@
 use crate::components::icons::{MaximizeIcon, XIcon};
 use crate::components::{EmojiPicker, RichContent};
-use crate::hooks::use_relay_subscription;
+use crate::hooks::{use_mute_block_cache, use_relay_subscription};
 use crate::routes::Route;
-use crate::stores::nostr_client::{fetch_events_aggregated, HAS_SIGNER};
+use crate::stores::nostr_client::{self, fetch_events_aggregated, HAS_SIGNER};
 use crate::stores::profiles;
 use crate::stores::social::channel_store::{
     cache_channel, cache_channel_metadata, channel_creation_by_id_filter, channel_messages_filter,
@@ -16,6 +16,8 @@ use crate::utils::truncate_pubkey;
 use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 use nostr_sdk::{Event, PublicKey, RelayUrl};
+use std::collections::HashSet;
+use std::rc::Rc;
 use std::time::Duration;
 #[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
@@ -55,6 +57,7 @@ pub fn ChannelChat(channel_id: String) -> Element {
     let mut channel_info: Signal<Option<Channel>> = use_signal(|| None);
     let mut relay_url_for_send: Signal<Option<RelayUrl>> = use_signal(|| None);
     let has_signer = use_memo(move || *HAS_SIGNER.read());
+    let (_, cached_blocked_users) = use_mute_block_cache();
 
     let channel_id_for_effect = channel_id.clone();
     let channel_id_for_send = channel_id.clone();
@@ -361,7 +364,11 @@ pub fn ChannelChat(channel_id: String) -> Element {
                     }
                 } else {
                     for message in messages.read().iter() {
-                        ChannelChatMessage { key: "{message.id}", event: message.clone() }
+                        ChannelChatMessage {
+                            key: "{message.id}",
+                            event: message.clone(),
+                            cached_blocked_users: cached_blocked_users.read().clone(),
+                        }
                     }
                 }
             }
@@ -424,8 +431,35 @@ pub fn ChannelChat(channel_id: String) -> Element {
 }
 
 #[component]
-fn ChannelChatMessage(event: Event) -> Element {
+fn ChannelChatMessage(
+    event: Event,
+    #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+) -> Element {
     let author_pubkey = event.pubkey.to_string();
+    let mut is_author_blocked = use_signal(|| None::<bool>);
+    let mut show_hidden_anyway = use_signal(|| false);
+    let author_pubkey_check = author_pubkey.clone();
+
+    use_effect(use_reactive!(|(
+        cached_blocked_users,
+        author_pubkey_check,
+    )| {
+        let author_pubkey = author_pubkey_check.clone();
+        if let Some(ref blocked_set) = cached_blocked_users {
+            if let Ok(blocked) = nostr_client::is_user_blocked_cached(&author_pubkey, blocked_set) {
+                is_author_blocked.set(Some(blocked));
+            }
+        }
+        if cached_blocked_users.is_none() {
+            spawn(async move {
+                match nostr_client::is_user_blocked(author_pubkey).await {
+                    Ok(blocked) => is_author_blocked.set(Some(blocked)),
+                    Err(_) => is_author_blocked.set(Some(false)),
+                }
+            });
+        }
+    }));
+
     let timestamp = event.created_at;
     let author_pk_for_metadata = author_pubkey.clone();
     let author_pk_for_name = author_pubkey.clone();
@@ -444,45 +478,62 @@ fn ChannelChatMessage(event: Event) -> Element {
     });
     let author_picture = use_memo(move || metadata.read().as_ref().and_then(|m| m.picture.clone()));
 
+    let is_hidden = is_author_blocked.read().unwrap_or(false) && !*show_hidden_anyway.read();
+
     rsx! {
-        div { class: "flex gap-3",
-            Link {
-                to: Route::Profile {
-                    pubkey: author_pk_for_display.clone(),
-                },
-                class: "shrink-0",
-                if let Some(pic_url) = author_picture.read().as_ref().filter(|u| is_valid_http_url(u)) {
-                    img {
-                        src: "{pic_url}",
-                        class: "w-8 h-8 rounded-full object-cover",
-                        alt: "Avatar",
-                        loading: "lazy",
-                    }
-                } else {
-                    div { class: "w-8 h-8 rounded-full bg-accent flex items-center justify-center text-accent-foreground text-xs font-bold",
-                        {
-                            let name = author_name.read();
-                            let first_char = name.chars().next().unwrap_or('?').to_uppercase().to_string();
-                            rsx! { "{first_char}" }
+        if is_hidden {
+            div { class: "flex items-center gap-3 py-2",
+                div { class: "flex-1 text-muted-foreground text-sm",
+                    "Message from blocked user"
+                }
+                button {
+                    class: "px-3 py-1 text-sm text-primary hover:underline",
+                    onclick: move |_| {
+                        show_hidden_anyway.set(true);
+                    },
+                    "Show anyway"
+                }
+            }
+        } else {
+            div { class: "flex gap-3",
+                Link {
+                    to: Route::Profile {
+                        pubkey: author_pk_for_display.clone(),
+                    },
+                    class: "shrink-0",
+                    if let Some(pic_url) = author_picture.read().as_ref().filter(|u| is_valid_http_url(u)) {
+                        img {
+                            src: "{pic_url}",
+                            class: "w-8 h-8 rounded-full object-cover",
+                            alt: "Avatar",
+                            loading: "lazy",
+                        }
+                    } else {
+                        div { class: "w-8 h-8 rounded-full bg-accent flex items-center justify-center text-accent-foreground text-xs font-bold",
+                            {
+                                let name = author_name.read();
+                                let first_char = name.chars().next().unwrap_or('?').to_uppercase().to_string();
+                                rsx! { "{first_char}" }
+                            }
                         }
                     }
                 }
-            }
-            div { class: "flex-1 min-w-0",
-                div { class: "flex items-baseline gap-2",
-                    Link {
-                        to: Route::Profile {
-                            pubkey: author_pk_for_display.clone(),
-                        },
-                        class: "font-semibold text-sm hover:underline truncate",
-                        "{author_name.read()}"
+                div { class: "flex-1 min-w-0",
+                    div { class: "flex items-baseline gap-2",
+                        Link {
+                            to: Route::Profile {
+                                pubkey: author_pk_for_display.clone(),
+                            },
+                            class: "font-semibold text-sm hover:underline truncate",
+                            "{author_name.read()}"
+                        }
+                        span { class: "text-xs text-muted-foreground", "{timestamp.to_human_datetime()}" }
                     }
-                    span { class: "text-xs text-muted-foreground", "{timestamp.to_human_datetime()}" }
-                }
-                div { class: "text-sm mt-1",
-                    RichContent {
-                        content: event.content.clone(),
-                        tags: event.tags.to_vec(),
+                    div { class: "text-sm mt-1",
+                        RichContent {
+                            content: event.content.clone(),
+                            tags: event.tags.to_vec(),
+                        }
                     }
                 }
             }

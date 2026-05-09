@@ -36,12 +36,27 @@ pub fn use_blobbi_quest_watcher() {
                 None => (None, false),
             }
         }
+        (Some(b), Some(pk)) if b.is_egg() => {
+            let author = nostr_sdk::PublicKey::from_hex(pk).ok();
+            match author {
+                Some(a) => (
+                    Some(
+                        Filter::new()
+                            .kind(nostr_sdk::Kind::TextNote)
+                            .author(a)
+                            .limit(20),
+                    ),
+                    false,
+                ),
+                None => (None, false),
+            }
+        }
         _ => (None, false),
     };
 
     let pk_for_cb = pubkey.clone();
     use_relay_subscription(filter, move |event| {
-        if !is_baby {
+        if !is_baby && !blobbi_store::get_selected_blobbi().map(|b| b.is_egg()).unwrap_or(false) {
             return;
         }
 
@@ -59,7 +74,7 @@ pub fn use_blobbi_quest_watcher() {
             None => return,
         };
 
-        if !blobbi.is_baby() {
+        if !blobbi.is_baby() && !blobbi.is_egg() {
             return;
         }
 
@@ -72,22 +87,9 @@ pub fn use_blobbi_quest_watcher() {
         });
         let has_blobbi_ref = content_lower.contains("#blobbi") || has_t_blobbi;
 
-        if !hatch_tasks::is_task_completed(&blobbi, QUEST_PUBLISH_5_POSTS) {
-            if let Some(task) = blobbi.tasks.iter_mut().find(|t| t.id == QUEST_PUBLISH_5_POSTS) {
-                if !task.completed {
-                    task.progress = task.progress.saturating_add(1);
-                    if task.progress >= task.target {
-                        task.completed = true;
-                    }
-                    updated = true;
-                }
-            }
-        }
-
-        if has_blobbi_ref && !hatch_tasks::is_task_completed(&blobbi, QUEST_USE_BLOBBI_HASHTAGS) {
-            let evolving_tag = format!("#evolving{}", blobbi.name.to_lowercase());
-            if content_lower.contains(&evolving_tag) {
-                if let Some(task) = blobbi.tasks.iter_mut().find(|t| t.id == QUEST_USE_BLOBBI_HASHTAGS) {
+        if blobbi.is_egg() {
+            if has_blobbi_ref && !hatch_tasks::is_task_completed(&blobbi, TASK_FIRST_POST) {
+                if let Some(task) = blobbi.tasks.iter_mut().find(|t| t.id == TASK_FIRST_POST) {
                     if !task.completed {
                         task.progress = 1;
                         task.completed = true;
@@ -95,15 +97,78 @@ pub fn use_blobbi_quest_watcher() {
                     }
                 }
             }
+
+            if !hatch_tasks::is_task_completed(&blobbi, TASK_POST_BLOBBI_PHOTO) {
+                let has_image = event.content.contains("https://")
+                    && (event.content.contains(".jpg")
+                        || event.content.contains(".png")
+                        || event.content.contains(".gif")
+                        || event.content.contains(".webp")
+                        || event.content.contains(".jpeg")
+                        || event.tags.iter().any(|t| {
+                            t.kind().to_string() == "image"
+                                || (t.kind().to_string() == "m"
+                                    && t.content()
+                                        .map(|v| v.starts_with("image/"))
+                                        .unwrap_or(false))
+                        }));
+                if has_image {
+                    if let Some(task) = blobbi.tasks.iter_mut().find(|t| t.id == TASK_POST_BLOBBI_PHOTO) {
+                        if !task.completed {
+                            task.progress = 1;
+                            task.completed = true;
+                            updated = true;
+                        }
+                    }
+                }
+            }
         }
 
-        if !hatch_tasks::is_task_completed(&blobbi, QUEST_SHARE_SONG) {
-            let content = &event.content;
-            let has_youtube = content.contains("youtube.com/watch")
-                || content.contains("youtu.be/")
-                || content.contains("youtube.com/embed/");
-            if has_youtube {
-                if let Some(task) = blobbi.tasks.iter_mut().find(|t| t.id == QUEST_SHARE_SONG) {
+        if blobbi.is_baby() {
+            if !hatch_tasks::is_task_completed(&blobbi, QUEST_PUBLISH_5_POSTS) {
+                if let Some(task) = blobbi.tasks.iter_mut().find(|t| t.id == QUEST_PUBLISH_5_POSTS) {
+                    if !task.completed {
+                        task.progress = task.progress.saturating_add(1);
+                        if task.progress >= task.target {
+                            task.completed = true;
+                        }
+                        updated = true;
+                    }
+                }
+            }
+
+            if has_blobbi_ref && !hatch_tasks::is_task_completed(&blobbi, QUEST_USE_BLOBBI_HASHTAGS) {
+                let evolving_tag = format!("#evolving{}", blobbi.name.to_lowercase());
+                if content_lower.contains(&evolving_tag) {
+                    if let Some(task) = blobbi.tasks.iter_mut().find(|t| t.id == QUEST_USE_BLOBBI_HASHTAGS) {
+                        if !task.completed {
+                            task.progress = 1;
+                            task.completed = true;
+                            updated = true;
+                        }
+                    }
+                }
+            }
+
+            if !hatch_tasks::is_task_completed(&blobbi, QUEST_SHARE_SONG) {
+                let content = &event.content;
+                let has_youtube = content.contains("youtube.com/watch")
+                    || content.contains("youtu.be/")
+                    || content.contains("youtube.com/embed/");
+                if has_youtube {
+                    if let Some(task) = blobbi.tasks.iter_mut().find(|t| t.id == QUEST_SHARE_SONG) {
+                        if !task.completed {
+                            task.progress = 1;
+                            task.completed = true;
+                            updated = true;
+                        }
+                    }
+                }
+            }
+
+            let has_p_tag = event.tags.iter().any(|t| t.kind().to_string() == "p");
+            if has_p_tag && !hatch_tasks::is_task_completed(&blobbi, QUEST_MENTION_USER) {
+                if let Some(task) = blobbi.tasks.iter_mut().find(|t| t.id == QUEST_MENTION_USER) {
                     if !task.completed {
                         task.progress = 1;
                         task.completed = true;
@@ -111,26 +176,15 @@ pub fn use_blobbi_quest_watcher() {
                     }
                 }
             }
-        }
 
-        let has_p_tag = event.tags.iter().any(|t| t.kind().to_string() == "p");
-        if has_p_tag && !hatch_tasks::is_task_completed(&blobbi, QUEST_MENTION_USER) {
-            if let Some(task) = blobbi.tasks.iter_mut().find(|t| t.id == QUEST_MENTION_USER) {
-                if !task.completed {
-                    task.progress = 1;
-                    task.completed = true;
-                    updated = true;
-                }
-            }
-        }
-
-        let has_e_tag = event.tags.iter().any(|t| t.kind().to_string() == "e");
-        if has_e_tag && has_p_tag && !hatch_tasks::is_task_completed(&blobbi, QUEST_REPLY_TO_POST) {
-            if let Some(task) = blobbi.tasks.iter_mut().find(|t| t.id == QUEST_REPLY_TO_POST) {
-                if !task.completed {
-                    task.progress = 1;
-                    task.completed = true;
-                    updated = true;
+            let has_e_tag = event.tags.iter().any(|t| t.kind().to_string() == "e");
+            if has_e_tag && has_p_tag && !hatch_tasks::is_task_completed(&blobbi, QUEST_REPLY_TO_POST) {
+                if let Some(task) = blobbi.tasks.iter_mut().find(|t| t.id == QUEST_REPLY_TO_POST) {
+                    if !task.completed {
+                        task.progress = 1;
+                        task.completed = true;
+                        updated = true;
+                    }
                 }
             }
         }
