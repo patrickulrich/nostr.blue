@@ -184,21 +184,3 @@ pub fn generate_random_blessing(roll: f64) -> Option<&'static str> {
     let sub = (roll / 0.10 * blessings.len() as f64).floor() as usize;
     Some(blessings[sub.min(blessings.len() - 1)])
 }
-
-pub fn generate_random_visual_effect(roll: f64) -> Option<&'static str> {
-    let effects = [
-        "sparkle_trail",
-        "shadow_wisp",
-        "color_shift",
-        "glow_pulse",
-        "crystal_shimmer",
-        "leaf_crown",
-        "flame_aura",
-        "bubble_burst",
-    ];
-    if roll > 0.15 {
-        return None;
-    }
-    let sub = (roll / 0.15 * effects.len() as f64).floor() as usize;
-    Some(effects[sub.min(effects.len() - 1)])
-}

@@ -185,7 +185,6 @@ pub struct BlobbiCompanion {
     pub crossover_app: Option<String>,
     pub manifestation: Option<String>,
     pub blessing: Option<String>,
-    pub visual_effect: Option<String>,
     pub adopted_by: Option<String>,
     pub adopted_from: Option<String>,
     pub visible_to_others: Option<bool>,

@@ -52,10 +52,10 @@ impl StateTags {
 
         tags.push(Tag::custom(
             TagKind::custom(TAG_IS_SLEEPING),
-            vec![if blobbi.is_sleeping { "true" } else { "false" }.to_string()],
+            vec![if blobbi.is_sleeping() { "true" } else { "false" }.to_string()],
         ));
 
-        if blobbi.is_sleeping {
+        if blobbi.is_sleeping() {
             if let Some(v) = blobbi.sleep_started_at {
                 tags.push(Tag::custom(TagKind::custom(TAG_SLEEP_STARTED_AT), vec![v.to_string()]));
             }
@@ -172,9 +172,6 @@ impl StateTags {
         }
         if let Some(ref v) = blobbi.blessing {
             tags.push(Tag::custom(TagKind::custom(TAG_BLESSING), vec![v.clone()]));
-        }
-        if let Some(ref v) = blobbi.visual_effect {
-            tags.push(Tag::custom(TagKind::custom(TAG_VISUAL_EFFECT), vec![v.clone()]));
         }
 
         if let Some(v) = blobbi.last_meal {

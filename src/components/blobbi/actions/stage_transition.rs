@@ -2,7 +2,7 @@ use crate::components::blobbi::core::decay::apply_decay;
 use crate::components::blobbi::core::seed::{
     derive_adult_type, derive_seed, generate_eye_color_at_hatching, generate_random_blessing,
     generate_random_food, generate_random_memory, generate_random_personality,
-    generate_random_title, generate_random_visual_effect, generate_random_voice,
+    generate_random_title, generate_random_voice,
 };
 use crate::components::blobbi::core::streak::{check_evolve_readiness, check_hatch_readiness};
 use crate::components::blobbi::core::types::{
@@ -233,12 +233,6 @@ pub fn evolve_baby(blobbi: &BlobbiCompanion, pubkey: &str) -> BlobbiCompanion {
         if adult.visual_traits.base_color.is_empty() {
             adult.visual_traits =
                 crate::components::blobbi::core::seed::derive_visual_traits_from_seed(seed);
-        }
-    }
-
-    if let Some(eff) = generate_random_visual_effect(0.5) {
-        if adult.visual_effect.is_none() {
-            adult.visual_effect = Some(eff.to_string());
         }
     }
 

@@ -334,7 +334,6 @@ pub fn parse_blobbi_from_event(event: &Event) -> BlobbiCompanion {
         crossover_app: tag_value(tags, TAG_CROSSOVER_APP),
         manifestation: tag_value(tags, TAG_MANIFESTATION),
         blessing: tag_value(tags, TAG_BLESSING),
-        visual_effect: tag_value(tags, TAG_VISUAL_EFFECT),
         adopted_by: tag_value(tags, TAG_ADOPTED_BY),
         adopted_from: tag_value(tags, TAG_ADOPTED_FROM),
         visible_to_others: tag_value(tags, TAG_VISIBLE_TO_OTHERS).map(|v| v == "true"),

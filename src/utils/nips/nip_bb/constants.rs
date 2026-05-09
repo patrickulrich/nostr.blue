@@ -136,7 +136,6 @@ pub const TAG_THEME: &str = "theme";
 pub const TAG_CROSSOVER_APP: &str = "crossover_app";
 pub const TAG_MANIFESTATION: &str = "manifestation";
 pub const TAG_BLESSING: &str = "blessing";
-pub const TAG_VISUAL_EFFECT: &str = "visual_effect";
 
 pub const TAG_PERSONALITY: &str = "personality";
 pub const TAG_TRAIT: &str = "trait";
