@@ -63,6 +63,7 @@ pub mod timed_serializer;
 pub mod url_metadata;
 pub mod validation;
 pub mod video_kinds;
+pub mod route_for_kind;
 pub use data_state::DataState;
 pub use error::log_fetch_error;
 pub use format::{

@@ -14,3 +14,11 @@ pub mod xp;
 pub mod streak;
 #[allow(dead_code)]
 pub mod progression;
+#[allow(dead_code)]
+pub mod content_json;
+#[allow(dead_code)]
+pub mod tag_schema;
+#[allow(dead_code)]
+pub mod migration;
+#[allow(dead_code)]
+pub mod egg_validation;

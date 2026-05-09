@@ -1,6 +1,7 @@
 //! Topic Post Detail Page
 //! Full post + threaded replies
 use crate::components::{ThreadView, TopicPostCard, TopicPostComposer};
+use crate::hooks::use_mute_block_cache;
 use crate::stores::auth_store;
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::profiles::prefetch_profiles;
@@ -29,6 +30,7 @@ pub fn TopicPostDetail(topic: String, post_id: String) -> Element {
     let mut vote_counts = use_signal(HashMap::<String, VoteCounts>::new);
     let mut loading = use_signal(|| true);
     let has_signer = *HAS_SIGNER.read();
+    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
 
     // Fetch post and replies
     let _resource = use_resource(move || {
@@ -86,6 +88,8 @@ pub fn TopicPostDetail(topic: String, post_id: String) -> Element {
                     post: main_post.clone(),
                     vote_counts: vote_counts.read().get(&main_post.id).cloned(),
                     show_topic_badge: true,
+                    cached_muted_posts: cached_muted_posts.read().clone(),
+                    cached_blocked_users: cached_blocked_users.read().clone(),
                 }
                 if has_signer {
                     div { class: "mt-4" }
@@ -105,6 +109,8 @@ pub fn TopicPostDetail(topic: String, post_id: String) -> Element {
                     ThreadView {
                         thread: replies.read().clone(),
                         vote_counts: Rc::new(vote_counts.read().clone()),
+                        cached_muted_posts: cached_muted_posts.read().clone(),
+                        cached_blocked_users: cached_blocked_users.read().clone(),
                     }
                 }
             } else {

@@ -3,7 +3,6 @@ use dioxus::prelude::*;
 use crate::components::blobbi::actions::hatch_tasks;
 use crate::components::blobbi::actions::stage_transition;
 use crate::components::blobbi::core::types::BlobbiCompanion;
-use crate::stores::blobbi_store;
 
 #[component]
 pub fn TasksPanel(blobbi: BlobbiCompanion) -> Element {
@@ -29,23 +28,9 @@ pub fn TasksPanel(blobbi: BlobbiCompanion) -> Element {
             }
 
             if can_evolve {
-                button {
-                    class: "w-full mt-3 py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-xl font-medium transition text-sm",
-                    onclick: move |_| {
-                        let b = blobbi.clone();
-                        spawn(async move {
-                            let pubkey = crate::stores::auth_store::get_pubkey().unwrap_or_default();
-                            let updated = stage_transition::transition_stage(&b, &pubkey);
-                            match crate::components::blobbi::core::builders::publish_blobbi_state(&updated).await {
-                                Ok(()) => blobbi_store::update_blobbi_in_collection(&updated),
-                                Err(e) => log::error!("Transition failed: {}", e),
-                            }
-                        });
-                    },
-                    if blobbi.is_egg() {
-                        "🥚 Hatch Now!"
-                    } else {
-                        "✨ Evolve Now!"
+                div { class: "text-center mt-2",
+                    span { class: "text-[10px] text-green-500",
+                        if blobbi.is_egg() { "All tasks complete! Go to Hatch Now!" } else { "All tasks complete! Ready to evolve!" }
                     }
                 }
             }
@@ -54,10 +39,14 @@ pub fn TasksPanel(blobbi: BlobbiCompanion) -> Element {
 }
 
 fn render_task(def: &hatch_tasks::TaskDefinition, blobbi: &BlobbiCompanion) -> Element {
-    let task = blobbi.tasks.iter().find(|t| t.id == def.id);
     let completed = hatch_tasks::is_task_completed(blobbi, def.id);
+    let task = blobbi.tasks.iter().find(|t| t.id == def.id);
     let current = task.map(|t| t.progress).unwrap_or(0);
     let target = def.target;
+
+    let has_action = !completed && matches!(def.id, crate::utils::nip_bb::constants::TASK_FIRST_POST | crate::utils::nip_bb::constants::TASK_POST_BLOBBI_PHOTO);
+
+    let action_id = def.id.to_string();
 
     rsx! {
         div {
@@ -74,6 +63,9 @@ fn render_task(def: &hatch_tasks::TaskDefinition, blobbi: &BlobbiCompanion) -> E
                         span { class: "text-[10px] text-green-500", "\u{2713}" }
                     }
                 }
+                if !completed {
+                    p { class: "text-[10px] text-muted-foreground mt-0.5", "{def.description}" }
+                }
                 div { class: "w-full h-1.5 bg-muted rounded-full overflow-hidden mt-1",
                     div {
                         class: if completed { "h-full bg-green-500 rounded-full" } else { "h-full bg-blue-500 rounded-full" },
@@ -81,8 +73,28 @@ fn render_task(def: &hatch_tasks::TaskDefinition, blobbi: &BlobbiCompanion) -> E
                     }
                 }
             }
-            span { class: "text-[10px] text-muted-foreground",
-                "{current}/{target}"
+            div { class: "flex flex-col items-end gap-1",
+                span { class: "text-[10px] text-muted-foreground",
+                    "{current}/{target}"
+                }
+                if has_action {
+                    {
+                        let nav = navigator();
+                        rsx! {
+                            button {
+                                class: "text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 transition",
+                                onclick: move |_| {
+                                    nav.push(crate::routes::Route::NoteNew { quote: None });
+                                },
+                                if action_id == crate::utils::nip_bb::constants::TASK_FIRST_POST {
+                                    "Post"
+                                } else {
+                                    "Post Photo"
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

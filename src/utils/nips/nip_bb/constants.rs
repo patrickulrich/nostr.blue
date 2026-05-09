@@ -2,7 +2,7 @@
 use nostr_sdk::Kind;
 
 pub const KIND_BLOBBI_STATE: u16 = 31124;
-pub const KIND_BLOBBONAUT_PROFILE: u16 = 31125;
+pub const KIND_BLOBBONAUT_PROFILE: u16 = 11125;
 pub const KIND_BLOBBI_INTERACTION: u16 = 14919;
 #[allow(dead_code)]
 pub const KIND_BLOBBI_BREEDING: u16 = 14920;
@@ -13,18 +13,15 @@ pub const BLOBBI_ECOSYSTEM_TAG: &str = "blobbi:ecosystem:v1";
 pub const BLOBBI_TOPIC_TAG: &str = "blobbi";
 pub const CLIENT_TAG: &str = "nostr.blue";
 
-pub const STAT_MIN: f64 = 0.0;
+pub const STAT_MIN: f64 = 1.0;
 pub const STAT_MAX: f64 = 100.0;
 pub const STAT_DEFAULT: f64 = 80.0;
 
-pub const INITIAL_BLOBBONAUT_COINS: u64 = 500;
+pub const INITIAL_BLOBBONAUT_COINS: u64 = 200;
 pub const ADOPTION_FEE: u64 = 100;
 
 pub const DIVINE_EGG_CHANCE: f64 = 0.40;
 pub const DIVINE_PRIMARY_GREEN: &str = "#55C4A2";
-
-pub const MIN_ACTIONS_PER_DAY: u32 = 3;
-pub const CARE_STREAK_GRACE_HOURS: u64 = 36;
 
 pub const HATCH_MIN_DAYS: u64 = 7;
 pub const HATCH_MIN_EXPERIENCE: u64 = 40;
@@ -33,7 +30,7 @@ pub const HATCH_MIN_CARE_DAYS: u64 = 4;
 
 pub const EVOLVE_MIN_DAYS: u64 = 10;
 pub const EVOLVE_MIN_EXPERIENCE: u64 = 150;
-pub const EVOLVE_MIN_INTERACTIONS: u64 = 50;
+pub const EVOLVE_MIN_INTERACTIONS: u64 = 21;
 pub const EVOLVE_MIN_HAPPINESS: f64 = 70.0;
 pub const EVOLVE_MIN_HEALTH: f64 = 80.0;
 
@@ -48,6 +45,8 @@ pub const STAGE_ADULT: &str = "adult";
 pub const STATE_ACTIVE: &str = "active";
 pub const STATE_SLEEPING: &str = "sleeping";
 pub const STATE_HIBERNATING: &str = "hibernating";
+pub const STATE_INCUBATING: &str = "incubating";
+pub const STATE_EVOLVING: &str = "evolving";
 pub const TAG_ORIGIN: &str = "origin";
 
 pub fn blobbi_state_kind() -> Kind {
@@ -73,6 +72,13 @@ pub fn blobbi_record_kind() -> Kind {
 pub fn profile_d_tag(pubkey_hex: &str) -> String {
     let prefix = &pubkey_hex[..12.min(pubkey_hex.len())];
     format!("blobbonaut-{}", prefix)
+}
+
+pub fn generate_blobbi_pet_id() -> String {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    let bytes: [u8; 5] = rng.gen();
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 pub fn blobbi_d_tag(pubkey_hex: &str, pet_id: &str) -> String {
@@ -130,7 +136,6 @@ pub const TAG_THEME: &str = "theme";
 pub const TAG_CROSSOVER_APP: &str = "crossover_app";
 pub const TAG_MANIFESTATION: &str = "manifestation";
 pub const TAG_BLESSING: &str = "blessing";
-pub const TAG_VISUAL_EFFECT: &str = "visual_effect";
 
 pub const TAG_PERSONALITY: &str = "personality";
 pub const TAG_TRAIT: &str = "trait";
@@ -187,10 +192,16 @@ pub const TAG_ACHIEVEMENTS: &str = "achievements";
 pub const TAG_STYLE: &str = "style";
 pub const TAG_BACKGROUND: &str = "background";
 
+pub const TAG_STATE_STARTED_AT: &str = "state_started_at";
+pub const TAG_TASK_COMPLETED: &str = "task_completed";
+pub const TAG_CARE_STREAK_LAST_AT: &str = "care_streak_last_at";
+pub const TAG_CARE_STREAK_LAST_DAY: &str = "care_streak_last_day";
+pub const TAG_LEVEL: &str = "level";
+
 pub const TASK_FIRST_POST: &str = "first_post";
 pub const TASK_POST_BLOBBI_PHOTO: &str = "post_blobbi_photo";
-pub const TASK_INTERACT_6: &str = "interact_6";
-pub const TASK_SHELL_INTEGRITY_ABOVE_50: &str = "shell_integrity_above_50";
+pub const TASK_INTERACT_7: &str = "interact_7";
+pub const TASK_SHARE_YOUR_EGG: &str = "share_your_egg";
 
 pub const QUEST_PUBLISH_5_POSTS: &str = "publish_5_posts";
 pub const QUEST_SHARE_SONG: &str = "share_song";
@@ -201,6 +212,11 @@ pub const QUEST_FOLLOW_5_USERS: &str = "follow_5_users";
 pub const QUEST_REACT_TO_5_POSTS: &str = "react_to_5_posts";
 pub const QUEST_REPOST_3_POSTS: &str = "repost_3_posts";
 pub const QUEST_REACT_OR_REPOST_BLOBBI: &str = "react_or_repost_blobbi";
+pub const QUEST_MAINTAIN_STATS: &str = "maintain_stats";
+pub const QUEST_EDIT_PROFILE: &str = "edit_profile";
+
+pub const EVOLVE_REQUIRED_INTERACTIONS: u32 = 21;
+pub const EVOLVE_STAT_THRESHOLD: f64 = 80.0;
 
 pub const DEFAULT_BASE_COLORS: &[&str] = &[
     "#ffffff", "#f2f2f2", "#e6e6ff", "#99ccff", "#ccffcc", "#ffffcc", "#cc99ff", "#ffb3cc",
@@ -247,7 +263,7 @@ pub const TITLES: &[&str] = &[
     "The Primordial",
 ];
 
-pub const CARE_ACTIONS: &[&str] = &["feed", "play", "clean", "medicine"];
+pub const CARE_ACTIONS: &[&str] = &["feed", "play", "clean", "medicine", "use_item", "rest", "sing", "play_music"];
 
 pub fn is_care_action(action: &str) -> bool {
     CARE_ACTIONS.contains(&action)

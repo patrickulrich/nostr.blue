@@ -1,7 +1,7 @@
 use crate::components::{
     icons::*, ArticleContent, ClientInitializing, ReplyComposer, ShareModal, ThreadedComment,
 };
-use crate::hooks::use_relay_subscription;
+use crate::hooks::{use_mute_block_cache, use_relay_subscription};
 use crate::routes::Route;
 use crate::stores::bookmarks;
 use crate::stores::nostr_client;
@@ -27,6 +27,7 @@ pub fn ArticleDetail(naddr: String) -> Element {
     let mut is_liked = use_signal(|| false);
     let mut like_count = use_signal(|| 0usize);
     let has_signer = *nostr_client::HAS_SIGNER.read();
+    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
     use_effect(move || {
         let naddr_str = naddr.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -37,7 +38,7 @@ pub fn ArticleDetail(naddr: String) -> Element {
         spawn(async move {
             loading.set(true);
             error.set(None);
-            match decode_naddr(&naddr_str) {
+            match crate::utils::nip19::parse_naddr(&naddr_str) {
                 Ok((pubkey, identifier)) => {
                     crate::stores::profiles::PROFILE_CACHE.write().pop(&pubkey);
                     match nostr_client::fetch_event_by_coordinate(
@@ -394,6 +395,8 @@ pub fn ArticleDetail(naddr: String) -> Element {
                                                             key: "{node.event.id}",
                                                             node: node.clone(),
                                                             depth: 0,
+                                                            cached_muted_posts: cached_muted_posts.read().clone(),
+                                                            cached_blocked_users: cached_blocked_users.read().clone(),
                                                             on_reply: move |reply_event: NostrEvent| {
                                                                 // Add the reply optimistically
                                                                 // nostr-sdk excludes self-published events from RelayPoolNotification::Event
@@ -442,24 +445,4 @@ pub fn ArticleDetail(naddr: String) -> Element {
         }
     }
 }
-/// Decode naddr to extract pubkey and identifier
-fn decode_naddr(naddr: &str) -> std::result::Result<(String, String), String> {
-    use nostr::nips::nip19::{FromBech32, Nip19Coordinate};
-    match Nip19Coordinate::from_bech32(naddr) {
-        Ok(nip19_coord) => {
-            let pubkey = nip19_coord.public_key.to_hex();
-            let identifier = nip19_coord.identifier.clone();
-            if !nip19_coord.relays.is_empty() {
-                log::debug!(
-                    "Article naddr contains {} relay hints",
-                    nip19_coord.relays.len()
-                );
-                for relay in &nip19_coord.relays {
-                    log::debug!("  Relay hint: {}", relay);
-                }
-            }
-            Ok((pubkey, identifier))
-        }
-        Err(e) => Err(format!("Invalid naddr format: {}", e)),
-    }
-}
+

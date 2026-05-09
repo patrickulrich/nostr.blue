@@ -588,6 +588,34 @@ const methods = {
   /**
    * Read file content at a given ref
    */
+  async readFileBytes({ dir, ref = 'HEAD', filepath }) {
+    dir = validateRepoDir(dir);
+
+    if (typeof filepath !== 'string') throw new Error('Invalid filepath type: ' + typeof filepath);
+    if (filepath.split('').some(c => { const code = c.charCodeAt(0); return code <= 0x1F || code === 0x7F; })) {
+      throw new Error(`Filepath contains control characters: ${sanitizeFilepath(filepath)}`);
+    }
+
+    let commitOid;
+    try {
+      commitOid = await git.resolveRef({ fs, dir, ref });
+    } catch (e) {
+      throw new Error(`Could not resolve ref '${ref}': ${e.message}`);
+    }
+
+    try {
+      const { blob } = await git.readBlob({
+        fs,
+        dir,
+        oid: commitOid,
+        filepath: sanitizeFilepath(filepath),
+      });
+      return Array.from(new Uint8Array(blob));
+    } catch (e) {
+      throw new Error(`Could not read file bytes '${sanitizeFilepath(filepath)}': ${e.message}`);
+    }
+  },
+
   async readFile({ dir, ref = 'HEAD', filepath }) {
     // Validate and normalize directory path to prevent path traversal attacks
     dir = validateRepoDir(dir);

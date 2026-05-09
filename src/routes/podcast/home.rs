@@ -1667,7 +1667,12 @@ fn RecentEpisodesMerged(props: RecentEpisodesMergedProps) -> Element {
                 rss_loading.set(false);
                 return;
             }
-            if !client_initialized || !has_signer {
+            if !client_initialized {
+                return;
+            }
+            if !has_signer {
+                rss_episodes.set(Some(Vec::new()));
+                rss_loading.set(false);
                 return;
             }
             rss_loading.set(true);
@@ -1868,6 +1873,12 @@ fn SubscribedFeedCard(props: SubscribedFeedCardProps) -> Element {
     let podcast_id = props.podcast_id.clone();
     use_effect(move || {
         let id_str = podcast_id.clone();
+        let has_signer = nostr_client::has_signer();
+        if !has_signer {
+            podcast_info.set(Some(("🔐 Sign in to load podcast".to_string(), None, None)));
+            is_loading.set(false);
+            return;
+        }
         spawn(async move {
             if let Ok(id) = id_str.parse::<u64>() {
                 match podcast_index::get_podcast_by_id(id).await {

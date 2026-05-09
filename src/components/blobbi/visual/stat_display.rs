@@ -26,6 +26,7 @@ pub fn StatDisplay(stats: BlobbiStats, compact: bool) -> Element {
     }
 }
 
+#[allow(dead_code)]
 fn render_stat_arc(
     label: &str,
     value: f64,

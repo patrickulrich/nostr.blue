@@ -179,6 +179,7 @@ fn format_event_type(t: &QueueEventType) -> String {
         QueueEventType::Poll => "Poll".to_string(),
         QueueEventType::Bookmark => "Bookmark".to_string(),
         QueueEventType::GitHosting => "Git".to_string(),
+        QueueEventType::Nsite => "Static Pages".to_string(),
         QueueEventType::RelayList => "Relay List".to_string(),
         QueueEventType::Other(s) => s.clone(),
     }

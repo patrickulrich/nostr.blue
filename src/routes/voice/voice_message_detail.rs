@@ -188,7 +188,7 @@ pub fn VoiceMessageDetail(voice_id: String) -> Element {
                                                     }
                                                 } else {
                                                     rsx! {
-                                                        ThreadedComment { key: "{node.event.id}", node: node.clone(), depth: 0 }
+            ThreadedComment { key: "{node.event.id}", node: node.clone(), depth: 0 }
                                                     }
                                                 }
                                             }

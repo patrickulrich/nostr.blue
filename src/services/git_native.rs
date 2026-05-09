@@ -52,6 +52,23 @@ pub fn list_files(repo_path: &str, path: &str, git_ref: &str) -> Result<Vec<File
     Ok(entries)
 }
 
+/// Read a file's raw bytes from the repository (binary-safe).
+pub fn read_file_bytes(repo_path: &str, filepath: &str, git_ref: &str) -> Result<Vec<u8>, String> {
+    let repo = Repository::open(repo_path).map_err(|e| e.to_string())?;
+    let obj = repo.revparse_single(git_ref).map_err(|e| e.to_string())?;
+    let commit = obj.peel_to_commit().map_err(|e| e.to_string())?;
+    let tree = commit.tree().map_err(|e| e.to_string())?;
+    let entry = tree
+        .get_path(Path::new(filepath))
+        .map_err(|e| e.to_string())?;
+    let blob = entry
+        .to_object(&repo)
+        .map_err(|e| e.to_string())?
+        .peel_to_blob()
+        .map_err(|e| e.to_string())?;
+    Ok(blob.content().to_vec())
+}
+
 /// Read a file's content from the repository.
 pub fn read_file(repo_path: &str, filepath: &str, git_ref: &str) -> Result<String, String> {
     let repo = Repository::open(repo_path).map_err(|e| e.to_string())?;

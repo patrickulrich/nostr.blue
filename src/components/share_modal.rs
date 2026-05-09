@@ -158,28 +158,15 @@ pub fn ShareModal(
         })
         .next()
         .unwrap_or_default();
-    use nostr_sdk::{Kind, ToBech32};
-    let is_recipe = event.tags.hashtags().any(|tag| tag == "nostrcooking");
-    let is_article = event.kind == Kind::LongFormTextNote && !is_recipe;
+    use nostr_sdk::ToBech32;
+    let content_label = crate::utils::route_for_kind::content_label_for_event(&event);
+    #[allow(unused_variables)]
+    let share_title = format!("Share {}", content_label);
+    let share_description = format!("Post about this {}", content_label.to_lowercase());
     let content_url = if let Some(url) = web_url.clone() {
         url
-    } else if event.kind.is_addressable() {
-        if let Some(coord) = event.coordinate() {
-            match coord.to_bech32() {
-                Ok(naddr) => {
-                    if is_recipe {
-                        format!("https://nostr.blue/recipes/{}", naddr)
-                    } else {
-                        format!("https://nostr.blue/articles/{}", naddr)
-                    }
-                }
-                Err(_) => format!("https://nostr.blue/articles/{}", event.id.to_hex()),
-            }
-        } else {
-            format!("https://nostr.blue/articles/{}", event.id.to_hex())
-        }
     } else {
-        format!("https://nostr.blue/videos/{}", event.id.to_hex())
+        crate::utils::route_for_kind::share_url_for_event(&event)
     };
     let content_nip19 = use_signal(String::new);
     {
@@ -273,8 +260,7 @@ pub fn ShareModal(
     };
     let handle_send_dm = {
         let content_url_dm = content_url.clone();
-        let is_recipe_dm = is_recipe;
-        let is_article_dm = is_article;
+        let content_label_dm = content_label;
         move |_| {
             let manual_recipient = dm_recipient.read().trim().to_string();
             if manual_recipient.is_empty() {
@@ -282,8 +268,7 @@ pub fn ShareModal(
             }
             is_publishing.set(true);
             let content_url_clone = content_url_dm.clone();
-            let is_recipe_clone = is_recipe_dm;
-            let is_article_clone = is_article_dm;
+            let content_label_clone = content_label_dm;
             spawn(async move {
                 let recipient_hex = if let Ok(pubkey) = PublicKey::from_bech32(&manual_recipient) {
                     pubkey.to_hex()
@@ -298,13 +283,7 @@ pub fn ShareModal(
                     is_publishing.set(false);
                     return;
                 };
-                let content_type = if is_recipe_clone {
-                    "recipe"
-                } else if is_article_clone {
-                    "article"
-                } else {
-                    "video"
-                };
+                let content_type = content_label_clone.to_lowercase();
                 let message = format!(
                     "Check out this {} on nostr.blue: {}",
                     content_type, content_url_clone,
@@ -368,13 +347,7 @@ pub fn ShareModal(
                             id: "{title_id}",
                             match *share_mode.read() {
                                 ShareMode::Main => {
-                                    if is_recipe {
-                                        "Share Recipe"
-                                    } else if is_article {
-                                        "Share Article"
-                                    } else {
-                                        "Share Video"
-                                    }
+                                    "{share_title}"
                                 }
                                 ShareMode::Nostr => "Share to Nostr",
                                 ShareMode::Dm => "Send via DM",
@@ -393,24 +366,12 @@ pub fn ShareModal(
                             class: "bg-accent rounded-lg p-4 flex items-center gap-3",
                             id: "{desc_id}",
                             div { class: "w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center shrink-0",
-                                if is_recipe {
-                                    span { class: "text-2xl", "🍳" }
-                                } else if is_article {
-                                    HashIcon { class: "w-6 h-6 text-white" }
-                                } else {
-                                    FileVideoIcon { class: "w-6 h-6 text-white" }
-                                }
+                                FileVideoIcon { class: "w-6 h-6 text-white" }
                             }
                             div { class: "flex-1 min-w-0",
                                 p { class: "font-medium truncate", "{content_title}" }
                                 p { class: "text-sm text-muted-foreground",
-                                    if is_recipe {
-                                        "nostr.blue Recipe"
-                                    } else if is_article {
-                                        "nostr.blue Article"
-                                    } else {
-                                        "nostr.blue Video"
-                                    }
+                                    "nostr.blue {content_label}"
                                 }
                             }
                         }
@@ -446,13 +407,7 @@ pub fn ShareModal(
                                     p { class: "font-medium", "Share to Nostr" }
                                     p { class: "text-xs text-muted-foreground",
                                         if has_signer {
-                                            if is_recipe {
-                                                "Post about this recipe"
-                                            } else if is_article {
-                                                "Post about this article"
-                                            } else {
-                                                "Post about this video"
-                                            }
+                                            "{share_description}"
                                         } else {
                                             "Login required"
                                         }
@@ -538,7 +493,7 @@ pub fn ShareModal(
                                     Link2Icon { class: "w-3 h-3" }
                                     "nostr.blue Link"
                                 }
-                                if !is_article && !video_mp4_url.is_empty() {
+                                if !video_mp4_url.is_empty() {
                                     button {
                                         class: "px-3 py-1.5 text-sm border border-border rounded-md hover:bg-accent transition flex items-center gap-1",
                                         onclick: move |_| {

@@ -77,7 +77,7 @@ pub use composer_body::ComposerBody;
 pub use confirm_modal::ConfirmModal;
 #[allow(unused_imports)]
 pub use live::{
-    ChannelChat, LiveChat, LiveStreamPlayer, LiveStreamShareModal, MiniLiveStreamCard, StreamStatus,
+    ChannelChat, LiveChat, LiveStreamPlayer, MiniLiveStreamCard, StreamStatus,
 };
 pub use media::MediaLightbox;
 pub use media_uploader::MediaUploader;

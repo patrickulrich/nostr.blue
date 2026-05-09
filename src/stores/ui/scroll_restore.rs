@@ -9,19 +9,28 @@ pub struct ScrollAnchor {
 
 pub static HOME_SCROLL_ANCHOR: GlobalSignal<ScrollAnchor> = Signal::global(ScrollAnchor::default);
 
-#[allow(dead_code)]
-pub async fn restore_scroll_position(current_feed_type_label: &str) -> bool {
-    let anchor = HOME_SCROLL_ANCHOR.read();
-    if !anchor.is_set || anchor.feed_type_label != current_feed_type_label {
-        return false;
-    }
-    let scroll_y = anchor.scroll_y;
-    drop(anchor);
-    crate::platform::timer::sleep_ms(100).await;
-    set_scroll_y(scroll_y).await;
-    HOME_SCROLL_ANCHOR.write().is_set = false;
-    log::debug!("Restored scroll position: y={}", scroll_y);
-    true
+pub async fn setup_popstate_flag() {
+    let _ = document::eval(r#"
+        if (!window.__nostrBluePopstateReady) {
+            window.__nostrBlueWasPopstate = false;
+            window.addEventListener("popstate", () => {
+                window.__nostrBlueWasPopstate = true;
+            });
+            window.__nostrBluePopstateReady = true;
+        }
+    "#).await;
+}
+
+pub async fn was_popstate_nav() -> bool {
+    document::eval("return window.__nostrBlueWasPopstate === true")
+        .await
+        .ok()
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+pub async fn clear_popstate_flag() {
+    let _ = document::eval("window.__nostrBlueWasPopstate = false").await;
 }
 
 pub async fn get_scroll_y() -> f64 {

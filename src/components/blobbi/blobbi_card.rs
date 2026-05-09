@@ -47,7 +47,7 @@ pub fn BlobbiCard(event: Event) -> Element {
             div { class: "p-4",
                 div { class: "flex items-center gap-3",
                     div { class: "shrink-0",
-                        BlobbiVisual { blobbi: blobbi.clone(), size: Some("80".to_string()) }
+                        BlobbiVisual { blobbi: blobbi.clone(), size: Some("80".to_string()), feed_mode: Some(true) }
                     }
                     div { class: "flex-1 min-w-0",
                         div { class: "flex items-center gap-2",

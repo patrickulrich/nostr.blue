@@ -8,7 +8,6 @@ use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, notifications as notif_store, profiles};
 use crate::utils::bolt11::parse_bolt11_amount;
 use dioxus::prelude::*;
-use nostr_sdk::ToBech32;
 use nostr_sdk::{Event as NostrEvent, Filter, Kind, TagStandard, Timestamp};
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -66,46 +65,8 @@ struct DailySummary {
     zap_sats: u64,
 }
 
-fn route_for_event(event: &NostrEvent, event_id_hex: &str) -> Route {
-    match event.kind.as_u16() {
-        20 => Route::PhotoDetail {
-            photo_id: event_id_hex.to_string(),
-        },
-        21 | 22 => Route::VideoDetail {
-            video_id: event_id_hex.to_string(),
-        },
-        1040 => Route::VoiceMessageDetail {
-            voice_id: event_id_hex.to_string(),
-        },
-        1068 => Route::PollView {
-            noteid: event_id_hex.to_string(),
-        },
-        1621 => Route::CodeIssueDetail {
-            note_id: event_id_hex.to_string(),
-        },
-        1622 => Route::CodePullDetail {
-            note_id: event_id_hex.to_string(),
-        },
-        _ => {
-            if event.kind.is_addressable() {
-                if let Some(coord) = event.coordinate() {
-                    if let Ok(naddr) = coord.to_bech32() {
-                        return match event.kind.as_u16() {
-                            30023 => Route::ArticleDetail { naddr },
-                            _ => Route::Note {
-                                note_id: event_id_hex.to_string(),
-                                from_voice: None,
-                            },
-                        };
-                    }
-                }
-            }
-            Route::Note {
-                note_id: event_id_hex.to_string(),
-                from_voice: None,
-            }
-        }
-    }
+fn route_for_event(event: &NostrEvent) -> Route {
+    crate::utils::route_for_kind::route_for_event(event)
 }
 
 #[component]
@@ -750,7 +711,7 @@ fn ReactionNotification(
     let post_route = reacted_post
         .read()
         .as_ref()
-        .map(|p| route_for_event(p, validated_reacted_eid.as_deref().unwrap_or("")));
+        .map(route_for_event);
     rsx! {
         div { class: "p-4 hover:bg-accent/50 transition",
             div { class: "flex items-center gap-3 mb-2",
@@ -910,7 +871,7 @@ fn RepostNotification(
     let post_route = reposted_post
         .read()
         .as_ref()
-        .map(|p| route_for_event(p, validated_reposted_eid.as_deref().unwrap_or("")));
+        .map(route_for_event);
     rsx! {
         div { class: "p-4 hover:bg-accent/50 transition",
             div { class: "flex items-center gap-3 mb-2",
@@ -1064,7 +1025,7 @@ fn ZapNotification(
     let post_route = zapped_post
         .read()
         .as_ref()
-        .map(|p| route_for_event(p, validated_zapped_eid.as_deref().unwrap_or("")));
+        .map(route_for_event);
     rsx! {
         div { class: "p-4 hover:bg-accent/50 transition",
             div { class: "flex items-center gap-3 mb-2",
@@ -1220,7 +1181,7 @@ fn QuoteNotification(
     let post_route = quoted_post
         .read()
         .as_ref()
-        .map(|p| route_for_event(p, validated_quoted_eid.as_deref().unwrap_or("")));
+        .map(route_for_event);
     rsx! {
         div { class: "p-4 hover:bg-accent/50 transition",
             div { class: "flex items-center gap-3 mb-2",

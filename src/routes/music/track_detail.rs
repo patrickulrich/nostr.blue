@@ -12,10 +12,20 @@
 //! - RSS Music tracks (rss:{feed_id}:{episode_id} format)
 
 use crate::components::{icons, ContentShareModal, ContentType};
+use crate::routes::podcast::podcast_shared_states::PodcastApiAuthRequiredState;
 use crate::routes::Route;
 use crate::services::{podcast_index, wavlake::WavlakeAPI};
 use crate::stores::{music_player, music_player::MusicPlayerStateStoreExt, nostr_client, nostr_music, profiles};
 use dioxus::prelude::*;
+
+const AUTH_REQUIRED_SENTINEL: &str = "__auth_required__";
+
+enum TrackDetailState {
+    Loading,
+    Loaded(Box<music_player::MusicTrack>),
+    AuthRequired,
+    Error(String),
+}
 
 /// Detail page for a music track (supports Wavlake, Nostr, and RSS sources)
 #[component]
@@ -23,28 +33,42 @@ pub fn MusicTrackDetail(track_id: ReadSignal<String>) -> Element {
     let track_data = use_resource(move || {
         let id = track_id();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        let has_signer = nostr_client::has_signer();
         async move {
             if !client_initialized && id.starts_with("naddr") {
                 return Err("Waiting for client initialization...".to_string());
+            }
+            if id.starts_with("rss:") && !has_signer {
+                return Err(AUTH_REQUIRED_SENTINEL.to_string());
             }
             fetch_track(&id).await
         }
     });
 
+    let state = match &*track_data.read() {
+        None => TrackDetailState::Loading,
+        Some(Ok(track)) => TrackDetailState::Loaded(Box::new(track.clone())),
+        Some(Err(e)) if e == AUTH_REQUIRED_SENTINEL => TrackDetailState::AuthRequired,
+        Some(Err(e)) => TrackDetailState::Error(e.clone()),
+    };
+
     rsx! {
         div { class: "min-h-screen",
             TrackDetailHeader {}
-            match &*track_data.read() {
-                Some(Ok(track)) => rsx! {
-                    TrackDetailContent { track: track.clone() }
+            match state {
+                TrackDetailState::Loaded(track) => rsx! {
+                    TrackDetailContent { track: *track }
                 },
-                Some(Err(e)) => rsx! {
+                TrackDetailState::AuthRequired => rsx! {
+                    PodcastApiAuthRequiredState { item_label: "track" }
+                },
+                TrackDetailState::Error(e) => rsx! {
                     div { class: "p-4 text-center",
                         div { class: "text-destructive mb-2", "Failed to load track" }
                         div { class: "text-sm text-muted-foreground", "{e}" }
                     }
                 },
-                None => rsx! {
+                TrackDetailState::Loading => rsx! {
                     TrackDetailSkeleton {}
                 },
             }
@@ -387,10 +411,10 @@ fn TrackDetailSkeleton() -> Element {
 }
 
 /// Fetch track by ID (handles Wavlake, Nostr, and RSS sources)
-async fn fetch_track(id: &str) -> Result<music_player::MusicTrack, String> {
+pub(crate) async fn fetch_track(id: &str) -> Result<music_player::MusicTrack, String> {
     if id.starts_with("naddr1") {
         // Nostr track (kind 36787)
-        let (pubkey, d_tag) = parse_naddr(id)?;
+        let (pubkey, d_tag) = crate::utils::nip19::parse_naddr(id)?;
         let nostr_track = nostr_music::fetch_nostr_track_by_coordinate(&pubkey, &d_tag)
             .await?
             .ok_or("Track not found")?;
@@ -430,22 +454,6 @@ async fn fetch_track(id: &str) -> Result<music_player::MusicTrack, String> {
         let api = WavlakeAPI::new();
         let track = api.get_track(id).await?;
         Ok(track.into())
-    }
-}
-
-/// Parse naddr into pubkey and d-tag
-fn parse_naddr(naddr: &str) -> Result<(String, String), String> {
-    use nostr::prelude::*;
-
-    let nip19 = Nip19::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
-
-    match nip19 {
-        Nip19::Coordinate(coord) => {
-            let pubkey = coord.coordinate.public_key.to_hex();
-            let d_tag = coord.coordinate.identifier;
-            Ok((pubkey, d_tag))
-        }
-        _ => Err("Expected naddr coordinate".to_string()),
     }
 }
 

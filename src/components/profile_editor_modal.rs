@@ -32,6 +32,7 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
     let mut github_proof = use_signal(String::new);
     let mut twitter_proof = use_signal(String::new);
     let mut mastodon_proof = use_signal(String::new);
+    let mut original_identities = use_signal(Vec::<Identity>::new);
     use_effect(use_reactive(&*props.show.read(), move |is_shown| {
         if is_shown {
             modal_session.with_mut(|s| *s = s.wrapping_add(1));
@@ -70,14 +71,34 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
                         if *modal_session.read() != session {
                             return;
                         }
+                        let mut parsed_originals: Vec<Identity> = Vec::new();
                         for info in &identities {
                             match info.platform.as_str() {
-                                "github" => github_proof.set(info.proof_url()),
-                                "twitter" => twitter_proof.set(info.proof_url()),
-                                "mastodon" => mastodon_proof.set(info.proof_url()),
+                                "github" => {
+                                    let url = info.proof_url();
+                                    github_proof.set(url.clone());
+                                    if let Some(id) = nip39::parse_github_proof_url(&url) {
+                                        parsed_originals.push(id);
+                                    }
+                                }
+                                "twitter" => {
+                                    let url = info.proof_url();
+                                    twitter_proof.set(url.clone());
+                                    if let Some(id) = nip39::parse_twitter_proof_url(&url) {
+                                        parsed_originals.push(id);
+                                    }
+                                }
+                                "mastodon" => {
+                                    let url = info.proof_url();
+                                    mastodon_proof.set(url.clone());
+                                    if let Some(id) = nip39::parse_mastodon_proof_url(&url) {
+                                        parsed_originals.push(id);
+                                    }
+                                }
                                 _ => {}
                             }
                         }
+                        original_identities.set(parsed_originals);
                     }
                 }
             });
@@ -162,10 +183,16 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
                             }
                         }
                     }
-                    if let Err(e) =
-                        nip39::publish_external_identities(identities_to_publish).await
-                    {
-                        identity_errors.push(e);
+                    let mut current_sorted = identities_to_publish.clone();
+                    current_sorted.sort();
+                    let mut original_sorted = original_identities.read().clone();
+                    original_sorted.sort();
+                    if current_sorted != original_sorted {
+                        if let Err(e) =
+                            nip39::publish_external_identities(identities_to_publish).await
+                        {
+                            identity_errors.push(e);
+                        }
                     }
                     if identity_errors.is_empty() {
                         success.set(true);

@@ -1,53 +1,37 @@
-#[allow(unused)]
 use crate::components::blobbi::actions::hatch_tasks;
 use crate::components::blobbi::core::types::BlobbiCompanion;
 use crate::utils::nip_bb::constants::*;
 use crate::utils::nip_bb::BlobbiStage;
 
 pub fn today_day_string() -> String {
-    let now = chrono::Utc::now();
-    now.format("%Y-%m-%d").to_string()
+    chrono::Local::now().format("%Y-%m-%d").to_string()
+}
+
+fn days_between(day_a: &str, day_b: &str) -> Option<u32> {
+    let a = chrono::NaiveDate::parse_from_str(day_a, "%Y-%m-%d").ok()?;
+    let b = chrono::NaiveDate::parse_from_str(day_b, "%Y-%m-%d").ok()?;
+    Some(b.signed_duration_since(a).num_days() as u32)
 }
 
 pub fn compute_streak(
     current_streak: u32,
     last_care_day_str: Option<&str>,
     today_str: &str,
-    actions_today: u32,
-) -> (u32, String) {
-    if actions_today < MIN_ACTIONS_PER_DAY {
-        return (
-            current_streak,
-            last_care_day_str.unwrap_or(today_str).to_string(),
-        );
+) -> (u32, String, bool) {
+    let last = last_care_day_str.unwrap_or("");
+
+    if last.is_empty() || current_streak == 0 {
+        return (1, today_str.to_string(), true);
     }
 
-    let new_streak = match last_care_day_str {
-        Some(last) => {
-            if last == today_str {
-                current_streak
-            } else if is_within_grace(last, today_str) {
-                current_streak.saturating_add(1)
-            } else {
-                1
-            }
-        }
-        None => 1,
-    };
+    if last == today_str {
+        return (current_streak, today_str.to_string(), false);
+    }
 
-    (new_streak, today_str.to_string())
-}
-
-fn is_within_grace(last_day: &str, today_str: &str) -> bool {
-    let last = chrono::NaiveDate::parse_from_str(last_day, "%Y-%m-%d");
-    let today = chrono::NaiveDate::parse_from_str(today_str, "%Y-%m-%d");
-
-    match (last, today) {
-        (Ok(l), Ok(t)) => {
-            let diff = t.signed_duration_since(l).num_hours();
-            diff > 0 && diff <= CARE_STREAK_GRACE_HOURS as i64
-        }
-        _ => false,
+    match days_between(last, today_str) {
+        Some(1) => (current_streak.saturating_add(1), today_str.to_string(), true),
+        Some(_) => (1, today_str.to_string(), true),
+        None => (1, today_str.to_string(), true),
     }
 }
 
@@ -57,11 +41,13 @@ pub fn record_care_action(blobbi: &mut BlobbiCompanion, action: &str) {
     }
 
     let today = today_day_string();
-    let _last_day = blobbi.last_interaction.map(|_| today_day_string());
+    let last_day = blobbi.care_streak_last_day.as_deref();
 
-    let (new_streak, _) = compute_streak(blobbi.care_streak, None, &today, 1);
+    let (new_streak, new_day, _was_updated) = compute_streak(blobbi.care_streak, last_day, &today);
 
     blobbi.care_streak = new_streak;
+    blobbi.care_streak_last_day = Some(new_day);
+    blobbi.care_streak_last_at = Some(nostr_sdk::Timestamp::now().as_secs());
     blobbi.last_interaction = Some(nostr_sdk::Timestamp::now().as_secs());
 }
 
@@ -166,12 +152,12 @@ pub fn check_evolve_readiness(blobbi: &BlobbiCompanion) -> EvolveReadiness {
 
     let days_ok = days_passed >= EVOLVE_MIN_DAYS;
     let xp_ok = xp >= EVOLVE_MIN_EXPERIENCE;
-    let _interactions_ok = tasks_done as u64 >= EVOLVE_MIN_INTERACTIONS;
+    let interactions_ok = tasks_done as u64 >= EVOLVE_MIN_INTERACTIONS;
     let happiness_ok = happiness >= EVOLVE_MIN_HAPPINESS;
     let health_ok = health >= EVOLVE_MIN_HEALTH;
     let quests_ok = hatch_tasks::all_tasks_completed(blobbi);
 
-    let ready = days_ok && xp_ok && happiness_ok && health_ok && quests_ok;
+    let ready = days_ok && xp_ok && interactions_ok && happiness_ok && health_ok && quests_ok;
 
     EvolveReadiness {
         ready,

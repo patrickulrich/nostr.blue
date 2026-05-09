@@ -125,6 +125,46 @@ pub async fn fetch_file(
     }
     Err("Failed to fetch file from any source".to_string())
 }
+
+/// Fetch file content as raw bytes from a repository (binary-safe)
+pub async fn fetch_file_bytes(
+    repo: &Repository,
+    path: &str,
+    git_ref: Option<&str>,
+) -> Result<Vec<u8>, String> {
+    let refs_to_try: Vec<&str> = match git_ref {
+        Some(r) => vec![r],
+        None => vec!["main", "master"],
+    };
+    for ref_name in refs_to_try {
+        for url in &repo.clone {
+            if url.contains("github.com") {
+                if let Some((owner, repo_name)) = parse_github_url(url) {
+                    match fetch_github_file_bytes(&owner, &repo_name, path, ref_name).await {
+                        Ok(content) => return Ok(content),
+                        Err(_) => continue,
+                    }
+                }
+            } else if url.contains("gitlab.com") {
+                if let Some((owner, repo_name)) = parse_gitlab_url(url) {
+                    match fetch_gitlab_file_bytes(&owner, &repo_name, path, ref_name).await {
+                        Ok(content) => return Ok(content),
+                        Err(_) => continue,
+                    }
+                }
+            } else if url.contains("codeberg.org") {
+                if let Some((owner, repo_name)) = parse_codeberg_url(url) {
+                    match fetch_codeberg_file_bytes(&owner, &repo_name, path, ref_name).await {
+                        Ok(content) => return Ok(content),
+                        Err(_) => continue,
+                    }
+                }
+            }
+        }
+    }
+    Err("Failed to fetch file bytes from any source".to_string())
+}
+
 /// Fetch directory listing from a repository
 pub async fn fetch_directory(
     repo: &Repository,
@@ -359,6 +399,94 @@ async fn fetch_codeberg_file(
     response
         .text()
         .await
+        .map_err(|e| format!("Read error: {}", e))
+}
+async fn fetch_github_file_bytes(
+    owner: &str,
+    repo: &str,
+    path: &str,
+    git_ref: &str,
+) -> Result<Vec<u8>, String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/contents/{}?ref={}",
+        owner, repo, path, git_ref,
+    );
+    let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(&url)
+        .header("Accept", "application/vnd.github.v3+json")
+        .header("User-Agent", "nostr-blue")
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    if !response.status().is_success() {
+        return Err(format!("GitHub API error: {}", response.status()));
+    }
+    let content: GitHubContentResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))?;
+    if let (Some(content), Some(encoding)) = (content.content, content.encoding) {
+        if encoding == "base64" {
+            let cleaned = content.replace('\n', "");
+            return base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &cleaned)
+                .map_err(|e| format!("Base64 decode error: {}", e));
+        }
+    }
+    Err("No content in response".to_string())
+}
+async fn fetch_gitlab_file_bytes(
+    owner: &str,
+    repo: &str,
+    path: &str,
+    git_ref: &str,
+) -> Result<Vec<u8>, String> {
+    let project_id = format!("{}/{}", owner, repo);
+    let encoded_path = urlencoding::encode(path);
+    let url = format!(
+        "https://gitlab.com/api/v4/projects/{}/repository/files/{}/raw?ref={}",
+        urlencoding::encode(&project_id),
+        encoded_path,
+        git_ref,
+    );
+    let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    if !response.status().is_success() {
+        return Err(format!("GitLab API error: {}", response.status()));
+    }
+    response
+        .bytes()
+        .await
+        .map(|b| b.to_vec())
+        .map_err(|e| format!("Read error: {}", e))
+}
+async fn fetch_codeberg_file_bytes(
+    owner: &str,
+    repo: &str,
+    path: &str,
+    git_ref: &str,
+) -> Result<Vec<u8>, String> {
+    let url = format!(
+        "https://codeberg.org/api/v1/repos/{}/{}/raw/{}?ref={}",
+        owner, repo, path, git_ref,
+    );
+    let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    if !response.status().is_success() {
+        return Err(format!("Codeberg API error: {}", response.status()));
+    }
+    response
+        .bytes()
+        .await
+        .map(|b| b.to_vec())
         .map_err(|e| format!("Read error: {}", e))
 }
 async fn fetch_codeberg_tree(

@@ -1,5 +1,5 @@
 use crate::routes::Route;
-use crate::utils::video_kinds;
+use crate::utils::route_for_kind::route_for_naddr;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 #[component]
@@ -105,94 +105,17 @@ async fn decode_and_redirect(identifier: &str) -> std::result::Result<Route, Str
                         .identifier
                     );
                     let kind = coord.coordinate.kind.as_u16();
-                    match kind {
-                        30023 => {
-                            Ok(Route::ArticleDetail {
-                                naddr: identifier.to_string(),
-                            })
-                        }
-                        30009 => {
-                            Ok(Route::BadgeDetail {
-                                naddr: identifier.to_string(),
-                            })
-                        }
-                        30311 => {
-                            Err(
-                                "Live stream naddr routing requires event fetch. Please use the event ID directly."
-                                    .to_string(),
+                    let naddr = identifier.to_string();
+                    let pubkey = coord.coordinate.public_key;
+                    let identifier_str = coord.coordinate.identifier.clone();
+                    route_for_naddr(kind, naddr, pubkey, identifier_str)
+                        .ok_or_else(|| {
+                            format!(
+                                "Addressable event kind {} is not yet supported. naddr: {}",
+                                kind,
+                                identifier,
                             )
-                        }
-                        31922 | 31923 => {
-                            Ok(Route::CalendarEventDetail {
-                                naddr: identifier.to_string(),
-                                from: None,
-                            })
-                        }
-                        32123 => {
-                            Ok(Route::MusicPlaylistDetail {
-                                naddr: identifier.to_string(),
-                            })
-                        }
-                        36787 => {
-                            // Nostr music track (kind 36787)
-                            Ok(Route::MusicTrackDetail {
-                                track_id: identifier.to_string(),
-                            })
-                        }
-                        30078 => {
-                            Ok(Route::PodcastNostrDetail {
-                                naddr: identifier.to_string(),
-                            })
-                        }
-                        30054 => {
-                            Ok(Route::PodcastNostrEpisodeDetail {
-                                naddr: identifier.to_string(),
-                            })
-                        }
-                        30617 => {
-                            Ok(Route::CodeRepo {
-                                naddr: identifier.to_string(),
-                            })
-                        }
-                        38383 => {
-                            Ok(Route::P2POrderDetail {
-                                naddr: identifier.to_string(),
-                            })
-                        }
-                        30818 => {
-                            let npub = coord.coordinate.public_key.to_bech32()
-                                .unwrap_or_else(|_| coord.coordinate.public_key.to_hex());
-                            Ok(Route::WikiDetail {
-                                npub,
-                                identifier: coord.coordinate.identifier.clone(),
-                            })
-                        }
-                        30040 => {
-                            Ok(Route::PublicationDetail {
-                                naddr: identifier.to_string(),
-                            })
-                        }
-                        33889 => {
-                            Ok(Route::PinBoardDetail {
-                                naddr: identifier.to_string(),
-                            })
-                        }
-                        kind if video_kinds::is_addressable_video(kind) => {
-                            // NIP-71 addressable video kinds (34235, 34236)
-                            Ok(Route::VideoDetail {
-                                video_id: identifier.to_string(),
-                            })
-                        }
-                        _ => {
-                            Err(
-                                format!(
-                                    "Addressable event kind {} is not yet supported. naddr: {}",
-                                    kind,
-                                    identifier,
-                                ),
-                            )
-                        }
-                    }
+                        })
                 }
                 Nip19::Secret(_) => {
                     Err(

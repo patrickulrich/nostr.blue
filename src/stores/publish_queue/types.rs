@@ -36,6 +36,7 @@ pub enum QueueEventType {
     Poll,
     Bookmark,
     GitHosting,
+    Nsite,
     RelayList,
     Other(String),
 }

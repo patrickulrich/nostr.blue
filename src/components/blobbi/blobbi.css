@@ -54,6 +54,245 @@
     100% { transform: translateY(-20px); opacity: 0; }
 }
 
+@keyframes blobbi-bob {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+}
+
+@keyframes blobbi-sway {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-4px); }
+    75% { transform: translateX(4px); }
+}
+
+@keyframes onboard-egg-breathe {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.04); }
+}
+
+@keyframes onboard-egg-shake-light {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-3px) rotate(-1deg); }
+    75% { transform: translateX(3px) rotate(1deg); }
+}
+
+@keyframes onboard-egg-shake-medium {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-5px) rotate(-2deg); }
+    40% { transform: translateX(5px) rotate(2deg); }
+    60% { transform: translateX(-3px) rotate(-1deg); }
+    80% { transform: translateX(3px) rotate(1deg); }
+}
+
+@keyframes onboard-egg-shake-heavy {
+    0%, 100% { transform: translateX(0); }
+    10% { transform: translateX(-8px) rotate(-3deg); }
+    30% { transform: translateX(8px) rotate(3deg); }
+    50% { transform: translateX(-6px) rotate(-2deg); }
+    70% { transform: translateX(6px) rotate(2deg); }
+    90% { transform: translateX(-4px) rotate(-1deg); }
+}
+
+@keyframes onboard-egg-burst {
+    0% { transform: scale(1) rotate(0deg); opacity: 1; }
+    50% { transform: scale(1.2) rotate(5deg); opacity: 0.8; }
+    100% { transform: scale(1.5) rotate(10deg); opacity: 0; }
+}
+
+@keyframes onboard-screen-flash {
+    0% { opacity: 0; }
+    50% { opacity: 1; }
+    100% { opacity: 0; }
+}
+
+@keyframes onboard-particle-rise {
+    0% { transform: translateY(0); opacity: 0; }
+    20% { opacity: 0.8; }
+    100% { transform: translateY(-120px); opacity: 0; }
+}
+
+@keyframes onboard-sparkle-twinkle {
+    0%, 100% { opacity: 0; transform: scale(0.5); }
+    15% { opacity: 1; transform: scale(1.2); }
+    30% { opacity: 0.6; transform: scale(0.8); }
+    50% { opacity: 1; transform: scale(1); }
+    70% { opacity: 0.3; transform: scale(0.6); }
+    85% { opacity: 0.9; transform: scale(1.1); }
+}
+
+@keyframes onboard-sparkle-drift {
+    0% { transform: translateY(0) translateX(0); opacity: 0; }
+    20% { opacity: 0.9; }
+    100% { transform: translateY(-200px) translateX(30px); opacity: 0; }
+}
+
+@keyframes onboard-golden-fadein {
+    0% { opacity: 0; transform: scale(0.5); }
+    100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes onboard-golden-rotate {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@keyframes onboard-soft-fade-in {
+    0% { opacity: 0; transform: translateY(8px); }
+    100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes onboard-continue-pulse {
+    0%, 100% { opacity: 0.3; transform: translateY(0); }
+    50% { opacity: 0.8; transform: translateY(4px); }
+}
+
+@keyframes blobbi-fade-to-white {
+    0% { background-color: transparent; }
+    100% { background-color: white; }
+}
+
+@keyframes companion-fall-entry {
+    0% { transform: translateY(-200px) scaleY(1.1) scaleX(0.9); }
+    70% { transform: translateY(0) scaleY(0.9) scaleX(1.1); }
+    85% { transform: translateY(-10px) scaleY(1.05) scaleX(0.95); }
+    100% { transform: translateY(0) scaleY(1) scaleX(1); }
+}
+
+@keyframes companion-rise-entry {
+    0% { transform: translateY(200px); opacity: 0; }
+    60% { transform: translateY(-10px); opacity: 1; }
+    80% { transform: translateY(5px); }
+    100% { transform: translateY(0); }
+}
+
+@keyframes blobbi-anger-rise {
+    0%, 100% { opacity: 0.12; transform: translateY(4px); }
+    50% { opacity: 0.22; transform: translateY(-2px); }
+}
+
+@keyframes blobbi-fly-orbit {
+    0% { transform: translate(0, 0); }
+    25% { transform: translate(6px, -4px); }
+    50% { transform: translate(-2px, -8px); }
+    75% { transform: translate(-6px, -2px); }
+    100% { transform: translate(0, 0); }
+}
+
+@keyframes blobbi-menu-pop {
+    0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
+    100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+
+@keyframes blobbi-item-drop {
+    0% { transform: translateY(-20px); opacity: 0; }
+    60% { transform: translateY(4px); opacity: 1; }
+    100% { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes egg-tap-wiggle {
+    0%, 100% { transform: translateX(0) rotate(0deg); }
+    20% { transform: translateX(-4px) rotate(-3deg); }
+    40% { transform: translateX(4px) rotate(3deg); }
+    60% { transform: translateX(-3px) rotate(-2deg); }
+    80% { transform: translateX(3px) rotate(2deg); }
+}
+
+@keyframes egg-dust-particle {
+    0%, 100% { opacity: 0; transform: translateY(0); }
+    15% { opacity: 0.5; }
+    50% { opacity: 0.3; transform: translateY(-12px) translateX(4px); }
+    85% { opacity: 0.1; }
+}
+
+@keyframes egg-sweat-drop {
+    0% { transform: translateY(0); opacity: 0; }
+    15% { opacity: 0.6; }
+    100% { transform: translateY(16px); opacity: 0; }
+}
+
+@keyframes egg-spiral-spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@keyframes egg-sparkle-twinkle {
+    0%, 100% { opacity: 0; transform: scale(0.3); }
+    30% { opacity: 1; transform: scale(1); }
+    60% { opacity: 0.5; transform: scale(0.6); }
+    90% { opacity: 0.8; transform: scale(0.9); }
+}
+
+@keyframes egg-sway {
+    0%, 100% { transform: rotate(0deg); }
+    25% { transform: rotate(2deg); }
+    75% { transform: rotate(-2deg); }
+}
+
+@keyframes egg-listening-sway {
+    0%, 100% { transform: rotate(0deg) translateY(0); }
+    25% { transform: rotate(1.5deg) translateY(-2px); }
+    75% { transform: rotate(-1.5deg) translateY(-2px); }
+}
+
+@keyframes egg-singing-bounce {
+    0%, 100% { transform: translateY(0) scale(1); }
+    50% { transform: translateY(-4px) scale(1.03); }
+}
+
+@keyframes egg-happy-bounce {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    25% { transform: translateY(-6px) rotate(1deg); }
+    75% { transform: translateY(-6px) rotate(-1deg); }
+}
+
+@keyframes egg-warmth-glow {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.08); }
+}
+
+@keyframes egg-divine-pulse {
+    0%, 100% { filter: brightness(1) drop-shadow(0 0 6px rgba(85, 196, 162, 0.3)); }
+    50% { filter: brightness(1.12) drop-shadow(0 0 14px rgba(85, 196, 162, 0.6)); }
+}
+
+@keyframes egg-ambient-particle {
+    0% { transform: translateY(0) translateX(0); opacity: 0; }
+    20% { opacity: 0.6; }
+    100% { transform: translateY(-80px) translateX(10px); opacity: 0; }
+}
+
+@keyframes egg-sigil-pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 0.8; }
+}
+
+@keyframes egg-glow-pulse {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 0.6; }
+}
+
+@keyframes egg-rune-glow {
+    0%, 100% { opacity: 0.5; filter: brightness(1); }
+    50% { opacity: 0.9; filter: brightness(1.2); }
+}
+
+@keyframes egg-mystical-float {
+    0%, 100% { transform: translateY(0) scale(1); opacity: 0.6; }
+    50% { transform: translateY(-4px) scale(1.05); opacity: 0.9; }
+}
+
+@keyframes blobbi-mouth-breathe {
+    0%, 100% { rx: 2.8; ry: 3.2; }
+    50% { rx: 3.3; ry: 3.8; }
+}
+
+@keyframes blobbi-wisp-rise {
+    0% { transform: translateY(0); opacity: 0; }
+    12% { opacity: 0.7; }
+    65% { opacity: 0.7; }
+    100% { transform: translateY(-10px); opacity: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
     [class*="blobbi"] {
         animation: none !important;

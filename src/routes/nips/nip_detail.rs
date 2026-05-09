@@ -1,7 +1,7 @@
 use crate::components::{
     ArticleContent, ClientInitializing, ReplyComposer, ShareModal, ThreadedComment,
 };
-use crate::hooks::{use_author_metadata, use_relay_subscription};
+use crate::hooks::{use_author_metadata, use_mute_block_cache, use_relay_subscription};
 use crate::routes::Route;
 use crate::services::github_nips;
 use crate::stores::nostr_client;
@@ -79,6 +79,7 @@ pub fn NipDetail(nip_id: String) -> Element {
     let mut is_liked = use_signal(|| false);
     let mut like_count = use_signal(|| 0usize);
     let has_signer = *nostr_client::HAS_SIGNER.read();
+    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
     let nip_id_for_render = nip_id.clone();
     use_effect(move || {
         let id = nip_id.clone();
@@ -486,6 +487,8 @@ pub fn NipDetail(nip_id: String) -> Element {
                                             key: "{node.event.id}",
                                             node: node.clone(),
                                             depth: 0,
+                                            cached_muted_posts: cached_muted_posts.read().clone(),
+                                            cached_blocked_users: cached_blocked_users.read().clone(),
                                         }
                                     }
                                 }
@@ -526,7 +529,7 @@ pub fn NipDetail(nip_id: String) -> Element {
                 if let Some(event) = custom_event.read().clone() {
                     ShareModal {
                         event,
-                        web_url: Some(format!("https://nostr.blue/nips/{}", nip_id_for_render)),
+                        web_url: Some(format!("{}/nips/{}", crate::stores::ui::settings_store::get_canonical_external_origin(), nip_id_for_render)),
                         on_close: move |_| show_share_modal.set(false),
                     }
                 }

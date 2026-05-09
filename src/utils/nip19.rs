@@ -16,3 +16,26 @@ pub fn normalize_pubkey(pubkey_str: &str) -> Result<String, String> {
         }
     }
 }
+
+pub fn parse_naddr(naddr: &str) -> Result<(String, String), String> {
+    if naddr.starts_with("naddr") {
+        let nip19 = Nip19::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
+        match nip19 {
+            Nip19::Coordinate(coord) => {
+                let pubkey = coord.coordinate.public_key.to_hex();
+                let d_tag = coord.coordinate.identifier;
+                Ok((pubkey, d_tag))
+            }
+            _ => Err("Expected naddr coordinate".to_string()),
+        }
+    } else {
+        let parts: Vec<&str> = naddr.splitn(3, ':').collect();
+        if parts.len() >= 3 {
+            Ok((parts[1].to_string(), parts[2].to_string()))
+        } else if parts.len() == 2 {
+            Ok((parts[0].to_string(), parts[1].to_string()))
+        } else {
+            Err(format!("Invalid naddr format: {}", naddr))
+        }
+    }
+}

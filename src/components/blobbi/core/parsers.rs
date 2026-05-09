@@ -127,8 +127,8 @@ fn parse_tasks_from_tags(tags: &Tags) -> Vec<BlobbiTaskProgress> {
     let all_task_ids: &[&str] = &[
         TASK_FIRST_POST,
         TASK_POST_BLOBBI_PHOTO,
-        TASK_INTERACT_6,
-        TASK_SHELL_INTEGRITY_ABOVE_50,
+        TASK_INTERACT_7,
+        TASK_SHARE_YOUR_EGG,
         QUEST_PUBLISH_5_POSTS,
         QUEST_SHARE_SONG,
         QUEST_USE_BLOBBI_HASHTAGS,
@@ -138,6 +138,8 @@ fn parse_tasks_from_tags(tags: &Tags) -> Vec<BlobbiTaskProgress> {
         QUEST_REACT_TO_5_POSTS,
         QUEST_REPOST_3_POSTS,
         QUEST_REACT_OR_REPOST_BLOBBI,
+        QUEST_MAINTAIN_STATS,
+        QUEST_EDIT_PROFILE,
     ];
 
     let mut seen = std::collections::HashSet::new();
@@ -153,9 +155,9 @@ fn parse_tasks_from_tags(tags: &Tags) -> Vec<BlobbiTaskProgress> {
                 .map(|(_, v)| *v)
                 .unwrap_or(0);
             let target = match id {
-                t if t == TASK_INTERACT_6 => 6,
+                t if t == TASK_INTERACT_7 => 7,
                 t if t == QUEST_REPOST_3_POSTS => 3,
-                t if t == QUEST_PUBLISH_5_POSTS || t == QUEST_REACT_TO_5_POSTS => 5,
+                t if t == QUEST_PUBLISH_5_POSTS || t == QUEST_REACT_TO_5_POSTS || t == QUEST_FOLLOW_5_USERS => 5,
                 _ => 1,
             };
             tasks.push(BlobbiTaskProgress {
@@ -191,13 +193,13 @@ pub fn parse_blobbi_from_event(event: &Event) -> BlobbiCompanion {
     let state_str = tag_value(tags, TAG_STATE).unwrap_or_default();
     let legacy_is_sleeping = tag_bool(tags, TAG_IS_SLEEPING);
 
-    let state = if state_str == "incubating" || state_str == "evolving" {
-        BlobbiState::Active
-    } else {
-        BlobbiState::from_str(&state_str)
-    };
+    let state = BlobbiState::from_str(&state_str);
 
     let is_sleeping = legacy_is_sleeping || state == BlobbiState::Sleeping;
+
+    let seed = tag_value(tags, TAG_SEED);
+
+    let seed_traits = seed.as_ref().map(|s| crate::components::blobbi::core::seed::derive_visual_traits_from_seed(s));
 
     let has_all_stats = tag_f64(tags, TAG_HUNGER).is_some()
         && tag_f64(tags, TAG_HAPPINESS).is_some()
@@ -217,16 +219,42 @@ pub fn parse_blobbi_from_event(event: &Event) -> BlobbiCompanion {
         recover_missing_stats(tags)
     };
 
+    let base_color = tag_value(tags, TAG_BASE_COLOR)
+        .filter(|v| !v.is_empty())
+        .or_else(|| seed_traits.as_ref().map(|t| t.base_color.clone()))
+        .unwrap_or_else(|| DEFAULT_BASE_COLORS[0].to_string());
+
+    let secondary_color = tag_value(tags, TAG_SECONDARY_COLOR)
+        .filter(|v| !v.is_empty())
+        .or_else(|| seed_traits.as_ref().and_then(|t| t.secondary_color.clone()));
+
+    let eye_color = tag_value(tags, TAG_EYE_COLOR)
+        .filter(|v| !v.is_empty())
+        .or_else(|| seed_traits.as_ref().map(|t| t.eye_color.clone()))
+        .unwrap_or_else(|| DEFAULT_EYE_COLORS[0].to_string());
+
+    let pattern = tag_value(tags, TAG_PATTERN)
+        .filter(|v| !v.is_empty())
+        .or_else(|| seed_traits.as_ref().map(|t| t.pattern.clone()))
+        .unwrap_or_else(|| DEFAULT_PATTERNS[0].to_string());
+
+    let special_mark = tag_value(tags, TAG_SPECIAL_MARK)
+        .filter(|v| !v.is_empty())
+        .or_else(|| seed_traits.as_ref().map(|t| t.special_mark.clone()))
+        .unwrap_or_else(|| DEFAULT_SPECIAL_MARKS[0].to_string());
+
+    let size = tag_value(tags, TAG_SIZE)
+        .filter(|v| !v.is_empty())
+        .or_else(|| seed_traits.as_ref().map(|t| t.size.clone()))
+        .unwrap_or_else(|| DEFAULT_SIZES[0].to_string());
+
     let visual_traits = BlobbiVisualTraits {
-        base_color: tag_value(tags, TAG_BASE_COLOR)
-            .unwrap_or_else(|| DEFAULT_BASE_COLORS[0].to_string()),
-        secondary_color: tag_value(tags, TAG_SECONDARY_COLOR),
-        eye_color: tag_value(tags, TAG_EYE_COLOR)
-            .unwrap_or_else(|| DEFAULT_EYE_COLORS[0].to_string()),
-        pattern: tag_value(tags, TAG_PATTERN).unwrap_or_else(|| DEFAULT_PATTERNS[0].to_string()),
-        special_mark: tag_value(tags, TAG_SPECIAL_MARK)
-            .unwrap_or_else(|| DEFAULT_SPECIAL_MARKS[0].to_string()),
-        size: tag_value(tags, TAG_SIZE).unwrap_or_else(|| DEFAULT_SIZES[0].to_string()),
+        base_color,
+        secondary_color,
+        eye_color,
+        pattern,
+        special_mark,
+        size,
     };
 
     let personality = BlobbiPersonality {
@@ -238,18 +266,25 @@ pub fn parse_blobbi_from_event(event: &Event) -> BlobbiCompanion {
         skills: tag_values(tags, TAG_SKILL),
     };
 
-    let start_incubation = if state_str == "incubating" {
-        tag_u64(tags, "state_started_at")
+    let start_incubation = if matches!(state, BlobbiState::Incubating) {
+        tag_u64(tags, TAG_STATE_STARTED_AT)
     } else {
         tag_u64(tags, TAG_START_INCUBATION)
     };
 
-    let start_evolution = if state_str == "evolving" {
-        tag_u64(tags, "state_started_at")
+    let start_evolution = if matches!(state, BlobbiState::Evolving) {
+        tag_u64(tags, TAG_STATE_STARTED_AT)
     } else {
         tag_u64(tags, TAG_START_EVOLUTION)
     };
 
+    let state_started_at = if matches!(state, BlobbiState::Incubating | BlobbiState::Evolving) {
+        tag_u64(tags, TAG_STATE_STARTED_AT)
+    } else {
+        None
+    };
+
+    let tasks_completed = tag_values(tags, TAG_TASK_COMPLETED);
     let tasks = parse_tasks_from_tags(tags);
 
     BlobbiCompanion {
@@ -278,7 +313,7 @@ pub fn parse_blobbi_from_event(event: &Event) -> BlobbiCompanion {
         last_sing: tag_u64(tags, TAG_LAST_SING),
         last_medicine: tag_u64(tags, TAG_LAST_MEDICINE),
         last_check: tag_u64(tags, TAG_LAST_CHECK),
-        seed: tag_value(tags, TAG_SEED),
+        seed,
         adult_type: tag_value(tags, TAG_ADULT_TYPE),
         evolution_time: tag_u64(tags, TAG_EVOLUTION_TIME),
         is_dirty: tag_bool(tags, TAG_IS_DIRTY),
@@ -291,11 +326,14 @@ pub fn parse_blobbi_from_event(event: &Event) -> BlobbiCompanion {
         shell_integrity: tag_f64(tags, TAG_SHELL_INTEGRITY),
         start_incubation,
         start_evolution,
+        state_started_at,
+        tasks_completed,
+        care_streak_last_at: tag_u64(tags, TAG_CARE_STREAK_LAST_AT),
+        care_streak_last_day: tag_value(tags, TAG_CARE_STREAK_LAST_DAY),
         theme: tag_value(tags, TAG_THEME),
         crossover_app: tag_value(tags, TAG_CROSSOVER_APP),
         manifestation: tag_value(tags, TAG_MANIFESTATION),
         blessing: tag_value(tags, TAG_BLESSING),
-        visual_effect: tag_value(tags, TAG_VISUAL_EFFECT),
         adopted_by: tag_value(tags, TAG_ADOPTED_BY),
         adopted_from: tag_value(tags, TAG_ADOPTED_FROM),
         visible_to_others: tag_value(tags, TAG_VISIBLE_TO_OTHERS).map(|v| v == "true"),
@@ -335,7 +373,7 @@ pub fn parse_profile_from_event(event: &Event) -> BlobbonautProfile {
         name: tag_value(tags, TAG_NAME).unwrap_or_default(),
         coins: tag_u64(tags, TAG_COINS).unwrap_or(0),
         petting_level,
-        level: tag_u32(tags, "level").unwrap_or(1),
+        level: tag_u32(tags, TAG_LEVEL).unwrap_or(1),
         current_companion: tag_value(tags, TAG_CURRENT_COMPANION),
         onboarding_done: tag_bool(tags, TAG_ONBOARDING_DONE),
         has,
@@ -347,6 +385,7 @@ pub fn parse_profile_from_event(event: &Event) -> BlobbonautProfile {
         style: tag_value(tags, TAG_STYLE),
         background: tag_value(tags, TAG_BACKGROUND),
         title: tag_value(tags, TAG_TITLE),
+        content_json: event.content.clone(),
         raw_event: Some(event.clone()),
     }
 }

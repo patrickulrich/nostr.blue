@@ -7,19 +7,33 @@ use crate::utils::nip_bb::*;
 use super::adult_visual::AdultVisual;
 use super::baby_visual::BabyVisual;
 use super::egg_visual::EggVisual;
+use super::status_reaction::resolve_recipe_with_override;
+#[cfg(feature = "web")]
+use super::eye_tracking;
 
 #[component]
-pub fn BlobbiVisual(blobbi: BlobbiCompanion, size: Option<String>) -> Element {
+pub fn BlobbiVisual(blobbi: BlobbiCompanion, size: Option<String>, feed_mode: Option<bool>) -> Element {
+    #[cfg(feature = "web")]
+    {
+        eye_tracking::install_eye_tracker();
+    }
+
     let s = size.unwrap_or_else(|| "200".to_string());
-    let recipe = resolve_recipe(
-        &blobbi.stats,
-        blobbi.is_sleeping(),
-        &blobbi.personality.mood,
-    );
+    let mut recipe = resolve_recipe_with_override(&blobbi);
+
+    if feed_mode.unwrap_or(false) {
+        recipe = attenuate_for_feed(&recipe);
+    }
+
+    let eye_container_class = if !blobbi.is_egg() && !blobbi.is_sleeping() {
+        "blobbi-eye-container"
+    } else {
+        ""
+    };
 
     rsx! {
         document::Link { rel: "stylesheet", href: asset!("../blobbi.css") }
-        div { class: "flex items-center justify-center",
+        div { class: "flex items-center justify-center {eye_container_class}",
             style: "width: {s}px; height: {s}px;",
             match blobbi.stage {
                 BlobbiStage::Egg => rsx! {

@@ -8,6 +8,7 @@ use crate::utils::nip34::{
     Bounty, Discussion, DisplaySnippet, Issue, IssueStatus, PersistedReview, PullRequest, Release,
     Repository,
 };
+use crate::utils::nips::nip5a::SiteManifest;
 use dioxus::prelude::*;
 use lru::LruCache;
 use nostr::Event as NostrEvent;
@@ -23,6 +24,7 @@ const DISCUSSION_CACHE_SIZE: usize = 200;
 const RELEASE_CACHE_SIZE: usize = 100;
 const BOUNTY_CACHE_SIZE: usize = 200;
 const REVIEW_CACHE_SIZE: usize = 200;
+const PAGES_CACHE_SIZE: usize = 100;
 /// Repository cache (keyed by coordinate string "30617:pubkey:d-tag")
 pub static CODE_REPOS_CACHE: GlobalSignal<LruCache<String, Repository>> =
     GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(REPO_CACHE_SIZE).unwrap()));
@@ -47,6 +49,9 @@ pub static CODE_BOUNTIES_CACHE: GlobalSignal<LruCache<String, Vec<Bounty>>> =
 /// Persisted review cache (keyed by pr_event_id, stores Vec<PersistedReview>)
 pub static CODE_REVIEWS_CACHE: GlobalSignal<LruCache<String, Vec<PersistedReview>>> =
     GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(REVIEW_CACHE_SIZE).unwrap()));
+/// Pages manifest cache (keyed by "pubkey:d_tag")
+pub static PAGES_MANIFESTS_CACHE: GlobalSignal<LruCache<String, SiteManifest>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(PAGES_CACHE_SIZE).unwrap()));
 /// User's own repositories (coordinate strings)
 pub static USER_REPOS: GlobalSignal<Vec<String>> = GlobalSignal::new(Vec::new);
 /// User's own code snippets (event IDs)
@@ -95,6 +100,32 @@ pub fn cache_repo_events(events: &[NostrEvent]) {
         GitWorkerManager::update_grasp_servers();
     }
 }
+
+pub fn get_cached_pages_manifest(key: &str) -> Option<SiteManifest> {
+    PAGES_MANIFESTS_CACHE.read().peek(key).cloned()
+}
+
+pub fn cache_pages_manifest(manifest: SiteManifest) {
+    let key = if let Some(ref d) = manifest.d_tag {
+        format!("{}:{}", manifest.pubkey, d)
+    } else {
+        manifest.pubkey.clone()
+    };
+    PAGES_MANIFESTS_CACHE.write().put(key, manifest);
+}
+
+pub fn cache_pages_manifests(manifests: &[SiteManifest]) {
+    let mut cache = PAGES_MANIFESTS_CACHE.write();
+    for m in manifests {
+        let key = if let Some(ref d) = m.d_tag {
+            format!("{}:{}", m.pubkey, d)
+        } else {
+            m.pubkey.clone()
+        };
+        cache.put(key, m.clone());
+    }
+}
+
 /// Get user's repositories
 pub fn get_user_repos() -> Vec<Repository> {
     let coords = USER_REPOS.read();

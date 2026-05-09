@@ -114,6 +114,25 @@ impl GitWorkerManager {
         let result = Self::call_worker(&script).await?;
         serde_wasm_bindgen::from_value(result).map_err(|e| format!("Parse error: {:?}", e))
     }
+    /// Read file content as raw bytes at a given ref (binary-safe)
+    pub async fn read_file_bytes(
+        dir: &str,
+        filepath: &str,
+        git_ref: &str,
+    ) -> Result<Vec<u8>, String> {
+        let dir_escaped = dir.replace('\\', "\\\\").replace('\'', "\\'");
+        let filepath_escaped = filepath.replace('\\', "\\\\").replace('\'', "\\'");
+        let ref_escaped = git_ref.replace('\\', "\\\\").replace('\'', "\\'");
+        let script = format!(
+            "window.gitWorkerManager.call('readFileBytes', {{ dir: '{}', filepath: '{}', ref: '{}' }})",
+            dir_escaped, filepath_escaped, ref_escaped,
+        );
+        let result = Self::call_worker(&script).await?;
+        let nums: Vec<u8> = serde_wasm_bindgen::from_value(result)
+            .map_err(|e| format!("Parse error: {:?}", e))?;
+        Ok(nums)
+    }
+
     /// Read file content at a given ref
     pub async fn read_file(dir: &str, filepath: &str, git_ref: &str) -> Result<String, String> {
         let dir_escaped = dir.replace('\\', "\\\\").replace('\'', "\\'");

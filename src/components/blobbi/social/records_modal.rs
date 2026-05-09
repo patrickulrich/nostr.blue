@@ -7,6 +7,7 @@ use crate::stores::nostr_client;
 use crate::utils::nip_bb::*;
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 struct RecordEntry {
     record_type: String,
     generation: u32,
@@ -14,6 +15,7 @@ struct RecordEntry {
     created_at: u64,
 }
 
+#[allow(dead_code)]
 fn tag_str(tags: &Tags, name: &str) -> Option<String> {
     for tag in tags.iter() {
         if tag.kind().to_string() == name {

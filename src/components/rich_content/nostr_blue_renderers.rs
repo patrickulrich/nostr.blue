@@ -11,9 +11,11 @@ use crate::components::recipe::card::RecipeCard;
 use crate::components::wiki::card::WikiCardCompact;
 use crate::components::{EventCardCompact, PhotoCard, VideoCard, VoiceMessageCard};
 use crate::hooks::{use_fetch_event_by_coordinate_with_message, use_fetch_event_by_id};
+use crate::routes::music::track_detail::fetch_track;
 use crate::routes::Route;
-use crate::services::podcast_index;
+use crate::services::{podcast_index, wavlake};
 use crate::stores::calendar_store::UnifiedEvent;
+use crate::stores::music_player::{self, MusicTrack};
 use crate::stores::nostr_music::parse_playlist_event;
 use crate::stores::pin_boards_store::parse_pinboard_event;
 use crate::stores::profiles;
@@ -1057,6 +1059,287 @@ pub(super) fn NostrBlueChannelRenderer(id: String) -> Element {
                 {nostr_blue_error(err)}
             } else if let Some(ev) = fetch.event().as_ref() {
                 {render_channel_minicard(ev, &ev.id.to_hex())}
+            }
+        }
+    }
+}
+
+fn is_nostr_pubkey(id: &str) -> bool {
+    id.len() == 64 && id.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn render_music_compact_card(
+    image: Option<&str>,
+    title: &str,
+    subtitle: &str,
+    on_play: impl FnMut(MouseEvent) + 'static,
+    _fallback_link: Route,
+) -> Element {
+    let image = image.map(|s| s.to_string());
+    let title = title.to_string();
+    let subtitle = subtitle.to_string();
+    rsx! {
+        div { class: "my-2", onclick: move |e: MouseEvent| e.stop_propagation(),
+            div { class: "flex items-center gap-3 p-3 border border-border rounded-lg bg-card hover:bg-accent/10 transition",
+                div { class: "w-12 h-12 rounded bg-muted shrink-0 overflow-hidden",
+                    if let Some(ref img) = image {
+                        img {
+                            src: "{img}",
+                            alt: "{title}",
+                            class: "w-full h-full object-cover",
+                            loading: "lazy",
+                        }
+                    } else {
+                        div { class: "w-full h-full flex items-center justify-center",
+                            icons::MusicIcon { class: "w-6 h-6 text-muted-foreground".to_string() }
+                        }
+                    }
+                }
+                div { class: "flex-1 min-w-0",
+                    p { class: "font-medium text-sm truncate", "{title}" }
+                    p { class: "text-xs text-muted-foreground truncate", "{subtitle}" }
+                }
+                button {
+                    class: "shrink-0 w-9 h-9 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition",
+                    onclick: on_play,
+                    span { class: "w-4 h-4", dangerous_inner_html: icons::PLAY }
+                }
+            }
+        }
+    }
+}
+
+fn render_music_error_card(err: &str, label: &str, route: Route) -> Element {
+    rsx! {
+        div { class: "my-2 p-3 border border-border rounded-lg bg-card",
+            p { class: "text-sm text-muted-foreground mb-2", "{err}" }
+            Link {
+                to: route,
+                class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
+                icons::MusicIcon { class: "w-4 h-4" }
+                "View {label}"
+            }
+        }
+    }
+}
+
+#[allow(clippy::type_complexity)]
+#[component]
+pub(super) fn NostrBlueRssMusicAlbumRenderer(feed_id: String) -> Element {
+    let feed_id_for_link = feed_id.clone();
+    let resource: Resource<Result<(podcast_index::PodcastFeed, Vec<podcast_index::Episode>), String>> =
+        use_resource(move || {
+        let fid = feed_id.clone();
+        async move {
+            let id = fid.parse::<u64>().map_err(|_| "Invalid album ID".to_string())?;
+            let feed = podcast_index::get_podcast_by_id(id)
+                .await
+                .map_err(|e| e.to_string())?;
+            let episodes = podcast_index::get_episodes_by_feed_id(id, Some(100), None)
+                .await
+                .unwrap_or_default();
+            Ok((feed, episodes))
+        }
+    });
+    rsx! {
+        div { class: "my-2", onclick: move |e: MouseEvent| e.stop_propagation(),
+            match resource.read_unchecked().as_ref() {
+                None => nostr_blue_loading_skeleton(),
+                Some(Err(err)) => render_music_error_card(
+                    err,
+                    "Album",
+                    Route::MusicRssAlbum { feed_id: feed_id_for_link.parse().unwrap_or(0) },
+                ),
+                Some(Ok((feed, episodes))) => {
+                    let title = feed.title.clone();
+                    let image = feed.get_image().map(String::from);
+                    let artist = feed.author.clone().unwrap_or_else(|| "Unknown Artist".to_string());
+                    let count = episodes.len() as u64;
+                    rsx! {
+                        {
+                            render_music_compact_card(
+                                image.as_deref(),
+                                &title,
+                                &format!("{} · {} {}", artist, count, if count == 1 { "track" } else { "tracks" }),
+                                move |_: MouseEvent| {
+                                    if let Some(Ok((f, eps))) = resource.read_unchecked().as_ref() {
+                                        let tracks: Vec<MusicTrack> = eps
+                                            .iter()
+                                            .map(|ep| MusicTrack::from_rss_music_track(ep, f))
+                                            .collect();
+                                        if let Some(first) = tracks.first().cloned() {
+                                            music_player::play_track(first, Some(tracks), Some(0));
+                                        }
+                                    }
+                                },
+                                Route::MusicRssAlbum { feed_id: feed_id_for_link.parse().unwrap_or(0) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub(super) fn NostrBlueTrackRenderer(track_id: String) -> Element {
+    let track_id_for_play = track_id.clone();
+    let track_id_for_link = track_id.clone();
+    let resource: Resource<Result<MusicTrack, String>> = use_resource(move || {
+        let id = track_id.clone();
+        async move { fetch_track(&id).await }
+    });
+    rsx! {
+        div { class: "my-2", onclick: move |e: MouseEvent| e.stop_propagation(),
+            match resource.read_unchecked().as_ref() {
+                None => nostr_blue_loading_skeleton(),
+                Some(Err(err)) => render_music_error_card(
+                    err,
+                    "Track",
+                    Route::MusicTrackDetail { track_id: track_id_for_link },
+                ),
+                Some(Ok(track)) => {
+                    let title = track.title.clone();
+                    let artist = track.artist.clone();
+                    let image = track.album_art_url.clone();
+                    let track_clone = track.clone();
+                    rsx! {
+                        {
+                            render_music_compact_card(
+                                image.as_deref(),
+                                &title,
+                                &artist,
+                                move |_: MouseEvent| {
+                                    music_player::play_track(track_clone.clone(), None, None);
+                                },
+                                Route::MusicTrackDetail { track_id: track_id_for_play.clone() },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub(super) fn NostrBlueAlbumRenderer(album_id: String) -> Element {
+    let album_id_for_link = album_id.clone();
+    let resource: Resource<Result<wavlake::WavlakeAlbum, String>> =
+        use_resource(move || {
+        let id = album_id.clone();
+        async move { wavlake::get_album(&id).await }
+    });
+    rsx! {
+        div { class: "my-2", onclick: move |e: MouseEvent| e.stop_propagation(),
+            match resource.read_unchecked().as_ref() {
+                None => nostr_blue_loading_skeleton(),
+                Some(Err(err)) => render_music_error_card(
+                    err,
+                    "Album",
+                    Route::MusicAlbum { album_id: album_id_for_link },
+                ),
+                Some(Ok(album)) => {
+                    let title = album.title.clone();
+                    let image = album.album_art_url.clone();
+                    let artist = album.artist.clone();
+                    let count = album.tracks.len();
+                    rsx! {
+                        {
+                            render_music_compact_card(
+                                image.as_deref(),
+                                &title,
+                                &format!("{} · {} {}", artist, count, if count == 1 { "track" } else { "tracks" }),
+                                move |_: MouseEvent| {
+                                    if let Some(Ok(a)) = resource.read_unchecked().as_ref() {
+                                        let tracks: Vec<MusicTrack> =
+                                            a.tracks.iter().map(|t| t.clone().into()).collect();
+                                        if let Some(first) = tracks.first().cloned() {
+                                            music_player::play_track(first, Some(tracks), Some(0));
+                                        }
+                                    }
+                                },
+                                Route::MusicAlbum { album_id: album_id_for_link.clone() },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[allow(clippy::type_complexity)]
+#[component]
+pub(super) fn NostrBlueArtistRenderer(artist_id: String) -> Element {
+    let artist_id_for_link = artist_id.clone();
+    let is_pubkey = is_nostr_pubkey(&artist_id);
+    let resource: Resource<Result<(String, Option<String>, Option<usize>), String>> =
+        use_resource(move || {
+            let id = artist_id.clone();
+            let is_pk = is_pubkey;
+            async move {
+                if is_pk {
+                    let profile = profiles::fetch_profile(id.clone())
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    let name = profile
+                        .display_name
+                        .or(profile.name)
+                        .unwrap_or_else(|| id.clone());
+                    Ok((name, profile.picture, None))
+                } else {
+                    let artist = wavlake::get_artist(&id).await?;
+                    let image = artist.artist_art_url.clone();
+                    Ok((artist.name, image, Some(artist.albums.len())))
+                }
+            }
+        });
+    rsx! {
+        div { class: "my-2", onclick: move |e: MouseEvent| e.stop_propagation(),
+            match resource.read_unchecked().as_ref() {
+                None => nostr_blue_loading_skeleton(),
+                Some(Err(err)) => render_music_error_card(
+                    err,
+                    "Artist",
+                    Route::MusicArtist { artist_id: artist_id_for_link },
+                ),
+                Some(Ok((name, image, album_count))) => {
+                    let name_clone = name.clone();
+                    let image_clone = image.clone();
+                    let subtitle = match album_count {
+                        Some(c) => format!("{} {}", c, if *c == 1 { "album" } else { "albums" }),
+                        None => "Nostr Artist".to_string(),
+                    };
+                    let link = Route::MusicArtist { artist_id: artist_id_for_link.clone() };
+                    rsx! {
+                        div { class: "my-2", onclick: move |e: MouseEvent| e.stop_propagation(),
+                            Link {
+                                to: link,
+                                class: "flex items-center gap-3 p-3 border border-border rounded-lg bg-card hover:bg-accent/10 transition",
+                                div { class: "w-12 h-12 rounded-full bg-muted shrink-0 overflow-hidden",
+                                    if let Some(ref img) = image_clone {
+                                        img {
+                                            src: "{img}",
+                                            alt: "{name_clone}",
+                                            class: "w-full h-full object-cover",
+                                            loading: "lazy",
+                                        }
+                                    } else {
+                                        div { class: "w-full h-full flex items-center justify-center",
+                                            icons::UserIcon { class: "w-6 h-6 text-muted-foreground".to_string() }
+                                        }
+                                    }
+                                }
+                                div { class: "flex-1 min-w-0",
+                                    p { class: "font-medium text-sm truncate", "{name_clone}" }
+                                    p { class: "text-xs text-muted-foreground", "{subtitle}" }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

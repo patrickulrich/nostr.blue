@@ -294,6 +294,19 @@ fn OverviewTab(repo: Repository, naddr: String) -> Element {
                         }
                     }
                 }
+                // Static Pages panel
+                {
+                    let is_owner = nostr_client::get_cached_pubkey()
+                        .map(|pk| pk.to_hex() == repo.pubkey)
+                        .unwrap_or(false);
+                    rsx! {
+                        crate::components::code::RepoPagesPanel {
+                            repo: repo.clone(),
+                            naddr: naddr.clone(),
+                            is_owner: is_owner,
+                        }
+                    }
+                }
             }
         }
         if *show_clone_modal.read() {
