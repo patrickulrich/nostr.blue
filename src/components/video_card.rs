@@ -1,4 +1,4 @@
-use crate::components::icons::{BookmarkIcon, MessageCircleIcon, ZapIcon};
+use crate::components::icons::{BookmarkIcon, MessageCircleIcon, PlayIcon, ZapIcon};
 use crate::components::{ReactionButton, SensitiveContent, ZapModal};
 use crate::hooks::use_reaction;
 use crate::routes::Route;
@@ -323,6 +323,12 @@ pub fn VideoCard(event: Event) -> Element {
     let formatted_duration = first_video
         .duration
         .map(|d| format_duration_timecode_padded(d as u64));
+    let video_src = if first_video.thumbnail.is_none() {
+        format!("{}#t=0.1", &first_video.url)
+    } else {
+        first_video.url.clone()
+    };
+    let has_thumbnail = first_video.thumbnail.is_some();
     rsx! {
         div { class: "border-b border-border hover:bg-accent/5 transition",
             div { class: "p-4 flex items-center gap-3",
@@ -362,7 +368,7 @@ pub fn VideoCard(event: Event) -> Element {
                                     preload: "metadata",
                                     poster: first_video.thumbnail.as_deref(),
                                     source {
-                                        src: "{first_video.url}",
+                                        src: "{video_src}",
                                         r#type: first_video.mime_type.as_deref().unwrap_or("video/mp4"),
                                     }
                                     for fallback_url in &first_video.fallback_urls {
@@ -373,6 +379,13 @@ pub fn VideoCard(event: Event) -> Element {
                                 if let Some(dur) = &formatted_duration {
                                     div { class: "absolute bottom-2 right-2 bg-black/75 text-white text-xs px-2 py-1 rounded",
                                         "{dur}"
+                                    }
+                                }
+                                if !has_thumbnail {
+                                    div { class: "absolute inset-0 flex items-center justify-center pointer-events-none",
+                                        div { class: "w-16 h-16 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center",
+                                            PlayIcon { class: "w-8 h-8 text-white ml-1" }
+                                        }
                                     }
                                 }
                             }
@@ -387,7 +400,7 @@ pub fn VideoCard(event: Event) -> Element {
                                 preload: "metadata",
                                 poster: first_video.thumbnail.as_deref(),
                                 source {
-                                    src: "{first_video.url}",
+                                    src: "{video_src}",
                                     r#type: first_video.mime_type.as_deref().unwrap_or("video/mp4"),
                                 }
                                 for fallback_url in &first_video.fallback_urls {
@@ -398,6 +411,13 @@ pub fn VideoCard(event: Event) -> Element {
                             if let Some(dur) = &formatted_duration {
                                 div { class: "absolute bottom-2 right-2 bg-black/75 text-white text-xs px-2 py-1 rounded",
                                     "{dur}"
+                                }
+                            }
+                            if !has_thumbnail {
+                                div { class: "absolute inset-0 flex items-center justify-center pointer-events-none",
+                                    div { class: "w-16 h-16 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center",
+                                        PlayIcon { class: "w-8 h-8 text-white ml-1" }
+                                    }
                                 }
                             }
                         }

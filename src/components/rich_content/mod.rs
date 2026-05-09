@@ -469,13 +469,15 @@ fn render_token(token: &ContentToken, emoji_map: &HashMap<String, String>) -> El
             }
         }
         ContentToken::Video(url) => {
+            let video_src = format!("{}#t=0.1", url);
             rsx! {
                 div {
                     class: "my-2 rounded-lg overflow-hidden border border-border",
                     onclick: move |e: MouseEvent| e.stop_propagation(),
                     video {
-                        src: "{url}",
+                        src: "{video_src}",
                         controls: true,
+                        preload: "metadata",
                         class: "max-w-full h-auto",
                         "Your browser does not support the video tag."
                     }

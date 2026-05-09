@@ -401,14 +401,18 @@ fn is_video_url(url: &str) -> bool {
         return false;
     }
     let path = lower.split('?').next().unwrap_or(&lower);
+    let path = path.split('#').next().unwrap_or(path);
     path.ends_with(".mp4")
+        || path.ends_with(".m4v")
         || path.ends_with(".webm")
         || path.ends_with(".mov")
         || path.ends_with(".avi")
         || path.ends_with(".mkv")
         || path.ends_with(".ogg")
+        || path.ends_with(".ogv")
         || path.ends_with(".3gp")
         || path.ends_with(".3gpp")
+        || path.ends_with(".flv")
 }
 /// Extract profile name from mention string
 #[allow(dead_code)]

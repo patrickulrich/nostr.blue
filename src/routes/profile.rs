@@ -1341,6 +1341,13 @@ fn VertsVideoCard(event: NostrEvent) -> Element {
         });
     }));
     let video_id = event.id.to_hex();
+    let video_src = video_meta.url.as_ref().map(|u| {
+        if video_meta.thumbnail.is_none() {
+            format!("{}#t=0.1", u)
+        } else {
+            u.clone()
+        }
+    });
     rsx! {
         div {
             class: "group cursor-pointer",
@@ -1357,7 +1364,7 @@ fn VertsVideoCard(event: NostrEvent) -> Element {
                             alt: "{video_meta.title.as_deref().unwrap_or(\"Vert\")}",
                             class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-200",
                         }
-                    } else if let Some(url) = &video_meta.url {
+                    } else if let Some(url) = &video_src {
                         video {
                             id: "{video_element_id}",
                             class: "w-full h-full object-cover",

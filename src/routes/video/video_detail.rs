@@ -170,6 +170,13 @@ fn LandscapePlayer(event: Event) -> Element {
     }
 
     let video_meta = parse_video_meta(&event);
+    let video_src = video_meta.url.as_ref().map(|u| {
+        if video_meta.thumbnail.is_none() {
+            format!("{}#t=0.1", u)
+        } else {
+            u.clone()
+        }
+    });
     rsx! {
         div { class: "min-h-screen bg-background",
             div { class: "sticky top-0 z-20 bg-black/80 backdrop-blur-sm border-b border-gray-800",
@@ -186,15 +193,16 @@ fn LandscapePlayer(event: Event) -> Element {
                 div {
                     class: "relative w-full bg-black rounded-lg overflow-hidden mb-4",
                     style: "max-height: 80vh;",
-                    if let Some(url) = &video_meta.url {
+                    if let Some(url) = &video_src {
                         video {
                             class: "w-full h-full object-contain",
                             src: "{url}",
-                            poster: "{video_meta.thumbnail.clone().unwrap_or_default()}",
+                            poster: video_meta.thumbnail.as_deref(),
                             controls: true,
                             muted: *is_muted.read(),
                             autoplay: true,
                             playsinline: true,
+                            preload: "metadata",
                         }
                     } else {
                         div { class: "flex items-center justify-center h-96 text-white",
@@ -621,6 +629,13 @@ fn VerticalVideoPlayer(
     let video_id = format!("video-{}", &event.id.to_hex()[..8]);
     let video_id_for_effect = video_id.clone();
     let video_meta = parse_video_meta(&event);
+    let video_src = video_meta.url.as_ref().map(|u| {
+        if video_meta.thumbnail.is_none() {
+            format!("{}#t=0.1", u)
+        } else {
+            u.clone()
+        }
+    });
     use_effect(use_reactive(&is_muted, move |muted| {
         let id = video_id_for_effect.clone();
         spawn(async move {
@@ -640,17 +655,18 @@ fn VerticalVideoPlayer(
     }));
     rsx! {
         div { class: "relative w-full h-full flex items-center justify-center bg-black",
-            if let Some(url) = video_meta.url.clone() {
+            if let Some(url) = video_src.clone() {
                 video {
                     id: "{video_id}",
                     class: "max-w-full max-h-full object-contain",
                     src: "{url}",
-                    poster: "{video_meta.thumbnail.clone().unwrap_or_default()}",
+                    poster: video_meta.thumbnail.as_deref(),
                     r#loop: true,
                     muted: is_muted,
                     autoplay: is_active,
                     playsinline: true,
                     controls: true,
+                    preload: "metadata",
                 }
             } else {
                 div { class: "flex flex-col items-center justify-center text-white",

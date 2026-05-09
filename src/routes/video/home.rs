@@ -569,6 +569,11 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
             truncate_pubkey(&pk)
         });
     let video_id = event.id.to_hex();
+    let video_src = if video_meta.thumbnail.is_none() {
+        video_meta.url.as_ref().map(|u| format!("{}#t=0.1", u))
+    } else {
+        video_meta.url.clone()
+    };
     let feed_param = match feed_type {
         FeedType::Following => "following",
         FeedType::Global => "global",
@@ -594,7 +599,7 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
                             },
                         }
                     }
-                    if let Some(url) = &video_meta.url {
+                    if let Some(url) = &video_src {
                         video {
                             id: "{video_element_id}",
                             class: if video_meta.thumbnail.is_some() && !*is_hovering.read() {
@@ -665,6 +670,11 @@ fn VertsVideoCard(event: Event, feed_type: FeedType) -> Element {
         });
     });
     let video_id = event.id.to_hex();
+    let video_src = if video_meta.thumbnail.is_none() {
+        video_meta.url.as_ref().map(|u| format!("{}#t=0.1", u))
+    } else {
+        video_meta.url.clone()
+    };
     let feed_param = match feed_type {
         FeedType::Following => "following",
         FeedType::Global => "global",
@@ -690,7 +700,7 @@ fn VertsVideoCard(event: Event, feed_type: FeedType) -> Element {
                             },
                         }
                     }
-                    if let Some(url) = &video_meta.url {
+                    if let Some(url) = &video_src {
                         video {
                             id: "{video_element_id}",
                             class: if video_meta.thumbnail.is_some() && !*is_hovering.read() {

@@ -413,7 +413,9 @@ fn is_image_url(url: &str) -> bool {
 }
 /// Check if URL is a video
 fn is_video_url(url: &str) -> bool {
-    let extensions = [".mp4", ".webm", ".mov", ".avi", ".mkv", ".m4v"];
+    let extensions = [
+        ".mp4", ".m4v", ".webm", ".mov", ".avi", ".mkv", ".ogg", ".ogv", ".3gp", ".3gpp", ".flv",
+    ];
     extensions.iter().any(|ext| url.ends_with(ext))
         || url.contains("youtube.com")
         || url.contains("youtu.be")
