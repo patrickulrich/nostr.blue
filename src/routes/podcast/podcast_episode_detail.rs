@@ -532,7 +532,7 @@ fn EpisodeDetailSkeleton() -> Element {
 }
 /// Fetch Nostr podcast episode by naddr/coordinate
 async fn fetch_nostr_episode(naddr: &str) -> Result<(DisplayEpisode, PodcastMetadata), String> {
-    let (pubkey, d_tag) = parse_coordinate(naddr)?;
+    let (pubkey, d_tag) = crate::utils::nip19::parse_naddr(naddr)?;
     let episode_filter = Filter::new()
         .kind(Kind::from(podcast::KIND_PODCAST_EPISODE))
         .author(PublicKey::from_hex(&pubkey).map_err(|e| e.to_string())?)
@@ -610,27 +610,4 @@ async fn fetch_rss_episode(podcast_id: &str, episode_id: &str) -> Result<Display
         .ok_or_else(|| "Episode not found".to_string())?;
     Ok(DisplayEpisode::from_rss_episode(episode, &podcast))
 }
-/// Parse coordinate string into pubkey and d-tag
-fn parse_coordinate(coord: &str) -> Result<(String, String), String> {
-    use nostr::prelude::*;
-    if coord.starts_with("naddr") {
-        let nip19 = Nip19::from_bech32(coord).map_err(|e| format!("Invalid naddr: {}", e))?;
-        match nip19 {
-            Nip19::Coordinate(nip19_coord) => {
-                let pubkey = nip19_coord.coordinate.public_key.to_hex();
-                let d_tag = nip19_coord.coordinate.identifier;
-                Ok((pubkey, d_tag))
-            }
-            _ => Err("Expected naddr coordinate".to_string()),
-        }
-    } else {
-        let parts: Vec<&str> = coord.splitn(3, ':').collect();
-        if parts.len() >= 3 {
-            return Ok((parts[1].to_string(), parts[2].to_string()));
-        }
-        if parts.len() == 2 {
-            return Ok((parts[0].to_string(), parts[1].to_string()));
-        }
-        Err(format!("Invalid coordinate format: {}", coord))
-    }
-}
+

@@ -14,15 +14,15 @@ pub fn MusicPlaylistDetail(naddr: String) -> Element {
         loading.set(true);
         error_msg.set(None);
         spawn(async move {
-            let parts: Vec<&str> = naddr_clone.split(':').collect();
-            if parts.len() < 3 {
-                error_msg.set(Some("Invalid playlist address".to_string()));
-                loading.set(false);
-                return;
-            }
-            let pubkey = parts[1];
-            let d_tag = parts[2..].join(":");
-            match nostr_music::fetch_playlist_by_coordinate(pubkey, &d_tag).await {
+            let (pubkey, d_tag) = match crate::utils::nip19::parse_naddr(&naddr_clone) {
+                Ok(result) => result,
+                Err(e) => {
+                    error_msg.set(Some(e));
+                    loading.set(false);
+                    return;
+                }
+            };
+            match nostr_music::fetch_playlist_by_coordinate(&pubkey, &d_tag).await {
                 Ok(Some(pl)) => {
                     playlist.set(Some(pl.clone()));
                     if let Ok(profile) = profiles::fetch_profile(pl.pubkey.clone()).await {

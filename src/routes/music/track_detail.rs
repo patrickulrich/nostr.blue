@@ -414,7 +414,7 @@ fn TrackDetailSkeleton() -> Element {
 pub(crate) async fn fetch_track(id: &str) -> Result<music_player::MusicTrack, String> {
     if id.starts_with("naddr1") {
         // Nostr track (kind 36787)
-        let (pubkey, d_tag) = parse_naddr(id)?;
+        let (pubkey, d_tag) = crate::utils::nip19::parse_naddr(id)?;
         let nostr_track = nostr_music::fetch_nostr_track_by_coordinate(&pubkey, &d_tag)
             .await?
             .ok_or("Track not found")?;
@@ -454,22 +454,6 @@ pub(crate) async fn fetch_track(id: &str) -> Result<music_player::MusicTrack, St
         let api = WavlakeAPI::new();
         let track = api.get_track(id).await?;
         Ok(track.into())
-    }
-}
-
-/// Parse naddr into pubkey and d-tag
-pub(crate) fn parse_naddr(naddr: &str) -> Result<(String, String), String> {
-    use nostr::prelude::*;
-
-    let nip19 = Nip19::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
-
-    match nip19 {
-        Nip19::Coordinate(coord) => {
-            let pubkey = coord.coordinate.public_key.to_hex();
-            let d_tag = coord.coordinate.identifier;
-            Ok((pubkey, d_tag))
-        }
-        _ => Err("Expected naddr coordinate".to_string()),
     }
 }
 

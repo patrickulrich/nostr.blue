@@ -38,7 +38,7 @@ pub fn ArticleDetail(naddr: String) -> Element {
         spawn(async move {
             loading.set(true);
             error.set(None);
-            match decode_naddr(&naddr_str) {
+            match crate::utils::nip19::parse_naddr(&naddr_str) {
                 Ok((pubkey, identifier)) => {
                     crate::stores::profiles::PROFILE_CACHE.write().pop(&pubkey);
                     match nostr_client::fetch_event_by_coordinate(
@@ -445,24 +445,4 @@ pub fn ArticleDetail(naddr: String) -> Element {
         }
     }
 }
-/// Decode naddr to extract pubkey and identifier
-fn decode_naddr(naddr: &str) -> std::result::Result<(String, String), String> {
-    use nostr::nips::nip19::{FromBech32, Nip19Coordinate};
-    match Nip19Coordinate::from_bech32(naddr) {
-        Ok(nip19_coord) => {
-            let pubkey = nip19_coord.public_key.to_hex();
-            let identifier = nip19_coord.identifier.clone();
-            if !nip19_coord.relays.is_empty() {
-                log::debug!(
-                    "Article naddr contains {} relay hints",
-                    nip19_coord.relays.len()
-                );
-                for relay in &nip19_coord.relays {
-                    log::debug!("  Relay hint: {}", relay);
-                }
-            }
-            Ok((pubkey, identifier))
-        }
-        Err(e) => Err(format!("Invalid naddr format: {}", e)),
-    }
-}
+
