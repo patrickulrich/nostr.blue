@@ -12,8 +12,6 @@ use crate::utils::FeedItem;
 use dioxus::prelude::*;
 use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp};
 use std::time::Duration;
-#[cfg(feature = "web")]
-use wasm_bindgen::JsCast;
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum FeedType {
     Following,
@@ -541,23 +539,11 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
         let hovering = *is_hovering.read();
         let id = video_element_id_for_effect.clone();
         spawn(async move {
-            #[cfg(feature = "web")]
-            if let Some(window) = web_sys::window() {
-                if let Some(document) = window.document() {
-                    if let Some(element) = document.get_element_by_id(&id) {
-                        if let Ok(video) = element.dyn_into::<web_sys::HtmlVideoElement>() {
-                            if hovering {
-                                let _ = video.play();
-                            } else {
-                                let _ = video.pause();
-                                video.set_current_time(0.0);
-                            }
-                        }
-                    }
-                }
-            }
-            #[cfg(not(feature = "web"))]
-            let _ = (&id, hovering);
+            let action = if hovering { "play" } else { "pause" };
+            let js = format!(
+                r#"(function() {{ var v = document.getElementById("{id}"); if (v) {{ if ("{action}" === "play") {{ v.play().catch(function(){{}}); }} else {{ v.pause(); v.currentTime = 0; }} }} }})()"#
+            );
+            let _ = document::eval(&js).await;
         });
     });
     let display_name = author_metadata
@@ -650,23 +636,11 @@ fn VertsVideoCard(event: Event, feed_type: FeedType) -> Element {
         let hovering = *is_hovering.read();
         let id = video_element_id_for_effect.clone();
         spawn(async move {
-            #[cfg(feature = "web")]
-            if let Some(window) = web_sys::window() {
-                if let Some(document) = window.document() {
-                    if let Some(element) = document.get_element_by_id(&id) {
-                        if let Ok(video) = element.dyn_into::<web_sys::HtmlVideoElement>() {
-                            if hovering {
-                                let _ = video.play();
-                            } else {
-                                let _ = video.pause();
-                                video.set_current_time(0.0);
-                            }
-                        }
-                    }
-                }
-            }
-            #[cfg(not(feature = "web"))]
-            let _ = (&id, hovering);
+            let action = if hovering { "play" } else { "pause" };
+            let js = format!(
+                r#"(function() {{ var v = document.getElementById("{id}"); if (v) {{ if ("{action}" === "play") {{ v.play().catch(function(){{}}); }} else {{ v.pause(); v.currentTime = 0; }} }} }})()"#
+            );
+            let _ = document::eval(&js).await;
         });
     });
     let video_id = event.id.to_hex();

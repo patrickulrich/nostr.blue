@@ -424,6 +424,59 @@ fn render_cashu_token(token: &str) -> Element {
     rsx! { span { class: "text-xs text-muted-foreground font-mono break-all", "{token}" } }
 }
 
+#[component]
+fn InlineVideoPlayer(url: String) -> Element {
+    let video_src = format!("{}#t=0.1", url);
+    let url_hash = {
+        use std::hash::Hasher;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        std::hash::Hash::hash(&url, &mut hasher);
+        format!("{:x}", hasher.finish())
+    };
+    let video_id = format!("iv-{}", url_hash);
+    let mut captured_poster: Signal<Option<String>> = use_signal(|| None);
+    let vid_for_capture = video_id.clone();
+    use_effect(move || {
+        if captured_poster.read().is_some() {
+            return;
+        }
+        let vid = vid_for_capture.clone();
+        spawn(async move {
+            crate::platform::timer::sleep_ms(1500).await;
+            let js = format!(
+                r#"return (function() {{ var v = document.getElementById("{vid}"); if (!v || !v.videoWidth) return null; try {{ var c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight; c.getContext('2d').drawImage(v, 0, 0); return c.toDataURL('image/jpeg', 0.7); }} catch(e) {{ return null; }} }})()"#
+            );
+            if let Some(data_url) = document::eval(&js)
+                .await
+                .ok()
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
+            {
+                captured_poster.set(Some(data_url));
+            }
+        });
+    });
+    rsx! {
+        div {
+            class: "my-2 rounded-lg overflow-hidden border border-border relative bg-black",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            if let Some(ref bg) = *captured_poster.read() {
+                img {
+                    src: "{bg}",
+                    class: "absolute inset-0 w-full h-full object-contain",
+                }
+            }
+            video {
+                id: "{video_id}",
+                src: "{video_src}",
+                controls: true,
+                preload: "metadata",
+                class: "max-w-full h-auto relative z-10",
+                "Your browser does not support the video tag."
+            }
+        }
+    }
+}
+
 fn render_token(token: &ContentToken, emoji_map: &HashMap<String, String>) -> Element {
     match token {
         ContentToken::Text(text) => {
@@ -469,19 +522,8 @@ fn render_token(token: &ContentToken, emoji_map: &HashMap<String, String>) -> El
             }
         }
         ContentToken::Video(url) => {
-            let video_src = format!("{}#t=0.1", url);
             rsx! {
-                div {
-                    class: "my-2 rounded-lg overflow-hidden border border-border",
-                    onclick: move |e: MouseEvent| e.stop_propagation(),
-                    video {
-                        src: "{video_src}",
-                        controls: true,
-                        preload: "metadata",
-                        class: "max-w-full h-auto",
-                        "Your browser does not support the video tag."
-                    }
-                }
+                InlineVideoPlayer { url: url.clone() }
             }
         }
         ContentToken::Mention(mention) => {

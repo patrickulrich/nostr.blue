@@ -16,8 +16,6 @@ use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 use std::collections::HashMap;
 use std::time::Duration;
-#[cfg(feature = "web")]
-use wasm_bindgen::JsCast;
 #[derive(Clone, PartialEq, Debug, Eq, Hash)]
 enum MediaSubTab {
     Photos,
@@ -1321,23 +1319,11 @@ fn VertsVideoCard(event: NostrEvent) -> Element {
     use_effect(use_reactive(&*is_hovering.read(), move |hovering| {
         let id = video_element_id_for_effect.clone();
         spawn(async move {
-            #[cfg(feature = "web")]
-            if let Some(window) = web_sys::window() {
-                if let Some(document) = window.document() {
-                    if let Some(element) = document.get_element_by_id(&id) {
-                        if let Ok(video) = element.dyn_into::<web_sys::HtmlVideoElement>() {
-                            if hovering {
-                                let _ = video.play();
-                            } else {
-                                let _ = video.pause();
-                                video.set_current_time(0.0);
-                            }
-                        }
-                    }
-                }
-            }
-            #[cfg(not(feature = "web"))]
-            let _ = (&id, hovering);
+            let action = if hovering { "play" } else { "pause" };
+            let js = format!(
+                r#"(function() {{ var v = document.getElementById("{id}"); if (v) {{ if ("{action}" === "play") {{ v.play().catch(function(){{}}); }} else {{ v.pause(); v.currentTime = 0; }} }} }})()"#
+            );
+            let _ = document::eval(&js).await;
         });
     }));
     let video_id = event.id.to_hex();
