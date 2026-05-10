@@ -381,6 +381,26 @@ pub async fn cleanup_ephemeral_relays(client: &Client, urls: &[String]) {
     }
 }
 
+/// Remove gossip-only relays from the pool.
+///
+/// Preserves user-configured relays (which have READ/WRITE flags) and
+/// discovery relays (which have DISCOVERY flag). Only removes relays
+/// that have GOSSIP flag with no READ, WRITE, or DISCOVERY flags.
+#[allow(dead_code)]
+pub async fn cleanup_gossip_relays(client: &Client) {
+    let all = client.pool().all_relays().await;
+    for (url, relay) in all {
+        let flags = relay.flags();
+        if flags.has_gossip()
+            && !flags.has_read()
+            && !flags.has_write()
+            && !flags.has_discovery()
+        {
+            let _ = client.force_remove_relay(url.as_str()).await;
+        }
+    }
+}
+
 /// Start a provenance recorder that listens to all relay notifications.
 ///
 /// Records:

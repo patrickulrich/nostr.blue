@@ -338,13 +338,16 @@ pub async fn fetch_recipe_by_naddr(naddr: &str) -> StdResult<Option<CachedRecipe
     if let Some(cached) = get_cached_recipe_by_naddr(naddr) {
         return Ok(Some(cached));
     }
-    let coord = Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
-    let filter = recipe_by_coord_filter(coord.public_key, &coord.identifier);
-    let events =
-        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-            .await?;
-    if let Some(event) = events.first() {
-        if let Some(recipe) = parse_recipe_event(event) {
+    let parsed = crate::utils::nip19::parse_naddr(naddr)?;
+    let event = crate::stores::nostr_client::fetch_event_by_coordinate_with_relays(
+        parsed.kind,
+        parsed.pubkey,
+        parsed.identifier,
+        parsed.relay_hints,
+    )
+    .await?;
+    if let Some(event) = event {
+        if let Some(recipe) = parse_recipe_event(&event) {
             cache_recipe(recipe.clone());
             return Ok(Some(recipe));
         }

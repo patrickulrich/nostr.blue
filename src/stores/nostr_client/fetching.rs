@@ -135,7 +135,7 @@ pub async fn fetch_events_aggregated_outbox(
 /// Internal: Fetch events using gossip with provided client (avoids re-reading NOSTR_CLIENT)
 ///
 /// Dioxus pattern: Get client once, pass same instance through all async operations.
-async fn fetch_events_aggregated_outbox_with_client(
+pub(crate) async fn fetch_events_aggregated_outbox_with_client(
     client: &std::sync::Arc<Client>,
     filter: Filter,
     timeout: Duration,

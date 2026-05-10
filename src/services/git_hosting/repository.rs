@@ -4,7 +4,7 @@
 #![allow(dead_code)]
 use crate::stores::code_store::{cache_repo_events, get_cached_repo};
 use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
-use crate::utils::nip34::{decode_repo_naddr, Repository};
+use crate::utils::nip34::Repository;
 use dioxus::signals::ReadableExt;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
@@ -15,20 +15,19 @@ pub async fn fetch_repository(naddr: &str) -> Result<Repository, String> {
     if let Some(repo) = get_cached_repo(naddr) {
         return Ok(repo);
     }
-    let (coordinate, _relay_hints) =
-        decode_repo_naddr(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
-    let filter = Filter::new()
-        .kind(Kind::GitRepoAnnouncement)
-        .author(coordinate.public_key)
-        .identifier(&coordinate.identifier);
-    let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
-        .await
-        .map_err(|e| format!("Failed to fetch repository: {}", e))?;
-    cache_repo_events(&events);
-    events
-        .into_iter()
-        .max_by_key(|e| e.created_at)
-        .and_then(|e| Repository::from_event(&e))
+    let parsed = crate::utils::nip19::parse_naddr(naddr)
+        .map_err(|e| format!("Invalid naddr: {}", e))?;
+    let event = crate::stores::nostr_client::fetch_event_by_coordinate_with_relays(
+        parsed.kind,
+        parsed.pubkey,
+        parsed.identifier,
+        parsed.relay_hints,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch repository: {}", e))?;
+    let event = event.ok_or_else(|| "Repository not found".to_string())?;
+    cache_repo_events(std::slice::from_ref(&event));
+    Repository::from_event(&event)
         .ok_or_else(|| "Repository not found".to_string())
 }
 /// Fetch repositories by author pubkey

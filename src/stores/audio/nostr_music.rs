@@ -344,6 +344,7 @@ pub async fn fetch_nostr_tracks(
 pub async fn fetch_nostr_track_by_coordinate(
     pubkey: &str,
     d_tag: &str,
+    relay_hints: Vec<String>,
 ) -> Result<Option<NostrTrack>, String> {
     let cache_key = format!("{}:{}:{}", KIND_MUSIC_TRACK, pubkey, d_tag);
     if let Some(cached) = NOSTR_TRACK_CACHE.read().peek(&cache_key) {
@@ -352,16 +353,15 @@ pub async fn fetch_nostr_track_by_coordinate(
             return Ok(Some(cached.track.clone()));
         }
     }
-    let public_key = PublicKey::from_hex(pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let filter = Filter::new()
-        .kind(Kind::from(KIND_MUSIC_TRACK))
-        .author(public_key)
-        .identifier(d_tag)
-        .limit(1);
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5))
-        .await
-        .map_err(|e| format!("Failed to fetch track: {}", e))?;
-    if let Some(event) = events.into_iter().next() {
+    let event = nostr_client::fetch_event_by_coordinate_with_relays(
+        KIND_MUSIC_TRACK,
+        pubkey.to_string(),
+        d_tag.to_string(),
+        relay_hints,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch track: {}", e))?;
+    if let Some(event) = event {
         let track = parse_track_event(&event)?;
         NOSTR_TRACK_CACHE.write().put(
             track.coordinate.clone(),
@@ -601,19 +601,17 @@ pub async fn fetch_playlists(
 pub async fn fetch_playlist_by_coordinate(
     author: &str,
     d_tag: &str,
+    relay_hints: Vec<String>,
 ) -> Result<Option<NostrPlaylist>, String> {
-    let public_key = PublicKey::from_hex(author)
-        .or_else(|_| PublicKey::from_bech32(author))
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let filter = Filter::new()
-        .kind(Kind::from(KIND_PLAYLIST))
-        .author(public_key)
-        .identifier(d_tag)
-        .limit(1);
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5))
-        .await
-        .map_err(|e| format!("Failed to fetch playlist: {}", e))?;
-    if let Some(event) = events.into_iter().next() {
+    let event = nostr_client::fetch_event_by_coordinate_with_relays(
+        KIND_PLAYLIST,
+        author.to_string(),
+        d_tag.to_string(),
+        relay_hints,
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch playlist: {}", e))?;
+    if let Some(event) = event {
         let playlist = parse_playlist_event(&event)?;
         NOSTR_PLAYLIST_CACHE
             .write()
@@ -647,7 +645,7 @@ pub async fn resolve_playlist_tracks(playlist: &NostrPlaylist) -> Result<Vec<Nos
             if parts.len() >= 3 {
                 let pubkey = parts[1];
                 let d_tag = parts[2];
-                if let Ok(Some(track)) = fetch_nostr_track_by_coordinate(pubkey, d_tag).await {
+                if let Ok(Some(track)) = fetch_nostr_track_by_coordinate(pubkey, d_tag, vec![]).await {
                     for (ref_key, track_opt) in &mut tracks {
                         if ref_key == track_ref {
                             *track_opt = Some(track.clone());

@@ -2,16 +2,15 @@ use crate::components::icons::{ArrowLeftIcon, ShareIcon, ZapIcon};
 use crate::components::live::stream_card::{parse_live_stream_event, LiveStreamMeta};
 use crate::components::{LiveChat, LiveStreamPlayer, ShareModal, StreamStatus, ZapModal};
 use crate::routes::Route;
-use crate::stores::nostr_client::{fetch_events_aggregated, CLIENT_INITIALIZED, HAS_SIGNER};
+use crate::stores::nostr_client::{fetch_event_by_coordinate_with_relays, CLIENT_INITIALIZED, HAS_SIGNER};
 use crate::stores::profiles;
+use crate::utils::nip19::ParsedNaddr;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
-use nostr_sdk::{Filter, Kind, PublicKey};
-use std::time::Duration;
 #[component]
 pub fn LiveStreamDetail(note_id: String) -> Element {
     let parsed_naddr = use_memo(move || {
-        crate::utils::nip19::parse_naddr(&note_id).unwrap_or((String::new(), String::new()))
+        crate::utils::nip19::parse_naddr(&note_id).ok()
     });
     let mut stream_event = use_signal(|| None::<nostr_sdk::Event>);
     let mut stream_meta = use_signal(|| None::<LiveStreamMeta>);
@@ -26,55 +25,51 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                 return profiles::get_profile(host_pk);
             }
         }
-        let (pubkey_str, _) = parsed_naddr.read().clone();
-        profiles::get_profile(&pubkey_str)
+        let p = parsed_naddr.read();
+        if let Some(ref parsed) = *p {
+            profiles::get_profile(&parsed.pubkey)
+        } else {
+            None
+        }
     });
     use_effect(use_reactive(
         (&*CLIENT_INITIALIZED.read(), &parsed_naddr),
-        move |(client_ready, _naddr)| {
+        move |(client_ready, _)| {
             if !client_ready {
                 return;
             }
-            let (author_pk, dtag) = parsed_naddr.read().clone();
+            let parsed = (*parsed_naddr.read()).clone();
+            let Some(parsed) = parsed else { return };
+            let ParsedNaddr { pubkey: author_pk, identifier: dtag, kind, relay_hints, .. } = parsed;
             spawn(async move {
                 loading.set(true);
                 error.set(None);
-                let pubkey = match PublicKey::parse(&author_pk) {
-                    Ok(pk) => pk,
-                    Err(e) => {
-                        error.set(Some(format!("Invalid public key: {}", e)));
-                        loading.set(false);
-                        return;
-                    }
-                };
-                let filter = Filter::new()
-                    .kind(Kind::from(30311))
-                    .author(pubkey)
-                    .custom_tag(
-                        nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::D),
-                        &dtag,
-                    )
-                    .limit(1);
-                match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
-                    Ok(events) => {
-                        if let Some(event) = events.first() {
-                            if let Some(meta) = parse_live_stream_event(event) {
-                                let profile_to_fetch = meta
-                                    .host_pubkey
-                                    .clone()
-                                    .unwrap_or_else(|| author_pk.clone());
-                                stream_meta.set(Some(meta));
-                                stream_event.set(Some(event.clone()));
-                                loading.set(false);
-                                let _ = profiles::fetch_profile(profile_to_fetch).await;
-                            } else {
-                                error.set(Some("Failed to parse stream metadata".to_string()));
-                                loading.set(false);
-                            }
+                match fetch_event_by_coordinate_with_relays(
+                    kind,
+                    author_pk.clone(),
+                    dtag,
+                    relay_hints,
+                )
+                .await
+                {
+                    Ok(Some(event)) => {
+                        if let Some(meta) = parse_live_stream_event(&event) {
+                            let profile_to_fetch = meta
+                                .host_pubkey
+                                .clone()
+                                .unwrap_or_else(|| author_pk.clone());
+                            stream_meta.set(Some(meta));
+                            stream_event.set(Some(event));
+                            loading.set(false);
+                            let _ = profiles::fetch_profile(profile_to_fetch).await;
                         } else {
-                            error.set(Some("Stream not found".to_string()));
+                            error.set(Some("Failed to parse stream metadata".to_string()));
                             loading.set(false);
                         }
+                    }
+                    Ok(None) => {
+                        error.set(Some("Stream not found".to_string()));
+                        loading.set(false);
                     }
                     Err(e) => {
                         error.set(Some(format!("Failed to load stream: {}", e)));
@@ -87,31 +82,32 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
     let handle_refresh = move |_| {
         loading.set(true);
         error.set(None);
-        let (author_pk, dtag) = parsed_naddr.peek().clone();
+        let parsed = (*parsed_naddr.read()).clone();
         spawn(async move {
-            if let Ok(pubkey) = PublicKey::parse(&author_pk) {
-                let filter = Filter::new()
-                    .kind(Kind::from(30311))
-                    .author(pubkey)
-                    .custom_tag(
-                        nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::D),
-                        &dtag,
-                    )
-                    .limit(1);
-                match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
-                    Ok(events) => {
-                        if let Some(event) = events.first() {
-                            if let Some(meta) = parse_live_stream_event(event) {
-                                stream_meta.set(Some(meta));
-                                stream_event.set(Some(event.clone()));
-                                loading.set(false);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error.set(Some(format!("Failed to refresh: {}", e)));
+            let Some(parsed) = parsed else { return };
+            let ParsedNaddr { pubkey: author_pk, identifier: dtag, kind, relay_hints, .. } = parsed;
+            match fetch_event_by_coordinate_with_relays(
+                kind,
+                author_pk.clone(),
+                dtag,
+                relay_hints,
+            )
+            .await
+            {
+                Ok(Some(event)) => {
+                    if let Some(meta) = parse_live_stream_event(&event) {
+                        stream_meta.set(Some(meta));
+                        stream_event.set(Some(event));
                         loading.set(false);
                     }
+                }
+                Ok(None) => {
+                    error.set(Some("Stream not found".to_string()));
+                    loading.set(false);
+                }
+                Err(e) => {
+                    error.set(Some(format!("Failed to refresh: {}", e)));
+                    loading.set(false);
                 }
             }
         });
@@ -311,7 +307,9 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                         div { class: "lg:w-96 border-t lg:border-t-0 lg:border-l border-border flex-1 lg:flex-none min-h-0 flex flex-col overflow-hidden",
                             if let Some(_event) = stream_event.read().as_ref() {
                                 {
-                                    let (author_pk, dtag) = parsed_naddr.peek().clone();
+                                    let p = (*parsed_naddr.read()).clone();
+                                    let author_pk = p.as_ref().map(|p| p.pubkey.clone()).unwrap_or_default();
+                                    let dtag = p.as_ref().map(|p| p.identifier.clone()).unwrap_or_default();
                                     rsx! {
                                         LiveChat { stream_author_pubkey: author_pk, stream_d_tag: dtag }
                                     }

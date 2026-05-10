@@ -39,12 +39,13 @@ pub fn ArticleDetail(naddr: String) -> Element {
             loading.set(true);
             error.set(None);
             match crate::utils::nip19::parse_naddr(&naddr_str) {
-                Ok((pubkey, identifier)) => {
-                    crate::stores::profiles::PROFILE_CACHE.write().pop(&pubkey);
-                    match nostr_client::fetch_event_by_coordinate(
-                        nostr_sdk::Kind::LongFormTextNote.as_u16(),
-                        pubkey.clone(),
-                        identifier,
+                Ok(parsed) => {
+                    crate::stores::profiles::PROFILE_CACHE.write().pop(&parsed.pubkey);
+                    match nostr_client::fetch_event_by_coordinate_with_relays(
+                        parsed.kind,
+                        parsed.pubkey.clone(),
+                        parsed.identifier,
+                        parsed.relay_hints,
                     )
                     .await
                     {
@@ -55,7 +56,7 @@ pub fn ArticleDetail(naddr: String) -> Element {
                             spawn(async move {
                                 profile_prefetch::prefetch_event_authors(&[event]).await;
                                 if let Some(profile) =
-                                    crate::stores::profiles::get_cached_profile(&pubkey)
+                                    crate::stores::profiles::get_cached_profile(&parsed.pubkey)
                                 {
                                     let mut metadata = nostr_sdk::Metadata::new();
                                     if let Some(name) = profile.name {

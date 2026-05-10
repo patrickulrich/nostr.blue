@@ -21,7 +21,7 @@ use crate::utils::podcast::{self, PodcastMetadata};
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::nips::nip19::ToBech32;
-use nostr_sdk::prelude::{Filter, Kind, PublicKey, SingleLetterTag};
+use nostr_sdk::prelude::{Filter, Kind, PublicKey};
 use std::time::Duration;
 
 enum RssEpisodeDetailState {
@@ -532,21 +532,19 @@ fn EpisodeDetailSkeleton() -> Element {
 }
 /// Fetch Nostr podcast episode by naddr/coordinate
 async fn fetch_nostr_episode(naddr: &str) -> Result<(DisplayEpisode, PodcastMetadata), String> {
-    let (pubkey, d_tag) = crate::utils::nip19::parse_naddr(naddr)?;
-    let episode_filter = Filter::new()
-        .kind(Kind::from(podcast::KIND_PODCAST_EPISODE))
-        .author(PublicKey::from_hex(&pubkey).map_err(|e| e.to_string())?)
-        .custom_tag(SingleLetterTag::from_char('d').unwrap(), d_tag.clone())
-        .limit(1);
-    let episode_events =
-        nostr_client::fetch_events_aggregated(episode_filter, Duration::from_secs(10)).await?;
-    let episode_event = episode_events
-        .first()
-        .ok_or_else(|| "Episode not found".to_string())?;
-    let episode = podcast::parse_podcast_episode(episode_event)?;
+    let parsed = crate::utils::nip19::parse_naddr(naddr)?;
+    let episode_event = nostr_client::fetch_event_by_coordinate_with_relays(
+        parsed.kind,
+        parsed.pubkey.clone(),
+        parsed.identifier,
+        parsed.relay_hints,
+    )
+    .await?
+    .ok_or_else(|| "Episode not found".to_string())?;
+    let episode = podcast::parse_podcast_episode(&episode_event)?;
     let metadata_filter = Filter::new()
         .kind(Kind::from(podcast::KIND_APP_DATA))
-        .author(PublicKey::from_hex(&pubkey).map_err(|e| e.to_string())?)
+        .author(PublicKey::from_hex(&parsed.pubkey).map_err(|e| e.to_string())?)
         .limit(1);
     let metadata_events =
         nostr_client::fetch_events_aggregated(metadata_filter, Duration::from_secs(5)).await?;
@@ -566,7 +564,7 @@ async fn fetch_nostr_episode(naddr: &str) -> Result<(DisplayEpisode, PodcastMeta
         website: None,
         funding: Vec::new(),
         value: None,
-        pubkey: pubkey.clone(),
+        pubkey: parsed.pubkey.clone(),
         d_tag: "".to_string(),
         created_at: 0,
     });

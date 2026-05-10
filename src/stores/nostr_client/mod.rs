@@ -181,7 +181,7 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
                 timeout: Duration::from_secs(30),
             })
             .gossip(GossipOptions::default().limits(gossip_limits))
-            .pool(RelayPoolOptions::new().max_relays(Some(50)));
+            .pool(RelayPoolOptions::new());
         Client::builder()
             .database(database)
             .gossip(gossip)
@@ -232,7 +232,7 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
                 timeout: Duration::from_secs(30),
             })
             .gossip(GossipOptions::default().limits(gossip_limits))
-            .pool(RelayPoolOptions::new().max_relays(Some(50)));
+            .pool(RelayPoolOptions::new());
         Client::builder()
             .database(database)
             .gossip(gossip)

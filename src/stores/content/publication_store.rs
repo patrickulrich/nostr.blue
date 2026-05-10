@@ -706,24 +706,28 @@ pub async fn fetch_publication_by_naddr(
     if let Some(pub_) = get_cached_publication_by_naddr(naddr) {
         return Ok(Some(pub_));
     }
-    let coord = Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
-    let identifier = coord.identifier;
+    let parsed = crate::utils::nip19::parse_naddr(naddr)?;
+    let identifier = parsed.identifier;
     if identifier.is_empty() {
         return Err("No identifier in naddr".to_string());
     }
-    let filter = publication_by_coord_filter(coord.public_key, &identifier);
     let result =
-        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await;
+        crate::stores::nostr_client::fetch_event_by_coordinate_with_relays(
+            parsed.kind,
+            parsed.pubkey,
+            identifier,
+            parsed.relay_hints,
+        )
+        .await;
     match result {
-        Ok(events) => {
-            if let Some(event) = events.first() {
-                if let Some(pub_) = parse_publication_index(event) {
-                    cache_publication(pub_.clone());
-                    return Ok(Some(pub_));
-                }
+        Ok(Some(event)) => {
+            if let Some(pub_) = parse_publication_index(&event) {
+                cache_publication(pub_.clone());
+                return Ok(Some(pub_));
             }
             Ok(None)
         }
+        Ok(None) => Ok(None),
         Err(e) => {
             log::error!("Failed to fetch publication: {}", e);
             Err(e)
