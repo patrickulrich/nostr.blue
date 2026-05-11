@@ -222,14 +222,20 @@ async fn fetch_events_for_filter(
     filter: Filter,
     timeout: Duration,
 ) -> Result<FetchEventsPage, String> {
-    let db_events: Vec<Event> = match client.database().query(filter.clone()).await {
+    let (db_events, relay_events) = tokio::join!(
+        client.database().query(filter.clone()),
+        client.fetch_events(filter, timeout)
+    );
+
+    let db_events: Vec<Event> = match db_events {
         Ok(events) => events.into_iter().collect(),
         Err(e) => {
             log::debug!("Database query for interactions failed: {}", e);
             Vec::new()
         }
     };
-    let relay_events: Vec<Event> = match client.fetch_events(filter, timeout).await {
+
+    let relay_events: Vec<Event> = match relay_events {
         Ok(events) => events.into_iter().collect(),
         Err(e) => {
             if !db_events.is_empty() {
@@ -393,26 +399,27 @@ pub async fn fetch_interaction_counts_batch(
     }
     let client = get_client().ok_or("Client not initialized")?;
     let mut event_map: HashMap<EventId, Event> = HashMap::new();
-    for batch in uncached_ids.chunks(INTERACTION_EVENT_BATCH_SIZE) {
-        let batch_events = fetch_paginated_interaction_events(
-            &client,
-            batch,
-            &[
-                Kind::TextNote,
-                Kind::Comment,
-                Kind::Reaction,
-                Kind::Repost,
-                Kind::ZapReceipt,
-                Kind::Custom(1010),
-            ],
-            timeout,
-        )
-        .await?;
-        log::info!(
-            "Fetched {} interaction events for batch of {} requested IDs",
-            batch_events.len(),
-            batch.len()
-        );
+    let batch_futures: Vec<_> = uncached_ids
+        .chunks(INTERACTION_EVENT_BATCH_SIZE)
+        .map(|batch| {
+            fetch_paginated_interaction_events(
+                &client,
+                batch,
+                &[
+                    Kind::TextNote,
+                    Kind::Comment,
+                    Kind::Reaction,
+                    Kind::Repost,
+                    Kind::ZapReceipt,
+                    Kind::Custom(1010),
+                ],
+                timeout,
+            )
+        })
+        .collect();
+    let batch_results = futures::future::join_all(batch_futures).await;
+    for batch_events in batch_results {
+        let batch_events = batch_events?;
         for event in batch_events {
             event_map.insert(event.id, event);
         }

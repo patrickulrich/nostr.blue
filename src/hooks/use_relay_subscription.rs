@@ -20,10 +20,18 @@ fn spawn_dispatched_listener(
 ) {
     spawn(async move {
         let mut rx = rx;
+        let mut buffer = Vec::new();
         while let Some(event) = rx.recv().await {
-            if let Ok(mut cb) = on_event.lock() {
-                cb(&event);
+            buffer.push(event);
+            while let Ok(event) = rx.try_recv() {
+                buffer.push(event);
             }
+            if let Ok(mut cb) = on_event.lock() {
+                for event in &buffer {
+                    cb(event);
+                }
+            }
+            buffer.clear();
         }
     });
 }
@@ -123,6 +131,7 @@ pub fn use_relay_subscription_opts(
 fn spawn_fallback_listener(client: Arc<Client>, sub_id: SubscriptionId, on_event: OnEvent) {
     spawn(async move {
         let mut notifications = client.notifications();
+        let mut buffer = Vec::new();
         while let Ok(notification) = notifications.recv().await {
             if let nostr_sdk::RelayPoolNotification::Event {
                 subscription_id,
@@ -131,9 +140,25 @@ fn spawn_fallback_listener(client: Arc<Client>, sub_id: SubscriptionId, on_event
             } = notification
             {
                 if subscription_id == sub_id {
-                    if let Ok(mut cb) = on_event.lock() {
-                        cb(&event);
+                    buffer.push(event);
+                    while let Ok(notification) = notifications.try_recv() {
+                        if let nostr_sdk::RelayPoolNotification::Event {
+                            subscription_id: sid,
+                            event,
+                            ..
+                        } = notification
+                        {
+                            if sid == sub_id {
+                                buffer.push(event);
+                            }
+                        }
                     }
+                    if let Ok(mut cb) = on_event.lock() {
+                        for event in &buffer {
+                            cb(event);
+                        }
+                    }
+                    buffer.clear();
                 }
             }
         }
