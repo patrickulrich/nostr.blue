@@ -14,7 +14,7 @@ use std::sync::{Mutex, OnceLock};
 
 const MAX_RELAY_LIMIT: usize = 5_000;
 const INTERACTION_PAGE_LIMIT: usize = 1_000;
-const INTERACTION_EVENT_BATCH_SIZE: usize = 25;
+const INTERACTION_EVENT_BATCH_SIZE: usize = 100;
 
 #[derive(Clone, Eq, Hash, PartialEq)]
 struct Nip45CacheKey {
@@ -843,6 +843,49 @@ pub(super) fn parse_amount_from_description(description: &str) -> Option<u64> {
 
 /// Fetch interaction counts for a time range (useful for trending/popular feeds)
 ///
+/// Get interaction counts from the local database only (zero relay round-trips).
+///
+/// This provides instant counts by querying the nostr-sdk's local database.
+/// Useful as a first-pass fast path before the full relay fetch resolves user-state.
+///
+/// The counts may be incomplete if the local DB hasn't seen all interactions.
+/// Callers should overwrite with full relay-fetched counts when they arrive.
+pub async fn fetch_local_db_counts(
+    event_ids: &[EventId],
+) -> HashMap<String, InteractionCounts> {
+    let client = match get_client() {
+        Some(c) => c,
+        None => return HashMap::new(),
+    };
+    let db = client.database();
+    let mut result = HashMap::new();
+    for event_id in event_ids {
+        let hex = event_id.to_hex();
+        let mut counts = InteractionCounts::default();
+        let filter_base = Filter::new().event(*event_id);
+        let reply_filter = filter_base
+            .clone()
+            .kinds(vec![Kind::TextNote, Kind::Comment]);
+        if let Ok(count) = db.count(reply_filter).await {
+            counts.replies = count;
+        }
+        let reaction_filter = filter_base.clone().kind(Kind::Reaction);
+        if let Ok(count) = db.count(reaction_filter).await {
+            counts.likes = count;
+        }
+        let repost_filter = filter_base.clone().kind(Kind::Repost);
+        if let Ok(count) = db.count(repost_filter).await {
+            counts.reposts = count;
+        }
+        let zap_filter = filter_base.kind(Kind::ZapReceipt);
+        if let Ok(count) = db.count(zap_filter).await {
+            counts.zaps = count;
+        }
+        result.insert(hex, counts);
+    }
+    result
+}
+
 /// This fetches all interactions in a given time period and groups by event.
 /// Useful for "trending" or "popular" feeds that want to rank by recent engagement.
 #[allow(dead_code)]

@@ -8,7 +8,8 @@ use crate::components::{ClientInitializing, EditProposalCard, NoteCard, Threaded
 use crate::hooks::{use_mute_block_cache, use_relay_subscription};
 use crate::routes::Route;
 use crate::services::aggregation::{
-    fetch_interaction_counts_batch, InteractionCounts,
+    fetch_interaction_counts_batch, fetch_local_db_counts, stream_interaction_counts,
+    InteractionCounts, InteractionStreamHandle,
 };
 use crate::stores::back_navigation;
 use crate::stores::nostr_client;
@@ -580,6 +581,8 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut interaction_counts: Signal<HashMap<String, InteractionCounts>> =
         use_signal(HashMap::new);
+    let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> =
+        use_signal(|| None);
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
     let mut load_generation = use_signal(|| 0u32);
     let mut reply_ids: Signal<HashSet<EventId>> = use_signal(HashSet::new);
@@ -731,13 +734,22 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
             all_events.extend(parent_events.peek().iter().cloned());
             all_events.extend(replies.peek().iter().cloned());
             let mut ic = interaction_counts;
+            let mut ic_stream = interaction_stream_handle;
             let ids_for_counts: Vec<EventId> = all_events.iter().map(|e| e.id).collect();
             let ids_clone = ids_for_counts.clone();
+            let ids_for_stream = ids_for_counts.clone();
+            let lg_stream = this_generation;
             spawn(async move {
                 profile_prefetch::prefetch_event_authors(&all_events).await;
             });
             if !ids_clone.is_empty() {
                 spawn(async move {
+                    let local_counts = fetch_local_db_counts(&ids_clone).await;
+                    if !local_counts.is_empty()
+                        && *load_generation.peek() == this_generation
+                    {
+                        ic.set(local_counts);
+                    }
                     if let Ok(counts) =
                         fetch_interaction_counts_batch(ids_clone, Duration::from_secs(5))
                             .await
@@ -746,6 +758,15 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                             return;
                         }
                         ic.set(counts);
+                        if let Ok(handle) =
+                            stream_interaction_counts(ids_for_stream, ic, Some(600)).await
+                        {
+                            if *load_generation.peek() != lg_stream {
+                                handle.unsubscribe().await;
+                                return;
+                            }
+                            ic_stream.set(Some(handle));
+                        }
                     }
                 });
             }
@@ -778,6 +799,11 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
 
     use_drop(move || {
         back_navigation::clear_active_note_back_context(&note_id);
+        if let Some(handle) = interaction_stream_handle.write().take() {
+            spawn(async move {
+                handle.unsubscribe().await;
+            });
+        }
     });
 
     rsx! {
