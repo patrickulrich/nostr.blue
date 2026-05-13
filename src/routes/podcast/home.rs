@@ -498,6 +498,7 @@ fn BrowsePodcastRow(props: BrowsePodcastRowProps) -> Element {
                 src: "{image}",
                 alt: "{props.title}",
                 class: "w-14 h-14 rounded-lg object-cover shrink-0",
+                referrerpolicy: "no-referrer",
             }
             div { class: "flex-1 min-w-0",
                 div { class: "font-medium truncate", "{props.title}" }
@@ -569,6 +570,7 @@ fn TrendingPodcastCard(props: TrendingPodcastCardProps) -> Element {
                         alt: "{feed.title}",
                         class: "w-full h-full object-cover",
                         loading: "lazy",
+                        referrerpolicy: "no-referrer",
                     }
                 } else {
                     div {
@@ -1201,6 +1203,7 @@ fn SubscribedPodcastRow(props: SubscribedPodcastRowProps) -> Element {
                         src: "{image}",
                         alt: "{title}",
                         class: "w-12 h-12 rounded object-cover",
+                        referrerpolicy: "no-referrer",
                     }
                     div { class: "flex-1 min-w-0",
                         div { class: "font-medium truncate", "{title}" }
@@ -1442,6 +1445,7 @@ fn SearchResultRow(props: SearchResultRowProps) -> Element {
                 src: "{image}",
                 alt: "{props.title}",
                 class: "w-12 h-12 rounded object-cover shrink-0",
+                referrerpolicy: "no-referrer",
             }
             div { class: "flex-1 min-w-0",
                 div { class: "font-medium truncate", "{props.title}" }
@@ -1929,6 +1933,7 @@ fn SubscribedFeedCard(props: SubscribedFeedCardProps) -> Element {
                         src: "{img}",
                         alt: "{title}",
                         class: "w-full h-full object-cover",
+                        referrerpolicy: "no-referrer",
                     }
                 } else {
                     div {

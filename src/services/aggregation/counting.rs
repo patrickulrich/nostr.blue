@@ -296,6 +296,12 @@ async fn fetch_paginated_interaction_events(
 
         let previous_len = all_events.len();
         for event in page.events {
+            #[cfg(feature = "native")]
+            {
+                if matches!(event.kind, Kind::TextNote | Kind::Comment | Kind::VoiceMessage | Kind::VoiceMessageReply) {
+                    crate::stores::ndb::cache_event(&event);
+                }
+            }
             all_events.insert(event.id, event);
         }
 

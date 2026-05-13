@@ -136,6 +136,7 @@ fn TrendingCard(props: TrendingCardProps) -> Element {
                         alt: "{feed.title}",
                         class: "w-full h-full object-cover",
                         loading: "lazy",
+                        referrerpolicy: "no-referrer",
                     }
                 } else {
                     div {

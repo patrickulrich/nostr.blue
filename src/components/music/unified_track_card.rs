@@ -149,6 +149,7 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
                     alt: "Album art",
                     class: "w-14 h-14 rounded object-cover",
                     loading: "lazy",
+                    referrerpolicy: "no-referrer",
                 }
                 if props.show_source_badge {
                     div {

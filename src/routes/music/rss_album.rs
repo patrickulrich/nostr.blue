@@ -120,6 +120,7 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
                                                     src: "{art_url}",
                                                     alt: "{feed.title}",
                                                     class: "w-full h-full object-cover",
+                                                    referrerpolicy: "no-referrer",
                                                 }
                                             } else {
                                                 MusicIcon { class: "w-24 h-24 text-muted-foreground" }

@@ -857,7 +857,8 @@ pub fn restore_from_floating() {
 /// Show zap dialog for a specific track (or current track if None)
 pub fn show_zap_dialog_for_track(track: Option<MusicTrack>) {
     let store = MUSIC_PLAYER.resolve();
-    *store.zap_track().write() = track.or_else(|| store.current_track().peek().clone());
+    let current = store.current_track().peek().clone();
+    *store.zap_track().write() = track.or(current);
     *store.show_zap_dialog().write() = true;
 }
 /// Show zap dialog for current track
@@ -1135,8 +1136,8 @@ pub fn sync_native_playback_snapshot(snapshot: AndroidPlaybackSnapshot) {
     if !store.playlist().peek().is_empty() && snapshot.current_index < store.playlist().peek().len()
         && prev_index != snapshot.current_index {
         *store.current_index().write() = snapshot.current_index;
-        *store.current_track().write() =
-            store.playlist().peek().get(snapshot.current_index).cloned();
+        let track = store.playlist().peek().get(snapshot.current_index).cloned();
+        *store.current_track().write() = track;
     }
     *store.is_playing().write() = snapshot.is_playing;
     *store.is_buffering().write() = snapshot.is_buffering;

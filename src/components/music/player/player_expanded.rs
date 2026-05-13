@@ -59,6 +59,7 @@ pub fn PlayerExpanded() -> Element {
                             src: "{art_url}",
                             alt: "Album art",
                             class: "w-full h-full object-cover",
+                            referrerpolicy: "no-referrer",
                         }
                     } else {
                         div { class: "w-full h-full flex items-center justify-center text-muted-foreground",

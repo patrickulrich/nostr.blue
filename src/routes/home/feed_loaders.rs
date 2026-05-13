@@ -359,6 +359,24 @@ where
     let filter = build_following_feed_filter(authors, until, Timestamp::now());
     let mut all_items: Vec<FeedItem> = Vec::new();
     let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
+
+    #[cfg(feature = "native")]
+    {
+        if let Some(client) = nostr_client::get_client() {
+            if let Ok(db_events) = client.database().query(filter.clone()).await {
+                if !db_events.is_empty() {
+                    let db_items = process_events_to_feed_items(db_events.into_iter().collect());
+                    log::info!("nostrdb pre-step: {} items for feed", db_items.len());
+                    for item in &db_items {
+                        seen_ids.insert(item.event().id);
+                    }
+                    on_batch(db_items.clone());
+                    all_items = db_items;
+                }
+            }
+        }
+    }
+
     let stream_result =
         nostr_client::stream_events_immediate(filter, Duration::from_secs(10), |event| {
             let item = if event.kind == Kind::Repost {

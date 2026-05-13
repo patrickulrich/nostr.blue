@@ -188,6 +188,7 @@ fn PodcastDetailContent(props: PodcastDetailContentProps) -> Element {
                             src: "{image_url}",
                             alt: "{metadata.title}",
                             class: "w-32 h-32 md:w-40 md:h-40 rounded-lg object-cover shadow-lg",
+                            referrerpolicy: "no-referrer",
                         }
                         div { class: "flex-1 min-w-0",
                             h1 { class: "text-2xl font-bold truncate", "{metadata.title}" }

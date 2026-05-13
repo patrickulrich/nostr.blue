@@ -214,6 +214,7 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
                                 src: "{image_url}",
                                 alt: "{episode.title}",
                                 class: "w-full aspect-square rounded-lg object-cover shadow-lg",
+                                referrerpolicy: "no-referrer",
                             }
                         }
                         div { class: "flex-1 min-w-0",

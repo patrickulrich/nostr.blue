@@ -198,6 +198,7 @@ pub fn PlayerBar() -> Element {
                                 alt: "Album art",
                                 class: "w-full h-full object-cover",
                                 loading: "lazy",
+                                referrerpolicy: "no-referrer",
                             }
                         }
                     }

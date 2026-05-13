@@ -354,10 +354,11 @@ pub fn Home(list: String) -> Element {
                                 oldest_timestamp.set(exclusive_pagination_cursor(Some(last_item)));
                             }
                             has_more.set(true);
-                            feed_state.set(DataState::Loaded(feed_items.clone()));
+                            accumulated_items = feed_cache::merge_feed_items(accumulated_items, feed_items.clone());
+                            feed_state.set(DataState::Loaded(accumulated_items.clone()));
                             if !is_stale() {
                                 let cache_key_for_store = effective_cache_key;
-                                let items_for_cache = feed_items.clone();
+                                let items_for_cache = accumulated_items.clone();
                                 spawn(async move {
                                     if let Err(e) = feed_cache::store_feed_items(
                                         &cache_key_for_store,
@@ -452,10 +453,11 @@ pub fn Home(list: String) -> Element {
                                 oldest_timestamp.set(exclusive_pagination_cursor(Some(last_item)));
                             }
                             has_more.set(true);
-                            feed_state.set(DataState::Loaded(feed_items.clone()));
+                            let merged = feed_cache::merge_feed_items(cached_items, feed_items.clone());
+                            feed_state.set(DataState::Loaded(merged.clone()));
                             if !is_stale() {
                                 let cache_key_for_store = effective_cache_key;
-                                let items_for_cache = feed_items.clone();
+                                let items_for_cache = merged;
                                 spawn(async move {
                                     let _ = feed_cache::store_feed_items(
                                         &cache_key_for_store,
@@ -1216,6 +1218,45 @@ pub fn Home(list: String) -> Element {
             anchor.feed_type_label = feed_type.read().label();
             log::debug!("Saved scroll position (sync): y={}", scroll_y);
         }
+
+        let ids = subscription_ids.peek().clone();
+        if !ids.is_empty() {
+            spawn(async move {
+                if let Some(client) = nostr_client::get_client() {
+                    log::info!(
+                        "Cleaning up {} real-time subscriptions on unmount",
+                        ids.len()
+                    );
+                    subscription_manager::unsubscribe_all(&client, &ids).await;
+                }
+            });
+        }
+        #[cfg(feature = "native")]
+        {
+            spawn(async move {
+                let _ = crate::stores::ndb::subscriptions::unsubscribe(
+                    crate::stores::ndb::subscriptions::SubKey::FollowingFeed,
+                )
+                .await;
+            });
+        }
+        if let Some(handle) = interaction_stream_handle.peek().clone() {
+            spawn(async move {
+                log::info!("Cleaning up interaction stream on unmount");
+                handle.unsubscribe().await;
+            });
+        }
+        if let Some(sub_id) = relay_feed_sub_id.peek().clone() {
+            let ephemeral_urls = relay_feed_ephemeral_urls.peek().clone();
+            spawn(async move {
+                if let Some(client) = nostr_client::get_client() {
+                    let _ = client.unsubscribe(&sub_id).await;
+                    for url in &ephemeral_urls {
+                        let _ = client.force_remove_relay(url).await;
+                    }
+                }
+            });
+        }
     });
 
     // Restore scroll position after feed content loads (only for popstate/back navigation)
@@ -1386,12 +1427,9 @@ pub fn Home(list: String) -> Element {
     let mut refresh_and_scroll_to_top = move || {
         let current = *refresh_trigger.read();
         refresh_trigger.set(current + 1);
-        #[cfg(feature = "web")]
-        {
-            if let Some(window) = web_sys::window() {
-                window.scroll_to_with_x_and_y(0.0, 0.0);
-            }
-        }
+        spawn(async move {
+            crate::stores::ui::scroll_restore::set_scroll_y(0.0).await;
+        });
     };
 
     let auth = auth_store::AUTH_STATE.read();

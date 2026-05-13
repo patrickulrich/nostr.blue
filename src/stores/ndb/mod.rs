@@ -22,6 +22,15 @@ use nostr_ndb::NdbDatabase;
 use std::sync::OnceLock;
 
 #[cfg(feature = "native")]
+use lru::LruCache;
+
+#[cfg(feature = "native")]
+use nostr::{EventId, Kind};
+
+#[cfg(feature = "native")]
+use std::num::NonZeroUsize;
+
+#[cfg(feature = "native")]
 use dioxus::core::spawn_forever;
 
 #[cfg(feature = "native")]
@@ -97,4 +106,45 @@ pub fn start_ndb_event_processor() {
 pub fn drain_ndb_live_events() -> Vec<nostr::Event> {
     let mut live = NDB_LIVE_EVENTS.write();
     std::mem::take(&mut *live)
+}
+
+#[cfg(feature = "native")]
+static EVENT_BRIDGE_CACHE: std::sync::LazyLock<std::sync::Mutex<LruCache<[u8; 32], nostr::Event>>> =
+    std::sync::LazyLock::new(|| {
+        std::sync::Mutex::new(LruCache::new(NonZeroUsize::new(10000).unwrap()))
+    });
+
+#[cfg(feature = "native")]
+pub fn cache_event(event: &nostr::Event) {
+    if let Ok(mut cache) = EVENT_BRIDGE_CACHE.lock() {
+        cache.put(event.id.to_bytes(), event.clone());
+    }
+}
+
+#[cfg(feature = "native")]
+pub fn get_cached_event(id: &[u8; 32]) -> Option<nostr::Event> {
+    EVENT_BRIDGE_CACHE
+        .lock()
+        .ok()
+        .and_then(|mut cache| cache.get(id).cloned())
+}
+
+#[cfg(feature = "native")]
+pub fn get_cached_replies(event_id: &EventId, kinds: &[Kind]) -> Vec<nostr::Event> {
+    let Ok(cache) = EVENT_BRIDGE_CACHE.lock() else {
+        return Vec::new();
+    };
+    let event_id_hex = event_id.to_hex();
+    cache
+        .iter()
+        .filter(|(_, event)| {
+            if !kinds.is_empty() && !kinds.contains(&event.kind) {
+                return false;
+            }
+            event.tags.iter().any(|tag| {
+                tag.content().map(|c| c == event_id_hex).unwrap_or(false)
+            })
+        })
+        .map(|(_, event)| event.clone())
+        .collect()
 }
