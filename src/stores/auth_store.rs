@@ -413,7 +413,7 @@ async fn run_post_login_init() {
     // Without this, fetches hit bootstrap relays only and silently return
     // empty results, which get baked in as LoadedDefaults (never retried).
     crate::stores::relay::wait_for_user_relays(
-        std::time::Duration::from_secs(10),
+        std::time::Duration::from_secs(5),
         "run_post_login_init",
     )
     .await;

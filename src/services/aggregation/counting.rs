@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::stores::nostr_client::get_client;
+use crate::stores::nostr_client::{fetch_events_from_connected_relays_with_client, get_client};
 use crate::stores::signer::SIGNER_INFO;
 use crate::utils::bolt11::parse_bolt11_amount;
 use dioxus::prelude::ReadableExt;
@@ -218,16 +218,16 @@ struct FetchEventsPage {
 }
 
 async fn fetch_events_for_filter(
-    client: &Client,
+    client: &std::sync::Arc<Client>,
     filter: Filter,
     timeout: Duration,
 ) -> Result<FetchEventsPage, String> {
-    let (db_events, relay_events) = tokio::join!(
+    let (db_result, relay_result) = tokio::join!(
         client.database().query(filter.clone()),
-        client.fetch_events(filter, timeout)
+        fetch_events_from_connected_relays_with_client(client, filter, timeout)
     );
 
-    let db_events: Vec<Event> = match db_events {
+    let db_events: Vec<Event> = match db_result {
         Ok(events) => events.into_iter().collect(),
         Err(e) => {
             log::debug!("Database query for interactions failed: {}", e);
@@ -235,8 +235,8 @@ async fn fetch_events_for_filter(
         }
     };
 
-    let relay_events: Vec<Event> = match relay_events {
-        Ok(events) => events.into_iter().collect(),
+    let relay_events: Vec<Event> = match relay_result {
+        Ok(events) => events,
         Err(e) => {
             if !db_events.is_empty() {
                 log::warn!(
@@ -246,7 +246,7 @@ async fn fetch_events_for_filter(
                 );
                 Vec::new()
             } else {
-                return Err(format!("Failed to fetch interactions: {}", e));
+                return Err(e);
             }
         }
     };
@@ -271,7 +271,7 @@ async fn fetch_events_for_filter(
 }
 
 async fn fetch_paginated_interaction_events(
-    client: &Client,
+    client: &std::sync::Arc<Client>,
     event_ids: &[EventId],
     kinds: &[Kind],
     timeout: Duration,

@@ -48,12 +48,10 @@ pub fn parse_naddr(naddr: &str) -> Result<ParsedNaddr, String> {
                 relay_hints: vec![],
             })
         } else if parts.len() == 2 {
-            Ok(ParsedNaddr {
-                kind: 0,
-                pubkey: parts[0].to_string(),
-                identifier: parts[1].to_string(),
-                relay_hints: vec![],
-            })
+            Err(format!(
+                "Invalid naddr format (missing kind): {}. Expected kind:pubkey:identifier or naddr1...",
+                naddr
+            ))
         } else {
             Err(format!("Invalid naddr format: {}", naddr))
         }

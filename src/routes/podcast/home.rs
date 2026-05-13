@@ -463,9 +463,7 @@ fn BrowsePodcastsByCategory(props: BrowsePodcastsByCategoryProps) -> Element {
                                 image: show.image.clone(),
                                 is_nostr: true,
                                 has_v4v: true,
-                                route: Route::PodcastNostrDetail {
-                                    naddr: show.id.clone(),
-                                },
+                                route: get_show_route(show),
                             }
                         }
                     }
