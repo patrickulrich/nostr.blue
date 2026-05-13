@@ -120,7 +120,6 @@ pub fn Profile(pubkey: String) -> Element {
     let mut pinned_events = use_signal(Vec::<NostrEvent>::new);
     let mut pinned_loading = use_signal(|| true);
     let mut user_write_relays = use_signal(Vec::<String>::new);
-    let mut interaction_counts: Signal<HashMap<String, crate::services::aggregation::InteractionCounts>> = use_signal(HashMap::new);
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
     let pubkey_for_button = pubkey.clone();
     let pubkey_for_display = pubkey.clone();
@@ -157,7 +156,6 @@ pub fn Profile(pubkey: String) -> Element {
         pinned_events.set(Vec::new());
         pinned_loading.set(true);
         user_write_relays.set(Vec::new());
-        interaction_counts.set(HashMap::new());
     }));
     use_effect(use_reactive(
         (
@@ -544,46 +542,6 @@ pub fn Profile(pubkey: String) -> Element {
         });
     };
     let sentinel_id = use_infinite_scroll(load_more, current_tab_has_more, loading_events);
-
-    // Viewport-aware engagement (#7)
-    {
-        let ic = interaction_counts;
-        use_future(move || async move {
-            loop {
-                crate::platform::timer::sleep_ms(300).await;
-                let engaged = crate::hooks::use_viewport_engagement::ENGAGED_IDS.read().clone();
-                let ic = ic;
-                let script = r#"
-                    const els = document.querySelectorAll('[data-event-id]');
-                    const vh = window.innerHeight;
-                    const results = [];
-                    for (const el of els) {
-                        const rect = el.getBoundingClientRect();
-                        if (rect.bottom >= -200 && rect.top <= vh + 200) {
-                            results.push(el.getAttribute('data-event-id'));
-                        }
-                        if (results.length >= 30) break;
-                    }
-                    return JSON.stringify(results);
-                "#;
-                let result = match document::eval(script).await {
-                    Ok(v) => v.as_str().unwrap_or_default().to_string(),
-                    Err(_) => continue,
-                };
-                let visible_ids: Vec<String> = match serde_json::from_str(&result) {
-                    Ok(v) => v,
-                    Err(_) => continue,
-                };
-                let unengaged: Vec<String> = visible_ids
-                    .into_iter()
-                    .filter(|id| !engaged.contains(id))
-                    .collect();
-                if !unengaged.is_empty() {
-                    crate::hooks::use_viewport_engagement::fetch_counts_for_visible(unengaged, ic).await;
-                }
-            }
-        });
-    }
 
     // Trigger NIP-05 verification when profile metadata arrives
     {
@@ -2107,6 +2065,7 @@ async fn load_tab_events(
             })
         }
         ProfileTab::Zaps => {
+            let hex_pk = public_key.to_hex();
             let mut filter = Filter::new()
                 .kind(Kind::ZapReceipt)
                 .pubkey(public_key)
@@ -2114,7 +2073,9 @@ async fn load_tab_events(
             if let Some(until_ts) = until {
                 filter = filter.until(Timestamp::from(until_ts));
             }
-            let events = nostr_client::fetch_events_from_relays(filter, Duration::from_secs(10))
+            let events = nostr_client::fetch_profile_events_targeted(
+                &hex_pk, filter, Duration::from_secs(10),
+            )
                 .await
                 .map_err(|e| format!("Failed to fetch zaps: {}", e))?;
             let relay_count = events.len();
@@ -2234,8 +2195,14 @@ fn ZapEntryCard(event: NostrEvent) -> Element {
         use_effect(use_reactive((&sender_name,), move |(pk_hex,)| {
             if let Some(hex) = pk_hex {
                 spawn(async move {
-                    let metadata = profiles::get_profile(&hex);
-                    sp.set(metadata);
+                    if let Some(metadata) = profiles::get_profile(&hex) {
+                        sp.set(Some(metadata));
+                    } else {
+                        let _ = profiles::fetch_profile(hex.clone()).await;
+                        if let Some(metadata) = profiles::get_profile(&hex) {
+                            sp.set(Some(metadata));
+                        }
+                    }
                 });
             }
         }));

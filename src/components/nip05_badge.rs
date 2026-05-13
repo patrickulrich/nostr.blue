@@ -32,7 +32,10 @@ pub fn Nip05Badge(props: Nip05BadgeProps) -> Element {
                 crate::platform::timer::sleep_ms(200).await;
                 let current = nip05::get_nip05_status(&pk, &nip);
                 if *status.read() != current {
-                    status.set(current);
+                    status.set(current.clone());
+                }
+                if matches!(&current, Nip05Status::Verified | Nip05Status::Impersonator) {
+                    break;
                 }
             }
         }
