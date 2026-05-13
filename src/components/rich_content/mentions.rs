@@ -38,7 +38,7 @@ const INTERACTIVE_ELEMENT_SELECTOR: &str =
     "a, button, input, textarea, select, summary, [role='button'], [role='link']:not([data-embedded-note]), [contenteditable='true'], video, audio, iframe, [data-interactive]";
 
 #[component]
-pub(super) fn MentionRenderer(mention: String) -> Element {
+pub fn MentionRenderer(mention: String) -> Element {
     let lower = mention.to_lowercase();
     let identifier = lower.strip_prefix("nostr:").unwrap_or(&lower);
     let pubkey_result: Option<nostr_sdk::PublicKey> =
@@ -149,7 +149,7 @@ fn try_extract_event_id_from_nevent(identifier: &str) -> Option<EventId> {
 }
 
 #[component]
-pub(super) fn EventMentionRenderer(mention: String) -> Element {
+pub fn EventMentionRenderer(mention: String) -> Element {
     let lower = mention.to_lowercase();
     let identifier = lower.strip_prefix("nostr:").unwrap_or(&lower);
     let nip19_result = Nip19::from_bech32(identifier).ok();
@@ -455,7 +455,7 @@ pub(super) fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -
 }
 
 #[component]
-pub(super) fn NaddrMentionRenderer(mention: String) -> Element {
+pub fn NaddrMentionRenderer(mention: String) -> Element {
     let lower = mention.to_lowercase();
     let identifier = lower.strip_prefix("nostr:").unwrap_or(&lower);
     let coord_data = nostr_sdk::nips::nip19::Nip19Coordinate::from_bech32(identifier)

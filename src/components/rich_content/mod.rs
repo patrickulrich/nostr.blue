@@ -249,6 +249,17 @@ fn image_gallery_key(items: &[(usize, &ContentToken)]) -> String {
     format!("gallery-{}-{:x}", first_idx, hash_str(&urls))
 }
 
+#[component]
+pub fn NostrUriRenderer(uri: String) -> Element {
+    let lower = uri.to_lowercase();
+    let identifier = lower.strip_prefix("nostr:").unwrap_or(&lower);
+    if identifier.starts_with("npub1") || identifier.starts_with("nprofile1") {
+        rsx! { MentionRenderer { mention: uri } }
+    } else {
+        rsx! { EventMentionRenderer { mention: uri } }
+    }
+}
+
 fn render_image_gallery(items: &[(usize, &ContentToken)]) -> Element {
     let images: Vec<LightboxImage> = items
         .iter()
