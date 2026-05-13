@@ -786,7 +786,7 @@ pub(super) fn extract_zap_sender(event: &Event) -> Option<String> {
 }
 
 /// Extract zap amount in satoshis from a zap event (kind 9735)
-pub(super) fn extract_zap_amount(event: &Event) -> Option<u64> {
+pub fn extract_zap_amount(event: &Event) -> Option<u64> {
     if let Some(bolt11_tag) = event.tags.iter().find(|tag| {
         tag.as_slice()
             .first()

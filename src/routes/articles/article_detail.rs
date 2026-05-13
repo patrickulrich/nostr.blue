@@ -40,7 +40,6 @@ pub fn ArticleDetail(naddr: String) -> Element {
             error.set(None);
             match crate::utils::nip19::parse_naddr(&naddr_str) {
                 Ok(parsed) => {
-                    crate::stores::profiles::PROFILE_CACHE.write().pop(&parsed.pubkey);
                     match nostr_client::fetch_event_by_coordinate_with_relays(
                         parsed.kind,
                         parsed.pubkey.clone(),

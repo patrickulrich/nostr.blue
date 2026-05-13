@@ -593,6 +593,12 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
         let this_generation = load_generation.peek().wrapping_add(1);
         load_generation.set(this_generation);
 
+        if let Some(handle) = interaction_stream_handle.write().take() {
+            spawn(async move {
+                handle.unsubscribe().await;
+            });
+        }
+
         note_data.set(None);
         replies.set(Vec::new());
         parent_events.set(Vec::new());
