@@ -6,6 +6,8 @@ use crate::stores::nostr_music::TrackSource;
 use crate::stores::profiles;
 use dioxus::prelude::*;
 use std::sync::Arc;
+
+const FALLBACK_ART_URL: &str = "https://api.dicebear.com/7.x/shapes/svg?seed=music";
 #[derive(Props, Clone, PartialEq)]
 pub struct UnifiedTrackCardProps {
     pub track: MusicTrack,
@@ -103,10 +105,18 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
         TrackSource::Radio { .. } => ("LIVE", "Internet Radio", "bg-red-500/20 text-red-400"),
         TrackSource::Bible { .. } => ("B", "Bible", "bg-blue-500/20 text-blue-400"),
     };
-    let artwork_url = track
+    let art_url = track
         .album_art_url
         .clone()
-        .unwrap_or_else(|| "https://api.dicebear.com/7.x/shapes/svg?seed=music".to_string());
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| FALLBACK_ART_URL.to_string());
+    let mut img_src = use_signal(|| art_url.clone());
+    {
+        let url_for_sync = art_url.clone();
+        use_effect(use_reactive((&url_for_sync,), move |(url,)| {
+            img_src.set(url);
+        }));
+    }
     let share_url = track.share_url();
     let share_content_type = match &track.source {
         TrackSource::NostrPodcast { .. } | TrackSource::RssPodcast { .. } => ContentType::PodcastEpisode,
@@ -145,11 +155,12 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
             onclick: handle_play,
             div { class: "relative shrink-0",
                 img {
-                    src: "{artwork_url}",
+                    src: "{img_src}",
                     alt: "Album art",
                     class: "w-14 h-14 rounded object-cover",
                     loading: "lazy",
                     referrerpolicy: "no-referrer",
+                    onerror: move |_| img_src.set(FALLBACK_ART_URL.to_string()),
                 }
                 if props.show_source_badge {
                     div {

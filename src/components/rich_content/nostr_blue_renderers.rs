@@ -1165,7 +1165,7 @@ pub(super) fn NostrBlueRssMusicAlbumRenderer(feed_id: String) -> Element {
                                     if let Some(Ok((f, eps))) = resource.read_unchecked().as_ref() {
                                         let tracks: Vec<MusicTrack> = eps
                                             .iter()
-                                            .map(|ep| MusicTrack::from_rss_music_track(ep, f))
+                                            .map(|ep| MusicTrack::from_rss_music_track(ep, f, None))
                                             .collect();
                                         if let Some(first) = tracks.first().cloned() {
                                             music_player::play_track(first, Some(tracks), Some(0));

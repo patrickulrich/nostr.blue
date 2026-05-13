@@ -58,7 +58,7 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
             episodes_state
                 .read()
                 .iter()
-                .map(|ep| MusicTrack::from_rss_music_track(ep, feed))
+                .map(|ep| MusicTrack::from_rss_music_track(ep, feed, None))
                 .collect::<Vec<MusicTrack>>()
         } else {
             Vec::new()

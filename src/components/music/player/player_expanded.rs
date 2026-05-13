@@ -6,6 +6,8 @@ use dioxus::prelude::*;
 
 use super::ExpandedSeekBar;
 
+const FALLBACK_ART_URL: &str = "https://api.dicebear.com/7.x/shapes/svg?seed=music";
+
 #[component]
 pub fn PlayerExpanded() -> Element {
     let store = MUSIC_PLAYER.resolve();
@@ -21,6 +23,19 @@ pub fn PlayerExpanded() -> Element {
     let duration = *store.duration().read();
 
     let mut show_share_modal = use_signal(|| false);
+
+    let art_url = track
+        .album_art_url
+        .clone()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| FALLBACK_ART_URL.to_string());
+    let mut img_src = use_signal(|| art_url.clone());
+    {
+        let url_for_sync = art_url.clone();
+        use_effect(use_reactive((&url_for_sync,), move |(url,)| {
+            img_src.set(url);
+        }));
+    }
 
     let share_url = track.share_url();
     let share_content_type = match &track.source {
@@ -54,17 +69,12 @@ pub fn PlayerExpanded() -> Element {
 
                 // Album artwork
                 div { class: "w-64 h-64 lg:w-80 lg:h-80 rounded-2xl overflow-hidden bg-muted shadow-2xl mb-8 shrink-0",
-                    if let Some(art_url) = &track.album_art_url {
-                        img {
-                            src: "{art_url}",
-                            alt: "Album art",
-                            class: "w-full h-full object-cover",
-                            referrerpolicy: "no-referrer",
-                        }
-                    } else {
-                        div { class: "w-full h-full flex items-center justify-center text-muted-foreground",
-                            div { dangerous_inner_html: icons::MUSIC_NOTE }
-                        }
+                    img {
+                        src: "{img_src}",
+                        alt: "Album art",
+                        class: "w-full h-full object-cover",
+                        referrerpolicy: "no-referrer",
+                        onerror: move |_| img_src.set(FALLBACK_ART_URL.to_string()),
                     }
                 }
 

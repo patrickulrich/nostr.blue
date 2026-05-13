@@ -447,7 +447,7 @@ pub(crate) async fn fetch_track(id: &str) -> Result<music_player::MusicTrack, St
             .ok_or("Track not found")?;
 
         Ok(music_player::MusicTrack::from_rss_music_track(
-            episode, &feed,
+            episode, &feed, None,
         ))
     } else {
         // Wavlake track (UUID)
