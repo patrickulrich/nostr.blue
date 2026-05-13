@@ -1131,6 +1131,7 @@ pub fn Home(list: String) -> Element {
     {
         let mut ndb_pending = pending_posts;
         let fstate = feed_state;
+        let ftype = feed_type;
         use_future(move || async move {
             loop {
                 crate::platform::timer::sleep_ms(500).await;
@@ -1162,8 +1163,13 @@ pub fn Home(list: String) -> Element {
                             Err(_) => None,
                         }
                     } else if event.kind == Kind::TextNote {
-                        let is_reply = event.tags.iter().any(|t| t.is_reply() || t.is_root());
-                        if !is_reply {
+                        let is_reply =
+                            event.tags.iter().any(|t| t.is_reply() || t.is_root());
+                        let include_replies = matches!(
+                            &*ftype.read(),
+                            FeedType::FollowingWithReplies
+                        );
+                        if !is_reply || include_replies {
                             Some(FeedItem::OriginalPost(event))
                         } else {
                             None
