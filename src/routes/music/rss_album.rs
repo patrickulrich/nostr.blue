@@ -111,7 +111,11 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
                                                 }
                                             }
                                             h1 { class: "text-3xl font-bold", "{feed.title}" }
-                                            p { class: "text-xl text-muted-foreground mt-2", "by {artist}" }
+                                            Link {
+                                                to: Route::MusicRssArtist { artist: artist.clone() },
+                                                class: "text-xl text-muted-foreground mt-2 hover:text-foreground hover:underline transition",
+                                                "by {artist}"
+                                            }
                                         }
                                         div { class: "flex items-center gap-4 text-sm text-muted-foreground",
                                             span { class: "flex items-center gap-1",

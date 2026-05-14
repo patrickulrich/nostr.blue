@@ -99,7 +99,7 @@ use list_detail::ListDetail;
 use lists::Lists;
 use music::{
     MusicAlbum, MusicArtist, MusicHome, MusicLeaderboard, MusicPlaylistDetail, MusicPlaylistNew,
-    MusicRadio, MusicRssAlbum, MusicSearch, MusicTrackDetail, MusicTrackNew,
+    MusicRadio, MusicRssAlbum, MusicRssArtist, MusicSearch, MusicTrackDetail, MusicTrackNew,
 };
 use nips::{Nip19Handler, NipDetail, NipNew, NipsHome};
 use note::Note;
@@ -194,6 +194,8 @@ pub enum Route {
     MusicPlaylistDetail { naddr: String },
     #[route("/music/rss/album/:feed_id")]
     MusicRssAlbum { feed_id: u64 },
+    #[route("/music/rss/artist/:artist")]
+    MusicRssArtist { artist: String },
     #[route("/music/track/:track_id")]
     MusicTrackDetail { track_id: String },
     #[route("/podcast")]
@@ -631,7 +633,8 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::MusicTrackDetail { .. }
         | Route::MusicPlaylistNew {}
         | Route::MusicPlaylistDetail { .. }
-        | Route::MusicRssAlbum { .. } => Some(Route::MusicHome {}),
+        | Route::MusicRssAlbum { .. }
+        | Route::MusicRssArtist { .. } => Some(Route::MusicHome {}),
         Route::PodcastTrending {}
         | Route::PodcastNostrDetail { .. }
         | Route::PodcastRssFeedDetail { .. }
@@ -861,6 +864,7 @@ fn Layout() -> Element {
             | Route::MusicArtist { .. }
             | Route::MusicAlbum { .. }
             | Route::MusicRssAlbum { .. }
+            | Route::MusicRssArtist { .. }
             | Route::MusicTrackNew {}
             | Route::MusicTrackDetail { .. }
             | Route::MusicPlaylistNew {}

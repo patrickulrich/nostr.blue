@@ -474,7 +474,9 @@ fn get_artist_route(track: &music_player::MusicTrack) -> Option<Route> {
         nostr_music::TrackSource::Nostr { pubkey, .. } => Some(Route::Profile {
             pubkey: pubkey.clone(),
         }),
-        nostr_music::TrackSource::RssMusic { .. } => None,
+        nostr_music::TrackSource::RssMusic { artist, .. } => artist.as_ref().map(|a| Route::MusicRssArtist {
+            artist: a.clone(),
+        }),
         _ => None,
     }
 }

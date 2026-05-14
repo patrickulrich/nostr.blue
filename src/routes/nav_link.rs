@@ -27,6 +27,7 @@ pub(super) fn NavLink(
         | (Route::MusicHome {}, Route::MusicArtist { .. })
         | (Route::MusicHome {}, Route::MusicAlbum { .. })
         | (Route::MusicHome {}, Route::MusicRssAlbum { .. })
+        | (Route::MusicHome {}, Route::MusicRssArtist { .. })
         | (Route::MusicHome {}, Route::MusicTrackNew {})
         | (Route::MusicHome {}, Route::MusicTrackDetail { .. })
         | (Route::MusicHome {}, Route::MusicPlaylistNew {})

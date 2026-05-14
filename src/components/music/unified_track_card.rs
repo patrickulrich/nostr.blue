@@ -139,7 +139,9 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
                 podcast_id: id.to_string(),
             })
         }
-        TrackSource::RssMusic { feed_id, .. } => Some(Route::MusicRssAlbum { feed_id: *feed_id }),
+        TrackSource::RssMusic { artist, .. } => artist.as_ref().map(|a| Route::MusicRssArtist {
+            artist: a.clone(),
+        }),
         TrackSource::Radio { pubkey, .. } => Some(Route::Profile {
             pubkey: pubkey.clone(),
         }),
