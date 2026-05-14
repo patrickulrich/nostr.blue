@@ -109,15 +109,60 @@ pub fn drain_ndb_live_events() -> Vec<nostr::Event> {
 }
 
 #[cfg(feature = "native")]
-static EVENT_BRIDGE_CACHE: std::sync::LazyLock<std::sync::Mutex<LruCache<[u8; 32], nostr::Event>>> =
+struct BridgeCache {
+    lru: LruCache<[u8; 32], nostr::Event>,
+    reply_index: std::collections::HashMap<[u8; 32], Vec<[u8; 32]>>,
+}
+
+#[cfg(feature = "native")]
+static EVENT_BRIDGE_CACHE: std::sync::LazyLock<std::sync::Mutex<BridgeCache>> =
     std::sync::LazyLock::new(|| {
-        std::sync::Mutex::new(LruCache::new(NonZeroUsize::new(10000).unwrap()))
+        std::sync::Mutex::new(BridgeCache {
+            lru: LruCache::new(NonZeroUsize::new(10000).unwrap()),
+            reply_index: std::collections::HashMap::new(),
+        })
     });
 
 #[cfg(feature = "native")]
+fn index_etag_targets(event: &nostr::Event) -> Vec<[u8; 32]> {
+    use nostr::TagKind;
+    event
+        .tags
+        .iter()
+        .filter(|tag| tag.kind() == TagKind::e())
+        .filter_map(|tag| {
+            let hex = tag.content()?;
+            let id = EventId::from_hex(hex).ok()?;
+            Some(id.to_bytes())
+        })
+        .collect()
+}
+
+#[cfg(feature = "native")]
 pub fn cache_event(event: &nostr::Event) {
-    if let Ok(mut cache) = EVENT_BRIDGE_CACHE.lock() {
-        cache.put(event.id.to_bytes(), event.clone());
+    if let Ok(mut guard) = EVENT_BRIDGE_CACHE.lock() {
+        let targets = index_etag_targets(event);
+        let event_id = event.id.to_bytes();
+        if let Some((evicted_id, evicted_event)) =
+            guard.lru.push(event_id, event.clone())
+        {
+            let evicted_targets = index_etag_targets(&evicted_event);
+            for target in &evicted_targets {
+                if let Some(list) = guard.reply_index.get_mut(target) {
+                    list.retain(|id| id != &evicted_id);
+                    if list.is_empty() {
+                        guard.reply_index.remove(target);
+                    }
+                }
+            }
+        }
+        for target in targets {
+            guard
+                .reply_index
+                .entry(target)
+                .or_default()
+                .push(event_id);
+        }
     }
 }
 
@@ -126,25 +171,26 @@ pub fn get_cached_event(id: &[u8; 32]) -> Option<nostr::Event> {
     EVENT_BRIDGE_CACHE
         .lock()
         .ok()
-        .and_then(|mut cache| cache.get(id).cloned())
+        .and_then(|mut guard| guard.lru.get(id).cloned())
 }
 
 #[cfg(feature = "native")]
 pub fn get_cached_replies(event_id: &EventId, kinds: &[Kind]) -> Vec<nostr::Event> {
-    let Ok(cache) = EVENT_BRIDGE_CACHE.lock() else {
+    let Ok(mut guard) = EVENT_BRIDGE_CACHE.lock() else {
         return Vec::new();
     };
-    let event_id_hex = event_id.to_hex();
-    cache
-        .iter()
-        .filter(|(_, event)| {
+    let parent_id = event_id.to_bytes();
+    let Some(child_ids) = guard.reply_index.get(&parent_id).cloned() else {
+        return Vec::new();
+    };
+    child_ids
+        .into_iter()
+        .filter_map(|id| {
+            let event = guard.lru.get(&id).cloned()?;
             if !kinds.is_empty() && !kinds.contains(&event.kind) {
-                return false;
+                return None;
             }
-            event.tags.iter().any(|tag| {
-                tag.content().map(|c| c == event_id_hex).unwrap_or(false)
-            })
+            Some(event)
         })
-        .map(|(_, event)| event.clone())
         .collect()
 }

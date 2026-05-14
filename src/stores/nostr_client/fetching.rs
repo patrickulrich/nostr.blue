@@ -371,7 +371,7 @@ pub async fn fetch_event_targeted(
     #[cfg(feature = "native")]
     {
         let bridge_hit = crate::stores::ndb::get_cached_event(&event_id.to_bytes());
-        log::info!("fetch_event_targeted: Phase 0 bridge cache check for {:?} -> {}", event_id.to_hex(), if bridge_hit.is_some() { "HIT" } else { "MISS" });
+        log::debug!("fetch_event_targeted: Phase 0 bridge cache check for {:?} -> {}", event_id.to_hex(), if bridge_hit.is_some() { "HIT" } else { "MISS" });
         if let Some(event) = bridge_hit {
             return Ok(Some(event));
         }
@@ -380,14 +380,14 @@ pub async fn fetch_event_targeted(
     // Phase 1: DB check (instant) — direct primary key lookup
     match client.database().event_by_id(&event_id).await {
         Ok(Some(event)) => {
-            log::info!("fetch_event_targeted: Phase 1 DB hit for {:?}", event_id.to_hex());
+            log::debug!("fetch_event_targeted: Phase 1 DB hit for {:?}", event_id.to_hex());
             return Ok(Some(event));
         }
         Ok(None) => {
-            log::info!("fetch_event_targeted: Phase 1 DB miss for {:?}", event_id.to_hex());
+            log::debug!("fetch_event_targeted: Phase 1 DB miss for {:?}", event_id.to_hex());
         }
         Err(e) => {
-            log::info!("fetch_event_targeted: Phase 1 DB error for {:?}: {}", event_id.to_hex(), e);
+            log::debug!("fetch_event_targeted: Phase 1 DB error for {:?}: {}", event_id.to_hex(), e);
         }
     }
 
@@ -402,7 +402,7 @@ pub async fn fetch_event_targeted(
     .await
     {
         Ok(events) if !events.is_empty() => {
-            log::info!("fetch_event_targeted: Phase 2 broadcast hit for {:?}", event_id.to_hex());
+            log::debug!("fetch_event_targeted: Phase 2 broadcast hit for {:?}", event_id.to_hex());
             let event = events.into_iter().next();
             #[cfg(feature = "native")]
             if let Some(ref e) = event {
@@ -411,10 +411,10 @@ pub async fn fetch_event_targeted(
             return Ok(event);
         }
         Ok(events) => {
-            log::info!("fetch_event_targeted: Phase 2 broadcast miss for {:?} ({} events)", event_id.to_hex(), events.len());
+            log::debug!("fetch_event_targeted: Phase 2 broadcast miss for {:?} ({} events)", event_id.to_hex(), events.len());
         }
         Err(e) => {
-            log::info!("fetch_event_targeted: Phase 2 broadcast error for {:?}: {}", event_id.to_hex(), e);
+            log::debug!("fetch_event_targeted: Phase 2 broadcast error for {:?}: {}", event_id.to_hex(), e);
         }
     }
 
@@ -437,7 +437,7 @@ pub async fn fetch_event_targeted(
             relay::coverage::cleanup_ephemeral_relays(&client, &ephemeral.newly_added).await;
             if let Ok(events) = result {
                 if let Some(event) = events.into_iter().next() {
-                    log::info!("fetch_event_targeted: Phase 3 author relays hit for {:?}", event_id.to_hex());
+                    log::debug!("fetch_event_targeted: Phase 3 author relays hit for {:?}", event_id.to_hex());
                     #[cfg(feature = "native")]
                     crate::stores::ndb::cache_event(&event);
                     return Ok(Some(event));
@@ -461,7 +461,7 @@ pub async fn fetch_event_targeted(
             relay::coverage::cleanup_ephemeral_relays(&client, &ephemeral.newly_added).await;
             if let Ok(events) = result {
                 if let Some(event) = events.into_iter().next() {
-                    log::info!("fetch_event_targeted: Phase 4 relay hints hit for {:?}", event_id.to_hex());
+                    log::debug!("fetch_event_targeted: Phase 4 relay hints hit for {:?}", event_id.to_hex());
                     #[cfg(feature = "native")]
                     crate::stores::ndb::cache_event(&event);
                     return Ok(Some(event));

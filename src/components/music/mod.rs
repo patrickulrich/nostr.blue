@@ -2,6 +2,9 @@
 //!
 //! This module contains components for music playback,
 //! discovery, albums, artists, tracks, and radio.
+
+pub const FALLBACK_ART_URL: &str = "https://api.dicebear.com/7.x/shapes/svg?seed=music";
+
 pub mod album_card;
 pub mod artist_card;
 pub mod player;

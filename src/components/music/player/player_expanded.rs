@@ -5,8 +5,7 @@ use crate::stores::music_player::{self, MusicPlayerStateStoreExt, PlayerViewMode
 use dioxus::prelude::*;
 
 use super::ExpandedSeekBar;
-
-const FALLBACK_ART_URL: &str = "https://api.dicebear.com/7.x/shapes/svg?seed=music";
+use super::super::FALLBACK_ART_URL;
 
 #[component]
 pub fn PlayerExpanded() -> Element {

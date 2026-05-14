@@ -424,7 +424,7 @@ async fn fetch_replies_db(
             Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT),
         ];
         let bridge_replies = crate::stores::ndb::get_cached_replies(&event_id, &reply_kinds);
-        log::info!("fetch_replies_db: bridge cache found {} replies for {:?}", bridge_replies.len(), event_id.to_hex());
+        log::debug!("fetch_replies_db: bridge cache found {} replies for {:?}", bridge_replies.len(), event_id.to_hex());
         db_replies.extend(bridge_replies);
     }
 

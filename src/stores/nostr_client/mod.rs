@@ -416,6 +416,7 @@ pub async fn set_read_only() -> std::result::Result<(), String> {
     *HAS_SIGNER.write() = false;
     *CURRENT_SIGNER.write() = None;
     *relay::USER_RELAYS_APPLIED.write() = false;
+    relay::pool::reset_pool_to_defaults(&client).await;
     if let Err(e) = crate::stores::publish_queue::processor::process_once_guarded().await {
         log::warn!("Flush before read-only failed: {}", e);
     }

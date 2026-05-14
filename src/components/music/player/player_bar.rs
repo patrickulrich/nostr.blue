@@ -5,8 +5,7 @@ use crate::stores::music_player::{self, MusicPlayerStateStoreExt, MUSIC_PLAYER, 
 use dioxus::prelude::*;
 
 use super::format_time;
-
-const FALLBACK_ART_URL: &str = "https://api.dicebear.com/7.x/shapes/svg?seed=music";
+use super::super::FALLBACK_ART_URL;
 
 #[component]
 pub fn PlayerBar() -> Element {

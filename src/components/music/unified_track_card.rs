@@ -4,10 +4,10 @@ use crate::routes::Route;
 use crate::stores::music_player::{self, MusicPlayerStateStoreExt, MusicTrack};
 use crate::stores::nostr_music::TrackSource;
 use crate::stores::profiles;
+use super::FALLBACK_ART_URL;
 use dioxus::prelude::*;
 use std::sync::Arc;
 
-const FALLBACK_ART_URL: &str = "https://api.dicebear.com/7.x/shapes/svg?seed=music";
 #[derive(Props, Clone, PartialEq)]
 pub struct UnifiedTrackCardProps {
     pub track: MusicTrack,
