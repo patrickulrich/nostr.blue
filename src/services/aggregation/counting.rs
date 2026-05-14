@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::stores::nostr_client::get_client;
+use crate::stores::nostr_client::{fetch_events_from_connected_relays_with_client, get_client};
 use crate::stores::signer::SIGNER_INFO;
 use crate::utils::bolt11::parse_bolt11_amount;
 use dioxus::prelude::ReadableExt;
@@ -14,7 +14,7 @@ use std::sync::{Mutex, OnceLock};
 
 const MAX_RELAY_LIMIT: usize = 5_000;
 const INTERACTION_PAGE_LIMIT: usize = 1_000;
-const INTERACTION_EVENT_BATCH_SIZE: usize = 25;
+const INTERACTION_EVENT_BATCH_SIZE: usize = 100;
 
 #[derive(Clone, Eq, Hash, PartialEq)]
 struct Nip45CacheKey {
@@ -218,19 +218,25 @@ struct FetchEventsPage {
 }
 
 async fn fetch_events_for_filter(
-    client: &Client,
+    client: &std::sync::Arc<Client>,
     filter: Filter,
     timeout: Duration,
 ) -> Result<FetchEventsPage, String> {
-    let db_events: Vec<Event> = match client.database().query(filter.clone()).await {
+    let (db_result, relay_result) = tokio::join!(
+        client.database().query(filter.clone()),
+        fetch_events_from_connected_relays_with_client(client, filter, timeout)
+    );
+
+    let db_events: Vec<Event> = match db_result {
         Ok(events) => events.into_iter().collect(),
         Err(e) => {
             log::debug!("Database query for interactions failed: {}", e);
             Vec::new()
         }
     };
-    let relay_events: Vec<Event> = match client.fetch_events(filter, timeout).await {
-        Ok(events) => events.into_iter().collect(),
+
+    let relay_events: Vec<Event> = match relay_result {
+        Ok(events) => events,
         Err(e) => {
             if !db_events.is_empty() {
                 log::warn!(
@@ -240,7 +246,7 @@ async fn fetch_events_for_filter(
                 );
                 Vec::new()
             } else {
-                return Err(format!("Failed to fetch interactions: {}", e));
+                return Err(e);
             }
         }
     };
@@ -265,7 +271,7 @@ async fn fetch_events_for_filter(
 }
 
 async fn fetch_paginated_interaction_events(
-    client: &Client,
+    client: &std::sync::Arc<Client>,
     event_ids: &[EventId],
     kinds: &[Kind],
     timeout: Duration,
@@ -290,6 +296,12 @@ async fn fetch_paginated_interaction_events(
 
         let previous_len = all_events.len();
         for event in page.events {
+            #[cfg(feature = "native")]
+            {
+                if matches!(event.kind, Kind::TextNote | Kind::Comment | Kind::VoiceMessage | Kind::VoiceMessageReply) {
+                    crate::stores::ndb::cache_event(&event);
+                }
+            }
             all_events.insert(event.id, event);
         }
 
@@ -393,26 +405,27 @@ pub async fn fetch_interaction_counts_batch(
     }
     let client = get_client().ok_or("Client not initialized")?;
     let mut event_map: HashMap<EventId, Event> = HashMap::new();
-    for batch in uncached_ids.chunks(INTERACTION_EVENT_BATCH_SIZE) {
-        let batch_events = fetch_paginated_interaction_events(
-            &client,
-            batch,
-            &[
-                Kind::TextNote,
-                Kind::Comment,
-                Kind::Reaction,
-                Kind::Repost,
-                Kind::ZapReceipt,
-                Kind::Custom(1010),
-            ],
-            timeout,
-        )
-        .await?;
-        log::info!(
-            "Fetched {} interaction events for batch of {} requested IDs",
-            batch_events.len(),
-            batch.len()
-        );
+    let batch_futures: Vec<_> = uncached_ids
+        .chunks(INTERACTION_EVENT_BATCH_SIZE)
+        .map(|batch| {
+            fetch_paginated_interaction_events(
+                &client,
+                batch,
+                &[
+                    Kind::TextNote,
+                    Kind::Comment,
+                    Kind::Reaction,
+                    Kind::Repost,
+                    Kind::ZapReceipt,
+                    Kind::Custom(1010),
+                ],
+                timeout,
+            )
+        })
+        .collect();
+    let batch_results = futures::future::join_all(batch_futures).await;
+    for batch_events in batch_results {
+        let batch_events = batch_events?;
         for event in batch_events {
             event_map.insert(event.id, event);
         }
@@ -779,7 +792,7 @@ pub(super) fn extract_zap_sender(event: &Event) -> Option<String> {
 }
 
 /// Extract zap amount in satoshis from a zap event (kind 9735)
-pub(super) fn extract_zap_amount(event: &Event) -> Option<u64> {
+pub fn extract_zap_amount(event: &Event) -> Option<u64> {
     if let Some(bolt11_tag) = event.tags.iter().find(|tag| {
         tag.as_slice()
             .first()
@@ -836,6 +849,49 @@ pub(super) fn parse_amount_from_description(description: &str) -> Option<u64> {
 
 /// Fetch interaction counts for a time range (useful for trending/popular feeds)
 ///
+/// Get interaction counts from the local database only (zero relay round-trips).
+///
+/// This provides instant counts by querying the nostr-sdk's local database.
+/// Useful as a first-pass fast path before the full relay fetch resolves user-state.
+///
+/// The counts may be incomplete if the local DB hasn't seen all interactions.
+/// Callers should overwrite with full relay-fetched counts when they arrive.
+pub async fn fetch_local_db_counts(
+    event_ids: &[EventId],
+) -> HashMap<String, InteractionCounts> {
+    let client = match get_client() {
+        Some(c) => c,
+        None => return HashMap::new(),
+    };
+    let db = client.database();
+    let mut result = HashMap::new();
+    for event_id in event_ids {
+        let hex = event_id.to_hex();
+        let mut counts = InteractionCounts::default();
+        let filter_base = Filter::new().event(*event_id);
+        let reply_filter = filter_base
+            .clone()
+            .kinds(vec![Kind::TextNote, Kind::Comment]);
+        if let Ok(count) = db.count(reply_filter).await {
+            counts.replies = count;
+        }
+        let reaction_filter = filter_base.clone().kind(Kind::Reaction);
+        if let Ok(count) = db.count(reaction_filter).await {
+            counts.likes = count;
+        }
+        let repost_filter = filter_base.clone().kind(Kind::Repost);
+        if let Ok(count) = db.count(repost_filter).await {
+            counts.reposts = count;
+        }
+        let zap_filter = filter_base.kind(Kind::ZapReceipt);
+        if let Ok(count) = db.count(zap_filter).await {
+            counts.zaps = count;
+        }
+        result.insert(hex, counts);
+    }
+    result
+}
+
 /// This fetches all interactions in a given time period and groups by event.
 /// Useful for "trending" or "popular" feeds that want to rank by recent engagement.
 #[allow(dead_code)]

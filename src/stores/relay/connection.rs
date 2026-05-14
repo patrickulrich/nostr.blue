@@ -272,10 +272,15 @@ pub async fn fetch_events_from_relays(
 pub async fn ensure_video_relay_connected(client: &Client) {
     super::specialty::ensure_video_relay(client).await;
 }
-/// Fetch addressable event by coordinate with relay hints
-/// Two-phase loading: DB first (instant), then relay (if not found)
+/// Fetch addressable event by coordinate with relay hints using 5-phase targeted strategy.
+///
+/// 1. DB check (instant)
+/// 2. Broadcast to connected relays (fast, 3s)
+/// 3. Relay hints from naddr (ephemeral connections, cleaned up)
+/// 4. Author relays via NIP-65 resolution (ephemeral connections, cleaned up)
+/// 5. Gossip/outbox fallback (last resort)
 pub async fn fetch_event_by_coordinate_with_relays(
-    client: &Client,
+    client: &std::sync::Arc<Client>,
     kind: u16,
     pubkey: &str,
     identifier: &str,
@@ -290,37 +295,103 @@ pub async fn fetch_event_by_coordinate_with_relays(
         .author(author)
         .identifier(identifier.to_string())
         .limit(1);
+
+    // Phase 1: DB check (instant)
     if let Ok(db_events) = client.database().query(filter.clone()).await {
         if let Some(event) = db_events.into_iter().next() {
-            log::debug!("Found event kind {} in DB: {}:{}", kind, pubkey, identifier);
+            log::debug!(
+                "fetch_event_by_coordinate: found kind {} in DB: {}:{}",
+                kind, pubkey, identifier
+            );
             return Ok(Some(event));
         }
     }
+
     log::info!(
-        "Fetching event kind {} from relay: {}:{}",
-        kind,
-        pubkey,
-        identifier
+        "fetch_event_by_coordinate: fetching kind {} {}:{}",
+        kind, pubkey, identifier
     );
-    if !relay_hints.is_empty() {
-        let added = super::specialty::add_relays_from_strings(client, &relay_hints).await;
-        let fetch_result = client
-            .fetch_events(filter.clone(), Duration::from_secs(5))
-            .await;
-        if !added.is_empty() {
-            super::specialty::remove_relays(client, &added).await;
+
+    // Phase 2: Broadcast to connected relays (fast, 3s)
+    match crate::stores::nostr_client::fetching::fetch_events_from_connected_relays_with_client(
+        client,
+        filter.clone(),
+        Duration::from_secs(3),
+    )
+    .await
+    {
+        Ok(events) if !events.is_empty() => {
+            log::debug!("fetch_event_by_coordinate: found via broadcast");
+            return Ok(events.into_iter().next());
         }
-        if let Ok(events) = fetch_result {
+        _ => {}
+    }
+
+    // Phase 3: Relay hints from naddr (ephemeral)
+    if !relay_hints.is_empty() {
+        let ephemeral =
+            super::coverage::connect_ephemeral_relays(client, &relay_hints).await;
+        if !ephemeral.connected.is_empty() {
+            let result = fetch_events_from_relays(
+                client,
+                filter.clone(),
+                ephemeral.connected.clone(),
+                Duration::from_secs(10),
+            )
+            .await;
+            super::coverage::cleanup_ephemeral_relays(client, &ephemeral.newly_added).await;
+            if let Ok(events) = result {
+                if let Some(event) = events.into_iter().next() {
+                    log::debug!("fetch_event_by_coordinate: found via relay hints");
+                    return Ok(Some(event));
+                }
+            }
+        }
+    }
+
+    // Phase 4: Author relays via NIP-65 (ephemeral)
+    let author_relay_urls = super::coverage::resolve_user_relays(
+        pubkey,
+        super::coverage::RelayPurpose::Write,
+    )
+    .await;
+    let ephemeral =
+        super::coverage::connect_ephemeral_relays(client, &author_relay_urls).await;
+    if !ephemeral.connected.is_empty() {
+        let result = fetch_events_from_relays(
+            client,
+            filter.clone(),
+            ephemeral.connected.clone(),
+            Duration::from_secs(10),
+        )
+        .await;
+        super::coverage::cleanup_ephemeral_relays(client, &ephemeral.newly_added).await;
+        if let Ok(events) = result {
             if let Some(event) = events.into_iter().next() {
+                log::debug!("fetch_event_by_coordinate: found via author relays");
                 return Ok(Some(event));
             }
         }
     }
-    ensure_relays_ready(client).await;
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
-        Ok(events) => Ok(events.into_iter().next()),
+
+    // Phase 5: Gossip/outbox fallback
+    match crate::stores::nostr_client::fetching::fetch_events_aggregated_outbox_with_client(
+        client,
+        filter,
+        Duration::from_secs(10),
+    )
+    .await
+    {
+        Ok(events) => {
+            if events.is_empty() {
+                log::debug!("fetch_event_by_coordinate: not found (all phases exhausted)");
+            } else {
+                log::debug!("fetch_event_by_coordinate: found via gossip fallback");
+            }
+            Ok(events.into_iter().next())
+        }
         Err(e) => {
-            log::error!("Failed to fetch event: {}", e);
+            log::error!("fetch_event_by_coordinate: gossip fallback failed: {}", e);
             Err(format!("Failed to fetch event: {}", e))
         }
     }

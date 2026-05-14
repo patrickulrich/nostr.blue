@@ -81,6 +81,8 @@ impl NotificationDispatcher {
                             #[cfg(feature = "native")]
                             {
                                 crate::stores::ndb::unknown_ids::queue_event((*event).clone());
+                                crate::stores::ndb::cache_event(&event);
+                                log::info!("notification_dispatcher: cached event {:?} in bridge cache", event.id.to_hex());
                             }
                             let inner = inner.lock().unwrap();
                             if let Some(senders) = inner.subscribers.get(&subscription_id) {

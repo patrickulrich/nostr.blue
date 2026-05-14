@@ -11,7 +11,7 @@
 //!
 //! # L2 Caching (Phase 3.5)
 //! Implements in-memory LRU cache for computed interaction counts:
-//! - Cache size: 1000 events
+//! - Cache size: 10000 events
 //! - TTL: 5 minutes per entry
 //! - Automatic eviction of stale/excess entries
 //! - Reduces redundant database queries for recently-viewed events
@@ -214,16 +214,14 @@ impl CountsCache {
     }
 }
 
-/// Global L2 cache for interaction counts
-///
 /// Cache configuration:
-/// - Capacity: 1000 events (enough for ~10 full feeds)
+/// - Capacity: 10000 events
 /// - TTL: 5 minutes (balance freshness vs performance)
 static COUNTS_CACHE: OnceLock<Mutex<CountsCache>> = OnceLock::new();
 
 /// Get or initialize the counts cache
 pub(crate) fn get_counts_cache() -> &'static Mutex<CountsCache> {
-    COUNTS_CACHE.get_or_init(|| Mutex::new(CountsCache::new(1000, Duration::from_secs(300))))
+    COUNTS_CACHE.get_or_init(|| Mutex::new(CountsCache::new(10000, Duration::from_secs(300))))
 }
 
 pub(crate) fn is_reply_kind(kind: Kind) -> bool {

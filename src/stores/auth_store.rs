@@ -409,21 +409,31 @@ async fn restore_nostr_connect(
 async fn run_post_login_init() {
     log::info!("Running post-login initialization...");
     crate::stores::notifications::load_checked_at();
-    crate::stores::notifications::fetch_and_merge_from_nip78().await;
-    if let Err(e) = crate::stores::blossom_store::fetch_user_servers().await {
-        log::warn!("Failed to fetch Blossom servers: {}", e);
-    }
-    // Wait for user relay lists before starting subscriptions
-    // Critical for NIP-46 where signer restoration is slow and
-    // relay application happens concurrently in set_signer()'s spawn_forever
+    // Wait for user relay lists BEFORE any NIP-78 fetches.
+    // Without this, fetches hit bootstrap relays only and silently return
+    // empty results, which get baked in as LoadedDefaults (never retried).
     crate::stores::relay::wait_for_user_relays(
-        std::time::Duration::from_secs(10),
+        std::time::Duration::from_secs(5),
         "run_post_login_init",
     )
     .await;
-    crate::stores::sidebar_store::load_sidebar_preferences().await;
-    crate::stores::reactions_store::load_preferred_reactions().await;
-    crate::stores::ai_provider_store::sync_provider_state_from_relays().await;
+    // Run all NIP-78 loads in parallel now that the relay pool is correct
+    futures::join!(
+        crate::stores::notifications::fetch_and_merge_from_nip78(),
+        async {
+            if let Err(e) = crate::stores::blossom_store::fetch_user_servers().await {
+                log::warn!("Failed to fetch Blossom servers: {}", e);
+            }
+        },
+        crate::stores::sidebar_store::load_sidebar_preferences(),
+        crate::stores::reactions_store::load_preferred_reactions(),
+        crate::stores::ai_provider_store::sync_provider_state_from_relays(),
+        async {
+            if let Err(e) = crate::stores::settings_store::load_settings().await {
+                log::warn!("Failed to load settings: {}", e);
+            }
+        },
+    );
     crate::stores::notifications::start_realtime_subscription().await;
     crate::stores::relay::start_relay_list_subscription().await;
     crate::stores::emoji_store::init_emoji_fetch();

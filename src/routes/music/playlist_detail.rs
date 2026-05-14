@@ -14,7 +14,7 @@ pub fn MusicPlaylistDetail(naddr: String) -> Element {
         loading.set(true);
         error_msg.set(None);
         spawn(async move {
-            let (pubkey, d_tag) = match crate::utils::nip19::parse_naddr(&naddr_clone) {
+            let parsed = match crate::utils::nip19::parse_naddr(&naddr_clone) {
                 Ok(result) => result,
                 Err(e) => {
                     error_msg.set(Some(e));
@@ -22,7 +22,7 @@ pub fn MusicPlaylistDetail(naddr: String) -> Element {
                     return;
                 }
             };
-            match nostr_music::fetch_playlist_by_coordinate(&pubkey, &d_tag).await {
+            match nostr_music::fetch_playlist_by_coordinate(&parsed.pubkey, &parsed.identifier, parsed.relay_hints).await {
                 Ok(Some(pl)) => {
                     playlist.set(Some(pl.clone()));
                     if let Ok(profile) = profiles::fetch_profile(pl.pubkey.clone()).await {

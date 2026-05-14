@@ -172,6 +172,7 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
     use quick_xml::Reader;
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
+    reader.config_mut().expand_empty_elements = true;
     let mut podcast = RssPodcast {
         guid: String::new(),
         title: String::new(),
@@ -196,6 +197,7 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
     let mut current_element = String::new();
     let mut in_channel = false;
     let mut in_item = false;
+    let mut in_image = false;
     let mut current_episode: Option<RssEpisode> = None;
     let mut buf = Vec::new();
     loop {
@@ -205,6 +207,7 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
                 current_element = name.clone();
                 match name.as_str() {
                     "channel" => in_channel = true,
+                    "image" if !in_item => in_image = true,
                     "item" => {
                         in_item = true;
                         current_episode = Some(RssEpisode {
@@ -300,7 +303,8 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
                         for attr in e.attributes().flatten() {
                             let key = String::from_utf8_lossy(attr.key.as_ref());
                             if key == "href" || key == "url" {
-                                let url = String::from_utf8_lossy(&attr.value).to_string();
+                                let url =
+                                    upgrade_to_https(String::from_utf8_lossy(&attr.value).to_string());
                                 if in_item {
                                     if let Some(ref mut ep) = current_episode {
                                         ep.image = Some(url);
@@ -318,6 +322,7 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
                 match name.as_str() {
                     "channel" => in_channel = false,
+                    "image" => in_image = false,
                     "item" => {
                         in_item = false;
                         if let Some(ep) = current_episode.take() {
@@ -333,6 +338,12 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
             Ok(Event::Text(ref e)) => {
                 let text = e.decode().unwrap_or_default().to_string();
                 if text.trim().is_empty() {
+                    continue;
+                }
+                if in_image {
+                    if current_element == "url" && podcast.image.is_none() {
+                        podcast.image = Some(upgrade_to_https(text));
+                    }
                     continue;
                 }
                 if in_item {
@@ -445,6 +456,13 @@ pub async fn fetch_transcript(transcript: &TranscriptRef) -> Result<String, Stri
         .text()
         .await
         .map_err(|e| format!("Failed to read transcript: {}", e))
+}
+fn upgrade_to_https(url: String) -> String {
+    if url.starts_with("http://") {
+        url.replacen("http://", "https://", 1)
+    } else {
+        url
+    }
 }
 /// Parse duration string to seconds
 /// Supports formats: "HH:MM:SS", "MM:SS", "SS", or numeric seconds
@@ -632,5 +650,95 @@ mod tests {
         let guid1 = generate_guid("Episode 1", "https://example.com/ep1.mp3");
         let guid2 = generate_guid("Episode 2", "https://example.com/ep2.mp3");
         assert_ne!(guid1, guid2);
+    }
+    #[test]
+    fn test_parse_podcast_feed_self_closing_tags() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"
+  xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
+  xmlns:podcast="https://podcastindex.org/namespace/1.0">
+<channel>
+    <title>Test Show</title>
+    <image>
+        <url>http://example.com/rss-image.jpg</url>
+        <title>Test Show</title>
+        <link>https://example.com</link>
+    </image>
+    <itunes:image href="http://example.com/itunes-art.jpg"/>
+    <podcast:image href="http://example.com/podcast-art.jpg"/>
+    <item>
+        <title>Episode 1</title>
+        <guid>ep1</guid>
+        <enclosure url="https://example.com/ep1.mp3" type="audio/mpeg" length="12345"/>
+        <itunes:image href="http://example.com/ep1-art.jpg"/>
+        <podcast:chapters url="https://example.com/chapters.json" type="application/json"/>
+    </item>
+    <item>
+        <title>Episode 2</title>
+        <guid>ep2</guid>
+        <enclosure url="https://example.com/ep2.mp3" type="audio/mpeg"/>
+    </item>
+</channel>
+</rss>"#;
+        let result = parse_podcast_feed(xml, "https://example.com/feed.xml").unwrap();
+        assert_eq!(result.title, "Test Show");
+        assert_eq!(
+            result.image,
+            Some("https://example.com/podcast-art.jpg".to_string())
+        );
+        assert_eq!(result.episodes.len(), 2);
+        let ep1 = &result.episodes[0];
+        assert_eq!(ep1.title, "Episode 1");
+        assert_eq!(ep1.enclosure_url, "https://example.com/ep1.mp3");
+        assert_eq!(ep1.enclosure_type, "audio/mpeg");
+        assert_eq!(
+            ep1.image,
+            Some("https://example.com/ep1-art.jpg".to_string())
+        );
+        assert_eq!(
+            ep1.chapters_url,
+            Some("https://example.com/chapters.json".to_string())
+        );
+        let ep2 = &result.episodes[1];
+        assert_eq!(ep2.title, "Episode 2");
+    }
+    #[test]
+    fn test_parse_podcast_feed_image_fallback() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+    <title>Fallback Show</title>
+    <image>
+        <url>http://example.com/fallback.jpg</url>
+        <title>Fallback Show</title>
+        <link>https://example.com</link>
+    </image>
+    <item>
+        <title>Episode A</title>
+        <guid>epA</guid>
+        <enclosure url="https://example.com/epA.mp3" type="audio/mpeg"/>
+    </item>
+</channel>
+</rss>"#;
+        let result = parse_podcast_feed(xml, "https://example.com/feed.xml").unwrap();
+        assert_eq!(
+            result.image,
+            Some("https://example.com/fallback.jpg".to_string())
+        );
+    }
+    #[test]
+    fn test_upgrade_to_https() {
+        assert_eq!(
+            upgrade_to_https("http://example.com/img.jpg".to_string()),
+            "https://example.com/img.jpg"
+        );
+        assert_eq!(
+            upgrade_to_https("https://example.com/img.jpg".to_string()),
+            "https://example.com/img.jpg"
+        );
+        assert_eq!(
+            upgrade_to_https("//example.com/img.jpg".to_string()),
+            "//example.com/img.jpg"
+        );
     }
 }

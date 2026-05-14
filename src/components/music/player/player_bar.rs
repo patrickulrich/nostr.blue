@@ -5,6 +5,7 @@ use crate::stores::music_player::{self, MusicPlayerStateStoreExt, MUSIC_PLAYER, 
 use dioxus::prelude::*;
 
 use super::format_time;
+use super::super::FALLBACK_ART_URL;
 
 #[component]
 pub fn PlayerBar() -> Element {
@@ -19,6 +20,19 @@ pub fn PlayerBar() -> Element {
     let playback_speed = store.playback_speed().cloned();
     let now_playing = store.now_playing().cloned();
     let playback_error = store.playback_error().cloned();
+
+    let art_url = track
+        .album_art_url
+        .clone()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| FALLBACK_ART_URL.to_string());
+    let mut img_src = use_signal(|| art_url.clone());
+    {
+        let url_for_sync = art_url.clone();
+        use_effect(use_reactive((&url_for_sync,), move |(url,)| {
+            img_src.set(url);
+        }));
+    }
 
     let progress = if duration > 0.0 {
         (current_time / duration * 100.0).clamp(0.0, 100.0)
@@ -192,13 +206,13 @@ pub fn PlayerBar() -> Element {
                 // LEFT: Album art + title/artist
                 div { class: "flex items-center gap-3 min-w-0 flex-1 md:flex-initial md:w-80",
                     div { class: "w-12 h-12 rounded-lg overflow-hidden bg-muted shrink-0",
-                        if let Some(art_url) = &track.album_art_url {
-                            img {
-                                src: "{art_url}",
-                                alt: "Album art",
-                                class: "w-full h-full object-cover",
-                                loading: "lazy",
-                            }
+                        img {
+                            src: "{img_src}",
+                            alt: "Album art",
+                            class: "w-full h-full object-cover",
+                            loading: "lazy",
+                            referrerpolicy: "no-referrer",
+                            onerror: move |_| img_src.set(FALLBACK_ART_URL.to_string()),
                         }
                     }
                     div { class: "flex flex-col min-w-0",

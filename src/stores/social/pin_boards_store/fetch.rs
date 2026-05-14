@@ -234,12 +234,17 @@ pub async fn fetch_pinboard_by_naddr(naddr: &str) -> std::result::Result<Option<
     if let Some(cached) = get_cached_pinboard_by_naddr(naddr) {
         return Ok(Some(cached));
     }
-    let coord = Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
-    let filter = pinboard_by_coord_filter(coord.public_key, &coord.identifier);
+    let parsed = crate::utils::nip19::parse_naddr(naddr)?;
     let current_user = crate::stores::auth_store::get_pubkey();
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
-    if let Some(event) = events.first() {
-        if let Some(board) = parse_pinboard_event(event, current_user.as_deref()) {
+    let event = nostr_client::fetch_event_by_coordinate_with_relays(
+        parsed.kind,
+        parsed.pubkey,
+        parsed.identifier,
+        parsed.relay_hints,
+    )
+    .await?;
+    if let Some(event) = event {
+        if let Some(board) = parse_pinboard_event(&event, current_user.as_deref()) {
             cache_pinboard(board.clone());
             return Ok(Some(board));
         }

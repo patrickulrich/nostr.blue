@@ -7,6 +7,7 @@ use crate::components::{
     RichContent, SensitiveContent, ZapModal,
 };
 use crate::hooks::use_reaction;
+use crate::hooks::use_global_interaction::{get_global_interaction, UseGlobalInteraction};
 use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
 use crate::stores::bookmarks;
@@ -203,12 +204,22 @@ pub fn NoteCard(
         }
     }));
     let has_precomputed = precomputed_counts.is_some();
+    let event_id_for_global = event_id.clone();
     use_effect(use_reactive(
         &(event_id_counts, has_precomputed),
         move |(event_id_for_counts, has_precomputed)| {
             let current_gen = count_request_gen.peek().wrapping_add(1);
             count_request_gen.set(current_gen);
             if has_precomputed {
+                return;
+            }
+            if let Some(global_counts) = get_global_interaction(&event_id_for_counts) {
+                reply_count.set(global_counts.replies);
+                repost_count.set(global_counts.reposts);
+                zap_amount_sats.set(global_counts.zap_amount_sats);
+                is_reposted.set(global_counts.user_reposted.unwrap_or(false));
+                user_repost_id.set(global_counts.user_repost_id.clone());
+                is_zapped.set(global_counts.user_zapped.unwrap_or(false));
                 return;
             }
             reply_count.set(0);
@@ -511,6 +522,7 @@ pub fn NoteCard(
     let is_hidden = (is_muted.read().unwrap_or(false) || is_author_blocked.read().unwrap_or(false))
         && !*show_hidden_anyway.read();
     rsx! {
+        UseGlobalInteraction { event_id: event_id_for_global }
         article {
             "data-event-id": "{event.id}",
             class: "border-b border-border p-4 hover:bg-accent/50 transition-colors cursor-pointer",

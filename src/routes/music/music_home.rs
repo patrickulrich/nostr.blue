@@ -181,7 +181,7 @@ pub fn MusicHome() -> Element {
                                             }
                                         });
                                         let track =
-                                            MusicTrack::from_rss_music_track(&episode, &feed);
+                                            MusicTrack::from_rss_music_track(&episode, &feed, item.image.as_deref());
                                         Some((item.rank, item.boosts, track))
                                     }
                                     Err(e) => {

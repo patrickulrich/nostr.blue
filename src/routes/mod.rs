@@ -804,10 +804,7 @@ fn Layout() -> Element {
             let _ = route.clone();
             spawn(async move {
                 if !crate::stores::ui::scroll_restore::was_popstate_nav().await {
-                    #[cfg(feature = "web")]
-                    if let Some(window) = web_sys::window() {
-                        window.scroll_to_with_x_and_y(0.0, 0.0);
-                    }
+                    crate::stores::ui::scroll_restore::set_scroll_y(0.0).await;
                 }
                 crate::platform::timer::sleep_ms(100).await;
                 crate::stores::ui::scroll_restore::clear_popstate_flag().await;
@@ -1113,10 +1110,9 @@ fn Layout() -> Element {
                                         class: "flex items-center gap-2 hover:opacity-80 transition mb-6 cursor-pointer",
                                         onclick: move |_| {
                                             if is_home_page {
-                                                #[cfg(feature = "web")]
-                                                if let Some(window) = web_sys::window() {
-                                                    window.scroll_to_with_x_and_y(0.0, 0.0);
-                                                }
+                                                spawn(async move {
+                                                    crate::stores::ui::scroll_restore::set_scroll_y(0.0).await;
+                                                });
                                             } else {
                                                 navigator.push(Route::Home { list: String::new() });
                                             }
@@ -1149,10 +1145,9 @@ fn Layout() -> Element {
                                                         onclick: move |_| {
                                                             *sidebar_page.write() = 0;
                                                             if is_home_page {
-                                                                #[cfg(feature = "web")]
-                                                                if let Some(window) = web_sys::window() {
-                                                                    window.scroll_to_with_x_and_y(0.0, 0.0);
-                                                                }
+                                                                spawn(async move {
+                                                                    crate::stores::ui::scroll_restore::set_scroll_y(0.0).await;
+                                                                });
                                                             } else {
                                                                 navigator.push(Route::Home { list: String::new() });
                                                             }
@@ -1319,10 +1314,9 @@ fn Layout() -> Element {
                                                     *sidebar_open.write() = false;
                                                     *sidebar_page.write() = 0;
                                                     if is_home_page {
-                                                        #[cfg(feature = "web")]
-                                                        if let Some(window) = web_sys::window() {
-                                                            window.scroll_to_with_x_and_y(0.0, 0.0);
-                                                        }
+                                                        spawn(async move {
+                                                            crate::stores::ui::scroll_restore::set_scroll_y(0.0).await;
+                                                        });
                                                     } else {
                                                         navigator.push(Route::Home { list: String::new() });
                                                     }
@@ -1358,10 +1352,9 @@ fn Layout() -> Element {
                                                                     *sidebar_open.write() = false;
                                                                     *sidebar_page.write() = 0;
                                                                     if is_home_page {
-                                                                        #[cfg(feature = "web")]
-                                                                        if let Some(window) = web_sys::window() {
-                                                                            window.scroll_to_with_x_and_y(0.0, 0.0);
-                                                                        }
+                                                                        spawn(async move {
+                                                                            crate::stores::ui::scroll_restore::set_scroll_y(0.0).await;
+                                                                        });
                                                                     } else {
                                                                         navigator.push(Route::Home { list: String::new() });
                                                                     }

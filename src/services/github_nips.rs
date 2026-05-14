@@ -84,10 +84,22 @@ fn validate_hex_number(number: &str, label: &str) -> Result<String, String> {
 }
 
 #[cfg(feature = "web")]
+fn resolve_url(path: &str) -> String {
+    if path.starts_with("http://") || path.starts_with("https://") || path.starts_with("blob:") {
+        return path.to_string();
+    }
+    let origin = web_sys::window()
+        .and_then(|w| w.location().origin().ok())
+        .unwrap_or_default();
+    format!("{}{}", origin, path)
+}
+
+#[cfg(feature = "web")]
 async fn fetch_text(url: &str, context: &str) -> Result<String, String> {
+    let absolute = resolve_url(url);
     let response = http_client()
         .map_err(|e| format!("HTTP client init failed: {}", e))?
-        .get(url)
+        .get(&absolute)
         .send()
         .await
         .map_err(|e| format!("Failed to fetch {}: {}", context, e))?;

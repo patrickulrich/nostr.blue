@@ -10,7 +10,7 @@ use nostr_sdk::{Filter, Kind, PublicKey, Timestamp};
 use std::collections::HashSet;
 use std::time::Duration;
 
-fn feed_kinds() -> Vec<Kind> {
+pub fn feed_kinds() -> Vec<Kind> {
     vec![
         Kind::TextNote,
         Kind::Repost,
@@ -359,6 +359,24 @@ where
     let filter = build_following_feed_filter(authors, until, Timestamp::now());
     let mut all_items: Vec<FeedItem> = Vec::new();
     let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
+
+    #[cfg(feature = "native")]
+    {
+        if let Some(client) = nostr_client::get_client() {
+            if let Ok(db_events) = client.database().query(filter.clone()).await {
+                if !db_events.is_empty() {
+                    let db_items = process_events_to_feed_items(db_events.into_iter().collect());
+                    log::info!("nostrdb pre-step: {} items for feed", db_items.len());
+                    for item in &db_items {
+                        seen_ids.insert(item.event().id);
+                    }
+                    on_batch(db_items.clone());
+                    all_items = db_items;
+                }
+            }
+        }
+    }
+
     let stream_result =
         nostr_client::stream_events_immediate(filter, Duration::from_secs(10), |event| {
             let item = if event.kind == Kind::Repost {
@@ -469,7 +487,17 @@ pub async fn load_following_with_replies(
         "Fetching all events (including replies and reposts) from {} followed accounts",
         filter.authors.as_ref().map(|a| a.len()).unwrap_or(0)
     );
-    match nostr_client::fetch_events_from_connected_relays(filter, Duration::from_secs(10)).await {
+    let fetch_result = {
+        #[cfg(feature = "native")]
+        {
+            nostr_client::fetch_events_ndb_first(filter, Duration::from_secs(10)).await
+        }
+        #[cfg(not(feature = "native"))]
+        {
+            nostr_client::fetch_events_from_connected_relays(filter, Duration::from_secs(10)).await
+        }
+    };
+    match fetch_result {
         Ok(events) => {
             log::info!(
                 "Loaded {} events (including replies and reposts) from following feed via outbox",
@@ -499,18 +527,36 @@ pub async fn load_following_with_replies(
             }
             feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
             if feed_items.is_empty() {
-                log::info!("No events from followed users");
-                return Ok((Vec::new(), false));
+                log::info!(
+                    "No events from followed users (incl replies), trying favorite relays"
+                );
+                match try_feed_from_favorite_relays(&authors, until).await {
+                    Ok(extra_items) if !extra_items.is_empty() => {
+                        log::info!("Got {} items from favorite relays", extra_items.len());
+                        return Ok((extra_items, false));
+                    }
+                    _ => {
+                        return Ok((Vec::new(), false));
+                    }
+                }
             }
             Ok((feed_items, false))
         }
         Err(e) => {
             log::error!(
-                "Failed to fetch following feed with replies: {}, falling back to global",
+                "Failed to fetch following feed with replies: {}, trying favorite relays before global fallback",
                 e
             );
-            let global = load_global_feed(until).await?;
-            Ok((global, true))
+            match try_feed_from_favorite_relays(&authors, until).await {
+                Ok(extra_items) if !extra_items.is_empty() => {
+                    log::info!("Got {} items from favorite relays", extra_items.len());
+                    Ok((extra_items, false))
+                }
+                _ => {
+                    let global = load_global_feed(until).await?;
+                    Ok((global, true))
+                }
+            }
         }
     }
 }
@@ -667,6 +713,76 @@ pub async fn load_people_list_feed(
             Err(NostrBlueError::Other(format!("Failed to load feed: {}", e)))
         }
     }
+}
+
+pub async fn load_relay_feed(
+    relay_urls: Vec<String>,
+    until: Option<u64>,
+) -> Result<Vec<FeedItem>, NostrBlueError> {
+    log::info!("Loading relay feed from {} relays (until: {:?})", relay_urls.len(), until);
+    let client = match crate::stores::nostr_client::get_client() {
+        Some(c) => c,
+        None => return Err(NostrBlueError::Other("Client not initialized".to_string())),
+    };
+    for url in &relay_urls {
+        let relay_url = match nostr_sdk::RelayUrl::parse(url) {
+            Ok(u) => u,
+            Err(_) => continue,
+        };
+        let relays = client.relays().await;
+        if !relays.contains_key(&relay_url) {
+            drop(relays);
+            if let Err(e) = client.add_read_relay(url).await {
+                log::warn!("Failed to add read relay {}: {}", url, e);
+                continue;
+            }
+        }
+        if let Err(e) = client.connect_relay(url).await {
+            log::warn!("Failed to connect relay {}: {}", url, e);
+        }
+    }
+    let mut filter = Filter::new().kinds(feed_kinds()).limit(100);
+    if let Some(until_ts) = until {
+        filter = filter.until(Timestamp::from(until_ts));
+    }
+    crate::stores::relay::connection::fetch_events_from_relays(
+        &client,
+        filter,
+        relay_urls.clone(),
+        Duration::from_secs(10),
+    )
+    .await
+    .map(|events| {
+        log::info!("Relay feed: received {} events", events.len());
+        let mut feed_items: Vec<FeedItem> = Vec::new();
+        for event in events.into_iter() {
+            if event.kind == Kind::Repost {
+                match extract_reposted_event(&event) {
+                    Ok(original) => {
+                        feed_items.push(FeedItem::Repost {
+                            original,
+                            reposted_by: event.pubkey,
+                            repost_timestamp: event.created_at,
+                        });
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to parse repost event {}: {}", event.id, e);
+                    }
+                }
+            } else if event.kind == Kind::TextNote
+                || (event.kind == Kind::Comment
+                    && crate::stores::topic_store::is_topic_post(&event))
+            {
+                feed_items.push(FeedItem::OriginalPost(event));
+            }
+        }
+        feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
+        feed_items
+    })
+    .map_err(|e| {
+        log::error!("Failed to fetch relay feed: {}", e);
+        NostrBlueError::Other(format!("Failed to load relay feed: {}", e))
+    })
 }
 
 #[cfg(test)]

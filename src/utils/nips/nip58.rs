@@ -197,6 +197,7 @@ pub fn build_badge_naddr(pubkey: &str, badge_id: &str) -> Option<String> {
     nip19.to_bech32().ok()
 }
 /// Parse a badge naddr back to (pubkey, badge_id)
+#[allow(dead_code)]
 pub fn parse_badge_naddr(naddr: &str) -> Result<(String, String), String> {
     let nip19 = Nip19Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
     if nip19.coordinate.kind.as_u16() != KIND_BADGE_DEFINITION {
@@ -212,18 +213,23 @@ pub fn parse_badge_naddr(naddr: &str) -> Result<(String, String), String> {
 }
 /// Fetch a badge definition by naddr
 pub async fn fetch_badge_definition(naddr: &str) -> Result<BadgeDefinition, String> {
-    let (pubkey, badge_id) = parse_badge_naddr(naddr)?;
-    let pk = PublicKey::from_hex(&pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let filter = Filter::new()
-        .kind(Kind::Custom(KIND_BADGE_DEFINITION))
-        .author(pk)
-        .identifier(&badge_id)
-        .limit(1);
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
-    events
-        .into_iter()
-        .filter_map(|e| parse_badge_definition(&e).ok())
-        .max_by_key(|b| b.created_at)
+    let parsed = crate::utils::nip19::parse_naddr(naddr)?;
+    if parsed.kind != KIND_BADGE_DEFINITION {
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_BADGE_DEFINITION,
+            parsed.kind,
+        ));
+    }
+    let event = nostr_client::fetch_event_by_coordinate_with_relays(
+        parsed.kind,
+        parsed.pubkey,
+        parsed.identifier,
+        parsed.relay_hints,
+    )
+    .await?;
+    event
+        .and_then(|e| parse_badge_definition(&e).ok())
         .ok_or_else(|| "Badge not found".to_string())
 }
 /// Fetch a badge definition by coordinate string ("30009:pubkey:badge_id")

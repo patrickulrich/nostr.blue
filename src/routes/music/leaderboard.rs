@@ -328,7 +328,7 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
                     let pubkey = parts[1].to_string();
                     let d_tag = parts[2..].join(":");
                     match crate::stores::nostr_music::fetch_nostr_track_by_coordinate(
-                        &pubkey, &d_tag,
+                        &pubkey, &d_tag, vec![],
                     )
                     .await
                     {

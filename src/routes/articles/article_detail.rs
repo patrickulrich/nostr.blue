@@ -26,36 +26,62 @@ pub fn ArticleDetail(naddr: String) -> Element {
     let mut is_liking = use_signal(|| false);
     let mut is_liked = use_signal(|| false);
     let mut like_count = use_signal(|| 0usize);
+    let mut load_generation = use_signal(|| 0u32);
     let has_signer = *nostr_client::HAS_SIGNER.read();
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
-    use_effect(move || {
+
+    use_effect(use_reactive!(|naddr| {
         let naddr_str = naddr.clone();
+        let gen = load_generation.peek().wrapping_add(1);
+        load_generation.set(gen);
+
+        article.set(None);
+        loading.set(true);
+        error.set(None);
+        author_metadata.set(None);
+        comments.set(Vec::new());
+        loading_comments.set(false);
+        is_liked.set(false);
+        like_count.set(0);
+
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             log::info!("Waiting for client initialization before loading article...");
             return;
         }
+
+        let lg = load_generation;
         spawn(async move {
-            loading.set(true);
-            error.set(None);
             match crate::utils::nip19::parse_naddr(&naddr_str) {
-                Ok((pubkey, identifier)) => {
-                    crate::stores::profiles::PROFILE_CACHE.write().pop(&pubkey);
-                    match nostr_client::fetch_event_by_coordinate(
-                        nostr_sdk::Kind::LongFormTextNote.as_u16(),
-                        pubkey.clone(),
-                        identifier,
+                Ok(parsed) => {
+                    let author_pubkey_for_meta = parsed.pubkey.clone();
+                    match nostr_client::fetch_event_by_coordinate_with_relays(
+                        parsed.kind,
+                        parsed.pubkey.clone(),
+                        parsed.identifier,
+                        parsed.relay_hints,
                     )
                     .await
                     {
                         Ok(Some(event)) => {
+                            if *lg.peek() != gen {
+                                return;
+                            }
                             article.set(Some(event.clone()));
                             loading.set(false);
-                            use crate::utils::profile_prefetch;
+
+                            let lg2 = lg;
+                            let gen2 = gen;
+                            let event_for_meta = event.clone();
+                            let author_pk = author_pubkey_for_meta.clone();
                             spawn(async move {
-                                profile_prefetch::prefetch_event_authors(&[event]).await;
+                                use crate::utils::profile_prefetch;
+                                profile_prefetch::prefetch_event_authors(&[event_for_meta]).await;
+                                if *lg2.peek() != gen2 {
+                                    return;
+                                }
                                 if let Some(profile) =
-                                    crate::stores::profiles::get_cached_profile(&pubkey)
+                                    crate::stores::profiles::get_cached_profile(&author_pk)
                                 {
                                     let mut metadata = nostr_sdk::Metadata::new();
                                     if let Some(name) = profile.name {
@@ -75,45 +101,117 @@ pub fn ArticleDetail(naddr: String) -> Element {
                                     author_metadata.set(Some(metadata));
                                 }
                             });
+
+                            let event_id = event.id;
+                            let lg3 = lg;
+                            let gen3 = gen;
+                            spawn(async move {
+                                loading_comments.set(true);
+                                let filter =
+                                    Filter::new().kind(Kind::Comment).event(event_id).limit(500);
+                                match nostr_client::fetch_events_aggregated(
+                                    filter,
+                                    Duration::from_secs(10),
+                                )
+                                .await
+                                {
+                                    Ok(mut comment_events) => {
+                                        if *lg3.peek() != gen3 {
+                                            return;
+                                        }
+                                        comment_events.sort_by_key(|a| a.created_at);
+                                        log::info!(
+                                            "Loaded {} NIP-22 comments",
+                                            comment_events.len()
+                                        );
+                                        comments.set(comment_events);
+                                    }
+                                    Err(e) => {
+                                        log::error!("Failed to fetch comments: {}", e);
+                                    }
+                                }
+                                if *lg3.peek() != gen3 {
+                                    return;
+                                }
+                                loading_comments.set(false);
+                            });
+
+                            let event_id = event.id;
+                            let current_user_pubkey = crate::stores::signer::SIGNER_INFO
+                                .read()
+                                .as_ref()
+                                .map(|info| info.public_key.clone());
+                            let lg4 = lg;
+                            let gen4 = gen;
+                            spawn(async move {
+                                let filter = Filter::new()
+                                    .kind(Kind::Reaction)
+                                    .event(event_id)
+                                    .limit(500);
+                                match nostr_client::fetch_events_aggregated(
+                                    filter,
+                                    Duration::from_secs(10),
+                                )
+                                .await
+                                {
+                                    Ok(reaction_events) => {
+                                        if *lg4.peek() != gen4 {
+                                            return;
+                                        }
+                                        let mut likes = 0;
+                                        let mut user_has_liked = false;
+                                        for reaction in &reaction_events {
+                                            if reaction.content != "-" {
+                                                likes += 1;
+                                            }
+                                            if let Some(ref user_pk) = current_user_pubkey {
+                                                if reaction.pubkey.to_hex() == *user_pk
+                                                    && reaction.content != "-"
+                                                {
+                                                    user_has_liked = true;
+                                                }
+                                            }
+                                        }
+                                        like_count.set(likes);
+                                        is_liked.set(user_has_liked);
+                                        log::info!(
+                                            "Loaded {} reactions for article, user has liked: {}",
+                                            likes,
+                                            user_has_liked
+                                        );
+                                    }
+                                    Err(e) => {
+                                        log::error!("Failed to fetch reactions: {}", e);
+                                    }
+                                }
+                            });
                         }
                         Ok(None) => {
+                            if *lg.peek() != gen {
+                                return;
+                            }
                             error.set(Some("Article not found".to_string()));
                             loading.set(false);
                         }
                         Err(e) => {
+                            if *lg.peek() != gen {
+                                return;
+                            }
                             error.set(Some(e));
                             loading.set(false);
                         }
                     }
                 }
                 Err(e) => {
+                    if *lg.peek() != gen {
+                        return;
+                    }
                     error.set(Some(e));
                     loading.set(false);
                 }
             }
         });
-    });
-    use_effect(move || {
-        let article_data = article.read();
-        if let Some(event) = article_data.as_ref() {
-            let event_id = event.id;
-            spawn(async move {
-                loading_comments.set(true);
-                let filter = Filter::new().kind(Kind::Comment).event(event_id).limit(500);
-                match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
-                    Ok(mut comment_events) => {
-                        comment_events.sort_by_key(|a| a.created_at);
-                        log::info!("Loaded {} NIP-22 comments", comment_events.len());
-                        comments.set(comment_events);
-                    }
-                    Err(e) => {
-                        log::error!("Failed to fetch comments: {}", e);
-                    }
-                }
-                loading_comments.set(false);
-            });
-        }
-    });
+    }));
 
     {
         let comment_filter = article.read().as_ref().map(|event| {
@@ -135,48 +233,6 @@ pub fn ArticleDetail(naddr: String) -> Element {
         });
     }
 
-    use_effect(move || {
-        let article_data = article.read();
-        if let Some(event) = article_data.as_ref() {
-            let event_id = event.id;
-            let current_user_pubkey = crate::stores::signer::SIGNER_INFO
-                .read()
-                .as_ref()
-                .map(|info| info.public_key.clone());
-            spawn(async move {
-                let filter = Filter::new()
-                    .kind(Kind::Reaction)
-                    .event(event_id)
-                    .limit(500);
-                match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
-                    Ok(reaction_events) => {
-                        let mut likes = 0;
-                        let mut user_has_liked = false;
-                        for reaction in &reaction_events {
-                            if reaction.content != "-" {
-                                likes += 1;
-                            }
-                            if let Some(ref user_pk) = current_user_pubkey {
-                                if reaction.pubkey.to_hex() == *user_pk && reaction.content != "-" {
-                                    user_has_liked = true;
-                                }
-                            }
-                        }
-                        like_count.set(likes);
-                        is_liked.set(user_has_liked);
-                        log::info!(
-                            "Loaded {} reactions for article, user has liked: {}",
-                            likes,
-                            user_has_liked
-                        );
-                    }
-                    Err(e) => {
-                        log::error!("Failed to fetch reactions: {}", e);
-                    }
-                }
-            });
-        }
-    });
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",

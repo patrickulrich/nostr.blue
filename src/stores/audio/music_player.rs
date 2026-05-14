@@ -299,8 +299,26 @@ impl MusicTrack {
         use nostr_sdk::nips::nip19::ToBech32;
         coord.to_bech32().ok()
     }
+    fn resolve_image_url<'a>(
+        episode: &'a PodcastIndexEpisode,
+        feed: &'a PodcastFeed,
+        chart_image: Option<&'a str>,
+    ) -> Option<&'a str> {
+        episode
+            .image
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .or(chart_image.filter(|s| !s.is_empty()))
+            .or(episode.feed_image.as_deref().filter(|s| !s.is_empty()))
+            .or(feed.get_image())
+    }
+
     /// Create MusicTrack from RSS music album track (Podcast Index medium="music")
-    pub fn from_rss_music_track(episode: &PodcastIndexEpisode, feed: &PodcastFeed) -> Self {
+    pub fn from_rss_music_track(
+        episode: &PodcastIndexEpisode,
+        feed: &PodcastFeed,
+        chart_image: Option<&str>,
+    ) -> Self {
         let value_block = episode.value.as_ref().or(feed.value.as_ref()).map(|v| {
             let model = v.model.as_ref();
             crate::utils::podcast::ValueBlock {
@@ -334,8 +352,8 @@ impl MusicTrack {
             artist: feed.author.clone().unwrap_or_else(|| feed.title.clone()),
             album: Some(feed.title.clone()),
             media_url: episode.enclosure_url.clone().unwrap_or_default(),
-            album_art_url: episode.get_image().or(feed.get_image()).map(String::from),
-            artist_art_url: feed.get_image().map(String::from),
+            album_art_url: Self::resolve_image_url(episode, feed, chart_image).map(String::from),
+            artist_art_url: feed.get_image().filter(|s| !s.is_empty()).map(String::from),
             duration: episode.duration.map(|d| d as u32),
             artist_id: None,
             album_id: None,
@@ -857,7 +875,8 @@ pub fn restore_from_floating() {
 /// Show zap dialog for a specific track (or current track if None)
 pub fn show_zap_dialog_for_track(track: Option<MusicTrack>) {
     let store = MUSIC_PLAYER.resolve();
-    *store.zap_track().write() = track.or_else(|| store.current_track().peek().clone());
+    let current = store.current_track().peek().clone();
+    *store.zap_track().write() = track.or(current);
     *store.show_zap_dialog().write() = true;
 }
 /// Show zap dialog for current track
@@ -1135,8 +1154,8 @@ pub fn sync_native_playback_snapshot(snapshot: AndroidPlaybackSnapshot) {
     if !store.playlist().peek().is_empty() && snapshot.current_index < store.playlist().peek().len()
         && prev_index != snapshot.current_index {
         *store.current_index().write() = snapshot.current_index;
-        *store.current_track().write() =
-            store.playlist().peek().get(snapshot.current_index).cloned();
+        let track = store.playlist().peek().get(snapshot.current_index).cloned();
+        *store.current_track().write() = track;
     }
     *store.is_playing().write() = snapshot.is_playing;
     *store.is_buffering().write() = snapshot.is_buffering;

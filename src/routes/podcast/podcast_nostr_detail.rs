@@ -13,7 +13,7 @@ use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, podcast_subscription};
 use crate::utils::podcast::{self, PodcastMetadata};
 use dioxus::prelude::*;
-use nostr_sdk::prelude::{Filter, Kind, PublicKey, SingleLetterTag, Timestamp};
+use nostr_sdk::prelude::{Filter, Kind, PublicKey, Timestamp};
 use std::collections::HashSet;
 use std::time::Duration;
 #[derive(Props, Clone, PartialEq)]
@@ -188,6 +188,7 @@ fn PodcastDetailContent(props: PodcastDetailContentProps) -> Element {
                             src: "{image_url}",
                             alt: "{metadata.title}",
                             class: "w-32 h-32 md:w-40 md:h-40 rounded-lg object-cover shadow-lg",
+                            referrerpolicy: "no-referrer",
                         }
                         div { class: "flex-1 min-w-0",
                             h1 { class: "text-2xl font-bold truncate", "{metadata.title}" }
@@ -384,19 +385,19 @@ fn PodcastDetailSkeleton() -> Element {
 async fn fetch_nostr_podcast_metadata(
     naddr: &str,
 ) -> std::result::Result<(PodcastMetadata, String), String> {
-    let (pubkey, d_tag) = crate::utils::nip19::parse_naddr(naddr)?;
-    let metadata_filter = Filter::new()
-        .kind(Kind::from(podcast::KIND_APP_DATA))
-        .author(PublicKey::from_hex(&pubkey).map_err(|e| e.to_string())?)
-        .custom_tag(SingleLetterTag::from_char('d').unwrap(), d_tag.clone())
-        .limit(1);
+    let parsed = crate::utils::nip19::parse_naddr(naddr)?;
     let metadata_events =
-        nostr_client::fetch_events_aggregated(metadata_filter, Duration::from_secs(10)).await?;
+        nostr_client::fetch_event_by_coordinate_with_relays(
+            parsed.kind,
+            parsed.pubkey.clone(),
+            parsed.identifier,
+            parsed.relay_hints,
+        )
+        .await?;
     let metadata_event = metadata_events
-        .first()
         .ok_or_else(|| "Podcast not found".to_string())?;
-    let metadata = podcast::parse_podcast_metadata(metadata_event)?;
-    Ok((metadata, pubkey))
+    let metadata = podcast::parse_podcast_metadata(&metadata_event)?;
+    Ok((metadata, parsed.pubkey))
 }
 
 /// Fetch Nostr podcast episodes with pagination

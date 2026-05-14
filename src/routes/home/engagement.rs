@@ -1,6 +1,6 @@
 use crate::services::aggregation::{
-    fetch_interaction_counts_batch, stream_interaction_counts, sync_interaction_counts,
-    InteractionCounts, InteractionStreamHandle,
+    fetch_interaction_counts_batch, fetch_local_db_counts, stream_interaction_counts,
+    sync_interaction_counts, InteractionCounts, InteractionStreamHandle,
 };
 use crate::utils::FeedItem;
 use dioxus::prelude::*;
@@ -21,6 +21,12 @@ pub async fn fetch_and_stream_interactions(
         interactions_loaded.set(true);
         return;
     }
+
+    let local_counts = fetch_local_db_counts(&event_ids).await;
+    if !local_counts.is_empty() && *request_id.peek() == current_id {
+        interaction_counts.set(local_counts);
+    }
+
     let counts = if is_first_load {
         fetch_interaction_counts_batch(event_ids.clone(), Duration::from_secs(5)).await
     } else {

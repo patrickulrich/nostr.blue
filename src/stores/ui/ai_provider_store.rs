@@ -250,13 +250,17 @@ pub async fn sync_provider_state_from_relays() {
     };
     match serde_json::from_str::<AiProviderState>(&decrypted) {
         Ok(relay_state) => {
+            let migrated = migrate_legacy_state(relay_state);
             log::info!(
                 "sync_provider_state: loaded state from relays (provider={}, {} custom providers)",
-                relay_state.selected_provider_id,
-                relay_state.custom_providers.len()
+                migrated.selected_provider_id,
+                migrated.custom_providers.len()
             );
+            if let Err(e) = cache_provider_state(&migrated) {
+                log::warn!("sync_provider_state: failed to cache: {}", e);
+            }
             *pending_relay_state().lock().expect("relay state lock poisoned") =
-                Some(migrate_legacy_state(relay_state));
+                Some(migrated);
         }
         Err(e) => {
             log::warn!("sync_provider_state: parse failed: {}", e);

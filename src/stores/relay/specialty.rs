@@ -53,6 +53,7 @@ pub async fn add_relays(client: &Client, relay_urls: &[RelayUrl]) -> Vec<RelayUr
     added
 }
 /// Add relays from string URLs, returning which ones were newly added.
+#[allow(dead_code)]
 pub async fn add_relays_from_strings(client: &Client, urls: &[String]) -> Vec<RelayUrl> {
     let relay_urls: Vec<RelayUrl> = urls
         .iter()

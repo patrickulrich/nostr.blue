@@ -135,7 +135,7 @@ pub async fn fetch_events_aggregated_outbox(
 /// Internal: Fetch events using gossip with provided client (avoids re-reading NOSTR_CLIENT)
 ///
 /// Dioxus pattern: Get client once, pass same instance through all async operations.
-async fn fetch_events_aggregated_outbox_with_client(
+pub(crate) async fn fetch_events_aggregated_outbox_with_client(
     client: &std::sync::Arc<Client>,
     filter: Filter,
     timeout: Duration,
@@ -354,25 +354,44 @@ pub fn parse_event_id(id: &str) -> Option<ParsedEventId> {
 
 /// Targeted event fetch with hybrid broadcast+targeted strategy.
 ///
-/// 1. DB check (instant)
-/// 2. Broadcast to connected relays (fast, uses existing connections)
-/// 3. Targeted author relays via NIP-65 resolution (if author known)
-/// 4. Relay hints from nevent (if available)
-/// 5. Fallback — gossip/outbox model
+/// 1. Bridge cache check (instant, native only — bridges nostrdb async ingestion gap)
+/// 2. DB check (instant, direct primary key lookup)
+/// 3. Broadcast to connected relays (fast, uses existing connections)
+/// 4. Targeted author relays via NIP-65 resolution (if author known)
+/// 5. Relay hints from nevent (if available)
+/// 6. Fallback — gossip/outbox model
 pub async fn fetch_event_targeted(
     parsed: ParsedEventId,
     timeout: Duration,
 ) -> std::result::Result<Option<nostr::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
-    let filter = Filter::new().id(parsed.event_id).limit(1);
+    let event_id = parsed.event_id;
 
-    // Phase 1: DB check (instant)
-    if let Ok(events) = client.database().query(filter.clone()).await {
-        if let Some(event) = events.into_iter().next() {
-            log::debug!("fetch_event_targeted: found in DB cache");
+    // Phase 0: Bridge cache check (instant, native only)
+    #[cfg(feature = "native")]
+    {
+        let bridge_hit = crate::stores::ndb::get_cached_event(&event_id.to_bytes());
+        log::debug!("fetch_event_targeted: Phase 0 bridge cache check for {:?} -> {}", event_id.to_hex(), if bridge_hit.is_some() { "HIT" } else { "MISS" });
+        if let Some(event) = bridge_hit {
             return Ok(Some(event));
         }
     }
+
+    // Phase 1: DB check (instant) — direct primary key lookup
+    match client.database().event_by_id(&event_id).await {
+        Ok(Some(event)) => {
+            log::debug!("fetch_event_targeted: Phase 1 DB hit for {:?}", event_id.to_hex());
+            return Ok(Some(event));
+        }
+        Ok(None) => {
+            log::debug!("fetch_event_targeted: Phase 1 DB miss for {:?}", event_id.to_hex());
+        }
+        Err(e) => {
+            log::debug!("fetch_event_targeted: Phase 1 DB error for {:?}: {}", event_id.to_hex(), e);
+        }
+    }
+
+    let filter = Filter::new().id(event_id).limit(1);
 
     // Phase 2: Broadcast to connected relays (fast)
     match fetch_events_from_connected_relays_with_client(
@@ -383,10 +402,20 @@ pub async fn fetch_event_targeted(
     .await
     {
         Ok(events) if !events.is_empty() => {
-            log::debug!("fetch_event_targeted: found via broadcast");
-            return Ok(events.into_iter().next());
+            log::debug!("fetch_event_targeted: Phase 2 broadcast hit for {:?}", event_id.to_hex());
+            let event = events.into_iter().next();
+            #[cfg(feature = "native")]
+            if let Some(ref e) = event {
+                crate::stores::ndb::cache_event(e);
+            }
+            return Ok(event);
         }
-        _ => {}
+        Ok(events) => {
+            log::debug!("fetch_event_targeted: Phase 2 broadcast miss for {:?} ({} events)", event_id.to_hex(), events.len());
+        }
+        Err(e) => {
+            log::debug!("fetch_event_targeted: Phase 2 broadcast error for {:?}: {}", event_id.to_hex(), e);
+        }
     }
 
     // Phase 3: Targeted author relays (if known)
@@ -408,7 +437,9 @@ pub async fn fetch_event_targeted(
             relay::coverage::cleanup_ephemeral_relays(&client, &ephemeral.newly_added).await;
             if let Ok(events) = result {
                 if let Some(event) = events.into_iter().next() {
-                    log::debug!("fetch_event_targeted: found via author relays");
+                    log::debug!("fetch_event_targeted: Phase 3 author relays hit for {:?}", event_id.to_hex());
+                    #[cfg(feature = "native")]
+                    crate::stores::ndb::cache_event(&event);
                     return Ok(Some(event));
                 }
             }
@@ -430,7 +461,9 @@ pub async fn fetch_event_targeted(
             relay::coverage::cleanup_ephemeral_relays(&client, &ephemeral.newly_added).await;
             if let Ok(events) = result {
                 if let Some(event) = events.into_iter().next() {
-                    log::debug!("fetch_event_targeted: found via relay hints");
+                    log::debug!("fetch_event_targeted: Phase 4 relay hints hit for {:?}", event_id.to_hex());
+                    #[cfg(feature = "native")]
+                    crate::stores::ndb::cache_event(&event);
                     return Ok(Some(event));
                 }
             }
@@ -439,7 +472,12 @@ pub async fn fetch_event_targeted(
 
     // Phase 5: Fallback — outbox (gossip model)
     let events = fetch_events_aggregated_outbox(filter, timeout).await?;
-    Ok(events.into_iter().next())
+    let event = events.into_iter().next();
+    #[cfg(feature = "native")]
+    if let Some(ref e) = event {
+        crate::stores::ndb::cache_event(e);
+    }
+    Ok(event)
 }
 
 /// Fetch video events from connected relays (bypasses gossip)
