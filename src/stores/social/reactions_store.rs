@@ -1,6 +1,7 @@
 use crate::hooks::ReactionEmoji;
 use crate::platform::storage;
 use crate::stores::sidebar_store::Nip78LoadState;
+use crate::stores::relay::USER_RELAYS_APPLIED;
 use crate::stores::{auth_store, nostr_client};
 /// NIP-78: Preferred Reactions Storage
 /// Stores user's preferred reaction emojis on Nostr relays using kind 30078 events
@@ -164,12 +165,12 @@ pub async fn load_preferred_reactions() {
                 .or_else(|_| nostr_sdk::PublicKey::from_hex(pk_str))
             {
                 Ok(pk) => pk,
-                Err(e) => {
+                    Err(e) => {
                     log::error!("Invalid pubkey: {}", e);
                     *REACTIONS_STATE.write() = if loaded_from_cache {
                         Nip78LoadState::Loaded
                     } else {
-                        Nip78LoadState::LoadedDefaults
+                        Nip78LoadState::Failed(format!("Invalid pubkey: {}", e))
                     };
                     return;
                 }
@@ -180,7 +181,7 @@ pub async fn load_preferred_reactions() {
             *REACTIONS_STATE.write() = if loaded_from_cache {
                 Nip78LoadState::Loaded
             } else {
-                Nip78LoadState::LoadedDefaults
+                Nip78LoadState::Failed("No pubkey available".into())
             };
             return;
         }
@@ -241,7 +242,7 @@ pub async fn load_preferred_reactions() {
                         *REACTIONS_STATE.write() = if loaded_from_cache {
                             Nip78LoadState::Loaded
                         } else {
-                            Nip78LoadState::LoadedDefaults
+                            Nip78LoadState::Failed(format!("Parse error: {}", e))
                         };
                     }
                 }
@@ -249,6 +250,10 @@ pub async fn load_preferred_reactions() {
                 log::info!("No reactions preferences found on relays");
                 *REACTIONS_STATE.write() = if loaded_from_cache {
                     Nip78LoadState::Loaded
+                } else if !*USER_RELAYS_APPLIED.peek() {
+                    Nip78LoadState::Failed(
+                        "User relays not applied, retry needed".into(),
+                    )
                 } else {
                     Nip78LoadState::LoadedDefaults
                 };

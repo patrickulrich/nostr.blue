@@ -58,7 +58,7 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
             episodes_state
                 .read()
                 .iter()
-                .map(|ep| MusicTrack::from_rss_music_track(ep, feed))
+                .map(|ep| MusicTrack::from_rss_music_track(ep, feed, None))
                 .collect::<Vec<MusicTrack>>()
         } else {
             Vec::new()
@@ -120,6 +120,7 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
                                                     src: "{art_url}",
                                                     alt: "{feed.title}",
                                                     class: "w-full h-full object-cover",
+                                                    referrerpolicy: "no-referrer",
                                                 }
                                             } else {
                                                 MusicIcon { class: "w-24 h-24 text-muted-foreground" }

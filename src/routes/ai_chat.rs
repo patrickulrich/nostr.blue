@@ -1019,7 +1019,7 @@ pub fn AIChat() -> Element {
             div {
                 id: "{messages_container_id}",
                 class: "flex-1 overflow-y-auto",
-                div { class: "mx-auto flex max-w-5xl flex-col gap-6 px-4 py-6",
+                div { class: "mx-auto flex max-w-5xl flex-col gap-6 overflow-hidden px-4 py-6",
                     if ppq_blocked {
                         PpqSetupGate {
                             loading: ppq_bootstrap_loading,
@@ -1295,11 +1295,11 @@ fn MessageBubble(message: DisplayMessage) -> Element {
     };
 
     rsx! {
-        div { class: if is_user { "flex justify-end" } else { "flex justify-start" },
+        div { class: if is_user { "flex min-w-0 justify-end" } else { "flex min-w-0 justify-start" },
             div { class: if is_user {
-                    "max-w-3xl rounded-2xl bg-primary px-4 py-3 text-sm text-primary-foreground shadow-sm"
+                    "max-w-3xl min-w-0 overflow-hidden rounded-2xl bg-primary px-4 py-3 text-sm text-primary-foreground shadow-sm"
                 } else {
-                    "max-w-3xl rounded-2xl border border-border bg-card px-4 py-3 text-sm text-foreground shadow-sm"
+                    "max-w-3xl min-w-0 overflow-hidden rounded-2xl border border-border bg-card px-4 py-3 text-sm text-foreground shadow-sm"
                 },
                 if is_user {
                     p { class: "whitespace-pre-wrap break-words", "{message.content}" }

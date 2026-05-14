@@ -11,15 +11,17 @@ use crate::error::NostrBlueError;
 use crate::hooks::{use_infinite_scroll, use_user_lists};
 use crate::services::aggregation::{InteractionCounts, InteractionStreamHandle};
 use crate::stores::feed_cache::{self, FeedCacheKey};
+use crate::stores::relay;
 use crate::stores::{auth_store, nostr_client, subscription_manager};
 use crate::stores::ui::scroll_restore;
+use crate::utils::list_kinds::NAMED_RELAYS;
 use crate::utils::{get_item_count, DataState, FeedItem};
 use dioxus::prelude::*;
 use engagement::{fetch_and_stream_interactions, fetch_paginated_interactions};
 use feed_loaders::{
-    exclusive_pagination_cursor, merge_paginated_feed_items, prefetch_author_metadata,
+    exclusive_pagination_cursor, feed_kinds, merge_paginated_feed_items, prefetch_author_metadata,
     load_following_feed, load_following_feed_streaming, load_following_with_replies,
-    load_global_feed, load_paginated_global_feed, load_people_list_feed,
+    load_global_feed, load_paginated_global_feed, load_people_list_feed, load_relay_feed,
 };
 use login::LoginSection;
 use nostr_sdk::{Filter, Kind, PublicKey, Timestamp};
@@ -49,12 +51,24 @@ pub fn Home(list: String) -> Element {
         use_signal(|| None);
     let mut request_id = use_signal(|| 0u32);
     let mut last_loaded_trigger = use_signal(|| (0u32, FeedType::Following, false));
+    let mut relay_feed_sub_id: Signal<Option<nostr_sdk::SubscriptionId>> =
+        use_signal(|| None);
+    let mut relay_feed_ephemeral_urls = use_signal(Vec::<String>::new);
+    let relay_url_input = use_signal(String::new);
     let (all_lists, _lists_loading, _lists_error, _) = use_user_lists();
     let people_lists = use_memo(move || {
         all_lists
             .read()
             .iter()
             .filter(|list| list.kind == crate::utils::list_kinds::NAMED_PEOPLE)
+            .cloned()
+            .collect::<Vec<_>>()
+    });
+    let relay_lists = use_memo(move || {
+        all_lists
+            .read()
+            .iter()
+            .filter(|list| list.kind == NAMED_RELAYS)
             .cloned()
             .collect::<Vec<_>>()
     });
@@ -340,10 +354,11 @@ pub fn Home(list: String) -> Element {
                                 oldest_timestamp.set(exclusive_pagination_cursor(Some(last_item)));
                             }
                             has_more.set(true);
-                            feed_state.set(DataState::Loaded(feed_items.clone()));
+                            accumulated_items = feed_cache::merge_feed_items(accumulated_items, feed_items.clone());
+                            feed_state.set(DataState::Loaded(accumulated_items.clone()));
                             if !is_stale() {
                                 let cache_key_for_store = effective_cache_key;
-                                let items_for_cache = feed_items.clone();
+                                let items_for_cache = accumulated_items.clone();
                                 spawn(async move {
                                     if let Err(e) = feed_cache::store_feed_items(
                                         &cache_key_for_store,
@@ -438,10 +453,11 @@ pub fn Home(list: String) -> Element {
                                 oldest_timestamp.set(exclusive_pagination_cursor(Some(last_item)));
                             }
                             has_more.set(true);
-                            feed_state.set(DataState::Loaded(feed_items.clone()));
+                            let merged = feed_cache::merge_feed_items(cached_items, feed_items.clone());
+                            feed_state.set(DataState::Loaded(merged.clone()));
                             if !is_stale() {
                                 let cache_key_for_store = effective_cache_key;
-                                let items_for_cache = feed_items.clone();
+                                let items_for_cache = merged;
                                 spawn(async move {
                                     let _ = feed_cache::store_feed_items(
                                         &cache_key_for_store,
@@ -647,6 +663,78 @@ pub fn Home(list: String) -> Element {
                         }
                     }
                 }
+                FeedType::RelayFeed { .. } | FeedType::RelaySetFeed { .. } => {
+                    let urls = current_feed_type.relay_urls();
+                    let cache_key = FeedCacheKey::RelayFeed {
+                        urls: urls.join(","),
+                    };
+                    let cached_items = feed_cache::load_cached_feed(&cache_key, 50)
+                        .await
+                        .unwrap_or_default();
+                    if is_stale() {
+                        return;
+                    }
+                    if !cached_items.is_empty() {
+                        feed_state.set(DataState::Loaded(cached_items.clone()));
+                    }
+                    let result = load_relay_feed(urls.clone(), None).await;
+                    if is_stale() {
+                        return;
+                    }
+                    match result {
+                        Ok(feed_items) => {
+                            if let Some(last_item) = feed_items.last() {
+                                oldest_timestamp.set(exclusive_pagination_cursor(Some(last_item)));
+                            }
+                            has_more.set(true);
+                            feed_state.set(DataState::Loaded(feed_items.clone()));
+                            if !is_stale() {
+                                let cache_key_for_store = cache_key;
+                                let items_for_cache = feed_items.clone();
+                                spawn(async move {
+                                    let _ = feed_cache::store_feed_items(
+                                        &cache_key_for_store,
+                                        &items_for_cache,
+                                    )
+                                    .await;
+                                    let _ = feed_cache::run_eviction_if_needed().await;
+                                });
+                            }
+                            if !is_stale() {
+                                let items_for_counts = feed_items.clone();
+                                let req_id = request_id;
+                                let curr_id = current_id;
+                                let ic = interaction_counts;
+                                let il = interactions_loaded;
+                                let ish = interaction_stream_handle;
+                                spawn(async move {
+                                    fetch_and_stream_interactions(
+                                        &items_for_counts,
+                                        is_first_load,
+                                        ic,
+                                        req_id,
+                                        curr_id,
+                                        il,
+                                        ish,
+                                    )
+                                    .await
+                                });
+                            }
+                            if !is_stale() {
+                                spawn(async move {
+                                    prefetch_author_metadata(&feed_items).await;
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            if cached_items.is_empty() {
+                                feed_state.set(DataState::Error(e.to_string()));
+                            } else {
+                                log::warn!("Network error but showing cached data: {}", e);
+                            }
+                        }
+                    }
+                }
             }
         });
     });
@@ -683,6 +771,19 @@ pub fn Home(list: String) -> Element {
             });
         }
         interaction_stream_handle.set(None);
+        if let Some(sub_id) = relay_feed_sub_id.peek().clone() {
+            let ephemeral_urls = relay_feed_ephemeral_urls.peek().clone();
+            spawn(async move {
+                if let Some(client) = nostr_client::get_client() {
+                    let _ = client.unsubscribe(&sub_id).await;
+                    for url in &ephemeral_urls {
+                        let _ = client.force_remove_relay(url).await;
+                    }
+                }
+            });
+        }
+        relay_feed_sub_id.set(None);
+        relay_feed_ephemeral_urls.write().clear();
     });
 
     // Real-time subscriptions
@@ -720,6 +821,95 @@ pub fn Home(list: String) -> Element {
         };
         realtime_started.set(true);
         spawn(async move {
+            if current_feed_type.is_relay_feed() {
+                let urls = current_feed_type.relay_urls();
+                let client = match nostr_client::get_client() {
+                    Some(c) => c,
+                    None => return,
+                };
+                for url in &urls {
+                    let relay_url = match nostr_sdk::RelayUrl::parse(url) {
+                        Ok(u) => u,
+                        Err(_) => continue,
+                    };
+                    let relays = client.relays().await;
+                    if !relays.contains_key(&relay_url) {
+                        drop(relays);
+                        let _ = client.add_read_relay(url).await;
+                    }
+                    let _ = client.connect_relay(url).await;
+                }
+                let parsed_urls: Vec<nostr_sdk::RelayUrl> = urls
+                    .iter()
+                    .filter_map(|u| nostr_sdk::RelayUrl::parse(u).ok())
+                    .collect();
+                let filter = Filter::new().kinds(feed_kinds()).since(since_timestamp);
+                let sub_id = match client
+                    .subscribe_to(parsed_urls, filter, None)
+                    .await
+                {
+                    Ok(output) => {
+                        log::info!("Relay feed real-time subscription: {:?}", output.val);
+                        output.val
+                    }
+                    Err(e) => {
+                        log::error!("Failed to subscribe to relay feed: {}", e);
+                        return;
+                    }
+                };
+                relay_feed_sub_id.set(Some(sub_id.clone()));
+                relay_feed_ephemeral_urls.write().extend(urls.iter().cloned());
+                subscription_ids.write().push(sub_id.clone());
+                let mut pending = pending_posts;
+                let fstate = feed_state;
+                let mut notifications = client.notifications();
+                while let Ok(notification) = notifications.recv().await {
+                    if let nostr_sdk::RelayPoolNotification::Event {
+                        subscription_id: event_sub_id,
+                        event,
+                        ..
+                    } = notification
+                    {
+                        if event_sub_id != sub_id {
+                            continue;
+                        }
+                        let feed_item_opt = if event.kind == Kind::Repost {
+                            crate::utils::extract_reposted_event(&event).ok().map(|original| {
+                                FeedItem::Repost {
+                                    original,
+                                    reposted_by: event.pubkey,
+                                    repost_timestamp: event.created_at,
+                                }
+                            })
+                        } else if event.kind == Kind::TextNote
+                            || event.kind == Kind::Comment
+                            || event.kind.as_u16() == crate::utils::nip_bb::KIND_BLOBBI_STATE
+                        {
+                            Some(FeedItem::OriginalPost((*event).clone()))
+                        } else {
+                            None
+                        };
+                        if let Some(feed_item) = feed_item_opt {
+                            let event_id = feed_item.event().id;
+                            let already_buffered = pending
+                                .read()
+                                .iter()
+                                .any(|item| item.event().id == event_id);
+                            let already_in_feed = match &*fstate.peek() {
+                                DataState::Loaded(ref current_items) => current_items
+                                    .iter()
+                                    .any(|item| item.event().id == event_id),
+                                _ => false,
+                            };
+                            if !already_buffered && !already_in_feed {
+                                pending.write().push(feed_item);
+                            }
+                        }
+                    }
+                }
+                return;
+            }
+
             let pubkey_str = match auth_store::get_pubkey() {
                 Some(pk) => pk,
                 None => return,
@@ -800,7 +990,9 @@ pub fn Home(list: String) -> Element {
                                         .any(|tag| tag.is_reply() || tag.is_root()),
                                     FeedType::FollowingWithReplies
                                     | FeedType::Global
-                                    | FeedType::PeopleList(_) => true,
+                                    | FeedType::PeopleList(_)
+                                    | FeedType::RelayFeed { .. }
+                                    | FeedType::RelaySetFeed { .. } => true,
                                 };
                                 if should_add {
                                     Some(FeedItem::OriginalPost((*event).clone()))
@@ -939,6 +1131,7 @@ pub fn Home(list: String) -> Element {
     {
         let mut ndb_pending = pending_posts;
         let fstate = feed_state;
+        let ftype = feed_type;
         use_future(move || async move {
             loop {
                 crate::platform::timer::sleep_ms(500).await;
@@ -970,8 +1163,13 @@ pub fn Home(list: String) -> Element {
                             Err(_) => None,
                         }
                     } else if event.kind == Kind::TextNote {
-                        let is_reply = event.tags.iter().any(|t| t.is_reply() || t.is_root());
-                        if !is_reply {
+                        let is_reply =
+                            event.tags.iter().any(|t| t.is_reply() || t.is_root());
+                        let include_replies = matches!(
+                            &*ftype.read(),
+                            FeedType::FollowingWithReplies
+                        );
+                        if !is_reply || include_replies {
                             Some(FeedItem::OriginalPost(event))
                         } else {
                             None
@@ -1025,6 +1223,45 @@ pub fn Home(list: String) -> Element {
             anchor.is_set = true;
             anchor.feed_type_label = feed_type.read().label();
             log::debug!("Saved scroll position (sync): y={}", scroll_y);
+        }
+
+        let ids = subscription_ids.peek().clone();
+        if !ids.is_empty() {
+            spawn(async move {
+                if let Some(client) = nostr_client::get_client() {
+                    log::info!(
+                        "Cleaning up {} real-time subscriptions on unmount",
+                        ids.len()
+                    );
+                    subscription_manager::unsubscribe_all(&client, &ids).await;
+                }
+            });
+        }
+        #[cfg(feature = "native")]
+        {
+            spawn(async move {
+                let _ = crate::stores::ndb::subscriptions::unsubscribe(
+                    crate::stores::ndb::subscriptions::SubKey::FollowingFeed,
+                )
+                .await;
+            });
+        }
+        if let Some(handle) = interaction_stream_handle.peek().clone() {
+            spawn(async move {
+                log::info!("Cleaning up interaction stream on unmount");
+                handle.unsubscribe().await;
+            });
+        }
+        if let Some(sub_id) = relay_feed_sub_id.peek().clone() {
+            let ephemeral_urls = relay_feed_ephemeral_urls.peek().clone();
+            spawn(async move {
+                if let Some(client) = nostr_client::get_client() {
+                    let _ = client.unsubscribe(&sub_id).await;
+                    for url in &ephemeral_urls {
+                        let _ = client.force_remove_relay(url).await;
+                    }
+                }
+            });
         }
     });
 
@@ -1144,6 +1381,9 @@ pub fn Home(list: String) -> Element {
                 },
                 FeedType::Global => load_paginated_global_feed(until).await,
                 FeedType::PeopleList(list) => load_people_list_feed(&list, until).await,
+                FeedType::RelayFeed { .. } | FeedType::RelaySetFeed { .. } => {
+                    load_relay_feed(current_feed_type.relay_urls(), until).await
+                }
             };
             match fetch_result {
                 Ok(new_items) => {
@@ -1193,12 +1433,9 @@ pub fn Home(list: String) -> Element {
     let mut refresh_and_scroll_to_top = move || {
         let current = *refresh_trigger.read();
         refresh_trigger.set(current + 1);
-        #[cfg(feature = "web")]
-        {
-            if let Some(window) = web_sys::window() {
-                window.scroll_to_with_x_and_y(0.0, 0.0);
-            }
-        }
+        spawn(async move {
+            crate::stores::ui::scroll_restore::set_scroll_y(0.0).await;
+        });
     };
 
     let auth = auth_store::AUTH_STATE.read();
@@ -1315,6 +1552,143 @@ pub fn Home(list: String) -> Element {
                                                         )
                                                         {
                                                             span { "✓" }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    {
+                                        let favorite_relays = {
+                                            use dioxus::prelude::ReadableExt;
+                                            let relays = relay::nip65::FAVORITE_RELAYS.peek().clone();
+                                            if relays.is_empty() {
+                                                relay::nip65::default_favorite_relays()
+                                            } else {
+                                                relays
+                                            }
+                                        };
+                                        let rlists = relay_lists.read().clone();
+                                        let has_relay_entries = !favorite_relays.is_empty() || !rlists.is_empty();
+                                        rsx! {
+                                            if has_relay_entries {
+                                                div { class: "border-t border-border" }
+                                                div { class: "px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide",
+                                                    "Relay Feeds"
+                                                }
+                                            }
+                                            for url in &favorite_relays {
+                                                {
+                                                    let url_for_click = url.clone();
+                                                    let url_for_check = url.clone();
+                                                    let domain = url
+                                                        .trim_start_matches("wss://")
+                                                        .trim_start_matches("ws://")
+                                                        .trim_end_matches('/')
+                                                        .to_string();
+                                                    rsx! {
+                                                        button {
+                                                            key: "fav-{url}",
+                                                            class: "w-full px-4 py-3 text-left hover:bg-accent transition flex items-center justify-between",
+                                                            onclick: move |_| {
+                                                                feed_type.set(FeedType::RelayFeed {
+                                                                    url: url_for_click.clone(),
+                                                                    name: domain.clone(),
+                                                                });
+                                                                show_dropdown.set(false);
+                                                            },
+                                                            div {
+                                                                div { class: "font-medium", "📡 {domain}" }
+                                                                div { class: "text-xs text-muted-foreground truncate", "{url}" }
+                                                            }
+                                                            if matches!(
+                                                                feed_type.read().clone(),
+                                                                FeedType::RelayFeed { ref url, .. } if url == &url_for_check
+                                                            ) {
+                                                                span { "✓" }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            for list in rlists.iter() {
+                                                {
+                                                    let list_relay_urls: Vec<String> = list.tags.iter()
+                                                        .filter_map(|tag| {
+                                                            let s = tag.as_slice();
+                                                            if s.first().map(|v| v.as_str()) == Some("relay") {
+                                                                s.get(1).map(|v| v.to_string())
+                                                            } else {
+                                                                None
+                                                            }
+                                                        })
+                                                        .collect();
+                                                    let list_name_for_set = list.name.clone();
+                                                    let list_name_for_check = list.name.clone();
+                                                    let list_urls_for_set = list_relay_urls.clone();
+                                                    let list_urls_for_check = list_relay_urls.clone();
+                                                    let relay_count = list_relay_urls.len();
+                                                    rsx! {
+                                                        button {
+                                                            key: "rlist-{list.id}",
+                                                            class: "w-full px-4 py-3 text-left hover:bg-accent transition flex items-center justify-between",
+                                                            onclick: move |_| {
+                                                                if !list_urls_for_set.is_empty() {
+                                                                    feed_type.set(FeedType::RelaySetFeed {
+                                                                        name: list_name_for_set.clone(),
+                                                                        urls: list_urls_for_set.clone(),
+                                                                    });
+                                                                    show_dropdown.set(false);
+                                                                }
+                                                            },
+                                                            div {
+                                                                div { class: "font-medium", "📡 {list.name}" }
+                                                                div { class: "text-xs text-muted-foreground", "{relay_count} relays" }
+                                                            }
+                                                            if matches!(
+                                                                feed_type.read().clone(),
+                                                                FeedType::RelaySetFeed { ref name, ref urls, .. }
+                                                                if name == &list_name_for_check && urls == &list_urls_for_check
+                                                            ) {
+                                                                span { "✓" }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            {
+                                                let mut input_url = relay_url_input;
+                                                rsx! {
+                                                    div { class: "border-t border-border" }
+                                                    div { class: "px-4 py-2 flex gap-2",
+                                                        input {
+                                                            class: "flex-1 text-sm px-3 py-2 bg-muted border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary",
+                                                            r#type: "text",
+                                                            placeholder: "wss://relay.example.com",
+                                                            value: "{input_url}",
+                                                            oninput: move |e| {
+                                                                input_url.set(e.value());
+                                                            },
+                                                        }
+                                                        button {
+                                                            class: "px-3 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
+                                                            onclick: move |_| {
+                                                                let url = input_url.read().clone();
+                                                                if !url.is_empty() {
+                                                                    let domain = url
+                                                                        .trim_start_matches("wss://")
+                                                                        .trim_start_matches("ws://")
+                                                                        .trim_end_matches('/')
+                                                                        .to_string();
+                                                                    feed_type.set(FeedType::RelayFeed {
+                                                                        url: url.clone(),
+                                                                        name: domain,
+                                                                    });
+                                                                    show_dropdown.set(false);
+                                                                    input_url.set(String::new());
+                                                                }
+                                                            },
+                                                            "Go"
                                                         }
                                                     }
                                                 }

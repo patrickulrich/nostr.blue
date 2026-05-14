@@ -181,7 +181,7 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
                 timeout: Duration::from_secs(30),
             })
             .gossip(GossipOptions::default().limits(gossip_limits))
-            .pool(RelayPoolOptions::new().max_relays(Some(50)));
+            .pool(RelayPoolOptions::new());
         Client::builder()
             .database(database)
             .gossip(gossip)
@@ -232,7 +232,7 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
                 timeout: Duration::from_secs(30),
             })
             .gossip(GossipOptions::default().limits(gossip_limits))
-            .pool(RelayPoolOptions::new().max_relays(Some(50)));
+            .pool(RelayPoolOptions::new());
         Client::builder()
             .database(database)
             .gossip(gossip)
@@ -379,8 +379,12 @@ pub async fn set_signer(signer: SignerType) -> std::result::Result<(), String> {
         if let Err(e) = relay::init_user_relay_lists(client_clone.clone()).await {
             log::warn!("Failed to load user relay lists: {}", e);
         }
+        client_clone.connect().await;
+        client_clone
+            .wait_for_connection(std::time::Duration::from_secs(3))
+            .await;
         *relay::USER_RELAYS_APPLIED.write() = true;
-        log::info!("User relays applied, feed fetching unblocked");
+        log::info!("User relays applied and connected, feed fetching unblocked");
         if let Err(e) = relay::init_nip51_relay_lists(client_clone.clone()).await {
             log::warn!("Failed to load NIP-51 relay lists: {}", e);
         }
@@ -411,6 +415,8 @@ pub async fn set_read_only() -> std::result::Result<(), String> {
     client.unset_signer().await;
     *HAS_SIGNER.write() = false;
     *CURRENT_SIGNER.write() = None;
+    *relay::USER_RELAYS_APPLIED.write() = false;
+    relay::pool::reset_pool_to_defaults(&client).await;
     if let Err(e) = crate::stores::publish_queue::processor::process_once_guarded().await {
         log::warn!("Flush before read-only failed: {}", e);
     }

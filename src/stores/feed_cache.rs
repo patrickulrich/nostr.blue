@@ -64,6 +64,8 @@ pub enum FeedCacheKey {
     ArticlesGlobal,
     /// People list feed
     PeopleList { pubkey: String, list_id: String },
+    /// Relay feed (single relay or relay set)
+    RelayFeed { urls: String },
 }
 impl FeedCacheKey {
     /// Convert to string key for IndexedDB storage
@@ -84,6 +86,7 @@ impl FeedCacheKey {
             FeedCacheKey::PeopleList { pubkey, list_id } => {
                 format!("list:{}:{}", pubkey, list_id)
             }
+            FeedCacheKey::RelayFeed { urls } => format!("relay_feed:{}", urls),
         }
     }
 }

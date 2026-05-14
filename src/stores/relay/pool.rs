@@ -51,6 +51,39 @@ pub async fn remove_blocked_relays_from_pool(client: &Client) {
         relays.len()
     );
 }
+/// Reset relay pool to default relays only, removing all user-specific relays.
+/// Call this on logout to prevent relay accumulation across account switches.
+pub async fn reset_pool_to_defaults(client: &Client) {
+    let relays = client.relays().await;
+    let mut removed_count = 0usize;
+    for (url, _) in relays {
+        let url_str = url.to_string();
+        let normalized = url_str.trim_end_matches('/');
+        if DEFAULT_RELAYS
+            .iter()
+            .any(|d| d.trim_end_matches('/') == normalized)
+        {
+            continue;
+        }
+        log::debug!("Removing user relay on logout: {}", url_str);
+        let _ = client.force_remove_relay(url).await;
+        removed_count += 1;
+    }
+    *USER_RELAY_METADATA.write() = None;
+    let store = RELAY_POOL.read();
+    let mut data = store.data();
+    let mut pool = data.write();
+    pool.retain(|r| {
+        DEFAULT_RELAYS
+            .iter()
+            .any(|d| d.trim_end_matches('/') == r.url.trim_end_matches('/'))
+    });
+    log::info!(
+        "Reset relay pool to defaults: removed {} user relays, {} defaults remaining",
+        removed_count,
+        pool.len()
+    );
+}
 /// Default relays to connect to
 pub const DEFAULT_RELAYS: &[&str] = &[
     "wss://relay.damus.io",

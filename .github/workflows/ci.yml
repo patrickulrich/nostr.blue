@@ -14,6 +14,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Validate docs submodules
+        run: |
+          for dir in public/docs/nips public/docs/nuts public/docs/blossom public/docs/NKBIPs public/docs/market-spec; do
+            count=$(find "$dir" -type f 2>/dev/null | wc -l)
+            if [ "$count" -eq 0 ]; then
+              echo "ERROR: Submodule $dir is empty or missing" >&2
+              exit 1
+            fi
+          done
+          echo "All docs submodules populated"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -58,6 +71,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Validate docs submodules
+        run: |
+          for dir in public/docs/nips public/docs/nuts public/docs/blossom public/docs/NKBIPs public/docs/market-spec; do
+            count=$(find "$dir" -type f 2>/dev/null | wc -l)
+            if [ "$count" -eq 0 ]; then
+              echo "ERROR: Submodule $dir is empty or missing" >&2
+              exit 1
+            fi
+          done
+          echo "All docs submodules populated"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -134,6 +160,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Validate docs submodules
+        run: |
+          for dir in public/docs/nips public/docs/nuts public/docs/blossom public/docs/NKBIPs public/docs/market-spec; do
+            count=$(find "$dir" -type f 2>/dev/null | wc -l)
+            if [ "$count" -eq 0 ]; then
+              echo "ERROR: Submodule $dir is empty or missing" >&2
+              exit 1
+            fi
+          done
+          echo "All docs submodules populated"
 
       - name: Setup Java
         uses: actions/setup-java@v5

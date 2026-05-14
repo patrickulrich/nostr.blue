@@ -154,6 +154,7 @@ fn App() -> Element {
         if let Some(css) = tailwind_css {
             document::Stylesheet { href: css }
         }
+        hooks::GlobalInteractionProcessor {}
         ToastProvider { Router::<routes::Route> {} }
         components::password_modal::PasswordModal {}
         components::MediaLightbox {}

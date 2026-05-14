@@ -404,6 +404,7 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
                     alt: "{episode.title}",
                     class: "w-16 h-16 rounded-lg object-cover",
                     loading: "lazy",
+                    referrerpolicy: "no-referrer",
                 }
                 div { class: "absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold {source_badge.1}",
                     "{source_badge.0}"

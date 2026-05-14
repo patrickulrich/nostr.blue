@@ -609,8 +609,9 @@ fn FileDetailModal(
                         } else if is_video {
                             video {
                                 class: "max-h-[400px]",
-                                src: "{item.url}",
+                                src: "{item.url}#t=0.1",
                                 controls: true,
+                                preload: "metadata",
                             }
                         } else if is_audio {
                             div { class: "p-8",

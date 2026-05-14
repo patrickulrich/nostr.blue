@@ -149,6 +149,7 @@ fn ChapterItem(props: ChapterItemProps) -> Element {
                         src: "{img_url}",
                         alt: chapter.title.as_deref().unwrap_or("Chapter"),
                         class: "w-12 h-12 rounded object-cover shrink-0",
+                        referrerpolicy: "no-referrer",
                     }
                 }
             }

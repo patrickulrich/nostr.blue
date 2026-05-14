@@ -1,5 +1,12 @@
 /// Markdown rendering utilities for NIP-23 long-form content
+use once_cell::sync::Lazy;
 use pulldown_cmark::{html, Options, Parser};
+use regex::Regex;
+
+static NOSTR_URI_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)nostr:(npub1|nprofile1|note1|nevent1|naddr1)[a-zA-Z0-9]+")
+        .expect("Failed to compile nostr URI regex")
+});
 /// Render markdown to safe HTML
 /// Uses pulldown-cmark for parsing and ammonia for sanitization.
 /// Mermaid code blocks are converted to `<div class="mermaid">` for client-side rendering.
@@ -14,7 +21,60 @@ pub fn render_markdown(markdown: &str) -> String {
     let mut html_output = String::new();
     html::push_html(&mut html_output, parser);
     let sanitized = sanitize_html(&html_output);
-    convert_mermaid_blocks(&sanitized)
+    let linked = auto_link_bare_urls(&sanitized);
+    convert_mermaid_blocks(&linked)
+}
+
+fn auto_link_bare_urls(html: &str) -> String {
+    static A_TAG: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"<a\s[^>]*>.*?</a>").expect("a tag regex"));
+    static IMG_TAG: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"<img\s[^>]*/?>").expect("img tag regex"));
+    static BARE_URL: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r#"https?://[^\s<>"']+"#).expect("bare url regex"));
+
+    let mut placeholders: Vec<String> = Vec::new();
+    let protected = A_TAG
+        .replace_all(html, |caps: &regex::Captures| {
+            let idx = placeholders.len();
+            placeholders.push(caps[0].to_string());
+            format!("\x00AURL{}\x00", idx)
+        })
+        .to_string();
+    let protected = IMG_TAG
+        .replace_all(&protected, |caps: &regex::Captures| {
+            let idx = placeholders.len();
+            placeholders.push(caps[0].to_string());
+            format!("\x00IURL{}\x00", idx)
+        })
+        .to_string();
+
+    let linked = BARE_URL
+        .replace_all(&protected, |caps: &regex::Captures| {
+            let url = &caps[0];
+            format!(
+                r#"<a href="{}" target="_blank" rel="noopener noreferrer">{}</a>"#,
+                url, url
+            )
+        })
+        .to_string();
+
+    let mut result = linked;
+    for (idx, original) in placeholders.iter().enumerate() {
+        result = result.replace(&format!("\x00AURL{}\x00", idx), original);
+        result = result.replace(&format!("\x00IURL{}\x00", idx), original);
+    }
+    result
+}
+
+pub fn extract_nostr_uris(content: &str) -> (String, Vec<String>) {
+    let mut uris = Vec::new();
+    let result = NOSTR_URI_PATTERN.replace_all(content, |caps: &regex::Captures| {
+        let idx = uris.len();
+        uris.push(caps[0].to_string());
+        format!("%%NOSTR_BLUE_EMBED_{}%%", idx)
+    });
+    (result.to_string(), uris)
 }
 
 /// Convert mermaid code blocks from `<pre><code class="language-mermaid">...</code></pre>`

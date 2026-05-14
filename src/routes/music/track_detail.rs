@@ -414,8 +414,8 @@ fn TrackDetailSkeleton() -> Element {
 pub(crate) async fn fetch_track(id: &str) -> Result<music_player::MusicTrack, String> {
     if id.starts_with("naddr1") {
         // Nostr track (kind 36787)
-        let (pubkey, d_tag) = crate::utils::nip19::parse_naddr(id)?;
-        let nostr_track = nostr_music::fetch_nostr_track_by_coordinate(&pubkey, &d_tag)
+        let parsed = crate::utils::nip19::parse_naddr(id)?;
+        let nostr_track = nostr_music::fetch_nostr_track_by_coordinate(&parsed.pubkey, &parsed.identifier, parsed.relay_hints)
             .await?
             .ok_or("Track not found")?;
 
@@ -447,7 +447,7 @@ pub(crate) async fn fetch_track(id: &str) -> Result<music_player::MusicTrack, St
             .ok_or("Track not found")?;
 
         Ok(music_player::MusicTrack::from_rss_music_track(
-            episode, &feed,
+            episode, &feed, None,
         ))
     } else {
         // Wavlake track (UUID)

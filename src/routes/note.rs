@@ -8,7 +8,8 @@ use crate::components::{ClientInitializing, EditProposalCard, NoteCard, Threaded
 use crate::hooks::{use_mute_block_cache, use_relay_subscription};
 use crate::routes::Route;
 use crate::services::aggregation::{
-    fetch_interaction_counts_batch, InteractionCounts,
+    fetch_interaction_counts_batch, fetch_local_db_counts, stream_interaction_counts,
+    InteractionCounts, InteractionStreamHandle,
 };
 use crate::stores::back_navigation;
 use crate::stores::nostr_client;
@@ -355,10 +356,85 @@ async fn fetch_author_relays_replies(
     result
 }
 
-async fn fetch_replies_fast(
+fn merge_new_replies(
+    new_events: Vec<NostrEvent>,
+    mut replies: Signal<Vec<NostrEvent>>,
+    mut reply_ids: Signal<HashSet<EventId>>,
+) {
+    let mut added = false;
+    for event in new_events {
+        if reply_ids.write().insert(event.id) {
+            replies.write().push(event);
+            added = true;
+        }
+    }
+    if added {
+        replies.write().sort_by_key(|a| a.created_at);
+    }
+}
+
+async fn fetch_replies_db(
+    event_id: EventId,
+) -> std::result::Result<Vec<NostrEvent>, String> {
+    let Some(client) = nostr_client::get_client() else {
+        return Err("Client not initialized".to_string());
+    };
+    let event_id_hex = event_id.to_hex();
+
+    let filter_lower = Filter::new()
+        .kinds(vec![
+            Kind::TextNote,
+            Kind::VoiceMessage,
+            Kind::VoiceMessageReply,
+            Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT),
+        ])
+        .event(event_id)
+        .limit(100);
+
+    let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
+    let filter_upper = Filter::new()
+        .kinds(vec![
+            Kind::VoiceMessage,
+            Kind::VoiceMessageReply,
+            Kind::Comment,
+        ])
+        .custom_tag(upper_e_tag, event_id_hex)
+        .limit(100);
+
+    let (lower_db, upper_db) = tokio::join!(
+        client.database().query(filter_lower),
+        client.database().query(filter_upper),
+    );
+
+    let mut db_replies = Vec::new();
+    if let Ok(events) = lower_db {
+        db_replies.extend(events);
+    }
+    if let Ok(events) = upper_db {
+        db_replies.extend(events);
+    }
+
+    #[cfg(feature = "native")]
+    {
+        let reply_kinds = vec![
+            Kind::TextNote,
+            Kind::VoiceMessage,
+            Kind::VoiceMessageReply,
+            Kind::Comment,
+            Kind::Custom(crate::stores::nostr_client::edits::KIND_NOTE_EDIT),
+        ];
+        let bridge_replies = crate::stores::ndb::get_cached_replies(&event_id, &reply_kinds);
+        log::debug!("fetch_replies_db: bridge cache found {} replies for {:?}", bridge_replies.len(), event_id.to_hex());
+        db_replies.extend(bridge_replies);
+    }
+
+    Ok(dedup_replies(db_replies))
+}
+
+async fn fetch_replies_from_relays(
     event_id: EventId,
     root_author_pubkey: Option<PublicKey>,
-) -> std::result::Result<(Vec<NostrEvent>, HashSet<PublicKey>), String> {
+) -> std::result::Result<Vec<NostrEvent>, String> {
     let event_id_hex = event_id.to_hex();
 
     let filter_lower = Filter::new()
@@ -382,8 +458,8 @@ async fn fetch_replies_fast(
         .limit(100);
 
     let (lower_result, upper_result, author_result) = tokio::join!(
-        nostr_client::fetch_events_aggregated_outbox(filter_lower, Duration::from_secs(5)),
-        nostr_client::fetch_events_aggregated_outbox(filter_upper, Duration::from_secs(5)),
+        nostr_client::fetch_events_from_connected_relays(filter_lower, Duration::from_secs(5)),
+        nostr_client::fetch_events_from_connected_relays(filter_upper, Duration::from_secs(5)),
         async {
             match root_author_pubkey {
                 Some(pk) => fetch_author_relays_replies(event_id, &pk).await,
@@ -401,9 +477,7 @@ async fn fetch_replies_fast(
     }
     all_replies.extend(author_result);
 
-    let reply_authors: HashSet<PublicKey> = all_replies.iter().map(|e| e.pubkey).collect();
-    let unique_replies = dedup_replies(all_replies);
-    Ok((unique_replies, reply_authors))
+    Ok(dedup_replies(all_replies))
 }
 
 const MAX_EPHEMERAL_RELAYS: usize = 5;
@@ -411,7 +485,8 @@ const MAX_EPHEMERAL_RELAYS: usize = 5;
 async fn fetch_replies_phase2(
     event_id: EventId,
     reply_authors: HashSet<PublicKey>,
-    mut replies_signal: Signal<Vec<NostrEvent>>,
+    replies_signal: Signal<Vec<NostrEvent>>,
+    reply_ids_signal: Signal<HashSet<EventId>>,
     load_generation: Signal<u32>,
     this_generation: u32,
 ) {
@@ -477,12 +552,8 @@ async fn fetch_replies_phase2(
                     relay::coverage::cleanup_ephemeral_relays(&client, &ephemeral.newly_added).await;
                     return;
                 }
-                let mut existing = replies_signal.read().clone();
-                existing.extend(events);
-                let mut merged = dedup_replies(existing);
-                merged.sort_by_key(|a| a.created_at);
-                log::info!("Phase 2: added {} additional replies", merged.len());
-                replies_signal.set(merged);
+                log::info!("Phase 2: merging {} additional replies", events.len());
+                merge_new_replies(events, replies_signal, reply_ids_signal);
             }
             relay::coverage::cleanup_ephemeral_relays(&client, &ephemeral.newly_added).await;
         }
@@ -524,8 +595,11 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut interaction_counts: Signal<HashMap<String, InteractionCounts>> =
         use_signal(HashMap::new);
+    let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> =
+        use_signal(|| None);
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
     let mut load_generation = use_signal(|| 0u32);
+    let mut reply_ids: Signal<HashSet<EventId>> = use_signal(HashSet::new);
 
     use_effect(use_reactive!(|note_id| {
         let note_id_str = note_id.clone();
@@ -533,10 +607,17 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
         let this_generation = load_generation.peek().wrapping_add(1);
         load_generation.set(this_generation);
 
+        if let Some(handle) = interaction_stream_handle.write().take() {
+            spawn(async move {
+                handle.unsubscribe().await;
+            });
+        }
+
         note_data.set(None);
         replies.set(Vec::new());
         parent_events.set(Vec::new());
         interaction_counts.set(HashMap::new());
+        reply_ids.set(HashSet::new());
         loading.set(true);
         loading_parents.set(true);
         error.set(None);
@@ -555,24 +636,43 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
             return;
         }
 
+        let event_id = match parse_event_id(&note_id_str) {
+            Some(p) => p.event_id,
+            None => match EventId::from_hex(&note_id_str) {
+                Ok(id) => id,
+                Err(e) => {
+                    error.set(Some(format!("Invalid note ID: {}", e)));
+                    loading.set(false);
+                    loading_parents.set(false);
+                    return;
+                }
+            },
+        };
+
+        let mut replies_early = replies;
+        let mut reply_ids_early = reply_ids;
+        let lg = load_generation;
+        let gen = this_generation;
+
         spawn(async move {
+            // Phase 0: DB query for replies (instant, ~1ms)
+            if let Ok(db_replies) = fetch_replies_db(event_id).await {
+                if *lg.peek() != gen { return; }
+                let db_ids: HashSet<EventId> = db_replies.iter().map(|e| e.id).collect();
+                let db_count = db_replies.len();
+                reply_ids_early.set(db_ids);
+                replies_early.set(db_replies);
+                loading_parents.set(false);
+                log::info!("Phase 0: loaded {} replies from DB cache", db_count);
+            }
+        });
+
+        spawn(async move {
+            // Phase 1: Fetch main note (DB-first, then relays)
             let note_result = fetch_main_note(&note_id_str).await;
             if *load_generation.peek() != this_generation {
                 return;
             }
-
-            let event_id = match parse_event_id(&note_id_str) {
-                Some(p) => p.event_id,
-                None => match EventId::from_hex(&note_id_str) {
-                    Ok(id) => id,
-                    Err(e) => {
-                        error.set(Some(format!("Invalid note ID: {}", e)));
-                        loading.set(false);
-                        loading_parents.set(false);
-                        return;
-                    }
-                },
-            };
 
             let parent_ids = match &note_result {
                 Ok(event) => {
@@ -596,9 +696,10 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
             let clicked_note = note_result.as_ref().unwrap().clone();
             let root_author = clicked_note.pubkey;
 
-            let (parents_result, replies_result) = tokio::join!(
+            // Phase 2: Fetch parents + relay replies concurrently
+            let (parents_result, relay_replies_result) = tokio::join!(
                 fetch_parents_with_hints(parent_ids, &clicked_note, 5),
-                fetch_replies_fast(event_id, Some(root_author))
+                fetch_replies_from_relays(event_id, Some(root_author))
             );
 
             if *load_generation.peek() != this_generation {
@@ -614,22 +715,31 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                 );
                 parent_events.set(parents);
             }
-            if let Ok((mut reply_vec, phase2_authors)) = replies_result {
-                reply_vec.sort_by_key(|a| a.created_at);
-                log::info!("Phase 1: loaded {} replies", reply_vec.len());
-                replies.set(reply_vec);
 
-                if !phase2_authors.is_empty() {
+            if let Ok(relay_replies) = relay_replies_result {
+                let relay_count = relay_replies.len();
+                let reply_authors: HashSet<PublicKey> =
+                    relay_replies.iter().map(|e| e.pubkey).collect();
+
+                merge_new_replies(relay_replies, replies, reply_ids);
+                log::info!(
+                    "Phase 1: merged {} relay replies (total now {})",
+                    relay_count,
+                    replies.peek().len()
+                );
+
+                if !reply_authors.is_empty() {
                     let replies_bg = replies;
-                    let gen = this_generation;
-                    let lg = load_generation;
+                    let lg = this_generation;
+                    let load_gen = load_generation;
                     spawn(async move {
                         fetch_replies_phase2(
                             event_id,
-                            phase2_authors,
+                            reply_authors,
                             replies_bg,
+                            reply_ids,
+                            load_gen,
                             lg,
-                            gen,
                         )
                         .await;
                     });
@@ -643,27 +753,43 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
             }
             all_events.extend(parent_events.peek().iter().cloned());
             all_events.extend(replies.peek().iter().cloned());
-            if !all_events.is_empty() {
-                let mut ic = interaction_counts;
-                let ids_for_counts: Vec<EventId> = all_events.iter().map(|e| e.id).collect();
+            let mut ic = interaction_counts;
+            let mut ic_stream = interaction_stream_handle;
+            let ids_for_counts: Vec<EventId> = all_events.iter().map(|e| e.id).collect();
+            let ids_clone = ids_for_counts.clone();
+            let ids_for_stream = ids_for_counts.clone();
+            let lg_stream = this_generation;
+            spawn(async move {
+                profile_prefetch::prefetch_event_authors(&all_events).await;
+            });
+            if !ids_clone.is_empty() {
                 spawn(async move {
-                    profile_prefetch::prefetch_event_authors(&all_events).await;
-                });
-                if !ids_for_counts.is_empty() {
+                    let local_counts = fetch_local_db_counts(&ids_clone).await;
+                    if !local_counts.is_empty()
+                        && *load_generation.peek() == this_generation
+                    {
+                        ic.set(local_counts);
+                    }
                     if let Ok(counts) =
-                        fetch_interaction_counts_batch(ids_for_counts, Duration::from_secs(5))
+                        fetch_interaction_counts_batch(ids_clone, Duration::from_secs(5))
                             .await
                     {
                         if *load_generation.peek() != this_generation {
                             return;
                         }
                         ic.set(counts);
+                        if let Ok(handle) =
+                            stream_interaction_counts(ids_for_stream, ic, Some(600)).await
+                        {
+                            if *load_generation.peek() != lg_stream {
+                                handle.unsubscribe().await;
+                                return;
+                            }
+                            ic_stream.set(Some(handle));
+                        }
                     }
-                }
+                });
             }
-
-            loading.set(false);
-            loading_parents.set(false);
         });
     }));
 
@@ -681,8 +807,7 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                 .limit(0)
         });
         use_relay_subscription(reply_filter, move |event: &nostr::Event| {
-            let already_exists = replies.read().iter().any(|e| e.id == event.id);
-            if !already_exists {
+            if reply_ids.write().insert(event.id) {
                 log::info!(
                     "New reply received via streaming: {}",
                     event.id.to_hex()
@@ -694,6 +819,11 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
 
     use_drop(move || {
         back_navigation::clear_active_note_back_context(&note_id);
+        if let Some(handle) = interaction_stream_handle.write().take() {
+            spawn(async move {
+                handle.unsubscribe().await;
+            });
+        }
     });
 
     rsx! {
@@ -798,8 +928,7 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                                 cached_muted_posts: cached_muted_posts.read().clone(),
                                 cached_blocked_users: cached_blocked_users.read().clone(),
                                 on_reply: move |reply_event: NostrEvent| {
-                                    let already_exists = replies.read().iter().any(|e| e.id == reply_event.id);
-                                    if !already_exists {
+                                    if reply_ids.write().insert(reply_event.id) {
                                         log::info!("Adding reply optimistically from main note: {}", reply_event.id.to_hex());
                                         replies.write().push(reply_event);
                                         crate::utils::thread_tree::invalidate_thread_tree_cache(&root_event_id);
@@ -854,8 +983,7 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                                         cached_muted_posts: cached_muted_posts.read().clone(),
                                         cached_blocked_users: cached_blocked_users.read().clone(),
                                         on_reply: move |reply_event: NostrEvent| {
-                                            let already_exists = replies.read().iter().any(|e| e.id == reply_event.id);
-                                            if !already_exists {
+                                            if reply_ids.write().insert(reply_event.id) {
                                                 log::info!("Adding reply optimistically: {}", reply_event.id.to_hex());
                                                 replies.write().push(reply_event);
                                                 crate::utils::thread_tree::invalidate_thread_tree_cache(&root_event_id);

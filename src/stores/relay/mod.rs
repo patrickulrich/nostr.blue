@@ -75,7 +75,8 @@ pub use nip65::{
     PROXY_RELAYS, SEARCH_RELAYS, TRUSTED_RELAYS, USER_RELAY_METADATA,
 };
 pub use pool::{
-    add_relay, apply_relay_lists_to_client, is_relay_blocked, remove_relay, DEFAULT_RELAYS,
+    add_relay, apply_relay_lists_to_client, is_relay_blocked, remove_relay,
+    reset_pool_to_defaults, DEFAULT_RELAYS,
 };
 pub use signals::{
     RelayInfo, RelaySource, RelayPoolStore, RelayPoolStoreStoreExt, RelayStatus, RELAY_CONNECTED,

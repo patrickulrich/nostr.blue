@@ -582,25 +582,28 @@ pub async fn fetch_unified_event_by_naddr(naddr: &str) -> StdResult<Option<Unifi
         format!("Invalid naddr: {}", e)
     })?;
     let coord = nip19.coordinate;
-    let pk = coord.public_key;
     let kind = coord.kind.as_u16();
+    let pk = coord.public_key;
     let identifier = coord.identifier.clone();
+    let relay_hints: Vec<String> = nip19.relays.iter().map(|r| r.to_string()).collect();
     log::info!(
-        "[calendar_store] Parsed naddr - kind: {}, pubkey: {}, identifier: {}",
-        kind,
-        pk,
-        identifier
+        "[calendar_store] Parsed naddr - kind: {}, pubkey: {}, identifier: {}, hints: {}",
+        kind, pk, identifier, relay_hints.len()
     );
-    let filter = event_by_coordinate_filter(pk, kind, &identifier);
-    log::info!("[calendar_store] Fetching from relays with 10s timeout...");
-    let events =
-        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-            .await?;
+    log::info!("[calendar_store] Fetching from relays...");
+    let event =
+        crate::stores::nostr_client::fetch_event_by_coordinate_with_relays(
+            kind,
+            pk.to_hex(),
+            identifier,
+            relay_hints,
+        )
+        .await?;
     log::info!(
-        "[calendar_store] Received {} events from relays",
-        events.len()
+        "[calendar_store] Fetch result: {}",
+        if event.is_some() { "found" } else { "not found" }
     );
-    if let Some(event) = events.first() {
+    if let Some(event) = event {
         let event_kind = event.kind.as_u16();
         log::info!(
             "[calendar_store] Attempting to parse event kind {}",
@@ -608,7 +611,7 @@ pub async fn fetch_unified_event_by_naddr(naddr: &str) -> StdResult<Option<Unifi
         );
         match event_kind {
             KIND_DATE_CALENDAR_EVENT | KIND_TIME_CALENDAR_EVENT => {
-                if let Ok(cal_event) = parse_calendar_event(event) {
+                if let Ok(cal_event) = parse_calendar_event(&event) {
                     log::info!(
                         "[calendar_store] Successfully parsed calendar event: {}",
                         cal_event.title
@@ -618,7 +621,7 @@ pub async fn fetch_unified_event_by_naddr(naddr: &str) -> StdResult<Option<Unifi
                 }
             }
             KIND_MEETING_SPACE => {
-                if let Ok(space) = parse_meeting_space(event) {
+                if let Ok(space) = parse_meeting_space(&event) {
                     log::info!(
                         "[calendar_store] Successfully parsed meeting space: {}",
                         space.room_name
@@ -631,7 +634,7 @@ pub async fn fetch_unified_event_by_naddr(naddr: &str) -> StdResult<Option<Unifi
                 }
             }
             KIND_MEETING_ROOM => {
-                if let Ok(meeting) = parse_meeting_room_event(event) {
+                if let Ok(meeting) = parse_meeting_room_event(&event) {
                     log::info!(
                         "[calendar_store] Successfully parsed meeting room: {}",
                         meeting.title

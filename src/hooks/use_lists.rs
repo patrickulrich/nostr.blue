@@ -87,6 +87,7 @@ pub fn use_user_lists() -> (
         let client_ready = *nostr_client::CLIENT_INITIALIZED.read();
         let has_signer = *nostr_client::HAS_SIGNER.read();
         let auth = auth_store::AUTH_STATE.read();
+        let relays_applied = *crate::stores::relay::USER_RELAYS_APPLIED.read();
         if !auth.is_authenticated {
             lists.set(Vec::new());
             return;
@@ -116,6 +117,10 @@ pub fn use_user_lists() -> (
         };
         if requires_signer && !has_signer {
             log::debug!("Waiting for signer before fetching lists...");
+            return;
+        }
+        if requires_signer && !relays_applied {
+            log::debug!("Waiting for user relay lists before fetching lists...");
             return;
         }
         let pubkey_str = match &auth.pubkey {

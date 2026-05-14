@@ -188,7 +188,7 @@ pub fn MusicSearch(q: String) -> Element {
                             podcast_index::get_episodes_by_feed_id(album.id, Some(3), None).await
                         {
                             for ep in &episodes {
-                                tracks.push(MusicTrack::from_rss_music_track(ep, album));
+                                tracks.push(MusicTrack::from_rss_music_track(ep, album, None));
                             }
                         }
                     }

@@ -7,6 +7,14 @@ pub enum FeedType {
     FollowingWithReplies,
     Global,
     PeopleList(Box<UserList>),
+    RelayFeed {
+        url: String,
+        name: String,
+    },
+    RelaySetFeed {
+        name: String,
+        urls: Vec<String>,
+    },
 }
 
 impl FeedType {
@@ -16,6 +24,20 @@ impl FeedType {
             FeedType::FollowingWithReplies => "Following + Replies".to_string(),
             FeedType::Global => "Global".to_string(),
             FeedType::PeopleList(list) => list.name.clone(),
+            FeedType::RelayFeed { name, .. } => name.clone(),
+            FeedType::RelaySetFeed { name, .. } => name.clone(),
+        }
+    }
+
+    pub fn is_relay_feed(&self) -> bool {
+        matches!(self, FeedType::RelayFeed { .. } | FeedType::RelaySetFeed { .. })
+    }
+
+    pub fn relay_urls(&self) -> Vec<String> {
+        match self {
+            FeedType::RelayFeed { url, .. } => vec![url.clone()],
+            FeedType::RelaySetFeed { urls, .. } => urls.clone(),
+            _ => Vec::new(),
         }
     }
 }

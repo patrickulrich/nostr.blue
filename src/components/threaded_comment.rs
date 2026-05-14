@@ -1,6 +1,7 @@
 use crate::components::icons::{BookmarkIcon, MessageCircleIcon, Repeat2Icon, ZapIcon};
 use crate::components::{ReactionButton, ReplyComposer, RichContent, SensitiveContent, ZapModal};
 use crate::hooks::{use_author_metadata, use_reaction};
+use crate::hooks::use_global_interaction::{get_global_interaction, UseGlobalInteraction};
 use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
 use crate::stores::bookmarks;
@@ -167,6 +168,13 @@ pub fn ThreadedComment(
             if skip {
                 return;
             }
+            if let Some(global_counts) = get_global_interaction(&event_id_counts) {
+                reply_count.set(global_counts.replies);
+                repost_count.set(global_counts.reposts);
+                zap_amount_sats.set(global_counts.zap_amount_sats);
+                is_reposted.set(global_counts.user_reposted.unwrap_or(false));
+                return;
+            }
             let event_id_for_counts = event_id_counts.clone();
             spawn(async move {
                 let client = match get_client() {
@@ -178,73 +186,60 @@ pub fn ThreadedComment(
                         Ok(id) => id,
                         Err(_) => return,
                     };
-                let reply_filter = Filter::new()
-                    .kind(Kind::TextNote)
+                let current_user_pubkey = SIGNER_INFO
+                    .read()
+                    .as_ref()
+                    .map(|info| info.public_key.clone());
+                let combined_filter = Filter::new()
+                    .kinds(vec![Kind::TextNote, Kind::Repost, Kind::ZapReceipt])
                     .event(event_id_parsed)
-                    .limit(500);
-                if let Ok(replies) = client
-                    .fetch_events(reply_filter, Duration::from_secs(5))
+                    .limit(2000);
+                if let Ok(events) = client
+                    .fetch_events(combined_filter, Duration::from_secs(5))
                     .await
                 {
-                    reply_count.set(replies.len());
-                }
-                let repost_filter = Filter::new()
-                    .kind(Kind::Repost)
-                    .event(event_id_parsed)
-                    .limit(500);
-                if let Ok(reposts) = client
-                    .fetch_events(repost_filter, Duration::from_secs(5))
-                    .await
-                {
-                    let current_user_pubkey = SIGNER_INFO
-                        .read()
-                        .as_ref()
-                        .map(|info| info.public_key.clone());
+                    let mut replies = 0usize;
+                    let mut reposts = 0usize;
+                    let mut total_sats = 0u64;
                     let mut user_has_reposted = false;
-                    if let Some(ref user_pk) = current_user_pubkey {
-                        for repost in reposts.iter() {
-                            if repost.pubkey.to_string() == *user_pk {
-                                user_has_reposted = true;
-                                break;
+                    for event in events {
+                        match event.kind {
+                            Kind::TextNote => replies += 1,
+                            Kind::Repost => {
+                                reposts += 1;
+                                if let Some(ref user_pk) = current_user_pubkey {
+                                    if event.pubkey.to_string() == *user_pk {
+                                        user_has_reposted = true;
+                                    }
+                                }
                             }
-                        }
-                    }
-                    repost_count.set(reposts.len());
-                    is_reposted.set(user_has_reposted);
-                }
-                let zap_filter = Filter::new()
-                    .kind(Kind::ZapReceipt)
-                    .event(event_id_parsed)
-                    .limit(500);
-                if let Ok(zaps) = client
-                    .fetch_events(zap_filter, Duration::from_secs(5))
-                    .await
-                {
-                    let total_sats: u64 = zaps
-                        .iter()
-                        .filter_map(|zap_event| {
-                            zap_event.tags.iter().find_map(|tag| {
-                                let tag_vec = tag.clone().to_vec();
-                                if tag_vec.first()?.as_str() == "description" {
-                                    let zap_request_json = tag_vec.get(1)?.as_str();
-                                    if let Ok(zap_request) =
-                                        serde_json::from_str::<serde_json::Value>(zap_request_json)
-                                    {
-                                        if let Some(tags) =
-                                            zap_request.get("tags").and_then(|t| t.as_array())
+                            Kind::ZapReceipt => {
+                                if let Some(amount) = event.tags.iter().find_map(|tag| {
+                                    let slice = tag.as_slice();
+                                    if slice.first()?.as_str() == "description" {
+                                        let zap_request_json = slice.get(1)?.as_str();
+                                        if let Ok(zap_request) =
+                                            serde_json::from_str::<serde_json::Value>(
+                                                zap_request_json,
+                                            )
                                         {
-                                            for tag_array in tags {
-                                                if let Some(tag_vals) = tag_array.as_array() {
-                                                    if tag_vals.first().and_then(|v| v.as_str())
-                                                        == Some("amount")
-                                                    {
-                                                        if let Some(amount_str) =
-                                                            tag_vals.get(1).and_then(|v| v.as_str())
+                                            if let Some(tags) =
+                                                zap_request.get("tags").and_then(|t| t.as_array())
+                                            {
+                                                for tag_array in tags {
+                                                    if let Some(tag_vals) = tag_array.as_array() {
+                                                        if tag_vals.first().and_then(|v| v.as_str())
+                                                            == Some("amount")
                                                         {
-                                                            if let Ok(millisats) =
-                                                                amount_str.parse::<u64>()
+                                                            if let Some(amount_str) = tag_vals
+                                                                .get(1)
+                                                                .and_then(|v| v.as_str())
                                                             {
-                                                                return Some(millisats / 1000);
+                                                                if let Ok(millisats) =
+                                                                    amount_str.parse::<u64>()
+                                                                {
+                                                                    return Some(millisats / 1000);
+                                                                }
                                                             }
                                                         }
                                                     }
@@ -252,11 +247,17 @@ pub fn ThreadedComment(
                                             }
                                         }
                                     }
+                                    None
+                                }) {
+                                    total_sats += amount;
                                 }
-                                None
-                            })
-                        })
-                        .sum();
+                            }
+                            _ => {}
+                        }
+                    }
+                    reply_count.set(replies);
+                    repost_count.set(reposts);
+                    is_reposted.set(user_has_reposted);
                     zap_amount_sats.set(total_sats);
                 }
             });
@@ -373,6 +374,7 @@ pub fn ThreadedComment(
         && !*show_hidden_anyway.read();
 
     rsx! {
+        UseGlobalInteraction { event_id: event_id.clone() }
         div { class: "comment-thread", style: "margin-left: {margin_left}px;",
             if is_hidden {
                 div { class: "border-l-2 border-border pl-3 py-2",

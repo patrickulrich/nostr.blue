@@ -5,14 +5,15 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 #[cfg(feature = "web")]
 use web_sys::{Request, RequestInit, RequestMode, Response};
-#[cfg(feature = "web")]
+
 const NOSTR_ARCHIVES_API: &str = "https://api.nostrarchives.com";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileStats {
     pub pubkey: String,
     pub followers_pubkey_count: Option<u64>,
 }
-#[cfg(feature = "web")]
+
 #[derive(Debug, Clone, Deserialize)]
 struct SocialListResponse {
     count: i64,
@@ -20,11 +21,12 @@ struct SocialListResponse {
     #[allow(dead_code)]
     pubkeys: Vec<String>,
 }
-#[cfg(feature = "web")]
+
 #[derive(Debug, Clone, Deserialize)]
 struct SocialGraphResponse {
     followers: SocialListResponse,
 }
+
 #[cfg(feature = "web")]
 pub async fn fetch_profile_stats(pubkey: &str) -> Result<ProfileStats, String> {
     let url = format!(
@@ -66,8 +68,27 @@ pub async fn fetch_profile_stats(pubkey: &str) -> Result<ProfileStats, String> {
 
 #[cfg(not(feature = "web"))]
 pub async fn fetch_profile_stats(pubkey: &str) -> Result<ProfileStats, String> {
-    Err(format!(
-        "Profile stats not yet supported on native for pubkey: {}",
-        pubkey
-    ))
+    let url = format!(
+        "{}/v1/social/{}?followers_limit=0&follows_limit=0",
+        NOSTR_ARCHIVES_API, pubkey
+    );
+    let client = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client error: {}", e))?;
+    let resp = client
+        .get(&url)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("Fetch failed: {}", e))?;
+    if !resp.status().is_success() {
+        return Err(format!("API returned status: {}", resp.status()));
+    }
+    let response: SocialGraphResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to deserialize: {}", e))?;
+    Ok(ProfileStats {
+        pubkey: pubkey.to_string(),
+        followers_pubkey_count: Some(response.followers.count as u64),
+    })
 }
