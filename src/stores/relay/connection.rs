@@ -272,6 +272,9 @@ pub async fn fetch_events_from_relays(
 pub async fn ensure_video_relay_connected(client: &Client) {
     super::specialty::ensure_video_relay(client).await;
 }
+pub async fn ensure_radio_relay_connected(client: &Client) {
+    super::specialty::ensure_radio_relay(client).await;
+}
 /// Fetch addressable event by coordinate with relay hints using 5-phase targeted strategy.
 ///
 /// 1. DB check (instant)

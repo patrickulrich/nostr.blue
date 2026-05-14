@@ -24,6 +24,9 @@ pub(crate) async fn ensure_relays_ready(client: &Client) {
 pub(crate) async fn ensure_video_relay_connected(client: &Client) {
     relay::connection::ensure_video_relay_connected(client).await;
 }
+pub(crate) async fn ensure_radio_relay_connected(client: &Client) {
+    relay::connection::ensure_radio_relay_connected(client).await;
+}
 /// Fetch events using aggregated pattern: database first, then relays
 ///
 /// This function:
@@ -86,6 +89,18 @@ pub async fn fetch_video_events(
 ) -> std::result::Result<Vec<nostr::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
     ensure_video_relay_connected(&client).await;
+    fetch_events_aggregated_with_client(&client, filter, timeout).await
+}
+/// Fetch radio events, ensuring relay.wavefunc.live is included
+///
+/// This function adds the WaveFunc radio relay to the pool before fetching,
+/// ensuring radio station events (kind 31237) are discovered.
+pub async fn fetch_radio_events(
+    filter: Filter,
+    timeout: Duration,
+) -> std::result::Result<Vec<nostr::Event>, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+    ensure_radio_relay_connected(&client).await;
     fetch_events_aggregated_with_client(&client, filter, timeout).await
 }
 /// Fetch events directly from relays, bypassing cache

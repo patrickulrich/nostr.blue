@@ -479,6 +479,9 @@ async fn publish_station(form: StationFormData) -> std::result::Result<String, S
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;
     let event_id = event.id.to_string();
+    if let Some(client) = nostr_client::get_client() {
+        crate::stores::relay::ensure_radio_relay_connected(&client).await;
+    }
     crate::stores::publish_queue::enqueue_and_await(
         event,
         crate::stores::publish_queue::types::QueueEventType::Other("radio".to_string()),

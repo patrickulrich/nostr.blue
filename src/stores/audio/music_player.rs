@@ -271,7 +271,7 @@ impl MusicTrack {
                 feed_id, episode_id, ..
             } => {
                 format!(
-                    "https://nostr.blue/music/rss/album/{}#track-{}",
+                    "https://nostr.blue/music/track/rss:{}:{}",
                     feed_id, episode_id,
                 )
             }
