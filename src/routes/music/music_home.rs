@@ -135,7 +135,10 @@ pub fn MusicHome() -> Element {
         }
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         let has_signer = nostr_client::has_signer();
-        if !client_initialized || !has_signer {
+        if !client_initialized {
+            return;
+        }
+        if !has_signer {
             chart_loading.set(false);
             chart_error.set(Some("Sign in to browse V4V Music Chart".into()));
             return;

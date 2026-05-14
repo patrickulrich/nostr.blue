@@ -1,3 +1,4 @@
+use crate::components::LoginModal;
 use crate::routes::Route;
 use dioxus::prelude::*;
 
@@ -8,6 +9,7 @@ pub(crate) struct PodcastApiAuthRequiredStateProps {
 
 #[component]
 pub(crate) fn PodcastApiAuthRequiredState(props: PodcastApiAuthRequiredStateProps) -> Element {
+    let mut show_login_modal = use_signal(|| false);
     rsx! {
         div { class: "min-h-[calc(100vh-73px)] flex items-center justify-center p-4",
             div { class: "text-center max-w-md",
@@ -32,10 +34,10 @@ pub(crate) fn PodcastApiAuthRequiredState(props: PodcastApiAuthRequiredStateProp
                     "Sign in with your Nostr identity to open this {props.item_label}. nostr.blue uses your signer to authenticate Podcast Index requests over NIP-98."
                 }
                 div { class: "flex flex-col sm:flex-row items-center justify-center gap-3",
-                    Link {
-                        to: Route::Home { list: String::new() },
+                    button {
                         class: "w-full sm:w-auto px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
-                        "Go To Login"
+                        onclick: move |_| show_login_modal.set(true),
+                        "Sign In"
                     }
                     Link {
                         to: Route::PodcastHome {},
@@ -43,6 +45,11 @@ pub(crate) fn PodcastApiAuthRequiredState(props: PodcastApiAuthRequiredStateProp
                         "Back To Podcasts"
                     }
                 }
+            }
+        }
+        if *show_login_modal.read() {
+            LoginModal {
+                on_close: move |_| show_login_modal.set(false),
             }
         }
     }
