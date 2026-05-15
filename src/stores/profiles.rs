@@ -286,7 +286,7 @@ fn empty_profile(pubkey: &str) -> Profile {
     }
 }
 /// Parse a Kind 0 event into a Profile struct
-fn parse_profile_event(event: &Event) -> Result<Profile, String> {
+pub fn parse_profile_event(event: &Event) -> Result<Profile, String> {
     let content = &event.content;
     let metadata: serde_json::Value = serde_json::from_str(content)
         .map_err(|e| format!("Failed to parse metadata JSON: {}", e))?;

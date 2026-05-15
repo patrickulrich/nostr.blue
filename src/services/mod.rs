@@ -26,6 +26,8 @@ compile_error!("Cannot enable both 'desktop' and 'mobile' features");
 #[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile_platform")))]
 compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature");
 
+#[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
+pub mod cloud_backup;
 pub mod admission_policy;
 pub mod aggregation;
 pub mod ai_chat;

@@ -143,7 +143,7 @@ pub async fn platform_sleep_ms(ms: u64) {
     #[cfg(not(target_arch = "wasm32"))]
     tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
 }
-const DEFAULT_DISCOVERY_RELAYS: &[&str] = &[
+pub const DEFAULT_DISCOVERY_RELAYS: &[&str] = &[
     "wss://purplepag.es",
     "wss://relay.nos.social",
     "wss://relay.damus.io",

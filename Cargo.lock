@@ -5195,6 +5195,8 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bech32",
+ "bip39",
+ "bitcoin_hashes",
  "cdk",
  "cdk-common",
  "cdk-sqlite",
