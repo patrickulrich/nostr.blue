@@ -1421,7 +1421,14 @@ class MainActivity : WryActivity() {
 
                     val parsed = com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
                         .createFrom(credential.data)
-                    val sub = parsed.id
+                    val idToken = parsed.idToken
+                    val payloadB64 = idToken.split(".")[1]
+                    val decoded = android.util.Base64.decode(
+                        payloadB64,
+                        android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+                    )
+                    val jwtJson = org.json.JSONObject(String(decoded, Charsets.UTF_8))
+                    val sub = jwtJson.getString("sub")
 
                     // Step 2: Get Drive access token via AuthorizationClient
                     val authClient = com.google.android.gms.auth.api.identity.Identity
