@@ -62,17 +62,18 @@ mod tests {
 
     #[test]
     fn test_encrypt_decrypt_roundtrip() {
+        use super::super::types::ZeroizeString;
         let sub = "test-google-sub-12345";
         let key = derive_backup_key(sub);
         let bundle = BackupBundle {
-            nsec_hex: "0".repeat(64),
+            nsec_hex: ZeroizeString("0".repeat(64)),
             nwc_uri: Some("nostr+walletconnect://test".to_string()),
             account_label: Some("test account".to_string()),
             created_at: 1234567890,
         };
         let encrypted = encrypt_bundle(&bundle, &key).unwrap();
         let decrypted = decrypt_bundle(&encrypted, &key).unwrap();
-        assert_eq!(decrypted.nsec_hex, bundle.nsec_hex);
+        assert_eq!(&*decrypted.nsec_hex, &*bundle.nsec_hex);
         assert_eq!(decrypted.nwc_uri, bundle.nwc_uri);
         assert_eq!(decrypted.account_label, bundle.account_label);
         assert_eq!(decrypted.created_at, bundle.created_at);
@@ -80,10 +81,11 @@ mod tests {
 
     #[test]
     fn test_wrong_key_fails() {
+        use super::super::types::ZeroizeString;
         let key1 = derive_backup_key("user1");
         let key2 = derive_backup_key("user2");
         let bundle = BackupBundle {
-            nsec_hex: "a".repeat(64),
+            nsec_hex: ZeroizeString("a".repeat(64)),
             nwc_uri: None,
             account_label: None,
             created_at: 0,

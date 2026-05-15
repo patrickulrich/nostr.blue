@@ -153,9 +153,12 @@ window.nostrBlueDrive = {
 
   async _rawDelete(accessToken, fileId) {
     const url = `${this.DRIVE_FILES_URL}/${fileId}`;
-    await fetch(url, {
+    const resp = await fetch(url, {
       method: "DELETE",
       headers: { Authorization: `Bearer ${accessToken}` },
     });
+    if (!resp.ok) {
+      throw new Error(`Delete failed: ${resp.status}`);
+    }
   },
 };

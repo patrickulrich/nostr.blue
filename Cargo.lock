@@ -5265,6 +5265,7 @@ dependencies = [
  "wasm-logger",
  "web-sys",
  "webbrowser",
+ "zeroize",
 ]
 
 [[package]]

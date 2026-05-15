@@ -1,7 +1,7 @@
 use nostr::ToBech32;
 
 use super::crypto;
-use super::types::{BackupBundle, BackupEntry, GoogleAuthResult};
+use super::types::{BackupBundle, BackupEntry, GoogleAuthResult, ZeroizeString};
 
 const BACKUP_FILE_PREFIX: &str = "nostrblue_backup_";
 const BACKUP_FILE_SUFFIX: &str = ".bin";
@@ -28,7 +28,9 @@ pub async fn google_sign_in() -> Result<GoogleAuthResult, String> {
     }
     #[cfg(all(target_os = "android", feature = "mobile_platform"))]
     {
-        super::android::google_sign_in()
+        tokio::task::spawn_blocking(|| super::android::google_sign_in())
+            .await
+            .map_err(|e| e.to_string())?
     }
     #[cfg(not(any(target_family = "wasm", all(target_os = "android", feature = "mobile_platform"))))]
     {
@@ -68,7 +70,7 @@ pub async fn backup_to_cloud(
         .map_err(|e| e.to_string())?;
 
     let bundle = BackupBundle {
-        nsec_hex: nsec_hex.to_string(),
+        nsec_hex: ZeroizeString(nsec_hex.to_string()),
         nwc_uri: nwc_uri.map(|s| s.to_string()),
         account_label: account_label.map(|s| s.to_string()),
         created_at: crate::platform::timestamp::now_secs(),
@@ -102,7 +104,10 @@ async fn list_raw(access_token: &str) -> Result<Vec<(String, String)>, String> {
     }
     #[cfg(all(target_os = "android", feature = "mobile_platform"))]
     {
-        super::android::list_backups(access_token)
+        let access_token = access_token.to_string();
+        tokio::task::spawn_blocking(move || super::android::list_backups(&access_token))
+            .await
+            .map_err(|e| e.to_string())?
     }
     #[cfg(not(any(target_family = "wasm", all(target_os = "android", feature = "mobile_platform"))))]
     {
@@ -121,7 +126,14 @@ async fn upload_raw(
     }
     #[cfg(all(target_os = "android", feature = "mobile_platform"))]
     {
-        super::android::upload_backup(access_token, npub, payload_b64)
+        let access_token = access_token.to_string();
+        let npub = npub.to_string();
+        let payload_b64 = payload_b64.to_string();
+        tokio::task::spawn_blocking(move || {
+            super::android::upload_backup(&access_token, &npub, &payload_b64)
+        })
+        .await
+        .map_err(|e| e.to_string())?
     }
     #[cfg(not(any(target_family = "wasm", all(target_os = "android", feature = "mobile_platform"))))]
     {
@@ -137,7 +149,13 @@ async fn download_raw(access_token: &str, file_id: &str) -> Result<String, Strin
     }
     #[cfg(all(target_os = "android", feature = "mobile_platform"))]
     {
-        super::android::download_backup(access_token, file_id)
+        let access_token = access_token.to_string();
+        let file_id = file_id.to_string();
+        tokio::task::spawn_blocking(move || {
+            super::android::download_backup(&access_token, &file_id)
+        })
+        .await
+        .map_err(|e| e.to_string())?
     }
     #[cfg(not(any(target_family = "wasm", all(target_os = "android", feature = "mobile_platform"))))]
     {
@@ -154,7 +172,13 @@ async fn delete_raw(access_token: &str, file_id: &str) -> Result<(), String> {
     }
     #[cfg(all(target_os = "android", feature = "mobile_platform"))]
     {
-        super::android::delete_backup(access_token, file_id)
+        let access_token = access_token.to_string();
+        let file_id = file_id.to_string();
+        tokio::task::spawn_blocking(move || {
+            super::android::delete_backup(&access_token, &file_id)
+        })
+        .await
+        .map_err(|e| e.to_string())?
     }
     #[cfg(not(any(target_family = "wasm", all(target_os = "android", feature = "mobile_platform"))))]
     {

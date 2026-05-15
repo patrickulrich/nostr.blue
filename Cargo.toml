@@ -33,6 +33,8 @@ native = [
 ]
 
 [dependencies]
+zeroize = "1.8"
+
 # Dioxus web framework
 dioxus = { version = "0.7.7", default-features = false, features = ["router", "launch", "logger", "lib"] }
 dioxus-stores = "0.7.7"
