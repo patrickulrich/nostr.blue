@@ -420,8 +420,7 @@ pub async fn restore_google_backup(file_id: &str) {
 
     let state = GOOGLE_BACKUP_STATE.read().clone();
     let auth = match state {
-        cloud_backup::GoogleBackupState::Choose { auth, .. }
-        | cloud_backup::GoogleBackupState::NoBackup(auth) => auth,
+        cloud_backup::GoogleBackupState::Choose { auth, .. } => auth,
         _ => {
             *GOOGLE_BACKUP_STATE.write() =
                 cloud_backup::GoogleBackupState::Error("Invalid state for restore".to_string());

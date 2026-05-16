@@ -1,4 +1,6 @@
 use crate::components::{NwcSetupModal, ReactionDefaultsModal};
+#[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
+use crate::components::ConfirmModal;
 use crate::platform::storage;
 use crate::routes::Route;
 use crate::stores::blossom_store::BlossomServersStoreStoreExt;
@@ -1851,6 +1853,7 @@ enum CloudBackupSettingsState {
 #[component]
 fn CloudBackupSection() -> Element {
     let mut state = use_signal(|| CloudBackupSettingsState::Idle);
+    let mut show_delete_confirm = use_signal(|| false);
     let npub = auth_store::export_npub().unwrap_or_default();
 
     let check_status = move |_| {
@@ -1940,6 +1943,10 @@ fn CloudBackupSection() -> Element {
     };
 
     let delete_backup = move |_| {
+        show_delete_confirm.set(true);
+    };
+
+    let confirm_delete_backup = move |_: ()| {
         let current = state.read().clone();
         let (file_id, auth) = match &current {
             CloudBackupSettingsState::HasBackup { file_id, auth } => {
@@ -2066,6 +2073,15 @@ fn CloudBackupSection() -> Element {
                         }
                     }
                 },
+            }
+            if *show_delete_confirm.read() {
+                ConfirmModal {
+                    title: "Delete Cloud Backup".to_string(),
+                    message: "Are you sure you want to delete your cloud backup? If you don't have your mnemonic stored elsewhere, you will permanently lose access to your account.".to_string(),
+                    confirm_text: Some("Delete".to_string()),
+                    on_confirm: confirm_delete_backup,
+                    on_cancel: move |_| show_delete_confirm.set(false),
+                }
             }
         }
     }

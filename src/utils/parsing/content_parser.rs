@@ -875,6 +875,18 @@ fn extract_nostr_blue(url: &str) -> Option<ContentToken> {
             .map(ContentToken::NostrBluePodcastShow);
     }
     if path.starts_with("/music/rss/album/") {
+        if let Some(fragment) = parsed.fragment() {
+            if let Some(episode_id) = fragment.strip_prefix("track-") {
+                if let Some(feed_id) =
+                    extract_id_from_path(path, "/music/rss/album/")
+                {
+                    return Some(ContentToken::NostrBlueTrack(format!(
+                        "rss:{}:{}",
+                        feed_id, episode_id
+                    )));
+                }
+            }
+        }
         return extract_id_from_path(path, "/music/rss/album/")
             .map(ContentToken::NostrBlueRssMusicAlbum);
     }

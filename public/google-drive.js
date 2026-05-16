@@ -63,7 +63,9 @@ window.nostrBlueDrive = {
 
   async signIn() {
     const accessToken = await this._getAccessToken();
-    const resp = await fetch(`${this.TOKENINFO_URL}?access_token=${accessToken}`);
+    const resp = await fetch(this.TOKENINFO_URL, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
     if (!resp.ok) throw new Error("Failed to get token info");
     const info = await resp.json();
     if (!info.sub) throw new Error("No sub claim in token info");
@@ -84,16 +86,14 @@ window.nostrBlueDrive = {
   async upload(accessToken, npub, payload) {
     const filename = this.BACKUP_PREFIX + npub + this.BACKUP_SUFFIX;
 
-    // Delete existing file with same name to avoid duplicates
+    let oldFileIds = [];
     try {
       const existing = await this.list(accessToken);
-      for (const f of existing) {
-        if (f.name === filename) {
-          await this._rawDelete(accessToken, f.fileId);
-        }
-      }
+      oldFileIds = existing
+        .filter((f) => f.name === filename)
+        .map((f) => f.fileId);
     } catch (e) {
-      console.warn("[nostrBlueDrive] Failed to clean up existing backup:", e);
+      console.warn("[nostrBlueDrive] Failed to list existing backups:", e);
     }
 
     const metadata = JSON.stringify({
@@ -135,6 +135,14 @@ window.nostrBlueDrive = {
     if (!resp.ok) {
       const text = await resp.text();
       throw new Error(`Drive upload failed: ${resp.status} ${text}`);
+    }
+
+    for (const oldId of oldFileIds) {
+      try {
+        await this._rawDelete(accessToken, oldId);
+      } catch (e) {
+        console.warn("[nostrBlueDrive] Failed to delete old backup:", e);
+      }
     }
   },
 

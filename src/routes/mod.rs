@@ -194,7 +194,7 @@ pub enum Route {
     MusicPlaylistDetail { naddr: String },
     #[route("/music/rss/album/:feed_id")]
     MusicRssAlbum { feed_id: u64 },
-    #[route("/music/rss/artist/:artist")]
+    #[route("/music/rss/artist?:artist")]
     MusicRssArtist { artist: String },
     #[route("/music/track/:track_id")]
     MusicTrackDetail { track_id: String },

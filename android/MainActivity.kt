@@ -1375,9 +1375,6 @@ class MainActivity : WryActivity() {
         private const val BACKUP_PREFIX = "nostrblue_backup_"
         private const val BACKUP_SUFFIX = ".bin"
 
-        private var pendingGoogleSub: String? = null
-        private var pendingGoogleAccessToken: String? = null
-
         @JvmStatic
         fun signInWithGoogle(context: Context): String {
             return try {
@@ -1441,9 +1438,6 @@ class MainActivity : WryActivity() {
                     val accessToken = authResult.accessToken
                         ?: return@withContext """{"error":"No access token returned"}"""
 
-                    pendingGoogleSub = sub
-                    pendingGoogleAccessToken = accessToken
-
                     """{"sub":"$sub","accessToken":"$accessToken"}"""
                 } catch (e: Exception) {
                     Log.e(TAG, "signInWithGoogleInternal failed", e)
@@ -1493,17 +1487,19 @@ class MainActivity : WryActivity() {
                 val payload = parts.getOrElse(1) { "" }
                 val filename = BACKUP_PREFIX + npub + BACKUP_SUFFIX
 
-                // Delete existing file with same name
+                val oldFileIds = mutableListOf<String>()
                 try {
                     val listResult = listDriveBackups(context, accessToken)
                     val arr = org.json.JSONArray(listResult)
                     for (i in 0 until arr.length()) {
                         val f = arr.getJSONObject(i)
                         if (f.getString("name") == filename) {
-                            deleteDriveBackup(context, accessToken, f.getString("fileId"))
+                            oldFileIds.add(f.getString("fileId"))
                         }
                     }
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to list existing backups for cleanup", e)
+                }
 
                 val metadata = """{"name":"$filename","parents":["appDataFolder"]}"""
                 val boundary = "nostrblue-" + java.util.UUID.randomUUID()
@@ -1529,6 +1525,15 @@ class MainActivity : WryActivity() {
                 if (!response.isSuccessful) {
                     return """{"error":"Upload failed: ${response.code}"}"""
                 }
+
+                for (oldId in oldFileIds) {
+                    try {
+                        deleteDriveBackup(context, accessToken, oldId)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to delete old backup $oldId", e)
+                    }
+                }
+
                 """{"success":true}"""
             } catch (e: Exception) {
                 Log.e(TAG, "uploadDriveBackup failed", e)
@@ -1566,7 +1571,11 @@ class MainActivity : WryActivity() {
                     .header("Authorization", "Bearer $accessToken")
                     .delete()
                     .build()
-                client.newCall(request).execute().close()
+                val response = client.newCall(request).execute()
+                response.close()
+                if (!response.isSuccessful) {
+                    return """{"error":"Delete failed: ${response.code}"}"""
+                }
                 """{"success":true}"""
             } catch (e: Exception) {
                 Log.e(TAG, "deleteDriveBackup failed", e)
