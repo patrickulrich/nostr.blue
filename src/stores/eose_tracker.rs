@@ -3,7 +3,7 @@ use nostr_sdk::{Client, RelayMessage, RelayPoolNotification};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
-const SINCE_BUFFER_SECS: u64 = 60;
+const SINCE_BUFFER_SECS: u64 = 120;
 
 struct EoseTrackerInner {
     eose_map: HashMap<String, u64>,
@@ -54,6 +54,15 @@ impl EoseTracker {
                                     })
                                     .or_insert(now);
                             }
+                            Ok(RelayPoolNotification::Event { relay_url, .. }) => {
+                                let now = Timestamp::now().as_secs();
+                                let mut guard = inner.lock().unwrap();
+                                if let Some(ts) = guard.eose_map.get_mut(relay_url.as_str()) {
+                                    if now > *ts {
+                                        *ts = now;
+                                    }
+                                }
+                            }
                             Ok(RelayPoolNotification::Shutdown) => break,
                             Err(_) => break,
                             _ => {}
@@ -85,6 +94,15 @@ impl EoseTracker {
                                 })
                                 .or_insert(now);
                         }
+                        Ok(RelayPoolNotification::Event { relay_url, .. }) => {
+                            let now = Timestamp::now().as_secs();
+                            let mut guard = inner.lock().unwrap();
+                            if let Some(ts) = guard.eose_map.get_mut(relay_url.as_str()) {
+                                if now > *ts {
+                                    *ts = now;
+                                }
+                            }
+                        }
                         Ok(RelayPoolNotification::Shutdown) => break,
                         Err(_) => break,
                         _ => {}
@@ -94,7 +112,6 @@ impl EoseTracker {
         }
     }
 
-    #[allow(dead_code)]
     pub fn get_min_since() -> Option<u64> {
         EOSE_TRACKER.get().and_then(|t| {
             let map = t.inner.lock().unwrap();
