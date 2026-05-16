@@ -53,15 +53,22 @@ pub fn merge_paginated_feed_items(
     (updated, unique_items, next_cursor)
 }
 
-pub fn build_global_feed_filter(until: Option<u64>) -> Filter {
+pub fn build_global_feed_filter(until: Option<u64>, cached_cursor: Option<u64>, cached_count: usize) -> Filter {
     let mut filter = Filter::new()
         .kinds(feed_kinds())
         .limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     } else {
-        let since = Timestamp::now() - Duration::from_secs(86400);
-        filter = filter.since(since);
+        let adaptive_since = Timestamp::now().as_secs().saturating_sub(86400);
+        if cached_count > 0 && cached_count < 50 {
+            // Backfill: skip since when cache is sparse but not empty
+        } else if let Some(cursor) = cached_cursor {
+            let cursor_since = cursor.saturating_sub(60);
+            filter = filter.since(Timestamp::from(std::cmp::min(cursor_since, adaptive_since)));
+        } else {
+            filter = filter.since(Timestamp::from(adaptive_since));
+        }
     }
     filter
 }
@@ -70,6 +77,8 @@ pub fn build_following_feed_filter(
     authors: Vec<PublicKey>,
     until: Option<u64>,
     now: Timestamp,
+    cached_cursor: Option<u64>,
+    cached_count: usize,
 ) -> Filter {
     let author_count = authors.len();
     let mut filter = Filter::new()
@@ -81,7 +90,15 @@ pub fn build_following_feed_filter(
         filter = filter.until(Timestamp::from(until_ts));
     } else {
         let window = adaptive_since_window(author_count);
-        filter = filter.since(now - Duration::from_secs(window));
+        let adaptive_since = now.as_secs().saturating_sub(window);
+        if cached_count > 0 && cached_count < 50 {
+            // Backfill: skip since when cache is sparse but not empty
+        } else if let Some(cursor) = cached_cursor {
+            let cursor_since = cursor.saturating_sub(60);
+            filter = filter.since(Timestamp::from(std::cmp::min(cursor_since, adaptive_since)));
+        } else {
+            filter = filter.since(now - Duration::from_secs(window));
+        }
     }
 
     filter
@@ -92,7 +109,7 @@ pub async fn sync_global_feed_page(until: Option<u64>) {
         log::debug!("Skipping global feed negentropy sync: client unavailable");
         return;
     };
-    let filter = build_global_feed_filter(until);
+    let filter = build_global_feed_filter(until, None, 0);
     let sync_opts = SyncOptions::default()
         .direction(SyncDirection::Down)
         .initial_timeout(Duration::from_secs(5));
@@ -117,11 +134,13 @@ pub async fn load_paginated_global_feed(
     until: Option<u64>,
 ) -> Result<Vec<FeedItem>, NostrBlueError> {
     sync_global_feed_page(until).await;
-    load_global_feed(until).await
+    load_global_feed(until, None, 0).await
 }
 
 pub async fn load_following_feed(
     until: Option<u64>,
+    cached_cursor: Option<u64>,
+    cached_count: usize,
 ) -> Result<(Vec<FeedItem>, bool), NostrBlueError> {
     let pubkey_str = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
     log::info!(
@@ -136,13 +155,13 @@ pub async fn load_following_feed(
                 "Failed to fetch contacts: {}, falling back to global feed",
                 e
             );
-            let global = load_global_feed(until).await?;
+            let global = load_global_feed(until, None, 0).await?;
             return Ok((global, true));
         }
     };
     if contacts.is_empty() {
         log::info!("User doesn't follow anyone, showing global feed");
-        let global = load_global_feed(until).await?;
+        let global = load_global_feed(until, None, 0).await?;
         return Ok((global, true));
     }
     log::info!("User follows {} accounts", contacts.len());
@@ -154,10 +173,10 @@ pub async fn load_following_feed(
     }
     if authors.is_empty() {
         log::warn!("No valid contact pubkeys, falling back to global feed");
-        let global = load_global_feed(until).await?;
+        let global = load_global_feed(until, None, 0).await?;
         return Ok((global, true));
     }
-    let filter = build_following_feed_filter(authors.clone(), until, Timestamp::now());
+    let filter = build_following_feed_filter(authors.clone(), until, Timestamp::now(), cached_cursor, cached_count);
     log::info!(
         "Fetching events from {} followed accounts",
         filter.authors.as_ref().map(|a| a.len()).unwrap_or(0)
@@ -241,7 +260,7 @@ pub async fn load_following_feed(
                     Ok((extra_items, false))
                 }
                 _ => {
-                    let global = load_global_feed(until).await?;
+                    let global = load_global_feed(until, None, 0).await?;
                     Ok((global, true))
                 }
             }
@@ -272,7 +291,7 @@ async fn try_feed_from_favorite_relays(
         Some(c) => c,
         None => return Ok(Vec::new()),
     };
-    let filter = build_following_feed_filter(authors.to_vec(), until, Timestamp::now());
+    let filter = build_following_feed_filter(authors.to_vec(), until, Timestamp::now(), None, 0);
     match client
         .fetch_events_from(relay_urls, filter, std::time::Duration::from_secs(8))
         .await
@@ -316,6 +335,8 @@ async fn try_feed_from_favorite_relays(
 
 pub async fn load_following_feed_streaming<F>(
     until: Option<u64>,
+    cached_cursor: Option<u64>,
+    cached_count: usize,
     mut on_batch: F,
 ) -> Result<(Vec<FeedItem>, bool), NostrBlueError>
 where
@@ -335,13 +356,13 @@ where
                 "Failed to fetch contacts: {}, falling back to global feed",
                 e
             );
-            let global = load_global_feed(until).await?;
+            let global = load_global_feed(until, None, 0).await?;
             return Ok((global, true));
         }
     };
     if contacts.is_empty() {
         log::info!("User doesn't follow anyone, showing global feed");
-        let global = load_global_feed(until).await?;
+        let global = load_global_feed(until, None, 0).await?;
         return Ok((global, true));
     }
     log::info!("User follows {} accounts, streaming posts", contacts.len());
@@ -353,10 +374,10 @@ where
     }
     if authors.is_empty() {
         log::warn!("No valid contact pubkeys, falling back to global feed");
-        let global = load_global_feed(until).await?;
+        let global = load_global_feed(until, None, 0).await?;
         return Ok((global, true));
     }
-    let filter = build_following_feed_filter(authors, until, Timestamp::now());
+    let filter = build_following_feed_filter(authors, until, Timestamp::now(), cached_cursor, cached_count);
     let mut all_items: Vec<FeedItem> = Vec::new();
     let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
 
@@ -423,7 +444,7 @@ where
             "Failed to stream following feed: {}, falling back to global",
             e
         );
-        let global = load_global_feed(until).await?;
+        let global = load_global_feed(until, None, 0).await?;
         return Ok((global, true));
     }
     if all_items.is_empty() {
@@ -437,6 +458,8 @@ where
 
 pub async fn load_following_with_replies(
     until: Option<u64>,
+    cached_cursor: Option<u64>,
+    cached_count: usize,
 ) -> Result<(Vec<FeedItem>, bool), NostrBlueError> {
     let pubkey_str = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
     log::info!(
@@ -451,13 +474,13 @@ pub async fn load_following_with_replies(
                 "Failed to fetch contacts: {}, falling back to global feed",
                 e
             );
-            let global = load_global_feed(until).await?;
+            let global = load_global_feed(until, None, 0).await?;
             return Ok((global, true));
         }
     };
     if contacts.is_empty() {
         log::info!("User doesn't follow anyone, showing global feed");
-        let global = load_global_feed(until).await?;
+        let global = load_global_feed(until, None, 0).await?;
         return Ok((global, true));
     }
     log::info!("User follows {} accounts", contacts.len());
@@ -469,7 +492,7 @@ pub async fn load_following_with_replies(
     }
     if authors.is_empty() {
         log::warn!("No valid contact pubkeys, falling back to global feed");
-        let global = load_global_feed(until).await?;
+        let global = load_global_feed(until, None, 0).await?;
         return Ok((global, true));
     }
     let mut filter = Filter::new()
@@ -480,8 +503,15 @@ pub async fn load_following_with_replies(
         filter = filter.until(Timestamp::from(until_ts));
     } else {
         let window = adaptive_since_window(authors.len());
-        let since = Timestamp::now() - Duration::from_secs(window);
-        filter = filter.since(since);
+        let adaptive_since = Timestamp::now().as_secs().saturating_sub(window);
+        if cached_count > 0 && cached_count < 50 {
+            // Backfill: skip since when cache is sparse but not empty
+        } else if let Some(cursor) = cached_cursor {
+            let cursor_since = cursor.saturating_sub(60);
+            filter = filter.since(Timestamp::from(std::cmp::min(cursor_since, adaptive_since)));
+        } else {
+            filter = filter.since(Timestamp::from(adaptive_since));
+        }
     }
     log::info!(
         "Fetching all events (including replies and reposts) from {} followed accounts",
@@ -553,7 +583,7 @@ pub async fn load_following_with_replies(
                     Ok((extra_items, false))
                 }
                 _ => {
-                    let global = load_global_feed(until).await?;
+                    let global = load_global_feed(until, None, 0).await?;
                     Ok((global, true))
                 }
             }
@@ -561,9 +591,9 @@ pub async fn load_following_with_replies(
     }
 }
 
-pub async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, NostrBlueError> {
+pub async fn load_global_feed(until: Option<u64>, cached_cursor: Option<u64>, cached_count: usize) -> Result<Vec<FeedItem>, NostrBlueError> {
     log::info!("Loading global feed (until: {:?})...", until);
-    let filter = build_global_feed_filter(until);
+    let filter = build_global_feed_filter(until, cached_cursor, cached_count);
     log::info!("Fetching events with filter: {:?}", filter);
     match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
@@ -814,7 +844,7 @@ mod tests {
         let now = Timestamp::from(200_000);
         let author = test_author();
 
-        let filter = build_following_feed_filter(vec![author], None, now);
+        let filter = build_following_feed_filter(vec![author], None, now, None, 0);
 
         assert_eq!(filter.authors.as_ref().map(|a| a.len()), Some(1));
         assert_eq!(filter.limit, Some(50));
@@ -830,7 +860,7 @@ mod tests {
         let now = Timestamp::from(200_000);
         let author = test_author();
 
-        let filter = build_following_feed_filter(vec![author], Some(123_456), now);
+        let filter = build_following_feed_filter(vec![author], Some(123_456), now, None, 0);
 
         assert_eq!(filter.authors.as_ref().map(|a| a.len()), Some(1));
         assert_eq!(filter.limit, Some(50));

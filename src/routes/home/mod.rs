@@ -303,7 +303,7 @@ pub fn Home(list: String) -> Element {
                     let accumulated_clone: Rc<RefCell<Vec<FeedItem>>> =
                         Rc::new(RefCell::new(accumulated_items.clone()));
                     let feed_state_clone = feed_state;
-                    let result = load_following_feed_streaming(None, |batch_items| {
+                    let result = load_following_feed_streaming(None, None, 0, |batch_items| {
                         if *stream_req_id.peek() != stream_curr_id {
                             log::debug!("Discarding stale streaming batch");
                             return;
@@ -350,11 +350,11 @@ pub fn Home(list: String) -> Element {
                             } else {
                                 cache_key.clone()
                             };
-                            if let Some(last_item) = feed_items.last() {
-                                oldest_timestamp.set(exclusive_pagination_cursor(Some(last_item)));
-                            }
                             has_more.set(true);
                             accumulated_items = feed_cache::merge_feed_items(accumulated_items, feed_items.clone());
+                            if let Some(last_item) = accumulated_items.last() {
+                                oldest_timestamp.set(exclusive_pagination_cursor(Some(last_item)));
+                            }
                             feed_state.set(DataState::Loaded(accumulated_items.clone()));
                             if !is_stale() {
                                 let cache_key_for_store = effective_cache_key;
@@ -436,7 +436,7 @@ pub fn Home(list: String) -> Element {
                         has_more.set(false);
                         return;
                     }
-                    let result = load_following_with_replies(None).await;
+                    let result = load_following_with_replies(None, None, 0).await;
                     if is_stale() {
                         return;
                     }
@@ -449,11 +449,11 @@ pub fn Home(list: String) -> Element {
                             } else {
                                 cache_key.clone()
                             };
-                            if let Some(last_item) = feed_items.last() {
-                                oldest_timestamp.set(exclusive_pagination_cursor(Some(last_item)));
-                            }
                             has_more.set(true);
                             let merged = feed_cache::merge_feed_items(cached_items, feed_items.clone());
+                            if let Some(last_item) = merged.last() {
+                                oldest_timestamp.set(exclusive_pagination_cursor(Some(last_item)));
+                            }
                             feed_state.set(DataState::Loaded(merged.clone()));
                             if !is_stale() {
                                 let cache_key_for_store = effective_cache_key;
@@ -517,7 +517,7 @@ pub fn Home(list: String) -> Element {
                         );
                         feed_state.set(DataState::Loaded(cached_items.clone()));
                     }
-                    let result = load_global_feed(None).await;
+                    let result = load_global_feed(None, None, 0).await;
                     if is_stale() {
                         return;
                     }
@@ -809,15 +809,12 @@ pub fn Home(list: String) -> Element {
         }
         let since_timestamp = match &*feed_state.peek() {
             DataState::Loaded(ref items) => {
-                if let Some(latest_item) = items.first() {
-                    latest_item.sort_timestamp()
-                } else {
-                    Timestamp::now()
-                }
+                items
+                    .first()
+                    .map(|i| i.sort_timestamp())
+                    .unwrap_or_else(Timestamp::now)
             }
-            _ => {
-                return;
-            }
+            _ => Timestamp::now(),
         };
         realtime_started.set(true);
         spawn(async move {
@@ -1355,7 +1352,7 @@ pub fn Home(list: String) -> Element {
                 current_feed_type
             );
             let fetch_result: Result<Vec<FeedItem>, NostrBlueError> = match current_feed_type {
-                FeedType::Following => match load_following_feed(until).await {
+                FeedType::Following => match load_following_feed(until, None, 0).await {
                     Ok((items, did_fallback)) => {
                         if did_fallback {
                             Err(NostrBlueError::Other(
@@ -1367,7 +1364,7 @@ pub fn Home(list: String) -> Element {
                     }
                     Err(e) => Err(e),
                 },
-                FeedType::FollowingWithReplies => match load_following_with_replies(until).await {
+                FeedType::FollowingWithReplies => match load_following_with_replies(until, None, 0).await {
                     Ok((items, did_fallback)) => {
                         if did_fallback {
                             Err(NostrBlueError::Other(
@@ -1434,7 +1431,23 @@ pub fn Home(list: String) -> Element {
         let current = *refresh_trigger.read();
         refresh_trigger.set(current + 1);
         spawn(async move {
-            crate::stores::ui::scroll_restore::set_scroll_y(0.0).await;
+            scroll_restore::set_scroll_y(0.0).await;
+        });
+    };
+
+    let mut accept_pending_posts = move || {
+        let pending: Vec<FeedItem> = pending_posts.write().drain(..).collect();
+        if pending.is_empty() {
+            return;
+        }
+        let current = match feed_state.read().clone() {
+            DataState::Loaded(items) => items,
+            _ => return,
+        };
+        let merged = feed_cache::merge_feed_items(current, pending);
+        feed_state.set(DataState::Loaded(merged));
+        spawn(async move {
+            scroll_restore::set_scroll_y(0.0).await;
         });
     };
 
@@ -1766,7 +1779,7 @@ pub fn Home(list: String) -> Element {
                                 rsx! {
                                     div {
                                         class: "sticky top-[57px] z-10 border-b border-border bg-blue-500 hover:bg-blue-600 transition-colors cursor-pointer",
-                                        onclick: move |_| refresh_and_scroll_to_top(),
+                                        onclick: move |_| accept_pending_posts(),
                                         div { class: "px-4 py-3 text-center",
                                             span { class: "text-white font-medium", "Show {count} new {post_text}" }
                                         }

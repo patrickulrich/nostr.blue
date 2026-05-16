@@ -349,6 +349,7 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
     if let Some(dispatcher) = crate::stores::notification_dispatcher::NotificationDispatcher::instance() {
         dispatcher.start_listener();
     }
+    crate::stores::eose_tracker::EoseTracker::init(client.clone());
     log::info!("Nostr client initialized with relays ready");
     Ok(client)
 }
