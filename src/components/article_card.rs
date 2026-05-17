@@ -160,7 +160,7 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
                             div { class: "flex items-center gap-2",
                                 Link {
                                     to: Route::Profile {
-                                        pubkey: author_pubkey.clone(),
+                                        pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                                     },
                                     onclick: move |e: Event<MouseData>| {
                                         e.stop_propagation();
@@ -184,7 +184,7 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
                                 div { class: "flex flex-col min-w-0",
                                     Link {
                                         to: Route::Profile {
-                                            pubkey: author_pubkey,
+                                            pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                                         },
                                         onclick: move |e: Event<MouseData>| {
                                             e.stop_propagation();

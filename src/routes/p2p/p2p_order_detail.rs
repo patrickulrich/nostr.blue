@@ -165,7 +165,7 @@ fn OrderDetailContent(order: P2POrder) -> Element {
                 }
                 Link {
                     to: Route::Profile {
-                        pubkey: order.pubkey.clone(),
+                        pubkey: crate::utils::nip19_urls::profile_route_id(&order.pubkey),
                     },
                     class: "text-sm text-primary hover:underline mt-2 inline-block",
                     "View Profile"

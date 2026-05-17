@@ -96,8 +96,9 @@ pub use error::Error;
 pub use fetching::{
     fetch_event_targeted, fetch_events_aggregated, fetch_events_aggregated_outbox,
     fetch_events_from_connected_relays, fetch_events_from_relays, fetch_metadata_targeted,
-    fetch_profile_events_db, fetch_profile_events_from_relays, fetch_profile_events_targeted,
-    parse_event_id, ParsedEventId,
+    fetch_profile_events_db, fetch_profile_events_from_relays,
+    fetch_profile_events_from_relays_direct, fetch_profile_events_targeted,
+    fetch_radio_events, parse_event_id, ParsedEventId,
 };
 pub(crate) use fetching::fetch_events_from_connected_relays_with_client;
 #[cfg(feature = "native")]
@@ -143,7 +144,7 @@ pub async fn platform_sleep_ms(ms: u64) {
     #[cfg(not(target_arch = "wasm32"))]
     tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
 }
-const DEFAULT_DISCOVERY_RELAYS: &[&str] = &[
+pub const DEFAULT_DISCOVERY_RELAYS: &[&str] = &[
     "wss://purplepag.es",
     "wss://relay.nos.social",
     "wss://relay.damus.io",
@@ -349,6 +350,7 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
     if let Some(dispatcher) = crate::stores::notification_dispatcher::NotificationDispatcher::instance() {
         dispatcher.start_listener();
     }
+    crate::stores::eose_tracker::EoseTracker::init(client.clone());
     log::info!("Nostr client initialized with relays ready");
     Ok(client)
 }

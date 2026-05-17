@@ -298,7 +298,7 @@ pub fn ArticleDetail(naddr: String) -> Element {
                                 div { class: "flex items-center justify-between py-4 border-y border-border",
                                     Link {
                                         to: Route::Profile {
-                                            pubkey: author_pubkey.clone(),
+                                            pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                                         },
                                         class: "flex items-center gap-3 hover:opacity-80 transition",
                                         div { class: "w-12 h-12 rounded-full overflow-hidden bg-muted flex items-center justify-center",

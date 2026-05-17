@@ -28,7 +28,7 @@ pub static NWC_STATUS: GlobalSignal<ConnectionStatus> =
 pub static NWC_BALANCE: GlobalSignal<Option<u64>> = Signal::global(|| None);
 /// Save NWC URI to secure storage (file with restricted permissions on native, web storage on web)
 #[cfg(feature = "native")]
-fn save_nwc_uri_secure(uri: &str) -> std::result::Result<(), String> {
+pub(crate) fn save_nwc_uri_secure(uri: &str) -> std::result::Result<(), String> {
     use std::fs;
     let dir = crate::platform::storage::data_dir();
     fs::create_dir_all(&dir).map_err(|e| format!("Failed to create storage directory: {}", e))?;
@@ -89,7 +89,7 @@ fn delete_nwc_uri_secure() {
 }
 /// Save NWC URI to storage (web - "secure" is naming convention, maps to same localStorage key)
 #[cfg(feature = "web")]
-fn save_nwc_uri_secure(uri: &str) -> std::result::Result<(), String> {
+pub(crate) fn save_nwc_uri_secure(uri: &str) -> std::result::Result<(), String> {
     crate::platform::storage::set_string(STORAGE_KEY_NWC_URI, uri)
 }
 /// Load NWC URI from storage (web - "secure" is naming convention, maps to same localStorage key)

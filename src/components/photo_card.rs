@@ -384,7 +384,7 @@ pub fn PhotoCard(
             div { class: "p-3 flex items-center gap-3",
                 Link {
                     to: Route::Profile {
-                        pubkey: author_pubkey.clone(),
+                        pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                     },
                     class: "shrink-0",
                     onclick: move |e: MouseEvent| e.stop_propagation(),
@@ -404,7 +404,7 @@ pub fn PhotoCard(
                 div { class: "flex-1 min-w-0",
                     Link {
                         to: Route::Profile {
-                            pubkey: author_pubkey.clone(),
+                            pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                         },
                         class: "font-semibold hover:underline text-sm",
                         onclick: move |e: MouseEvent| e.stop_propagation(),

@@ -134,7 +134,7 @@ pub fn PinCard(
                     naddr: naddr.clone(),
                 }),
                 PinContentType::Profile => parse_coordinate(address).map(|coord| Route::Profile {
-                    pubkey: coord.public_key.to_hex(),
+                    pubkey: crate::utils::nip19_urls::profile_route_id(&coord.public_key.to_hex()),
                 }),
                 _ => None,
             };
@@ -495,7 +495,7 @@ pub fn PinCardMosaic(
                     naddr: naddr.clone(),
                 }),
                 PinContentType::Profile => parse_coordinate(address).map(|coord| Route::Profile {
-                    pubkey: coord.public_key.to_hex(),
+                    pubkey: crate::utils::nip19_urls::profile_route_id(&coord.public_key.to_hex()),
                 }),
                 _ => None,
             };

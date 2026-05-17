@@ -19,6 +19,8 @@ import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.util.Locale
 import java.util.UUID
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 
 typealias BuildConfig = com.nostr.blue.BuildConfig
 
@@ -1363,6 +1365,221 @@ class MainActivity : WryActivity() {
             } catch (e: Exception) {
                 Log.e(TAG, "readFromClipboard failed", e)
                 "error:${e.message}"
+            }
+        }
+
+        private const val GOOGLE_WEB_CLIENT_ID =
+            "665414552910-b0b9mu4guac4bk9hdoc751uqqmd6irum.apps.googleusercontent.com"
+        private const val DRIVE_APPDATA_SCOPE = "https://www.googleapis.com/auth/drive.appdata"
+        private const val DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files"
+        private const val BACKUP_PREFIX = "nostrblue_backup_"
+        private const val BACKUP_SUFFIX = ".bin"
+
+        @JvmStatic
+        fun signInWithGoogle(context: Context): String {
+            return try {
+                // This is a synchronous stub that returns pending status.
+                // The actual sign-in flow is initiated via signInWithGoogleAsync below.
+                // For JNI compatibility we return a JSON error indicating async is needed.
+                kotlinx.coroutines.runBlocking {
+                    signInWithGoogleInternal(context)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "signInWithGoogle failed", e)
+                """{"error":"${e.message?.replace("\"", "\\\"")}"}"""
+            }
+        }
+
+        private suspend fun signInWithGoogleInternal(context: Context): String {
+            return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    // Step 1: Get sub via CredentialManager
+                    val credentialManager = androidx.credentials.CredentialManager.create(context)
+                    val option = com.google.android.libraries.identity.googleid.GetGoogleIdOption.Builder()
+                        .setServerClientId(GOOGLE_WEB_CLIENT_ID)
+                        .setFilterByAuthorizedAccounts(false)
+                        .setAutoSelectEnabled(false)
+                        .build()
+                    val request = androidx.credentials.GetCredentialRequest.Builder()
+                        .addCredentialOption(option)
+                        .build()
+
+                    // We need an Activity for CredentialManager — use the static instance
+                    val activity = instance
+                        ?: return@withContext """{"error":"No active MainActivity"}"""
+
+                    val response = credentialManager.getCredential(activity, request)
+                    val credential = response.credential
+                    if (credential !is androidx.credentials.CustomCredential ||
+                        credential.type != com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+                    ) {
+                        return@withContext """{"error":"Unexpected credential type"}"""
+                    }
+
+                    val parsed = com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+                        .createFrom(credential.data)
+                    val idToken = parsed.idToken
+                    val payloadB64 = idToken.split(".")[1]
+                    val decoded = android.util.Base64.decode(
+                        payloadB64,
+                        android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+                    )
+                    val jwtJson = org.json.JSONObject(String(decoded, Charsets.UTF_8))
+                    val sub = jwtJson.getString("sub")
+
+                    // Step 2: Get Drive access token via AuthorizationClient
+                    val authClient = com.google.android.gms.auth.api.identity.Identity
+                        .getAuthorizationClient(activity)
+                    val authRequest = com.google.android.gms.auth.api.identity.AuthorizationRequest.Builder()
+                        .setRequestedScopes(listOf(com.google.android.gms.common.api.Scope(DRIVE_APPDATA_SCOPE)))
+                        .build()
+
+                    val authResult = com.google.android.gms.tasks.Tasks.await(authClient.authorize(authRequest))
+                    val accessToken = authResult.accessToken
+                        ?: return@withContext """{"error":"No access token returned"}"""
+
+                    """{"sub":"$sub","accessToken":"$accessToken"}"""
+                } catch (e: Exception) {
+                    Log.e(TAG, "signInWithGoogleInternal failed", e)
+                    """{"error":"${e.message?.replace("\"", "\\\"")?.replace("\n", " ")}"}"""
+                }
+            }
+        }
+
+        @JvmStatic
+        fun listDriveBackups(context: Context, accessToken: String): String {
+            return try {
+                val query = java.net.URLEncoder.encode("name contains '$BACKUP_PREFIX'", "UTF-8")
+                val url = "$DRIVE_FILES_URL?spaces=appDataFolder&q=$query&fields=files(id,name,modifiedTime)&pageSize=100"
+                val client = okhttp3.OkHttpClient()
+                val request = okhttp3.Request.Builder()
+                    .url(url)
+                    .header("Authorization", "Bearer $accessToken")
+                    .get()
+                    .build()
+                val response = client.newCall(request).execute()
+                if (!response.isSuccessful) {
+                    return """{"error":"Drive list failed: ${response.code}"}"""
+                }
+                val body = response.body?.string() ?: return """[]"""
+                val json = org.json.JSONObject(body)
+                val files = json.optJSONArray("files") ?: org.json.JSONArray()
+                val result = org.json.JSONArray()
+                for (i in 0 until files.length()) {
+                    val file = files.getJSONObject(i)
+                    val entry = org.json.JSONObject()
+                    entry.put("fileId", file.getString("id"))
+                    entry.put("name", file.getString("name"))
+                    result.put(entry)
+                }
+                result.toString()
+            } catch (e: Exception) {
+                Log.e(TAG, "listDriveBackups failed", e)
+                """{"error":"${e.message?.replace("\"", "\\\"")}"}"""
+            }
+        }
+
+        @JvmStatic
+        fun uploadDriveBackup(context: Context, accessToken: String, combinedArg: String): String {
+            return try {
+                val parts = combinedArg.split("|", limit = 2)
+                val npub = parts[0]
+                val payload = parts.getOrElse(1) { "" }
+                val filename = BACKUP_PREFIX + npub + BACKUP_SUFFIX
+
+                val oldFileIds = mutableListOf<String>()
+                try {
+                    val listResult = listDriveBackups(context, accessToken)
+                    val arr = org.json.JSONArray(listResult)
+                    for (i in 0 until arr.length()) {
+                        val f = arr.getJSONObject(i)
+                        if (f.getString("name") == filename) {
+                            oldFileIds.add(f.getString("fileId"))
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to list existing backups for cleanup", e)
+                }
+
+                val metadata = """{"name":"$filename","parents":["appDataFolder"]}"""
+                val boundary = "nostrblue-" + java.util.UUID.randomUUID()
+                val crlf = "\r\n"
+                val body = "--$boundary$crlf" +
+                    "Content-Type: application/json; charset=UTF-8$crlf$crlf" +
+                    "$metadata$crlf" +
+                    "--$boundary$crlf" +
+                    "Content-Type: application/octet-stream$crlf$crlf" +
+                    "$payload$crlf" +
+                    "--$boundary--$crlf"
+
+                val client = okhttp3.OkHttpClient()
+                val requestBody = body.toRequestBody(
+                    "multipart/related; boundary=$boundary".toMediaType()
+                )
+                val request = okhttp3.Request.Builder()
+                    .url("$DRIVE_FILES_URL?uploadType=multipart")
+                    .header("Authorization", "Bearer $accessToken")
+                    .post(requestBody)
+                    .build()
+                val response = client.newCall(request).execute()
+                if (!response.isSuccessful) {
+                    return """{"error":"Upload failed: ${response.code}"}"""
+                }
+
+                for (oldId in oldFileIds) {
+                    try {
+                        deleteDriveBackup(context, accessToken, oldId)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to delete old backup $oldId", e)
+                    }
+                }
+
+                """{"success":true}"""
+            } catch (e: Exception) {
+                Log.e(TAG, "uploadDriveBackup failed", e)
+                """{"error":"${e.message?.replace("\"", "\\\"")}"}"""
+            }
+        }
+
+        @JvmStatic
+        fun downloadDriveBackup(context: Context, accessToken: String, fileId: String): String {
+            return try {
+                val client = okhttp3.OkHttpClient()
+                val request = okhttp3.Request.Builder()
+                    .url("$DRIVE_FILES_URL/$fileId?alt=media")
+                    .header("Authorization", "Bearer $accessToken")
+                    .get()
+                    .build()
+                val response = client.newCall(request).execute()
+                if (!response.isSuccessful) {
+                    return """{"error":"Download failed: ${response.code}"}"""
+                }
+                val payload = response.body?.string() ?: ""
+                """{"payload":${org.json.JSONObject.quote(payload)}}"""
+            } catch (e: Exception) {
+                Log.e(TAG, "downloadDriveBackup failed", e)
+                """{"error":"${e.message?.replace("\"", "\\\"")}"}"""
+            }
+        }
+
+        @JvmStatic
+        fun deleteDriveBackup(context: Context, accessToken: String, fileId: String): String {
+            return try {
+                val client = okhttp3.OkHttpClient()
+                val request = okhttp3.Request.Builder()
+                    .url("$DRIVE_FILES_URL/$fileId")
+                    .header("Authorization", "Bearer $accessToken")
+                    .delete()
+                    .build()
+                val response = client.newCall(request).execute()
+                response.close()
+                if (!response.isSuccessful) {
+                    return """{"error":"Delete failed: ${response.code}"}"""
+                }
+                """{"success":true}"""
+            } catch (e: Exception) {
+                Log.e(TAG, "deleteDriveBackup failed", e)
+                """{"error":"${e.message?.replace("\"", "\\\"")}"}"""
             }
         }
     }

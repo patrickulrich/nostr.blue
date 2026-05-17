@@ -66,6 +66,10 @@ pub enum FeedCacheKey {
     PeopleList { pubkey: String, list_id: String },
     /// Relay feed (single relay or relay set)
     RelayFeed { urls: String },
+    /// Shorts/verts feed from followed users
+    Shorts { pubkey: String },
+    /// Shorts/verts global feed
+    ShortsGlobal,
 }
 impl FeedCacheKey {
     /// Convert to string key for IndexedDB storage
@@ -87,6 +91,8 @@ impl FeedCacheKey {
                 format!("list:{}:{}", pubkey, list_id)
             }
             FeedCacheKey::RelayFeed { urls } => format!("relay_feed:{}", urls),
+            FeedCacheKey::Shorts { pubkey } => format!("shorts:{}", pubkey),
+            FeedCacheKey::ShortsGlobal => "shorts_global".to_string(),
         }
     }
 }
@@ -395,4 +401,45 @@ pub async fn touch_items(event_ids: &[String]) -> Result<(), String> {
 fn current_timestamp() -> u64 {
     use web_sys::js_sys::Date;
     (Date::now() / 1000.0) as u64
+}
+
+#[cfg(feature = "web")]
+#[allow(dead_code)]
+pub async fn load_feed_cursor(key: &FeedCacheKey) -> Option<u64> {
+    let db = get_db()?;
+    let feed_key = key.to_string_key();
+    db.get_feed_metadata(&feed_key)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|m| m.newest_timestamp)
+}
+
+#[cfg(feature = "web")]
+#[allow(dead_code)]
+pub async fn get_cached_item_count(key: &FeedCacheKey) -> usize {
+    match get_db() {
+        Some(db) => {
+            let feed_key = key.to_string_key();
+            db.get_feed_metadata(&feed_key)
+                .await
+                .ok()
+                .flatten()
+                .map(|m| m.event_ids.len())
+                .unwrap_or(0)
+        }
+        None => 0,
+    }
+}
+
+#[cfg(not(feature = "web"))]
+#[allow(dead_code)]
+pub async fn load_feed_cursor(_key: &FeedCacheKey) -> Option<u64> {
+    None
+}
+
+#[cfg(not(feature = "web"))]
+#[allow(dead_code)]
+pub async fn get_cached_item_count(_key: &FeedCacheKey) -> usize {
+    0
 }

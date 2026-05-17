@@ -9,6 +9,7 @@ use crate::components::{
     icons, DisplayEpisode, PodcastAddFeedModal, PodcastEpisodeCard, PodcastEpisodeCardSkeleton,
     PodcastShow, PodcastShowCard, PodcastShowCardSkeleton,
 };
+use crate::routes::podcast::podcast_shared_states::PodcastApiInitializingState;
 use crate::routes::Route;
 use crate::services::podcast_index;
 use crate::stores::{auth_store, nostr_client, podcast_subscription};
@@ -103,7 +104,9 @@ pub fn PodcastHome() -> Element {
                 }
             }
             div { class: "p-4",
-                if !submitted_query.read().is_empty() {
+                if !*nostr_client::CLIENT_INITIALIZED.read() {
+                    PodcastApiInitializingState { item_label: "podcasts" }
+                } else if !submitted_query.read().is_empty() {
                     PodcastSearchResults {
                         query: submitted_query.read().clone(),
                         platform: selected_platform.read().clone(),

@@ -271,7 +271,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                 div { class: "flex items-center gap-3",
                     Link {
                         to: Route::Profile {
-                            pubkey: issue.pubkey.clone(),
+                            pubkey: crate::utils::nip19_urls::profile_route_id(&issue.pubkey),
                         },
                         class: "flex items-center gap-2 hover:underline",
                         div { class: "w-6 h-6 rounded-full bg-muted flex items-center justify-center overflow-hidden",
@@ -663,7 +663,7 @@ fn CommentCard(comment: GitComment) -> Element {
             div { class: "flex items-center gap-2 mb-2",
                 Link {
                     to: Route::Profile {
-                        pubkey: comment.pubkey.clone(),
+                        pubkey: crate::utils::nip19_urls::profile_route_id(&comment.pubkey),
                     },
                     class: "flex items-center gap-2 hover:underline",
                     div { class: "w-5 h-5 rounded-full bg-muted flex items-center justify-center overflow-hidden",

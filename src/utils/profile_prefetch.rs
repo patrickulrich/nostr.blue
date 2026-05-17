@@ -55,3 +55,24 @@ pub async fn prefetch_pubkeys(pubkeys: impl IntoIterator<Item = PublicKey>) {
         }
     }
 }
+
+/// Prefetch author metadata AND relay lists for a slice of events.
+/// Relay lists are resolved in background for nprofile URL generation.
+pub async fn prefetch_event_authors_with_relays<T: HasAuthor>(events: &[T]) {
+    if events.is_empty() {
+        return;
+    }
+    let pubkeys: HashSet<PublicKey> = events.iter().map(|e| e.author_pubkey()).collect();
+    let _ = profiles::fetch_profiles_batch_native(pubkeys.clone()).await;
+
+    let pk_hexes: Vec<String> = pubkeys.iter().map(|pk| pk.to_hex()).collect();
+    dioxus::prelude::spawn(async move {
+        for pk_hex in pk_hexes {
+            let _ = crate::stores::relay::coverage::resolve_user_relays(
+                &pk_hex,
+                crate::stores::relay::coverage::RelayPurpose::Write,
+            )
+            .await;
+        }
+    });
+}

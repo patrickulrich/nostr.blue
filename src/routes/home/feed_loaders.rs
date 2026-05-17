@@ -10,6 +10,23 @@ use nostr_sdk::{Filter, Kind, PublicKey, Timestamp};
 use std::collections::HashSet;
 use std::time::Duration;
 
+const SINCE_BUFFER_SECS: u64 = 120;
+const RELAY_FEED_LIMIT: usize = 100;
+pub const FEED_LIMIT: usize = 100;
+
+fn resolve_since(adaptive_since: u64, cached_cursor: Option<u64>, cached_count: usize, feed_limit: usize) -> Option<u64> {
+    let eose_since = crate::stores::eose_tracker::EoseTracker::get_min_since();
+    match (eose_since, cached_cursor, cached_count) {
+        (_, _, count) if count > 0 && count < feed_limit => None,
+        (Some(eose), _, _) => Some(std::cmp::min(eose, adaptive_since)),
+        (None, Some(cursor), _) => {
+            let cursor_since = cursor.saturating_sub(SINCE_BUFFER_SECS);
+            Some(std::cmp::min(cursor_since, adaptive_since))
+        }
+        (None, None, _) => Some(adaptive_since),
+    }
+}
+
 pub fn feed_kinds() -> Vec<Kind> {
     vec![
         Kind::TextNote,
@@ -31,7 +48,7 @@ pub fn adaptive_since_window(author_count: usize) -> u64 {
 }
 
 pub fn exclusive_pagination_cursor(item: Option<&FeedItem>) -> Option<u64> {
-    item.map(|entry| entry.sort_timestamp().as_secs().saturating_sub(1))
+    item.map(|entry| entry.sort_timestamp().as_secs())
 }
 
 pub fn merge_paginated_feed_items(
@@ -53,15 +70,17 @@ pub fn merge_paginated_feed_items(
     (updated, unique_items, next_cursor)
 }
 
-pub fn build_global_feed_filter(until: Option<u64>) -> Filter {
+pub fn build_global_feed_filter(until: Option<u64>, cached_cursor: Option<u64>, cached_count: usize) -> Filter {
     let mut filter = Filter::new()
         .kinds(feed_kinds())
-        .limit(50);
+        .limit(FEED_LIMIT);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     } else {
-        let since = Timestamp::now() - Duration::from_secs(86400);
-        filter = filter.since(since);
+        let adaptive_since = Timestamp::now().as_secs().saturating_sub(86400);
+        if let Some(since) = resolve_since(adaptive_since, cached_cursor, cached_count, FEED_LIMIT) {
+            filter = filter.since(Timestamp::from(since));
+        }
     }
     filter
 }
@@ -70,18 +89,23 @@ pub fn build_following_feed_filter(
     authors: Vec<PublicKey>,
     until: Option<u64>,
     now: Timestamp,
+    cached_cursor: Option<u64>,
+    cached_count: usize,
 ) -> Filter {
     let author_count = authors.len();
     let mut filter = Filter::new()
         .kinds(feed_kinds())
         .authors(authors)
-        .limit(50);
+        .limit(FEED_LIMIT);
 
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     } else {
         let window = adaptive_since_window(author_count);
-        filter = filter.since(now - Duration::from_secs(window));
+        let adaptive_since = now.as_secs().saturating_sub(window);
+        if let Some(since) = resolve_since(adaptive_since, cached_cursor, cached_count, FEED_LIMIT) {
+            filter = filter.since(Timestamp::from(since));
+        }
     }
 
     filter
@@ -92,7 +116,7 @@ pub async fn sync_global_feed_page(until: Option<u64>) {
         log::debug!("Skipping global feed negentropy sync: client unavailable");
         return;
     };
-    let filter = build_global_feed_filter(until);
+    let filter = build_global_feed_filter(until, None, 0);
     let sync_opts = SyncOptions::default()
         .direction(SyncDirection::Down)
         .initial_timeout(Duration::from_secs(5));
@@ -113,15 +137,51 @@ pub async fn sync_global_feed_page(until: Option<u64>) {
     }
 }
 
+pub async fn sync_following_feed_page(authors: Vec<PublicKey>, until: Option<u64>) {
+    let Some(client) = nostr_client::get_client() else {
+        log::debug!("Skipping following feed negentropy sync: client unavailable");
+        return;
+    };
+    if authors.is_empty() {
+        return;
+    }
+    let mut filter = Filter::new()
+        .kinds(feed_kinds())
+        .authors(authors)
+        .limit(FEED_LIMIT);
+    if let Some(until_ts) = until {
+        filter = filter.until(Timestamp::from(until_ts));
+    }
+    let sync_opts = SyncOptions::default()
+        .direction(SyncDirection::Down)
+        .initial_timeout(Duration::from_secs(5));
+    match client.sync(filter, &sync_opts).await {
+        Ok(output) => {
+            log::info!(
+                "Following feed negentropy sync complete: {} received, {} sent, {} relays succeeded, {} failed",
+                output.val.received.len(),
+                output.val.sent.len(),
+                output.success.len(),
+                output.failed.len()
+            );
+        }
+        Err(e) => {
+            log::warn!("Following feed negentropy sync failed: {}", e);
+        }
+    }
+}
+
 pub async fn load_paginated_global_feed(
     until: Option<u64>,
 ) -> Result<Vec<FeedItem>, NostrBlueError> {
     sync_global_feed_page(until).await;
-    load_global_feed(until).await
+    load_global_feed(until, None, 0).await
 }
 
 pub async fn load_following_feed(
     until: Option<u64>,
+    cached_cursor: Option<u64>,
+    cached_count: usize,
 ) -> Result<(Vec<FeedItem>, bool), NostrBlueError> {
     let pubkey_str = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
     log::info!(
@@ -136,13 +196,13 @@ pub async fn load_following_feed(
                 "Failed to fetch contacts: {}, falling back to global feed",
                 e
             );
-            let global = load_global_feed(until).await?;
+            let global = load_global_feed(until, None, 0).await?;
             return Ok((global, true));
         }
     };
     if contacts.is_empty() {
         log::info!("User doesn't follow anyone, showing global feed");
-        let global = load_global_feed(until).await?;
+        let global = load_global_feed(until, None, 0).await?;
         return Ok((global, true));
     }
     log::info!("User follows {} accounts", contacts.len());
@@ -154,10 +214,10 @@ pub async fn load_following_feed(
     }
     if authors.is_empty() {
         log::warn!("No valid contact pubkeys, falling back to global feed");
-        let global = load_global_feed(until).await?;
+        let global = load_global_feed(until, None, 0).await?;
         return Ok((global, true));
     }
-    let filter = build_following_feed_filter(authors.clone(), until, Timestamp::now());
+    let filter = build_following_feed_filter(authors.clone(), until, Timestamp::now(), cached_cursor, cached_count);
     log::info!(
         "Fetching events from {} followed accounts",
         filter.authors.as_ref().map(|a| a.len()).unwrap_or(0)
@@ -241,7 +301,7 @@ pub async fn load_following_feed(
                     Ok((extra_items, false))
                 }
                 _ => {
-                    let global = load_global_feed(until).await?;
+                    let global = load_global_feed(until, None, 0).await?;
                     Ok((global, true))
                 }
             }
@@ -272,7 +332,7 @@ async fn try_feed_from_favorite_relays(
         Some(c) => c,
         None => return Ok(Vec::new()),
     };
-    let filter = build_following_feed_filter(authors.to_vec(), until, Timestamp::now());
+    let filter = build_following_feed_filter(authors.to_vec(), until, Timestamp::now(), None, 0);
     match client
         .fetch_events_from(relay_urls, filter, std::time::Duration::from_secs(8))
         .await
@@ -316,6 +376,8 @@ async fn try_feed_from_favorite_relays(
 
 pub async fn load_following_feed_streaming<F>(
     until: Option<u64>,
+    cached_cursor: Option<u64>,
+    cached_count: usize,
     mut on_batch: F,
 ) -> Result<(Vec<FeedItem>, bool), NostrBlueError>
 where
@@ -335,13 +397,13 @@ where
                 "Failed to fetch contacts: {}, falling back to global feed",
                 e
             );
-            let global = load_global_feed(until).await?;
+            let global = load_global_feed(until, None, 0).await?;
             return Ok((global, true));
         }
     };
     if contacts.is_empty() {
         log::info!("User doesn't follow anyone, showing global feed");
-        let global = load_global_feed(until).await?;
+        let global = load_global_feed(until, None, 0).await?;
         return Ok((global, true));
     }
     log::info!("User follows {} accounts, streaming posts", contacts.len());
@@ -353,10 +415,10 @@ where
     }
     if authors.is_empty() {
         log::warn!("No valid contact pubkeys, falling back to global feed");
-        let global = load_global_feed(until).await?;
+        let global = load_global_feed(until, None, 0).await?;
         return Ok((global, true));
     }
-    let filter = build_following_feed_filter(authors, until, Timestamp::now());
+    let filter = build_following_feed_filter(authors, until, Timestamp::now(), cached_cursor, cached_count);
     let mut all_items: Vec<FeedItem> = Vec::new();
     let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
 
@@ -423,7 +485,7 @@ where
             "Failed to stream following feed: {}, falling back to global",
             e
         );
-        let global = load_global_feed(until).await?;
+        let global = load_global_feed(until, None, 0).await?;
         return Ok((global, true));
     }
     if all_items.is_empty() {
@@ -437,6 +499,8 @@ where
 
 pub async fn load_following_with_replies(
     until: Option<u64>,
+    cached_cursor: Option<u64>,
+    cached_count: usize,
 ) -> Result<(Vec<FeedItem>, bool), NostrBlueError> {
     let pubkey_str = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
     log::info!(
@@ -451,13 +515,13 @@ pub async fn load_following_with_replies(
                 "Failed to fetch contacts: {}, falling back to global feed",
                 e
             );
-            let global = load_global_feed(until).await?;
+            let global = load_global_feed(until, None, 0).await?;
             return Ok((global, true));
         }
     };
     if contacts.is_empty() {
         log::info!("User doesn't follow anyone, showing global feed");
-        let global = load_global_feed(until).await?;
+        let global = load_global_feed(until, None, 0).await?;
         return Ok((global, true));
     }
     log::info!("User follows {} accounts", contacts.len());
@@ -469,19 +533,21 @@ pub async fn load_following_with_replies(
     }
     if authors.is_empty() {
         log::warn!("No valid contact pubkeys, falling back to global feed");
-        let global = load_global_feed(until).await?;
+        let global = load_global_feed(until, None, 0).await?;
         return Ok((global, true));
     }
     let mut filter = Filter::new()
         .kinds(feed_kinds())
         .authors(authors.clone())
-        .limit(50);
+        .limit(FEED_LIMIT);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     } else {
         let window = adaptive_since_window(authors.len());
-        let since = Timestamp::now() - Duration::from_secs(window);
-        filter = filter.since(since);
+        let adaptive_since = Timestamp::now().as_secs().saturating_sub(window);
+        if let Some(since) = resolve_since(adaptive_since, cached_cursor, cached_count, FEED_LIMIT) {
+            filter = filter.since(Timestamp::from(since));
+        }
     }
     log::info!(
         "Fetching all events (including replies and reposts) from {} followed accounts",
@@ -553,7 +619,7 @@ pub async fn load_following_with_replies(
                     Ok((extra_items, false))
                 }
                 _ => {
-                    let global = load_global_feed(until).await?;
+                    let global = load_global_feed(until, None, 0).await?;
                     Ok((global, true))
                 }
             }
@@ -561,9 +627,9 @@ pub async fn load_following_with_replies(
     }
 }
 
-pub async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, NostrBlueError> {
+pub async fn load_global_feed(until: Option<u64>, cached_cursor: Option<u64>, cached_count: usize) -> Result<Vec<FeedItem>, NostrBlueError> {
     log::info!("Loading global feed (until: {:?})...", until);
-    let filter = build_global_feed_filter(until);
+    let filter = build_global_feed_filter(until, cached_cursor, cached_count);
     log::info!("Fetching events with filter: {:?}", filter);
     match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
@@ -644,14 +710,52 @@ pub async fn prefetch_author_metadata(feed_items: &[FeedItem]) {
     profile_prefetch::prefetch_pubkeys(pubkeys).await;
 }
 
+pub async fn prefetch_author_metadata_with_relays(feed_items: &[FeedItem]) {
+    use crate::stores::relay::coverage;
+    use crate::utils::profile_prefetch;
+    let mut pubkeys = Vec::new();
+    for item in feed_items {
+        match item {
+            FeedItem::OriginalPost(event) => {
+                pubkeys.push(event.pubkey);
+            }
+            FeedItem::Repost {
+                original,
+                reposted_by,
+                ..
+            } => {
+                pubkeys.push(original.pubkey);
+                pubkeys.push(*reposted_by);
+            }
+        }
+    }
+    pubkeys.sort();
+    pubkeys.dedup();
+    profile_prefetch::prefetch_pubkeys(pubkeys.clone()).await;
+    let pk_hexes: Vec<String> = pubkeys.iter().map(|pk| pk.to_hex()).collect();
+    dioxus::prelude::spawn(async move {
+        for pk_hex in pk_hexes {
+            let _ = coverage::resolve_user_relays(
+                &pk_hex,
+                coverage::RelayPurpose::Write,
+            )
+            .await;
+        }
+    });
+}
+
 pub async fn load_people_list_feed(
     list: &UserList,
     until: Option<u64>,
+    cached_cursor: Option<u64>,
+    cached_count: usize,
 ) -> Result<Vec<FeedItem>, NostrBlueError> {
     log::info!(
-        "Loading people list feed for '{}' (until: {:?})",
+        "Loading people list feed for '{}' (until: {:?}, cursor: {:?}, count: {})",
         list.name,
-        until
+        until,
+        cached_cursor,
+        cached_count
     );
     let members = get_all_list_members(&list.event).await.map_err(|e| {
         log::error!("Failed to get list members: {}", e);
@@ -665,12 +769,19 @@ pub async fn load_people_list_feed(
         return Ok(Vec::new());
     }
     log::info!("People list '{}' has {} members", list.name, members.len());
+    let member_count = members.len();
     let mut filter = Filter::new()
         .kinds(feed_kinds())
         .authors(members)
-        .limit(50);
+        .limit(FEED_LIMIT);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
+    } else {
+        let window = adaptive_since_window(member_count);
+        let adaptive_since = Timestamp::now().as_secs().saturating_sub(window);
+        if let Some(since) = resolve_since(adaptive_since, cached_cursor, cached_count, FEED_LIMIT) {
+            filter = filter.since(Timestamp::from(since));
+        }
     }
     match nostr_client::fetch_events_from_connected_relays(filter, Duration::from_secs(10)).await {
         Ok(events) => {
@@ -718,8 +829,10 @@ pub async fn load_people_list_feed(
 pub async fn load_relay_feed(
     relay_urls: Vec<String>,
     until: Option<u64>,
+    cached_cursor: Option<u64>,
+    cached_count: usize,
 ) -> Result<Vec<FeedItem>, NostrBlueError> {
-    log::info!("Loading relay feed from {} relays (until: {:?})", relay_urls.len(), until);
+    log::info!("Loading relay feed from {} relays (until: {:?}, cursor: {:?}, count: {})", relay_urls.len(), until, cached_cursor, cached_count);
     let client = match crate::stores::nostr_client::get_client() {
         Some(c) => c,
         None => return Err(NostrBlueError::Other("Client not initialized".to_string())),
@@ -741,9 +854,14 @@ pub async fn load_relay_feed(
             log::warn!("Failed to connect relay {}: {}", url, e);
         }
     }
-    let mut filter = Filter::new().kinds(feed_kinds()).limit(100);
+    let mut filter = Filter::new().kinds(feed_kinds()).limit(RELAY_FEED_LIMIT);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
+    } else {
+        let adaptive_since = Timestamp::now().as_secs().saturating_sub(86400);
+        if let Some(since) = resolve_since(adaptive_since, cached_cursor, cached_count, RELAY_FEED_LIMIT) {
+            filter = filter.since(Timestamp::from(since));
+        }
     }
     crate::stores::relay::connection::fetch_events_from_relays(
         &client,
@@ -804,9 +922,9 @@ mod tests {
     }
 
     #[test]
-    fn exclusive_cursor_uses_saturating_sub() {
+    fn exclusive_cursor_returns_timestamp() {
         let item = test_post(10, "hello");
-        assert_eq!(exclusive_pagination_cursor(Some(&item)), Some(9));
+        assert_eq!(exclusive_pagination_cursor(Some(&item)), Some(10));
     }
 
     #[test]
@@ -814,10 +932,10 @@ mod tests {
         let now = Timestamp::from(200_000);
         let author = test_author();
 
-        let filter = build_following_feed_filter(vec![author], None, now);
+        let filter = build_following_feed_filter(vec![author], None, now, None, 0);
 
         assert_eq!(filter.authors.as_ref().map(|a| a.len()), Some(1));
-        assert_eq!(filter.limit, Some(50));
+        assert_eq!(filter.limit, Some(FEED_LIMIT));
         assert_eq!(
             filter.since,
             Some(now - Duration::from_secs(adaptive_since_window(1)))
@@ -830,10 +948,10 @@ mod tests {
         let now = Timestamp::from(200_000);
         let author = test_author();
 
-        let filter = build_following_feed_filter(vec![author], Some(123_456), now);
+        let filter = build_following_feed_filter(vec![author], Some(123_456), now, None, 0);
 
         assert_eq!(filter.authors.as_ref().map(|a| a.len()), Some(1));
-        assert_eq!(filter.limit, Some(50));
+        assert_eq!(filter.limit, Some(FEED_LIMIT));
         assert_eq!(filter.until, Some(Timestamp::from(123_456)));
         assert_eq!(filter.since, None);
     }
@@ -853,7 +971,7 @@ mod tests {
             .map(|item| item.sort_timestamp().as_secs())
             .collect();
         assert_eq!(timestamps, vec![200, 175, 150, 125]);
-        assert_eq!(next_cursor, Some(124));
+        assert_eq!(next_cursor, Some(125));
     }
 
     #[test]
@@ -870,7 +988,7 @@ mod tests {
             .map(|item| item.sort_timestamp().as_secs())
             .collect();
         assert_eq!(timestamps, vec![120, 100, 90]);
-        assert_eq!(next_cursor, Some(89));
+        assert_eq!(next_cursor, Some(90));
     }
 
     #[test]

@@ -179,6 +179,20 @@ pub fn record_user_relays(pubkey: &str, relay_urls: &[String]) {
         .insert(pubkey.to_string(), relay_urls.to_vec());
 }
 
+/// Get relay URLs for a pubkey ONLY if we have actual NIP-65 data for them.
+/// Returns None if no specific relay data exists (no fallback to generic relays).
+/// Use this to decide whether to generate nprofile vs npub.
+pub fn get_known_user_relays(pubkey: &str) -> Option<Vec<String>> {
+    let coverage = RELAY_COVERAGE.peek();
+    coverage.user_relays.get(pubkey).and_then(|relays| {
+        if relays.is_empty() {
+            None
+        } else {
+            Some(relays.clone())
+        }
+    })
+}
+
 /// Get the best relay URLs for fetching a given user's events.
 /// Falls back to the current user's own read relays, then defaults.
 pub fn get_relays_for_pubkey(pubkey: &str) -> Vec<String> {

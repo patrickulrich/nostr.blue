@@ -68,6 +68,8 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
     let mut pending_ai_chat_seed = use_signal(|| None::<AiChatSeedPayload>);
     let mut show_edit_modal = use_signal(|| false);
     let mut show_propose_modal = use_signal(|| false);
+    let mut show_delete_confirm = use_signal(|| false);
+    let mut is_deleting = use_signal(|| false);
     let toast = consume_toast();
     let event = props.event.clone();
     let parsed_author = PublicKey::parse(&props.author_pubkey).ok();
@@ -113,6 +115,7 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
     let event_id_pin_board = event_id.clone();
     let event_broadcast = event.clone();
     let event_edit = event.clone();
+    let event_id_delete = event_id.clone();
     let mut follow_state_gen = use_signal(|| 0u32);
     let is_own_note = auth_store::get_pubkey()
         .and_then(|pubkey| PublicKey::parse(&pubkey).ok())
@@ -509,6 +512,18 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                             },
                             span { class: "text-sm", "Edit Post" }
                         }
+                        button {
+                            class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
+                            disabled: *is_deleting.read(),
+                            onclick: move |e: MouseEvent| {
+                                e.stop_propagation();
+                                show_delete_confirm.set(true);
+                                is_open.set(false);
+                            },
+                            span { class: "text-sm",
+                                if *is_deleting.read() { "Deleting..." } else { "Delete Note" }
+                            }
+                        }
                     }
                     if !is_own_note && event.kind == Kind::TextNote {
                         button {
@@ -625,6 +640,86 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                 is_proposal: true,
                 on_close: move |_| show_propose_modal.set(false),
                 on_success: move |_| show_propose_modal.set(false),
+            }
+        }
+        if *show_delete_confirm.read() {
+            ConfirmModal {
+                title: "Delete Note?".to_string(),
+                message: "This will publish a deletion request to your relays. There is no guarantee that all relays will honor this request or that the note will be permanently removed.".to_string(),
+                confirm_text: Some("Delete".to_string()),
+                cancel_text: Some("Cancel".to_string()),
+                on_confirm: move |_| {
+                    show_delete_confirm.set(false);
+                    is_deleting.set(true);
+                    let event_id = event_id_delete.clone();
+                    let toast_api = toast;
+                    spawn(async move {
+                        use nostr_sdk::nips::nip09::EventDeletionRequest;
+                        use nostr_sdk::{EventBuilder, Tag, TagStandard};
+                        let eid = EventId::from_hex(&event_id)
+                            .or_else(|_| EventId::from_bech32(&event_id));
+                        let event_id_parsed = match eid {
+                            Ok(id) => id,
+                            Err(e) => {
+                                toast_api.error(
+                                    "Error".to_string(),
+                                    ToastOptions::new()
+                                        .description(format!("Invalid event ID: {e}"))
+                                        .duration(Duration::from_secs(3))
+                                        .permanent(false),
+                                );
+                                is_deleting.set(false);
+                                return;
+                            }
+                        };
+                        let request = EventDeletionRequest::new().id(event_id_parsed);
+                        let builder = EventBuilder::delete(request).tag(
+                            Tag::from_standardized(TagStandard::Kind {
+                                kind: Kind::TextNote,
+                                uppercase: false,
+                            }),
+                        );
+                        match crate::stores::publish_queue::signing::sign_event_builder(builder)
+                            .await
+                        {
+                            Ok(signed_event) => {
+                                let write_relays: Vec<String> =
+                                    crate::stores::relay::get_write_relays();
+                                crate::stores::publish_queue::enqueue(
+                                    signed_event,
+                                    crate::stores::publish_queue::types::QueueEventType::Other(
+                                        "delete".to_string(),
+                                    ),
+                                    Some(write_relays),
+                                    std::collections::HashMap::new(),
+                                )
+                                .await;
+                                toast_api.success(
+                                    "Deletion requested".to_string(),
+                                    ToastOptions::new()
+                                        .description(
+                                            "A deletion request has been sent to your relays",
+                                        )
+                                        .duration(Duration::from_secs(3))
+                                        .permanent(false),
+                                );
+                            }
+                            Err(e) => {
+                                toast_api.error(
+                                    "Error".to_string(),
+                                    ToastOptions::new()
+                                        .description(format!("Failed to sign deletion: {e}"))
+                                        .duration(Duration::from_secs(3))
+                                        .permanent(false),
+                                );
+                            }
+                        }
+                        is_deleting.set(false);
+                    });
+                },
+                on_cancel: move |_| {
+                    show_delete_confirm.set(false);
+                },
             }
         }
     }

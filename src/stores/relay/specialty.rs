@@ -19,6 +19,7 @@ use std::time::Duration;
 pub mod urls {
     pub const VIDEO: &str = "wss://relay.divine.video";
     pub const GIF: &str = "wss://relay.gifbuddy.lol";
+    pub const RADIO: &str = "wss://relay.wavefunc.live";
 }
 /// Default options for specialty relays
 fn specialty_relay_options() -> RelayOptions {
@@ -134,6 +135,10 @@ pub async fn ensure_video_relay(client: &Client) -> bool {
 /// Ensure GIF relay is connected (session-persistent).
 pub async fn ensure_gif_relay(client: &Client) -> bool {
     ensure_connected(client, urls::GIF).await
+}
+/// Ensure radio relay is connected (session-persistent).
+pub async fn ensure_radio_relay(client: &Client) -> bool {
+    ensure_connected(client, urls::RADIO).await
 }
 /// Ensure DM inbox relays are connected with privacy-respecting fallback.
 ///

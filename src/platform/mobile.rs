@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 
 static JNI_VM: OnceLock<Result<jni::JavaVM, jni::errors::Error>> = OnceLock::new();
 
-fn get_jvm() -> Option<&'static jni::JavaVM> {
+pub fn get_jvm() -> Option<&'static jni::JavaVM> {
     JNI_VM
         .get_or_init(|| unsafe {
             let ctx = ndk_context::android_context();
@@ -15,7 +15,7 @@ fn get_jvm() -> Option<&'static jni::JavaVM> {
         .ok()
 }
 
-fn find_app_class<'a>(
+pub fn find_app_class<'a>(
     env: &mut jni::JNIEnv<'a>,
     context: &jni::objects::JObject<'a>,
     class_name: &str,

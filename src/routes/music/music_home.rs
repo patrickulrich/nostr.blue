@@ -1,4 +1,4 @@
-use crate::components::{DiscoveryTab, DiscoveryTabs, UnifiedTrackCard, UnifiedTrackCardSkeleton};
+use crate::components::{DiscoveryTab, DiscoveryTabs, LoginModal, UnifiedTrackCard, UnifiedTrackCardSkeleton};
 use crate::services::podcast_index;
 use crate::services::wavlake::WavlakeAPI;
 use crate::stores::auth_store;
@@ -22,6 +22,13 @@ pub fn MusicHome() -> Element {
     let mut chart_tracks = use_signal(Vec::<(u32, String, MusicTrack)>::new);
     let mut chart_loading = use_signal(|| true);
     let mut chart_error = use_signal(|| None::<String>);
+    let mut chart_auth_required = use_signal(|| false);
+    let mut show_login_modal = use_signal(|| false);
+    use_effect(move || {
+        if nostr_client::has_signer() && *show_login_modal.read() {
+            show_login_modal.set(false);
+        }
+    });
     let genres = [
         "all",
         "Rock",
@@ -135,11 +142,15 @@ pub fn MusicHome() -> Element {
         }
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         let has_signer = nostr_client::has_signer();
-        if !client_initialized || !has_signer {
-            chart_loading.set(false);
-            chart_error.set(Some("Sign in to browse V4V Music Chart".into()));
+        if !client_initialized {
             return;
         }
+        if !has_signer {
+            chart_loading.set(false);
+            chart_auth_required.set(true);
+            return;
+        }
+        chart_auth_required.set(false);
         chart_loading.set(true);
         chart_error.set(None);
         spawn(async move {
@@ -380,6 +391,34 @@ pub fn MusicHome() -> Element {
                         for i in 0..8 {
                             UnifiedTrackCardSkeleton { key: "{i}" }
                         }
+                    } else if *chart_auth_required.read() {
+                        div { class: "text-center py-16",
+                            div { class: "w-20 h-20 mx-auto mb-6 rounded-full bg-muted flex items-center justify-center",
+                                svg {
+                                    class: "w-10 h-10 text-muted-foreground",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    width: "24",
+                                    height: "24",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    rect { x: "3", y: "11", width: "18", height: "10", rx: "2" }
+                                    path { d: "M7 11V7a5 5 0 0 1 10 0v4" }
+                                }
+                            }
+                            h2 { class: "font-semibold text-xl mb-2", "Sign In Required" }
+                            p { class: "text-muted-foreground mb-6",
+                                "Sign in with your Nostr identity to browse the V4V Music Chart."
+                            }
+                            button {
+                                class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
+                                onclick: move |_| show_login_modal.set(true),
+                                "Sign In"
+                            }
+                        }
                     } else if let Some(ref err) = *chart_error.read() {
                         div { class: "text-center py-16",
                             div { class: "w-16 h-16 mx-auto mb-4 rounded-full bg-destructive/10 flex items-center justify-center",
@@ -522,8 +561,14 @@ pub fn MusicHome() -> Element {
                 }
             }
         }
+        if *show_login_modal.read() {
+            LoginModal {
+                on_close: move |_| show_login_modal.set(false),
+            }
+        }
     }
 }
+
 /// Playlist discovery section
 #[component]
 fn PlaylistSection(platform_filter: String) -> Element {

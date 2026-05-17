@@ -548,7 +548,7 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
                                 // View social profile link
                                 div { class: "mt-3",
                                     Link {
-                                        to: Route::Profile { pubkey: pubkey_for_load.clone() },
+                                        to: Route::Profile { pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey_for_load) },
                                         class: "inline-flex items-center gap-1 text-sm text-primary hover:underline",
                                         "View Social Profile"
                                         svg {

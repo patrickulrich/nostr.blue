@@ -144,20 +144,19 @@ pub async fn fetch_subscriptions() -> Result<Vec<PodcastSubscription>, String> {
             return Err(err);
         }
     };
-    let auth = auth_store::AUTH_STATE.read();
-    let pubkey_str = match auth.pubkey.as_ref() {
-        Some(p) => p,
-        None => {
+    let pubkey_str = auth_store::AUTH_STATE.read()
+        .pubkey
+        .clone()
+        .ok_or_else(|| {
             let err = "No pubkey".to_string();
             log::warn!("{}", err);
             SUBSCRIPTIONS_LOADING.write().clone_from(&false);
             SUBSCRIPTIONS_LOADED.write().clone_from(&true);
             SUBSCRIPTIONS_ERROR.write().clone_from(&Some(err.clone()));
-            return Err(err);
-        }
-    };
-    let pubkey = match nostr_sdk::PublicKey::from_bech32(pubkey_str)
-        .or_else(|_| nostr_sdk::PublicKey::from_hex(pubkey_str))
+            err
+        })?;
+    let pubkey = match nostr_sdk::PublicKey::from_bech32(&pubkey_str)
+        .or_else(|_| nostr_sdk::PublicKey::from_hex(&pubkey_str))
     {
         Ok(pk) => pk,
         Err(e) => {

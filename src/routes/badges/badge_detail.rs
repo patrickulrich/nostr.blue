@@ -171,7 +171,7 @@ pub fn BadgeDetail(naddr: String) -> Element {
                             span { class: "text-muted-foreground", "Created by" }
                             Link {
                                 to: Route::Profile {
-                                    pubkey: b.pubkey.clone(),
+                                    pubkey: crate::utils::nip19_urls::profile_route_id(&b.pubkey),
                                 },
                                 class: "flex items-center gap-2 text-primary hover:underline",
                                 if let Some(profile) = issuer_profile.read().as_ref() {

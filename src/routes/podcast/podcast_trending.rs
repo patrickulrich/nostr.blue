@@ -1,16 +1,16 @@
-//! Podcast Trending Page
-//!
-//! Full page view of trending podcasts from Podcast Index API
 use crate::components::icons;
+use crate::routes::podcast::podcast_shared_states::{
+    PodcastApiAuthRequiredState, PodcastApiInitializingState,
+};
 use crate::routes::Route;
 use crate::services::podcast_index;
 use crate::stores::{nostr_client, podcast_subscription};
 use dioxus::prelude::*;
-/// Full trending podcasts page
 #[component]
 pub fn PodcastTrending() -> Element {
     let mut podcasts = use_signal(|| None::<Vec<podcast_index::PodcastFeed>>);
     let mut loading = use_signal(|| true);
+    let mut auth_required = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut selected_category = use_signal(|| None::<String>);
     {
@@ -18,11 +18,15 @@ pub fn PodcastTrending() -> Element {
         use_effect(move || {
             let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
             let has_signer = nostr_client::has_signer();
-            if !client_initialized || !has_signer {
-                loading.set(false);
-                error.set(Some("Sign in to view trending podcasts".into()));
+            if !client_initialized {
                 return;
             }
+            if !has_signer {
+                loading.set(false);
+                auth_required.set(true);
+                return;
+            }
+            auth_required.set(false);
             let cat = category.clone();
             loading.set(true);
             error.set(None);
@@ -54,40 +58,46 @@ pub fn PodcastTrending() -> Element {
                     h1 { class: "text-xl font-bold", "Trending Podcasts" }
                 }
             }
-            div { class: "p-4 space-y-4",
-                div { class: "flex flex-wrap gap-2",
-                    CategoryChip {
-                        label: "All",
-                        selected: selected_category.read().is_none(),
-                        onclick: move |_| selected_category.set(None),
-                    }
-                    for cat in podcast_subscription::get_categories() {
+            if !*nostr_client::CLIENT_INITIALIZED.read() {
+                PodcastApiInitializingState { item_label: "trending podcasts" }
+            } else if *auth_required.read() {
+                PodcastApiAuthRequiredState { item_label: "trending podcasts" }
+            } else {
+                div { class: "p-4 space-y-4",
+                    div { class: "flex flex-wrap gap-2",
                         CategoryChip {
-                            label: cat.name,
-                            selected: selected_category.read().as_ref().is_some_and(|c| c == cat.name),
-                            onclick: move |_| selected_category.set(Some(cat.name.to_string())),
+                            label: "All",
+                            selected: selected_category.read().is_none(),
+                            onclick: move |_| selected_category.set(None),
+                        }
+                        for cat in podcast_subscription::get_categories() {
+                            CategoryChip {
+                                label: cat.name,
+                                selected: selected_category.read().as_ref().is_some_and(|c| c == cat.name),
+                                onclick: move |_| selected_category.set(Some(cat.name.to_string())),
+                            }
                         }
                     }
-                }
-                if *loading.read() {
-                    div { class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3",
-                        for i in 0..20 {
-                            TrendingCardSkeleton { key: "{i}" }
-                        }
-                    }
-                } else if let Some(ref err) = *error.read() {
-                    div { class: "text-center py-16 text-destructive",
-                        "Failed to load trending podcasts: {err}"
-                    }
-                } else if let Some(ref feeds) = *podcasts.read() {
-                    if feeds.is_empty() {
-                        div { class: "text-center py-16 text-muted-foreground",
-                            "No trending podcasts found"
-                        }
-                    } else {
+                    if *loading.read() {
                         div { class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3",
-                            for feed in feeds.iter() {
-                                TrendingCard { key: "{feed.id}", feed: feed.clone() }
+                            for i in 0..20 {
+                                TrendingCardSkeleton { key: "{i}" }
+                            }
+                        }
+                    } else if let Some(ref err) = *error.read() {
+                        div { class: "text-center py-16 text-destructive",
+                            "Failed to load trending podcasts: {err}"
+                        }
+                    } else if let Some(ref feeds) = *podcasts.read() {
+                        if feeds.is_empty() {
+                            div { class: "text-center py-16 text-muted-foreground",
+                                "No trending podcasts found"
+                            }
+                        } else {
+                            div { class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3",
+                                for feed in feeds.iter() {
+                                    TrendingCard { key: "{feed.id}", feed: feed.clone() }
+                                }
                             }
                         }
                     }
@@ -96,7 +106,6 @@ pub fn PodcastTrending() -> Element {
         }
     }
 }
-/// Category filter chip
 #[derive(Props, Clone, PartialEq)]
 struct CategoryChipProps {
     label: &'static str,
@@ -113,7 +122,6 @@ fn CategoryChip(props: CategoryChipProps) -> Element {
         }
     }
 }
-/// Trending podcast card
 #[derive(Props, Clone, PartialEq)]
 struct TrendingCardProps {
     feed: podcast_index::PodcastFeed,

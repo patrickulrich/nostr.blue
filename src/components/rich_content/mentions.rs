@@ -46,7 +46,15 @@ pub fn MentionRenderer(mention: String) -> Element {
             .ok()
             .and_then(|nip19| match nip19 {
                 Nip19::Pubkey(pk) => Some(pk),
-                Nip19::Profile(profile) => Some(profile.public_key),
+                Nip19::Profile(profile) => {
+                    if !profile.relays.is_empty() {
+                        let urls: Vec<String> = profile.relays.iter().map(|r| r.to_string()).collect();
+                        crate::stores::relay::coverage::record_user_relays(
+                            &profile.public_key.to_hex(), &urls,
+                        );
+                    }
+                    Some(profile.public_key)
+                }
                 _ => None,
             });
     let cached_metadata = pubkey_result
@@ -59,6 +67,13 @@ pub fn MentionRenderer(mention: String) -> Element {
         }
         if let Some(pubkey) = pubkey_result {
             let pubkey_hex = pubkey.to_hex();
+            let pk_hex_bg = pubkey_hex.clone();
+            spawn(async move {
+                let _ = crate::stores::relay::coverage::resolve_user_relays(
+                    &pk_hex_bg,
+                    crate::stores::relay::coverage::RelayPurpose::Write,
+                ).await;
+            });
             spawn(async move {
                 match profiles::fetch_profile(pubkey_hex).await {
                     Ok(profile) => {
@@ -106,7 +121,7 @@ pub fn MentionRenderer(mention: String) -> Element {
         rsx! {
             Link {
                 to: Route::Profile {
-                    pubkey: pubkey.to_hex(),
+                    pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey.to_hex()),
                 },
                 class: "text-foreground hover:text-foreground/70 font-medium hover:underline",
                 onclick: move |e: MouseEvent| e.stop_propagation(),
@@ -339,7 +354,7 @@ pub fn EventMentionRenderer(mention: String) -> Element {
             rsx! {
                 Link {
                     to: Route::Note {
-                        note_id: event_id.to_hex(),
+                        note_id: crate::utils::nip19_urls::note_route_id(&event_id.to_hex(), None),
                         from_voice: None,
                     },
                     class: "text-foreground hover:text-foreground/70 font-medium hover:underline",
@@ -363,6 +378,7 @@ pub(super) fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -
     let pubkey_str = pubkey.to_hex();
     let event_id_nav = event_id.clone();
     let event_id_click = event_id.clone();
+    let pubkey_str_click = pubkey_str.clone();
     let display_name = if let Some(meta) = metadata {
         meta.display_name
             .clone()
@@ -403,7 +419,7 @@ pub(super) fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -
                 }
                 evt.prevent_default();
                 navigator().push(Route::Note {
-                    note_id: event_id_nav.clone(),
+                    note_id: crate::utils::nip19_urls::note_route_id(&event_id_nav, Some(&pubkey_str)),
                     from_voice: None,
                 });
             },
@@ -420,7 +436,7 @@ pub(super) fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -
                     }
                 }
                 navigator().push(Route::Note {
-                    note_id: event_id_click.clone(),
+                    note_id: crate::utils::nip19_urls::note_route_id(&event_id_click, Some(&pubkey_str_click)),
                     from_voice: None,
                 });
             },

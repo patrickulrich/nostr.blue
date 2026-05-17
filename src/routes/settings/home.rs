@@ -1,4 +1,6 @@
 use crate::components::{NwcSetupModal, ReactionDefaultsModal};
+#[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
+use crate::components::ConfirmModal;
 use crate::platform::storage;
 use crate::routes::Route;
 use crate::stores::blossom_store::BlossomServersStoreStoreExt;
@@ -13,6 +15,9 @@ use dioxus_core::use_drop;
 #[cfg(feature = "web")]
 use gloo_events::EventListener;
 use nostr_sdk::{Timestamp, ToBech32};
+
+#[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
+use crate::services::cloud_backup::{delete_cloud_backup, google_sign_in, list_cloud_backups, GoogleAuthResult};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum VanishRelayScope {
@@ -117,6 +122,7 @@ pub fn Settings() -> Element {
                     }
                 }
             }
+            {cloud_backup_section()}
             div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
                 div { class: "flex items-center justify-between mb-4",
                     h3 { class: "text-xl font-semibold text-gray-900 dark:text-white",
@@ -1799,6 +1805,282 @@ fn BitcoinSettingsSection() -> Element {
             if auth.is_authenticated {
                 p { class: "text-xs text-gray-500 dark:text-gray-400",
                     "Your mempool endpoint setting is synced across devices via Nostr (NIP-78)."
+                }
+            }
+        }
+    }
+}
+
+#[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
+fn cloud_backup_section() -> Element {
+    if auth_store::is_google_backup_user() {
+        rsx! { CloudBackupSection {} }
+    } else {
+        rsx! {}
+    }
+}
+
+#[cfg(not(any(target_family = "wasm", feature = "mobile_platform")))]
+fn cloud_backup_section() -> Element {
+    rsx! {}
+}
+
+#[cfg(not(any(target_family = "wasm", feature = "mobile_platform")))]
+#[component]
+fn CloudBackupSection() -> Element {
+    rsx! {}
+}
+
+#[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
+#[derive(Clone, Debug, PartialEq)]
+enum CloudBackupSettingsState {
+    Idle,
+    SigningIn,
+    Checking,
+    HasBackup {
+        file_id: String,
+        auth: GoogleAuthResult,
+    },
+    NoBackup {
+        auth: GoogleAuthResult,
+    },
+    Working,
+    Success(String),
+    Error(String),
+}
+
+#[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
+#[component]
+fn CloudBackupSection() -> Element {
+    let mut state = use_signal(|| CloudBackupSettingsState::Idle);
+    let mut show_delete_confirm = use_signal(|| false);
+    let npub = auth_store::export_npub().unwrap_or_default();
+
+    let check_status = move |_| {
+        let npub = npub.clone();
+        spawn(async move {
+            state.set(CloudBackupSettingsState::SigningIn);
+            let auth = match google_sign_in().await {
+                Ok(a) => a,
+                Err(e) => {
+                    state.set(CloudBackupSettingsState::Error(format!("Sign-in failed: {}", e)));
+                    return;
+                }
+            };
+
+            state.set(CloudBackupSettingsState::Checking);
+            match list_cloud_backups(&auth).await {
+                Ok(entries) => {
+                    if let Some(entry) = entries.iter().find(|e| e.npub == npub) {
+                        state.set(CloudBackupSettingsState::HasBackup {
+                            file_id: entry.file_id.clone(),
+                            auth,
+                        });
+                    } else {
+                        state.set(CloudBackupSettingsState::NoBackup { auth });
+                    }
+                }
+                Err(e) => {
+                    state.set(CloudBackupSettingsState::Error(format!(
+                        "Failed to check Drive: {}",
+                        e
+                    )));
+                }
+            }
+        });
+    };
+
+    let re_backup = move |_| {
+        let current = state.read().clone();
+        let auth = match &current {
+            CloudBackupSettingsState::HasBackup { auth, .. } => auth.clone(),
+            _ => return,
+        };
+        spawn(async move {
+            state.set(CloudBackupSettingsState::Working);
+            match auth_store::backup_current_account_to_cloud(&auth).await {
+                Ok(()) => {
+                    state.set(CloudBackupSettingsState::Success(
+                        "Backup updated successfully".to_string(),
+                    ));
+                    crate::platform::timer::sleep_ms(3000).await;
+                    state.set(CloudBackupSettingsState::Idle);
+                }
+                Err(e) => {
+                    state.set(CloudBackupSettingsState::Error(format!(
+                        "Backup failed: {}",
+                        e
+                    )));
+                }
+            }
+        });
+    };
+
+    let create_backup = move |_| {
+        let current = state.read().clone();
+        let auth = match &current {
+            CloudBackupSettingsState::NoBackup { auth } => auth.clone(),
+            _ => return,
+        };
+        spawn(async move {
+            state.set(CloudBackupSettingsState::Working);
+            match auth_store::backup_current_account_to_cloud(&auth).await {
+                Ok(()) => {
+                    state.set(CloudBackupSettingsState::Success(
+                        "Backup created successfully".to_string(),
+                    ));
+                    crate::platform::timer::sleep_ms(3000).await;
+                    state.set(CloudBackupSettingsState::Idle);
+                }
+                Err(e) => {
+                    state.set(CloudBackupSettingsState::Error(format!(
+                        "Backup failed: {}",
+                        e
+                    )));
+                }
+            }
+        });
+    };
+
+    let delete_backup = move |_| {
+        show_delete_confirm.set(true);
+    };
+
+    let confirm_delete_backup = move |_: ()| {
+        let current = state.read().clone();
+        let (file_id, auth) = match &current {
+            CloudBackupSettingsState::HasBackup { file_id, auth } => {
+                (file_id.clone(), auth.clone())
+            }
+            _ => return,
+        };
+        spawn(async move {
+            state.set(CloudBackupSettingsState::Working);
+            match delete_cloud_backup(&file_id, &auth).await {
+                Ok(()) => {
+                    state.set(CloudBackupSettingsState::Success(
+                        "Backup deleted".to_string(),
+                    ));
+                    crate::platform::timer::sleep_ms(3000).await;
+                    state.set(CloudBackupSettingsState::Idle);
+                }
+                Err(e) => {
+                    state.set(CloudBackupSettingsState::Error(format!(
+                        "Delete failed: {}",
+                        e
+                    )));
+                }
+            }
+        });
+    };
+
+    let dismiss = move |_| {
+        state.set(CloudBackupSettingsState::Idle);
+    };
+
+    let current_state = state.read().clone();
+
+    rsx! {
+        div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+            div { class: "flex items-center justify-between mb-4",
+                h3 { class: "text-xl font-semibold text-gray-900 dark:text-white",
+                    "☁️ Cloud Backup"
+                }
+                span { class: "text-xs text-gray-500 dark:text-gray-400", "Google Drive" }
+            }
+            p { class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
+                "Back up your encrypted private key to Google Drive. Sign in to check, create, or manage your backup."
+            }
+            match &current_state {
+                CloudBackupSettingsState::Idle => rsx! {
+                    button {
+                        class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition",
+                        onclick: check_status,
+                        "Check Backup Status"
+                    }
+                },
+                CloudBackupSettingsState::SigningIn => rsx! {
+                    div { class: "flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400",
+                        span { class: "inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" }
+                        "Signing in to Google..."
+                    }
+                },
+                CloudBackupSettingsState::Checking => rsx! {
+                    div { class: "flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400",
+                        span { class: "inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" }
+                        "Checking Google Drive..."
+                    }
+                },
+                CloudBackupSettingsState::HasBackup { .. } => rsx! {
+                    div { class: "space-y-3",
+                        div { class: "p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg",
+                            p { class: "text-sm font-medium text-green-800 dark:text-green-200",
+                                "✓ Backup exists for this account"
+                            }
+                        }
+                        div { class: "flex gap-2",
+                            button {
+                                class: "px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition",
+                                onclick: re_backup,
+                                "Re-backup Now"
+                            }
+                            button {
+                                class: "px-4 py-2 text-sm bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 transition",
+                                onclick: delete_backup,
+                                "Delete Backup"
+                            }
+                        }
+                    }
+                },
+                CloudBackupSettingsState::NoBackup { .. } => rsx! {
+                    div { class: "space-y-3",
+                        div { class: "p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg",
+                            p { class: "text-sm font-medium text-yellow-800 dark:text-yellow-200",
+                                "No backup found for this account"
+                            }
+                        }
+                        button {
+                            class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition",
+                            onclick: create_backup,
+                            "Create Backup"
+                        }
+                    }
+                },
+                CloudBackupSettingsState::Working => rsx! {
+                    div { class: "flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400",
+                        span { class: "inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" }
+                        "Working..."
+                    }
+                },
+                CloudBackupSettingsState::Success(msg) => rsx! {
+                    div { class: "p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg",
+                        p { class: "text-sm text-green-800 dark:text-green-200",
+                            "✅ {msg}"
+                        }
+                    }
+                },
+                CloudBackupSettingsState::Error(msg) => rsx! {
+                    div { class: "space-y-2",
+                        div { class: "p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg",
+                            p { class: "text-sm text-red-800 dark:text-red-200",
+                                "❌ {msg}"
+                            }
+                        }
+                        button {
+                            class: "px-4 py-2 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition",
+                            onclick: dismiss,
+                            "Dismiss"
+                        }
+                    }
+                },
+            }
+            if *show_delete_confirm.read() {
+                ConfirmModal {
+                    title: "Delete Cloud Backup".to_string(),
+                    message: "Are you sure you want to delete your cloud backup? If you don't have your mnemonic stored elsewhere, you will permanently lose access to your account.".to_string(),
+                    confirm_text: Some("Delete".to_string()),
+                    on_confirm: confirm_delete_backup,
+                    on_cancel: move |_| show_delete_confirm.set(false),
                 }
             }
         }

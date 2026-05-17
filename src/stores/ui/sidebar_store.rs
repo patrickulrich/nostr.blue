@@ -195,7 +195,7 @@ impl SidebarItem {
             SidebarItem::Messages => Some(Route::DMs {}),
             SidebarItem::Bookmarks => Some(Route::Bookmarks {}),
             SidebarItem::Profile => pubkey.map(|pk| Route::Profile {
-                pubkey: pk.to_string(),
+                pubkey: crate::utils::nip19_urls::profile_route_id(pk),
             }),
             SidebarItem::Settings => Some(Route::Settings {}),
             SidebarItem::VoiceMessages => Some(Route::VoiceMessages {}),

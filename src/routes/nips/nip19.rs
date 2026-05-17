@@ -69,7 +69,7 @@ async fn decode_and_redirect(identifier: &str) -> std::result::Result<Route, Str
                 Nip19::Pubkey(pubkey) => {
                     log::info!("Decoded npub: {}", pubkey);
                     Ok(Route::Profile {
-                        pubkey: pubkey.to_hex(),
+                        pubkey: pubkey.to_bech32().unwrap_or_else(|_| pubkey.to_hex()),
                     })
                 }
                 Nip19::Profile(profile) => {
@@ -77,14 +77,20 @@ async fn decode_and_redirect(identifier: &str) -> std::result::Result<Route, Str
                         "Decoded nprofile: {} with {} relay hints", profile.public_key,
                         profile.relays.len()
                     );
+                    if !profile.relays.is_empty() {
+                        let urls: Vec<String> = profile.relays.iter().map(|r| r.to_string()).collect();
+                        crate::stores::relay::coverage::record_user_relays(
+                            &profile.public_key.to_hex(), &urls,
+                        );
+                    }
                     Ok(Route::Profile {
-                        pubkey: profile.public_key.to_hex(),
+                        pubkey: profile.to_bech32().unwrap_or_else(|_| profile.public_key.to_hex()),
                     })
                 }
                 Nip19::EventId(event_id) => {
                     log::info!("Decoded note: {}", event_id);
                     Ok(Route::Note {
-                        note_id: event_id.to_hex(),
+                        note_id: event_id.to_bech32().unwrap_or_else(|_| event_id.to_hex()),
                         from_voice: None,
                     })
                 }
@@ -93,8 +99,16 @@ async fn decode_and_redirect(identifier: &str) -> std::result::Result<Route, Str
                         "Decoded nevent: {} with {} relay hints", nevent.event_id, nevent
                         .relays.len()
                     );
+                    if !nevent.relays.is_empty() {
+                        let urls: Vec<String> = nevent.relays.iter().map(|r| r.to_string()).collect();
+                        if let Some(author) = &nevent.author {
+                            crate::stores::relay::coverage::record_user_relays(
+                                &author.to_hex(), &urls,
+                            );
+                        }
+                    }
                     Ok(Route::Note {
-                        note_id: nevent.event_id.to_hex(),
+                        note_id: nevent.to_bech32().unwrap_or_else(|_| nevent.event_id.to_hex()),
                         from_voice: None,
                     })
                 }
