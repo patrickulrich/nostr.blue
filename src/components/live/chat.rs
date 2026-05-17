@@ -405,7 +405,7 @@ fn ChatMessage(
             div { class: "flex gap-3",
                 Link {
                     to: Route::Profile {
-                        pubkey: author_pk_for_display.clone(),
+                        pubkey: crate::utils::nip19_urls::profile_route_id(&author_pk_for_display),
                     },
                     class: "shrink-0",
                     if let Some(pic_url) = author_picture.read().as_ref() {
@@ -429,7 +429,7 @@ fn ChatMessage(
                     div { class: "flex items-baseline gap-2",
                         Link {
                             to: Route::Profile {
-                                pubkey: author_pk_for_display.clone(),
+                                pubkey: crate::utils::nip19_urls::profile_route_id(&author_pk_for_display),
                             },
                             class: "font-semibold text-sm hover:underline truncate",
                             "{author_name.read()}"

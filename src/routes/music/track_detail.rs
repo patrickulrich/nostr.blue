@@ -12,18 +12,22 @@
 //! - RSS Music tracks (rss:{feed_id}:{episode_id} format)
 
 use crate::components::{icons, ContentShareModal, ContentType};
-use crate::routes::podcast::podcast_shared_states::PodcastApiAuthRequiredState;
+use crate::routes::podcast::podcast_shared_states::{
+    PodcastApiAuthRequiredState, PodcastApiInitializingState,
+};
 use crate::routes::Route;
 use crate::services::{podcast_index, wavlake::WavlakeAPI};
 use crate::stores::{music_player, music_player::MusicPlayerStateStoreExt, nostr_client, nostr_music, profiles};
 use dioxus::prelude::*;
 
 const AUTH_REQUIRED_SENTINEL: &str = "__auth_required__";
+const INITIALIZING_SENTINEL: &str = "__initializing__";
 
 enum TrackDetailState {
     Loading,
     Loaded(Box<music_player::MusicTrack>),
     AuthRequired,
+    Initializing,
     Error(String),
 }
 
@@ -35,8 +39,8 @@ pub fn MusicTrackDetail(track_id: ReadSignal<String>) -> Element {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         let has_signer = nostr_client::has_signer();
         async move {
-            if !client_initialized && id.starts_with("naddr") {
-                return Err("Waiting for client initialization...".to_string());
+            if !client_initialized {
+                return Err(INITIALIZING_SENTINEL.to_string());
             }
             if id.starts_with("rss:") && !has_signer {
                 return Err(AUTH_REQUIRED_SENTINEL.to_string());
@@ -48,6 +52,7 @@ pub fn MusicTrackDetail(track_id: ReadSignal<String>) -> Element {
     let state = match &*track_data.read() {
         None => TrackDetailState::Loading,
         Some(Ok(track)) => TrackDetailState::Loaded(Box::new(track.clone())),
+        Some(Err(e)) if e == INITIALIZING_SENTINEL => TrackDetailState::Initializing,
         Some(Err(e)) if e == AUTH_REQUIRED_SENTINEL => TrackDetailState::AuthRequired,
         Some(Err(e)) => TrackDetailState::Error(e.clone()),
     };
@@ -61,6 +66,9 @@ pub fn MusicTrackDetail(track_id: ReadSignal<String>) -> Element {
                 },
                 TrackDetailState::AuthRequired => rsx! {
                     PodcastApiAuthRequiredState { item_label: "track" }
+                },
+                TrackDetailState::Initializing => rsx! {
+                    PodcastApiInitializingState { item_label: "track" }
                 },
                 TrackDetailState::Error(e) => rsx! {
                     div { class: "p-4 text-center",
@@ -464,9 +472,11 @@ fn get_artist_route(track: &music_player::MusicTrack) -> Option<Route> {
             artist_id: artist_id.clone(),
         }),
         nostr_music::TrackSource::Nostr { pubkey, .. } => Some(Route::Profile {
-            pubkey: pubkey.clone(),
+            pubkey: crate::utils::nip19_urls::profile_route_id(pubkey),
         }),
-        nostr_music::TrackSource::RssMusic { .. } => None,
+        nostr_music::TrackSource::RssMusic { artist, .. } => artist.as_ref().map(|a| Route::MusicRssArtist {
+            artist: a.clone(),
+        }),
         _ => None,
     }
 }

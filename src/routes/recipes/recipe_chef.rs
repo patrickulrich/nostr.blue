@@ -200,7 +200,7 @@ pub fn RecipeChef(npub: String) -> Element {
                             if let Some(ref pk) = *pubkey_hex.read() {
                                 Link {
                                     to: Route::Profile {
-                                        pubkey: pk.clone(),
+                                        pubkey: crate::utils::nip19_urls::profile_route_id(pk),
                                     },
                                     class: "text-sm text-primary hover:underline mt-2 inline-block",
                                     "View full profile →"

@@ -286,10 +286,11 @@ fn NostrWineHotPostCard(note: crate::services::trending::TrendingNote) -> Elemen
         .ok()
         .and_then(|id| id.to_bech32().ok())
         .unwrap_or_else(|| note.event.id.clone());
+    let author_pk = note.event.pubkey.clone();
 
     rsx! {
         Link {
-            to: Route::Note { note_id: note_bech32, from_voice: None },
+            to: Route::Note { note_id: crate::utils::nip19_urls::note_route_id(&note_bech32, Some(&author_pk)), from_voice: None },
             class: "block rounded-lg border border-border/60 p-2.5 transition hover:bg-accent/40",
             div { class: "flex gap-3",
                 img {
@@ -317,7 +318,7 @@ fn DittoHotPostCard(event: Event) -> Element {
 
     rsx! {
         Link {
-            to: Route::Note { note_id: note_bech32, from_voice: None },
+            to: Route::Note { note_id: crate::utils::nip19_urls::note_route_id(&note_bech32, Some(&pubkey_hex)), from_voice: None },
             class: "block rounded-lg border border-border/60 p-2.5 transition hover:bg-accent/40",
             div { class: "flex gap-3",
                 img {
@@ -344,10 +345,11 @@ fn NostrarchivesHotPostCard(note: NostrarchivesNote) -> Element {
         .ok()
         .and_then(|id| id.to_bech32().ok())
         .unwrap_or_else(|| note.id.clone());
+    let author_pk = note.pubkey.clone();
 
     rsx! {
         Link {
-            to: Route::Note { note_id: note_bech32, from_voice: None },
+            to: Route::Note { note_id: crate::utils::nip19_urls::note_route_id(&note_bech32, Some(&author_pk)), from_voice: None },
             class: "block rounded-lg border border-border/60 p-2.5 transition hover:bg-accent/40",
             div { class: "flex gap-3",
                 img {

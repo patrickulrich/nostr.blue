@@ -588,10 +588,11 @@ fn render_note_minicard(event: &Event, note_id: &str) -> Element {
             event.content.clone()
         }
     };
+    let author_pk = event.pubkey.to_hex();
     rsx! {
         Link {
             to: Route::Note {
-                note_id: note_id.to_string(),
+                note_id: crate::utils::nip19_urls::note_route_id(note_id, Some(&author_pk)),
                 from_voice: None,
             },
             class: "block p-3 bg-card border border-border rounded-lg hover:bg-accent/50 transition",
@@ -651,7 +652,7 @@ fn render_profile_minicard(
         rsx! {
             Link {
                 to: Route::Profile {
-                    pubkey: pubkey.to_string(),
+                    pubkey: crate::utils::nip19_urls::profile_route_id(pubkey),
                 },
                 class: "flex items-center gap-3 p-3 bg-card border border-border rounded-lg hover:bg-accent/50 transition",
                 if let Some(ref pic) = picture.as_ref().filter(|u| is_valid_http_url(u)) {

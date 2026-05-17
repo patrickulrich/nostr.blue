@@ -549,7 +549,7 @@ fn ContributorCard(pubkey: String, is_owner: bool) -> Element {
 
     rsx! {
         Link {
-            to: Route::Profile { pubkey: pubkey.clone() },
+            to: Route::Profile { pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey) },
             class: "flex items-center gap-3 p-4 bg-card border border-border rounded-lg hover:bg-accent/50 transition",
             if let Some(pic) = &picture {
                 if !*img_failed.read() {

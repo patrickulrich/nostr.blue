@@ -136,7 +136,7 @@ pub fn MobileSearchSlideout(show: bool, on_close: EventHandler<()>) -> Element {
                             let selected = results.get(*selected_index.read());
                             if let Some(profile) = selected {
                                 let pubkey_hex = profile.pubkey.to_hex();
-                                navigator.push(Route::Profile { pubkey: pubkey_hex });
+                                navigator.push(Route::Profile { pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey_hex) });
                                 on_close.call(());
                             }
                         } else {
@@ -260,7 +260,7 @@ fn render_mobile_results(
                             onmousedown: move |evt| {
                                 evt.prevent_default();
                                 let pubkey_hex = profile_clone.pubkey.to_hex();
-                                navigator.push(Route::Profile { pubkey: pubkey_hex });
+                                navigator.push(Route::Profile { pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey_hex) });
                                 query.set(String::new());
                                 on_close.call(());
                             },

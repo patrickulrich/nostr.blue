@@ -94,7 +94,11 @@ pub fn set_active_note_back_context(
 
 pub fn clear_active_note_back_context(note_id: &str) {
     let current = ACTIVE_NOTE_BACK_CONTEXT.read().clone();
-    if current.note_id.as_deref() == Some(note_id) {
+    let note_matches = current.note_id.as_deref().is_some_and(|ctx_id| {
+        crate::stores::nostr_client::parse_event_id(ctx_id).map(|p| p.event_id)
+            == crate::stores::nostr_client::parse_event_id(note_id).map(|p| p.event_id)
+    });
+    if note_matches {
         *ACTIVE_NOTE_BACK_CONTEXT.write() = ActiveNoteBackContext::default();
     }
 }

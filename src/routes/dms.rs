@@ -598,7 +598,7 @@ fn ConversationView(pubkey: String) -> Element {
                         p { class: "text-xs text-muted-foreground truncate", "{nip05_id}" }
                     }
                     Link {
-                        to: Route::Profile { pubkey },
+                        to: Route::Profile { pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey) },
                         class: "text-xs text-blue-500 hover:underline",
                         "View profile"
                     }

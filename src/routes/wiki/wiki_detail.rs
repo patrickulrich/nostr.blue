@@ -144,7 +144,7 @@ pub fn WikiDetail(npub: String, identifier: String) -> Element {
                                     div { class: "flex items-start gap-4",
                                         Link {
                                             to: Route::Profile {
-                                                pubkey: author_hex.clone(),
+                                                pubkey: crate::utils::nip19_urls::profile_route_id(&author_hex),
                                             },
                                             class: "shrink-0",
                                             if let Some(ref picture) = author_picture {
@@ -163,7 +163,7 @@ pub fn WikiDetail(npub: String, identifier: String) -> Element {
                                             div { class: "flex items-center gap-2",
                                                 Link {
                                                     to: Route::Profile {
-                                                        pubkey: author_hex.clone(),
+                                                        pubkey: crate::utils::nip19_urls::profile_route_id(&author_hex),
                                                     },
                                                     class: "font-medium text-foreground hover:underline",
                                                     "{author_name}"
@@ -173,7 +173,7 @@ pub fn WikiDetail(npub: String, identifier: String) -> Element {
                                             div { class: "flex items-center gap-4 mt-2 text-sm",
                                                 Link {
                                                     to: Route::Profile {
-                                                        pubkey: author_hex.clone(),
+                                                        pubkey: crate::utils::nip19_urls::profile_route_id(&author_hex),
                                                     },
                                                     class: "flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors",
                                                     UserIcon { class: "w-4 h-4" }
@@ -373,7 +373,7 @@ fn MergeRequestCard(request: WikiMergeRequest) -> Element {
             div { class: "flex items-start gap-3",
                 Link {
                     to: Route::Profile {
-                        pubkey: request.pubkey.clone(),
+                        pubkey: crate::utils::nip19_urls::profile_route_id(&request.pubkey),
                     },
                     class: "shrink-0",
                     if let Some(ref picture) = requester_picture {
@@ -392,7 +392,7 @@ fn MergeRequestCard(request: WikiMergeRequest) -> Element {
                     div { class: "flex items-center gap-2",
                         Link {
                             to: Route::Profile {
-                                pubkey: request.pubkey.clone(),
+                                pubkey: crate::utils::nip19_urls::profile_route_id(&request.pubkey),
                             },
                             class: "font-medium text-foreground hover:underline truncate",
                             "{requester_name}"

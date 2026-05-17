@@ -167,6 +167,9 @@ impl MusicTrack {
             TrackSource::Wavlake { artist_id, .. } => Some(Route::MusicArtist {
                 artist_id: artist_id.clone(),
             }),
+            TrackSource::RssMusic { artist, .. } => artist.as_ref().map(|a| Route::MusicRssArtist {
+                artist: a.clone(),
+            }),
             _ => None,
         }
     }
@@ -271,7 +274,7 @@ impl MusicTrack {
                 feed_id, episode_id, ..
             } => {
                 format!(
-                    "https://nostr.blue/music/rss/album/{}#track-{}",
+                    "https://nostr.blue/music/track/rss:{}:{}",
                     feed_id, episode_id,
                 )
             }

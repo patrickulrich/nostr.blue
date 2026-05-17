@@ -24,6 +24,7 @@ pub mod gif_picker;
 pub mod gif_upload_modal;
 pub mod icons;
 pub mod live;
+pub mod login_modal;
 pub mod markdown_editor;
 pub mod media;
 pub mod media_uploader;
@@ -80,6 +81,7 @@ pub use confirm_modal::ConfirmModal;
 pub use live::{
     ChannelChat, LiveChat, LiveStreamPlayer, MiniLiveStreamCard, StreamStatus,
 };
+pub use login_modal::LoginModal;
 pub use media::MediaLightbox;
 pub use media_uploader::MediaUploader;
 pub use mobile_search_slideout::MobileSearchSlideout;

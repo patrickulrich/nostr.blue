@@ -153,10 +153,12 @@ pub async fn load_settings() -> Result<(), String> {
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-    let auth = auth_store::AUTH_STATE.read();
-    let pubkey_str = auth.pubkey.as_ref().ok_or("No pubkey")?;
-    let pubkey = nostr_sdk::PublicKey::from_bech32(pubkey_str)
-        .or_else(|_| nostr_sdk::PublicKey::from_hex(pubkey_str))
+    let pubkey_str = auth_store::AUTH_STATE.read()
+        .pubkey
+        .clone()
+        .ok_or("No pubkey")?;
+    let pubkey = nostr_sdk::PublicKey::from_bech32(&pubkey_str)
+        .or_else(|_| nostr_sdk::PublicKey::from_hex(&pubkey_str))
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = Filter::new()
         .author(pubkey)

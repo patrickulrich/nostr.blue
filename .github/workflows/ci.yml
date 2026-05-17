@@ -137,7 +137,7 @@ jobs:
             libgdk-pixbuf-2.0-dev
 
       - name: Install Dioxus CLI
-        run: cargo install dioxus-cli --version 0.7.5 --locked --force
+        run: cargo install dioxus-cli --version 0.7.7 --locked --force
 
       - name: Dioxus check
         run: dx check --platform linux --no-default-features --features desktop
@@ -230,7 +230,7 @@ jobs:
         run: npm run build:all
 
       - name: Install Dioxus CLI
-        run: cargo install dioxus-cli --version 0.7.5 --locked --force
+        run: cargo install dioxus-cli --version 0.7.7 --locked --force
 
       - name: Build Android APK
         run: |

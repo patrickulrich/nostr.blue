@@ -86,7 +86,7 @@ pub fn HighlightCard(props: HighlightCardProps) -> Element {
             div { class: "flex items-center gap-2 mt-3 pt-3 border-t border-border/50",
                 Link {
                     to: Route::Profile {
-                        pubkey: author_pubkey.clone(),
+                        pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                     },
                     class: "shrink-0",
                     if let Some(pic_url) = profile_picture.clone() {
@@ -105,7 +105,7 @@ pub fn HighlightCard(props: HighlightCardProps) -> Element {
                 div { class: "flex items-center gap-1 text-xs text-muted-foreground min-w-0",
                     Link {
                         to: Route::Profile {
-                            pubkey: author_pubkey.clone(),
+                            pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                         },
                         class: "font-medium hover:text-foreground transition-colors truncate",
                         "{display_name}"

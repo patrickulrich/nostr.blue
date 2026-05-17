@@ -1,5 +1,4 @@
 use super::video_detail::{FeedType, ShortsPlayer};
-use crate::stores::nostr_client::get_contacts_cache;
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
 
@@ -7,28 +6,11 @@ use dioxus::prelude::*;
 pub fn VideosVerts() -> Element {
     let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
     let default_feed = if is_authenticated {
-        let has_contacts = get_contacts_cache()
-            .lock()
-            .map(|guard| {
-                guard
-                    .as_ref()
-                    .map(|c| !c.contacts.is_empty())
-                    .unwrap_or(false)
-            })
-            .unwrap_or(false);
-        if has_contacts {
-            FeedType::Following
-        } else {
-            FeedType::Global
-        }
+        FeedType::Following
     } else {
         FeedType::Global
     };
     let mut feed_type = use_signal(|| default_feed);
-    let _feed_key = match *feed_type.read() {
-        FeedType::Following => "following",
-        FeedType::Global => "global",
-    };
 
     rsx! {
         if !*nostr_client::CLIENT_INITIALIZED.read() {
@@ -43,7 +25,6 @@ pub fn VideosVerts() -> Element {
         } else {
             div {
                 ShortsPlayer {
-                    key: "{_feed_key}",
                     initial_video_id: String::new(),
                     feed_type: *feed_type.read(),
                     initial_event: None,

@@ -1,4 +1,4 @@
-mod types;
+pub mod types;
 mod feed_loaders;
 pub mod login;
 mod engagement;
@@ -20,8 +20,10 @@ use dioxus::prelude::*;
 use engagement::{fetch_and_stream_interactions, fetch_paginated_interactions};
 use feed_loaders::{
     exclusive_pagination_cursor, feed_kinds, merge_paginated_feed_items, prefetch_author_metadata,
+    prefetch_author_metadata_with_relays,
     load_following_feed, load_following_feed_streaming, load_following_with_replies,
     load_global_feed, load_paginated_global_feed, load_people_list_feed, load_relay_feed,
+    sync_following_feed_page, FEED_LIMIT,
 };
 use login::LoginSection;
 use nostr_sdk::{Filter, Kind, PublicKey, Timestamp};
@@ -265,16 +267,23 @@ pub fn Home(list: String) -> Element {
                     let cache_key = FeedCacheKey::Following {
                         pubkey: pubkey_str.clone(),
                     };
-                    let cached_items = feed_cache::load_cached_feed(&cache_key, 50)
-                        .await
-                        .unwrap_or_default();
+                    let (cached_items, cached_cursor, cached_count) = {
+                        let items = feed_cache::load_cached_feed(&cache_key, FEED_LIMIT)
+                            .await
+                            .unwrap_or_default();
+                        let cursor = feed_cache::load_feed_cursor(&cache_key).await;
+                        let count = feed_cache::get_cached_item_count(&cache_key).await;
+                        (items, cursor, count)
+                    };
                     if is_stale() {
                         return;
                     }
                     let mut accumulated_items = if !cached_items.is_empty() {
                         log::info!(
-                            "Loaded {} items from cache for Following feed",
-                            cached_items.len()
+                            "Loaded {} items from cache for Following feed (cursor: {:?}, count: {})",
+                            cached_items.len(),
+                            cached_cursor,
+                            cached_count
                         );
                         feed_state.set(DataState::Loaded(cached_items.clone()));
                         cached_items
@@ -303,7 +312,7 @@ pub fn Home(list: String) -> Element {
                     let accumulated_clone: Rc<RefCell<Vec<FeedItem>>> =
                         Rc::new(RefCell::new(accumulated_items.clone()));
                     let feed_state_clone = feed_state;
-                    let result = load_following_feed_streaming(None, |batch_items| {
+                    let result = load_following_feed_streaming(None, cached_cursor, cached_count, |batch_items| {
                         if *stream_req_id.peek() != stream_curr_id {
                             log::debug!("Discarding stale streaming batch");
                             return;
@@ -350,11 +359,11 @@ pub fn Home(list: String) -> Element {
                             } else {
                                 cache_key.clone()
                             };
-                            if let Some(last_item) = feed_items.last() {
-                                oldest_timestamp.set(exclusive_pagination_cursor(Some(last_item)));
-                            }
                             has_more.set(true);
                             accumulated_items = feed_cache::merge_feed_items(accumulated_items, feed_items.clone());
+                            if let Some(last_item) = accumulated_items.last() {
+                                oldest_timestamp.set(exclusive_pagination_cursor(Some(last_item)));
+                            }
                             feed_state.set(DataState::Loaded(accumulated_items.clone()));
                             if !is_stale() {
                                 let cache_key_for_store = effective_cache_key;
@@ -395,7 +404,21 @@ pub fn Home(list: String) -> Element {
                             }
                             if !is_stale() {
                                 spawn(async move {
-                                    prefetch_author_metadata(&feed_items).await;
+                                    prefetch_author_metadata_with_relays(&feed_items).await;
+                                });
+                            }
+                            if !is_stale() && !did_fallback {
+                                let pk_for_sync = pubkey_str.clone();
+                                spawn(async move {
+                                    if let Ok(contacts) = nostr_client::fetch_contacts(pk_for_sync).await {
+                                        let authors: Vec<PublicKey> = contacts
+                                            .iter()
+                                            .filter_map(|c| PublicKey::parse(c).ok())
+                                            .collect();
+                                        if !authors.is_empty() {
+                                            sync_following_feed_page(authors, None).await;
+                                        }
+                                    }
                                 });
                             }
                         }
@@ -410,17 +433,25 @@ pub fn Home(list: String) -> Element {
                 }
                 FeedType::FollowingWithReplies => {
                     let pubkey_str = auth_store::get_pubkey().unwrap_or_default();
+                    let pk_for_sync = pubkey_str.clone();
                     let cache_key = FeedCacheKey::FollowingWithReplies { pubkey: pubkey_str };
-                    let cached_items = feed_cache::load_cached_feed(&cache_key, 50)
-                        .await
-                        .unwrap_or_default();
+                    let (cached_items, cached_cursor, cached_count) = {
+                        let items = feed_cache::load_cached_feed(&cache_key, FEED_LIMIT)
+                            .await
+                            .unwrap_or_default();
+                        let cursor = feed_cache::load_feed_cursor(&cache_key).await;
+                        let count = feed_cache::get_cached_item_count(&cache_key).await;
+                        (items, cursor, count)
+                    };
                     if is_stale() {
                         return;
                     }
                     if !cached_items.is_empty() {
                         log::info!(
-                            "Loaded {} items from cache for FollowingWithReplies feed",
-                            cached_items.len()
+                            "Loaded {} items from cache for FollowingWithReplies feed (cursor: {:?}, count: {})",
+                            cached_items.len(),
+                            cached_cursor,
+                            cached_count
                         );
                         feed_state.set(DataState::Loaded(cached_items.clone()));
                     }
@@ -436,7 +467,7 @@ pub fn Home(list: String) -> Element {
                         has_more.set(false);
                         return;
                     }
-                    let result = load_following_with_replies(None).await;
+                    let result = load_following_with_replies(None, cached_cursor, cached_count).await;
                     if is_stale() {
                         return;
                     }
@@ -449,11 +480,11 @@ pub fn Home(list: String) -> Element {
                             } else {
                                 cache_key.clone()
                             };
-                            if let Some(last_item) = feed_items.last() {
-                                oldest_timestamp.set(exclusive_pagination_cursor(Some(last_item)));
-                            }
                             has_more.set(true);
                             let merged = feed_cache::merge_feed_items(cached_items, feed_items.clone());
+                            if let Some(last_item) = merged.last() {
+                                oldest_timestamp.set(exclusive_pagination_cursor(Some(last_item)));
+                            }
                             feed_state.set(DataState::Loaded(merged.clone()));
                             if !is_stale() {
                                 let cache_key_for_store = effective_cache_key;
@@ -492,6 +523,20 @@ pub fn Home(list: String) -> Element {
                                     prefetch_author_metadata(&feed_items).await;
                                 });
                             }
+                            if !is_stale() && !did_fallback {
+                                let pk_sync = pk_for_sync.clone();
+                                spawn(async move {
+                                    if let Ok(contacts) = nostr_client::fetch_contacts(pk_sync).await {
+                                        let authors: Vec<PublicKey> = contacts
+                                            .iter()
+                                            .filter_map(|c| PublicKey::parse(c).ok())
+                                            .collect();
+                                        if !authors.is_empty() {
+                                            sync_following_feed_page(authors, None).await;
+                                        }
+                                    }
+                                });
+                            }
                         }
                         Err(e) => {
                             if cached_items.is_empty() {
@@ -504,20 +549,27 @@ pub fn Home(list: String) -> Element {
                 }
                 FeedType::Global => {
                     let cache_key = FeedCacheKey::Global;
-                    let cached_items = feed_cache::load_cached_feed(&cache_key, 50)
-                        .await
-                        .unwrap_or_default();
+                    let (cached_items, cached_cursor, cached_count) = {
+                        let items = feed_cache::load_cached_feed(&cache_key, FEED_LIMIT)
+                            .await
+                            .unwrap_or_default();
+                        let cursor = feed_cache::load_feed_cursor(&cache_key).await;
+                        let count = feed_cache::get_cached_item_count(&cache_key).await;
+                        (items, cursor, count)
+                    };
                     if is_stale() {
                         return;
                     }
                     if !cached_items.is_empty() {
                         log::info!(
-                            "Loaded {} items from cache for Global feed",
-                            cached_items.len()
+                            "Loaded {} items from cache for Global feed (cursor: {:?}, count: {})",
+                            cached_items.len(),
+                            cached_cursor,
+                            cached_count
                         );
                         feed_state.set(DataState::Loaded(cached_items.clone()));
                     }
-                    let result = load_global_feed(None).await;
+                    let result = load_global_feed(None, cached_cursor, cached_count).await;
                     if is_stale() {
                         return;
                     }
@@ -580,16 +632,23 @@ pub fn Home(list: String) -> Element {
                         pubkey: pubkey_str,
                         list_id: list.identifier.clone(),
                     };
-                    let cached_items = feed_cache::load_cached_feed(&cache_key, 50)
-                        .await
-                        .unwrap_or_default();
+                    let (cached_items, cached_cursor, cached_count) = {
+                        let items = feed_cache::load_cached_feed(&cache_key, FEED_LIMIT)
+                            .await
+                            .unwrap_or_default();
+                        let cursor = feed_cache::load_feed_cursor(&cache_key).await;
+                        let count = feed_cache::get_cached_item_count(&cache_key).await;
+                        (items, cursor, count)
+                    };
                     if is_stale() {
                         return;
                     }
                     if !cached_items.is_empty() {
                         log::info!(
-                            "Loaded {} items from cache for PeopleList feed",
-                            cached_items.len()
+                            "Loaded {} items from cache for PeopleList feed (cursor: {:?}, count: {})",
+                            cached_items.len(),
+                            cached_cursor,
+                            cached_count
                         );
                         feed_state.set(DataState::Loaded(cached_items.clone()));
                     }
@@ -605,7 +664,7 @@ pub fn Home(list: String) -> Element {
                         has_more.set(false);
                         return;
                     }
-                    let result = load_people_list_feed(&list, None).await;
+                    let result = load_people_list_feed(&list, None, cached_cursor, cached_count).await;
                     if is_stale() {
                         return;
                     }
@@ -668,16 +727,27 @@ pub fn Home(list: String) -> Element {
                     let cache_key = FeedCacheKey::RelayFeed {
                         urls: urls.join(","),
                     };
-                    let cached_items = feed_cache::load_cached_feed(&cache_key, 50)
-                        .await
-                        .unwrap_or_default();
+                    let (cached_items, cached_cursor, cached_count) = {
+                        let items = feed_cache::load_cached_feed(&cache_key, FEED_LIMIT)
+                            .await
+                            .unwrap_or_default();
+                        let cursor = feed_cache::load_feed_cursor(&cache_key).await;
+                        let count = feed_cache::get_cached_item_count(&cache_key).await;
+                        (items, cursor, count)
+                    };
                     if is_stale() {
                         return;
                     }
                     if !cached_items.is_empty() {
+                        log::info!(
+                            "Loaded {} items from cache for RelayFeed (cursor: {:?}, count: {})",
+                            cached_items.len(),
+                            cached_cursor,
+                            cached_count
+                        );
                         feed_state.set(DataState::Loaded(cached_items.clone()));
                     }
-                    let result = load_relay_feed(urls.clone(), None).await;
+                    let result = load_relay_feed(urls.clone(), None, cached_cursor, cached_count).await;
                     if is_stale() {
                         return;
                     }
@@ -809,15 +879,12 @@ pub fn Home(list: String) -> Element {
         }
         let since_timestamp = match &*feed_state.peek() {
             DataState::Loaded(ref items) => {
-                if let Some(latest_item) = items.first() {
-                    latest_item.sort_timestamp()
-                } else {
-                    Timestamp::now()
-                }
+                items
+                    .first()
+                    .map(|i| i.sort_timestamp())
+                    .unwrap_or_else(Timestamp::now)
             }
-            _ => {
-                return;
-            }
+            _ => Timestamp::now(),
         };
         realtime_started.set(true);
         spawn(async move {
@@ -1355,7 +1422,7 @@ pub fn Home(list: String) -> Element {
                 current_feed_type
             );
             let fetch_result: Result<Vec<FeedItem>, NostrBlueError> = match current_feed_type {
-                FeedType::Following => match load_following_feed(until).await {
+                FeedType::Following => match load_following_feed(until, None, 0).await {
                     Ok((items, did_fallback)) => {
                         if did_fallback {
                             Err(NostrBlueError::Other(
@@ -1367,7 +1434,7 @@ pub fn Home(list: String) -> Element {
                     }
                     Err(e) => Err(e),
                 },
-                FeedType::FollowingWithReplies => match load_following_with_replies(until).await {
+                FeedType::FollowingWithReplies => match load_following_with_replies(until, None, 0).await {
                     Ok((items, did_fallback)) => {
                         if did_fallback {
                             Err(NostrBlueError::Other(
@@ -1380,9 +1447,9 @@ pub fn Home(list: String) -> Element {
                     Err(e) => Err(e),
                 },
                 FeedType::Global => load_paginated_global_feed(until).await,
-                FeedType::PeopleList(list) => load_people_list_feed(&list, until).await,
+                FeedType::PeopleList(list) => load_people_list_feed(&list, until, None, 0).await,
                 FeedType::RelayFeed { .. } | FeedType::RelaySetFeed { .. } => {
-                    load_relay_feed(current_feed_type.relay_urls(), until).await
+                    load_relay_feed(current_feed_type.relay_urls(), until, None, 0).await
                 }
             };
             match fetch_result {
@@ -1434,7 +1501,23 @@ pub fn Home(list: String) -> Element {
         let current = *refresh_trigger.read();
         refresh_trigger.set(current + 1);
         spawn(async move {
-            crate::stores::ui::scroll_restore::set_scroll_y(0.0).await;
+            scroll_restore::set_scroll_y(0.0).await;
+        });
+    };
+
+    let mut accept_pending_posts = move || {
+        let pending: Vec<FeedItem> = pending_posts.write().drain(..).collect();
+        if pending.is_empty() {
+            return;
+        }
+        let current = match feed_state.read().clone() {
+            DataState::Loaded(items) => items,
+            _ => return,
+        };
+        let merged = feed_cache::merge_feed_items(current, pending);
+        feed_state.set(DataState::Loaded(merged));
+        spawn(async move {
+            scroll_restore::set_scroll_y(0.0).await;
         });
     };
 
@@ -1766,7 +1849,7 @@ pub fn Home(list: String) -> Element {
                                 rsx! {
                                     div {
                                         class: "sticky top-[57px] z-10 border-b border-border bg-blue-500 hover:bg-blue-600 transition-colors cursor-pointer",
-                                        onclick: move |_| refresh_and_scroll_to_top(),
+                                        onclick: move |_| accept_pending_posts(),
                                         div { class: "px-4 py-3 text-center",
                                             span { class: "text-white font-medium", "Show {count} new {post_text}" }
                                         }

@@ -453,7 +453,7 @@ pub fn RelayDetail(relay_id: String) -> Element {
                                                 h3 { class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-2", "Admin Pubkey" }
                                                 if PublicKey::parse(&pubkey).is_ok() {
                                                     Link {
-                                                        to: Route::Profile { pubkey: pubkey.clone() },
+                                                        to: Route::Profile { pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey) },
                                                         class: "text-sm font-mono text-blue-600 dark:text-blue-400 hover:underline break-all",
                                                         "{pubkey}"
                                                     }

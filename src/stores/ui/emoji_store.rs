@@ -401,8 +401,7 @@ pub async fn publish_emoji_collection(
 }
 
 pub async fn toggle_emoji_pack(coordinate: String) -> std::result::Result<(), String> {
-    let auth_state = crate::stores::auth_store::AUTH_STATE.read();
-    let pubkey = auth_state
+    let pubkey = crate::stores::auth_store::AUTH_STATE.read()
         .pubkey
         .clone()
         .ok_or("No authenticated user found")?;

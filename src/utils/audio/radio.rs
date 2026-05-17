@@ -5,7 +5,7 @@
 //!
 //! Radio stations contain stream URLs, metadata, and genre tags
 //! for live internet radio playback.
-use crate::stores::nostr_client;
+use crate::stores::nostr_client::fetch_radio_events;
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -314,7 +314,7 @@ pub async fn fetch_radio_stations(
     if let Some(g) = genre {
         filter = filter.hashtag(g.to_lowercase());
     }
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+    let events = fetch_radio_events(filter, Duration::from_secs(10)).await?;
     let stations: Vec<RadioStation> = events
         .iter()
         .filter_map(|e| RadioStation::from_event(e).ok())
@@ -330,7 +330,7 @@ pub async fn fetch_station_by_naddr(naddr: &str) -> Result<RadioStation, String>
         .author(pk)
         .identifier(&d_tag)
         .limit(1);
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+    let events = fetch_radio_events(filter, Duration::from_secs(10)).await?;
     events
         .into_iter()
         .filter_map(|e| RadioStation::from_event(&e).ok())
@@ -350,7 +350,7 @@ pub async fn search_radio_stations(query: &str, limit: usize) -> Result<Vec<Radi
         .kind(Kind::Custom(KIND_RADIO_STATION))
         .search(query)
         .limit(limit);
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
+    match fetch_radio_events(filter, Duration::from_secs(5)).await {
         Ok(events) => {
             log::debug!("NIP-50 search found {} station events", events.len());
             let mut stations: Vec<RadioStation> = events
@@ -380,7 +380,7 @@ pub async fn search_radio_stations(query: &str, limit: usize) -> Result<Vec<Radi
                 .kind(Kind::Custom(KIND_RADIO_STATION))
                 .limit(200);
             let events =
-                nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+                fetch_radio_events(filter, Duration::from_secs(10)).await?;
             let query_lower = query.to_lowercase();
             let mut stations: Vec<RadioStation> = events
                 .iter()

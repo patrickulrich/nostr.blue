@@ -3,6 +3,8 @@ use crate::stores::signer::{set_signer_with_pubkey, SignerType};
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use nostr::{Keys, PublicKey};
+#[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
+use nostr::nips::nip06::FromMnemonic;
 #[cfg(target_family = "wasm")]
 use nostr_browser_signer::BrowserSigner;
 use nostr_connect::client::NostrConnect;
@@ -53,6 +55,11 @@ pub struct PasswordPromptState {
 /// Global password prompt state
 pub static PASSWORD_PROMPT: GlobalSignal<PasswordPromptState> =
     Signal::global(PasswordPromptState::default);
+
+#[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
+pub static GOOGLE_BACKUP_STATE: GlobalSignal<
+    crate::services::cloud_backup::GoogleBackupState,
+> = Signal::global(crate::services::cloud_backup::GoogleBackupState::default);
 /// Initialize authentication from stored credentials
 /// Note: This only loads the auth state from localStorage.
 /// Actual signer restoration should be done via restore_session_async()
@@ -152,13 +159,42 @@ pub async fn restore_session_async() {
                     crate::platform::storage::get::<String>(STORAGE_KEY_NCRYPTSEC)
                 {
                     if crate::utils::nip49::is_ncryptsec(&ncryptsec) {
-                        *PASSWORD_PROMPT.write() = PasswordPromptState {
-                            required: true,
-                            ncryptsec: Some(ncryptsec),
-                            error: None,
-                            loading: false,
-                        };
-                        log::info!("Password required to restore encrypted session");
+                        if let Ok(auto_pw) =
+                            crate::platform::storage::get::<String>(STORAGE_KEY_AUTO_PASSWORD)
+                        {
+                            match crate::utils::nip49::decrypt_ncryptsec(&ncryptsec, &auto_pw) {
+                                Ok(keys) => {
+                                    if let Err(e) =
+                                        login_with_keys_internal(keys).await
+                                    {
+                                        log::error!(
+                                            "Failed to restore auto-password session: {}",
+                                            e
+                                        );
+                                        clear_auth();
+                                    }
+                                }
+                                Err(_) => {
+                                    log::warn!(
+                                        "Auto-password decryption failed, prompting user"
+                                    );
+                                    *PASSWORD_PROMPT.write() = PasswordPromptState {
+                                        required: true,
+                                        ncryptsec: Some(ncryptsec),
+                                        error: None,
+                                        loading: false,
+                                    };
+                                }
+                            }
+                        } else {
+                            *PASSWORD_PROMPT.write() = PasswordPromptState {
+                                required: true,
+                                ncryptsec: Some(ncryptsec),
+                                error: None,
+                                loading: false,
+                            };
+                            log::info!("Password required to restore encrypted session");
+                        }
                     } else {
                         log::error!("Invalid ncryptsec format in storage");
                         clear_auth();
@@ -250,6 +286,367 @@ pub async fn restore_session_async() {
         }
     }
 }
+
+const STORAGE_KEY_AUTO_PASSWORD: &str = "nostr_auto_password";
+const STORAGE_KEY_GOOGLE_BACKUP_USER: &str = "google_backup_user";
+
+#[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
+pub async fn start_google_sign_in() {
+    use crate::services::cloud_backup;
+
+    *GOOGLE_BACKUP_STATE.write() = cloud_backup::GoogleBackupState::SigningIn;
+
+    let auth = match cloud_backup::google_sign_in().await {
+        Ok(a) => a,
+        Err(e) => {
+            *GOOGLE_BACKUP_STATE.write() = cloud_backup::GoogleBackupState::Error(e);
+            return;
+        }
+    };
+
+    *GOOGLE_BACKUP_STATE.write() = cloud_backup::GoogleBackupState::CheckingDrive;
+
+    let mut entries = match cloud_backup::list_cloud_backups(&auth).await {
+        Ok(e) => e,
+        Err(e) => {
+            *GOOGLE_BACKUP_STATE.write() = cloud_backup::GoogleBackupState::Error(e);
+            return;
+        }
+    };
+
+    if !entries.is_empty() {
+        enrich_backup_entries(&mut entries).await;
+    }
+
+    if entries.is_empty() {
+        *GOOGLE_BACKUP_STATE.write() = cloud_backup::GoogleBackupState::NoBackup(auth);
+    } else {
+        *GOOGLE_BACKUP_STATE.write() = cloud_backup::GoogleBackupState::Choose { entries, auth };
+    }
+}
+
+#[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
+async fn enrich_backup_entries(entries: &mut [crate::services::cloud_backup::BackupEntry]) {
+    let npubs: Vec<String> = entries.iter().map(|e| e.npub.clone()).collect();
+
+    let profiles = if crate::stores::nostr_client::get_client().is_some() {
+        crate::stores::profiles::fetch_profiles_batch(npubs.clone())
+            .await
+            .ok()
+    } else {
+        enrich_with_temp_client(&npubs).await
+    };
+
+    if let Some(profiles) = profiles {
+        for entry in entries.iter_mut() {
+            if let Some(profile) = profiles.get(&entry.npub) {
+                let name = profile.get_display_name();
+                let pic = profile.get_avatar_url();
+                if !name.starts_with("npub1") && !name.contains("...") {
+                    entry.display_name = Some(name);
+                }
+                if !pic.contains("dicebear") {
+                    entry.picture = Some(pic);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
+async fn enrich_with_temp_client(
+    npubs: &[String],
+) -> Option<std::collections::HashMap<String, crate::stores::profiles::Profile>> {
+    use std::collections::HashSet;
+
+    let authors: Vec<nostr::PublicKey> = npubs
+        .iter()
+        .filter_map(|npub| nostr::PublicKey::parse(npub).ok())
+        .collect();
+    if authors.is_empty() {
+        return None;
+    }
+
+    let indexer_urls = crate::stores::relay::nip65::get_indexer_relay_urls();
+    let discovery_urls: Vec<String> = crate::stores::nostr_client::DEFAULT_DISCOVERY_RELAYS
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let mut relay_set: HashSet<String> = HashSet::new();
+    for url in indexer_urls.iter().chain(discovery_urls.iter()) {
+        relay_set.insert(url.clone());
+    }
+    let relay_urls: Vec<String> = relay_set.into_iter().collect();
+
+    let ephemeral_keys = nostr_sdk::Keys::generate();
+    let client = nostr_sdk::Client::new(ephemeral_keys);
+    for url in &relay_urls {
+        if let Ok(relay_url) = nostr_sdk::RelayUrl::parse(url) {
+            client.add_read_relay(relay_url).await.ok();
+        }
+    }
+    client.connect().await;
+
+    let filter = nostr::Filter::new()
+        .kind(nostr::Kind::Metadata)
+        .authors(authors);
+
+    let events = match client
+        .fetch_events(filter, std::time::Duration::from_secs(6))
+        .await
+    {
+        Ok(events) => events,
+        Err(e) => {
+            log::warn!("Profile enrichment fetch failed: {}", e);
+            return None;
+        }
+    };
+
+    let mut profiles = std::collections::HashMap::new();
+    for event in events.into_iter() {
+        let pubkey_bech32 = event.pubkey.to_bech32().unwrap_or_else(|_| event.pubkey.to_hex());
+        if let Ok(profile) = crate::stores::profiles::parse_profile_event(&event) {
+            profiles.insert(pubkey_bech32, profile);
+        }
+    }
+
+    Some(profiles)
+}
+
+#[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
+pub async fn restore_google_backup(file_id: &str) {
+    use crate::services::cloud_backup;
+
+
+    let state = GOOGLE_BACKUP_STATE.read().clone();
+    let auth = match state {
+        cloud_backup::GoogleBackupState::Choose { auth, .. } => auth,
+        _ => {
+            *GOOGLE_BACKUP_STATE.write() =
+                cloud_backup::GoogleBackupState::Error("Invalid state for restore".to_string());
+            return;
+        }
+    };
+
+    *GOOGLE_BACKUP_STATE.write() = cloud_backup::GoogleBackupState::Working;
+
+    match cloud_backup::restore_from_cloud(file_id, &auth).await {
+        Ok(bundle) => match store_key_from_google_restore(&bundle.nsec_hex, bundle.nwc_uri.as_deref())
+            .await
+        {
+            Ok(()) => {
+                *GOOGLE_BACKUP_STATE.write() =
+                    cloud_backup::GoogleBackupState::Done { is_new_account: false };
+            }
+            Err(e) => {
+                *GOOGLE_BACKUP_STATE.write() =
+                    cloud_backup::GoogleBackupState::Error(format!("Failed to store key: {}", e));
+            }
+        },
+        Err(e) => {
+            *GOOGLE_BACKUP_STATE.write() =
+                cloud_backup::GoogleBackupState::Error(format!("Failed to restore: {}", e));
+        }
+    }
+}
+
+#[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
+pub async fn import_key_to_google(nsec: &str) {
+    use crate::services::cloud_backup;
+
+
+    let state = GOOGLE_BACKUP_STATE.read().clone();
+    let auth = match state {
+        cloud_backup::GoogleBackupState::ImportKey { auth, .. }
+        | cloud_backup::GoogleBackupState::NoBackup(auth) => auth,
+        _ => {
+            *GOOGLE_BACKUP_STATE.write() =
+                cloud_backup::GoogleBackupState::Error("Invalid state for import".to_string());
+            return;
+        }
+    };
+
+    *GOOGLE_BACKUP_STATE.write() = cloud_backup::GoogleBackupState::Working;
+
+    let keys = match nostr::Keys::parse(nsec) {
+        Ok(k) => k,
+        Err(e) => {
+            *GOOGLE_BACKUP_STATE.write() =
+                cloud_backup::GoogleBackupState::Error(format!("Invalid nsec: {}", e));
+            return;
+        }
+    };
+    let nsec_hex = keys.secret_key().to_secret_hex();
+
+    if let Err(e) = cloud_backup::backup_to_cloud(&nsec_hex, None, None, &auth).await {
+        *GOOGLE_BACKUP_STATE.write() =
+            cloud_backup::GoogleBackupState::Error(format!("Upload failed: {}", e));
+        return;
+    }
+
+    match store_key_from_google_restore(&nsec_hex, None).await {
+        Ok(()) => {
+            *GOOGLE_BACKUP_STATE.write() =
+                cloud_backup::GoogleBackupState::Done { is_new_account: false };
+        }
+        Err(e) => {
+            *GOOGLE_BACKUP_STATE.write() =
+                cloud_backup::GoogleBackupState::Error(format!("Failed to store key: {}", e));
+        }
+    }
+}
+
+#[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
+pub async fn create_key_with_google() {
+    use crate::services::cloud_backup;
+
+
+    let state = GOOGLE_BACKUP_STATE.read().clone();
+    let auth = match state {
+        cloud_backup::GoogleBackupState::NoBackup(auth) => auth,
+        _ => {
+            *GOOGLE_BACKUP_STATE.write() =
+                cloud_backup::GoogleBackupState::Error("Invalid state".to_string());
+            return;
+        }
+    };
+
+    let (words, _keys) = match cloud_backup::crypto::generate_mnemonic_and_keys() {
+        Ok(r) => r,
+        Err(e) => {
+            *GOOGLE_BACKUP_STATE.write() =
+                cloud_backup::GoogleBackupState::Error(format!("Mnemonic generation failed: {}", e));
+            return;
+        }
+    };
+
+    *GOOGLE_BACKUP_STATE.write() = cloud_backup::GoogleBackupState::ShowMnemonic {
+        auth,
+        words,
+        acknowledged: false,
+    };
+}
+
+#[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
+pub async fn confirm_mnemonic_and_create() {
+    use crate::services::cloud_backup;
+
+
+    let state = GOOGLE_BACKUP_STATE.read().clone();
+    let (auth, words) = match state {
+        cloud_backup::GoogleBackupState::ShowMnemonic { auth, words, .. } => (auth, words),
+        _ => {
+            *GOOGLE_BACKUP_STATE.write() =
+                cloud_backup::GoogleBackupState::Error("Invalid state".to_string());
+            return;
+        }
+    };
+
+    *GOOGLE_BACKUP_STATE.write() = cloud_backup::GoogleBackupState::Working;
+
+    let keys = match nostr::Keys::from_mnemonic(&words, None) {
+        Ok(k) => k,
+        Err(e) => {
+            *GOOGLE_BACKUP_STATE.write() =
+                cloud_backup::GoogleBackupState::Error(format!("Key derivation failed: {}", e));
+            return;
+        }
+    };
+    let nsec_hex = keys.secret_key().to_secret_hex();
+
+    if let Err(e) = cloud_backup::backup_to_cloud(&nsec_hex, None, None, &auth).await {
+        *GOOGLE_BACKUP_STATE.write() =
+            cloud_backup::GoogleBackupState::Error(format!("Upload failed: {}", e));
+        return;
+    }
+
+    match store_key_from_google_restore(&nsec_hex, None).await {
+        Ok(()) => {
+            *GOOGLE_BACKUP_STATE.write() =
+                cloud_backup::GoogleBackupState::Done { is_new_account: true };
+        }
+        Err(e) => {
+            *GOOGLE_BACKUP_STATE.write() =
+                cloud_backup::GoogleBackupState::Error(format!("Failed to store key: {}", e));
+        }
+    }
+}
+
+#[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
+pub fn reset_google_backup_state() {
+
+    *GOOGLE_BACKUP_STATE.write() = crate::services::cloud_backup::GoogleBackupState::Idle;
+}
+
+#[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
+pub async fn backup_current_account_to_cloud(
+    auth: &crate::services::cloud_backup::GoogleAuthResult,
+) -> Result<(), String> {
+    use crate::services::cloud_backup;
+
+    let keys = get_keys().ok_or("Not logged in with private key")?;
+    let nsec_hex = keys.secret_key().to_secret_hex();
+    let nwc_uri = crate::stores::nwc_store::current_nwc_uri();
+    let label = AUTH_STATE
+        .read()
+        .pubkey
+        .as_ref()
+        .and_then(|p| {
+            let cache = crate::stores::profiles::PROFILE_CACHE.read();
+            cache.peek(p).and_then(|prof| {
+                prof.display_name
+                    .clone()
+                    .or(prof.name.clone())
+            })
+        });
+
+    cloud_backup::backup_to_cloud(
+        &nsec_hex,
+        nwc_uri.as_deref(),
+        label.as_deref(),
+        auth,
+    )
+    .await
+}
+
+#[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
+async fn store_key_from_google_restore(
+    nsec_hex: &str,
+    nwc_uri: Option<&str>,
+) -> Result<(), String> {
+    let secret_key = nostr::SecretKey::from_hex(nsec_hex).map_err(|e| e.to_string())?;
+    let keys = nostr::Keys::new(secret_key);
+    let auto_password = crate::services::cloud_backup::crypto::generate_auto_password();
+
+    let ncryptsec = crate::utils::nip49::encrypt_secret_key(keys.secret_key(), &auto_password)
+        .map_err(|e| format!("Encryption failed: {}", e))?;
+
+    let pubkey_str = keys.public_key().to_string();
+    crate::platform::storage::set(STORAGE_KEY_NCRYPTSEC, &ncryptsec)?;
+    crate::platform::storage::set(STORAGE_KEY_AUTO_PASSWORD, &auto_password)?;
+    crate::platform::storage::set(STORAGE_KEY_GOOGLE_BACKUP_USER, "true")?;
+    crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey_str)?;
+    crate::platform::storage::set(STORAGE_KEY_METHOD, "private_key")?;
+    crate::platform::storage::delete(STORAGE_KEY_NSEC)?;
+
+    if let Some(uri) = nwc_uri {
+        let _ = crate::stores::nwc_store::save_nwc_uri_secure(uri);
+    }
+
+    *KEYS.write() = Some(keys.clone());
+    let signer = SignerType::Keys(keys);
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| e.to_string())?;
+    set_signer_with_pubkey(signer.clone(), pubkey).await?;
+    nostr_client::set_signer(signer).await?;
+    *AUTH_STATE.write() = AuthState {
+        pubkey: Some(pubkey_str),
+        is_authenticated: true,
+        login_method: Some(LoginMethod::PrivateKey),
+    };
+    run_post_login_init().await;
+    Ok(())
+}
+
 /// Login with private key (nsec) and encrypt with password (NIP-49)
 ///
 /// The nsec will be encrypted with the provided password before storage.
@@ -545,6 +942,10 @@ pub fn is_authenticated() -> bool {
 pub fn get_login_method() -> Option<LoginMethod> {
     AUTH_STATE.read().login_method.clone()
 }
+#[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
+pub fn is_google_backup_user() -> bool {
+    crate::platform::storage::get::<String>(STORAGE_KEY_GOOGLE_BACKUP_USER).is_ok()
+}
 /// Logout and clear credentials.
 ///
 /// Returns an error if local AI chat history could not be cleared so the caller can
@@ -581,12 +982,18 @@ pub async fn logout() -> Result<(), String> {
         (STORAGE_KEY_BUNKER_URI, "bunker URI"),
         (STORAGE_KEY_APP_KEYS, "app keys"),
         (STORAGE_KEY_SIGNER_PACKAGE, "signer package"),
+        (STORAGE_KEY_AUTO_PASSWORD, "auto password"),
+        (STORAGE_KEY_GOOGLE_BACKUP_USER, "google backup user"),
     ] {
         crate::platform::storage::delete(storage_key)
             .map_err(|e| format!("Failed to delete {} during logout: {}", label, e))?;
     }
     crate::stores::nwc_store::disconnect_nwc(false);
     clear_auth();
+    #[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
+    {
+        *GOOGLE_BACKUP_STATE.write() = crate::services::cloud_backup::GoogleBackupState::Idle;
+    }
     *PASSWORD_PROMPT.write() = PasswordPromptState::default();
     Ok(())
 }

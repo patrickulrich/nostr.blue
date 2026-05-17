@@ -43,6 +43,7 @@ struct TabData {
 struct LoadOutcome {
     events: Vec<NostrEvent>,
     oldest_cursor: Option<u64>,
+    #[allow(dead_code)]
     relay_count: usize,
 }
 impl Default for TabData {
@@ -128,9 +129,7 @@ pub fn Profile(pubkey: String) -> Element {
     let pubkey_for_info = pubkey.clone();
     let pubkey_for_pinned = pubkey.clone();
     let pubkey_for_list = pubkey.clone();
-    let parsed_pubkey = PublicKey::from_bech32(&pubkey)
-        .or_else(|_| PublicKey::from_hex(&pubkey))
-        .ok();
+    let parsed_pubkey = crate::utils::nip19_urls::parse_profile_id(&pubkey);
     let auth = auth_store::AUTH_STATE.read();
     let is_own_profile = auth
         .pubkey
@@ -200,12 +199,10 @@ pub fn Profile(pubkey: String) -> Element {
             spawn(async move {
                 loading.set(true);
                 metadata_error.set(None);
-                let public_key = match PublicKey::from_bech32(&pubkey_str)
-                    .or_else(|_| PublicKey::from_hex(&pubkey_str))
-                {
-                    Ok(pk) => pk,
-                    Err(e) => {
-                        error.set(Some(format!("Invalid public key: {}", e)));
+                let public_key = match crate::utils::nip19_urls::parse_profile_id(&pubkey_str) {
+                    Some(pk) => pk,
+                    None => {
+                        error.set(Some("Invalid public key".to_string()));
                         loading.set(false);
                         return;
                     }
@@ -220,21 +217,23 @@ pub fn Profile(pubkey: String) -> Element {
                 };
                 let hex_pubkey = public_key.to_hex();
 
-                // Pre-resolve relay list (needed for targeted tab fetches)
-                let write_relays = crate::stores::relay::coverage::resolve_user_relays(
-                    &hex_pubkey,
-                    crate::stores::relay::coverage::RelayPurpose::Write,
-                )
-                .await;
-                if !write_relays.is_empty() {
-                    user_write_relays.set(write_relays);
-                }
-
                 // Tier 0: LRU profile cache (instant, session-only)
                 if let Some(metadata) = profiles::get_profile(&hex_pubkey) {
                     log::debug!("Loaded profile metadata from LRU cache");
                     profile_data.set(Some(metadata));
                     loading.set(false);
+                    // Background: resolve relay list for tab fetches (non-blocking)
+                    let hex_bg = hex_pubkey.clone();
+                    spawn(async move {
+                        let write_relays = crate::stores::relay::coverage::resolve_user_relays(
+                            &hex_bg,
+                            crate::stores::relay::coverage::RelayPurpose::Write,
+                        )
+                        .await;
+                        if !write_relays.is_empty() {
+                            user_write_relays.set(write_relays);
+                        }
+                    });
                     return;
                 }
 
@@ -243,7 +242,29 @@ pub fn Profile(pubkey: String) -> Element {
                     log::debug!("Loaded profile metadata from database cache");
                     profile_data.set(Some(metadata));
                     loading.set(false);
+                    // Background: resolve relay list for tab fetches (non-blocking)
+                    let hex_bg = hex_pubkey.clone();
+                    spawn(async move {
+                        let write_relays = crate::stores::relay::coverage::resolve_user_relays(
+                            &hex_bg,
+                            crate::stores::relay::coverage::RelayPurpose::Write,
+                        )
+                        .await;
+                        if !write_relays.is_empty() {
+                            user_write_relays.set(write_relays);
+                        }
+                    });
                     return;
+                }
+
+                // Cache miss: resolve relay list before targeted fetch
+                let write_relays = crate::stores::relay::coverage::resolve_user_relays(
+                    &hex_pubkey,
+                    crate::stores::relay::coverage::RelayPurpose::Write,
+                )
+                .await;
+                if !write_relays.is_empty() {
+                    user_write_relays.set(write_relays);
                 }
 
                 // Tier 2: Targeted relay fetch (NIP-65 write relays -> SDK fallback)
@@ -312,16 +333,14 @@ pub fn Profile(pubkey: String) -> Element {
                         );
                         tab_data.set(data_map);
                         current_tab_has_more.set(has_more);
-                        if !db_outcome.events.is_empty() {
-                            loading_events.set(false);
-                        }
+                        loading_events.set(false);
                         log::info!(
                             "Phase 1 complete: showing {} events from DB instantly",
                             db_outcome.events.len()
                         );
                         let db_events_for_metadata = expand_events_for_prefetch(&db_outcome.events);
                         spawn(async move {
-                            prefetch_author_metadata(&db_events_for_metadata).await;
+                            crate::utils::profile_prefetch::prefetch_event_authors_with_relays(&db_events_for_metadata).await;
                         });
                     }
                     Err(e) => {
@@ -329,98 +348,161 @@ pub fn Profile(pubkey: String) -> Element {
                     }
                 }
                 spawn(async move {
-                    match load_tab_events_relays(&pubkey_for_relay, &tab_for_relay, None).await {
-                        Ok(relay_outcome) => {
-                            let mut data_map = tab_data.read().clone();
-                            let existing_data =
-                                data_map.get(&tab_for_relay).cloned().unwrap_or_default();
-                            let existing_ids: std::collections::HashSet<_> =
-                                existing_data.events.iter().map(|e| e.id).collect();
-                            let new_events: Vec<_> = relay_outcome
-                                .events
-                                .into_iter()
-                                .filter(|e| !existing_ids.contains(&e.id))
-                                .collect();
-                            let has_more = relay_outcome.relay_count >= 100;
-                            if !new_events.is_empty() {
-                                log::info!(
-                                    "Phase 2: found {} new events from relays (has_more: {})",
-                                    new_events.len(),
-                                    has_more
-                                );
-                                let mut merged = existing_data.events;
-                                merged.extend(new_events.clone());
-                                if matches!(tab_for_relay, ProfileTab::Articles) {
-                                    merged = dedupe_articles_by_address(merged);
-                                }
-                                if matches!(tab_for_relay, ProfileTab::Articles) {
-                                    merged.sort_by_key(|e| std::cmp::Reverse(get_published_at(e)));
-                                } else {
-                                    merged.sort_by_key(|e| std::cmp::Reverse(e.created_at));
-                                }
-                                let oldest_ts = if matches!(tab_for_relay, ProfileTab::Articles) {
-                                    merged.last().map(|e| get_published_at(e).saturating_sub(1))
-                                } else {
-                                    merged
-                                        .last()
-                                        .map(|e| e.created_at.as_secs().saturating_sub(1))
-                                };
-                                data_map.insert(
-                                    tab_for_relay.clone(),
-                                    TabData {
-                                        events: merged.clone(),
-                                        oldest_timestamp: oldest_ts,
-                                        has_more,
-                                        loaded: true,
-                                    },
-                                );
-                                tab_data.set(data_map);
-                                current_tab_has_more.set(has_more);
-                                if matches!(tab_for_relay, ProfileTab::Posts) {
-                                    post_count.set(merged.len());
-                                }
-                                let events_for_prefetch = expand_events_for_prefetch(&new_events);
-                                spawn(async move {
-                                    prefetch_author_metadata(&events_for_prefetch).await;
-                                });
-                            } else {
-                                log::info!(
-                                        "Phase 2: no new events from relays (all already in DB, has_more: {})",
-                                        has_more
-                                    );
+                    let public_key_for_relay = match crate::utils::nip19_urls::parse_profile_id(&pubkey_for_relay) {
+                        Some(pk) => pk,
+                        None => {
+                            loading_events.set(false);
+                            return;
+                        }
+                    };
+                    let known_relays = user_write_relays.read().clone();
+                    let client = match nostr_client::get_client() {
+                        Some(c) => c,
+                        None => {
+                            loading_events.set(false);
+                            return;
+                        }
+                    };
+                    let filter = build_tab_filter(public_key_for_relay, &tab_for_relay, None, 100);
+
+                    if matches!(tab_for_relay, ProfileTab::Likes) {
+                        match load_likes_relays(public_key_for_relay, None).await {
+                            Ok(relay_outcome) => {
                                 let mut data_map = tab_data.read().clone();
-                                data_map.insert(
-                                    tab_for_relay.clone(),
-                                    TabData {
-                                        events: existing_data.events,
-                                        oldest_timestamp: existing_data.oldest_timestamp,
-                                        has_more,
-                                        loaded: true,
-                                    },
-                                );
-                                tab_data.set(data_map);
-                                current_tab_has_more.set(has_more);
+                                let existing_data = data_map.get(&tab_for_relay).cloned().unwrap_or_default();
+                                let existing_ids: std::collections::HashSet<_> =
+                                    existing_data.events.iter().map(|e| e.id).collect();
+                                let new_events: Vec<_> = relay_outcome
+                                    .events
+                                    .into_iter()
+                                    .filter(|e| !existing_ids.contains(&e.id))
+                                    .collect();
+                                if !new_events.is_empty() {
+                                    let mut merged = existing_data.events;
+                                    merged.extend(new_events.clone());
+                                    merged.sort_by_key(|e| std::cmp::Reverse(e.created_at));
+                                    data_map.insert(
+                                        tab_for_relay.clone(),
+                                        TabData {
+                                            events: merged,
+                                            oldest_timestamp: None,
+                                            has_more: false,
+                                            loaded: true,
+                                        },
+                                    );
+                                    tab_data.set(data_map);
+                                }
+                            }
+                            Err(e) => log::warn!("Likes relay phase failed: {}", e),
+                        }
+                        loading_events.set(false);
+                        return;
+                    }
+                    if matches!(tab_for_relay, ProfileTab::Zaps) {
+                        let _ = load_tab_events(&pubkey_for_relay, &tab_for_relay, None).await;
+                        loading_events.set(false);
+                        return;
+                    }
+
+                    let targeted_future = nostr_client::fetch_profile_events_from_relays_direct(
+                        &client, filter.clone(), &known_relays, Duration::from_secs(5),
+                    );
+                    let safety_future = nostr_client::fetch_events_from_connected_relays(
+                        filter, Duration::from_secs(5),
+                    );
+
+                    let (targeted_result, safety_result) = futures::join!(targeted_future, safety_future);
+
+                    let mut all_events = Vec::new();
+                    let mut seen_ids = std::collections::HashSet::new();
+                    for events in [&targeted_result, &safety_result]
+                        .into_iter()
+                        .filter_map(|r| r.as_ref().ok())
+                    {
+                        for event in events {
+                            if seen_ids.insert(event.id) {
+                                all_events.push(event.clone());
                             }
                         }
-                        Err(e) => {
-                            log::warn!("Relay phase failed: {}, using DB results only", e);
-                            let mut data_map = tab_data.read().clone();
-                            let existing_data =
-                                data_map.get(&tab_for_relay).cloned().unwrap_or_default();
-                            if !existing_data.loaded {
-                                data_map.insert(
-                                    tab_for_relay.clone(),
-                                    TabData {
-                                        events: existing_data.events,
-                                        oldest_timestamp: existing_data.oldest_timestamp,
-                                        has_more: false,
-                                        loaded: true,
-                                    },
-                                );
-                                tab_data.set(data_map);
-                                current_tab_has_more.set(false);
-                            }
+                    }
+
+                    let mut processed = process_tab_events(all_events, &tab_for_relay);
+                    if matches!(tab_for_relay, ProfileTab::Articles) {
+                        processed.sort_by_key(|e| std::cmp::Reverse(get_published_at(e)));
+                    } else {
+                        processed.sort_by_key(|e| std::cmp::Reverse(e.created_at));
+                    }
+                    let mut seen_ids = std::collections::HashSet::new();
+                    processed.retain(|e| seen_ids.insert(e.id));
+                    let relay_count = processed.len();
+
+                    let mut data_map = tab_data.read().clone();
+                    let existing_data = data_map.get(&tab_for_relay).cloned().unwrap_or_default();
+                    let existing_ids: std::collections::HashSet<_> =
+                        existing_data.events.iter().map(|e| e.id).collect();
+                    let new_events: Vec<_> = processed
+                        .into_iter()
+                        .filter(|e| !existing_ids.contains(&e.id))
+                        .collect();
+                    let has_more = relay_count >= 100;
+                    if !new_events.is_empty() {
+                        log::info!(
+                            "Phase 2: found {} new events from relays (has_more: {})",
+                            new_events.len(),
+                            has_more
+                        );
+                        let mut merged = existing_data.events;
+                        merged.extend(new_events.clone());
+                        if matches!(tab_for_relay, ProfileTab::Articles) {
+                            merged = dedupe_articles_by_address(merged);
                         }
+                        if matches!(tab_for_relay, ProfileTab::Articles) {
+                            merged.sort_by_key(|e| std::cmp::Reverse(get_published_at(e)));
+                        } else {
+                            merged.sort_by_key(|e| std::cmp::Reverse(e.created_at));
+                        }
+                        let oldest_ts = if matches!(tab_for_relay, ProfileTab::Articles) {
+                            merged.last().map(|e| get_published_at(e).saturating_sub(1))
+                        } else {
+                            merged
+                                .last()
+                                .map(|e| e.created_at.as_secs().saturating_sub(1))
+                        };
+                        data_map.insert(
+                            tab_for_relay.clone(),
+                            TabData {
+                                events: merged.clone(),
+                                oldest_timestamp: oldest_ts,
+                                has_more,
+                                loaded: true,
+                            },
+                        );
+                        tab_data.set(data_map);
+                        current_tab_has_more.set(has_more);
+                        if matches!(tab_for_relay, ProfileTab::Posts) {
+                            post_count.set(merged.len());
+                        }
+                        let events_for_prefetch = expand_events_for_prefetch(&new_events);
+                        spawn(async move {
+                            prefetch_author_metadata(&events_for_prefetch).await;
+                        });
+                    } else {
+                        log::info!(
+                            "Phase 2: no new events from relays (all already in DB, has_more: {})",
+                            has_more
+                        );
+                        let mut data_map = tab_data.read().clone();
+                        data_map.insert(
+                            tab_for_relay.clone(),
+                            TabData {
+                                events: existing_data.events,
+                                oldest_timestamp: existing_data.oldest_timestamp,
+                                has_more,
+                                loaded: true,
+                            },
+                        );
+                        tab_data.set(data_map);
+                        current_tab_has_more.set(has_more);
                     }
                     loading_events.set(false);
                 });
@@ -435,12 +517,9 @@ pub fn Profile(pubkey: String) -> Element {
         let is_authenticated = auth_store::is_authenticated();
         let my_pubkey = auth_store::get_pubkey();
         spawn(async move {
-            let hex_pubkey = if let Ok(pk) = PublicKey::from_bech32(&pubkey_str) {
-                pk.to_hex()
-            } else if let Ok(pk) = PublicKey::from_hex(&pubkey_str) {
-                pk.to_hex()
-            } else {
-                return;
+            let hex_pubkey = match crate::utils::nip19_urls::parse_profile_id(&pubkey_str) {
+                Some(pk) => pk.to_hex(),
+                None => return,
             };
 
             let contacts_future = nostr_client::fetch_contacts(hex_pubkey.clone());
@@ -550,10 +629,9 @@ pub fn Profile(pubkey: String) -> Element {
             if let Some(metadata) = profile_data.read().as_ref() {
                 if let Some(nip05_str) = &metadata.nip05 {
                     if !nip05_str.is_empty() {
-                        let pk_hex = PublicKey::from_bech32(&pubkey_for_nip05)
-                            .or_else(|_| PublicKey::from_hex(&pubkey_for_nip05))
+                        let pk_hex = crate::utils::nip19_urls::parse_profile_id(&pubkey_for_nip05)
                             .map(|p| p.to_hex())
-                            .unwrap_or_else(|_| pubkey_for_nip05.clone());
+                            .unwrap_or_else(|| pubkey_for_nip05.clone());
                         nip05::verify_nip05(&pk_hex, nip05_str);
                     }
                 }
@@ -585,9 +663,7 @@ pub fn Profile(pubkey: String) -> Element {
                         } else {
                             h2 { class: "text-xl font-bold",
                                 {
-                                    if let Ok(pk) = PublicKey::from_bech32(&pubkey_for_display)
-                                        .or_else(|_| PublicKey::from_hex(&pubkey_for_display))
-                                    {
+                                    if let Some(pk) = crate::utils::nip19_urls::parse_profile_id(&pubkey_for_display) {
                                         let npub = pk.to_bech32().unwrap_or_else(|_| pubkey_for_display.clone());
                                         if npub.len() > 16 {
                                             format!("{}...{}", &npub[..12], &npub[npub.len() - 4..])
@@ -703,13 +779,9 @@ pub fn Profile(pubkey: String) -> Element {
                                 let pubkey_clone = pubkey_for_button.clone();
                                 follow_loading.set(true);
                                 spawn(async move {
-                                    let hex_pubkey = if let Ok(pk) = PublicKey::from_bech32(&pubkey_clone) {
-                                        pk.to_hex()
-                                    } else if let Ok(pk) = PublicKey::from_hex(&pubkey_clone) {
-                                        pk.to_hex()
-                                    } else {
-                                        follow_loading.set(false);
-                                        return;
+                                    let hex_pubkey = match crate::utils::nip19_urls::parse_profile_id(&pubkey_clone) {
+                                        Some(pk) => pk.to_hex(),
+                                        None => { follow_loading.set(false); return; }
                                     };
                                     let result = if *is_following.read() {
                                         nostr_client::unfollow_user(hex_pubkey).await
@@ -792,9 +864,9 @@ pub fn Profile(pubkey: String) -> Element {
                         if let Some(nip05_str) = &metadata.nip05 {
                             if !nip05_str.is_empty() {
                                 Nip05Badge {
-                                    pubkey: if let Ok(pk) = PublicKey::from_bech32(&pubkey_for_display)
-                                        .or_else(|_| PublicKey::from_hex(&pubkey_for_display))
-                                    { pk.to_hex() } else { pubkey_for_display.clone() },
+                                    pubkey: crate::utils::nip19_urls::parse_profile_id(&pubkey_for_display)
+                                        .map(|pk| pk.to_hex())
+                                        .unwrap_or_else(|| pubkey_for_display.clone()),
                                     nip05: nip05_str.clone(),
                                 }
                             }
@@ -881,9 +953,7 @@ pub fn Profile(pubkey: String) -> Element {
                 } else {
                     h1 { class: "text-2xl font-bold",
                         {
-                            if let Ok(pk) = PublicKey::from_bech32(&pubkey_for_display)
-                                .or_else(|_| PublicKey::from_hex(&pubkey_for_display))
-                            {
+                            if let Some(pk) = crate::utils::nip19_urls::parse_profile_id(&pubkey_for_display) {
                                 let npub = pk.to_bech32().unwrap_or_else(|_| pubkey_for_display.clone());
                                 if npub.len() > 16 {
                                     format!("{}...{}", &npub[..12], &npub[npub.len() - 4..])
@@ -897,9 +967,7 @@ pub fn Profile(pubkey: String) -> Element {
                     }
                     p { class: "text-muted-foreground",
                         {
-                            if let Ok(pk) = PublicKey::from_bech32(&pubkey_for_display)
-                                .or_else(|_| PublicKey::from_hex(&pubkey_for_display))
-                            {
+                            if let Some(pk) = crate::utils::nip19_urls::parse_profile_id(&pubkey_for_display) {
                                 let npub = pk.to_bech32().unwrap_or_else(|_| pubkey_for_display.clone());
                                 if npub.len() > 18 {
                                     format!("@{}...{}", &npub[..12], &npub[npub.len() - 6..])
@@ -1184,14 +1252,13 @@ pub fn Profile(pubkey: String) -> Element {
                                 dm_sending.set(true);
                                 dm_error.set(None);
                                 spawn(async move {
-                                    let hex_pubkey = if let Ok(pk) = PublicKey::from_bech32(&recipient) {
-                                        pk.to_hex()
-                                    } else if let Ok(pk) = PublicKey::from_hex(&recipient) {
-                                        pk.to_hex()
-                                    } else {
-                                        dm_error.set(Some("Invalid public key".to_string()));
-                                        dm_sending.set(false);
-                                        return;
+                                    let hex_pubkey = match crate::utils::nip19_urls::parse_profile_id(&recipient) {
+                                        Some(pk) => pk.to_hex(),
+                                        None => {
+                                            dm_error.set(Some("Invalid public key".to_string()));
+                                            dm_sending.set(false);
+                                            return;
+                                        }
                                     };
                                     match dms::send_dm(hex_pubkey, message).await {
                                         Ok(_) => {
@@ -1233,22 +1300,16 @@ pub fn Profile(pubkey: String) -> Element {
                             div { class: "flex items-center gap-2",
                                 div { class: "flex-1 p-2 bg-muted rounded border border-border text-sm font-mono break-all",
                                     {
-                                        if let Ok(pk) = PublicKey::from_bech32(&pubkey_for_info)
-                                            .or_else(|_| PublicKey::from_hex(&pubkey_for_info))
-                                        {
-                                            pk.to_bech32().unwrap_or_else(|_| pubkey_for_info.clone())
-                                        } else {
-                                            pubkey_for_info.clone()
-                                        }
+                                        crate::utils::nip19_urls::parse_profile_id(&pubkey_for_info)
+                                            .map(|pk| pk.to_bech32().unwrap_or_else(|_| pubkey_for_info.clone()))
+                                            .unwrap_or_else(|| pubkey_for_info.clone())
                                     }
                                 }
                                 button {
                                     class: "px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition",
                                     onclick: move |_| {
                                         #[cfg(feature = "web")]
-                                        if let Ok(pk) = PublicKey::from_bech32(&pubkey_for_info)
-                                            .or_else(|_| PublicKey::from_hex(&pubkey_for_info))
-                                        {
+                                        if let Some(pk) = crate::utils::nip19_urls::parse_profile_id(&pubkey_for_info) {
                                             let npub = pk.to_bech32().unwrap();
                                             if let Some(window) = web_sys::window() {
                                                 let _ = window.navigator().clipboard().write_text(&npub);
@@ -1544,9 +1605,8 @@ async fn load_tab_events_db(
     tab: &ProfileTab,
     until: Option<u64>,
 ) -> std::result::Result<LoadOutcome, String> {
-    let public_key = PublicKey::from_bech32(pubkey)
-        .or_else(|_| PublicKey::from_hex(pubkey))
-        .map_err(|e| format!("Invalid public key: {}", e))?;
+    let public_key = crate::utils::nip19_urls::parse_profile_id(pubkey)
+        .ok_or_else(|| format!("Invalid public key: {}", pubkey))?;
     if matches!(tab, ProfileTab::Likes) {
         return load_likes_db(public_key, until).await;
     }
@@ -1579,14 +1639,14 @@ async fn load_tab_events_db(
         relay_count: 0,
     })
 }
+#[allow(dead_code)]
 async fn load_tab_events_relays(
     pubkey: &str,
     tab: &ProfileTab,
     until: Option<u64>,
 ) -> std::result::Result<LoadOutcome, String> {
-    let public_key = PublicKey::from_bech32(pubkey)
-        .or_else(|_| PublicKey::from_hex(pubkey))
-        .map_err(|e| format!("Invalid public key: {}", e))?;
+    let public_key = crate::utils::nip19_urls::parse_profile_id(pubkey)
+        .ok_or_else(|| format!("Invalid public key: {}", pubkey))?;
     if matches!(tab, ProfileTab::Likes) {
         return load_likes_relays(public_key, until).await;
     }
@@ -1595,7 +1655,7 @@ async fn load_tab_events_relays(
     }
     let filter = build_tab_filter(public_key, tab, until, 100);
     let events =
-        nostr_client::fetch_profile_events_targeted(pubkey, filter, Duration::from_secs(10))
+        nostr_client::fetch_profile_events_targeted(pubkey, filter, Duration::from_secs(7))
             .await?;
     let relay_count = events.len();
     let mut processed = process_tab_events(events, tab);
@@ -1789,9 +1849,8 @@ async fn load_tab_events(
     tab: &ProfileTab,
     until: Option<u64>,
 ) -> std::result::Result<LoadOutcome, String> {
-    let public_key = PublicKey::from_bech32(pubkey)
-        .or_else(|_| PublicKey::from_hex(pubkey))
-        .map_err(|e| format!("Invalid public key: {}", e))?;
+    let public_key = crate::utils::nip19_urls::parse_profile_id(pubkey)
+        .ok_or_else(|| format!("Invalid public key: {}", pubkey))?;
     const TARGET_COUNT: usize = 50;
     const MAX_FETCH_LIMIT: usize = 500;
     match tab {
@@ -2097,8 +2156,7 @@ fn get_display_name(metadata: &nostr_sdk::Metadata, pubkey: &str) -> String {
         .clone()
         .or_else(|| metadata.name.clone())
         .unwrap_or_else(|| {
-            if let Ok(pk) = PublicKey::from_hex(pubkey).or_else(|_| PublicKey::from_bech32(pubkey))
-            {
+            if let Some(pk) = crate::utils::nip19_urls::parse_profile_id(pubkey) {
                 let hex = pk.to_hex();
                 format!("{}...{}", &hex[..8], &hex[hex.len() - 4..])
             } else {
@@ -2108,7 +2166,7 @@ fn get_display_name(metadata: &nostr_sdk::Metadata, pubkey: &str) -> String {
 }
 fn get_username(metadata: &nostr_sdk::Metadata, pubkey: &str) -> String {
     metadata.name.clone().unwrap_or_else(|| {
-        if let Ok(pk) = PublicKey::from_hex(pubkey).or_else(|_| PublicKey::from_bech32(pubkey)) {
+        if let Some(pk) = crate::utils::nip19_urls::parse_profile_id(pubkey) {
             let npub = pk.to_bech32().expect("to_bech32 is infallible");
             if npub.len() > 18 {
                 format!("{}...{}", &npub[..12], &npub[npub.len() - 6..])

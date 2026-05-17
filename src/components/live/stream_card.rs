@@ -175,7 +175,7 @@ pub fn LiveStreamCard(event: NostrEvent) -> Element {
             div { class: "p-4 flex items-center gap-3",
                 Link {
                     to: Route::Profile {
-                        pubkey: author_pubkey.clone(),
+                        pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                     },
                     class: "flex items-center gap-3 flex-1",
                     if let Some(pic_url) = author_picture {
