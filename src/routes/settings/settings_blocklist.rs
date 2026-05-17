@@ -98,7 +98,7 @@ pub fn SettingsBlocklist() -> Element {
                                 div { class: "flex-1 min-w-0",
                                     Link {
                                         to: Route::Profile {
-                                            pubkey: pubkey.clone(),
+                                            pubkey: crate::utils::nip19_urls::profile_route_id(pubkey),
                                         },
                                         class: "hover:text-foreground hover:underline truncate block",
                                         div { class: "font-semibold text-sm",

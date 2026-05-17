@@ -717,7 +717,7 @@ fn ReactionNotification(
             div { class: "flex items-center gap-3 mb-2",
                 Link {
                     to: Route::Profile {
-                        pubkey: reactor_pubkey_for_link.clone(),
+                        pubkey: crate::utils::nip19_urls::profile_route_id(&reactor_pubkey_for_link),
                     },
                     onclick: move |e: MouseEvent| e.stop_propagation(),
                     img {
@@ -738,7 +738,7 @@ fn ReactionNotification(
                     }
                     Link {
                         to: Route::Profile {
-                            pubkey: reactor_pubkey_for_link.clone(),
+                            pubkey: crate::utils::nip19_urls::profile_route_id(&reactor_pubkey_for_link),
                         },
                         onclick: move |e: MouseEvent| e.stop_propagation(),
                         class: "font-semibold hover:underline",
@@ -754,7 +754,7 @@ fn ReactionNotification(
                     } else if validated_reacted_eid.is_some() {
                         Link {
                             to: Route::Note {
-                                note_id: validated_reacted_eid.clone().unwrap(),
+                                note_id: crate::utils::nip19_urls::note_route_id(&validated_reacted_eid.clone().unwrap(), None),
                                 from_voice: None,
                             },
                             class: "text-muted-foreground hover:underline",
@@ -877,7 +877,7 @@ fn RepostNotification(
             div { class: "flex items-center gap-3 mb-2",
                 Link {
                     to: Route::Profile {
-                        pubkey: reposter_pubkey_for_link.clone(),
+                        pubkey: crate::utils::nip19_urls::profile_route_id(&reposter_pubkey_for_link),
                     },
                     onclick: move |e: MouseEvent| e.stop_propagation(),
                     img {
@@ -890,7 +890,7 @@ fn RepostNotification(
                     span { class: "text-green-500 text-2xl", "🔁" }
                     Link {
                         to: Route::Profile {
-                            pubkey: reposter_pubkey_for_link.clone(),
+                            pubkey: crate::utils::nip19_urls::profile_route_id(&reposter_pubkey_for_link),
                         },
                         onclick: move |e: MouseEvent| e.stop_propagation(),
                         class: "font-semibold hover:underline",
@@ -906,7 +906,7 @@ fn RepostNotification(
                     } else if validated_reposted_eid.is_some() {
                         Link {
                             to: Route::Note {
-                                note_id: validated_reposted_eid.clone().unwrap(),
+                                note_id: crate::utils::nip19_urls::note_route_id(&validated_reposted_eid.clone().unwrap(), None),
                                 from_voice: None,
                             },
                             class: "text-muted-foreground hover:underline",
@@ -1031,7 +1031,7 @@ fn ZapNotification(
             div { class: "flex items-center gap-3 mb-2",
                 Link {
                     to: Route::Profile {
-                        pubkey: zapper_pubkey_for_link.clone(),
+                        pubkey: crate::utils::nip19_urls::profile_route_id(&zapper_pubkey_for_link),
                     },
                     onclick: move |e: MouseEvent| e.stop_propagation(),
                     img {
@@ -1044,7 +1044,7 @@ fn ZapNotification(
                     span { class: "text-yellow-500 text-2xl", "⚡" }
                     Link {
                         to: Route::Profile {
-                            pubkey: zapper_pubkey_for_link.clone(),
+                            pubkey: crate::utils::nip19_urls::profile_route_id(&zapper_pubkey_for_link),
                         },
                         onclick: move |e: MouseEvent| e.stop_propagation(),
                         class: "font-semibold hover:underline",
@@ -1062,7 +1062,7 @@ fn ZapNotification(
                     } else if validated_zapped_eid.is_some() {
                         Link {
                             to: Route::Note {
-                                note_id: validated_zapped_eid.clone().unwrap(),
+                                note_id: crate::utils::nip19_urls::note_route_id(&validated_zapped_eid.clone().unwrap(), None),
                                 from_voice: None,
                             },
                             class: "text-muted-foreground hover:underline",
@@ -1187,7 +1187,7 @@ fn QuoteNotification(
             div { class: "flex items-center gap-3 mb-2",
                 Link {
                     to: Route::Profile {
-                        pubkey: quoter_pubkey_for_link.clone(),
+                        pubkey: crate::utils::nip19_urls::profile_route_id(&quoter_pubkey_for_link),
                     },
                     onclick: move |e: MouseEvent| e.stop_propagation(),
                     img {
@@ -1200,7 +1200,7 @@ fn QuoteNotification(
                     span { class: "text-blue-500 text-2xl", "📝" }
                     Link {
                         to: Route::Profile {
-                            pubkey: quoter_pubkey_for_link.clone(),
+                            pubkey: crate::utils::nip19_urls::profile_route_id(&quoter_pubkey_for_link),
                         },
                         onclick: move |e: MouseEvent| e.stop_propagation(),
                         class: "font-semibold hover:underline",
@@ -1216,7 +1216,7 @@ fn QuoteNotification(
                     } else if validated_quoted_eid.is_some() {
                         Link {
                             to: Route::Note {
-                                note_id: validated_quoted_eid.clone().unwrap(),
+                                note_id: crate::utils::nip19_urls::note_route_id(&validated_quoted_eid.clone().unwrap(), None),
                                 from_voice: None,
                             },
                             class: "text-muted-foreground hover:underline",

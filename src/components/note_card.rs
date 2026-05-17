@@ -540,7 +540,7 @@ pub fn NoteCard(
                 }
                 if !is_hidden {
                     nav.push(Route::Note {
-                        note_id: event_id_nav.clone(),
+                        note_id: crate::utils::nip19_urls::note_route_id(&event_id_nav, Some(&author_pubkey)),
                         from_voice: None,
                     });
                 }
@@ -569,7 +569,7 @@ pub fn NoteCard(
                         Repeat2Icon { class: "w-4 h-4" }
                         Link {
                             to: Route::Profile {
-                                pubkey: reposter_pubkey_str.clone(),
+                                pubkey: crate::utils::nip19_urls::profile_route_id(reposter_pubkey_str),
                             },
                             onclick: move |e: MouseEvent| e.stop_propagation(),
                             class: "hover:underline font-medium text-muted-foreground",
@@ -583,7 +583,7 @@ pub fn NoteCard(
                     div { class: "shrink-0",
                         Link {
                             to: Route::Profile {
-                                pubkey: author_pubkey.clone(),
+                                pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                             },
                             onclick: move |e: MouseEvent| e.stop_propagation(),
                             if let Some(picture_url) = &profile_picture {
@@ -605,7 +605,7 @@ pub fn NoteCard(
                             div { class: "flex items-center gap-2 flex-wrap",
                                 Link {
                                     to: Route::Profile {
-                                        pubkey: author_pubkey.clone(),
+                                        pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                                     },
                                     onclick: move |e: MouseEvent| e.stop_propagation(),
                                     class: "font-bold hover:underline",

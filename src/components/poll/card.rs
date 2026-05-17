@@ -270,7 +270,7 @@ pub fn PollCard(
             div { class: "flex items-center gap-2 mb-3",
                 Link {
                     to: Route::Profile {
-                        pubkey: author_pubkey_for_link.clone(),
+                        pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey_for_link),
                     },
                     class: "font-semibold hover:underline",
                     "{author_name}"

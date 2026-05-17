@@ -868,7 +868,7 @@ fn VideoInfo(
                 div { class: "flex-1 mr-4",
                     Link {
                         to: crate::routes::Route::Profile {
-                            pubkey: event.pubkey.to_string(),
+                            pubkey: crate::utils::nip19_urls::profile_route_id(&event.pubkey.to_string()),
                         },
                         class: "flex items-center mb-3",
                         div { class: "w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-white font-bold mr-3 ring-2 ring-white overflow-hidden",
@@ -1325,7 +1325,7 @@ fn AuthorInfo(pubkey: String) -> Element {
     rsx! {
         Link {
             to: crate::routes::Route::Profile {
-                pubkey: pubkey.clone(),
+                pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey),
             },
             class: "flex items-center gap-3 mb-4 hover:opacity-80 transition",
             div { class: "w-12 h-12 rounded-full bg-gray-700 flex items-center justify-center text-white font-bold overflow-hidden",

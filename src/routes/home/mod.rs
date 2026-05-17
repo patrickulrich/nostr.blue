@@ -20,6 +20,7 @@ use dioxus::prelude::*;
 use engagement::{fetch_and_stream_interactions, fetch_paginated_interactions};
 use feed_loaders::{
     exclusive_pagination_cursor, feed_kinds, merge_paginated_feed_items, prefetch_author_metadata,
+    prefetch_author_metadata_with_relays,
     load_following_feed, load_following_feed_streaming, load_following_with_replies,
     load_global_feed, load_paginated_global_feed, load_people_list_feed, load_relay_feed,
     sync_following_feed_page, FEED_LIMIT,
@@ -403,7 +404,7 @@ pub fn Home(list: String) -> Element {
                             }
                             if !is_stale() {
                                 spawn(async move {
-                                    prefetch_author_metadata(&feed_items).await;
+                                    prefetch_author_metadata_with_relays(&feed_items).await;
                                 });
                             }
                             if !is_stale() && !did_fallback {

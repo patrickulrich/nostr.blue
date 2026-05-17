@@ -138,7 +138,7 @@ fn SnippetContent(snippet: DisplaySnippet, copied: Signal<bool>) -> Element {
                 div { class: "flex items-center gap-3",
                     Link {
                         to: Route::Profile {
-                            pubkey: snippet.pubkey.clone(),
+                            pubkey: crate::utils::nip19_urls::profile_route_id(&snippet.pubkey),
                         },
                         class: "w-10 h-10 rounded-full bg-muted flex items-center justify-center overflow-hidden",
                         if let Some(picture) = author_profile.as_ref().and_then(|p| p.picture.as_ref()) {
@@ -154,7 +154,7 @@ fn SnippetContent(snippet: DisplaySnippet, copied: Signal<bool>) -> Element {
                     div {
                         Link {
                             to: Route::Profile {
-                                pubkey: snippet.pubkey.clone(),
+                                pubkey: crate::utils::nip19_urls::profile_route_id(&snippet.pubkey),
                             },
                             class: "font-medium hover:underline",
                             "{display_name}"

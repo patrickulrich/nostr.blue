@@ -200,7 +200,7 @@ pub fn BadgeDetailModal(
                         span { class: "text-muted-foreground", "Issued by" }
                         Link {
                             to: Route::Profile {
-                                pubkey: badge.pubkey.clone(),
+                                pubkey: crate::utils::nip19_urls::profile_route_id(&badge.pubkey),
                             },
                             class: "text-primary hover:underline font-medium",
                             onclick: move |_| on_close.call(()),

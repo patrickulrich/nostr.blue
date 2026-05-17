@@ -401,6 +401,7 @@ pub fn ThreadedComment(
                 class: "border-l-2 border-border pl-3 py-2 hover:bg-accent/20 transition cursor-pointer",
                 onclick: {
                     let event_id_click = event_id_nav.clone();
+                    let author_pk = author_pubkey_str.clone();
                     let navigator = nav;
                     move |_evt: MouseEvent| {
                         #[cfg(feature = "web")]
@@ -414,7 +415,7 @@ pub fn ThreadedComment(
                             }
                         }
                         navigator.push(Route::Note {
-                            note_id: event_id_click.clone(),
+                            note_id: crate::utils::nip19_urls::note_route_id(&event_id_click, Some(&author_pk)),
                             from_voice: None,
                         });
                     }
@@ -422,7 +423,7 @@ pub fn ThreadedComment(
                 div { class: "flex items-start gap-2 mb-2",
                     Link {
                         to: Route::Profile {
-                            pubkey: author_pubkey.to_string(),
+                            pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey.to_string()),
                         },
                         onclick: move |e: MouseEvent| e.stop_propagation(),
                         if let Some(metadata) = author_metadata.read().as_ref() {
@@ -452,7 +453,7 @@ pub fn ThreadedComment(
                         div { class: "flex items-baseline gap-2 flex-wrap",
                             Link {
                                 to: Route::Profile {
-                                    pubkey: author_pubkey.to_string(),
+                                    pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey.to_string()),
                                 },
                                 class: "font-semibold text-sm hover:underline truncate",
                                 onclick: move |e: MouseEvent| e.stop_propagation(),
@@ -710,7 +711,7 @@ pub fn ThreadedComment(
                 div { class: "ml-4 mt-2",
                     Link {
                         to: Route::Note {
-                            note_id: event.id.to_hex(),
+                            note_id: crate::utils::nip19_urls::note_route_id(&event.id.to_hex(), Some(&author_pubkey_str)),
                             from_voice: None,
                         },
                         class: "text-xs text-blue-500 hover:underline",

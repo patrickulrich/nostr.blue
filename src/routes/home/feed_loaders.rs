@@ -710,6 +710,40 @@ pub async fn prefetch_author_metadata(feed_items: &[FeedItem]) {
     profile_prefetch::prefetch_pubkeys(pubkeys).await;
 }
 
+pub async fn prefetch_author_metadata_with_relays(feed_items: &[FeedItem]) {
+    use crate::stores::relay::coverage;
+    use crate::utils::profile_prefetch;
+    let mut pubkeys = Vec::new();
+    for item in feed_items {
+        match item {
+            FeedItem::OriginalPost(event) => {
+                pubkeys.push(event.pubkey);
+            }
+            FeedItem::Repost {
+                original,
+                reposted_by,
+                ..
+            } => {
+                pubkeys.push(original.pubkey);
+                pubkeys.push(*reposted_by);
+            }
+        }
+    }
+    pubkeys.sort();
+    pubkeys.dedup();
+    profile_prefetch::prefetch_pubkeys(pubkeys.clone()).await;
+    let pk_hexes: Vec<String> = pubkeys.iter().map(|pk| pk.to_hex()).collect();
+    dioxus::prelude::spawn(async move {
+        for pk_hex in pk_hexes {
+            let _ = coverage::resolve_user_relays(
+                &pk_hex,
+                coverage::RelayPurpose::Write,
+            )
+            .await;
+        }
+    });
+}
+
 pub async fn load_people_list_feed(
     list: &UserList,
     until: Option<u64>,

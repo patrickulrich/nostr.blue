@@ -132,7 +132,7 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
             artist_id: pubkey.clone(),
         }),
         TrackSource::NostrPodcast { pubkey, .. } => Some(Route::Profile {
-            pubkey: pubkey.clone(),
+            pubkey: crate::utils::nip19_urls::profile_route_id(pubkey),
         }),
         TrackSource::RssPodcast { podcast_id, .. } => {
             podcast_id.map(|id| Route::PodcastRssFeedDetail {
@@ -143,7 +143,7 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
             artist: a.clone(),
         }),
         TrackSource::Radio { pubkey, .. } => Some(Route::Profile {
-            pubkey: pubkey.clone(),
+            pubkey: crate::utils::nip19_urls::profile_route_id(pubkey),
         }),
         TrackSource::Bible { translation, book, chapter, .. } => Some(Route::BibleChapter {
             translation: translation.clone(),

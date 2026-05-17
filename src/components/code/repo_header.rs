@@ -61,7 +61,7 @@ pub fn RepoHeader(
             }
             Link {
                 to: Route::Profile {
-                    pubkey: repo.pubkey.clone(),
+                    pubkey: crate::utils::nip19_urls::profile_route_id(&repo.pubkey),
                 },
                 class: "text-primary hover:underline cursor-pointer",
                 "{owner_name}"
@@ -96,7 +96,7 @@ pub fn RepoHeaderCompact(
         div { class: "flex items-center gap-1.5 text-sm flex-wrap",
             Link {
                 to: Route::Profile {
-                    pubkey: repo.pubkey.clone(),
+                    pubkey: crate::utils::nip19_urls::profile_route_id(&repo.pubkey),
                 },
                 class: "text-primary hover:underline",
                 "{owner_name}"

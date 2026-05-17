@@ -1055,7 +1055,7 @@ fn CommentCard(pubkey: String, content: String, created_at: u64) -> Element {
                 }
                 Link {
                     to: Route::Profile {
-                        pubkey: pubkey.clone(),
+                        pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey),
                     },
                     class: "font-medium text-sm hover:underline",
                     "{display_name}"
@@ -1083,7 +1083,7 @@ fn OrganizerCard(pubkey: String) -> Element {
     rsx! {
         Link {
             to: Route::Profile {
-                pubkey: pubkey.clone(),
+                pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey),
             },
             class: "flex items-center gap-3 p-3 bg-muted rounded-lg hover:bg-accent transition",
             if let Some(url) = avatar {
@@ -1274,7 +1274,7 @@ fn PresenceAvatar(pubkey: String, hand_raised: bool) -> Element {
     rsx! {
         Link {
             to: Route::Profile {
-                pubkey: pubkey.clone(),
+                pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey),
             },
             class: "relative group",
             title: "{display_name}",

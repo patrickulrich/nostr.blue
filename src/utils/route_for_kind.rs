@@ -56,7 +56,7 @@ pub fn route_for_event(event: &Event) -> Route {
                 }
             }
             Route::Note {
-                note_id: hex_id,
+                note_id: crate::utils::nip19_urls::note_route_id(&hex_id, Some(&event.pubkey.to_hex())),
                 from_voice: None,
             }
         }

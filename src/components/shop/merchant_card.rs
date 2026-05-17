@@ -24,7 +24,7 @@ pub fn MerchantCard(props: MerchantCardProps) -> Element {
     rsx! {
         Link {
             to: Route::Profile {
-                pubkey: props.pubkey.clone(),
+                pubkey: crate::utils::nip19_urls::profile_route_id(&props.pubkey),
             },
             class: "block bg-card border border-border rounded-lg p-4 hover:border-ring transition",
             div { class: "flex items-center gap-3",

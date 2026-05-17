@@ -96,7 +96,8 @@ pub use error::Error;
 pub use fetching::{
     fetch_event_targeted, fetch_events_aggregated, fetch_events_aggregated_outbox,
     fetch_events_from_connected_relays, fetch_events_from_relays, fetch_metadata_targeted,
-    fetch_profile_events_db, fetch_profile_events_from_relays, fetch_profile_events_targeted,
+    fetch_profile_events_db, fetch_profile_events_from_relays,
+    fetch_profile_events_from_relays_direct, fetch_profile_events_targeted,
     fetch_radio_events, parse_event_id, ParsedEventId,
 };
 pub(crate) use fetching::fetch_events_from_connected_relays_with_client;

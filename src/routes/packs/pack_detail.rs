@@ -249,7 +249,7 @@ pub fn PackDetail(naddr: String) -> Element {
                             rsx! {
                                 div { class: "flex items-center gap-3",
                                     Link {
-                                        to: Route::Profile { pubkey: p.author_pubkey.clone() },
+                                        to: Route::Profile { pubkey: crate::utils::nip19_urls::profile_route_id(&p.author_pubkey) },
                                         class: "flex items-center gap-2 hover:underline",
                                         if let Some(ref pic) = author_picture.as_ref().filter(|u| is_valid_http_url(u)) {
                                             img {
@@ -560,7 +560,7 @@ fn MemberRow(pubkey: String) -> Element {
     rsx! {
         div { class: "flex items-center gap-3 px-4 py-3 hover:bg-accent/50 transition",
             Link {
-                to: Route::Profile { pubkey: pubkey.clone() },
+                to: Route::Profile { pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey) },
                 class: "flex items-center gap-3 flex-1 min-w-0",
                 // Avatar
                 if let Some(ref pic) = picture.as_ref().filter(|u| is_valid_http_url(u)) {

@@ -57,7 +57,7 @@ pub fn WikiAuthor(pubkey: String) -> Element {
             div { class: "flex items-center gap-4 mb-8",
                 Link {
                     to: Route::Profile {
-                        pubkey: pubkey.clone(),
+                        pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey),
                     },
                     if let Some(ref picture) = author_picture {
                         img {
@@ -80,7 +80,7 @@ pub fn WikiAuthor(pubkey: String) -> Element {
                         }
                         Link {
                             to: Route::Profile {
-                                pubkey: pubkey.clone(),
+                                pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey),
                             },
                             class: "flex items-center gap-1 hover:text-foreground transition-colors",
                             UserIcon { class: "w-4 h-4" }

@@ -378,9 +378,10 @@ pub fn VoiceMessageCard(
         {
             let nav = use_navigator();
             let voice_id = event_id_str.clone();
+            let author_pubkey_nav = author_pubkey.clone();
             Some(std::rc::Rc::new(move || {
                 let _ = nav.push(Route::Note {
-                    note_id: voice_id.clone(),
+                    note_id: crate::utils::nip19_urls::note_route_id(&voice_id, Some(&author_pubkey_nav)),
                     from_voice: Some("true".to_string()),
                 });
             }))
@@ -539,7 +540,7 @@ pub fn VoiceMessageCard(
             div { class: "flex items-start gap-3 mb-3",
                 Link {
                     to: Route::Profile {
-                        pubkey: author_pubkey.clone(),
+                        pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                     },
                     class: "shrink-0",
                     onclick: |e: MouseEvent| e.stop_propagation(),
@@ -558,7 +559,7 @@ pub fn VoiceMessageCard(
                 div { class: "flex-1 min-w-0",
                     Link {
                         to: Route::Profile {
-                            pubkey: author_pubkey.clone(),
+                            pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                         },
                         class: "hover:underline",
                         onclick: |e: MouseEvent| e.stop_propagation(),

@@ -534,10 +534,14 @@ fn note_back_target(current_route: &Route) -> Option<Route> {
     };
 
     let note_context = crate::stores::back_navigation::ACTIVE_NOTE_BACK_CONTEXT.read();
-    if note_context.note_id.as_deref() == Some(note_id.as_str()) {
+    let note_matches = note_context.note_id.as_deref().is_some_and(|ctx_id| {
+        crate::stores::nostr_client::parse_event_id(ctx_id).map(|p| p.event_id)
+            == crate::stores::nostr_client::parse_event_id(note_id).map(|p| p.event_id)
+    });
+    if note_matches {
         if let Some(parent_note_id) = note_context.parent_note_ids.last() {
             return Some(Route::Note {
-                note_id: parent_note_id.clone(),
+                note_id: crate::utils::nip19_urls::note_route_id(parent_note_id, None),
                 from_voice: None,
             });
         }
@@ -1168,7 +1172,7 @@ fn Layout() -> Element {
                                                                 onclick: move |_| *sidebar_page.write() = 0,
                                                                 NavLink {
                                                                     to: Route::Profile {
-                                                                        pubkey: pubkey.clone(),
+                                                                        pubkey: crate::utils::nip19_urls::profile_route_id(pubkey),
                                                                     },
                                                                     icon: render_sidebar_icon(&SidebarItem::Profile, "w-7 h-7"),
                                                                     label: "Profile",
@@ -1378,7 +1382,7 @@ fn Layout() -> Element {
                                                                         },
                                                                         NavLink {
                                                                             to: Route::Profile {
-                                                                                pubkey: pubkey.clone(),
+                                                                                pubkey: crate::utils::nip19_urls::profile_route_id(pubkey),
                                                                             },
                                                                             icon: render_sidebar_icon(&SidebarItem::Profile, "w-7 h-7"),
                                                                             label: "Profile",

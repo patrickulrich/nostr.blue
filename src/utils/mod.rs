@@ -49,6 +49,7 @@ pub mod format;
 pub mod list_encryption;
 pub mod list_kinds;
 pub mod nip19;
+pub mod nip19_urls;
 pub mod notification_nip78;
 pub mod path_validation;
 pub mod permissions;

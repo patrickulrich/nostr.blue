@@ -851,7 +851,7 @@ pub fn ProfileSection() -> Element {
                     if let Some(pubkey) = &auth.pubkey {
                         Link {
                             to: Route::Profile {
-                                pubkey: pubkey.clone(),
+                                pubkey: crate::utils::nip19_urls::profile_route_id(pubkey),
                             },
                             class: "font-mono text-sm text-blue-600 dark:text-blue-400 hover:underline break-all",
                             "{pubkey}"

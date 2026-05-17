@@ -136,7 +136,7 @@ fn TrendingNoteItem(note: TrendingNote) -> Element {
     rsx! {
         Link {
             to: Route::Note {
-                note_id: note_bech32,
+                note_id: crate::utils::nip19_urls::note_route_id(&note_bech32, Some(&author_pubkey)),
                 from_voice: None,
             },
             class: "block px-4 py-3 hover:bg-accent/50 transition-colors border-b border-border last:border-0",
