@@ -3,13 +3,17 @@ use crate::components::{
 };
 use crate::error::NostrBlueError;
 use crate::hooks::{use_mute_block_cache, use_relay_subscription};
+use crate::routes::home::types::login_method_requires_signer;
+use crate::stores::feed_cache::{self, FeedCacheKey};
 use crate::stores::signer::SIGNER_INFO;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::build_thread_tree;
 use crate::utils::format::{format_relative_time_or, truncate_pubkey};
 use crate::utils::format_sats_compact;
 use crate::utils::video_kinds::{all_video_kinds, is_vertical_video, vertical_kinds};
+use crate::utils::FeedItem;
 use dioxus::prelude::*;
+use dioxus_core::spawn_forever;
 use nostr_sdk::prelude::*;
 use nostr_sdk::{Event, EventId, PublicKey};
 use std::time::Duration;
@@ -165,12 +169,93 @@ fn LandscapePlayer(event: Event) -> Element {
     }
 
     let video_meta = parse_video_meta(&event);
+    let raw_url = video_meta.url.clone();
     let video_src = video_meta.url.as_ref().map(|u| {
         if video_meta.thumbnail.is_none() {
             format!("{}#t=0.1", u)
         } else {
             u.clone()
         }
+    });
+    let resolved = video_src
+        .as_ref()
+        .map(|u| crate::utils::divine_video::resolve_video_src(u))
+        .unwrap_or(crate::utils::divine_video::VideoSrc {
+            direct_url: None,
+            hls_url: None,
+        });
+    let landscape_is_divine = resolved.hls_url.is_some();
+    let landscape_direct_src = resolved.direct_url;
+    let landscape_hls_url = resolved.hls_url;
+    let landscape_fallback_raw = raw_url.unwrap_or_default();
+    let landscape_video_id = format!("landscape-{}", &event.id.to_hex()[..8]);
+    let landscape_video_id_for_hls = landscape_video_id.clone();
+    let landscape_video_id_for_cleanup = landscape_video_id.clone();
+    let _landscape_hls_url_for_effect = landscape_hls_url.clone();
+    let _landscape_fallback_for_effect = landscape_fallback_raw.clone();
+    use_effect(move || {
+        let id = landscape_video_id_for_hls.clone();
+        let hls = _landscape_hls_url_for_effect.clone();
+        let raw = _landscape_fallback_for_effect.clone();
+        spawn(async move {
+            if hls.is_none() { return; }
+            let hls = hls.unwrap();
+            let js = format!(
+                r#"(async function() {{
+                    var video = document.getElementById("{id}");
+                    if (!video || video._hlsAttached) return;
+                    video._hlsAttached = true;
+                    if (typeof hlsManager !== 'undefined') {{
+                        var result = await hlsManager.attachToMedia("{id}", "{hls}");
+                        if (result.type === 'success' || result.type === 'native-hls') {{
+                            video.play().catch(function(){{}});
+                            return;
+                        }}
+                    }}
+                    if (typeof Hls !== 'undefined' && Hls.isSupported()) {{
+                        var hls = new Hls({{ lowLatencyMode: false }});
+                        hls.loadSource("{hls}");
+                        hls.attachMedia(video);
+                        hls.on(Hls.Events.MANIFEST_PARSED, function() {{
+                            video.play().catch(function(){{}});
+                        }});
+                        hls.on(Hls.Events.ERROR, function(event, data) {{
+                            if (data.fatal) {{
+                                hls.destroy();
+                                video._hlsInstance = null;
+                                video.src = "{raw}";
+                                video.play().catch(function(){{}});
+                            }}
+                        }});
+                        video._hlsInstance = hls;
+                        return;
+                    }}
+                    if (video.canPlayType('application/vnd.apple.mpegurl')) {{
+                        video.src = "{hls}";
+                        video.play().catch(function(){{}});
+                        return;
+                    }}
+                    video.src = "{raw}";
+                    video.play().catch(function(){{}});
+                }})()"#
+            );
+            let _ = document::eval(&js).await;
+        });
+    });
+    use_drop(move || {
+        let id = landscape_video_id_for_cleanup.clone();
+        spawn_forever(async move {
+            let js = format!(
+                r#"(function() {{
+                    var video = document.getElementById("{id}");
+                    if (video && video._hlsInstance) {{
+                        video._hlsInstance.destroy();
+                        video._hlsInstance = null;
+                    }}
+                }})()"#
+            );
+            let _ = document::eval(&js).await;
+        });
     });
     rsx! {
         div { class: "min-h-screen bg-background",
@@ -188,10 +273,11 @@ fn LandscapePlayer(event: Event) -> Element {
                 div {
                     class: "relative w-full bg-black rounded-lg overflow-hidden mb-4",
                     style: "max-height: 80vh;",
-                    if let Some(url) = &video_src {
+                    if landscape_is_divine || landscape_direct_src.is_some() {
                         video {
+                            id: "{landscape_video_id}",
                             class: "w-full h-full object-contain",
-                            src: "{url}",
+                            src: landscape_direct_src,
                             poster: video_meta.thumbnail.as_deref(),
                             controls: true,
                             muted: *is_muted.read(),
@@ -361,11 +447,23 @@ pub(crate) fn ShortsPlayer(
     use_effect(use_reactive(
         (&feed_type, &initial_video_id, &initial_event_id),
         move |(current_feed_type, id, _)| {
+            let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+            let has_signer = *nostr_client::HAS_SIGNER.read();
+            let auth_state = auth_store::AUTH_STATE.read();
+            let login_method = auth_state.login_method.clone();
+            drop(auth_state);
+
+            if !client_initialized {
+                return;
+            }
+
+            let requires_signer = login_method_requires_signer(login_method.as_ref());
+            let cache_only = requires_signer && !has_signer;
+
             let initial_evt = initial_event.clone();
             let has_initial = initial_evt.is_some();
             let current_request = *request_generation.peek() + 1;
             request_generation.set(current_request);
-            events.set(Vec::new());
             current_video_index.set(0);
             has_more.set(true);
             oldest_timestamp.set(None);
@@ -374,9 +472,70 @@ pub(crate) fn ShortsPlayer(
             wheel_accumulator.set(0.0);
             touch_start_y.set(None);
             loading.set(true);
+
+            let cache_key = match current_feed_type {
+                FeedType::Following => auth_store::get_pubkey()
+                    .map(|pk| FeedCacheKey::Shorts { pubkey: pk }),
+                FeedType::Global => Some(FeedCacheKey::ShortsGlobal),
+            };
+
             spawn(async move {
-                let result =
-                    load_shorts_feed(current_feed_type, None, fallback_to_global_on_empty).await;
+                if let Some(ref key) = cache_key {
+                    let cached = feed_cache::load_cached_feed(key, 50)
+                        .await
+                        .unwrap_or_default();
+                    let cached_events: Vec<Event> = cached
+                        .iter()
+                        .map(|i| i.event().clone())
+                        .filter(|e| is_vertical_video(e.kind.as_u16()))
+                        .collect();
+                    if !cached_events.is_empty() {
+                        log::info!("Loaded {} shorts from cache", cached_events.len());
+                        if *request_generation.peek() != current_request {
+                            return;
+                        }
+                        if let Some(last) = cached_events.last() {
+                            oldest_timestamp.set(Some(last.created_at.as_secs()));
+                        }
+                        has_more.set(cached_events.len() >= 50);
+                        events.set(cached_events);
+                        loading.set(false);
+                    }
+                }
+
+                if cache_only {
+                    log::info!(
+                        "Phase 1 cache-only: waiting for signer restore before loading shorts"
+                    );
+                    return;
+                }
+
+                let request_gen = request_generation;
+                let mut evts_signal = events;
+                let mut loading_signal = loading;
+
+                let result = stream_shorts_feed(
+                    current_feed_type,
+                    None,
+                    fallback_to_global_on_empty,
+                    move |batch: Vec<Event>| {
+                        if *request_gen.peek() != current_request {
+                            return;
+                        }
+                        let mut current = evts_signal.cloned();
+                        current.extend(batch);
+                        current.sort_by_key(|e| std::cmp::Reverse(e.created_at));
+                        let mut seen = std::collections::HashSet::new();
+                        let deduped: Vec<Event> = current
+                            .into_iter()
+                            .filter(|e| seen.insert(e.id))
+                            .collect();
+                        evts_signal.set(deduped);
+                        loading_signal.set(false);
+                    },
+                )
+                .await;
+
                 if *request_generation.peek() != current_request {
                     log::debug!(
                         "Discarding stale shorts feed load {} after feed switch",
@@ -384,6 +543,7 @@ pub(crate) fn ShortsPlayer(
                     );
                     return;
                 }
+
                 match result {
                     ShortsLoadResult::Ready(mut video_events) => {
                         if let Some(evt) = initial_evt {
@@ -406,9 +566,22 @@ pub(crate) fn ShortsPlayer(
                                 .position(|e| e.id.to_hex() == id)
                                 .unwrap_or(0)
                         };
-                        events.set(video_events);
+                        events.set(video_events.clone());
                         current_video_index.set(initial_index);
                         loading.set(false);
+
+                        if let Some(ref key) = cache_key {
+                            let feed_items: Vec<FeedItem> = video_events
+                                .iter()
+                                .map(|e| FeedItem::OriginalPost(e.clone()))
+                                .collect();
+                            let key_clone = key.clone();
+                            spawn(async move {
+                                let _ =
+                                    feed_cache::store_feed_items(&key_clone, &feed_items).await;
+                                let _ = feed_cache::run_eviction_if_needed().await;
+                            });
+                        }
                     }
                     ShortsLoadResult::Empty(message) => {
                         has_more.set(false);
@@ -437,7 +610,7 @@ pub(crate) fn ShortsPlayer(
             load_error.set(None);
             empty_message.set(None);
             spawn(async move {
-                let result = load_shorts_feed(feed_type, until, fallback_to_global_on_empty).await;
+                let result = stream_shorts_feed(feed_type, until, fallback_to_global_on_empty, |_| {}).await;
                 if *request_generation.peek() != current_request {
                     log::debug!(
                         "Discarding stale shorts pagination request {} after feed switch",
@@ -623,7 +796,10 @@ fn VerticalVideoPlayer(
 ) -> Element {
     let video_id = format!("video-{}", &event.id.to_hex()[..8]);
     let video_id_for_effect = video_id.clone();
+    let video_id_for_hls = video_id.clone();
+    let video_id_for_cleanup = video_id.clone();
     let video_meta = parse_video_meta(&event);
+    let raw_url = video_meta.url.clone();
     let video_src = video_meta.url.as_ref().map(|u| {
         if video_meta.thumbnail.is_none() {
             format!("{}#t=0.1", u)
@@ -631,6 +807,17 @@ fn VerticalVideoPlayer(
             u.clone()
         }
     });
+    let resolved = video_src
+        .as_ref()
+        .map(|u| crate::utils::divine_video::resolve_video_src(u))
+        .unwrap_or(crate::utils::divine_video::VideoSrc {
+            direct_url: None,
+            hls_url: None,
+        });
+    let is_divine = resolved.hls_url.is_some();
+    let direct_src = resolved.direct_url;
+    let hls_url = resolved.hls_url;
+    let fallback_raw = raw_url.unwrap_or_default();
     use_effect(use_reactive(&is_muted, move |muted| {
         let id = video_id_for_effect.clone();
         spawn(async move {
@@ -640,13 +827,79 @@ fn VerticalVideoPlayer(
             let _ = document::eval(&js).await;
         });
     }));
+    let _hls_url_for_effect = hls_url.clone();
+    let _fallback_for_effect = fallback_raw.clone();
+    use_effect(move || {
+        let id = video_id_for_hls.clone();
+        let hls = _hls_url_for_effect.clone();
+        let raw = _fallback_for_effect.clone();
+        spawn(async move {
+            if hls.is_none() { return; }
+            let hls = hls.unwrap();
+            let js = format!(
+                r#"(async function() {{
+                    var video = document.getElementById("{id}");
+                    if (!video || video._hlsAttached) return;
+                    video._hlsAttached = true;
+                    if (typeof hlsManager !== 'undefined') {{
+                        var result = await hlsManager.attachToMedia("{id}", "{hls}");
+                        if (result.type === 'success' || result.type === 'native-hls') {{
+                            video.play().catch(function(){{}});
+                            return;
+                        }}
+                    }}
+                    if (typeof Hls !== 'undefined' && Hls.isSupported()) {{
+                        var hls = new Hls({{ lowLatencyMode: false }});
+                        hls.loadSource("{hls}");
+                        hls.attachMedia(video);
+                        hls.on(Hls.Events.MANIFEST_PARSED, function() {{
+                            video.play().catch(function(){{}});
+                        }});
+                        hls.on(Hls.Events.ERROR, function(event, data) {{
+                            if (data.fatal) {{
+                                hls.destroy();
+                                video._hlsInstance = null;
+                                video.src = "{raw}";
+                                video.play().catch(function(){{}});
+                            }}
+                        }});
+                        video._hlsInstance = hls;
+                        return;
+                    }}
+                    if (video.canPlayType('application/vnd.apple.mpegurl')) {{
+                        video.src = "{hls}";
+                        video.play().catch(function(){{}});
+                        return;
+                    }}
+                    video.src = "{raw}";
+                    video.play().catch(function(){{}});
+                }})()"#
+            );
+            let _ = document::eval(&js).await;
+        });
+    });
+    use_drop(move || {
+        let id = video_id_for_cleanup.clone();
+        spawn_forever(async move {
+            let js = format!(
+                r#"(function() {{
+                    var video = document.getElementById("{id}");
+                    if (video && video._hlsInstance) {{
+                        video._hlsInstance.destroy();
+                        video._hlsInstance = null;
+                    }}
+                }})()"#
+            );
+            let _ = document::eval(&js).await;
+        });
+    });
     rsx! {
         div { class: "relative w-full h-full flex items-center justify-center bg-black",
-            if let Some(url) = video_src.clone() {
+            if is_divine || direct_src.is_some() {
                 video {
                     id: "{video_id}",
                     class: "max-w-full max-h-full object-contain",
-                    src: "{url}",
+                    src: direct_src,
                     poster: video_meta.thumbnail.as_deref(),
                     r#loop: true,
                     muted: is_muted,
@@ -1460,30 +1713,28 @@ async fn load_video_by_id(video_id: &str) -> std::result::Result<Event, NostrBlu
         .next()
         .ok_or_else(|| NostrBlueError::Other("Video not found".into()))
 }
-async fn load_shorts_feed(
+async fn stream_shorts_feed<F: FnMut(Vec<Event>)>(
     feed_type: FeedType,
     until: Option<u64>,
     fallback_to_global_on_empty: bool,
+    on_batch: F,
 ) -> ShortsLoadResult {
     match feed_type {
-        FeedType::Following => load_shorts_following(until, fallback_to_global_on_empty).await,
-        FeedType::Global => match load_shorts_global(until).await {
-            Ok(events) => ShortsLoadResult::Ready(events),
-            Err(e) => ShortsLoadResult::Error(e),
-        },
+        FeedType::Following => {
+            stream_shorts_following(until, fallback_to_global_on_empty, on_batch).await
+        }
+        FeedType::Global => stream_shorts_global(until, on_batch).await,
     }
 }
 
-async fn load_shorts_following(
+async fn stream_shorts_following<F: FnMut(Vec<Event>)>(
     until: Option<u64>,
     fallback_to_global_on_empty: bool,
+    mut on_batch: F,
 ) -> ShortsLoadResult {
     let Some(pubkey_str) = auth_store::get_pubkey() else {
         return if fallback_to_global_on_empty {
-            match load_shorts_global(until).await {
-                Ok(events) => ShortsLoadResult::Ready(events),
-                Err(e) => ShortsLoadResult::Error(e),
-            }
+            stream_shorts_global(until, |_| {}).await
         } else {
             ShortsLoadResult::Empty(
                 "Sign in to browse vertical videos from people you follow.".to_string(),
@@ -1495,10 +1746,7 @@ async fn load_shorts_following(
         Err(e) => {
             log::warn!("Failed to fetch contacts for following shorts: {}", e);
             return if fallback_to_global_on_empty {
-                match load_shorts_global(until).await {
-                    Ok(events) => ShortsLoadResult::Ready(events),
-                    Err(global_err) => ShortsLoadResult::Error(global_err),
-                }
+                stream_shorts_global(until, |_| {}).await
             } else {
                 ShortsLoadResult::Error(
                     "Failed to load people you follow for vertical videos.".to_string(),
@@ -1508,10 +1756,7 @@ async fn load_shorts_following(
     };
     if contacts.is_empty() {
         return if fallback_to_global_on_empty {
-            match load_shorts_global(until).await {
-                Ok(events) => ShortsLoadResult::Ready(events),
-                Err(e) => ShortsLoadResult::Error(e),
-            }
+            stream_shorts_global(until, |_| {}).await
         } else {
             ShortsLoadResult::Empty(
                 "Follow some accounts to see their vertical videos here.".to_string(),
@@ -1526,10 +1771,7 @@ async fn load_shorts_following(
     }
     if authors.is_empty() {
         return if fallback_to_global_on_empty {
-            match load_shorts_global(until).await {
-                Ok(events) => ShortsLoadResult::Ready(events),
-                Err(e) => ShortsLoadResult::Error(e),
-            }
+            stream_shorts_global(until, |_| {}).await
         } else {
             ShortsLoadResult::Empty(
                 "Your follow list does not include any valid authors yet.".to_string(),
@@ -1543,53 +1785,82 @@ async fn load_shorts_following(
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
-    match nostr_client::fetch_events_from_connected_relays(filter, Duration::from_secs(10)).await {
-        Ok(events) => {
-            let mut event_vec: Vec<Event> = events.into_iter().collect();
-            event_vec.sort_by_key(|b| std::cmp::Reverse(b.created_at));
-            if event_vec.is_empty() {
-                return if fallback_to_global_on_empty {
-                    match load_shorts_global(until).await {
-                        Ok(events) => ShortsLoadResult::Ready(events),
-                        Err(e) => ShortsLoadResult::Error(e),
-                    }
-                } else {
-                    ShortsLoadResult::Empty(
-                        "No vertical videos from people you follow right now.".to_string(),
-                    )
-                };
-            }
-            ShortsLoadResult::Ready(event_vec)
-        }
+    let mut all_events = Vec::new();
+    let count = match nostr_client::stream_video_events_from_connected_relays_batched(
+        filter,
+        Duration::from_secs(10),
+        10,
+        |batch| {
+            all_events.extend(batch.clone());
+            on_batch(batch);
+        },
+    )
+    .await
+    {
+        Ok(c) => c,
         Err(e) => {
-            log::error!("Failed to fetch following shorts: {}", e);
-            if fallback_to_global_on_empty {
-                match load_shorts_global(until).await {
-                    Ok(events) => ShortsLoadResult::Ready(events),
-                    Err(global_err) => ShortsLoadResult::Error(global_err),
-                }
+            log::error!("Failed to stream following shorts: {}", e);
+            return if fallback_to_global_on_empty {
+                stream_shorts_global(until, |_| {}).await
             } else {
                 ShortsLoadResult::Error(
                     "Failed to load vertical videos from people you follow.".to_string(),
                 )
-            }
+            };
         }
+    };
+    if all_events.is_empty() {
+        return if fallback_to_global_on_empty {
+            stream_shorts_global(until, |_| {}).await
+        } else {
+            ShortsLoadResult::Empty(
+                "No vertical videos from people you follow right now.".to_string(),
+            )
+        };
     }
+    all_events.sort_by_key(|e| std::cmp::Reverse(e.created_at));
+    log::info!(
+        "Streamed {} following shorts ({} total from stream)",
+        all_events.len(),
+        count
+    );
+    ShortsLoadResult::Ready(all_events)
 }
-async fn load_shorts_global(until: Option<u64>) -> std::result::Result<Vec<Event>, String> {
+
+async fn stream_shorts_global<F: FnMut(Vec<Event>)>(
+    until: Option<u64>,
+    mut on_batch: F,
+) -> ShortsLoadResult {
     let mut filter = Filter::new().kinds(vertical_kinds()).limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
-    match nostr_client::fetch_events_from_relays(filter, Duration::from_secs(10)).await {
-        Ok(events) => {
-            let mut event_vec: Vec<Event> = events.into_iter().collect();
-            event_vec.sort_by_key(|b| std::cmp::Reverse(b.created_at));
-            Ok(event_vec)
-        }
+    let mut all_events = Vec::new();
+    let count = match nostr_client::stream_video_events_from_connected_relays_batched(
+        filter,
+        Duration::from_secs(10),
+        10,
+        |batch| {
+            all_events.extend(batch.clone());
+            on_batch(batch);
+        },
+    )
+    .await
+    {
+        Ok(c) => c,
         Err(e) => {
-            log::error!("Failed to fetch global shorts: {}", e);
-            Err(format!("Failed to load shorts: {}", e))
+            log::error!("Failed to stream global shorts: {}", e);
+            return ShortsLoadResult::Error(format!("Failed to load shorts: {}", e));
         }
+    };
+    if all_events.is_empty() {
+        return ShortsLoadResult::Error("No shorts found".to_string());
     }
+    all_events.sort_by_key(|e| std::cmp::Reverse(e.created_at));
+    log::info!(
+        "Streamed {} global shorts ({} total from stream)",
+        all_events.len(),
+        count
+    );
+    ShortsLoadResult::Ready(all_events)
 }

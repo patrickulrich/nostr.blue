@@ -1,4 +1,4 @@
-mod types;
+pub mod types;
 mod feed_loaders;
 pub mod login;
 mod engagement;

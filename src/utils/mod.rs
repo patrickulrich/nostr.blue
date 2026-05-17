@@ -39,6 +39,7 @@ pub mod article_meta;
 pub mod bolt11;
 pub mod clipboard;
 pub mod custom_emoji;
+pub mod divine_video;
 pub mod data_state;
 pub mod date_helpers;
 pub mod download;
