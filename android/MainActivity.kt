@@ -1479,6 +1479,28 @@ class MainActivity : WryActivity() {
         }
 
         @JvmStatic
+        fun saveBrowseCache(context: Context, key: String, json: String): String {
+            return try {
+                BrowseCache.save(context, key, json)
+                "ok"
+            } catch (e: Exception) {
+                Log.e(TAG, "saveBrowseCache failed", e)
+                "error:${e.message}"
+            }
+        }
+
+        @JvmStatic
+        fun saveBrowsePosition(context: Context, mediaId: String, positionMs: Long): String {
+            return try {
+                BrowseCache.savePosition(context, mediaId, positionMs)
+                "ok"
+            } catch (e: Exception) {
+                Log.e(TAG, "saveBrowsePosition failed", e)
+                "error:${e.message}"
+            }
+        }
+
+        @JvmStatic
         fun copyToClipboard(context: Context, text: String): String {
             return try {
                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)

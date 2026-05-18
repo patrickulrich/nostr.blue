@@ -643,6 +643,25 @@ pub fn play_track(
         log::error!("Failed to start native Android playback queue: {}", e);
         state.playback_error = Some(format!("Android playback failed: {}", e));
     }
+    #[cfg(feature = "mobile_platform")]
+    {
+        let recent_tracks: Vec<MusicTrack> = state.playlist.iter().take(21).cloned().collect();
+        let track_id = track.id.clone();
+        let track_json = serde_json::to_string(&track).unwrap_or_default();
+        let recent_json = serde_json::to_string(&recent_tracks).unwrap_or_default();
+        let item_key = format!("item:{}", track.id);
+        for t in &recent_tracks {
+            let _ = android_media::save_browse_cache(
+                &format!("item:{}", t.id),
+                &serde_json::to_string(t).unwrap_or_default(),
+            );
+        }
+        spawn(async move {
+            let _ = android_media::save_browse_cache("continue_listening", &recent_json);
+            let _ = android_media::save_browse_position(&track_id, 0);
+            let _ = android_media::save_browse_cache(&item_key, &track_json);
+        });
+    }
     spawn(async move {
         publish_music_status(&track).await;
     });

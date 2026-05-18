@@ -139,6 +139,22 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
                             .iter()
                             .map(|ep| DisplayEpisode::from_podcast_index_episode(ep, &feed))
                             .collect();
+                        #[cfg(feature = "mobile_platform")]
+                        {
+                            let music_tracks: Vec<crate::stores::music_player::MusicTrack> = display_eps.iter()
+                                .map(|de| de.to_music_track())
+                                .collect();
+                            if let Ok(json) = serde_json::to_string(&music_tracks) {
+                                let cache_key = format!("episodes:rss:{}", podcast_id);
+                                let _ = crate::platform::android_media::save_browse_cache(&cache_key, &json);
+                            }
+                            for t in &music_tracks {
+                                let _ = crate::platform::android_media::save_browse_cache(
+                                    &format!("item:{}", t.id),
+                                    &serde_json::to_string(t).unwrap_or_default(),
+                                );
+                            }
+                        }
                         episodes.set(display_eps);
                     }
                     Err(e) => log::error!("Failed to load episodes: {}", e),
