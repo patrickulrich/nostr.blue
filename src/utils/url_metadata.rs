@@ -25,8 +25,10 @@ pub struct UrlMetadata {
 /// * `Ok(UrlMetadata)` - Extracted metadata (fields may be None if not found)
 /// * `Err(String)` - Error message if fetch or parse fails
 pub async fn fetch_url_metadata(url: String) -> Result<UrlMetadata, String> {
-    let full_url = if url.starts_with("http://") || url.starts_with("https://") {
+    let full_url = if url.starts_with("https://") {
         url.clone()
+    } else if let Some(stripped) = url.strip_prefix("http://") {
+        format!("https://{}", stripped)
     } else {
         format!("https://{}", url)
     };

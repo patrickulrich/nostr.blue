@@ -225,5 +225,10 @@ pub(super) fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 crate::components::icons::EggIcon { class: class.to_string() }
             }
         }
+        SidebarItem::Nests => {
+            rsx! {
+                crate::components::icons::NestIcon { class: class.to_string() }
+            }
+        }
     }
 }

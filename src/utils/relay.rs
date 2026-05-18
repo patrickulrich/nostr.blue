@@ -125,6 +125,14 @@ pub fn relay_http_url(relay_url: &str) -> Result<String, String> {
     Ok(url.to_string())
 }
 
+pub fn upgrade_to_secure_relay_url(url: &str) -> String {
+    if let Some(stripped) = url.strip_prefix("ws://") {
+        format!("wss://{}", stripped)
+    } else {
+        url.to_string()
+    }
+}
+
 pub fn normalize_known_relay_url(url: &str) -> String {
     nostr::Url::parse(url)
         .map(|parsed| parsed.to_string())

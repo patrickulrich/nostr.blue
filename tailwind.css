@@ -191,6 +191,21 @@
   }
 }
 
+@keyframes nest-float-up {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-80px) scale(1.3);
+  }
+}
+
+.animate-float-up {
+  animation: nest-float-up 1.5s ease-out forwards;
+}
+
 /* ============================================================================
    NKBIP-03 Citation Styles
    ============================================================================ */

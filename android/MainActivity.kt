@@ -17,7 +17,14 @@ import androidx.core.content.ContextCompat
 import java.io.File
 import java.io.ByteArrayInputStream
 import java.io.IOException
-import java.util.Locale
+import android.app.PictureInPictureParams
+import android.app.RemoteAction
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import android.graphics.drawable.Icon
+import android.util.Rational
+
 import java.util.UUID
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -206,6 +213,11 @@ class MainActivity : WryActivity() {
             cleanupTempShareFiles(cacheDir, TEMP_FILE_PRESERVE_MILLIS)
         }
         onBackPressedDispatcher.addCallback(this, backPressedCallback)
+        val filter = IntentFilter().apply {
+            addAction(ACTION_PIP_TOGGLE_MUTE)
+            addAction(ACTION_PIP_LEAVE)
+        }
+        ContextCompat.registerReceiver(this, pipReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         synchronized(lock) {
             instance = this
         }
@@ -218,13 +230,118 @@ class MainActivity : WryActivity() {
                 instance = null
             }
         }
+        try {
+            unregisterReceiver(pipReceiver)
+        } catch (_: Exception) {}
         Log.d(TAG, "MainActivity destroyed, instance cleared")
         super.onDestroy()
     }
 
+    // region PIP (Picture-in-Picture) for Nests
+
+    @Volatile
+    var isNestActive: Boolean = false
+        private set
+
+    @Volatile
+    var isInPipMode: Boolean = false
+        private set
+
+    private val pipLock = Any()
+
+    private val ACTION_PIP_TOGGLE_MUTE = "dev.dioxus.main.PIP_TOGGLE_MUTE"
+    private val ACTION_PIP_LEAVE = "dev.dioxus.main.PIP_LEAVE"
+    private val PIP_MUTE_REQ = 1001
+    private val PIP_LEAVE_REQ = 1002
+
+    private val pipReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.action) {
+                ACTION_PIP_TOGGLE_MUTE -> {
+                    notifyPipMuteToggled()
+                }
+                ACTION_PIP_LEAVE -> {
+                    val activity = synchronized(lock) { instance }
+                    activity?.let {
+                        it.setNestActive(false)
+                        it.finish()
+                    }
+                }
+            }
+        }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        val active = synchronized(pipLock) { isNestActive }
+        if (active) {
+            enterPip()
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: android.content.res.Configuration,
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        synchronized(pipLock) { isInPipMode = isInPictureInPictureMode }
+        notifyPipModeChanged(isInPictureInPictureMode)
+    }
+
+    private fun enterPip() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) return
+        try {
+            val params = buildPipParams()
+            enterPictureInPictureMode(params)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to enter PIP mode", e)
+        }
+    }
+
+    private fun buildPipParams(): PictureInPictureParams {
+        val builder = PictureInPictureParams.Builder()
+            .setAspectRatio(Rational(16, 9))
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            builder.setActions(buildPipActions())
+        }
+
+        return builder.build()
+    }
+
+    private fun buildPipActions(): List<RemoteAction> {
+        val muteIntent = PendingIntent.getBroadcast(
+            this, PIP_MUTE_REQ,
+            Intent(ACTION_PIP_TOGGLE_MUTE).setPackage(packageName),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val leaveIntent = PendingIntent.getBroadcast(
+            this, PIP_LEAVE_REQ,
+            Intent(ACTION_PIP_LEAVE).setPackage(packageName),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val muteIcon = Icon.createWithResource(this, R.drawable.ic_mic_off)
+        val muteLabel = "Mute"
+        val leaveIcon = Icon.createWithResource(this, R.drawable.ic_call_end)
+        val leaveLabel = "Leave"
+        return listOf(
+            RemoteAction(muteIcon, muteLabel, muteLabel, muteIntent),
+            RemoteAction(leaveIcon, leaveLabel, leaveLabel, leaveIntent),
+        )
+    }
+
+    // endregion
+
     companion object {
         @JvmStatic
         external fun handleAndroidBackPressed()
+
+        @JvmStatic
+        external fun notifyPipModeChanged(isInPip: Boolean)
+
+        @JvmStatic
+        external fun notifyPipMuteToggled()
 
         private const val TAG = "NIP55"
         private val lock = Any()
@@ -334,6 +451,28 @@ class MainActivity : WryActivity() {
             activity.runOnUiThread {
                 activity.finish()
             }
+        }
+
+        @JvmStatic
+        fun setNestActive(context: Context, active: String) {
+            val activity = instance ?: return
+            activity.setNestActive(active == "true")
+        }
+
+        @JvmStatic
+        fun enterPipMode(context: Context): String {
+            val activity = instance ?: return "no_instance"
+            if (!activity.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
+                return "error:not_supported"
+            }
+            activity.runOnUiThread { activity.enterPip() }
+            return "ok"
+        }
+
+        @JvmStatic
+        fun isInPip(context: Context): String {
+            val activity = instance ?: return "false"
+            return activity.isInPipMode.toString()
         }
 
         @JvmStatic

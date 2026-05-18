@@ -265,7 +265,7 @@ pub fn parse_relay_list_event(event: &nostr_sdk::Event) -> Vec<RelayConfig> {
         };
         log::debug!("Found relay tag: {} (read={}, write={})", url, read, write);
         relays.push(RelayConfig {
-            url: url.to_string(),
+            url: crate::utils::relay::upgrade_to_secure_relay_url(url),
             read,
             write,
         });
@@ -280,7 +280,7 @@ pub fn parse_dm_relay_list(event: &nostr_sdk::Event) -> Vec<String> {
     for tag in event.tags.iter() {
         if tag.kind() == TagKind::Custom("relay".into()) {
             if let Some(content) = tag.content() {
-                dm_relays.push(content.to_string());
+                dm_relays.push(crate::utils::relay::upgrade_to_secure_relay_url(content));
             }
         }
     }
@@ -956,7 +956,7 @@ pub async fn fetch_own_lists_from_indexers(client: Arc<Client>) {
                             .iter()
                             .filter_map(|tag| {
                                 if tag.kind() == TagKind::Relay {
-                                    tag.content().map(|s| s.to_string())
+                                    tag.content().map(crate::utils::relay::upgrade_to_secure_relay_url)
                                 } else {
                                     None
                                 }

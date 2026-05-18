@@ -146,6 +146,7 @@ jobs:
             patchelf \
             squashfs-tools \
             desktop-file-utils \
+            cmake \
             pkg-config \
             libglib2.0-dev \
             libgtk-3-dev \

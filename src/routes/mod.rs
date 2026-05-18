@@ -29,6 +29,7 @@ pub mod home;
 mod list_detail;
 mod lists;
 pub mod music;
+pub mod nests;
 pub mod nips;
 pub mod note;
 pub mod note_new;
@@ -101,6 +102,7 @@ use music::{
     MusicAlbum, MusicArtist, MusicHome, MusicLeaderboard, MusicPlaylistDetail, MusicPlaylistNew,
     MusicRadio, MusicRssAlbum, MusicRssArtist, MusicSearch, MusicTrackDetail, MusicTrackNew,
 };
+use nests::{NestCreate, NestDetail, NestServers, NestsHome};
 use nips::{Nip19Handler, NipDetail, NipNew, NipsHome};
 use note::Note;
 use note_new::NoteNew;
@@ -216,6 +218,14 @@ pub enum Route {
     RadioStationNew {},
     #[route("/radio/:naddr")]
     RadioStation { naddr: String },
+    #[route("/nests")]
+    NestsHome {},
+    #[route("/nests/new?:naddr")]
+    NestCreate { naddr: Option<String> },
+    #[route("/nests/servers")]
+    NestServers {},
+    #[route("/nests/:naddr")]
+    NestDetail { naddr: String },
     #[route("/nips")]
     NipsHome {},
     #[route("/nips/new")]
@@ -574,6 +584,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::MusicLeaderboard {}
         | Route::PodcastHome {}
         | Route::RadioHome {}
+        | Route::NestsHome {}
         | Route::NipsHome {}
         | Route::BadgesHome {}
         | Route::PacksHome {}
@@ -645,6 +656,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::PodcastNostrEpisodeDetail { .. }
         | Route::PodcastRssEpisodeDetail { .. } => Some(Route::PodcastHome {}),
         Route::RadioStationNew {} | Route::RadioStation { .. } => Some(Route::RadioHome {}),
+        Route::NestCreate { .. } | Route::NestDetail { .. } | Route::NestServers {} => Some(Route::NestsHome {}),
         Route::NipNew {} | Route::NipDetail { .. } => Some(Route::NipsHome {}),
         Route::BadgeNew {} | Route::BadgeDetail { .. } => Some(Route::BadgesHome {}),
         Route::PackNew {} | Route::PackDetail { .. } => Some(Route::PacksHome {}),

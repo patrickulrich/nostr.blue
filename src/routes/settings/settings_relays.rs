@@ -126,10 +126,13 @@ pub fn SettingsRelays() -> Element {
         }
         if let Ok(url) = nostr::Url::parse(trimmed) {
             let scheme = url.scheme();
-            if scheme == "ws" || scheme == "wss" {
+            if scheme == "wss" {
                 return Ok(url.to_string());
             }
-            return Err("Unsupported URL scheme (use ws:// or wss://)".to_string());
+            if scheme == "ws" {
+                return Err("Insecure ws:// is not supported. Use wss:// for secure connections.".to_string());
+            }
+            return Err("Unsupported URL scheme (use wss://)".to_string());
         }
         if let Ok(url) = nostr::Url::parse(&format!("wss://{}", trimmed)) {
             return Ok(url.to_string());

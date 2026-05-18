@@ -30,6 +30,7 @@ pub mod media;
 pub mod media_uploader;
 pub mod mention_autocomplete;
 pub mod mobile_search_slideout;
+pub mod nests;
 pub mod nip05_badge;
 pub mod nip_card;
 pub mod note;
