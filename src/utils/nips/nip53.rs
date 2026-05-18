@@ -76,7 +76,7 @@ impl RoomStatus {
         match s.to_lowercase().as_str() {
             "open" => Some(RoomStatus::Open),
             "private" => Some(RoomStatus::Private),
-            "closed" => Some(RoomStatus::Closed),
+            "closed" | "ended" => Some(RoomStatus::Closed),
             _ => None,
         }
     }
@@ -647,6 +647,53 @@ pub fn build_meeting_space_tags(
             ["Interactive room event"],
         ),
     ]
+}
+/// Rebuild all tags from an existing MeetingSpace with a new status.
+/// Preserves participants, hashtags, and all optional fields.
+/// Used for closing rooms and preserving participant data on edit.
+pub fn rebuild_meeting_space_tags(
+    ms: &MeetingSpace,
+    new_status: RoomStatus,
+) -> Vec<Tag> {
+    let mut tags = vec![
+        Tag::identifier(&ms.d_tag),
+        Tag::custom(TagKind::custom("title"), [&ms.room_name]),
+        Tag::custom(TagKind::custom("status"), [new_status.as_str()]),
+        Tag::custom(TagKind::custom("auth"), [&ms.service_url]),
+        Tag::custom(
+            TagKind::custom("alt"),
+            ["Interactive room event"],
+        ),
+    ];
+    for provider in &ms.providers {
+        let mut vals: Vec<String> = vec![provider.pubkey.clone()];
+        vals.push(provider.relay_hint.clone().unwrap_or_default());
+        vals.push(provider.role.clone().unwrap_or_default());
+        if let Some(ref proof) = provider.proof {
+            vals.push(proof.clone());
+        }
+        tags.push(Tag::custom(TagKind::custom("p"), vals));
+    }
+    if let Some(ref url) = ms.endpoint_url {
+        tags.push(Tag::custom(TagKind::custom("streaming"), [url.as_str()]));
+    }
+    if let Some(ref s) = ms.summary {
+        tags.push(Tag::custom(TagKind::custom("summary"), [s.as_str()]));
+    }
+    if let Some(ref url) = ms.image {
+        tags.push(Tag::custom(TagKind::custom("image"), [url.as_str()]));
+    }
+    if let Some(ref url) = ms.recording {
+        tags.push(Tag::custom(TagKind::custom("recording"), [url.as_str()]));
+    }
+    for hashtag in &ms.hashtags {
+        tags.push(Tag::custom(TagKind::custom("t"), [hashtag.as_str()]));
+    }
+    if !ms.relays.is_empty() {
+        let relay_strs: Vec<String> = ms.relays.iter().map(|r| r.as_str().to_string()).collect();
+        tags.push(Tag::custom(TagKind::custom("relays"), relay_strs));
+    }
+    tags
 }
 /// Add optional tags to a meeting space event
 pub fn add_meeting_space_optional_tags(

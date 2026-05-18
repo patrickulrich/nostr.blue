@@ -73,7 +73,7 @@ async fn send_reaction(room_coordinate: &str, emoji: &str) -> Result<(), String>
     let _pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
     let tags = vec![
         nostr_sdk::Tag::custom(
-            nostr_sdk::TagKind::Custom("a".into()),
+            nostr_sdk::TagKind::custom("a"),
             [room_coordinate],
         ),
     ];

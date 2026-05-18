@@ -127,7 +127,7 @@ pub fn NestHeader(props: NestHeaderProps) -> Element {
                         }
                     }
                 }
-                if props.is_host && props.space.status == RoomStatus::Open {
+                if props.is_host && props.space.status != RoomStatus::Closed {
                     Link {
                         to: Route::NestCreate { naddr: Some(props.space.naddr.clone()) },
                         class: "inline-flex items-center gap-1.5 mt-3 ml-2 px-3 py-1.5 bg-muted hover:bg-accent rounded-lg text-sm transition",

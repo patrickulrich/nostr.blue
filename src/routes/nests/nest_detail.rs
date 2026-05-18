@@ -2,6 +2,7 @@ use crate::components::icons::{ArrowLeftIcon, PhoneCallIcon, RadioIcon};
 use crate::components::nests::{
     ActionBar, NestChat, NestHeader, NestReactions, ParticipantGallery, SpeakerQueue, StageGrid,
 };
+use crate::components::ConfirmModal;
 use crate::hooks::use_relay_subscription;
 use crate::routes::Route;
 use crate::stores::auth_store::get_pubkey;
@@ -9,7 +10,8 @@ use crate::stores::nostr_client::{self, CLIENT_INITIALIZED};
 use crate::stores::profiles;
 use crate::utils::nip19::parse_naddr;
 use crate::utils::nips::nip53::{
-    parse_meeting_space, parse_room_presence, MeetingSpace, RoomPresence,
+    parse_meeting_space, parse_room_presence, rebuild_meeting_space_tags, MeetingSpace,
+    RoomPresence, RoomStatus,
 };
 use dioxus::prelude::*;
 
@@ -18,6 +20,7 @@ use crate::platform::pip;
 
 #[component]
 pub fn NestDetail(naddr: String) -> Element {
+    let nav = navigator();
     let publisher_id: String = {
         let pk = get_pubkey().unwrap_or_default();
         format!("nest-{}-{pk}", naddr)
@@ -34,6 +37,7 @@ pub fn NestDetail(naddr: String) -> Element {
     let is_publishing = use_signal(|| false);
     let hand_raised = use_signal(|| false);
     let audio_error = use_signal(|| None::<String>);
+    let mut show_host_leave_confirm = use_signal(|| false);
 
     use_effect(use_reactive(
         (&*CLIENT_INITIALIZED.read(), &parsed_naddr),
@@ -126,6 +130,63 @@ pub fn NestDetail(naddr: String) -> Element {
                     }
                     Err(e) => {
                         log::warn!("Failed to parse presence: {}", e);
+                    }
+                }
+            }
+        });
+    }
+
+    {
+        let mut space_sub = space;
+        let is_joined_sub = is_joined;
+        let is_muted_sub = is_muted;
+        let is_publishing_sub = is_publishing;
+        let hand_raised_sub = hand_raised;
+        let room_author = parsed_naddr
+            .read()
+            .as_ref()
+            .map(|p| p.pubkey.clone())
+            .unwrap_or_default();
+        let room_d_tag = parsed_naddr
+            .read()
+            .as_ref()
+            .map(|p| p.identifier.clone())
+            .unwrap_or_default();
+        let space_filter = if !room_author.is_empty() && !room_d_tag.is_empty() {
+            Some(
+                nostr_sdk::Filter::new()
+                    .kind(nostr_sdk::Kind::Custom(30312))
+                    .custom_tag(
+                        nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::D),
+                        room_d_tag.as_str(),
+                    )
+                    .limit(1),
+            )
+        } else {
+            None
+        };
+        use_relay_subscription(space_filter, move |event: &nostr::Event| {
+            if event.kind.as_u16() == 30312 {
+                match parse_meeting_space(event) {
+                    Ok(ms) => {
+                        let was_open = space_sub
+                            .read()
+                            .as_ref()
+                            .map(|old| old.status != RoomStatus::Closed)
+                            .unwrap_or(false);
+                        space_sub.set(Some(ms.clone()));
+                        if was_open
+                            && ms.status == RoomStatus::Closed
+                            && *is_joined_sub.read()
+                        {
+                            let _ = is_muted_sub;
+                            let _ = is_publishing_sub;
+                            let _ = hand_raised_sub;
+                            log::info!("Room closed by host, auto-leaving");
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to parse space update: {}", e);
                     }
                 }
             }
@@ -312,14 +373,60 @@ pub fn NestDetail(naddr: String) -> Element {
         }
     };
 
-    let handle_leave = {
+    let handle_close_and_leave = {
+        let space_val = space;
         let pid = publisher_id.clone();
         let mut is_joined_cb = is_joined;
         let mut is_muted_cb = is_muted;
         let mut is_publishing_cb = is_publishing;
         let mut hand_raised_cb = hand_raised;
         let mut audio_error_cb = audio_error;
-        move |_: ()| {
+    let _nav = navigator();
+        move |_| {
+            show_host_leave_confirm.set(false);
+            let ms = match space_val.read().clone() {
+                Some(ms) => ms,
+                None => return,
+            };
+            let pid = pid.clone();
+            spawn(async move {
+                let tags = rebuild_meeting_space_tags(&ms, RoomStatus::Closed);
+                let builder = nostr_sdk::EventBuilder::new(nostr_sdk::Kind::Custom(30312), "")
+                    .tags(tags);
+                let _ = crate::stores::publish_queue::signing::sign_event_builder(builder)
+                    .await
+                    .map(|event| {
+                        crate::stores::publish_queue::enqueue(
+                            event,
+                            crate::stores::publish_queue::types::QueueEventType::Other(
+                                "nest".to_string(),
+                            ),
+                            None,
+                            std::collections::HashMap::new(),
+                        )
+                    });
+                let _ = crate::hooks::use_nest_audio::leave_room(&pid).await;
+                #[cfg(feature = "mobile_platform")]
+                { let _ = pip::set_nest_active(false); }
+                is_joined_cb.set(false);
+                is_muted_cb.set(true);
+                is_publishing_cb.set(false);
+                hand_raised_cb.set(false);
+                audio_error_cb.set(None);
+                nav.push(Route::NestsHome {});
+            });
+        }
+    };
+
+    let handle_just_leave = {
+        let pid = publisher_id.clone();
+        let mut is_joined_cb = is_joined;
+        let mut is_muted_cb = is_muted;
+        let mut is_publishing_cb = is_publishing;
+        let mut hand_raised_cb = hand_raised;
+        let mut audio_error_cb = audio_error;
+        move |_| {
+            show_host_leave_confirm.set(false);
             let pid = pid.clone();
             spawn(async move {
                 let _ = crate::hooks::use_nest_audio::leave_room(&pid).await;
@@ -362,6 +469,43 @@ pub fn NestDetail(naddr: String) -> Element {
                     "remove_speaker",
                 )
                 .await;
+            });
+        }
+    };
+
+    let on_leave_clicked = {
+        let is_host = space
+            .read()
+            .as_ref()
+            .map(|ms| {
+                ms.providers
+                    .first()
+                    .map(|p| p.pubkey == *my_pubkey.read())
+                    .unwrap_or(false)
+            })
+            .unwrap_or(false);
+        let mut show_confirm = show_host_leave_confirm;
+        let pid = publisher_id.clone();
+        let mut is_joined_cb = is_joined;
+        let mut is_muted_cb = is_muted;
+        let mut is_publishing_cb = is_publishing;
+        let mut hand_raised_cb = hand_raised;
+        let mut audio_error_cb = audio_error;
+        move |_: ()| {
+            if is_host && *is_joined_cb.read() {
+                show_confirm.set(true);
+                return;
+            }
+            let pid = pid.clone();
+            spawn(async move {
+                let _ = crate::hooks::use_nest_audio::leave_room(&pid).await;
+                #[cfg(feature = "mobile_platform")]
+                { let _ = pip::set_nest_active(false); }
+                is_joined_cb.set(false);
+                is_muted_cb.set(true);
+                is_publishing_cb.set(false);
+                hand_raised_cb.set(false);
+                audio_error_cb.set(None);
             });
         }
     };
@@ -516,9 +660,20 @@ pub fn NestDetail(naddr: String) -> Element {
                         speaker_request_count: speaker_request_count,
                         on_toggle_mute: handle_toggle_mute,
                         on_raise_hand: handle_raise_hand,
-                        on_leave: handle_leave,
+                        on_leave: on_leave_clicked,
                         on_request_speak: handle_request_speak,
                     }
+                }
+            }
+
+            if *show_host_leave_confirm.read() {
+                ConfirmModal {
+                    title: "End this nest?".to_string(),
+                    message: "You're the host. Closing the room will disconnect everyone. Choose \"Just Leave\" if you want to come back later.".to_string(),
+                    confirm_text: Some("Close Room".to_string()),
+                    cancel_text: Some("Just Leave".to_string()),
+                    on_confirm: handle_close_and_leave,
+                    on_cancel: handle_just_leave,
                 }
             }
         }
