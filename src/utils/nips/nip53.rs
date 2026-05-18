@@ -850,4 +850,141 @@ mod tests {
         assert_eq!(LiveStatus::Planned.to_string(), "planned");
         assert_eq!(LiveStatus::Ended.to_string(), "ended");
     }
+    #[test]
+    fn test_room_status_ended_alias() {
+        assert_eq!(RoomStatus::from_str("ended"), Some(RoomStatus::Closed));
+        assert_eq!(RoomStatus::from_str("ENDED"), Some(RoomStatus::Closed));
+    }
+    #[test]
+    fn test_build_meeting_space_tags() {
+        let tags = build_meeting_space_tags(
+            "my-room",
+            "Test Room",
+            RoomStatus::Open,
+            "https://auth.example.com",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        );
+        let d = tags.iter().find(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D))).and_then(|t| t.content()).unwrap();
+        assert_eq!(d, "my-room");
+        let title = tags.iter().find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("title")).and_then(|t| t.as_slice().get(1).map(|s| s.as_str())).unwrap();
+        assert_eq!(title, "Test Room");
+        let status = tags.iter().find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("status")).and_then(|t| t.as_slice().get(1).map(|s| s.as_str())).unwrap();
+        assert_eq!(status, "open");
+        assert!(tags.iter().any(|t| {
+            let s = t.as_slice();
+            s.first().map(|x| x.as_str()) == Some("p") && s.get(3).map(|x| x.as_str()) == Some("host")
+        }));
+    }
+    #[test]
+    fn test_build_room_presence_tags() {
+        let tags = build_room_presence_tags("30312:abc123:my-room", true, false, true, false);
+        let a_tag = tags.iter().find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("a")).and_then(|t| t.as_slice().get(1).map(|s| s.to_string())).unwrap();
+        assert_eq!(a_tag, "30312:abc123:my-room");
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("hand") && t.as_slice().get(1).map(|s| s.as_str()) == Some("1")));
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("publishing") && t.as_slice().get(1).map(|s| s.as_str()) == Some("1")));
+    }
+    #[test]
+    fn test_build_nests_servers_tags() {
+        let servers = vec![
+            NestsServer { relay_url: "wss://relay.example.com".into(), auth_url: "https://auth.example.com".into() },
+        ];
+        let tags = build_nests_servers_tags(&servers);
+        assert!(tags.iter().any(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D))));
+        let server_tag = tags.iter().find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("server")).unwrap();
+        assert_eq!(server_tag.as_slice()[1], "wss://relay.example.com");
+        assert_eq!(server_tag.as_slice()[2], "https://auth.example.com");
+    }
+    #[test]
+    fn test_parse_nests_servers() {
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::Custom(10112), "")
+            .tags(vec![
+                Tag::identifier("nests-servers"),
+                Tag::custom(TagKind::custom("server"), ["wss://relay.example.com", "https://auth.example.com"]),
+            ])
+            .sign_with_keys(&keys)
+            .unwrap();
+        let servers = parse_nests_servers(&event);
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].relay_url, "wss://relay.example.com");
+        assert_eq!(servers[0].auth_url, "https://auth.example.com");
+    }
+    #[test]
+    fn test_build_admin_command_tags() {
+        let tags = build_admin_command_tags(
+            "30312:abc:room1",
+            "def456",
+            "mute",
+        );
+        let a_tag = tags.iter().find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("a")).and_then(|t| t.as_slice().get(1).map(|s| s.to_string())).unwrap();
+        assert_eq!(a_tag, "30312:abc:room1");
+        let p_tag = tags.iter().find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("p")).and_then(|t| t.as_slice().get(1).map(|s| s.to_string())).unwrap();
+        assert_eq!(p_tag, "def456");
+        let action = tags.iter().find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("action")).and_then(|t| t.as_slice().get(1).map(|s| s.to_string())).unwrap();
+        assert_eq!(action, "mute");
+    }
+    #[test]
+    fn test_rebuild_meeting_space_tags_preserves_participants() {
+        let ms = MeetingSpace {
+            d_tag: "room-42".into(),
+            event_id: "evt123".into(),
+            pubkey: "aa".repeat(32),
+            naddr: "naddr1test".into(),
+            coordinate: "30312:aa".to_string() + &"aa".repeat(31) + ":room-42",
+            created_at: 1000,
+            room_name: "My Room".into(),
+            summary: Some("A test room".into()),
+            image: Some("https://img.example.com/pic.png".into()),
+            status: RoomStatus::Open,
+            service_url: "https://auth.example.com".into(),
+            endpoint_url: Some("https://stream.example.com".into()),
+            recording: Some("https://rec.example.com/rec.mp4".into()),
+            hashtags: vec!["test".into(), "nostr".into()],
+            relays: vec!["wss://relay.example.com".into()],
+            providers: vec![
+                LiveParticipant {
+                    pubkey: "bb".repeat(32),
+                    relay_hint: Some("wss://r1.example.com".into()),
+                    role: Some("host".into()),
+                    proof: None,
+                },
+                LiveParticipant {
+                    pubkey: "cc".repeat(32),
+                    relay_hint: None,
+                    role: Some("speaker".into()),
+                    proof: Some("proof123".into()),
+                },
+            ],
+        };
+        let tags = rebuild_meeting_space_tags(&ms, RoomStatus::Closed);
+        let p_tags: Vec<_> = tags.iter().filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("p")).collect();
+        assert_eq!(p_tags.len(), 2);
+        let status_tag = tags.iter().find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("status")).and_then(|t| t.as_slice().get(1).map(|s| s.to_string())).unwrap();
+        assert_eq!(status_tag, "closed");
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("summary")));
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("image")));
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("recording")));
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("streaming")));
+        let t_tags: Vec<_> = tags.iter().filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("t")).collect();
+        assert_eq!(t_tags.len(), 2);
+    }
+    #[test]
+    fn test_add_meeting_space_optional_tags() {
+        let mut tags = build_meeting_space_tags("room1", "Room", RoomStatus::Open, "https://auth.example.com", &"aa".repeat(32));
+        add_meeting_space_optional_tags(
+            &mut tags,
+            Some("https://stream.example.com"),
+            Some("A summary"),
+            Some("https://img.example.com/pic.png"),
+            Some(1700000000),
+            Some("https://rec.example.com/rec.mp4"),
+            &["wss://relay.example.com".to_string()],
+        );
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("streaming")));
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("summary")));
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("image")));
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("starts")));
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("recording")));
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("relays")));
+    }
 }
