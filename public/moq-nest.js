@@ -152,7 +152,7 @@ window.nestAudioManager = window.nestAudioManager || {
                         source.buffer = audioBuffer;
                         source.connect(subState.audioContext.destination);
                         source.start();
-                    } catch (_) {}
+                    } catch (e) { console.warn('[MoQ Nest] Audio playback error:', e); }
                     audioData.close();
                 },
                 error: (e) => {

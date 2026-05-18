@@ -190,6 +190,7 @@ struct Engine {
 
 struct SubState {
     _output_stream: cpal::Stream,
+    _decode_task: tokio::task::AbortHandle,
 }
 
 impl Engine {
@@ -223,7 +224,9 @@ impl Engine {
                 let _ = reply.send(self.do_subscribe(&pubkey).await);
             }
             NativeCmd::UnsubscribeFromParticipant { pubkey, reply } => {
-                self.subscribers.remove(&pubkey);
+                if let Some(sub) = self.subscribers.remove(&pubkey) {
+                    sub._decode_task.abort();
+                }
                 let _ = reply.send(Ok(()));
             }
             NativeCmd::Disconnect { reply } => {
@@ -237,9 +240,13 @@ impl Engine {
         &mut self,
         relay_url: &str,
         namespace: &str,
-        _jwt: &str,
+        jwt: &str,
     ) -> Result<(), String> {
-        let url = url::Url::parse(relay_url).map_err(|e| format!("Invalid URL: {}", e))?;
+        let mut url = url::Url::parse(relay_url).map_err(|e| format!("Invalid URL: {}", e))?;
+
+        if !jwt.is_empty() {
+            url.query_pairs_mut().append_pair("jwt", jwt);
+        }
 
         let wt_client = web_transport_quinn::ClientBuilder::new()
             .with_system_roots()
@@ -317,7 +324,7 @@ impl Engine {
             .clone()
             .ok_or_else(|| "No track available".to_string())?;
 
-        tokio::spawn(async move {
+        std::thread::spawn(move || {
             let mut encoder = match opus::Encoder::new(
                 SAMPLE_RATE,
                 opus::Channels::Mono,
@@ -339,7 +346,10 @@ impl Engine {
                         Ok(len) => {
                             let encoded = output[..len].to_vec();
                             let mut t = track.clone();
-                            let _ = t.write_frame(encoded);
+                            if let Err(e) = t.write_frame(encoded) {
+                                log::warn!("Track write failed: {}, stopping encoding", e);
+                                return;
+                            }
                         }
                         Err(e) => {
                             log::warn!("Opus encode error: {}", e);
@@ -401,7 +411,7 @@ impl Engine {
             .play()
             .map_err(|e| format!("Play output failed: {}", e))?;
 
-        tokio::spawn(async move {
+        let decode_task = tokio::spawn(async move {
             let mut decoder = match opus::Decoder::new(SAMPLE_RATE, opus::Channels::Mono) {
                 Ok(d) => d,
                 Err(e) => {
@@ -435,6 +445,7 @@ impl Engine {
             pubkey.to_string(),
             SubState {
                 _output_stream: output_stream,
+                _decode_task: decode_task.abort_handle(),
             },
         );
 

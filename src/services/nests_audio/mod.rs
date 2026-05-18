@@ -309,16 +309,36 @@ pub async fn authenticate_with_nest(auth_url: &str) -> Result<String, String> {
 }
 
 #[cfg(feature = "desktop")]
-fn get_bridge(publisher_id: &str) -> native::NativeBridge {
+mod desktop_bridges {
+    use super::native::NativeBridge;
     use once_cell::sync::Lazy;
     use std::collections::HashMap;
     use std::sync::Mutex;
-    static BRIDGES: Lazy<Mutex<HashMap<String, native::NativeBridge>>> =
+
+    static BRIDGES: Lazy<Mutex<HashMap<String, NativeBridge>>> =
         Lazy::new(|| Mutex::new(HashMap::new()));
-    let mut map = BRIDGES.lock().unwrap();
-    map.entry(publisher_id.to_string())
-        .or_insert_with(native::NativeBridge::new)
-        .clone()
+
+    pub fn get(publisher_id: &str) -> NativeBridge {
+        let mut map = BRIDGES.lock().unwrap();
+        map.entry(publisher_id.to_string())
+            .or_insert_with(NativeBridge::new)
+            .clone()
+    }
+
+    pub fn remove(publisher_id: &str) {
+        let mut map = BRIDGES.lock().unwrap();
+        map.remove(publisher_id);
+    }
+}
+
+#[cfg(feature = "desktop")]
+fn get_bridge(publisher_id: &str) -> native::NativeBridge {
+    desktop_bridges::get(publisher_id)
+}
+
+#[cfg(feature = "desktop")]
+fn remove_bridge(publisher_id: &str) {
+    desktop_bridges::remove(publisher_id)
 }
 
 #[cfg(feature = "desktop")]
@@ -368,7 +388,9 @@ pub async fn js_unmute(publisher_id: &str) -> Result<(), String> {
 #[cfg(feature = "desktop")]
 pub async fn js_disconnect(publisher_id: &str) -> Result<(), String> {
     let bridge = get_bridge(publisher_id);
-    bridge.disconnect().await
+    let result = bridge.disconnect().await;
+    remove_bridge(publisher_id);
+    result
 }
 
 #[cfg(feature = "desktop")]

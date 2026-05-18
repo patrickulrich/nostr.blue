@@ -9,6 +9,8 @@ use crate::stores::auth_store::get_pubkey;
 use crate::stores::nostr_client::{self, CLIENT_INITIALIZED};
 use crate::stores::profiles;
 use crate::utils::nip19::parse_naddr;
+use std::collections::HashSet;
+
 use crate::utils::nips::nip53::{
     parse_meeting_space, parse_room_presence, rebuild_meeting_space_tags, MeetingSpace,
     RoomPresence, RoomStatus,
@@ -38,6 +40,7 @@ pub fn NestDetail(naddr: String) -> Element {
     let hand_raised = use_signal(|| false);
     let audio_error = use_signal(|| None::<String>);
     let mut show_host_leave_confirm = use_signal(|| false);
+    let subscribed_pubkeys = use_signal(HashSet::<String>::new);
 
     use_effect(use_reactive(
         (&*CLIENT_INITIALIZED.read(), &parsed_naddr),
@@ -138,10 +141,10 @@ pub fn NestDetail(naddr: String) -> Element {
 
     {
         let mut space_sub = space;
-        let is_joined_sub = is_joined;
-        let is_muted_sub = is_muted;
-        let is_publishing_sub = is_publishing;
-        let hand_raised_sub = hand_raised;
+        let mut is_joined_sub = is_joined;
+        let mut is_muted_sub = is_muted;
+        let mut is_publishing_sub = is_publishing;
+        let mut hand_raised_sub = hand_raised;
         let room_author = parsed_naddr
             .read()
             .as_ref()
@@ -153,18 +156,21 @@ pub fn NestDetail(naddr: String) -> Element {
             .map(|p| p.identifier.clone())
             .unwrap_or_default();
         let space_filter = if !room_author.is_empty() && !room_d_tag.is_empty() {
-            Some(
-                nostr_sdk::Filter::new()
-                    .kind(nostr_sdk::Kind::Custom(30312))
-                    .custom_tag(
-                        nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::D),
-                        room_d_tag.as_str(),
-                    )
-                    .limit(1),
-            )
+            let mut filter = nostr_sdk::Filter::new()
+                .kind(nostr_sdk::Kind::Custom(30312))
+                .custom_tag(
+                    nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::D),
+                    room_d_tag.as_str(),
+                )
+                .limit(1);
+            if let Ok(pk) = nostr_sdk::PublicKey::parse(&room_author) {
+                filter = filter.author(pk);
+            }
+            Some(filter)
         } else {
             None
         };
+        let pid_for_close = publisher_id.clone();
         use_relay_subscription(space_filter, move |event: &nostr::Event| {
             if event.kind.as_u16() == 30312 {
                 match parse_meeting_space(event) {
@@ -179,9 +185,19 @@ pub fn NestDetail(naddr: String) -> Element {
                             && ms.status == RoomStatus::Closed
                             && *is_joined_sub.read()
                         {
-                            let _ = is_muted_sub;
-                            let _ = is_publishing_sub;
-                            let _ = hand_raised_sub;
+                            let pid = pid_for_close.clone();
+                            spawn(async move {
+                                let _ =
+                                    crate::hooks::use_nest_audio::leave_room(&pid).await;
+                                #[cfg(feature = "mobile_platform")]
+                                {
+                                    let _ = pip::set_nest_active(false);
+                                }
+                            });
+                            is_joined_sub.set(false);
+                            is_muted_sub.set(true);
+                            is_publishing_sub.set(false);
+                            hand_raised_sub.set(false);
                             log::info!("Room closed by host, auto-leaving");
                         }
                     }
@@ -208,18 +224,31 @@ pub fn NestDetail(naddr: String) -> Element {
     {
         let pid = publisher_id.clone();
         let is_joined_cb = is_joined;
+        let mut subscribed_cb = subscribed_pubkeys;
         use_effect(use_reactive(&participants, move |parts: Signal<Vec<RoomPresence>>| {
             if !*is_joined_cb.read() {
                 return;
             }
             let parts_vec = parts.read().clone();
             let pid = pid.clone();
+            let new_subscribed = subscribed_cb.write();
+            let mut to_subscribe = Vec::new();
+            for p in &parts_vec {
+                if p.publishing && !new_subscribed.contains(&p.pubkey) {
+                    to_subscribe.push(p.pubkey.clone());
+                }
+            }
+            drop(new_subscribed);
             spawn(async move {
-                for p in &parts_vec {
-                    if p.publishing {
-                        let _ =
-                            crate::hooks::use_nest_audio::subscribe_to_participant(&pid, &p.pubkey)
-                                .await;
+                for pk in &to_subscribe {
+                    let _ =
+                        crate::hooks::use_nest_audio::subscribe_to_participant(&pid, pk)
+                            .await;
+                }
+                if !to_subscribe.is_empty() {
+                    let mut s = subscribed_cb.write();
+                    for pk in to_subscribe {
+                        s.insert(pk);
                     }
                 }
             });
@@ -236,7 +265,7 @@ pub fn NestDetail(naddr: String) -> Element {
             loop {
                 crate::platform::timer::sleep_ms(60_000).await;
                 if !*is_joined_hb.read() {
-                    continue;
+                    break;
                 }
                 let _ = crate::hooks::use_nest_audio::publish_presence(
                     &coord,
@@ -510,7 +539,7 @@ pub fn NestDetail(naddr: String) -> Element {
         }
     };
 
-    let space_ref = space.read();
+    let space_ref = space.read().clone();
     let is_host = space_ref
         .as_ref()
         .map(|ms| {
@@ -611,10 +640,10 @@ pub fn NestDetail(naddr: String) -> Element {
                             if !participants.read().is_empty() {
                                 div { class: "space-y-2",
                                     h3 { class: "text-sm font-semibold text-muted-foreground",
-                                        "Listeners ({participants.read().len()})"
+                                        "Listeners ({participants.read().iter().filter(|p| !p.publishing && !p.onstage).count()})"
                                     }
                                     ParticipantGallery {
-                                        participants: participants.read().clone(),
+                                        participants: participants.read().iter().filter(|p| !p.publishing && !p.onstage).cloned().collect(),
                                         max_display: Some(15),
                                     }
                                 }

@@ -1,13 +1,12 @@
-use dioxus::prelude::*;
 use jni::objects::JValue;
 use jni::sys::jboolean;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-static PIP_MODE: GlobalSignal<bool> = Signal::global(|| false);
+static PIP_MODE: AtomicBool = AtomicBool::new(false);
 static PIP_MUTE_PENDING: AtomicBool = AtomicBool::new(false);
 
 pub fn is_pip_mode() -> bool {
-    *PIP_MODE.read()
+    PIP_MODE.load(Ordering::SeqCst)
 }
 
 pub fn consume_pip_mute_toggle() -> bool {
@@ -89,7 +88,7 @@ pub extern "system" fn Java_dev_dioxus_main_MainActivity_notifyPipModeChanged(
     _class: jni::objects::JClass,
     is_in_pip: jboolean,
 ) {
-    *PIP_MODE.write() = is_in_pip != 0;
+    PIP_MODE.store(is_in_pip != 0, Ordering::SeqCst);
 }
 
 #[no_mangle]

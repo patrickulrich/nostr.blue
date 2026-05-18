@@ -203,7 +203,7 @@ pub fn NestChat(props: NestChatProps) -> Element {
                         }
                     }
                 } else {
-                    for message in messages.read().iter() {
+                    for message in messages.read().clone().iter() {
                         NestChatMessage {
                             key: "{message.id}",
                             event: message.clone(),

@@ -23,16 +23,14 @@ pub async fn join_room_with_retry(
     let mut last_error = String::new();
     for attempt in 0..max_retries {
         if attempt > 0 {
-            let delay_ms: u32 = (1000u64 * 2u64.pow(attempt)).min(u32::MAX as u64) as u32;
+            let delay_ms: u32 = (1000u64 * 2u64.pow(attempt)).min(30_000) as u32;
             crate::platform::timer::sleep_ms(delay_ms).await;
         }
         match join_room(publisher_id, auth_url, relay_url, namespace).await {
             Ok(()) => return Ok(()),
             Err(e) => {
                 last_error = e;
-                if attempt + 1 < max_retries {
-                    let _ = crate::services::nests_audio::js_disconnect(publisher_id).await;
-                }
+                let _ = crate::services::nests_audio::js_disconnect(publisher_id).await;
             }
         }
     }
