@@ -137,20 +137,26 @@ window.nestAudioManager = window.nestAudioManager || {
                 audioDecoder: null,
                 active: true,
             };
+            const bufferPool = [];
+            const POOL_SIZE = 10;
             subState.audioDecoder = new AudioDecoder({
                 output: (audioData) => {
                     try {
-                        const buffer = new Float32Array(audioData.numberOfFrames * audioData.numberOfChannels);
+                        const numFrames = audioData.numberOfFrames;
+                        const numChannels = audioData.numberOfChannels;
+                        const sampleRate = audioData.sampleRate;
+                        const buffer = new Float32Array(numFrames * numChannels);
                         audioData.copyTo(buffer, { planeIndex: 0 });
-                        const audioBuffer = subState.audioContext.createBuffer(
-                            audioData.numberOfChannels,
-                            audioData.numberOfFrames,
-                            audioData.sampleRate,
-                        );
+                        const audioBuffer = bufferPool.length > 0
+                            ? bufferPool.pop()
+                            : subState.audioContext.createBuffer(numChannels, numFrames, sampleRate);
                         audioBuffer.copyToChannel(buffer, 0);
                         const source = subState.audioContext.createBufferSource();
                         source.buffer = audioBuffer;
                         source.connect(subState.audioContext.destination);
+                        source.onended = () => {
+                            if (bufferPool.length < POOL_SIZE) bufferPool.push(audioBuffer);
+                        };
                         source.start();
                     } catch (e) { console.warn('[MoQ Nest] Audio playback error:', e); }
                     audioData.close();
@@ -164,6 +170,7 @@ window.nestAudioManager = window.nestAudioManager || {
                 sampleRate: 48000,
                 numberOfChannels: 1,
             });
+            let frameIndex = 0;
             (async () => {
                 try {
                     while (subState.active) {
@@ -172,7 +179,7 @@ window.nestAudioManager = window.nestAudioManager || {
                         if (subState.audioDecoder.state === 'configured') {
                             const data = new EncodedAudioChunk({
                                 type: 'key',
-                                timestamp: Date.now() * 1000,
+                                timestamp: frameIndex++ * 20000,
                                 data: chunk,
                             });
                             subState.audioDecoder.decode(data);

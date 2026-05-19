@@ -6,7 +6,7 @@ use crate::stores::nostr_client;
 use crate::utils::nip19::parse_naddr;
 use crate::utils::nips::nip53::{
     add_meeting_space_optional_tags, build_meeting_space_tags, parse_meeting_space,
-    rebuild_meeting_space_tags, MeetingSpace, RoomStatus,
+    parse_nests_servers, rebuild_meeting_space_tags, MeetingSpace, RoomStatus,
 };
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
@@ -147,7 +147,15 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
                     t.as_slice().first().map(|s| s.as_str()) == Some("title")
                 });
                 if let Some(idx) = title_idx {
-                    rebuilt[idx] = Tag::custom(TagKind::custom("title"), [&*name_val]);
+                    rebuilt[idx] = Tag::custom(
+                        TagKind::custom("title"),
+                        [name_val.trim()],
+                    );
+                } else {
+                    rebuilt.push(Tag::custom(
+                        TagKind::custom("title"),
+                        [name_val.trim()],
+                    ));
                 }
                 let summary_idx = rebuilt.iter().position(|t| {
                     t.as_slice().first().map(|s| s.as_str()) == Some("summary")
@@ -189,18 +197,54 @@ pub fn NestCreate(naddr: Option<String>) -> Element {
                 }
                 rebuilt
             } else {
-                let auth_url = "https://moq-auth.nostrnests.com";
-                let streaming_url = "https://moq.nostrnests.com:4443";
+                let (auth_url, streaming_url) = {
+                    let default_auth = "https://moq-auth.nostrnests.com".to_string();
+                    let default_streaming = "https://moq.nostrnests.com:4443".to_string();
+                    if let Some(pk) = auth_store::get_pubkey() {
+                        if let Ok(author) = PublicKey::from_hex(&pk) {
+                            let filter = nostr_sdk::Filter::new()
+                                .kind(Kind::Custom(10112))
+                                .author(author)
+                                .limit(1);
+                            if let Ok(events) = nostr_client::fetch_events_aggregated(
+                                filter,
+                                std::time::Duration::from_secs(5),
+                            )
+                            .await
+                            {
+                                if let Some(event) = events.first() {
+                                    let servers = parse_nests_servers(event);
+                                    if let Some(server) = servers.first() {
+                                        (
+                                            server.auth_url.clone(),
+                                            Some(server.relay_url.clone()),
+                                        )
+                                    } else {
+                                        (default_auth, Some(default_streaming))
+                                    }
+                                } else {
+                                    (default_auth, Some(default_streaming))
+                                }
+                            } else {
+                                (default_auth, Some(default_streaming))
+                            }
+                        } else {
+                            (default_auth, Some(default_streaming))
+                        }
+                    } else {
+                        (default_auth, Some(default_streaming))
+                    }
+                };
                 let mut tags = build_meeting_space_tags(
                     &d_tag,
                     &name_val,
                     status,
-                    auth_url,
+                    &auth_url,
                     &pubkey,
                 );
                 add_meeting_space_optional_tags(
                     &mut tags,
-                    Some(streaming_url),
+                    streaming_url.as_deref(),
                     if summary_val.trim().is_empty() {
                         None
                     } else {

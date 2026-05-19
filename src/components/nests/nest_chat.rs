@@ -121,6 +121,16 @@ pub fn NestChat(props: NestChatProps) -> Element {
                         }
                     }
                 }
+                #[cfg(not(feature = "web"))]
+                {
+                    let element_id =
+                        serde_json::to_string(&container_id).unwrap_or_else(|_| "\"\"".to_string());
+                    let _ = document::eval(&format!(
+                        "(() => {{ const el = document.getElementById({}); if (el) el.scrollTop = el.scrollHeight; }})()",
+                        element_id,
+                    ))
+                    .await;
+                }
             }
             let _ = msg_count;
         });

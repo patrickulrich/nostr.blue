@@ -1,12 +1,12 @@
 use crate::components::icons;
 use crate::components::nests::NestCard;
-use crate::hooks::use_relay_subscription;
 use crate::routes::Route;
 use crate::stores::nostr_client::{self, CLIENT_INITIALIZED};
 use crate::utils::nips::nip53::{
     nest_effective_status, parse_meeting_space, LiveStatus, MeetingSpace,
 };
 use dioxus::prelude::*;
+use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 
 #[component]
@@ -53,32 +53,92 @@ pub fn NestsHome() -> Element {
     });
 
     {
-        let presence_filter = Some(
-            nostr_sdk::Filter::new()
-                .kind(nostr_sdk::Kind::Custom(10312))
-                .limit(0),
-        );
-        use_relay_subscription(presence_filter, move |event: &nostr::Event| {
-            if event.kind.as_u16() == 10312 {
-                let coordinate = event
-                    .tags
-                    .iter()
-                    .find(|t| {
-                        t.as_slice()
-                            .first()
-                            .map(|s| s.as_str())
-                            == Some("a")
-                    })
-                    .and_then(|t| t.as_slice().get(1).cloned());
-                if let Some(coord) = coordinate {
-                    let ts = event.created_at.as_secs();
-                    let mut map = presence_map.write();
-                    let entry = map.entry(coord).or_insert(0);
-                    if ts > *entry {
-                        *entry = ts;
+        let mut sub_handle: Signal<Option<crate::stores::notification_dispatcher::DispatcherHandle>> =
+            use_signal(|| None);
+        let mut sub_fallback_id: Signal<Option<nostr_sdk::SubscriptionId>> =
+            use_signal(|| None);
+
+        use_effect(move || {
+            let current_spaces = spaces.read();
+            let coordinates: Vec<String> = current_spaces
+                .iter()
+                .map(|s| s.coordinate.clone())
+                .collect();
+            drop(current_spaces);
+            let filter = if coordinates.is_empty() {
+                return;
+            } else {
+                nostr_sdk::Filter::new()
+                    .kind(nostr_sdk::Kind::Custom(10312))
+                    .custom_tags(
+                        SingleLetterTag::lowercase(Alphabet::A),
+                        coordinates,
+                    )
+                    .limit(0)
+            };
+            spawn(async move {
+                if let Some(handle) = sub_handle.write().take() {
+                    handle.unregister().await;
+                }
+                if let Some(sid) = sub_fallback_id.write().take() {
+                    if let Some(client) = crate::stores::nostr_client::get_client() {
+                        let _ = client.unsubscribe(&sid).await;
                     }
                 }
-            }
+                let client = match crate::stores::nostr_client::get_client() {
+                    Some(c) => c,
+                    None => return,
+                };
+                match client.subscribe(filter, None).await {
+                    Ok(output) => {
+                        let sub_id = output.val;
+                        if let Some((handle, mut rx)) =
+                            crate::stores::notification_dispatcher::DispatcherHandle::create(
+                                sub_id.clone(),
+                            )
+                        {
+                            sub_handle.set(Some(handle));
+                            spawn(async move {
+                                let mut buffer = Vec::new();
+                                while let Some(event) = rx.recv().await {
+                                    buffer.push(event);
+                                    while let Ok(event) = rx.try_recv() {
+                                        buffer.push(event);
+                                    }
+                                    for event in &buffer {
+                                        if event.kind.as_u16() == 10312 {
+                                            let coordinate = event
+                                                .tags
+                                                .iter()
+                                                .find(|t| {
+                                                    t.as_slice()
+                                                        .first()
+                                                        .map(|s| s.as_str())
+                                                        == Some("a")
+                                                })
+                                                .and_then(|t| t.as_slice().get(1).cloned());
+                                            if let Some(coord) = coordinate {
+                                                let ts = event.created_at.as_secs();
+                                                let mut map = presence_map.write();
+                                                let entry = map.entry(coord).or_insert(0);
+                                                if ts > *entry {
+                                                    *entry = ts;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    buffer.clear();
+                                }
+                            });
+                        } else {
+                            sub_fallback_id.set(Some(sub_id));
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("presence subscription failed: {}", e);
+                    }
+                }
+            });
         });
     }
 

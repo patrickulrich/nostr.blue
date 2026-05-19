@@ -26,6 +26,8 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -53,6 +55,9 @@ object NativeAudioBridge {
     const val ACTION_NEXT = "com.nostr.blue.media.NEXT"
     const val ACTION_PREVIOUS = "com.nostr.blue.media.PREVIOUS"
     const val ACTION_STOP = "com.nostr.blue.media.STOP"
+
+    private val scopeJob = SupervisorJob()
+    private val scope = CoroutineScope(scopeJob + Dispatchers.IO)
 
     private val queue = mutableListOf<NativeQueueItem>()
     private var player: ExoPlayer? = null
@@ -105,6 +110,7 @@ object NativeAudioBridge {
     fun detachService(service: MediaPlaybackService) {
         if (serviceRef?.get() === service) {
             serviceRef = null
+            scopeJob.cancel()
         }
     }
 
@@ -477,7 +483,7 @@ object NativeAudioBridge {
             params: MediaLibraryService.LibraryParams?
         ): ListenableFuture<LibraryResult<Void>> {
             val context = appContext ?: return Futures.immediateFuture(LibraryResult.ofVoid())
-            CoroutineScope(Dispatchers.IO).launch {
+            scope.launch {
                 val results = mutableListOf<MediaItem>()
                 results.addAll(BrowseCache.searchCached(context, query))
                 try {
