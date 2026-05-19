@@ -1,5 +1,7 @@
 use dioxus::prelude::*;
 
+const REACTION_DISPLAY_SECS: u64 = 3;
+
 #[derive(Props, Clone, PartialEq)]
 pub struct NestReactionsProps {
     pub room_coordinate: String,
@@ -18,6 +20,19 @@ static REACTIONS: &[(&str, &str)] = &[
 pub fn NestReactions(props: NestReactionsProps) -> Element {
     let floating_reactions = use_signal(Vec::<(String, f64, u32)>::new);
     let reaction_counter = use_signal(|| 0u32);
+
+    {
+        let mut reactions = floating_reactions;
+        use_future(move || async move {
+            loop {
+                crate::platform::timer::sleep_ms(1000).await;
+                let now = crate::platform::timestamp::now_secs();
+                reactions.write().retain(|(_, created, _)| {
+                    now.saturating_sub(*created as u64) < REACTION_DISPLAY_SECS
+                });
+            }
+        });
+    }
 
     if !props.is_joined {
         return rsx! {};
@@ -46,8 +61,9 @@ pub fn NestReactions(props: NestReactionsProps) -> Element {
                                     });
                                     let id = *counter.read();
                                     counter.set(id + 1);
+                                    let now = crate::platform::timestamp::now_secs() as f64;
                                     let mut floats_mut = floats.write();
-                                    floats_mut.push((emoji_for_float, 0.0, id));
+                                    floats_mut.push((emoji_for_float, now, id));
                                 },
                                 "{emoji}"
                             }
@@ -56,11 +72,11 @@ pub fn NestReactions(props: NestReactionsProps) -> Element {
                 }
             }
             div { class: "absolute bottom-full left-0 right-0 pointer-events-none overflow-hidden h-20",
-                for (emoji, offset, id) in floating_reactions.read().iter() {
+                for (emoji, _created, id) in floating_reactions.read().iter() {
                     div {
                         key: "{id}",
                         class: "absolute animate-float-up text-2xl",
-                        style: "left: {offset}%; bottom: 0px;",
+                        style: "left: {(*id as f64 * 15.0) % 80.0}%; bottom: 0px;",
                         "{emoji}"
                     }
                 }

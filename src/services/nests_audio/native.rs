@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use tokio::sync::{mpsc, oneshot};
@@ -7,6 +8,7 @@ use super::ConnectionState;
 
 const SAMPLE_RATE: u32 = 48000;
 const OPUS_FRAME_SIZE: usize = 960;
+const MAX_DECODE_SAMPLES: usize = 5760;
 
 enum NativeCmd {
     Connect {
@@ -57,6 +59,8 @@ impl NativeBridge {
             tracks: Vec::new(),
         }));
         let shared_clone = shared.clone();
+        let is_muted = Arc::new(AtomicBool::new(false));
+        let is_muted_clone = is_muted.clone();
         std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -72,6 +76,7 @@ impl NativeBridge {
                     track: None,
                     input_stream: None,
                     subscribers: HashMap::new(),
+                    is_muted: is_muted_clone,
                 };
                 engine.run().await;
             });
@@ -186,6 +191,7 @@ struct Engine {
     track: Option<moq_lite::TrackProducer>,
     input_stream: Option<cpal::Stream>,
     subscribers: HashMap<String, SubState>,
+    is_muted: Arc<AtomicBool>,
 }
 
 struct SubState {
@@ -217,7 +223,8 @@ impl Engine {
                 self.input_stream = None;
                 let _ = reply.send(Ok(()));
             }
-            NativeCmd::SetMuted { muted: _, reply } => {
+            NativeCmd::SetMuted { muted, reply } => {
+                self.is_muted.store(muted, Ordering::Relaxed);
                 let _ = reply.send(Ok(()));
             }
             NativeCmd::SubscribeToParticipant { pubkey, reply } => {
@@ -302,11 +309,16 @@ impl Engine {
             log::error!("Audio input error: {}", err);
         };
 
+        let is_muted = self.is_muted.clone();
         let stream = device
             .build_input_stream(
                 &stream_config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    let _ = audio_tx.send(data.to_vec());
+                    if is_muted.load(Ordering::Relaxed) {
+                        let _ = audio_tx.send(vec![0.0f32; data.len()]);
+                    } else {
+                        let _ = audio_tx.send(data.to_vec());
+                    }
                 },
                 err_fn,
                 None,
@@ -340,9 +352,9 @@ impl Engine {
             let mut output = vec![0u8; 4000];
             while let Ok(samples) = audio_rx.recv() {
                 pcm_buffer.extend_from_slice(&samples);
-                while pcm_buffer.len() >= OPUS_FRAME_SIZE {
-                    let frame: Vec<f32> = pcm_buffer.drain(..OPUS_FRAME_SIZE).collect();
-                    match encoder.encode_float(&frame, &mut output) {
+                let mut read_pos = 0;
+                while pcm_buffer.len() - read_pos >= OPUS_FRAME_SIZE {
+                    match encoder.encode_float(&pcm_buffer[read_pos..read_pos + OPUS_FRAME_SIZE], &mut output) {
                         Ok(len) => {
                             let encoded = output[..len].to_vec();
                             let mut t = track.clone();
@@ -355,6 +367,10 @@ impl Engine {
                             log::warn!("Opus encode error: {}", e);
                         }
                     }
+                    read_pos += OPUS_FRAME_SIZE;
+                }
+                if read_pos > 0 {
+                    pcm_buffer.drain(..read_pos);
                 }
             }
         });
@@ -387,19 +403,21 @@ impl Engine {
             buffer_size: cpal::BufferSize::Default,
         };
 
-        let (pcm_tx, pcm_rx) = std::sync::mpsc::channel::<Vec<f32>>();
+        let ring_buf: Arc<StdMutex<std::collections::VecDeque<f32>>> =
+            Arc::new(StdMutex::new(std::collections::VecDeque::with_capacity(9600)));
 
         let err_fn = |err: cpal::StreamError| {
             log::error!("Audio output error: {}", err);
         };
 
+        let ring_buf_out = ring_buf.clone();
         let output_stream = device
             .build_output_stream(
                 &stream_config,
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                    if let Ok(samples) = pcm_rx.try_recv() {
-                        let len = data.len().min(samples.len());
-                        data[..len].copy_from_slice(&samples[..len]);
+                    let mut buf = ring_buf_out.lock().unwrap();
+                    for sample in data.iter_mut() {
+                        *sample = buf.pop_front().unwrap_or(0.0);
                     }
                 },
                 err_fn,
@@ -411,6 +429,7 @@ impl Engine {
             .play()
             .map_err(|e| format!("Play output failed: {}", e))?;
 
+        let ring_buf_dec = ring_buf.clone();
         let decode_task = tokio::spawn(async move {
             let mut decoder = match opus::Decoder::new(SAMPLE_RATE, opus::Channels::Mono) {
                 Ok(d) => d,
@@ -420,13 +439,13 @@ impl Engine {
                 }
             };
             let mut track = track_consumer;
-            let mut output = vec![0f32; OPUS_FRAME_SIZE * 2];
+            let mut output = vec![0f32; MAX_DECODE_SAMPLES];
             loop {
                 match track.read_frame().await {
                     Ok(Some(frame)) => match decoder.decode_float(&frame, &mut output, false) {
                         Ok(len) => {
-                            let samples = output[..len].to_vec();
-                            let _ = pcm_tx.send(samples);
+                            let mut buf = ring_buf_dec.lock().unwrap();
+                            buf.extend(&output[..len]);
                         }
                         Err(e) => {
                             log::warn!("Opus decode error: {}", e);
@@ -456,6 +475,9 @@ impl Engine {
         self.input_stream = None;
         self.track = None;
         self.broadcast = None;
+        for sub in self.subscribers.values() {
+            sub._decode_task.abort();
+        }
         self.subscribers.clear();
         self.moq_session = None;
         self.origin = None;

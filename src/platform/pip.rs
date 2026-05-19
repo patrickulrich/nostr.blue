@@ -22,9 +22,6 @@ fn call_pip_method(method: &str, arg: Option<&str>) -> Result<String, String> {
     let class = crate::platform::mobile::find_app_class(
         &mut env, &context, "dev/dioxus/main/MainActivity",
     ).ok_or("Failed to find MainActivity class")?;
-    let context_obj = unsafe {
-        jni::objects::JObject::from_raw(ndk_context::android_context().context().cast())
-    };
     match arg {
         None => {
             let result = env
@@ -32,7 +29,7 @@ fn call_pip_method(method: &str, arg: Option<&str>) -> Result<String, String> {
                     &class,
                     method,
                     "(Landroid/content/Context;)Ljava/lang/String;",
-                    &[JValue::Object(&context_obj)],
+                    &[JValue::Object(&context)],
                 )
                 .map_err(|e| format!("call {} failed: {}", method, e))?
                 .l()
@@ -48,7 +45,7 @@ fn call_pip_method(method: &str, arg: Option<&str>) -> Result<String, String> {
                     &class,
                     method,
                     "(Landroid/content/Context;Ljava/lang/String;)Ljava/lang/String;",
-                    &[JValue::Object(&context_obj), JValue::Object(&j_arg)],
+                    &[JValue::Object(&context), JValue::Object(&j_arg)],
                 )
                 .map_err(|e| format!("call {} failed: {}", method, e))?
                 .l()

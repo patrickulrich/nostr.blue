@@ -11,6 +11,9 @@
 //! NIP-53 defines a standard for live activities on Nostr.
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
+
+const PRESENCE_LIVE_THRESHOLD_SECS: u64 = 600;
+const ROOM_STALE_THRESHOLD_SECS: u64 = 28800;
 /// Live streaming event (audio/video streams, audio spaces)
 /// Note: Used at /videos/live via nostr-sdk's LiveEvent parser
 #[allow(dead_code)]
@@ -814,12 +817,12 @@ pub fn nest_effective_status(
     }
     let now = crate::platform::timestamp::now_secs();
     if let Some(ts) = last_presence {
-        if now.saturating_sub(ts) < 600 {
+        if now.saturating_sub(ts) < PRESENCE_LIVE_THRESHOLD_SECS {
             return LiveStatus::Live;
         }
     }
     if room_status == RoomStatus::Open {
-        if now.saturating_sub(created_at) > 28800 {
+        if now.saturating_sub(created_at) > ROOM_STALE_THRESHOLD_SECS {
             return LiveStatus::Ended;
         }
         LiveStatus::Live

@@ -650,13 +650,13 @@ pub fn play_track(
         let track_json = serde_json::to_string(&track).unwrap_or_default();
         let recent_json = serde_json::to_string(&recent_tracks).unwrap_or_default();
         let item_key = format!("item:{}", track.id);
-        for t in &recent_tracks {
-            let _ = android_media::save_browse_cache(
-                &format!("item:{}", t.id),
-                &serde_json::to_string(t).unwrap_or_default(),
-            );
-        }
         spawn(async move {
+            for t in &recent_tracks {
+                let _ = android_media::save_browse_cache(
+                    &format!("item:{}", t.id),
+                    &serde_json::to_string(t).unwrap_or_default(),
+                );
+            }
             let _ = android_media::save_browse_cache("continue_listening", &recent_json);
             let _ = android_media::save_browse_position(&track_id, 0);
             let _ = android_media::save_browse_cache(&item_key, &track_json);

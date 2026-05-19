@@ -3,7 +3,7 @@ pub async fn publish_admin_command(
     target_pubkey: &str,
     action: &str,
 ) -> Result<(), String> {
-    let _pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
+    crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
     let tags = crate::utils::nips::nip53::build_admin_command_tags(
         room_coordinate,
         target_pubkey,

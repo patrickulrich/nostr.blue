@@ -55,13 +55,10 @@ struct AuthResponse {
 }
 
 #[cfg(any(feature = "web", feature = "mobile_platform"))]
-pub async fn js_init(publisher_id: &str) -> Result<(), String> {
-    let pid = serde_json::to_string(publisher_id).map_err(|e| e.to_string())?;
-    let result = document::eval(&format!(
-        "return window.nestAudioManager.init({pid});"
-    ))
-    .await
-    .map_err(|e| format!("JS eval error: {}", e))?;
+async fn eval_nest_js(expr: &str, error_context: &str) -> Result<(), String> {
+    let result = document::eval(expr)
+        .await
+        .map_err(|e| format!("JS eval error: {}", e))?;
     let obj = result.as_object().ok_or("Invalid JS return")?;
     if obj
         .get("type")
@@ -74,9 +71,19 @@ pub async fn js_init(publisher_id: &str) -> Result<(), String> {
         Err(obj
             .get("error")
             .and_then(|v| v.as_str())
-            .unwrap_or("Unknown init error")
+            .unwrap_or(error_context)
             .to_string())
     }
+}
+
+#[cfg(any(feature = "web", feature = "mobile_platform"))]
+pub async fn js_init(publisher_id: &str) -> Result<(), String> {
+    let pid = serde_json::to_string(publisher_id).map_err(|e| e.to_string())?;
+    eval_nest_js(
+        &format!("return window.nestAudioManager.init({pid});"),
+        "Unknown init error",
+    )
+    .await
 }
 
 #[cfg(any(feature = "web", feature = "mobile_platform"))]
@@ -92,157 +99,70 @@ pub async fn js_connect(
     let rurl = serde_json::to_string(relay_url).map_err(|e| e.to_string())?;
     let ns = serde_json::to_string(namespace).map_err(|e| e.to_string())?;
     let j = serde_json::to_string(jwt).map_err(|e| e.to_string())?;
-    let result = document::eval(&format!(
-        "return window.nestAudioManager.connect({pid}, {aurl}, {rurl}, {ns}, {j});"
-    ))
+    eval_nest_js(
+        &format!("return window.nestAudioManager.connect({pid}, {aurl}, {rurl}, {ns}, {j});"),
+        "Unknown connect error",
+    )
     .await
-    .map_err(|e| format!("JS eval error: {}", e))?;
-    let obj = result.as_object().ok_or("Invalid JS return")?;
-    if obj
-        .get("type")
-        .and_then(|v| v.as_str())
-        .map(|s| s == "success")
-        .unwrap_or(false)
-    {
-        Ok(())
-    } else {
-        Err(obj
-            .get("error")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Unknown connect error")
-            .to_string())
-    }
 }
 
 #[cfg(any(feature = "web", feature = "mobile_platform"))]
 pub async fn js_publish_audio(publisher_id: &str) -> Result<(), String> {
     let pid = serde_json::to_string(publisher_id).map_err(|e| e.to_string())?;
-    let result = document::eval(&format!(
-        "return window.nestAudioManager.publishAudio({pid});"
-    ))
+    eval_nest_js(
+        &format!("return window.nestAudioManager.publishAudio({pid});"),
+        "Unknown publish error",
+    )
     .await
-    .map_err(|e| format!("JS eval error: {}", e))?;
-    let obj = result.as_object().ok_or("Invalid JS return")?;
-    if obj
-        .get("type")
-        .and_then(|v| v.as_str())
-        .map(|s| s == "success")
-        .unwrap_or(false)
-    {
-        Ok(())
-    } else {
-        Err(obj
-            .get("error")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Unknown publish error")
-            .to_string())
-    }
 }
 
 #[cfg(any(feature = "web", feature = "mobile_platform"))]
 pub async fn js_subscribe_audio(publisher_id: &str, participant_pubkey: &str) -> Result<(), String> {
     let pid = serde_json::to_string(publisher_id).map_err(|e| e.to_string())?;
     let ppk = serde_json::to_string(participant_pubkey).map_err(|e| e.to_string())?;
-    let result = document::eval(&format!(
-        "return window.nestAudioManager.subscribeAudio({pid}, {ppk});"
-    ))
+    eval_nest_js(
+        &format!("return window.nestAudioManager.subscribeAudio({pid}, {ppk});"),
+        "Unknown subscribe error",
+    )
     .await
-    .map_err(|e| format!("JS eval error: {}", e))?;
-    let obj = result.as_object().ok_or("Invalid JS return")?;
-    if obj
-        .get("type")
-        .and_then(|v| v.as_str())
-        .map(|s| s == "success")
-        .unwrap_or(false)
-    {
-        Ok(())
-    } else {
-        Err(obj
-            .get("error")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Unknown subscribe error")
-            .to_string())
-    }
 }
 
 #[cfg(any(feature = "web", feature = "mobile_platform"))]
 pub async fn js_mute(publisher_id: &str) -> Result<(), String> {
     let pid = serde_json::to_string(publisher_id).map_err(|e| e.to_string())?;
-    let result = document::eval(&format!(
-        "return window.nestAudioManager.mute({pid});"
-    ))
+    eval_nest_js(
+        &format!("return window.nestAudioManager.mute({pid});"),
+        "Unknown mute error",
+    )
     .await
-    .map_err(|e| format!("JS eval error: {}", e))?;
-    let obj = result.as_object().ok_or("Invalid JS return")?;
-    if obj
-        .get("type")
-        .and_then(|v| v.as_str())
-        .map(|s| s == "success")
-        .unwrap_or(false)
-    {
-        Ok(())
-    } else {
-        Err(obj
-            .get("error")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Unknown mute error")
-            .to_string())
-    }
 }
 
 #[cfg(any(feature = "web", feature = "mobile_platform"))]
 pub async fn js_unmute(publisher_id: &str) -> Result<(), String> {
     let pid = serde_json::to_string(publisher_id).map_err(|e| e.to_string())?;
-    let result = document::eval(&format!(
-        "return window.nestAudioManager.unmute({pid});"
-    ))
+    eval_nest_js(
+        &format!("return window.nestAudioManager.unmute({pid});"),
+        "Unknown unmute error",
+    )
     .await
-    .map_err(|e| format!("JS eval error: {}", e))?;
-    let obj = result.as_object().ok_or("Invalid JS return")?;
-    if obj
-        .get("type")
-        .and_then(|v| v.as_str())
-        .map(|s| s == "success")
-        .unwrap_or(false)
-    {
-        Ok(())
-    } else {
-        Err(obj
-            .get("error")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Unknown unmute error")
-            .to_string())
-    }
 }
 
 #[cfg(any(feature = "web", feature = "mobile_platform"))]
 pub async fn js_disconnect(publisher_id: &str) -> Result<(), String> {
     let pid = serde_json::to_string(publisher_id).map_err(|e| e.to_string())?;
-    let result = document::eval(&format!(
-        "return window.nestAudioManager.disconnect({pid});"
-    ))
+    eval_nest_js(
+        &format!("return window.nestAudioManager.disconnect({pid});"),
+        "Unknown disconnect error",
+    )
     .await
-    .map_err(|e| format!("JS eval error: {}", e))?;
-    let obj = result.as_object().ok_or("Invalid JS return")?;
-    if obj
-        .get("type")
-        .and_then(|v| v.as_str())
-        .map(|s| s == "success")
-        .unwrap_or(false)
-    {
-        Ok(())
-    } else {
-        Err(obj
-            .get("error")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Unknown disconnect error")
-            .to_string())
-    }
 }
 
 #[cfg(any(feature = "web", feature = "mobile_platform"))]
 pub async fn js_get_connection_state(publisher_id: &str) -> ConnectionState {
-    let pid = serde_json::to_string(publisher_id).unwrap_or_default();
+    let pid = match serde_json::to_string(publisher_id) {
+        Ok(p) => p,
+        Err(e) => return ConnectionState::Error(e.to_string()),
+    };
     let result = document::eval(&format!(
         "return window.nestAudioManager.getConnectionState({pid});"
     ))
@@ -264,7 +184,13 @@ pub async fn js_get_connection_state(publisher_id: &str) -> ConnectionState {
 
 #[cfg(any(feature = "web", feature = "mobile_platform"))]
 pub async fn js_get_participant_tracks(publisher_id: &str) -> Vec<String> {
-    let pid = serde_json::to_string(publisher_id).unwrap_or_default();
+    let pid = match serde_json::to_string(publisher_id) {
+        Ok(p) => p,
+        Err(e) => {
+            log::warn!("Failed to serialize publisher_id: {}", e);
+            return Vec::new();
+        }
+    };
     let result = document::eval(&format!(
         "return JSON.stringify(window.nestAudioManager.getParticipantTracks({pid}));"
     ))
@@ -274,7 +200,10 @@ pub async fn js_get_participant_tracks(publisher_id: &str) -> Vec<String> {
             .as_str()
             .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
             .unwrap_or_default(),
-        Err(_) => Vec::new(),
+        Err(e) => {
+            log::warn!("Failed to get participant tracks: {}", e);
+            Vec::new()
+        }
     }
 }
 

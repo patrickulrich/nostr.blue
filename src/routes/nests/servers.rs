@@ -10,7 +10,7 @@ use nostr_sdk::prelude::*;
 #[component]
 pub fn NestServers() -> Element {
     let navigator = use_navigator();
-    let is_logged_in = auth_store::get_pubkey().is_some();
+    let is_logged_in = use_memo(move || auth_store::get_pubkey().is_some());
     let mut servers = use_signal(Vec::<NestsServer>::new);
     let mut loading = use_signal(|| true);
     let mut relay_url = use_signal(String::new);
@@ -19,7 +19,7 @@ pub fn NestServers() -> Element {
     let mut error = use_signal(|| None::<String>);
 
     use_effect(use_reactive(&*CLIENT_INITIALIZED.read(), move |client_ready| {
-        if !client_ready || !is_logged_in {
+        if !client_ready || !is_logged_in() {
             return;
         }
         spawn(async move {
@@ -55,7 +55,7 @@ pub fn NestServers() -> Element {
         });
     }));
 
-    if !is_logged_in {
+    if !is_logged_in() {
         return rsx! {
             div { class: "min-h-screen flex items-center justify-center",
                 div { class: "text-center space-y-4",
@@ -76,6 +76,14 @@ pub fn NestServers() -> Element {
         let auth_val = auth_url.read().clone();
         if relay_val.trim().is_empty() || auth_val.trim().is_empty() {
             error.set(Some("Both relay URL and auth URL are required".to_string()));
+            return;
+        }
+        if !relay_val.trim().starts_with("wss://") && !relay_val.trim().starts_with("ws://") {
+            error.set(Some("Relay URL must start with wss:// or ws://".to_string()));
+            return;
+        }
+        if !auth_val.trim().starts_with("https://") && !auth_val.trim().starts_with("http://") {
+            error.set(Some("Auth URL must start with https:// or http://".to_string()));
             return;
         }
         let mut current = servers.write();
