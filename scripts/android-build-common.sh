@@ -544,6 +544,21 @@ if [ -f "$PROJECT_ROOT/android/res/values/strings.xml" ]; then
     cp "$PROJECT_ROOT/android/res/values/strings.xml" "$DX_ANDROID/app/src/main/res/values/strings.xml"
     echo "Pre-copied strings.xml"
 fi
+mkdir -p "$DX_ANDROID/app/src/main/res/drawable"
+for drawable in "$PROJECT_ROOT/android/res/drawable/"*.xml; do
+    [ -f "$drawable" ] || continue
+    base=$(basename "$drawable")
+    if cp "$drawable" "$DX_ANDROID/app/src/main/res/drawable/$base"; then
+        echo "Pre-copied drawable/$base"
+    fi
+done
+for drawable in "$PROJECT_ROOT/android/res/drawable/"*.png; do
+    [ -f "$drawable" ] || continue
+    base=$(basename "$drawable")
+    if cp "$drawable" "$DX_ANDROID/app/src/main/res/drawable/$base"; then
+        echo "Pre-copied drawable/$base"
+    fi
+done
 write_android_local_properties
 
 echo "Pre-copying Kotlin sources (so dx build / Gradle can see them)"
