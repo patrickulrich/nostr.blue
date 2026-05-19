@@ -41,6 +41,10 @@ pub async fn subscribe_to_participant(publisher_id: &str, pubkey: &str) -> Resul
     crate::services::nests_audio::js_subscribe_audio(publisher_id, pubkey).await
 }
 
+pub async fn unsubscribe_from_participant(publisher_id: &str, pubkey: &str) -> Result<(), String> {
+    crate::services::nests_audio::js_unsubscribe_audio(publisher_id, pubkey).await
+}
+
 #[allow(dead_code)]
 pub async fn start_publishing(publisher_id: &str) -> Result<(), String> {
     crate::services::nests_audio::js_publish_audio(publisher_id).await

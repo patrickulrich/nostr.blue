@@ -56,8 +56,8 @@ object NativeAudioBridge {
     const val ACTION_PREVIOUS = "com.nostr.blue.media.PREVIOUS"
     const val ACTION_STOP = "com.nostr.blue.media.STOP"
 
-    private val scopeJob = SupervisorJob()
-    private val scope = CoroutineScope(scopeJob + Dispatchers.IO)
+    private var scopeJob = SupervisorJob()
+    private val scope get() = CoroutineScope(scopeJob + Dispatchers.IO)
 
     private val queue = mutableListOf<NativeQueueItem>()
     private var player: ExoPlayer? = null
@@ -111,6 +111,7 @@ object NativeAudioBridge {
         if (serviceRef?.get() === service) {
             serviceRef = null
             scopeJob.cancel()
+            scopeJob = SupervisorJob()
         }
     }
 

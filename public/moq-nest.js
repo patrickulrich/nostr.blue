@@ -147,9 +147,17 @@ window.nestAudioManager = window.nestAudioManager || {
                         const sampleRate = audioData.sampleRate;
                         const buffer = new Float32Array(numFrames * numChannels);
                         audioData.copyTo(buffer, { planeIndex: 0 });
-                        const audioBuffer = bufferPool.length > 0
-                            ? bufferPool.pop()
-                            : subState.audioContext.createBuffer(numChannels, numFrames, sampleRate);
+                        let audioBuffer;
+                        while (bufferPool.length > 0) {
+                            const cached = bufferPool.pop();
+                            if (cached.numberOfFrames === numFrames && cached.numberOfChannels === numChannels) {
+                                audioBuffer = cached;
+                                break;
+                            }
+                        }
+                        if (!audioBuffer) {
+                            audioBuffer = subState.audioContext.createBuffer(numChannels, numFrames, sampleRate);
+                        }
                         audioBuffer.copyToChannel(buffer, 0);
                         const source = subState.audioContext.createBufferSource();
                         source.buffer = audioBuffer;
@@ -199,6 +207,20 @@ window.nestAudioManager = window.nestAudioManager || {
         } catch (e) {
             return { type: 'error', error: e.message || String(e) };
         }
+    },
+
+    async unsubscribeAudio(publisherId, participantPubkey) {
+        const conn = this._getConnection(publisherId);
+        if (!conn) return { type: 'success' };
+        const subState = conn.subscribers.get(participantPubkey);
+        if (subState) {
+            subState.active = false;
+            try { if (subState.audioDecoder) subState.audioDecoder.close(); } catch (_) {}
+            try { if (subState.audioContext) subState.audioContext.close(); } catch (_) {}
+            conn.subscribers.delete(participantPubkey);
+            conn.participantTracks = conn.participantTracks.filter(t => t !== participantPubkey);
+        }
+        return { type: 'success' };
     },
 
     async mute(publisherId) {

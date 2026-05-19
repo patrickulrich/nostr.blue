@@ -9,6 +9,7 @@ use super::ConnectionState;
 const SAMPLE_RATE: u32 = 48000;
 const OPUS_FRAME_SIZE: usize = 960;
 const MAX_DECODE_SAMPLES: usize = 5760;
+const RING_BUFFER_MAX_SAMPLES: usize = 24000;
 
 enum NativeCmd {
     Connect {
@@ -61,11 +62,19 @@ impl NativeBridge {
         let shared_clone = shared.clone();
         let is_muted = Arc::new(AtomicBool::new(false));
         let is_muted_clone = is_muted.clone();
+        let encoding_shutdown = Arc::new(AtomicBool::new(false));
+        let encoding_shutdown_clone = encoding_shutdown.clone();
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
+            let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-                .expect("Failed to create audio runtime");
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    log::error!("Failed to create audio runtime: {}", e);
+                    return;
+                }
+            };
             rt.block_on(async move {
                 let mut engine = Engine {
                     cmd_rx,
@@ -77,6 +86,7 @@ impl NativeBridge {
                     input_stream: None,
                     subscribers: HashMap::new(),
                     is_muted: is_muted_clone,
+                    encoding_shutdown: encoding_shutdown_clone,
                 };
                 engine.run().await;
             });
@@ -192,6 +202,7 @@ struct Engine {
     input_stream: Option<cpal::Stream>,
     subscribers: HashMap<String, SubState>,
     is_muted: Arc<AtomicBool>,
+    encoding_shutdown: Arc<AtomicBool>,
 }
 
 struct SubState {
@@ -220,6 +231,7 @@ impl Engine {
                 let _ = reply.send(self.do_start_publishing());
             }
             NativeCmd::StopPublishing { reply } => {
+                self.encoding_shutdown.store(true, Ordering::Relaxed);
                 self.input_stream = None;
                 let _ = reply.send(Ok(()));
             }
@@ -292,6 +304,8 @@ impl Engine {
     fn do_start_publishing(&mut self) -> Result<(), String> {
         use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
+        self.encoding_shutdown.store(false, Ordering::Relaxed);
+
         let host = cpal::default_host();
         let device = host
             .default_input_device()
@@ -336,6 +350,7 @@ impl Engine {
             .clone()
             .ok_or_else(|| "No track available".to_string())?;
 
+        let encoding_shutdown = self.encoding_shutdown.clone();
         std::thread::spawn(move || {
             let mut encoder = match opus::Encoder::new(
                 SAMPLE_RATE,
@@ -351,6 +366,9 @@ impl Engine {
             let mut pcm_buffer = Vec::with_capacity(OPUS_FRAME_SIZE * 2);
             let mut output = vec![0u8; 4000];
             while let Ok(samples) = audio_rx.recv() {
+                if encoding_shutdown.load(Ordering::Relaxed) {
+                    break;
+                }
                 pcm_buffer.extend_from_slice(&samples);
                 let mut read_pos = 0;
                 while pcm_buffer.len() - read_pos >= OPUS_FRAME_SIZE {
@@ -446,6 +464,10 @@ impl Engine {
                         Ok(len) => {
                             let mut buf = ring_buf_dec.lock().unwrap();
                             buf.extend(&output[..len]);
+                            let excess = buf.len().saturating_sub(RING_BUFFER_MAX_SAMPLES);
+                            if excess > 0 {
+                                buf.drain(..excess);
+                            }
                         }
                         Err(e) => {
                             log::warn!("Opus decode error: {}", e);

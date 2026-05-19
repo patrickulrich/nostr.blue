@@ -231,24 +231,37 @@ pub fn NestDetail(naddr: String) -> Element {
             }
             let parts_vec = parts.read().clone();
             let pid = pid.clone();
-            let new_subscribed = subscribed_cb.write();
+            let current_subscribed = subscribed_cb.read().clone();
             let mut to_subscribe = Vec::new();
+            let mut to_unsubscribe = Vec::new();
             for p in &parts_vec {
-                if p.publishing && !new_subscribed.contains(&p.pubkey) {
+                if p.publishing && !current_subscribed.contains(&p.pubkey) {
                     to_subscribe.push(p.pubkey.clone());
                 }
             }
-            drop(new_subscribed);
+            for pk in &current_subscribed {
+                if !parts_vec.iter().any(|p| p.pubkey == *pk && p.publishing) {
+                    to_unsubscribe.push(pk.clone());
+                }
+            }
             spawn(async move {
                 for pk in &to_subscribe {
                     let _ =
                         crate::hooks::use_nest_audio::subscribe_to_participant(&pid, pk)
                             .await;
                 }
-                if !to_subscribe.is_empty() {
+                for pk in &to_unsubscribe {
+                    let _ =
+                        crate::hooks::use_nest_audio::unsubscribe_from_participant(&pid, pk)
+                            .await;
+                }
+                if !to_subscribe.is_empty() || !to_unsubscribe.is_empty() {
                     let mut s = subscribed_cb.write();
                     for pk in to_subscribe {
                         s.insert(pk);
+                    }
+                    for pk in to_unsubscribe {
+                        s.remove(&pk);
                     }
                 }
             });
@@ -261,21 +274,23 @@ pub fn NestDetail(naddr: String) -> Element {
         let is_muted_hb = is_muted;
         let is_publishing_hb = is_publishing;
         let hand_raised_hb = hand_raised;
-        spawn(async move {
-            loop {
-                crate::platform::timer::sleep_ms(60_000).await;
-                if !*is_joined_hb.read() {
-                    break;
+        use_hook(move || {
+            spawn(async move {
+                loop {
+                    crate::platform::timer::sleep_ms(60_000).await;
+                    if !*is_joined_hb.read() {
+                        break;
+                    }
+                    let _ = crate::hooks::use_nest_audio::publish_presence(
+                        &coord,
+                        *is_muted_hb.read(),
+                        *is_publishing_hb.read(),
+                        *hand_raised_hb.read(),
+                        false,
+                    )
+                    .await;
                 }
-                let _ = crate::hooks::use_nest_audio::publish_presence(
-                    &coord,
-                    *is_muted_hb.read(),
-                    *is_publishing_hb.read(),
-                    *hand_raised_hb.read(),
-                    false,
-                )
-                .await;
-            }
+            });
         });
     }
 

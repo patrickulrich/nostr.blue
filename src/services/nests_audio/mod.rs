@@ -128,6 +128,17 @@ pub async fn js_subscribe_audio(publisher_id: &str, participant_pubkey: &str) ->
 }
 
 #[cfg(any(feature = "web", feature = "mobile_platform"))]
+pub async fn js_unsubscribe_audio(publisher_id: &str, participant_pubkey: &str) -> Result<(), String> {
+    let pid = serde_json::to_string(publisher_id).map_err(|e| e.to_string())?;
+    let ppk = serde_json::to_string(participant_pubkey).map_err(|e| e.to_string())?;
+    eval_nest_js(
+        &format!("return window.nestAudioManager.unsubscribeAudio({pid}, {ppk});"),
+        "Unknown unsubscribe error",
+    )
+    .await
+}
+
+#[cfg(any(feature = "web", feature = "mobile_platform"))]
 pub async fn js_mute(publisher_id: &str) -> Result<(), String> {
     let pid = serde_json::to_string(publisher_id).map_err(|e| e.to_string())?;
     eval_nest_js(
@@ -300,6 +311,15 @@ pub async fn js_subscribe_audio(
 ) -> Result<(), String> {
     let bridge = get_bridge(publisher_id);
     bridge.subscribe(participant_pubkey).await
+}
+
+#[cfg(feature = "desktop")]
+pub async fn js_unsubscribe_audio(
+    publisher_id: &str,
+    participant_pubkey: &str,
+) -> Result<(), String> {
+    let bridge = get_bridge(publisher_id);
+    bridge.unsubscribe(participant_pubkey).await
 }
 
 #[cfg(feature = "desktop")]
