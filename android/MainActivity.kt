@@ -25,7 +25,9 @@ import android.content.IntentFilter
 import android.graphics.drawable.Icon
 import android.util.Rational
 
+import java.util.Locale
 import java.util.UUID
+import com.nostr.blue.R
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 
@@ -248,6 +250,10 @@ class MainActivity : WryActivity() {
         private set
 
     private val pipLock = Any()
+
+    private fun setNestActive(active: Boolean) {
+        synchronized(pipLock) { isNestActive = active }
+    }
 
     private val ACTION_PIP_TOGGLE_MUTE = "dev.dioxus.main.PIP_TOGGLE_MUTE"
     private val ACTION_PIP_LEAVE = "dev.dioxus.main.PIP_LEAVE"
