@@ -536,6 +536,10 @@ else
     echo "ERROR: Failed to pre-copy file_paths.xml into $DX_ANDROID/app/src/main/res/xml/" >&2
     exit 1
 fi
+if [ -f "$PROJECT_ROOT/android/res/xml/automotive_app_desc.xml" ]; then
+    cp "$PROJECT_ROOT/android/res/xml/automotive_app_desc.xml" "$DX_ANDROID/app/src/main/res/xml/"
+    echo "Pre-copied automotive_app_desc.xml"
+fi
 if [ -f "$PROJECT_ROOT/android/res/values/strings.xml" ]; then
     cp "$PROJECT_ROOT/android/res/values/strings.xml" "$DX_ANDROID/app/src/main/res/values/strings.xml"
     echo "Pre-copied strings.xml"
