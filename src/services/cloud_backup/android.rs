@@ -23,10 +23,6 @@ fn call_drive(method: &str, arg1: Option<&str>, arg2: Option<&str>) -> Result<St
     )
     .ok_or("Failed to find MainActivity class for cloud backup")?;
 
-    let context_obj = unsafe {
-        jni::objects::JObject::from_raw(ndk_context::android_context().context().cast())
-    };
-
     match (arg1, arg2) {
         (None, None) => {
             let result = env
@@ -34,7 +30,7 @@ fn call_drive(method: &str, arg1: Option<&str>, arg2: Option<&str>) -> Result<St
                     &class,
                     method,
                     "(Landroid/content/Context;)Ljava/lang/String;",
-                    &[JValue::Object(&context_obj)],
+                    &[JValue::Object(&context)],
                 )
                 .map_err(|e| format!("Call {} failed: {}", method, e))?
                 .l()
@@ -52,7 +48,7 @@ fn call_drive(method: &str, arg1: Option<&str>, arg2: Option<&str>) -> Result<St
                     &class,
                     method,
                     "(Landroid/content/Context;Ljava/lang/String;)Ljava/lang/String;",
-                    &[JValue::Object(&context_obj), JValue::Object(&j_arg1)],
+                    &[JValue::Object(&context), JValue::Object(&j_arg1)],
                 )
                 .map_err(|e| format!("Call {} failed: {}", method, e))?
                 .l()
@@ -72,7 +68,7 @@ fn call_drive(method: &str, arg1: Option<&str>, arg2: Option<&str>) -> Result<St
                     method,
                     "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
                     &[
-                        JValue::Object(&context_obj),
+                        JValue::Object(&context),
                         JValue::Object(&j_arg1),
                         JValue::Object(&j_arg2),
                     ],

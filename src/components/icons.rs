@@ -2076,3 +2076,111 @@ pub fn TelegramIcon(props: IconProps) -> Element {
         }
     }
 }
+#[component]
+pub fn NestIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            circle { cx: "12", cy: "12", r: "4" }
+            path { d: "M12 2v2" }
+            path { d: "M12 20v2" }
+            path { d: "m4.93 4.93 1.41 1.41" }
+            path { d: "m17.66 17.66 1.41 1.41" }
+            path { d: "M2 12h2" }
+            path { d: "M20 12h2" }
+            path { d: "m6.34 17.66-1.41 1.41" }
+            path { d: "m19.07 4.93-1.41 1.41" }
+        }
+    }
+}
+#[component]
+pub fn MicrophoneOffIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            line { x1: "2", y1: "2", x2: "22", y2: "22" }
+            path { d: "M18.89 13.23A7.12 7.12 0 0 0 19 12v-2" }
+            path { d: "M5 10v2a7 7 0 0 0 12 5" }
+            path { d: "M15 9.34V5a3 3 0 0 0-5.94-.6" }
+            path { d: "M12 19v3" }
+        }
+    }
+}
+#[component]
+pub fn HandIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0" }
+            path { d: "M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2" }
+            path { d: "M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8" }
+            path { d: "M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" }
+        }
+    }
+}
+#[component]
+pub fn PhoneOffIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91" }
+            line { x1: "1", y1: "1", x2: "23", y2: "23" }
+        }
+    }
+}
+#[component]
+pub fn PhoneCallIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 2.31 2.51" }
+            path { d: "M14.05 2a10 10 0 0 1 8 8" }
+            path { d: "M14.05 6A6 6 0 0 1 18 10" }
+        }
+    }
+}

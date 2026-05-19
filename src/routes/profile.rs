@@ -121,10 +121,11 @@ pub fn Profile(pubkey: String) -> Element {
     let mut pinned_events = use_signal(Vec::<NostrEvent>::new);
     let mut pinned_loading = use_signal(|| true);
     let mut user_write_relays = use_signal(Vec::<String>::new);
+    let mut request_id = use_signal(|| 0u32);
+    let mut current_pubkey = use_signal(|| pubkey.clone());
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
     let pubkey_for_button = pubkey.clone();
     let pubkey_for_display = pubkey.clone();
-    let pubkey_for_load_more = pubkey.clone();
     let pubkey_for_dm = pubkey.clone();
     let pubkey_for_info = pubkey.clone();
     let pubkey_for_pinned = pubkey.clone();
@@ -138,6 +139,9 @@ pub fn Profile(pubkey: String) -> Element {
         .and_then(|user_pk| parsed_pubkey.map(|profile_pk| user_pk == profile_pk))
         .unwrap_or(false);
     use_effect(use_reactive(&pubkey, move |_new_pubkey| {
+        let current_id = request_id.peek().wrapping_add(1);
+        request_id.set(current_id);
+        current_pubkey.set(_new_pubkey.clone());
         profile_data.set(None);
         loading.set(true);
         error.set(None);
@@ -166,9 +170,14 @@ pub fn Profile(pubkey: String) -> Element {
                 return;
             }
             pinned_loading.set(true);
+            let current_id = *request_id.peek();
+            let rid = request_id;
             spawn(async move {
                 match pinned_notes::fetch_pinned_notes_for_user(&pubkey_str).await {
                     Ok((pin_ids, events)) => {
+                        if *rid.peek() != current_id {
+                            return;
+                        }
                         let mut sorted_events = Vec::new();
                         for pin_id in pin_ids {
                             if let Some(event) = events.iter().find(|e| e.id.to_hex() == pin_id) {
@@ -178,11 +187,16 @@ pub fn Profile(pubkey: String) -> Element {
                         pinned_events.set(sorted_events);
                     }
                     Err(e) => {
+                        if *rid.peek() != current_id {
+                            return;
+                        }
                         log::warn!("Failed to fetch pinned notes: {}", e);
                         pinned_events.set(Vec::new());
                     }
                 }
-                pinned_loading.set(false);
+                if *rid.peek() == current_id {
+                    pinned_loading.set(false);
+                }
             });
         },
     ));
@@ -196,7 +210,12 @@ pub fn Profile(pubkey: String) -> Element {
             if !client_initialized {
                 return;
             }
+            let current_id = *request_id.peek();
+            let rid = request_id;
             spawn(async move {
+                if *rid.peek() != current_id {
+                    return;
+                }
                 loading.set(true);
                 metadata_error.set(None);
                 let public_key = match crate::utils::nip19_urls::parse_profile_id(&pubkey_str) {
@@ -215,22 +234,29 @@ pub fn Profile(pubkey: String) -> Element {
                         return;
                     }
                 };
+                if *rid.peek() != current_id {
+                    return;
+                }
                 let hex_pubkey = public_key.to_hex();
 
                 // Tier 0: LRU profile cache (instant, session-only)
                 if let Some(metadata) = profiles::get_profile(&hex_pubkey) {
+                    if *rid.peek() != current_id {
+                        return;
+                    }
                     log::debug!("Loaded profile metadata from LRU cache");
                     profile_data.set(Some(metadata));
                     loading.set(false);
-                    // Background: resolve relay list for tab fetches (non-blocking)
                     let hex_bg = hex_pubkey.clone();
+                    let rid_bg = rid;
+                    let cid_bg = current_id;
                     spawn(async move {
                         let write_relays = crate::stores::relay::coverage::resolve_user_relays(
                             &hex_bg,
                             crate::stores::relay::coverage::RelayPurpose::Write,
                         )
                         .await;
-                        if !write_relays.is_empty() {
+                        if *rid_bg.peek() == cid_bg && !write_relays.is_empty() {
                             user_write_relays.set(write_relays);
                         }
                     });
@@ -239,21 +265,29 @@ pub fn Profile(pubkey: String) -> Element {
 
                 // Tier 1: SDK database (SQLite/indexedDB, near-instant)
                 if let Ok(Some(metadata)) = client.database().metadata(public_key).await {
+                    if *rid.peek() != current_id {
+                        return;
+                    }
                     log::debug!("Loaded profile metadata from database cache");
                     profile_data.set(Some(metadata));
                     loading.set(false);
-                    // Background: resolve relay list for tab fetches (non-blocking)
                     let hex_bg = hex_pubkey.clone();
+                    let rid_bg = rid;
+                    let cid_bg = current_id;
                     spawn(async move {
                         let write_relays = crate::stores::relay::coverage::resolve_user_relays(
                             &hex_bg,
                             crate::stores::relay::coverage::RelayPurpose::Write,
                         )
                         .await;
-                        if !write_relays.is_empty() {
+                        if *rid_bg.peek() == cid_bg && !write_relays.is_empty() {
                             user_write_relays.set(write_relays);
                         }
                     });
+                    return;
+                }
+
+                if *rid.peek() != current_id {
                     return;
                 }
 
@@ -263,6 +297,9 @@ pub fn Profile(pubkey: String) -> Element {
                     crate::stores::relay::coverage::RelayPurpose::Write,
                 )
                 .await;
+                if *rid.peek() != current_id {
+                    return;
+                }
                 if !write_relays.is_empty() {
                     user_write_relays.set(write_relays);
                 }
@@ -272,21 +309,32 @@ pub fn Profile(pubkey: String) -> Element {
                     .await
                 {
                     Ok(Some(metadata)) => {
+                        if *rid.peek() != current_id {
+                            return;
+                        }
                         log::debug!("Fetched profile metadata from relays");
                         profile_data.set(Some(metadata));
                     }
                     Ok(None) => {
+                        if *rid.peek() != current_id {
+                            return;
+                        }
                         log::debug!("No metadata found, using empty profile");
                         metadata_error.set(Some("No profile data found".to_string()));
                         profile_data.set(Some(nostr_sdk::Metadata::new()));
                     }
                     Err(e) => {
+                        if *rid.peek() != current_id {
+                            return;
+                        }
                         log::error!("Failed to fetch profile metadata: {}", e);
                         metadata_error.set(Some(format!("Failed to load: {}", e)));
                         profile_data.set(Some(nostr_sdk::Metadata::new()));
                     }
                 }
-                loading.set(false);
+                if *rid.peek() == current_id {
+                    loading.set(false);
+                }
             });
         },
     ));
@@ -313,9 +361,17 @@ pub fn Profile(pubkey: String) -> Element {
             loading_events.set(true);
             let pubkey_for_relay = pubkey_str.clone();
             let tab_for_relay = tab.clone();
+            let current_id = *request_id.peek();
+            let rid = request_id;
             spawn(async move {
+                if *rid.peek() != current_id {
+                    return;
+                }
                 match load_tab_events_db(&pubkey_str, &tab, None).await {
                     Ok(db_outcome) => {
+                        if *rid.peek() != current_id {
+                            return;
+                        }
                         let oldest_ts = db_outcome.oldest_cursor.map(|ts| ts.saturating_sub(1));
                         let has_more = true;
                         if matches!(tab, ProfileTab::Posts) {
@@ -347,7 +403,14 @@ pub fn Profile(pubkey: String) -> Element {
                         log::warn!("DB phase failed: {}, will try relays", e);
                     }
                 }
+                if *rid.peek() != current_id {
+                    return;
+                }
                 spawn(async move {
+                    if *rid.peek() != current_id {
+                        loading_events.set(false);
+                        return;
+                    }
                     let public_key_for_relay = match crate::utils::nip19_urls::parse_profile_id(&pubkey_for_relay) {
                         Some(pk) => pk,
                         None => {
@@ -368,6 +431,10 @@ pub fn Profile(pubkey: String) -> Element {
                     if matches!(tab_for_relay, ProfileTab::Likes) {
                         match load_likes_relays(public_key_for_relay, None).await {
                             Ok(relay_outcome) => {
+                                if *rid.peek() != current_id {
+                                    loading_events.set(false);
+                                    return;
+                                }
                                 let mut data_map = tab_data.read().clone();
                                 let existing_data = data_map.get(&tab_for_relay).cloned().unwrap_or_default();
                                 let existing_ids: std::collections::HashSet<_> =
@@ -395,12 +462,16 @@ pub fn Profile(pubkey: String) -> Element {
                             }
                             Err(e) => log::warn!("Likes relay phase failed: {}", e),
                         }
-                        loading_events.set(false);
+                        if *rid.peek() == current_id {
+                            loading_events.set(false);
+                        }
                         return;
                     }
                     if matches!(tab_for_relay, ProfileTab::Zaps) {
                         let _ = load_tab_events(&pubkey_for_relay, &tab_for_relay, None).await;
-                        loading_events.set(false);
+                        if *rid.peek() == current_id {
+                            loading_events.set(false);
+                        }
                         return;
                     }
 
@@ -412,6 +483,11 @@ pub fn Profile(pubkey: String) -> Element {
                     );
 
                     let (targeted_result, safety_result) = futures::join!(targeted_future, safety_future);
+
+                    if *rid.peek() != current_id {
+                        loading_events.set(false);
+                        return;
+                    }
 
                     let mut all_events = Vec::new();
                     let mut seen_ids = std::collections::HashSet::new();
@@ -468,6 +544,10 @@ pub fn Profile(pubkey: String) -> Element {
                                 .last()
                                 .map(|e| e.created_at.as_secs().saturating_sub(1))
                         };
+                        if *rid.peek() != current_id {
+                            loading_events.set(false);
+                            return;
+                        }
                         data_map.insert(
                             tab_for_relay.clone(),
                             TabData {
@@ -491,6 +571,10 @@ pub fn Profile(pubkey: String) -> Element {
                             "Phase 2: no new events from relays (all already in DB, has_more: {})",
                             has_more
                         );
+                        if *rid.peek() != current_id {
+                            loading_events.set(false);
+                            return;
+                        }
                         let mut data_map = tab_data.read().clone();
                         data_map.insert(
                             tab_for_relay.clone(),
@@ -504,7 +588,9 @@ pub fn Profile(pubkey: String) -> Element {
                         tab_data.set(data_map);
                         current_tab_has_more.set(has_more);
                     }
-                    loading_events.set(false);
+                    if *rid.peek() == current_id {
+                        loading_events.set(false);
+                    }
                 });
             });
         },
@@ -516,6 +602,8 @@ pub fn Profile(pubkey: String) -> Element {
         }
         let is_authenticated = auth_store::is_authenticated();
         let my_pubkey = auth_store::get_pubkey();
+        let current_id = *request_id.peek();
+        let rid = request_id;
         spawn(async move {
             let hex_pubkey = match crate::utils::nip19_urls::parse_profile_id(&pubkey_str) {
                 Some(pk) => pk.to_hex(),
@@ -534,6 +622,9 @@ pub fn Profile(pubkey: String) -> Element {
             let (contacts_result, stats_result, following_result) =
                 futures::join!(contacts_future, stats_future, following_future);
 
+            if *rid.peek() != current_id {
+                return;
+            }
             if let Ok(following) = following_result {
                 is_following.set(following);
             }
@@ -573,12 +664,17 @@ pub fn Profile(pubkey: String) -> Element {
             log::info!("load_more: bailing early");
             return;
         }
-        let pubkey_str = pubkey_for_load_more.clone();
+        let pubkey_str = current_pubkey.read().clone();
         let mut post_count_clone = post_count;
+        let current_id = *request_id.peek();
+        let rid = request_id;
         loading_events.set(true);
         spawn(async move {
             match load_tab_events(&pubkey_str, &tab, until).await {
                 Ok(outcome) => {
+                    if *rid.peek() != current_id {
+                        return;
+                    }
                     let oldest_ts = outcome.oldest_cursor.map(|ts| ts.saturating_sub(1));
                     let has_more_val = !outcome.events.is_empty();
                     log::info!(
@@ -608,6 +704,9 @@ pub fn Profile(pubkey: String) -> Element {
                     });
                 }
                 Err(e) => {
+                    if *rid.peek() != current_id {
+                        return;
+                    }
                     log::error!("Failed to load more events: {}", e);
                     current_tab_has_more.set(false);
                     let mut data_map = tab_data.read().clone();
@@ -617,7 +716,9 @@ pub fn Profile(pubkey: String) -> Element {
                     tab_data.set(data_map);
                 }
             }
-            loading_events.set(false);
+            if *rid.peek() == current_id {
+                loading_events.set(false);
+            }
         });
     };
     let sentinel_id = use_infinite_scroll(load_more, current_tab_has_more, loading_events);

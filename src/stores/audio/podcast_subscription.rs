@@ -197,6 +197,12 @@ pub async fn fetch_subscriptions() -> Result<Vec<PodcastSubscription>, String> {
     SUBSCRIPTIONS.write().clone_from(&subscriptions);
     SUBSCRIPTIONS_LOADING.write().clone_from(&false);
     SUBSCRIPTIONS_LOADED.write().clone_from(&true);
+    #[cfg(feature = "mobile_platform")]
+    {
+        if let Ok(subs_json) = serde_json::to_string(&subscriptions) {
+            let _ = crate::platform::android_media::save_browse_cache("subscriptions", &subs_json);
+        }
+    }
     Ok(subscriptions)
 }
 /// Parse subscriptions from a Kind 30003 event
@@ -258,8 +264,15 @@ pub async fn add_rss_subscription(
     ));
     publish_subscriptions(&subs).await?;
     SUBSCRIPTIONS.write().clone_from(&subs);
+    #[cfg(feature = "mobile_platform")]
+    {
+        if let Ok(subs_json) = serde_json::to_string(&subs) {
+            let _ = crate::platform::android_media::save_browse_cache("subscriptions", &subs_json);
+        }
+    }
     Ok(())
 }
+
 /// Add a Nostr podcast subscription
 pub async fn add_nostr_subscription(
     coordinate: &str,
@@ -276,6 +289,12 @@ pub async fn add_nostr_subscription(
     ));
     publish_subscriptions(&subs).await?;
     SUBSCRIPTIONS.write().clone_from(&subs);
+    #[cfg(feature = "mobile_platform")]
+    {
+        if let Ok(subs_json) = serde_json::to_string(&subs) {
+            let _ = crate::platform::android_media::save_browse_cache("subscriptions", &subs_json);
+        }
+    }
     Ok(())
 }
 /// Remove a subscription by ID (feed URL or coordinate)
@@ -285,6 +304,12 @@ pub async fn remove_subscription(id: &str) -> Result<(), String> {
     subs.retain(|s| s.id().as_deref() != Some(id));
     publish_subscriptions(&subs).await?;
     SUBSCRIPTIONS.write().clone_from(&subs);
+    #[cfg(feature = "mobile_platform")]
+    {
+        if let Ok(subs_json) = serde_json::to_string(&subs) {
+            let _ = crate::platform::android_media::save_browse_cache("subscriptions", &subs_json);
+        }
+    }
     Ok(())
 }
 /// Publish the subscription list to Nostr

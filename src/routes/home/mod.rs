@@ -1848,7 +1848,7 @@ pub fn Home(list: String) -> Element {
                                 let post_text = if count == 1 { "post" } else { "posts" };
                                 rsx! {
                                     div {
-                                        class: "sticky top-[57px] z-10 border-b border-border bg-blue-500 hover:bg-blue-600 transition-colors cursor-pointer",
+                                        class: "sticky top-[57px] z-20 border-b border-border bg-blue-500 hover:bg-blue-600 transition-colors cursor-pointer",
                                         onclick: move |_| accept_pending_posts(),
                                         div { class: "px-4 py-3 text-center",
                                             span { class: "text-white font-medium", "Show {count} new {post_text}" }

@@ -5,7 +5,7 @@ pub fn Privacy() -> Element {
         div { class: "max-w-4xl mx-auto px-6 py-12",
             h1 { class: "text-4xl font-bold mb-8", "Privacy Policy" }
             div { class: "prose dark:prose-invert max-w-none space-y-6",
-                p { class: "text-lg text-muted-foreground", "Last updated: May 15, 2026" }
+                p { class: "text-lg text-muted-foreground", "Last updated: May 18, 2026" }
                 section { class: "space-y-4",
                     h2 { class: "text-2xl font-semibold mt-8", "1. Overview" }
                     p {
@@ -28,7 +28,7 @@ pub fn Privacy() -> Element {
                         li { "Your personal messages or direct messages in a nostr.blue-hosted mailbox" }
                         li { "Advertising profiles or cross-site tracking data" }
                         li { "A centralized copy of your local app state just for normal app usage" }
-                        li { "Google account passwords or persistent Google access tokens" }
+                        li { "Google account passwords, email addresses, profile names, profile pictures, or persistent Google access tokens" }
                     }
                     p {
                         "However, when you connect to relays, media hosts, wallet services, AI providers, podcast services, geocoding services, or other external systems, those services can receive normal network metadata such as your IP address and request details."
@@ -52,9 +52,96 @@ pub fn Privacy() -> Element {
                     }
                 }
                 section { class: "space-y-4",
-                    h2 { class: "text-2xl font-semibold mt-8", "4. Google Drive Cloud Backup" }
+                    h2 { class: "text-2xl font-semibold mt-8", "4. Google User Data — Access, Use, and Disclosure" }
                     p {
-                        "nostr.blue offers an optional encrypted private key backup feature using Google Drive. This feature is not enabled by default and only activates when you choose to use it."
+                        "nostr.blue integrates with Google services solely for the optional encrypted cloud backup feature (described in detail in section 5). This section specifically addresses how nostr.blue interacts with Google user data in compliance with the Google API Services User Data Policy and Google APIs Terms of Service."
+                    }
+                    h3 { class: "text-xl font-semibold mt-6", "4a. Google User Data We Access" }
+                    p { "When you use the optional cloud backup feature, nostr.blue accesses the following Google user data:" }
+                    ul { class: "list-disc pl-6 space-y-2",
+                        li {
+                            strong { "Google User ID (`sub` claim): " }
+                            "A unique, stable identifier for your Google account, obtained from the OpenID Connect ID token. On the web app, this is retrieved via the Google OAuth2 token info endpoint. On Android, this is decoded from the JWT ID token returned by Android CredentialManager."
+                        }
+                        li {
+                            strong { "Short-lived OAuth 2.0 access token: " }
+                            "A temporary bearer token used to authenticate Drive API requests. This token expires after a short period and is not a refresh token."
+                        }
+                        li {
+                            strong { "Google Drive `appDataFolder`: " }
+                            "A hidden, app-only storage space within your Google Drive that is not visible in your normal Drive files. nostr.blue reads and writes a single encrypted file in this folder."
+                        }
+                    }
+                    p {
+                        strong { "What we do NOT access: " }
+                        "nostr.blue does not access your Google email address, profile name, profile picture, contacts, calendar, general Google Drive files, or any other Google account data. On Android, the Google ID token JWT technically contains email and name fields, but nostr.blue only reads the `sub` (user ID) field and ignores all other claims. No email or profile scopes are requested."
+                    }
+                    h3 { class: "text-xl font-semibold mt-6", "4b. How We Use Google User Data" }
+                    p { "Each piece of Google user data is used for a specific, limited purpose:" }
+                    ul { class: "list-disc pl-6 space-y-2",
+                        li {
+                            strong { "Google User ID (`sub`): " }
+                            "Used as input to an HMAC-SHA256 key derivation function (with the static salt \"nostrblue-backup-v1\") to derive a NIP-44 encryption key. This key is used to encrypt your backup before it leaves your device. The user ID is never sent to Google or any server as part of this process — it is only used locally in your browser or app."
+                        }
+                        li {
+                            strong { "OAuth access token: " }
+                            "Used as a Bearer token in the Authorization header of Google Drive REST API v3 calls to list, create, read, and delete files within your `appDataFolder`. The token is used only during active backup or restore operations."
+                        }
+                        li {
+                            strong { "`appDataFolder`: " }
+                            "Used to store a single encrypted backup file containing your encrypted Nostr private key and optional wallet connection URI."
+                        }
+                    }
+                    p {
+                        "Google user data is used solely to provide the optional encrypted cloud backup feature. It is not used for advertising, analytics, marketing, profiling, content personalization, or any other purpose."
+                    }
+                    h3 { class: "text-xl font-semibold mt-6", "4c. How We Store Google User Data" }
+                    ul { class: "list-disc pl-6 space-y-2",
+                        li {
+                            strong { "In memory (transient): " }
+                            "The Google User ID (`sub`) and OAuth access token are held only in volatile device memory (RAM) during active backup or restore operations. They are never written to disk, never stored in databases, and never sent to nostr.blue servers. They are cleared when the operation completes or the app is closed."
+                        }
+                        li {
+                            strong { "On device (persistent): " }
+                            "Only a single boolean flag (`google_backup_user`) is persisted to local device storage to indicate that the cloud backup feature has been used. No Google tokens, user IDs, or other Google data are persisted to disk."
+                        }
+                        li {
+                            strong { "On Google Drive: " }
+                            "A single encrypted file (`nostrblue_backup_{{npub}}.bin`) is stored in your Google Drive `appDataFolder`. The file contents are encrypted with NIP-44 (XChaCha20-Poly1305) using a client-side derived key. The file persists until you delete it from within nostr.blue or revoke access at myaccount.google.com/permissions."
+                        }
+                    }
+                    p {
+                        "No Google access tokens, refresh tokens, or user IDs are ever persisted to disk or stored in any database."
+                    }
+                    h3 { class: "text-xl font-semibold mt-6", "4d. How We Share Google User Data" }
+                    ul { class: "list-disc pl-6 space-y-2",
+                        li { "Google user data is not shared with any third parties." }
+                        li { "It is not used for advertising, analytics, or marketing purposes." }
+                        li { "It is not transferred, sold, or disclosed to any other party except as required to perform the Google Drive backup operations described above." }
+                        li {
+                            "Google itself receives standard OAuth metadata (that nostr.blue requested access) and the encrypted backup file stored in your `appDataFolder`. Google cannot read the backup contents because the encryption key is derived client-side and never sent to Google."
+                        }
+                    }
+                    h3 { class: "text-xl font-semibold mt-6", "4e. Google API Scopes Used" }
+                    p { "nostr.blue requests the following OAuth scopes:" }
+                    ul { class: "list-disc pl-6 space-y-2",
+                        li {
+                            code { "https://www.googleapis.com/auth/drive.appdata" }
+                            " — read and write access to the app's hidden `appDataFolder` in Google Drive. This scope does not grant access to your general Google Drive files."
+                        }
+                        li {
+                            code { "openid" }
+                            " — OpenID Connect scope used to obtain your Google user ID (`sub` claim). No email or profile scopes are requested."
+                        }
+                    }
+                    p {
+                        "Both scopes are requested together only when you choose to use the cloud backup feature. They are not requested at app launch or for any other purpose."
+                    }
+                }
+                section { class: "space-y-4",
+                    h2 { class: "text-2xl font-semibold mt-8", "5. Google Drive Cloud Backup" }
+                    p {
+                        "nostr.blue offers an optional encrypted private key backup feature using Google Drive. This feature is not enabled by default and only activates when you choose to use it. See section 4 for details on how Google user data is accessed, used, stored, and shared."
                     }
                     h3 { class: "text-xl font-semibold mt-4", "What You Share With Google" }
                     ul { class: "list-disc pl-6 space-y-2",
@@ -68,7 +155,7 @@ pub fn Privacy() -> Element {
                         }
                         li {
                             strong { "What nostr.blue Receives: " }
-                            "Your Google user ID (`sub`) and a short-lived access token. These are held only in device memory during the backup or restore session and are not stored persistently."
+                            "Your Google user ID (`sub`) and a short-lived access token. The `openid` scope is used solely to obtain your Google user ID (`sub`). Your Google email address, name, and profile picture are never read, stored, or processed — even though they may be present in the ID token on Android. These values are held only in device memory during the backup or restore session and are not stored persistently."
                         }
                     }
                     h3 { class: "text-xl font-semibold mt-4", "What Is Stored In Google Drive" }
@@ -93,7 +180,7 @@ pub fn Privacy() -> Element {
                     }
                 }
                 section { class: "space-y-4",
-                    h2 { class: "text-2xl font-semibold mt-8", "5. Data Published To Nostr" }
+                    h2 { class: "text-2xl font-semibold mt-8", "6. Data Published To Nostr" }
                     p { "When you use nostr.blue to publish or sync data to Nostr, that data is sent to relays you use or configure." }
                     ul { class: "list-disc pl-6 space-y-2",
                         li { "Public posts, profiles, reactions, follows, relay lists, articles, media references, marketplace data, and other public events are public on the Nostr network" }
@@ -107,7 +194,7 @@ pub fn Privacy() -> Element {
                     }
                 }
                 section { class: "space-y-4",
-                    h2 { class: "text-2xl font-semibold mt-8", "6. Third-Party And User-Selected Services" }
+                    h2 { class: "text-2xl font-semibold mt-8", "7. Third-Party And User-Selected Services" }
                     p { "nostr.blue can connect to third-party or user-selected services. Which ones are used depends on the features you choose." }
                     ul { class: "list-disc pl-6 space-y-2",
                         li {
@@ -148,7 +235,7 @@ pub fn Privacy() -> Element {
                     }
                 }
                 section { class: "space-y-4",
-                    h2 { class: "text-2xl font-semibold mt-8", "7. Permissions And Device Access" }
+                    h2 { class: "text-2xl font-semibold mt-8", "8. Permissions And Device Access" }
                     p {
                         "nostr.blue only asks for device capabilities when a feature needs them."
                     }
@@ -166,7 +253,7 @@ pub fn Privacy() -> Element {
                     }
                 }
                 section { class: "space-y-4",
-                    h2 { class: "text-2xl font-semibold mt-8", "8. Security" }
+                    h2 { class: "text-2xl font-semibold mt-8", "9. Security" }
                     p { "Security features in nostr.blue include:" }
                     ul { class: "list-disc pl-6 space-y-2",
                         li { "Client-side cryptography for signing events" }
@@ -182,7 +269,7 @@ pub fn Privacy() -> Element {
                     }
                 }
                 section { class: "space-y-4",
-                    h2 { class: "text-2xl font-semibold mt-8", "9. Cookies, Local Cache, And Offline Data" }
+                    h2 { class: "text-2xl font-semibold mt-8", "10. Cookies, Local Cache, And Offline Data" }
                     p {
                         "On the web app, nostr.blue uses minimal cookies/storage for essential functionality and may use a service worker and local caches for offline support and performance."
                     }
@@ -200,7 +287,7 @@ pub fn Privacy() -> Element {
                     }
                 }
                 section { class: "space-y-4",
-                    h2 { class: "text-2xl font-semibold mt-8", "10. Distribution Platforms" }
+                    h2 { class: "text-2xl font-semibold mt-8", "11. Distribution Platforms" }
                     p { "nostr.blue is distributed through several channels, each of which may collect their own metadata:" }
                     ul { class: "list-disc pl-6 space-y-2",
                         li {
@@ -218,7 +305,7 @@ pub fn Privacy() -> Element {
                     }
                 }
                 section { class: "space-y-4",
-                    h2 { class: "text-2xl font-semibold mt-8", "11. Your Choices And Controls" }
+                    h2 { class: "text-2xl font-semibold mt-8", "12. Your Choices And Controls" }
                     p { "You can:" }
                     ul { class: "list-disc pl-6 space-y-2",
                         li { "Clear browser storage, delete local app data, or uninstall the app to remove data stored on your device" }
@@ -230,19 +317,19 @@ pub fn Privacy() -> Element {
                     }
                 }
                 section { class: "space-y-4",
-                    h2 { class: "text-2xl font-semibold mt-8", "12. Children's Privacy" }
+                    h2 { class: "text-2xl font-semibold mt-8", "13. Children's Privacy" }
                     p {
                         "nostr.blue is not intended for users under 13 years of age. We do not knowingly collect information from children."
                     }
                 }
                 section { class: "space-y-4",
-                    h2 { class: "text-2xl font-semibold mt-8", "13. Changes To This Policy" }
+                    h2 { class: "text-2xl font-semibold mt-8", "14. Changes To This Policy" }
                     p {
                         "We may update this policy as nostr.blue changes. The date at the top of this page reflects the latest revision."
                     }
                 }
                 section { class: "space-y-4",
-                    h2 { class: "text-2xl font-semibold mt-8", "14. Contact" }
+                    h2 { class: "text-2xl font-semibold mt-8", "15. Contact" }
                     p {
                         "For privacy questions, please visit our "
                         Link {

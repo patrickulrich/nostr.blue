@@ -40,7 +40,7 @@ npm run build   # Production build
 
 ## Project Overview
 
-**nostr.blue** is a Nostr social client built with Rust + Dioxus, compiled to WebAssembly for browsers, Android via WebView, and Linux Desktop. Features include feeds, DMs, communities, zaps, Cashu ecash wallet, articles, wikis, podcasts, and more.
+**nostr.blue** is a Nostr social client built with Rust + Dioxus, compiled to WebAssembly for browsers, Android via WebView, and Linux Desktop. Features include feeds, DMs, communities, zaps, Cashu ecash wallet, articles, wikis, podcasts, Nests (live audio rooms), and more.
 
 **Stack**: Dioxus 0.7 (reactive UI), rust-nostr SDK, CDK (Cashu), TailwindCSS 4
 
@@ -55,6 +55,10 @@ src/
 ├── routes/           # Pages + Layout (mod.rs)
 ├── stores/           # Global state (dioxus-stores)
 ├── services/         # External APIs
+│   └── nests_audio/  # Nests audio engine
+│       ├── mod.rs    # JS interop (web/mobile) + desktop stubs
+│       ├── native.rs # Desktop native audio (moq-lite + cpal + opus)
+│       └── android.rs # Android foreground notification (JNI)
 ├── hooks/            # Custom hooks (use_*)
 ├── utils/            # Helpers + NIP implementations
 ├── context/          # App context providers
@@ -126,4 +130,24 @@ class: "bg-card border border-border rounded-lg p-4"
 
 // Modal backdrop
 class: "fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+```
+
+## Nests (NIP-53)
+
+Live audio rooms powered by MoQ (Media over QUIC). Each Nest is a NIP-53 live event with real-time audio and chat.
+
+### Audio Engine Architecture
+
+| Platform | Path | Transport |
+|----------|------|-----------|
+| Web | `mod.rs` JS interop → `public/moq-nest.js` | WebTransport (WASM) |
+| Android | `mod.rs` JS interop → WebView + `android.rs` JNI notification | WebTransport (WebView) |
+| Desktop | `native.rs` → moq-lite + cpal + opus | WebTransport (native) |
+
+### Desktop Build Dependencies
+
+Desktop builds require `cmake` (for vendored libopus via the `opus` crate) and `libasound2-dev` (for cpal ALSA backend):
+
+```bash
+sudo apt-get install -y cmake libasound2-dev
 ```

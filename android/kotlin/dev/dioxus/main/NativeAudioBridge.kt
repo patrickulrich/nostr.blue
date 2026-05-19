@@ -1,8 +1,10 @@
 package dev.dioxus.main
 
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -14,7 +16,19 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.LibraryResult
+import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionError
+import androidx.media3.session.legacy.MediaConstants
+import com.google.common.collect.ImmutableList
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.lang.ref.WeakReference
@@ -42,10 +56,13 @@ object NativeAudioBridge {
     const val ACTION_PREVIOUS = "com.nostr.blue.media.PREVIOUS"
     const val ACTION_STOP = "com.nostr.blue.media.STOP"
 
+    private var scopeJob = SupervisorJob()
+    private val scope get() = CoroutineScope(scopeJob + Dispatchers.IO)
+
     private val queue = mutableListOf<NativeQueueItem>()
     private var player: ExoPlayer? = null
     @Volatile
-    var mediaSession: MediaSession? = null
+    var mediaLibrarySession: MediaLibraryService.MediaLibrarySession? = null
         private set
     private var currentIndex: Int = 0
     private var playWhenReady: Boolean = false
@@ -86,13 +103,15 @@ object NativeAudioBridge {
         serviceRef = WeakReference(service)
         ensureInitialized(service.applicationContext)
         ensurePlayer()
-        mediaSession?.let { service.addSession(it) }
+        mediaLibrarySession?.let { service.addSession(it) }
     }
 
     @Synchronized
     fun detachService(service: MediaPlaybackService) {
         if (serviceRef?.get() === service) {
             serviceRef = null
+            scopeJob.cancel()
+            scopeJob = SupervisorJob()
         }
     }
 
@@ -279,9 +298,12 @@ object NativeAudioBridge {
         }
     }
 
+    @Suppress("UnstableApiUsage")
     private fun ensurePlayer(): ExoPlayer {
         player?.let { return it }
         val context = appContext ?: throw IllegalStateException("Not initialized")
+        val service = serviceRef?.get()
+            ?: throw IllegalStateException("Service not attached")
         val audioAttributes = AudioAttributes.Builder()
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .setUsage(C.USAGE_MEDIA)
@@ -293,11 +315,17 @@ object NativeAudioBridge {
         p.addListener(playerListener)
         player = p
 
-        mediaSession?.release()
-        mediaSession = MediaSession.Builder(context, p)
-            .setCallback(mediaSessionCallback)
-            .build()
-        serviceRef?.get()?.addSession(mediaSession!!)
+        mediaLibrarySession?.release()
+        mediaLibrarySession = MediaLibraryService.MediaLibrarySession.Builder(
+            service, p, libraryCallback
+        ).setSessionActivity(
+            PendingIntent.getActivity(
+                context, 0,
+                Intent(context, Class.forName("dev.dioxus.main.MainActivity")),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        ).build()
+        serviceRef?.get()?.addSession(mediaLibrarySession!!)
 
         return p
     }
@@ -306,7 +334,7 @@ object NativeAudioBridge {
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState == Player.STATE_ENDED) {
                 playWhenReady = false
-                releasePlayer()
+                player?.stop()
             }
         }
 
@@ -325,13 +353,162 @@ object NativeAudioBridge {
         }
     }
 
-    private val mediaSessionCallback = object : MediaSession.Callback {
+    @Suppress("UnstableApiUsage")
+    private val libraryCallback = object : MediaLibraryService.MediaLibrarySession.Callback {
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo
+        ): MediaSession.ConnectionResult {
+            val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(sessionCommands)
+                .setAvailablePlayerCommands(Player.Commands.Builder().addAllCommands().build())
+                .build()
+        }
+
+        override fun onGetLibraryRoot(
+            session: MediaLibraryService.MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            params: MediaLibraryService.LibraryParams?
+        ): ListenableFuture<LibraryResult<MediaItem>> {
+            val rootExtras = Bundle().apply {
+                putBoolean(MediaConstants.BROWSER_SERVICE_EXTRAS_KEY_SEARCH_SUPPORTED, true)
+                putBoolean(MediaConstants.DESCRIPTION_EXTRAS_KEY_CONTENT_STYLE_BROWSABLE, true)
+            }
+            val libraryParams = MediaLibraryService.LibraryParams.Builder()
+                .setExtras(rootExtras).build()
+            if ("com.google.android.googlequicksearchbox" == browser.packageName) {
+                return Futures.immediateFuture(LibraryResult.ofItem(
+                    MediaBrowseTree.browsableItem("__continue__", "Continue Listening", null),
+                    libraryParams))
+            }
+            return Futures.immediateFuture(LibraryResult.ofItem(
+                MediaBrowseTree.browsableItem("__root__", "nostr.blue", null),
+                libraryParams))
+        }
+
+        override fun onGetChildren(
+            session: MediaLibraryService.MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            parentId: String, page: Int, pageSize: Int,
+            params: MediaLibraryService.LibraryParams?
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
+            val safePageSize = minOf(pageSize.coerceAtLeast(1), 100)
+            val ctx = appContext
+            val children: List<MediaItem> = if (ctx != null) {
+                when (parentId) {
+                    "__root__" -> MediaBrowseTree.getRootChildren()
+                    "__continue__" -> MediaBrowseTree.getContinueListening(ctx)
+                    "__queue__" -> MediaBrowseTree.getQueue(ctx)
+                    "podcasts" -> MediaBrowseTree.getSubscriptions(ctx)
+                    "playlists" -> MediaBrowseTree.getPlaylists(ctx)
+                    "trending" -> MediaBrowseTree.getTrendingCategories()
+                    "trending_podcasts" -> MediaBrowseTree.getTrendingPodcasts(ctx)
+                    "trending_music" -> MediaBrowseTree.getTrendingMusic(ctx)
+                    else -> {
+                        when {
+                            parentId.startsWith("podcast:") ->
+                                MediaBrowseTree.getPodcastEpisodes(ctx, parentId)
+                            parentId.startsWith("playlist:") ->
+                                MediaBrowseTree.getPlaylistTracks(ctx, parentId)
+                            else -> emptyList()
+                        }
+                    }
+                }
+            } else {
+                emptyList()
+            }
+            val paged = children.drop(page * safePageSize).take(safePageSize)
+            return Futures.immediateFuture(LibraryResult.ofItemList(paged, params))
+        }
+
+        override fun onGetItem(
+            session: MediaLibraryService.MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            mediaId: String
+        ): ListenableFuture<LibraryResult<MediaItem>> {
+            val ctx = appContext ?: return Futures.immediateFuture(
+                LibraryResult.ofError(SessionError.ERROR_BAD_VALUE))
+            val item = BrowseCache.getItem(ctx, mediaId)
+            return if (item != null) {
+                Futures.immediateFuture(LibraryResult.ofItem(item, null))
+            } else {
+                Futures.immediateFuture(LibraryResult.ofError(SessionError.ERROR_BAD_VALUE))
+            }
+        }
+
         override fun onAddMediaItems(
-            mediaSession: MediaSession,
+            session: MediaSession,
             controller: MediaSession.ControllerInfo,
             mediaItems: MutableList<MediaItem>
-        ): com.google.common.util.concurrent.ListenableFuture<MutableList<MediaItem>> {
-            return com.google.common.util.concurrent.Futures.immediateFuture(mediaItems)
+        ): ListenableFuture<MutableList<MediaItem>> {
+            return Futures.immediateFuture(mediaItems)
+        }
+
+        @Suppress("UnstableApiUsage")
+        override fun onSetMediaItems(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            mediaItems: MutableList<MediaItem>,
+            startIndex: Int,
+            startPositionMs: Long
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            val index = if (startIndex == C.INDEX_UNSET) 0 else startIndex
+            return Futures.immediateFuture(
+                MediaSession.MediaItemsWithStartPosition(mediaItems, index, startPositionMs))
+        }
+
+        @Suppress("UnstableApiUsage")
+        override fun onPlaybackResumption(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            isForPlayback: Boolean
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            val context = appContext ?: return Futures.immediateFuture(
+                MediaSession.MediaItemsWithStartPosition(emptyList(), 0, 0))
+            val lastItem = BrowseCache.getContinueListeningItems(context).firstOrNull()
+            return if (lastItem != null) {
+                val position = BrowseCache.getLastPosition(context, lastItem.mediaId)
+                Futures.immediateFuture(
+                    MediaSession.MediaItemsWithStartPosition(listOf(lastItem), 0, position))
+            } else {
+                Futures.immediateFuture(
+                    MediaSession.MediaItemsWithStartPosition(emptyList(), 0, 0))
+            }
+        }
+
+        override fun onSearch(
+            session: MediaLibraryService.MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String,
+            params: MediaLibraryService.LibraryParams?
+        ): ListenableFuture<LibraryResult<Void>> {
+            val context = appContext ?: return Futures.immediateFuture(LibraryResult.ofVoid())
+            scope.launch {
+                val results = mutableListOf<MediaItem>()
+                results.addAll(BrowseCache.searchCached(context, query))
+                try {
+                    results.addAll(WavlakeClient.search(context, query))
+                } catch (_: Exception) {}
+                val deduped = results.distinctBy { it.mediaMetadata.title?.toString()?.lowercase() }
+                BrowseCache.saveSearchResults(context, query, deduped)
+                session.notifySearchResultChanged(browser, query, deduped.size, params)
+            }
+            return Futures.immediateFuture(LibraryResult.ofVoid())
+        }
+
+        override fun onGetSearchResult(
+            session: MediaLibraryService.MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String, page: Int, pageSize: Int,
+            params: MediaLibraryService.LibraryParams?
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
+            val context = appContext ?: return Futures.immediateFuture(
+                LibraryResult.ofItemList(ImmutableList.of(), params))
+            val safePageSize = pageSize.coerceAtLeast(1)
+            val results = BrowseCache.getSearchResults(context, query)
+                .drop(page * safePageSize).take(safePageSize)
+            return Futures.immediateFuture(LibraryResult.ofItemList(results, params))
         }
     }
 
@@ -368,8 +545,8 @@ object NativeAudioBridge {
         player?.removeListener(playerListener)
         player?.release()
         player = null
-        mediaSession?.release()
-        mediaSession = null
+        mediaLibrarySession?.release()
+        mediaLibrarySession = null
     }
 
     private fun resetSnapshotState() {

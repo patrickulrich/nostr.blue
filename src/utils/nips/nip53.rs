@@ -11,6 +11,9 @@
 //! NIP-53 defines a standard for live activities on Nostr.
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
+
+const PRESENCE_LIVE_THRESHOLD_SECS: u64 = 600;
+const ROOM_STALE_THRESHOLD_SECS: u64 = 28800;
 /// Live streaming event (audio/video streams, audio spaces)
 /// Note: Used at /videos/live via nostr-sdk's LiveEvent parser
 #[allow(dead_code)]
@@ -76,7 +79,7 @@ impl RoomStatus {
         match s.to_lowercase().as_str() {
             "open" => Some(RoomStatus::Open),
             "private" => Some(RoomStatus::Private),
-            "closed" => Some(RoomStatus::Closed),
+            "closed" | "ended" => Some(RoomStatus::Closed),
             _ => None,
         }
     }
@@ -119,6 +122,8 @@ pub struct MeetingSpace {
     pub service_url: String,
     /// API endpoint for status/info
     pub endpoint_url: Option<String>,
+    /// Recording URL (post-room recording)
+    pub recording: Option<String>,
     pub hashtags: Vec<String>,
     pub relays: Vec<String>,
     pub providers: Vec<LiveParticipant>,
@@ -177,6 +182,18 @@ pub struct RoomPresence {
     pub room_coordinate: String,
     /// Hand raised flag
     pub hand_raised: bool,
+    /// Microphone muted
+    pub muted: bool,
+    /// Actively publishing audio
+    pub publishing: bool,
+    /// On stage (speaker slot)
+    pub onstage: bool,
+}
+/// Nests server entry from Kind 10112 events
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NestsServer {
+    pub relay_url: String,
+    pub auth_url: String,
 }
 /// Parse a Kind 30312 event into a MeetingSpace
 pub fn parse_meeting_space(event: &Event) -> Result<MeetingSpace, String> {
@@ -191,14 +208,20 @@ pub fn parse_meeting_space(event: &Event) -> Result<MeetingSpace, String> {
     let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
     let coordinate = format!("{}:{}:{}", KIND_MEETING_SPACE, pubkey, d_tag);
     let naddr = build_naddr(KIND_MEETING_SPACE, &pubkey, &d_tag).unwrap_or_default();
-    let room_name = get_tag_value(event, "room").ok_or("Missing required 'room' tag")?;
+    let room_name = get_tag_value(event, "title")
+        .or_else(|| get_tag_value(event, "room"))
+        .ok_or("Missing required 'title'/'room' tag")?;
     let summary = get_tag_value(event, "summary");
     let image = get_tag_value(event, "image");
     let status = get_tag_value(event, "status")
         .and_then(|s| RoomStatus::from_str(&s))
         .unwrap_or_default();
-    let service_url = get_tag_value(event, "service").ok_or("Missing required 'service' tag")?;
-    let endpoint_url = get_tag_value(event, "endpoint");
+    let service_url = get_tag_value(event, "auth")
+        .or_else(|| get_tag_value(event, "service"))
+        .ok_or("Missing required 'auth'/'service' tag")?;
+    let endpoint_url = get_tag_value(event, "streaming")
+        .or_else(|| get_tag_value(event, "endpoint"));
+    let recording = get_tag_value(event, "recording");
     let hashtags = get_all_tag_values(event, "t");
     let relays = get_relay_tag_values(event);
     let providers = parse_participants(event);
@@ -218,6 +241,7 @@ pub fn parse_meeting_space(event: &Event) -> Result<MeetingSpace, String> {
         status,
         service_url,
         endpoint_url,
+        recording,
         hashtags,
         relays,
         providers,
@@ -292,12 +316,24 @@ pub fn parse_room_presence(event: &Event) -> Result<RoomPresence, String> {
     let hand_raised = get_tag_value(event, "hand")
         .map(|s| s == "1" || s.to_lowercase() == "true")
         .unwrap_or(false);
+    let muted = get_tag_value(event, "muted")
+        .map(|s| s == "1" || s.to_lowercase() == "true")
+        .unwrap_or(false);
+    let publishing = get_tag_value(event, "publishing")
+        .map(|s| s == "1" || s.to_lowercase() == "true")
+        .unwrap_or(false);
+    let onstage = get_tag_value(event, "onstage")
+        .map(|s| s == "1" || s.to_lowercase() == "true")
+        .unwrap_or(false);
     Ok(RoomPresence {
         event_id: event.id.to_hex(),
         pubkey: event.pubkey.to_hex(),
         created_at: event.created_at.as_secs(),
         room_coordinate,
         hand_raised,
+        muted,
+        publishing,
+        onstage,
     })
 }
 /// Get a tag value by name (first parameter after tag name)
@@ -589,6 +625,211 @@ fn verify_host_proof(event: &Event, host_pubkey: &PublicKey, proof: Option<&Sign
         Err(_) => false,
     }
 }
+/// Kind 10112: Nests server list (replaceable)
+#[allow(dead_code)]
+pub const KIND_NESTS_SERVERS: u16 = 10112;
+/// Kind 4312: Admin commands (ephemeral)
+#[allow(dead_code)]
+pub const KIND_NESTS_ADMIN: u16 = 4312;
+/// Build tags for a Kind 30312 Meeting Space event
+pub fn build_meeting_space_tags(
+    d_tag: &str,
+    room_name: &str,
+    status: RoomStatus,
+    auth_url: &str,
+    host_pubkey: &str,
+) -> Vec<Tag> {
+    vec![
+        Tag::identifier(d_tag),
+        Tag::custom(TagKind::custom("title"), [room_name]),
+        Tag::custom(TagKind::custom("status"), [status.as_str()]),
+        Tag::custom(TagKind::custom("auth"), [auth_url]),
+        Tag::custom(TagKind::custom("p"), [host_pubkey, "", "host"]),
+        Tag::custom(
+            TagKind::custom("alt"),
+            ["Interactive room event"],
+        ),
+    ]
+}
+/// Rebuild all tags from an existing MeetingSpace with a new status.
+/// Preserves participants, hashtags, and all optional fields.
+/// Used for closing rooms and preserving participant data on edit.
+pub fn rebuild_meeting_space_tags(
+    ms: &MeetingSpace,
+    new_status: RoomStatus,
+) -> Vec<Tag> {
+    let mut tags = vec![
+        Tag::identifier(&ms.d_tag),
+        Tag::custom(TagKind::custom("title"), [&ms.room_name]),
+        Tag::custom(TagKind::custom("status"), [new_status.as_str()]),
+        Tag::custom(TagKind::custom("auth"), [&ms.service_url]),
+        Tag::custom(
+            TagKind::custom("alt"),
+            ["Interactive room event"],
+        ),
+    ];
+    for provider in &ms.providers {
+        let mut vals: Vec<String> = vec![provider.pubkey.clone()];
+        vals.push(provider.relay_hint.clone().unwrap_or_default());
+        vals.push(provider.role.clone().unwrap_or_default());
+        if let Some(ref proof) = provider.proof {
+            vals.push(proof.clone());
+        }
+        tags.push(Tag::custom(TagKind::custom("p"), vals));
+    }
+    if let Some(ref url) = ms.endpoint_url {
+        tags.push(Tag::custom(TagKind::custom("streaming"), [url.as_str()]));
+    }
+    if let Some(ref s) = ms.summary {
+        tags.push(Tag::custom(TagKind::custom("summary"), [s.as_str()]));
+    }
+    if let Some(ref url) = ms.image {
+        tags.push(Tag::custom(TagKind::custom("image"), [url.as_str()]));
+    }
+    if let Some(ref url) = ms.recording {
+        tags.push(Tag::custom(TagKind::custom("recording"), [url.as_str()]));
+    }
+    for hashtag in &ms.hashtags {
+        tags.push(Tag::custom(TagKind::custom("t"), [hashtag.as_str()]));
+    }
+    if !ms.relays.is_empty() {
+        let relay_strs: Vec<String> = ms.relays.iter().map(|r| r.as_str().to_string()).collect();
+        tags.push(Tag::custom(TagKind::custom("relays"), relay_strs));
+    }
+    tags
+}
+/// Add optional tags to a meeting space event
+pub fn add_meeting_space_optional_tags(
+    tags: &mut Vec<Tag>,
+    streaming_url: Option<&str>,
+    summary: Option<&str>,
+    image: Option<&str>,
+    starts: Option<u64>,
+    recording: Option<&str>,
+    relays: &[String],
+) {
+    if let Some(url) = streaming_url {
+        tags.push(Tag::custom(TagKind::custom("streaming"), [url]));
+    }
+    if let Some(s) = summary {
+        tags.push(Tag::custom(TagKind::custom("summary"), [s]));
+    }
+    if let Some(url) = image {
+        tags.push(Tag::custom(TagKind::custom("image"), [url]));
+    }
+    if let Some(ts) = starts {
+        tags.push(Tag::custom(
+            TagKind::custom("starts"),
+            [ts.to_string()],
+        ));
+    }
+    if let Some(url) = recording {
+        tags.push(Tag::custom(TagKind::custom("recording"), [url]));
+    }
+    if !relays.is_empty() {
+        let relay_strs: Vec<String> = relays.iter().map(|r| r.as_str().to_string()).collect();
+        tags.push(Tag::custom(
+            TagKind::custom("relays"),
+            relay_strs,
+        ));
+    }
+}
+/// Build tags for a Kind 10312 Room Presence event
+#[allow(dead_code)]
+pub fn build_room_presence_tags(
+    room_coordinate: &str,
+    hand: bool,
+    muted: bool,
+    publishing: bool,
+    onstage: bool,
+) -> Vec<Tag> {
+    vec![
+        Tag::custom(TagKind::custom("a"), [room_coordinate]),
+        Tag::custom(
+            TagKind::custom("hand"),
+            [if hand { "1" } else { "0" }],
+        ),
+        Tag::custom(
+            TagKind::custom("muted"),
+            [if muted { "1" } else { "0" }],
+        ),
+        Tag::custom(
+            TagKind::custom("publishing"),
+            [if publishing { "1" } else { "0" }],
+        ),
+        Tag::custom(
+            TagKind::custom("onstage"),
+            [if onstage { "1" } else { "0" }],
+        ),
+    ]
+}
+/// Build tags for a Kind 10112 Nests server list event
+#[allow(dead_code)]
+pub fn build_nests_servers_tags(servers: &[NestsServer]) -> Vec<Tag> {
+    let mut tags: Vec<Tag> = vec![Tag::identifier("nests-servers")];
+    for server in servers {
+        tags.push(Tag::custom(
+            TagKind::custom("server"),
+            [&server.relay_url, &server.auth_url],
+        ));
+    }
+    tags
+}
+/// Parse a Kind 10112 event into a list of Nests servers
+#[allow(dead_code)]
+pub fn parse_nests_servers(event: &Event) -> Vec<NestsServer> {
+    event
+        .tags
+        .iter()
+        .filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("server"))
+        .filter_map(|t| {
+            let slice = t.as_slice();
+            let relay_url = slice.get(1)?.to_string();
+            let auth_url = slice.get(2)?.to_string();
+            Some(NestsServer {
+                relay_url,
+                auth_url,
+            })
+        })
+        .collect()
+}
+/// Build tags for a Kind 4312 admin command event
+#[allow(dead_code)]
+pub fn build_admin_command_tags(
+    room_coordinate: &str,
+    target_pubkey: &str,
+    action: &str,
+) -> Vec<Tag> {
+    vec![
+        Tag::custom(TagKind::custom("a"), [room_coordinate]),
+        Tag::custom(TagKind::custom("p"), [target_pubkey]),
+        Tag::custom(TagKind::custom("action"), [action]),
+    ]
+}
+/// Determine the display status for a nest room using presence-based liveness
+pub fn nest_effective_status(
+    room_status: RoomStatus,
+    last_presence: Option<u64>,
+    created_at: u64,
+) -> LiveStatus {
+    if room_status == RoomStatus::Closed {
+        return LiveStatus::Ended;
+    }
+    let now = crate::platform::timestamp::now_secs();
+    if let Some(ts) = last_presence {
+        if now.saturating_sub(ts) < PRESENCE_LIVE_THRESHOLD_SECS {
+            return LiveStatus::Live;
+        }
+    }
+    if room_status == RoomStatus::Open {
+        if now.saturating_sub(created_at) > ROOM_STALE_THRESHOLD_SECS {
+            return LiveStatus::Ended;
+        }
+        LiveStatus::Live
+    } else {
+        LiveStatus::Planned
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -611,5 +852,142 @@ mod tests {
         assert_eq!(LiveStatus::Live.to_string(), "live");
         assert_eq!(LiveStatus::Planned.to_string(), "planned");
         assert_eq!(LiveStatus::Ended.to_string(), "ended");
+    }
+    #[test]
+    fn test_room_status_ended_alias() {
+        assert_eq!(RoomStatus::from_str("ended"), Some(RoomStatus::Closed));
+        assert_eq!(RoomStatus::from_str("ENDED"), Some(RoomStatus::Closed));
+    }
+    #[test]
+    fn test_build_meeting_space_tags() {
+        let tags = build_meeting_space_tags(
+            "my-room",
+            "Test Room",
+            RoomStatus::Open,
+            "https://auth.example.com",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        );
+        let d = tags.iter().find(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D))).and_then(|t| t.content()).unwrap();
+        assert_eq!(d, "my-room");
+        let title = tags.iter().find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("title")).and_then(|t| t.as_slice().get(1).map(|s| s.as_str())).unwrap();
+        assert_eq!(title, "Test Room");
+        let status = tags.iter().find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("status")).and_then(|t| t.as_slice().get(1).map(|s| s.as_str())).unwrap();
+        assert_eq!(status, "open");
+        assert!(tags.iter().any(|t| {
+            let s = t.as_slice();
+            s.first().map(|x| x.as_str()) == Some("p") && s.get(3).map(|x| x.as_str()) == Some("host")
+        }));
+    }
+    #[test]
+    fn test_build_room_presence_tags() {
+        let tags = build_room_presence_tags("30312:abc123:my-room", true, false, true, false);
+        let a_tag = tags.iter().find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("a")).and_then(|t| t.as_slice().get(1).map(|s| s.to_string())).unwrap();
+        assert_eq!(a_tag, "30312:abc123:my-room");
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("hand") && t.as_slice().get(1).map(|s| s.as_str()) == Some("1")));
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("publishing") && t.as_slice().get(1).map(|s| s.as_str()) == Some("1")));
+    }
+    #[test]
+    fn test_build_nests_servers_tags() {
+        let servers = vec![
+            NestsServer { relay_url: "wss://relay.example.com".into(), auth_url: "https://auth.example.com".into() },
+        ];
+        let tags = build_nests_servers_tags(&servers);
+        assert!(tags.iter().any(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D))));
+        let server_tag = tags.iter().find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("server")).unwrap();
+        assert_eq!(server_tag.as_slice()[1], "wss://relay.example.com");
+        assert_eq!(server_tag.as_slice()[2], "https://auth.example.com");
+    }
+    #[test]
+    fn test_parse_nests_servers() {
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::Custom(10112), "")
+            .tags(vec![
+                Tag::identifier("nests-servers"),
+                Tag::custom(TagKind::custom("server"), ["wss://relay.example.com", "https://auth.example.com"]),
+            ])
+            .sign_with_keys(&keys)
+            .unwrap();
+        let servers = parse_nests_servers(&event);
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].relay_url, "wss://relay.example.com");
+        assert_eq!(servers[0].auth_url, "https://auth.example.com");
+    }
+    #[test]
+    fn test_build_admin_command_tags() {
+        let tags = build_admin_command_tags(
+            "30312:abc:room1",
+            "def456",
+            "mute",
+        );
+        let a_tag = tags.iter().find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("a")).and_then(|t| t.as_slice().get(1).map(|s| s.to_string())).unwrap();
+        assert_eq!(a_tag, "30312:abc:room1");
+        let p_tag = tags.iter().find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("p")).and_then(|t| t.as_slice().get(1).map(|s| s.to_string())).unwrap();
+        assert_eq!(p_tag, "def456");
+        let action = tags.iter().find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("action")).and_then(|t| t.as_slice().get(1).map(|s| s.to_string())).unwrap();
+        assert_eq!(action, "mute");
+    }
+    #[test]
+    fn test_rebuild_meeting_space_tags_preserves_participants() {
+        let ms = MeetingSpace {
+            d_tag: "room-42".into(),
+            event_id: "evt123".into(),
+            pubkey: "aa".repeat(32),
+            naddr: "naddr1test".into(),
+            coordinate: "30312:aa".to_string() + &"aa".repeat(31) + ":room-42",
+            created_at: 1000,
+            room_name: "My Room".into(),
+            summary: Some("A test room".into()),
+            image: Some("https://img.example.com/pic.png".into()),
+            status: RoomStatus::Open,
+            service_url: "https://auth.example.com".into(),
+            endpoint_url: Some("https://stream.example.com".into()),
+            recording: Some("https://rec.example.com/rec.mp4".into()),
+            hashtags: vec!["test".into(), "nostr".into()],
+            relays: vec!["wss://relay.example.com".into()],
+            providers: vec![
+                LiveParticipant {
+                    pubkey: "bb".repeat(32),
+                    relay_hint: Some("wss://r1.example.com".into()),
+                    role: Some("host".into()),
+                    proof: None,
+                },
+                LiveParticipant {
+                    pubkey: "cc".repeat(32),
+                    relay_hint: None,
+                    role: Some("speaker".into()),
+                    proof: Some("proof123".into()),
+                },
+            ],
+        };
+        let tags = rebuild_meeting_space_tags(&ms, RoomStatus::Closed);
+        let p_tags: Vec<_> = tags.iter().filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("p")).collect();
+        assert_eq!(p_tags.len(), 2);
+        let status_tag = tags.iter().find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("status")).and_then(|t| t.as_slice().get(1).map(|s| s.to_string())).unwrap();
+        assert_eq!(status_tag, "closed");
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("summary")));
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("image")));
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("recording")));
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("streaming")));
+        let t_tags: Vec<_> = tags.iter().filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("t")).collect();
+        assert_eq!(t_tags.len(), 2);
+    }
+    #[test]
+    fn test_add_meeting_space_optional_tags() {
+        let mut tags = build_meeting_space_tags("room1", "Room", RoomStatus::Open, "https://auth.example.com", &"aa".repeat(32));
+        add_meeting_space_optional_tags(
+            &mut tags,
+            Some("https://stream.example.com"),
+            Some("A summary"),
+            Some("https://img.example.com/pic.png"),
+            Some(1700000000),
+            Some("https://rec.example.com/rec.mp4"),
+            &["wss://relay.example.com".to_string()],
+        );
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("streaming")));
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("summary")));
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("image")));
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("starts")));
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("recording")));
+        assert!(tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("relays")));
     }
 }
