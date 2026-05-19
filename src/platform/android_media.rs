@@ -222,3 +222,48 @@ pub fn snapshot() -> Result<AndroidPlaybackSnapshot, String> {
     let json = expect_ok_string(call_context_only("getNativePlaybackSnapshot")?)?;
     serde_json::from_str(&json).map_err(|e| e.to_string())
 }
+
+pub fn save_browse_cache(key: &str, json: &str) -> Result<(), String> {
+    let result = with_activity_class(|env, context, class| {
+        let j_key = env.new_string(key).map_err(|e| e.to_string())?;
+        let j_json = env.new_string(json).map_err(|e| e.to_string())?;
+        let result = env
+            .call_static_method(
+                class,
+                "saveBrowseCache",
+                "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                &[
+                    JValue::Object(context),
+                    JValue::Object(&j_key),
+                    JValue::Object(&j_json),
+                ],
+            )
+            .map_err(|e| e.to_string())?
+            .l()
+            .map_err(|e| e.to_string())?;
+        extract_string(env, result)
+    })?;
+    expect_ok(result)
+}
+
+pub fn save_browse_position(media_id: &str, position_ms: u64) -> Result<(), String> {
+    let result = with_activity_class(|env, context, class| {
+        let j_id = env.new_string(media_id).map_err(|e| e.to_string())?;
+        let result = env
+            .call_static_method(
+                class,
+                "saveBrowsePosition",
+                "(Landroid/content/Context;Ljava/lang/String;J)Ljava/lang/String;",
+                &[
+                    JValue::Object(context),
+                    JValue::Object(&j_id),
+                    JValue::Long(position_ms as i64),
+                ],
+            )
+            .map_err(|e| e.to_string())?
+            .l()
+            .map_err(|e| e.to_string())?;
+        extract_string(env, result)
+    })?;
+    expect_ok(result)
+}

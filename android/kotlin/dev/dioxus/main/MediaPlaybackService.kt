@@ -7,14 +7,13 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
-import androidx.core.content.ContextCompat
 import androidx.media3.session.DefaultMediaNotificationProvider
+import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
-import androidx.media3.session.MediaSessionService
 
-class MediaPlaybackService : MediaSessionService() {
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
-        return NativeAudioBridge.mediaSession
+class MediaPlaybackService : MediaLibraryService() {
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? {
+        return NativeAudioBridge.mediaLibrarySession
     }
 
     override fun onCreate() {
@@ -31,7 +30,7 @@ class MediaPlaybackService : MediaSessionService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         NativeAudioBridge.attachService(this)
-        val session = NativeAudioBridge.mediaSession
+        val session = NativeAudioBridge.mediaLibrarySession
         if (session != null && session.player.playbackState != androidx.media3.common.Player.STATE_IDLE) {
             return super.onStartCommand(intent, flags, startId)
         }

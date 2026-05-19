@@ -87,6 +87,9 @@ jobs:
       - name: Build with Dioxus
         run: dx build --release
 
+      - name: Mirror index.html to 404.html for SPA routing
+        run: cp ./target/dx/nostrblue/release/web/public/index.html ./target/dx/nostrblue/release/web/public/404.html
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
@@ -146,6 +149,7 @@ jobs:
             patchelf \
             squashfs-tools \
             desktop-file-utils \
+            cmake \
             pkg-config \
             libglib2.0-dev \
             libgtk-3-dev \

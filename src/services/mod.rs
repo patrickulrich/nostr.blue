@@ -28,6 +28,7 @@ compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature
 
 #[cfg(any(target_family = "wasm", feature = "mobile_platform"))]
 pub mod cloud_backup;
+pub mod nests_audio;
 pub mod admission_policy;
 pub mod aggregation;
 pub mod ai_chat;

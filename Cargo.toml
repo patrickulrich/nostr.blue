@@ -1,6 +1,6 @@
 [package]
 name = "nostrblue"
-version = "0.8.13"
+version = "0.8.14"
 edition = "2021"
 rust-version = "1.82"
 authors = ["Patrick Ulrich"]
@@ -24,7 +24,7 @@ web = [
     "chrono/wasmbind", "uuid/js", "getrandom/js", "instant/wasm-bindgen",
     "cashu",
 ]
-desktop = ["dioxus/desktop", "dioxus-motion/desktop", "native", "dep:arboard", "dep:rfd", "dep:webbrowser", "cashu_native"]
+desktop = ["dioxus/desktop", "dioxus-motion/desktop", "native", "dep:arboard", "dep:rfd", "dep:webbrowser", "cashu_native", "dep:moq-lite", "dep:web-transport-quinn", "dep:cpal", "dep:opus"]
 mobile = ["dioxus/mobile", "dioxus-motion/desktop", "native", "dep:jni", "dep:ndk-context", "mobile_platform"]
 native = [
     "dep:nostr-ndb", "dep:nostrdb", "dep:git2",
@@ -191,6 +191,12 @@ webbrowser = { version = "1.0", optional = true }
 # Android-only (NIP-55 signer via JNI)
 jni = { version = "0.21", optional = true }
 ndk-context = { version = "0.1", optional = true }
+
+# Desktop-only native audio for Nests
+moq-lite = { version = "0.16", optional = true }
+web-transport-quinn = { version = "0.11", optional = true }
+cpal = { version = "0.15", optional = true }
+opus = { version = "0.3", optional = true }
 
 # Markdown rendering
 pulldown-cmark = "0.13"

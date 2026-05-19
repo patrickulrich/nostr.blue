@@ -34,6 +34,12 @@ pub fn PodcastTrending() -> Element {
                 match podcast_index::get_trending(Some(50), cat.as_deref()).await {
                     Ok(feeds) => {
                         log::info!("Fetched {} trending podcasts", feeds.len());
+                        #[cfg(feature = "mobile_platform")]
+                        {
+                            if let Ok(json) = serde_json::to_string(&feeds) {
+                                let _ = crate::platform::android_media::save_browse_cache("trending_podcasts", &json);
+                            }
+                        }
                         podcasts.set(Some(feeds));
                         loading.set(false);
                     }

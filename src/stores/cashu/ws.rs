@@ -464,7 +464,7 @@ fn mint_url_to_ws(mint_url: &str) -> Result<String, String> {
     if url.starts_with("https://") {
         url = format!("wss://{}/v1/ws", &url[8..]);
     } else if url.starts_with("http://") {
-        url = format!("ws://{}/v1/ws", &url[7..]);
+        url = format!("wss://{}/v1/ws", &url[7..]);
     } else {
         return Err(format!("Invalid mint URL scheme: {}", mint_url));
     }

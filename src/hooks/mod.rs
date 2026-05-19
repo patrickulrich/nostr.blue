@@ -12,6 +12,8 @@ pub mod use_profile;
 pub mod use_reaction;
 pub mod use_relay_subscription;
 pub mod use_unsaved_changes;
+pub mod use_nest_admin;
+pub mod use_nest_audio;
 pub mod use_viewport_engagement;
 pub use use_author_metadata::use_author_metadata;
 #[allow(unused_imports)]

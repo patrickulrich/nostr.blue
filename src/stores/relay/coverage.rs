@@ -251,10 +251,11 @@ pub fn record_relay_hint(pubkey: &str, relay_url: &str) {
     if !url.starts_with("wss://") && !url.starts_with("ws://") {
         return;
     }
+    let url = crate::utils::relay::upgrade_to_secure_relay_url(url);
     let mut coverage = RELAY_COVERAGE.write();
     let entry = coverage.hints.entry(pubkey.to_string()).or_default();
-    if !entry.contains(&url.to_string()) {
-        entry.push(url.to_string());
+    if !entry.contains(&url) {
+        entry.push(url);
         if entry.len() > 5 {
             entry.remove(0);
         }
@@ -329,8 +330,9 @@ pub async fn connect_ephemeral_relays(client: &Client, urls: &[String]) -> Ephem
     let mut already_connected: Vec<String> = Vec::new();
     let mut to_add: Vec<nostr::Url> = Vec::new();
 
-    for url in urls {
-        let Ok(parsed) = nostr::Url::parse(url) else {
+    for raw_url in urls {
+        let url = crate::utils::relay::upgrade_to_secure_relay_url(raw_url);
+        let Ok(parsed) = nostr::Url::parse(&url) else {
             continue;
         };
         let is_connected = relays

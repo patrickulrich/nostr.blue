@@ -35,3 +35,6 @@ pub use mobile::download_file;
 
 #[cfg(feature = "mobile_platform")]
 pub mod android_media;
+
+#[cfg(feature = "mobile_platform")]
+pub mod pip;

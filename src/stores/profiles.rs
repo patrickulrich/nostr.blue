@@ -92,10 +92,12 @@ impl Profile {
     /// Get the avatar URL, with Dicebear fallback
     pub fn get_avatar_url(&self) -> String {
         if let Some(picture) = &self.picture {
-            if !picture.trim().is_empty()
-                && (picture.starts_with("http://") || picture.starts_with("https://"))
-            {
-                return picture.clone();
+            if !picture.trim().is_empty() {
+                if picture.starts_with("https://") {
+                    return picture.clone();
+                } else if let Some(stripped) = picture.strip_prefix("http://") {
+                    return format!("https://{}", stripped);
+                }
             }
         }
         format!(

@@ -78,6 +78,22 @@ pub fn MusicHome() -> Element {
                     .await
                 {
                     Ok(wavlake_tracks) => {
+                        #[cfg(feature = "mobile_platform")]
+                        {
+                            let music_tracks: Vec<MusicTrack> = wavlake_tracks.iter()
+                                .cloned()
+                                .map(Into::into)
+                                .collect();
+                            if let Ok(json) = serde_json::to_string(&music_tracks) {
+                                let _ = crate::platform::android_media::save_browse_cache("trending_music", &json);
+                            }
+                            for t in &music_tracks {
+                                let _ = crate::platform::android_media::save_browse_cache(
+                                    &format!("item:{}", t.id),
+                                    &serde_json::to_string(t).unwrap_or_default(),
+                                );
+                            }
+                        }
                         for wt in wavlake_tracks {
                             all_tracks.push(wt.into());
                         }
