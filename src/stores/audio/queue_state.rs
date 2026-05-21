@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 const STORAGE_KEY: &str = "music_player_queue";
 const MAX_PERSISTED_TRACKS: usize = 200;
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistedQueueState {
     pub version: u8,
@@ -14,6 +18,8 @@ pub struct PersistedQueueState {
     pub loop_mode: LoopMode,
     #[serde(default)]
     pub shuffle_enabled: bool,
+    #[serde(default = "default_true")]
+    pub is_visible: bool,
 }
 
 impl Default for PersistedQueueState {
@@ -25,6 +31,7 @@ impl Default for PersistedQueueState {
             progress_secs: 0,
             loop_mode: LoopMode::None,
             shuffle_enabled: false,
+            is_visible: true,
         }
     }
 }

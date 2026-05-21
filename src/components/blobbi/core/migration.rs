@@ -314,7 +314,6 @@ pub fn ensure_canonical_before_action(blobbi: &mut crate::components::blobbi::co
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::nip_bb::constants::*;
 
     #[test]
     fn removes_deprecated_tags() {
@@ -333,7 +332,7 @@ mod tests {
 
     #[test]
     fn adds_missing_required_defaults() {
-        let mut tags = HashMap::new();
+        let tags = HashMap::new();
         let repaired = validate_and_repair_tags(&tags, BlobbiStage::Egg);
 
         let required = required_tag_names(BlobbiStage::Egg);

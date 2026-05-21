@@ -515,7 +515,7 @@ pub fn init_player() {
             state.current_index = idx;
             state.current_track = state.playlist.get(idx).cloned();
             state.current_time = queue.progress_secs as f64;
-            state.is_visible = true;
+            state.is_visible = queue.is_visible;
             state.loop_mode = queue.loop_mode;
             state.shuffle_enabled = queue.shuffle_enabled;
             if state.shuffle_enabled {
@@ -698,6 +698,7 @@ fn build_queue_snapshot() -> Option<super::queue_state::PersistedQueueState> {
         progress_secs: progress,
         loop_mode: state.loop_mode,
         shuffle_enabled: state.shuffle_enabled,
+        is_visible: state.is_visible,
     })
 }
 
@@ -1166,6 +1167,7 @@ pub fn close_player() {
             log::error!("Failed to clear native Android playback queue: {}", e);
         }
     }
+    mark_queue_dirty();
     spawn(async move {
         clear_music_status().await;
     });
