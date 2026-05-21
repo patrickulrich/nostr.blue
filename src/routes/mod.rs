@@ -817,17 +817,37 @@ fn Layout() -> Element {
     let mut last_handled_android_back_nonce = use_signal(|| 0u64);
     let current_route = use_route::<Route>();
     let navigator = navigator();
+    let mut previous_route_key: Signal<Option<String>> = use_signal(|| None);
     {
         let route = current_route.clone();
         use_effect(move || {
-            let _ = route.clone();
+            let route = route.clone();
+            let prev_key = previous_route_key.read().clone();
             spawn(async move {
-                if !crate::stores::ui::scroll_restore::was_popstate_nav().await {
+                if let Some(pk) = prev_key {
+                    let y = crate::stores::ui::scroll_restore::get_tracked_scroll_y().await;
+                    if y > 0.0 {
+                        crate::stores::ui::scroll_restore::save_scroll(&pk, y);
+                    }
+                }
+                if crate::stores::ui::scroll_restore::was_popstate_nav().await {
+                    let route_key = format!("{:?}", route);
+                    if let Some(y) = crate::stores::ui::scroll_restore::get_scroll(&route_key) {
+                        crate::stores::ui::scroll_restore::set_scroll_y(y).await;
+                    }
+                } else {
                     crate::stores::ui::scroll_restore::set_scroll_y(0.0).await;
                 }
                 crate::platform::timer::sleep_ms(100).await;
                 crate::stores::ui::scroll_restore::clear_popstate_flag().await;
             });
+        });
+    }
+    {
+        let route = current_route.clone();
+        use_effect(move || {
+            let key = format!("{:?}", route);
+            *previous_route_key.write() = Some(key);
         });
     }
     #[cfg(feature = "mobile_platform")]
@@ -1508,7 +1528,23 @@ fn Layout() -> Element {
                             }
                         }
                     }
-                    Outlet::<Route> {}
+                    crate::components::OfflineBanner {}
+                    ErrorBoundary {
+                        handle_error: |ctx: ErrorContext| rsx! {
+                            div { class: "container mx-auto px-4 py-8 max-w-5xl text-center",
+                                h2 { class: "text-xl font-semibold mb-2", "Something went wrong" }
+                                if let Some(err) = ctx.error() {
+                                    p { class: "text-muted-foreground", "{err}" }
+                                }
+                                button {
+                                    class: "mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg",
+                                    onclick: move |_| ctx.clear_errors(),
+                                    "Try again"
+                                }
+                            }
+                        },
+                        Outlet::<Route> {}
+                    }
                 }
                 if is_topics_page && !is_settings_page {
                     aside { class: "w-[350px] shrink-0 hidden xl:block",

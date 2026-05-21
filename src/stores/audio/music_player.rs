@@ -386,6 +386,24 @@ pub enum PlayerViewMode {
     Floating,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LoopMode {
+    #[default]
+    None,
+    Queue,
+    Track,
+}
+
+impl LoopMode {
+    pub fn next(self) -> Self {
+        match self {
+            LoopMode::None => LoopMode::Queue,
+            LoopMode::Queue => LoopMode::Track,
+            LoopMode::Track => LoopMode::None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Store)]
 pub struct MusicPlayerState {
     pub current_track: Option<MusicTrack>,
@@ -422,6 +440,15 @@ pub struct MusicPlayerState {
     /// If true, stop playback when reaching the end of the playlist instead of wrapping
     #[serde(default)]
     pub stop_at_end: bool,
+    /// Repeat mode: None (stop at end / wrap), Queue (loop all), Track (loop one)
+    #[serde(default)]
+    pub loop_mode: LoopMode,
+    /// Whether shuffle is enabled
+    #[serde(default)]
+    pub shuffle_enabled: bool,
+    /// Shuffle permutation order (maps logical position -> actual playlist index)
+    #[serde(default)]
+    pub shuffle_order: Vec<usize>,
     /// Current player view mode (bar / expanded / floating)
     #[serde(skip)]
     pub view_mode: PlayerViewMode,
@@ -453,6 +480,9 @@ impl Default for MusicPlayerState {
             available_streams: Vec::new(),
             now_playing: None,
             stop_at_end: false,
+            loop_mode: LoopMode::None,
+            shuffle_enabled: false,
+            shuffle_order: Vec::new(),
             view_mode: PlayerViewMode::Bar,
             floating_pos: (16.0, 16.0),
         }
@@ -464,6 +494,8 @@ const STORAGE_KEY_VOLUME: &str = "music_player_volume";
 const STORAGE_KEY_MUTED: &str = "music_player_muted";
 const STORAGE_KEY_PLAYBACK_SPEED: &str = "music_player_playback_speed";
 static VOLUME_PERSIST_GEN: AtomicU64 = AtomicU64::new(0);
+static QUEUE_SAVE_GEN: AtomicU64 = AtomicU64::new(0);
+const PROGRESS_STEP_SECS: u64 = 5;
 /// Initialize music player from localStorage
 pub fn init_player() {
     let mut state = MUSIC_PLAYER.write();
@@ -475,6 +507,29 @@ pub fn init_player() {
     }
     if let Ok(speed) = storage::get::<f64>(STORAGE_KEY_PLAYBACK_SPEED) {
         state.playback_speed = speed.clamp(0.5, 3.0);
+    }
+    if let Some(queue) = super::queue_state::load_queue() {
+        if !queue.playlist.is_empty() {
+            let idx = queue.current_index.min(queue.playlist.len() - 1);
+            state.playlist = queue.playlist;
+            state.current_index = idx;
+            state.current_track = state.playlist.get(idx).cloned();
+            state.current_time = queue.progress_secs as f64;
+            state.is_visible = true;
+            state.loop_mode = queue.loop_mode;
+            state.shuffle_enabled = queue.shuffle_enabled;
+            if state.shuffle_enabled {
+                state.shuffle_order = rebuild_shuffle_order(state.playlist.len(), idx);
+            }
+            log::info!(
+                "Restored queue: {} tracks, index {}, position {}s, loop {:?}, shuffle {}",
+                state.playlist.len(),
+                idx,
+                queue.progress_secs,
+                state.loop_mode,
+                state.shuffle_enabled
+            );
+        }
     }
     log::info!("Music player initialized");
 }
@@ -619,6 +674,45 @@ async fn clear_music_status() {
         }
     }
 }
+
+pub fn mark_queue_dirty() {
+    QUEUE_SAVE_GEN.fetch_add(1, Ordering::SeqCst);
+}
+
+fn build_queue_snapshot() -> Option<super::queue_state::PersistedQueueState> {
+    let state = MUSIC_PLAYER.read();
+    if state.playlist.is_empty() {
+        return None;
+    }
+    let idx = state.current_index.min(state.playlist.len() - 1);
+    let progress = if state.is_playing {
+        let p = state.current_time as u64;
+        p - (p % PROGRESS_STEP_SECS)
+    } else {
+        state.current_time as u64
+    };
+    Some(super::queue_state::PersistedQueueState {
+        version: 2,
+        playlist: state.playlist.iter().take(200).cloned().collect(),
+        current_index: idx,
+        progress_secs: progress,
+        loop_mode: state.loop_mode,
+        shuffle_enabled: state.shuffle_enabled,
+    })
+}
+
+pub fn persist_queue_snapshot() {
+    if let Some(snapshot) = build_queue_snapshot() {
+        super::queue_state::save_queue(&snapshot);
+    } else {
+        super::queue_state::clear_queue();
+    }
+}
+
+pub fn queue_save_gen() -> u64 {
+    QUEUE_SAVE_GEN.load(Ordering::SeqCst)
+}
+
 /// Play a track
 pub fn play_track(
     track: MusicTrack,
@@ -637,6 +731,9 @@ pub fn play_track(
     state.view_mode = PlayerViewMode::Bar;
     state.current_time = 0.0;
     state.now_playing = None;
+    if state.shuffle_enabled {
+        state.shuffle_order = rebuild_shuffle_order(state.playlist.len(), index);
+    }
     log::info!("Playing track: {}", track.title);
     #[cfg(feature = "mobile_platform")]
     if let Err(e) = android_media::set_queue(&state.playlist, state.current_index, true) {
@@ -662,9 +759,31 @@ pub fn play_track(
             let _ = android_media::save_browse_cache(&item_key, &track_json);
         });
     }
+    let ms_track = track.clone();
+    {
+        let title = ms_track.title.clone();
+        let artist = ms_track.artist.clone();
+        let album = ms_track.album.clone().unwrap_or_default();
+        let artwork = ms_track.album_art_url.clone();
+        let duration = ms_track.duration.unwrap_or(0) as f64;
+        crate::platform::mpris::update_now_playing(
+            &title, &artist, &album, duration, 0.0, true, artwork.as_deref(),
+        );
+    }
     spawn(async move {
         publish_music_status(&track).await;
     });
+    spawn(async move {
+        crate::utils::media_session::update_metadata(
+            &ms_track.title,
+            &ms_track.artist,
+            ms_track.album.as_deref().unwrap_or(""),
+            ms_track.album_art_url.as_deref(),
+        )
+        .await;
+        crate::utils::media_session::set_playback_state(true).await;
+    });
+    mark_queue_dirty();
 }
 
 pub fn play_or_toggle_track(
@@ -686,6 +805,7 @@ pub fn play_or_toggle_track(
         play_track(track, playlist, index_override);
     }
 }
+
 pub fn append_to_playlist(tracks: Vec<MusicTrack>) {
     let mut state = MUSIC_PLAYER.write();
     state.playlist.extend(tracks);
@@ -714,11 +834,25 @@ pub fn toggle_play() {
         spawn(async move {
             clear_music_status().await;
         });
+        spawn(async move {
+            crate::utils::media_session::set_playback_state(false).await;
+        });
+        crate::platform::mpris::update_now_playing("", "", "", 0.0, 0.0, false, None);
     } else if let Some(track) = state.current_track.clone() {
+        crate::platform::mpris::update_now_playing(
+            &track.title, &track.artist,
+            track.album.as_deref().unwrap_or(""),
+            track.duration.unwrap_or(0) as f64, 0.0, true,
+            track.album_art_url.as_deref(),
+        );
         spawn(async move {
             publish_music_status(&track).await;
         });
+        spawn(async move {
+            crate::utils::media_session::set_playback_state(true).await;
+        });
     }
+    mark_queue_dirty();
 }
 /// Play next track in playlist
 pub fn next_track() {
@@ -726,16 +860,56 @@ pub fn next_track() {
     if state.playlist.is_empty() {
         return;
     }
-    if state.stop_at_end && state.current_index >= state.playlist.len() - 1 {
-        state.is_playing = false;
-        state.is_visible = false;
-        state.current_track = None;
-        #[cfg(feature = "mobile_platform")]
-        let _ = android_media::stop();
-        return;
+    match state.loop_mode {
+        LoopMode::Track => {
+            state.current_time = 0.0;
+            if let Some(track) = state.current_track.clone() {
+                spawn(async move {
+                    publish_music_status(&track).await;
+                });
+            }
+            mark_queue_dirty();
+            return;
+        }
+        LoopMode::None if state.stop_at_end && state.current_index >= state.playlist.len() - 1 => {
+            state.is_playing = false;
+            state.is_visible = false;
+            state.current_track = None;
+            #[cfg(feature = "mobile_platform")]
+            let _ = android_media::stop();
+            mark_queue_dirty();
+            return;
+        }
+        LoopMode::None | LoopMode::Queue => {}
     }
-    state.current_index = (state.current_index + 1) % state.playlist.len();
-    state.current_track = state.playlist.get(state.current_index).cloned();
+    let next_idx = if state.shuffle_enabled && !state.shuffle_order.is_empty() {
+        let logical = state
+            .shuffle_order
+            .iter()
+            .position(|&i| i == state.current_index)
+            .unwrap_or(0);
+        let next_logical = (logical + 1) % state.shuffle_order.len();
+        if next_logical == 0 && state.loop_mode == LoopMode::None && !state.stop_at_end {
+            if let Some(&actual) = state.shuffle_order.get(next_logical) {
+                state.current_index = actual;
+            }
+        } else if let Some(&actual) = state.shuffle_order.get(next_logical) {
+            state.current_index = actual;
+        } else {
+            state.current_index = (state.current_index + 1) % state.playlist.len();
+        }
+        state.current_index
+    } else if state.loop_mode == LoopMode::Queue
+        || !state.stop_at_end
+        || state.current_index < state.playlist.len() - 1
+    {
+        state.current_index = (state.current_index + 1) % state.playlist.len();
+        state.current_index
+    } else {
+        mark_queue_dirty();
+        return;
+    };
+    state.current_track = state.playlist.get(next_idx).cloned();
     state.is_playing = true;
     state.current_time = 0.0;
     if let Some(track) = state.current_track.clone() {
@@ -745,10 +919,28 @@ pub fn next_track() {
             log::error!("Failed to skip to next native Android track: {}", e);
             state.playback_error = Some(format!("Android playback failed: {}", e));
         }
+        crate::platform::mpris::update_now_playing(
+            &track.title, &track.artist,
+            track.album.as_deref().unwrap_or(""),
+            track.duration.unwrap_or(0) as f64, 0.0, true,
+            track.album_art_url.as_deref(),
+        );
+        let t = track.clone();
         spawn(async move {
-            publish_music_status(&track).await;
+            publish_music_status(&t).await;
+        });
+        spawn(async move {
+            crate::utils::media_session::update_metadata(
+                &track.title,
+                &track.artist,
+                track.album.as_deref().unwrap_or(""),
+                track.album_art_url.as_deref(),
+            )
+            .await;
+            crate::utils::media_session::set_playback_state(true).await;
         });
     }
+    mark_queue_dirty();
 }
 /// Play previous track in playlist
 pub fn previous_track() {
@@ -770,7 +962,32 @@ pub fn previous_track() {
         }
         return;
     }
-    state.current_index = if state.current_index == 0 {
+    if state.loop_mode == LoopMode::Track {
+        state.current_time = 0.0;
+        if let Some(track) = state.current_track.clone() {
+            spawn(async move {
+                publish_music_status(&track).await;
+            });
+        }
+        mark_queue_dirty();
+        return;
+    }
+    state.current_index = if state.shuffle_enabled && !state.shuffle_order.is_empty() {
+        let logical = state
+            .shuffle_order
+            .iter()
+            .position(|&i| i == state.current_index)
+            .unwrap_or(0);
+        if logical == 0 {
+            if state.loop_mode == LoopMode::Queue {
+                *state.shuffle_order.last().unwrap_or(&0)
+            } else {
+                state.current_index
+            }
+        } else {
+            state.shuffle_order[logical - 1]
+        }
+    } else if state.current_index == 0 {
         state.playlist.len() - 1
     } else {
         state.current_index - 1
@@ -785,10 +1002,28 @@ pub fn previous_track() {
             log::error!("Failed to skip to previous native Android track: {}", e);
             state.playback_error = Some(format!("Android playback failed: {}", e));
         }
+        crate::platform::mpris::update_now_playing(
+            &track.title, &track.artist,
+            track.album.as_deref().unwrap_or(""),
+            track.duration.unwrap_or(0) as f64, 0.0, true,
+            track.album_art_url.as_deref(),
+        );
+        let t = track.clone();
         spawn(async move {
-            publish_music_status(&track).await;
+            publish_music_status(&t).await;
+        });
+        spawn(async move {
+            crate::utils::media_session::update_metadata(
+                &track.title,
+                &track.artist,
+                track.album.as_deref().unwrap_or(""),
+                track.album_art_url.as_deref(),
+            )
+            .await;
+            crate::utils::media_session::set_playback_state(true).await;
         });
     }
+    mark_queue_dirty();
 }
 /// Set volume (0.0 - 1.0)
 pub fn set_volume(volume: f64) {
@@ -827,6 +1062,58 @@ pub fn toggle_mute() {
     };
     storage::set(STORAGE_KEY_MUTED, &is_muted).ok();
 }
+pub fn toggle_loop() {
+    let mut state = MUSIC_PLAYER.write();
+    state.loop_mode = state.loop_mode.next();
+    drop(state);
+    mark_queue_dirty();
+}
+
+#[allow(dead_code)]
+pub fn set_loop_mode(mode: LoopMode) {
+    MUSIC_PLAYER.write().loop_mode = mode;
+}
+
+fn rebuild_shuffle_order(playlist_len: usize, current_index: usize) -> Vec<usize> {
+    use rand::seq::SliceRandom;
+    let mut ahead: Vec<usize> = (current_index..playlist_len).collect();
+    ahead.shuffle(&mut rand::thread_rng());
+    if let Some(pos) = ahead.iter().position(|&i| i == current_index) {
+        ahead.swap(pos, 0);
+    }
+    let mut wrapped: Vec<usize> = (0..current_index).collect();
+    wrapped.shuffle(&mut rand::thread_rng());
+    ahead.extend(wrapped);
+    ahead
+}
+
+pub fn toggle_shuffle() {
+    let mut state = MUSIC_PLAYER.write();
+    state.shuffle_enabled = !state.shuffle_enabled;
+    if state.shuffle_enabled && !state.playlist.is_empty() {
+        state.shuffle_order = rebuild_shuffle_order(state.playlist.len(), state.current_index);
+    } else {
+        state.shuffle_order = Vec::new();
+    }
+    drop(state);
+    mark_queue_dirty();
+}
+
+#[allow(dead_code)]
+pub fn play_next_track(track: MusicTrack) {
+    let mut state = MUSIC_PLAYER.write();
+    if state.playlist.is_empty() {
+        drop(state);
+        play_track(track, None, None);
+        return;
+    }
+    let insert_at = state.current_index + 1;
+    state.playlist.insert(insert_at, track);
+    if state.shuffle_enabled {
+        state.shuffle_order = rebuild_shuffle_order(state.playlist.len(), state.current_index);
+    }
+    mark_queue_dirty();
+}
 /// Set current time
 #[cfg(not(feature = "mobile_platform"))]
 pub fn set_current_time(time: f64) {
@@ -857,6 +1144,7 @@ pub fn seek_to(time: f64) {
             log::warn!("Failed to sync seek via eval: {:?}", e);
         }
     });
+    mark_queue_dirty();
 }
 /// Set duration
 #[cfg(not(feature = "mobile_platform"))]

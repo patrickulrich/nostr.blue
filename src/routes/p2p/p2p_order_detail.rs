@@ -1,11 +1,9 @@
-//! P2P Order Detail Page
-//!
-//! Full details view for a NIP-69 P2P order
 use crate::components::{
-    ClientInitializing, P2PLayerBadge, P2PNetworkBadge, P2PStatusBadge, P2PTypeBadge,
+    ApiInitializingState, P2PLayerBadge, P2PNetworkBadge, P2PStatusBadge, P2PTypeBadge,
 };
+use crate::hooks::{use_nostr_resource_public, NostrResourceState};
 use crate::routes::Route;
-use crate::stores::{nostr_client, p2p_store};
+use crate::stores::p2p_store;
 use crate::utils::duration::format_duration_verbose;
 use crate::utils::format::format_sats_with_separator;
 use crate::utils::nip69::{FiatAmount, P2POrder};
@@ -15,38 +13,21 @@ use nostr::Timestamp;
 #[component]
 pub fn P2POrderDetail(naddr: String) -> Element {
     let navigator = navigator();
-    let mut order = use_signal(|| None::<P2POrder>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
-    use_effect(move || {
-        let naddr = naddr.clone();
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !client_initialized {
-            log::debug!("Waiting for client initialization before loading P2P order...");
-            return;
-        }
-        spawn(async move {
-            loading.set(true);
-            error.set(None);
+    let naddr_clone = naddr.clone();
+    let order = use_nostr_resource_public(move || {
+        let naddr = naddr_clone.clone();
+        async move {
             if let Some(cached) = p2p_store::get_cached_order(&naddr) {
-                order.set(Some(cached));
-                loading.set(false);
-                return;
+                return Ok(cached);
             }
             match p2p_store::fetch_order_by_naddr(&naddr).await {
-                Ok(Some(fetched)) => {
-                    order.set(Some(fetched));
-                }
-                Ok(None) => {
-                    error.set(Some("Order not found".to_string()));
-                }
-                Err(e) => {
-                    error.set(Some(e));
-                }
+                Ok(Some(fetched)) => Ok(fetched),
+                Ok(None) => Err("Order not found".to_string()),
+                Err(e) => Err(e),
             }
-            loading.set(false);
-        });
+        }
     });
+    let order_state = order.state();
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/95 backdrop-blur border-b border-border p-4",
@@ -69,26 +50,32 @@ pub fn P2POrderDetail(naddr: String) -> Element {
                     h1 { class: "text-xl font-bold", "Order Details" }
                 }
             }
-            if !*nostr_client::CLIENT_INITIALIZED.read() {
-                ClientInitializing {}
-            } else if *loading.read() {
-                div { class: "p-4 space-y-4 animate-pulse",
-                    div { class: "h-8 w-32 bg-muted rounded" }
-                    div { class: "h-12 w-48 bg-muted rounded" }
-                    div { class: "h-6 w-64 bg-muted rounded" }
-                    div { class: "h-20 w-full bg-muted rounded" }
-                }
-            } else if let Some(err) = error.read().as_ref() {
-                div { class: "p-8 text-center",
-                    p { class: "text-red-500 mb-4", "{err}" }
-                    Link {
-                        to: Route::P2PHome {},
-                        class: "text-primary hover:underline",
-                        "Back to P2P Trading"
+            match &*order_state.read() {
+                NostrResourceState::Initializing => rsx! {
+                    ApiInitializingState { item_label: "order" }
+                },
+                NostrResourceState::Loading => rsx! {
+                    div { class: "p-4 space-y-4 animate-pulse",
+                        div { class: "h-8 w-32 bg-muted rounded" }
+                        div { class: "h-12 w-48 bg-muted rounded" }
+                        div { class: "h-6 w-64 bg-muted rounded" }
+                        div { class: "h-20 w-full bg-muted rounded" }
                     }
-                }
-            } else if let Some(ord) = order.read().as_ref() {
-                OrderDetailContent { order: ord.clone() }
+                },
+                NostrResourceState::Error(err) => rsx! {
+                    div { class: "p-8 text-center",
+                        p { class: "text-red-500 mb-4", "{err}" }
+                        Link {
+                            to: Route::P2PHome {},
+                            class: "text-primary hover:underline",
+                            "Back to P2P Trading"
+                        }
+                    }
+                },
+                NostrResourceState::Loaded(ord) => rsx! {
+                    OrderDetailContent { order: ord.clone() }
+                },
+                NostrResourceState::AuthRequired => rsx! {},
             }
         }
     }

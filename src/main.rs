@@ -46,6 +46,8 @@ fn App() -> Element {
     use_effect(move || {
         spawn(async move {
             stores::ui::scroll_restore::setup_popstate_flag().await;
+            stores::ui::scroll_restore::setup_scroll_tracker().await;
+            stores::ui::online_status::setup_online_status().await;
         });
     });
     use_effect(move || {
@@ -115,8 +117,8 @@ fn App() -> Element {
     use_effect(move || {
         let connected = *nostr_client::RELAY_CONNECTED.read();
         if connected {
-            let sidebar_state = sidebar_store::SIDEBAR_STATE.peek();
-            let reactions_state = reactions_store::REACTIONS_STATE.peek();
+            let sidebar_state = sidebar_store::SIDEBAR_STATE.read();
+            let reactions_state = reactions_store::REACTIONS_STATE.read();
             let sidebar_failed = sidebar_state.is_failed();
             let reactions_failed = reactions_state.is_failed();
             if sidebar_failed || reactions_failed {
@@ -135,8 +137,8 @@ fn App() -> Element {
     use_effect(move || {
         let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
         if is_authenticated {
-            let sidebar_failed = sidebar_store::SIDEBAR_STATE.peek().is_failed();
-            let reactions_failed = reactions_store::REACTIONS_STATE.peek().is_failed();
+            let sidebar_failed = sidebar_store::SIDEBAR_STATE.read().is_failed();
+            let reactions_failed = reactions_store::REACTIONS_STATE.read().is_failed();
             if sidebar_failed || reactions_failed {
                 spawn(async move {
                     if sidebar_store::SIDEBAR_STATE.peek().is_failed() {

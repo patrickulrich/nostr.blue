@@ -72,36 +72,67 @@ pub fn SettingsRelays() -> Element {
     let mut publishing = use_signal(|| false);
     use_effect(move || {
         if let Some(metadata) = relay::USER_RELAY_METADATA.read().as_ref() {
-            general_relays.set(metadata.relays.clone());
-            dm_relays.set(metadata.dm_relays.clone());
+            if *general_relays.peek() != metadata.relays {
+                general_relays.set(metadata.relays.clone());
+            }
+            if *dm_relays.peek() != metadata.dm_relays {
+                dm_relays.set(metadata.dm_relays.clone());
+            }
         }
-    });
-    use_effect(move || {
-        search_relays.set(relay::SEARCH_RELAYS.read().clone());
-    });
-    use_effect(move || {
-        blocked_relays.set(relay::BLOCKED_RELAYS.read().clone());
-    });
-    use_effect(move || {
-        local_relays.set(relay::LOCAL_RELAYS.read().clone());
-    });
-    use_effect(move || {
-        broadcast_relays.set(relay::BROADCAST_RELAYS.read().clone());
-    });
-    use_effect(move || {
-        indexer_relays.set(relay::INDEXER_RELAYS.read().clone());
-    });
-    use_effect(move || {
-        outbox_relays.set(relay::OUTBOX_RELAYS.read().clone());
-    });
-    use_effect(move || {
-        favorite_relays.set(relay::FAVORITE_RELAYS.read().clone());
-    });
-    use_effect(move || {
-        proxy_relays.set(relay::PROXY_RELAYS.read().clone());
-    });
-    use_effect(move || {
-        trusted_relays.set(relay::TRUSTED_RELAYS.read().clone());
+        {
+            let v = relay::SEARCH_RELAYS.read();
+            if *search_relays.peek() != *v {
+                search_relays.set(v.clone());
+            }
+        }
+        {
+            let v = relay::BLOCKED_RELAYS.read();
+            if *blocked_relays.peek() != *v {
+                blocked_relays.set(v.clone());
+            }
+        }
+        {
+            let v = relay::LOCAL_RELAYS.read();
+            if *local_relays.peek() != *v {
+                local_relays.set(v.clone());
+            }
+        }
+        {
+            let v = relay::BROADCAST_RELAYS.read();
+            if *broadcast_relays.peek() != *v {
+                broadcast_relays.set(v.clone());
+            }
+        }
+        {
+            let v = relay::INDEXER_RELAYS.read();
+            if *indexer_relays.peek() != *v {
+                indexer_relays.set(v.clone());
+            }
+        }
+        {
+            let v = relay::OUTBOX_RELAYS.read();
+            if *outbox_relays.peek() != *v {
+                outbox_relays.set(v.clone());
+            }
+        }
+        {
+            let v = relay::FAVORITE_RELAYS.read();
+            if *favorite_relays.peek() != *v {
+                favorite_relays.set(v.clone());
+            }
+        }
+        {
+            let v = relay::PROXY_RELAYS.read();
+            if *proxy_relays.peek() != *v {
+                proxy_relays.set(v.clone());
+            }
+        }
+        {
+            let v = relay::TRUSTED_RELAYS.read();
+            if *trusted_relays.peek() != *v {
+                trusted_relays.set(v.clone());
+            }
+        }
     });
     let connection_info = use_resource(move || async move {
         let _initialized = *nostr_client::CLIENT_INITIALIZED.read();

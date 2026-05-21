@@ -1,57 +1,37 @@
-//! Recipe Detail Page
-//! View a full recipe with all sections, engagement, and actions
 use crate::components::{
     ClientInitializing, RecipeDetailView, RecipeDetailViewSkeleton, ShareModal, ZapModal,
 };
+use crate::hooks::{use_nostr_resource, NostrResourceState};
 use crate::routes::Route;
 use crate::stores::auth_store;
-use crate::stores::nostr_client::{self, HAS_SIGNER};
+use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::recipe_store::{self, CachedRecipe};
 use dioxus::prelude::*;
+
 #[component]
 pub fn RecipeDetail(naddr: String) -> Element {
-    let naddr_for_effect = naddr.clone();
-    let naddr_for_render = naddr.clone();
-    let mut recipe = use_signal(|| None::<CachedRecipe>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
-    let mut show_zap_modal = use_signal(|| false);
-    let mut show_share_modal = use_signal(|| false);
+    let naddr_clone = naddr.clone();
+    let recipe = use_nostr_resource(move || {
+        let naddr_str = naddr_clone.clone();
+        async move {
+            match recipe_store::fetch_recipe_by_naddr(&naddr_str).await {
+                Ok(Some(r)) => Ok(r),
+                Ok(None) => Err("Recipe not found".to_string()),
+                Err(e) => Err(e),
+            }
+        }
+    });
+    let recipe_state = recipe.state();
     let is_owner = use_memo(move || {
-        if let Some(ref r) = *recipe.read() {
+        if let NostrResourceState::Loaded(ref r) = &*recipe_state.read() {
             if let Some(pubkey) = auth_store::get_pubkey() {
                 return r.event.pubkey.to_hex() == pubkey;
             }
         }
         false
     });
-    use_effect(use_reactive(
-        (&*nostr_client::CLIENT_INITIALIZED.read(), &naddr_for_effect),
-        move |(client_initialized, naddr_str)| {
-            if !client_initialized {
-                return;
-            }
-            let naddr_clone = naddr_str.clone();
-            loading.set(true);
-            error.set(None);
-            spawn(async move {
-                match recipe_store::fetch_recipe_by_naddr(&naddr_clone).await {
-                    Ok(Some(r)) => {
-                        recipe.set(Some(r));
-                        loading.set(false);
-                    }
-                    Ok(None) => {
-                        error.set(Some("Recipe not found".to_string()));
-                        loading.set(false);
-                    }
-                    Err(e) => {
-                        error.set(Some(e));
-                        loading.set(false);
-                    }
-                }
-            });
-        },
-    ));
+    let mut show_zap_modal = use_signal(|| false);
+    let mut show_share_modal = use_signal(|| false);
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
@@ -73,7 +53,7 @@ pub fn RecipeDetail(naddr: String) -> Element {
                         }
                         "Recipes"
                     }
-                    if recipe.read().is_some() {
+                    if let NostrResourceState::Loaded(_) = &*recipe_state.read() {
                         div { class: "flex items-center gap-2",
                             button {
                                 class: "p-2 rounded-lg hover:bg-muted transition",
@@ -108,7 +88,7 @@ pub fn RecipeDetail(naddr: String) -> Element {
                             if *HAS_SIGNER.read() && !*is_owner.read() {
                                 Link {
                                     to: Route::RecipeFork {
-                                        naddr: naddr_for_render.clone(),
+                                        naddr: naddr.clone(),
                                     },
                                     class: "px-3 py-1.5 rounded-lg hover:bg-muted transition text-sm font-medium flex items-center gap-1",
                                     svg {
@@ -129,7 +109,7 @@ pub fn RecipeDetail(naddr: String) -> Element {
                             if *is_owner.read() {
                                 Link {
                                     to: Route::RecipeFork {
-                                        naddr: naddr_for_render.clone(),
+                                        naddr: naddr.clone(),
                                     },
                                     class: "px-3 py-1.5 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition",
                                     "Edit"
@@ -139,45 +119,55 @@ pub fn RecipeDetail(naddr: String) -> Element {
                     }
                 }
             }
-            if !*nostr_client::CLIENT_INITIALIZED.read() || *loading.read() {
-                div { class: "p-4",
-                    if !*nostr_client::CLIENT_INITIALIZED.read() {
+            match &*recipe_state.read() {
+                NostrResourceState::Initializing => rsx! {
+                    div { class: "p-4",
                         ClientInitializing {}
-                    } else {
+                    }
+                },
+                NostrResourceState::Loading => rsx! {
+                    div { class: "p-4",
                         RecipeDetailViewSkeleton {}
                     }
-                }
-            } else if let Some(err) = error.read().as_ref() {
-                div { class: "p-4",
-                    div { class: "flex flex-col items-center justify-center py-12 text-center",
-                        span { class: "text-5xl mb-4", "🍽️" }
-                        h2 { class: "text-xl font-semibold mb-2", "Recipe Not Found" }
-                        p { class: "text-muted-foreground mb-4", "{err}" }
-                        Link {
-                            to: Route::RecipesHome {},
-                            class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition",
-                            "Browse Recipes"
+                },
+                NostrResourceState::AuthRequired => rsx! {
+                    div { class: "p-4",
+                        ClientInitializing {}
+                    }
+                },
+                NostrResourceState::Error(e) => rsx! {
+                    div { class: "p-4",
+                        div { class: "flex flex-col items-center justify-center py-12 text-center",
+                            span { class: "text-5xl mb-4", "🍽️" }
+                            h2 { class: "text-xl font-semibold mb-2", "Recipe Not Found" }
+                            p { class: "text-muted-foreground mb-4", "{e}" }
+                            Link {
+                                to: Route::RecipesHome {},
+                                class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition",
+                                "Browse Recipes"
+                            }
                         }
                     }
-                }
-            } else if let Some(ref r) = *recipe.read() {
-                div { class: "p-4",
-                    RecipeDetailView { recipe: r.clone() }
-                }
-                if *show_zap_modal.read() {
-                    ZapModal {
-                        recipient_pubkey: r.event.pubkey.to_hex(),
-                        recipient_name: r.metadata.title.clone(),
-                        event_id: Some(r.event.id.to_hex()),
-                        on_close: move |_| show_zap_modal.set(false),
+                },
+                NostrResourceState::Loaded(r) => rsx! {
+                    div { class: "p-4",
+                        RecipeDetailView { recipe: r.clone() }
                     }
-                }
-                if *show_share_modal.read() {
-                    ShareModal {
-                        event: r.event.clone(),
-                        on_close: move |_| show_share_modal.set(false),
+                    if *show_zap_modal.read() {
+                        ZapModal {
+                            recipient_pubkey: r.event.pubkey.to_hex(),
+                            recipient_name: r.metadata.title.clone(),
+                            event_id: Some(r.event.id.to_hex()),
+                            on_close: move |_| show_zap_modal.set(false),
+                        }
                     }
-                }
+                    if *show_share_modal.read() {
+                        ShareModal {
+                            event: r.event.clone(),
+                            on_close: move |_| show_share_modal.set(false),
+                        }
+                    }
+                },
             }
         }
     }

@@ -1,5 +1,6 @@
 use crate::components::{NoteCard, NoteCardSkeleton};
 use crate::hooks::use_mute_block_cache;
+use crate::hooks::{use_nostr_resource_public, NostrResourceState};
 use crate::services::search::sidebar_discovery::{self, HotPostItem, HotPostSource, NostrarchivesNote};
 use crate::services::trending::TrendingNote;
 use crate::stores::nostr_client;
@@ -13,34 +14,12 @@ pub fn Trending(source: Option<String>) -> Element {
         .as_deref()
         .and_then(HotPostSource::from_query)
         .unwrap_or(HotPostSource::NostrWine);
-    let mut events = use_signal(Vec::<NostrEvent>::new);
-    let mut loading = use_signal(|| false);
-    let mut error = use_signal(|| None::<String>);
-    let mut refresh_trigger = use_signal(|| 0);
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
 
-    use_effect(move || {
-        let _ = refresh_trigger.read();
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !client_initialized {
-            return;
-        }
-
-        loading.set(true);
-        error.set(None);
-        spawn(async move {
-            match load_trending_events(source).await {
-                Ok(fetched_events) => {
-                    events.set(fetched_events);
-                    loading.set(false);
-                }
-                Err(e) => {
-                    error.set(Some(e));
-                    loading.set(false);
-                }
-            }
-        });
+    let mut events_resource = use_nostr_resource_public(move || async move {
+        load_trending_events(source).await
     });
+    let events = events_resource.state();
 
     let subtitle = match source {
         HotPostSource::NostrWine => "Top trending posts from nostr.wine",
@@ -61,13 +40,12 @@ pub fn Trending(source: Option<String>) -> Element {
                     }
                     button {
                         class: "rounded-full p-2 transition hover:bg-accent disabled:opacity-50",
-                        disabled: *loading.read(),
+                        disabled: events_resource.is_loading(),
                         onclick: move |_| {
-                            let current = *refresh_trigger.read();
-                            refresh_trigger.set(current + 1);
+                            events_resource.restart();
                         },
                         title: "Refresh feed",
-                        if *loading.read() && events.read().is_empty() {
+                        if events_resource.is_loading() {
                             span { class: "inline-block h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" }
                         } else {
                             "🔄"
@@ -76,42 +54,42 @@ pub fn Trending(source: Option<String>) -> Element {
                 }
             }
 
-            if let Some(err) = error.read().as_ref() {
-                div { class: "p-4",
-                    div { class: "rounded-lg bg-red-100 p-4 text-red-800 dark:bg-red-900 dark:text-red-200",
-                        "❌ {err}"
-                    }
-                }
-            }
-
-            if *loading.read() && events.read().is_empty() {
-                div { class: "divide-y divide-border",
-                    for _ in 0..5 {
-                        NoteCardSkeleton {}
-                    }
-                }
-            }
-
-            if !events.read().is_empty() {
-                div { class: "divide-y divide-border",
-                    for event in events.read().iter() {
-                        NoteCard {
-                            key: "{event.id}",
-                            event: event.clone(),
-                            collapsible: true,
-                            cached_muted_posts: cached_muted_posts.read().clone(),
-                            cached_blocked_users: cached_blocked_users.read().clone(),
+            match &*events.read() {
+                NostrResourceState::Error(e) => rsx! {
+                    div { class: "p-4",
+                        div { class: "rounded-lg bg-red-100 p-4 text-red-800 dark:bg-red-900 dark:text-red-200",
+                            "❌ {e}"
                         }
                     }
-                }
-            }
-
-            if !*loading.read() && events.read().is_empty() && error.read().is_none() {
-                div { class: "py-12 text-center",
-                    div { class: "mb-4 text-6xl", "📈" }
-                    h3 { class: "mb-2 text-xl font-semibold", "No trending posts" }
-                    p { class: "text-muted-foreground", "Check back later for trending content" }
-                }
+                },
+                NostrResourceState::Loading | NostrResourceState::Initializing => rsx! {
+                    div { class: "divide-y divide-border",
+                        for _ in 0..5 {
+                            NoteCardSkeleton {}
+                        }
+                    }
+                },
+                NostrResourceState::Loaded(data) if !data.is_empty() => rsx! {
+                    div { class: "divide-y divide-border",
+                        for event in data.iter() {
+                            NoteCard {
+                                key: "{event.id}",
+                                event: event.clone(),
+                                collapsible: true,
+                                cached_muted_posts: cached_muted_posts.read().clone(),
+                                cached_blocked_users: cached_blocked_users.read().clone(),
+                            }
+                        }
+                    }
+                },
+                NostrResourceState::Loaded(_) => rsx! {
+                    div { class: "py-12 text-center",
+                        div { class: "mb-4 text-6xl", "📈" }
+                        h3 { class: "mb-2 text-xl font-semibold", "No trending posts" }
+                        p { class: "text-muted-foreground", "Check back later for trending content" }
+                    }
+                },
+                NostrResourceState::AuthRequired => rsx! {},
             }
         }
     }

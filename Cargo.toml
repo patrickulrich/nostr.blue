@@ -208,6 +208,9 @@ dioxus-primitives = { git = "https://github.com/DioxusLabs/components", version 
 quick-xml = "0.39"
 strum = { version = "0.27.2", features = ["derive"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+mpris-server = "0.9.0"
+
 [profile.release]
 opt-level = "z"
 lto = true
