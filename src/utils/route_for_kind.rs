@@ -40,7 +40,7 @@ pub fn route_for_event(event: &Event) -> Route {
         20 => Route::PhotoDetail { photo_id: hex_id },
         21 | 22 => Route::VideoDetail { video_id: hex_id },
         1040 => Route::VoiceMessageDetail { voice_id: hex_id },
-        1068 => Route::PollView { noteid: hex_id },
+        1068 => Route::PollView { noteid: crate::utils::nip19_urls::note_route_id(&hex_id, Some(&event.pubkey.to_hex())) },
         1621 => Route::CodeIssueDetail { note_id: hex_id },
         1622 => Route::CodePullDetail { note_id: hex_id },
         _ => {

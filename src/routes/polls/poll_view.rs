@@ -54,23 +54,26 @@ pub fn PollView(noteid: String) -> Element {
         spawn(async move {
             loading.set(true);
             error.set(None);
-            match decode_event_id(&noteid_str) {
-                Ok(event_id) => match fetch_poll_by_id(event_id).await {
-                    Ok(Some(event)) => {
-                        poll_event.set(Some(event));
-                        loading.set(false);
+            match nostr_client::parse_event_id(&noteid_str) {
+                Some(parsed) => {
+                    let event_id = parsed.event_id;
+                    match fetch_poll_by_id(event_id).await {
+                        Ok(Some(event)) => {
+                            poll_event.set(Some(event));
+                            loading.set(false);
+                        }
+                        Ok(None) => {
+                            error.set(Some("Poll not found".to_string()));
+                            loading.set(false);
+                        }
+                        Err(e) => {
+                            error.set(Some(e));
+                            loading.set(false);
+                        }
                     }
-                    Ok(None) => {
-                        error.set(Some("Poll not found".to_string()));
-                        loading.set(false);
-                    }
-                    Err(e) => {
-                        error.set(Some(e));
-                        loading.set(false);
-                    }
-                },
-                Err(e) => {
-                    error.set(Some(e));
+                }
+                None => {
+                    error.set(Some("Invalid poll ID".to_string()));
                     loading.set(false);
                 }
             }
@@ -306,14 +309,6 @@ pub fn PollView(noteid: String) -> Element {
                 }
             }
         }
-    }
-}
-
-fn decode_event_id(noteid: &str) -> Result<EventId, String> {
-    if noteid.starts_with("note1") {
-        EventId::parse(noteid).map_err(|e| format!("Invalid note ID (bech32): {}", e))
-    } else {
-        EventId::from_hex(noteid).map_err(|e| format!("Invalid note ID (hex): {}", e))
     }
 }
 
