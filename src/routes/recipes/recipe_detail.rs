@@ -5,7 +5,7 @@ use crate::hooks::{use_nostr_resource, NostrResourceState};
 use crate::routes::Route;
 use crate::stores::auth_store;
 use crate::stores::nostr_client::HAS_SIGNER;
-use crate::stores::recipe_store::{self, CachedRecipe};
+use crate::stores::recipe_store;
 use dioxus::prelude::*;
 
 #[component]

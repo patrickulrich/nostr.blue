@@ -58,15 +58,14 @@ mod imp {
                     .block_on(async {
                         if let Ok(srv) = Server::new("nostrblue", MprisPlayer(st.clone(), tx())).await {
                             while let Some(changed) = nrx.recv().await {
-                                if let Ok(s) = st.lock() {
-                                    if changed {
-                                        srv.properties_changed([
-                                            Property::Metadata(s.0.clone()),
-                                            Property::PlaybackStatus(s.1),
-                                        ])
-                                        .await
-                                        .ok();
-                                    }
+                                if changed {
+                                    let props = {
+                                        let Ok(s) = st.lock() else {
+                                            continue;
+                                        };
+                                        [Property::Metadata(s.0.clone()), Property::PlaybackStatus(s.1)]
+                                    };
+                                    srv.properties_changed(props).await.ok();
                                 }
                             }
                         }

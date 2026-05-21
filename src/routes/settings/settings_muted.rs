@@ -6,14 +6,9 @@ use dioxus::prelude::*;
 #[component]
 pub fn SettingsMuted() -> Element {
     let muted_posts = use_nostr_resource(move || {
-        let mut posts = Vec::new();
         async move {
             nostr_client::get_muted_posts()
                 .await
-                .map(|p| {
-                    posts = p;
-                    posts
-                })
                 .map_err(|e| format!("Failed to load muted posts: {}", e))
         }
     });

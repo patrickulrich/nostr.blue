@@ -2,8 +2,7 @@ use crate::components::{icons, CodeRepoCard};
 use crate::hooks::{use_nostr_resource, NostrResourceState};
 use crate::routes::Route;
 use crate::services::git_hosting::fetch_user_repositories;
-use crate::stores::{auth_store, nostr_client};
-use crate::utils::nip34::Repository;
+use crate::stores::auth_store;
 use dioxus::prelude::*;
 use nostr_sdk::PublicKey;
 

@@ -115,7 +115,7 @@ pub async fn ensure_connected(client: &Client, relay_url: &str) -> bool {
         log::warn!("Failed to connect to specialty relay {}: {}", relay_url, e);
         return false;
     }
-    for _ in 0..20 {
+    for _ in 0..50 {
         let relays = client.relays().await;
         if let Some((_, relay)) = relays.iter().find(|(u, _)| u.as_str() == relay_url) {
             if relay.status() == nostr_relay_pool::RelayStatus::Connected {

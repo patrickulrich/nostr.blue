@@ -95,13 +95,23 @@ pub async fn fetch_video_events(
 ///
 /// This function adds the WaveFunc radio relay to the pool before fetching,
 /// ensuring radio station events (kind 31237) are discovered.
+///
+/// If the first fetch returns empty results (race condition with relay connection),
+/// waits for the radio relay and retries once.
 pub async fn fetch_radio_events(
     filter: Filter,
     timeout: Duration,
 ) -> std::result::Result<Vec<nostr::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
     ensure_radio_relay_connected(&client).await;
-    fetch_events_aggregated_with_client(&client, filter, timeout).await
+    let events = fetch_events_aggregated_with_client(&client, filter.clone(), timeout).await?;
+    if events.is_empty() {
+        log::info!("Radio fetch returned 0 events, waiting for relay and retrying...");
+        crate::platform::timer::sleep_ms(3000).await;
+        ensure_radio_relay_connected(&client).await;
+        return fetch_events_aggregated_with_client(&client, filter, timeout).await;
+    }
+    Ok(events)
 }
 /// Fetch events directly from relays, bypassing cache
 ///

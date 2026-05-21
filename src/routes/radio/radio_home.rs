@@ -37,15 +37,18 @@ pub fn RadioHome() -> Element {
     let mut search_input = use_signal(String::new);
     let mut is_searching = use_signal(|| false);
     let mut refetch_trigger = use_signal(|| 0u32);
+    let mut fetch_gen = use_signal(|| 0u32);
     let is_logged_in = auth_store::get_pubkey().is_some();
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         let _ = refetch_trigger.read();
+        let genre = selected_genre.read().clone();
+        let query = search_query.read().clone();
         if !client_initialized {
             return;
         }
-        let genre = selected_genre.read().clone();
-        let query = search_query.read().clone();
+        let gen = *fetch_gen.peek() + 1;
+        fetch_gen.set(gen);
         let in_search_mode = !query.is_empty();
         is_loading.set(true);
         error.set(None);
@@ -58,8 +61,26 @@ pub fn RadioHome() -> Element {
                 } else {
                     Some(genre.clone())
                 };
-                fetch_radio_stations(genre_filter.as_deref(), 50).await
+                let mut res = fetch_radio_stations(genre_filter.as_deref(), 50).await;
+                if matches!(res, Ok(ref s) if s.is_empty()) {
+                    crate::platform::timer::sleep_ms(4000).await;
+                    if *fetch_gen.peek() != gen {
+                        return;
+                    }
+                    res = fetch_radio_stations(genre_filter.as_deref(), 50).await;
+                }
+                if matches!(res, Ok(ref s) if s.is_empty()) {
+                    crate::platform::timer::sleep_ms(3000).await;
+                    if *fetch_gen.peek() != gen {
+                        return;
+                    }
+                    res = fetch_radio_stations(genre_filter.as_deref(), 50).await;
+                }
+                res
             };
+            if *fetch_gen.peek() != gen {
+                return;
+            }
             match result {
                 Ok(fetched_stations) => {
                     stations.set(fetched_stations);
