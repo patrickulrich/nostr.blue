@@ -55,24 +55,53 @@ pub fn use_composer_editor(config: ComposerConfig) -> UseComposerEditor {
 
     let draft_ctx = config.draft_context.clone();
     let draft_context_signal: Signal<Option<String>> = use_signal(move || draft_ctx);
+    let mut last_draft_save = use_signal(|| 0u64);
     use_effect(move || {
         let ctx = draft_context_signal.read().clone();
         if let Some(ref ctx) = ctx {
             let text = content.read();
             if !text.is_empty() {
+                let now = crate::platform::timestamp::now_secs();
+                if now.saturating_sub(*last_draft_save.peek()) < 2 {
+                    return;
+                }
+                last_draft_save.set(now);
                 if let Some(pk) = auth_store::get_pubkey() {
                     note_draft_store::save_note_draft(
                         &pk,
                         ctx,
                         &note_draft_store::NoteDraft {
                             content: text.clone(),
-                            saved_at: crate::platform::timestamp::now_secs(),
+                            saved_at: now,
                         },
                     );
                 }
             }
         }
     });
+
+    {
+        let content_clone = content;
+        let draft_ctx_clone = draft_context_signal;
+        use_drop(move || {
+            let ctx = draft_ctx_clone.peek().clone();
+            if let Some(ref ctx) = ctx {
+                let text = content_clone.peek().clone();
+                if !text.is_empty() {
+                    if let Some(pk) = auth_store::get_pubkey() {
+                        note_draft_store::save_note_draft(
+                            &pk,
+                            ctx,
+                            &note_draft_store::NoteDraft {
+                                content: text,
+                                saved_at: crate::platform::timestamp::now_secs(),
+                            },
+                        );
+                    }
+                }
+            }
+        });
+    }
 
     UseComposerEditor {
         content,

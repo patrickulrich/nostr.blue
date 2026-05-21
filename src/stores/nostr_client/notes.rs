@@ -114,14 +114,13 @@ pub async fn publish_note_tracked(
     let event = crate::stores::publish_queue::signing::sign_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to sign note: {}", e))?;
-    let event_id = event.id.to_hex();
     let queue_id = crate::stores::publish_queue::enqueue(
-        event,
+        event.clone(),
         crate::stores::publish_queue::types::QueueEventType::Note,
         None,
         std::collections::HashMap::new(),
     ).await;
-    let result = PublishResult::queued(queue_id, event_id);
+    let result = PublishResult::queued_with_event(queue_id, event);
     log::info!("Note queued: {}", result.event_id);
     Ok(result)
 }

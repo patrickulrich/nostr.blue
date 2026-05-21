@@ -1,3 +1,4 @@
+use crate::hooks::use_stale_guard::StaleGuard;
 use crate::services::aggregation::{
     fetch_interaction_counts_batch, fetch_local_db_counts, stream_interaction_counts,
     sync_interaction_counts, InteractionCounts, InteractionStreamHandle,
@@ -11,8 +12,8 @@ pub async fn fetch_and_stream_interactions(
     feed_items: &[FeedItem],
     is_first_load: bool,
     mut interaction_counts: Signal<HashMap<String, InteractionCounts>>,
-    request_id: Signal<u32>,
-    current_id: u32,
+    stale: StaleGuard,
+    token: u64,
     mut interactions_loaded: Signal<bool>,
     mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>>,
 ) {
@@ -23,7 +24,7 @@ pub async fn fetch_and_stream_interactions(
     }
 
     let local_counts = fetch_local_db_counts(&event_ids).await;
-    if !local_counts.is_empty() && *request_id.peek() == current_id {
+    if !local_counts.is_empty() && !stale.is_stale(token) {
         interaction_counts.set(local_counts);
     }
 
@@ -32,7 +33,7 @@ pub async fn fetch_and_stream_interactions(
     } else {
         sync_interaction_counts(event_ids.clone(), Duration::from_secs(5)).await
     };
-    if *request_id.peek() != current_id {
+    if stale.is_stale(token) {
         return;
     }
     if let Ok(counts) = counts {
@@ -40,7 +41,7 @@ pub async fn fetch_and_stream_interactions(
         interactions_loaded.set(true);
         match stream_interaction_counts(event_ids.clone(), interaction_counts, Some(600)).await {
             Ok(handle) => {
-                if *request_id.peek() != current_id {
+                if stale.is_stale(token) {
                     log::debug!("Discarding stale interaction stream handle");
                     handle.unsubscribe().await;
                     return;

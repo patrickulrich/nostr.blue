@@ -498,13 +498,15 @@ pub fn PackDetail(naddr: String) -> Element {
                             } else {
                                 div { class: "divide-y divide-border",
                                     for feed_item in posts.read().iter() {
-                                        NoteCard {
-                                            key: "{feed_item.event().id}",
-                                            event: feed_item.event().clone(),
-                                            repost_info: feed_item.repost_info(),
-                                            collapsible: true,
-                                            cached_muted_posts: cached_muted_posts.read().clone(),
-                                            cached_blocked_users: cached_blocked_users.read().clone(),
+                                        div { class: "feed-item",
+                                            NoteCard {
+                                                key: "{feed_item.event().id}",
+                                                event: feed_item.event().clone(),
+                                                repost_info: feed_item.repost_info(),
+                                                collapsible: true,
+                                                cached_muted_posts: cached_muted_posts.read().clone(),
+                                                cached_blocked_users: cached_blocked_users.read().clone(),
+                                            }
                                         }
                                     }
                                 }

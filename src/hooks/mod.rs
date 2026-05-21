@@ -16,6 +16,7 @@ pub mod use_nest_admin;
 pub mod use_nest_audio;
 pub mod use_viewport_engagement;
 pub mod use_nostr_resource;
+pub mod use_stale_guard;
 pub use use_author_metadata::use_author_metadata;
 #[allow(unused_imports)]
 pub use use_composer_editor::{use_composer_editor, ComposerConfig, UseComposerEditor};
@@ -37,5 +38,6 @@ pub use use_unsaved_changes::{
     calculate_hash, calculate_multi_hash, use_unsaved_changes, UseUnsavedChanges,
 };
 pub use use_nostr_resource::{use_nostr_resource, use_nostr_resource_public, NostrResourceState};
+pub use use_stale_guard::use_stale_guard;
 
 pub mod blobbi;

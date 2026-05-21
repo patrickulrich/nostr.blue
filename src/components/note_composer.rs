@@ -1,7 +1,8 @@
 use crate::components::{ComposerBody, DraftDiscardModal};
 use crate::components::toast::show_queued_toast;
 use crate::hooks::use_composer_editor::{use_composer_editor, restore_draft_or_empty, ComposerConfig};
-use crate::stores::{auth_store, nostr_client::publish_note_tracked};
+use crate::stores::{auth_store, feed_cache, nostr_client::publish_note_tracked};
+use crate::utils::repost::FeedItem;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::consume_toast;
 
@@ -64,6 +65,11 @@ pub fn NoteComposer(mode: NoteMode) -> Element {
                         Ok(result) => {
                             log::info!("Note published: {}", result.event_id);
                             if result.is_success() {
+                                if let Some(event) = result.event {
+                                    feed_cache::push_optimistic_feed_item(
+                                        FeedItem::OriginalPost(event)
+                                    );
+                                }
                                 show_queued_toast(toast_api, "Note");
                                 content.set(String::new());
                                 editor.clear_draft();
@@ -102,7 +108,12 @@ pub fn NoteComposer(mode: NoteMode) -> Element {
                 let toast_api = toast;
                 spawn(async move {
                     match publish_note_tracked(content_value, Vec::new(), content_warning.clone()).await {
-                        Ok(_) => {
+                        Ok(result) => {
+                            if let Some(event) = result.event {
+                                feed_cache::push_optimistic_feed_item(
+                                    FeedItem::OriginalPost(event)
+                                );
+                            }
                             show_queued_toast(toast_api, "Note");
                             editor.clear();
                             editor.clear_draft();

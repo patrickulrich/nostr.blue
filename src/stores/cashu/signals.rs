@@ -338,14 +338,14 @@ pub fn schedule_persist_pending_secrets() {
 }
 /// Internal implementation for persisting pending secrets
 async fn persist_pending_secrets_impl() {
-    let localstore = match SHARED_LOCALSTORE.read().as_ref() {
+    let localstore = match SHARED_LOCALSTORE.peek().as_ref() {
         Some(store) => store.clone(),
         None => {
             log::debug!("Skipping pending secrets persistence: localstore not initialized");
             return;
         }
     };
-    let secrets = PENDING_BY_MINT_SECRETS.read().clone();
+    let secrets = PENDING_BY_MINT_SECRETS.peek().clone();
     if let Err(e) = localstore.save_pending_mint_secrets(&secrets).await {
         log::warn!("Failed to persist pending secrets: {}", e);
     } else {
@@ -356,7 +356,7 @@ async fn persist_pending_secrets_impl() {
 ///
 /// Restores the pending-at-mint state from the previous session.
 pub async fn load_pending_secrets() {
-    let localstore = match SHARED_LOCALSTORE.read().as_ref() {
+    let localstore = match SHARED_LOCALSTORE.peek().as_ref() {
         Some(store) => store.clone(),
         None => {
             log::debug!("Skipping pending secrets load: localstore not initialized");

@@ -8,7 +8,7 @@ use crate::components::{
 };
 use crate::components::note_composer::NoteMode;
 use crate::error::NostrBlueError;
-use crate::hooks::{use_infinite_scroll, use_user_lists};
+use crate::hooks::{use_infinite_scroll, use_stale_guard, use_user_lists};
 use crate::services::aggregation::{InteractionCounts, InteractionStreamHandle};
 use crate::stores::feed_cache::{self, FeedCacheKey};
 use crate::stores::relay;
@@ -51,7 +51,7 @@ pub fn Home(list: String) -> Element {
     let mut subscription_ids = use_signal(Vec::<nostr_sdk::SubscriptionId>::new);
     let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> =
         use_signal(|| None);
-    let mut request_id = use_signal(|| 0u32);
+    let mut stale = use_stale_guard();
     let mut last_loaded_trigger = use_signal(|| (0u32, FeedType::Following, false));
     let mut relay_feed_sub_id: Signal<Option<nostr_sdk::SubscriptionId>> =
         use_signal(|| None);
@@ -211,8 +211,7 @@ pub fn Home(list: String) -> Element {
             return;
         }
         last_loaded_trigger.set((refresh, current_feed_type.clone(), signer_available));
-        let current_id = *request_id.peek() + 1;
-        request_id.set(current_id);
+        let token = stale.bump();
         if !has_data || feed_type_changed {
             feed_state.set(DataState::Loading);
         }
@@ -255,11 +254,11 @@ pub fn Home(list: String) -> Element {
         interactions_loaded.set(false);
 
         spawn(async move {
-            if *request_id.peek() != current_id {
-                log::debug!("Discarding stale feed request {}", current_id);
+            if stale.is_stale(token) {
+                log::debug!("Discarding stale feed request {}", token);
                 return;
             }
-            let is_stale = || *request_id.peek() != current_id;
+            let is_stale = || stale.is_stale(token);
 
             match current_feed_type {
                 FeedType::Following => {
@@ -303,8 +302,8 @@ pub fn Home(list: String) -> Element {
                         has_more.set(false);
                         return;
                     }
-                    let stream_req_id = request_id;
-                    let stream_curr_id = current_id;
+                    let stream_stale = stale;
+                    let stream_token = token;
                     let debounce_buffer: Rc<RefCell<Vec<FeedItem>>> =
                         Rc::new(RefCell::new(Vec::new()));
                     let debounce_flush_pending: Rc<RefCell<bool>> =
@@ -313,7 +312,7 @@ pub fn Home(list: String) -> Element {
                         Rc::new(RefCell::new(accumulated_items.clone()));
                     let feed_state_clone = feed_state;
                     let result = load_following_feed_streaming(None, cached_cursor, cached_count, |batch_items| {
-                        if *stream_req_id.peek() != stream_curr_id {
+                        if stream_stale.is_stale(stream_token) {
                             log::debug!("Discarding stale streaming batch");
                             return;
                         }
@@ -384,8 +383,6 @@ pub fn Home(list: String) -> Element {
                             }
                             if !is_stale() {
                                 let items_for_counts = feed_items.clone();
-                                let req_id = request_id;
-                                let curr_id = current_id;
                                 let ic = interaction_counts;
                                 let il = interactions_loaded;
                                 let ish = interaction_stream_handle;
@@ -394,8 +391,8 @@ pub fn Home(list: String) -> Element {
                                         &items_for_counts,
                                         is_first_load,
                                         ic,
-                                        req_id,
-                                        curr_id,
+                                        stale,
+                                        token,
                                         il,
                                         ish,
                                     )
@@ -500,8 +497,6 @@ pub fn Home(list: String) -> Element {
                             }
                             if !is_stale() {
                                 let items_for_counts = feed_items.clone();
-                                let req_id = request_id;
-                                let curr_id = current_id;
                                 let ic = interaction_counts;
                                 let il = interactions_loaded;
                                 let ish = interaction_stream_handle;
@@ -510,8 +505,8 @@ pub fn Home(list: String) -> Element {
                                         &items_for_counts,
                                         is_first_load,
                                         ic,
-                                        req_id,
-                                        curr_id,
+                                        stale,
+                                        token,
                                         il,
                                         ish,
                                     )
@@ -593,8 +588,6 @@ pub fn Home(list: String) -> Element {
                             }
                             if !is_stale() {
                                 let items_for_counts = feed_items.clone();
-                                let req_id = request_id;
-                                let curr_id = current_id;
                                 let ic = interaction_counts;
                                 let il = interactions_loaded;
                                 let ish = interaction_stream_handle;
@@ -603,8 +596,8 @@ pub fn Home(list: String) -> Element {
                                         &items_for_counts,
                                         is_first_load,
                                         ic,
-                                        req_id,
-                                        curr_id,
+                                        stale,
+                                        token,
                                         il,
                                         ish,
                                     )
@@ -689,8 +682,6 @@ pub fn Home(list: String) -> Element {
                             }
                             if !is_stale() {
                                 let items_for_counts = feed_items.clone();
-                                let req_id = request_id;
-                                let curr_id = current_id;
                                 let ic = interaction_counts;
                                 let il = interactions_loaded;
                                 let ish = interaction_stream_handle;
@@ -699,8 +690,8 @@ pub fn Home(list: String) -> Element {
                                         &items_for_counts,
                                         is_first_load,
                                         ic,
-                                        req_id,
-                                        curr_id,
+                                        stale,
+                                        token,
                                         il,
                                         ish,
                                     )
@@ -772,8 +763,6 @@ pub fn Home(list: String) -> Element {
                             }
                             if !is_stale() {
                                 let items_for_counts = feed_items.clone();
-                                let req_id = request_id;
-                                let curr_id = current_id;
                                 let ic = interaction_counts;
                                 let il = interactions_loaded;
                                 let ish = interaction_stream_handle;
@@ -782,8 +771,8 @@ pub fn Home(list: String) -> Element {
                                         &items_for_counts,
                                         is_first_load,
                                         ic,
-                                        req_id,
-                                        curr_id,
+                                        stale,
+                                        token,
                                         il,
                                         ish,
                                     )
@@ -1497,6 +1486,17 @@ pub fn Home(list: String) -> Element {
 
     let sentinel_id = use_infinite_scroll(load_more, has_more, pagination_loading);
 
+    use_effect(move || {
+        let optimistic = feed_cache::OPTIMISTIC_FEED_INSERTS.read().clone();
+        if optimistic.is_empty() {
+            return;
+        }
+        let drained = feed_cache::drain_optimistic_feed_items();
+        if !drained.is_empty() {
+            pending_posts.write().extend(drained);
+        }
+    });
+
     let mut refresh_and_scroll_to_top = move || {
         let current = *refresh_trigger.read();
         refresh_trigger.set(current + 1);
@@ -1863,22 +1863,28 @@ pub fn Home(list: String) -> Element {
                                 let repost_info = feed_item.repost_info();
                                 if event.kind == Kind::LongFormTextNote {
                                     rsx! {
-                                        ArticleCard { key: "{event.id}", event: event.clone() }
+                                        div { class: "feed-item-article",
+                                            ArticleCard { key: "{event.id}", event: event.clone() }
+                                        }
                                     }
                                 } else if event.kind.as_u16() == crate::utils::nip_bb::KIND_BLOBBI_STATE {
                                     rsx! {
-                                        crate::components::blobbi::blobbi_card::BlobbiCard { key: "{event.id}", event: event.clone() }
+                                        div { class: "feed-item",
+                                            crate::components::blobbi::blobbi_card::BlobbiCard { key: "{event.id}", event: event.clone() }
+                                        }
                                     }
                                 } else {
                                     rsx! {
-                                        NoteCard {
-                                            key: "{event.id}",
-                                            event: event.clone(),
-                                            repost_info,
-                                            precomputed_counts: interaction_counts.read().get(&event.id.to_hex()).cloned(),
-                                            collapsible: true,
-                                            cached_muted_posts: cached_muted_posts.read().clone(),
-                                            cached_blocked_users: cached_blocked_users.read().clone(),
+                                        div { class: "feed-item",
+                                            NoteCard {
+                                                key: "{event.id}",
+                                                event: event.clone(),
+                                                repost_info,
+                                                precomputed_counts: interaction_counts.read().get(&event.id.to_hex()).cloned(),
+                                                collapsible: true,
+                                                cached_muted_posts: cached_muted_posts.read().clone(),
+                                                cached_blocked_users: cached_blocked_users.read().clone(),
+                                            }
                                         }
                                     }
                                 }

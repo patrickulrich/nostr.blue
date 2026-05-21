@@ -64,7 +64,7 @@ pub fn set_checked_at(timestamp: i64) {
 }
 /// Publish checked_at to NIP-78 if sync is enabled and throttle allows
 async fn publish_checked_at_if_enabled(timestamp: i64) {
-    let settings = settings_store::SETTINGS.read();
+    let settings = settings_store::SETTINGS.peek();
     if !settings.sync_notifications {
         log::debug!("NIP-78 sync disabled, skipping publish");
         return;
@@ -74,7 +74,7 @@ async fn publish_checked_at_if_enabled(timestamp: i64) {
         log::debug!("Not authenticated, skipping NIP-78 publish");
         return;
     }
-    let last_published = *LAST_PUBLISHED_AT.read();
+    let last_published = *LAST_PUBLISHED_AT.peek();
     let time_since_last = timestamp - last_published;
     if last_published > 0 && time_since_last < PUBLISH_THROTTLE_SECONDS {
         log::debug!(

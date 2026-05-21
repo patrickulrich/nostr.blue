@@ -15,6 +15,12 @@ use std::time::Duration;
 pub(crate) fn get_client() -> Option<std::sync::Arc<Client>> {
     NOSTR_CLIENT.read().clone()
 }
+/// Get the current client instance without subscribing to changes.
+/// Use in spawn/async contexts to avoid creating reactive subscriptions.
+#[allow(dead_code)]
+pub(crate) fn get_client_peek() -> Option<std::sync::Arc<Client>> {
+    NOSTR_CLIENT.peek().clone()
+}
 /// Wait for at least one relay to be ready before fetching
 pub(crate) async fn ensure_relays_ready(client: &Client) {
     relay::connection::ensure_relays_ready(client).await;

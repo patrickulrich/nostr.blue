@@ -185,7 +185,7 @@ pub fn use_reaction(
                 .limit(MAX_REACTIONS_FETCH);
             if let Ok(reactions) = client.fetch_events(filter, Duration::from_secs(5)).await {
                 let current_user_pk: Option<nostr_sdk::PublicKey> = SIGNER_INFO
-                    .read()
+                    .peek()
                     .as_ref()
                     .and_then(|info| nostr_sdk::PublicKey::from_hex(&info.public_key).ok());
                 let mut positive_count = 0usize;

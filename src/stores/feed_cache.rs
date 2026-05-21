@@ -29,6 +29,18 @@ use nostr_sdk::Event;
 use std::collections::HashSet;
 #[cfg(feature = "web")]
 use std::sync::OnceLock;
+
+use dioxus::prelude::*;
+
+pub static OPTIMISTIC_FEED_INSERTS: GlobalSignal<Vec<FeedItem>> = Signal::global(Vec::new);
+
+pub fn push_optimistic_feed_item(item: FeedItem) {
+    OPTIMISTIC_FEED_INSERTS.write().push(item);
+}
+
+pub fn drain_optimistic_feed_items() -> Vec<FeedItem> {
+    OPTIMISTIC_FEED_INSERTS.write().drain(..).collect()
+}
 /// Maximum items per feed type
 #[cfg(feature = "web")]
 pub const MAX_ITEMS_PER_FEED: usize = 500;
