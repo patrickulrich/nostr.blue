@@ -936,6 +936,11 @@ fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 }
             }
         }
+        SidebarItem::Groups => {
+            rsx! {
+                crate::components::icons::UsersIcon { class: class.to_string() }
+            }
+        }
         SidebarItem::Publications => {
             rsx! {
                 svg {

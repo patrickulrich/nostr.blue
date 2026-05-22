@@ -218,6 +218,10 @@ pub mod highlight;
 #[allow(unused_imports)]
 pub use highlight::{HighlightCard, HighlightCardSkeleton, HighlightModal};
 
+pub mod groups;
+#[allow(unused_imports)]
+pub use groups::{GroupCard, GroupCardSkeleton, GroupExplore};
+
 pub mod list;
 pub use list::{AddToListModal, AddToPeopleListModal, CreateListModal, PeopleListMembersModal};
 

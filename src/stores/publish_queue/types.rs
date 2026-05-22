@@ -29,6 +29,7 @@ pub enum QueueEventType {
     Cashu,
     Community,
     Channel,
+    Group,
     PinBoard,
     Topic,
     Pack,

@@ -70,6 +70,9 @@ pub(super) fn NavLink(
         (Route::Chats {}, Route::Chats {})
         | (Route::Chats {}, Route::ChatNew {})
         | (Route::Chats {}, Route::ChatDetail { .. }) => true,
+        // Groups
+        (Route::Groups {}, Route::Groups {})
+        | (Route::Groups {}, Route::GroupDetail { .. }) => true,
         _ => false,
     };
     let font_class = if is_active { "font-bold" } else { "" };

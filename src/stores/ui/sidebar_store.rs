@@ -79,6 +79,7 @@ pub enum SidebarItem {
     Chats,
     Dvm,
     Wiki,
+    Groups,
     Publications,
     Shop,
     Blossom,
@@ -109,6 +110,7 @@ impl SidebarItem {
              | SidebarItem::Blossom
              | SidebarItem::AIChat
              | SidebarItem::Blobbi
+             | SidebarItem::Groups
              | SidebarItem::Nests => true,
             #[cfg(feature = "cashu")]
             SidebarItem::Wallet => true,
@@ -170,6 +172,7 @@ impl SidebarItem {
             SidebarItem::Chats => "Chats",
             SidebarItem::Dvm => "DVM",
             SidebarItem::Wiki => "Wiki",
+            SidebarItem::Groups => "Groups",
             SidebarItem::Publications => "Publications",
             SidebarItem::Shop => "Marketplace",
             SidebarItem::Blossom => "Blossom",
@@ -227,6 +230,7 @@ impl SidebarItem {
             SidebarItem::Chats => Some(Route::Chats {}),
             SidebarItem::Dvm => Some(Route::DVM {}),
             SidebarItem::Wiki => Some(Route::WikiHome {}),
+            SidebarItem::Groups => Some(Route::Groups {}),
             SidebarItem::Publications => Some(Route::PublicationsHome {}),
             SidebarItem::Shop => Some(Route::ShopHome {}),
             SidebarItem::Blossom => Some(Route::BlossomPage {}),
@@ -317,6 +321,7 @@ pub fn default_sidebar_items() -> Vec<SidebarItem> {
         SidebarItem::Articles,
         SidebarItem::Shop,
         SidebarItem::Communities,
+        SidebarItem::Groups,
         SidebarItem::Topics,
         SidebarItem::Radio,
         SidebarItem::Videos,

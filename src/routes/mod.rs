@@ -23,6 +23,7 @@ pub mod dms;
 pub mod dvm;
 pub mod events;
 pub mod explore;
+pub mod groups;
 pub mod hashtag;
 pub mod highlights;
 pub mod home;
@@ -87,6 +88,7 @@ use code::{
     CodeSnippetNew, CodeSnippets, CodeStars, CodeUserProfile,
 };
 use community::{Communities, CommunityNew, CommunityPage};
+use groups::{GroupDetail, Groups};
 use cookies::Cookies;
 use csae::Csae;
 use dms::DMs;
@@ -348,6 +350,10 @@ pub enum Route {
     CommunityNew {},
     #[route("/community/:a_tag")]
     CommunityPage { a_tag: String },
+    #[route("/groups")]
+    Groups {},
+    #[route("/group/:encoded_relay/:group_id")]
+    GroupDetail { encoded_relay: String, group_id: String },
     #[route("/topics")]
     TopicsHome {},
     #[route("/topics/popular")]
@@ -593,6 +599,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::P2PHome {}
         | Route::Chats {}
         | Route::Communities {}
+        | Route::Groups {}
         | Route::TopicsHome {}
         | Route::RecipesHome {}
         | Route::PinBoardsHome {}
@@ -705,6 +712,7 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         Route::P2POrderDetail { .. } => Some(Route::P2PHome {}),
         Route::ChatNew {} | Route::ChatDetail { .. } => Some(Route::Chats {}),
         Route::CommunityNew {} | Route::CommunityPage { .. } => Some(Route::Communities {}),
+        Route::GroupDetail { .. } => Some(Route::Groups {}),
         Route::TopicsPopular {}
         | Route::TopicsBrowse {}
         | Route::TopicNewPost {}
@@ -988,6 +996,10 @@ fn Layout() -> Element {
         current_route,
         Route::Communities {} | Route::CommunityPage { .. }
     );
+    let is_groups_page = matches!(
+        current_route,
+        Route::Groups {} | Route::GroupDetail { .. }
+    );
     let is_topics_page = matches!(
         current_route,
         Route::TopicsHome {}
@@ -1088,6 +1100,7 @@ fn Layout() -> Element {
         || is_p2p_page
         || is_chats_page
         || is_community_page
+        || is_groups_page
         || is_events_page
         || is_recipes_page
         || is_pin_boards_page

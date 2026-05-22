@@ -317,7 +317,15 @@ pub async fn fetch_radio_stations(
     let events = fetch_radio_events(filter, Duration::from_secs(10)).await?;
     let stations: Vec<RadioStation> = events
         .iter()
-        .filter_map(|e| RadioStation::from_event(e).ok())
+        .filter_map(|e| {
+            match RadioStation::from_event(e) {
+                Ok(station) => Some(station),
+                Err(err) => {
+                    log::warn!("Failed to parse radio event {}: {}", e.id.to_hex(), err);
+                    None
+                }
+            }
+        })
         .collect();
     Ok(stations)
 }
@@ -333,7 +341,15 @@ pub async fn fetch_station_by_naddr(naddr: &str) -> Result<RadioStation, String>
     let events = fetch_radio_events(filter, Duration::from_secs(10)).await?;
     events
         .into_iter()
-        .filter_map(|e| RadioStation::from_event(&e).ok())
+        .filter_map(|e| {
+            match RadioStation::from_event(&e) {
+                Ok(station) => Some(station),
+                Err(err) => {
+                    log::warn!("Failed to parse radio event {}: {}", e.id.to_hex(), err);
+                    None
+                }
+            }
+        })
         .max_by_key(|s| s.created_at)
         .ok_or_else(|| "Station not found".to_string())
 }
@@ -355,7 +371,19 @@ pub async fn search_radio_stations(query: &str, limit: usize) -> Result<Vec<Radi
             log::debug!("NIP-50 search found {} station events", events.len());
             let mut stations: Vec<RadioStation> = events
                 .iter()
-                .filter_map(|e| RadioStation::from_event(e).ok())
+                .filter_map(|e| {
+                    match RadioStation::from_event(e) {
+                        Ok(station) => Some(station),
+                        Err(err) => {
+                            log::warn!(
+                                "Failed to parse radio event {}: {}",
+                                e.id.to_hex(),
+                                err
+                            );
+                            None
+                        }
+                    }
+                })
                 .collect();
             let query_lower = query.to_lowercase();
             stations.sort_by(|a, b| {
@@ -384,7 +412,19 @@ pub async fn search_radio_stations(query: &str, limit: usize) -> Result<Vec<Radi
             let query_lower = query.to_lowercase();
             let mut stations: Vec<RadioStation> = events
                 .iter()
-                .filter_map(|e| RadioStation::from_event(e).ok())
+                .filter_map(|e| {
+                    match RadioStation::from_event(e) {
+                        Ok(station) => Some(station),
+                        Err(err) => {
+                            log::warn!(
+                                "Failed to parse radio event {}: {}",
+                                e.id.to_hex(),
+                                err
+                            );
+                            None
+                        }
+                    }
+                })
                 .filter(|s| {
                     s.name.to_lowercase().contains(&query_lower)
                         || s.description

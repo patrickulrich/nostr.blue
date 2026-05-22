@@ -1,6 +1,7 @@
 pub mod channel_store;
 pub mod community_store;
 pub mod dms;
+pub mod group_store;
 pub mod p2p_store;
 pub mod packs_store;
 pub mod pin_boards_store;

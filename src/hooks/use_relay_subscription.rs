@@ -56,18 +56,23 @@ pub fn use_relay_subscription_opts(
     use_effect(use_reactive!(|filter| {
         let on_event = on_event.clone();
         spawn(async move {
-            if let Some(old) = sub_state.peek().clone() {
-                if let Ok(s) = Arc::try_unwrap(old) {
-                    if let Some(handle) = s.handle {
-                        handle.unregister().await;
-                    } else {
-                        let _ = s.client.unsubscribe(&s.sub_id).await;
+            let old_sub = sub_state.peek().clone();
+            sub_state.set(None);
+
+            if let Some(old) = old_sub {
+                match Arc::try_unwrap(old) {
+                    Ok(s) => {
+                        if let Some(handle) = s.handle {
+                            handle.unregister().await;
+                        } else {
+                            let _ = s.client.unsubscribe(&s.sub_id).await;
+                        }
                     }
-                } else if let Some(old) = sub_state.peek().clone() {
-                    let _ = old.client.unsubscribe(&old.sub_id).await;
+                    Err(arc) => {
+                        let _ = arc.client.unsubscribe(&arc.sub_id).await;
+                    }
                 }
             }
-            sub_state.set(None);
 
             let filter = match filter {
                 Some(f) => f,

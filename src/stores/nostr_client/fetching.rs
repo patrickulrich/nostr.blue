@@ -97,25 +97,39 @@ pub async fn fetch_video_events(
     ensure_video_relay_connected(&client).await;
     fetch_events_aggregated_with_client(&client, filter, timeout).await
 }
-/// Fetch radio events, ensuring relay.wavefunc.live is included
+/// Fetch radio events directly from relays, bypassing the aggregated cache.
 ///
-/// This function adds the WaveFunc radio relay to the pool before fetching,
-/// ensuring radio station events (kind 31237) are discovered.
+/// The aggregated cache pattern (`fetch_events_aggregated_with_client`) returns
+/// stale IndexedDB data immediately and spawns a background relay sync whose
+/// results are never propagated to the UI. For radio, this means once a single
+/// event is cached, only that one station shows forever.
 ///
-/// If the first fetch returns empty results (race condition with relay connection),
-/// waits for the radio relay and retries once.
+/// Instead, this always fetches fresh from relays. Events are still saved to
+/// IndexedDB automatically by nostr-sdk during relay message processing.
 pub async fn fetch_radio_events(
     filter: Filter,
     timeout: Duration,
 ) -> std::result::Result<Vec<nostr::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
     ensure_radio_relay_connected(&client).await;
-    let events = fetch_events_aggregated_with_client(&client, filter.clone(), timeout).await?;
+    relay::connection::ensure_relays_ready(&client).await;
+
+    let mut events: Vec<_> = client
+        .fetch_events(filter.clone(), timeout)
+        .await
+        .map(|events| events.into_iter().collect())
+        .map_err(|e| e.to_string())?;
+
     if events.is_empty() {
         log::info!("Radio fetch returned 0 events, waiting for relay and retrying...");
         crate::platform::timer::sleep_ms(3000).await;
         ensure_radio_relay_connected(&client).await;
-        return fetch_events_aggregated_with_client(&client, filter, timeout).await;
+        relay::connection::ensure_relays_ready(&client).await;
+        events = client
+            .fetch_events(filter, timeout)
+            .await
+            .map(|events| events.into_iter().collect())
+            .map_err(|e| e.to_string())?;
     }
     Ok(events)
 }
