@@ -99,6 +99,8 @@ pub use draft_discard_modal::DraftDiscardModal;
 pub use ppq_settings_panel::PpqSettingsPanel;
 pub use reply_composer::ReplyComposer;
 pub use rich_content::RichContent;
+#[allow(unused_imports)]
+pub use rich_content::mentions::TextLinkMention;
 pub use search_input::SearchInput;
 #[allow(unused_imports)]
 pub use sensitive_content::SensitiveContent;

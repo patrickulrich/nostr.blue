@@ -1,5 +1,5 @@
 mod embeds;
-mod mentions;
+pub(crate) mod mentions;
 mod minicards;
 mod nostr_blue_renderers;
 
@@ -12,7 +12,8 @@ use embeds::{
     WavlakeArtistRenderer, WavlakePlaylistRenderer, WavlakeTrackRenderer, YouTubeRenderer,
     ZapCookingRecipeRenderer, ZapStreamRenderer,
 };
-use mentions::{EventMentionRenderer, MentionRenderer};
+#[allow(unused_imports)]
+use mentions::{EventMentionRenderer, MentionRenderer, TextLinkMention};
 use nostr_blue_renderers::{
     NostrBlueAlbumRenderer, NostrBlueArtistRenderer, NostrBlueArticleRenderer,
     NostrBlueBadgeRenderer, NostrBlueCalendarEventRenderer, NostrBlueChannelRenderer,

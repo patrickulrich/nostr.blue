@@ -5,6 +5,7 @@ pub use types::{MediaSubTab, ProfileTab, ZapSubTab};
 
 use crate::components::dialog::{DialogDescription, DialogRoot, DialogTitle};
 use crate::components::icons::{InfoIcon, ListIcon, MailIcon};
+use crate::components::rich_content::mentions::{MentionRenderer, TextLinkMention};
 use crate::components::{
     AddToPeopleListModal, ArticleCard, ArticleCardSkeleton, ClientInitializing, ExternalIdentitiesSection, Nip05Badge, NoteCard,
     PhotoCard, PinnedNotesCarousel, ProfileBadgesSection, ProfileEditorModal, VideoCard,
@@ -14,6 +15,7 @@ use crate::services::nip05;
 use crate::services::profile_stats;
 use crate::stores::{auth_store, dms, nostr_client, pinned_notes, profiles};
 use crate::utils::article_meta::get_published_at;
+use crate::utils::content_parser::{parse_content, ContentToken};
 use crate::utils::repost::{expand_events_for_prefetch, extract_reposted_event};
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip19::ToBech32;
@@ -23,6 +25,68 @@ use std::time::Duration;
 
 use types::{TabData, default_tab_data_map, dedupe_articles_by_address, get_display_name, get_username, get_avatar_initial, strip_https, get_empty_state_message, get_empty_state_icon, format_timestamp};
 use loader::{load_tab_events_db, load_tab_events, prefetch_author_metadata, build_tab_filter, process_tab_events, load_likes_relays};
+
+fn render_bio_content(about: &str) -> Element {
+    let tokens = parse_content(about, &[]);
+    let mut elements: Vec<Element> = Vec::new();
+    for (idx, token) in tokens.into_iter().enumerate() {
+        let el = match token {
+            ContentToken::Text(text) => {
+                rsx! { span { key: "{idx}", "{text}" } }
+            }
+            ContentToken::Link(url) => {
+                let is_safe = url.starts_with("http://")
+                    || url.starts_with("https://")
+                    || url.starts_with("nostr:");
+                if is_safe {
+                    rsx! {
+                        a {
+                            key: "{idx}",
+                            href: "{url}",
+                            target: "_blank",
+                            rel: "noopener noreferrer",
+                            class: "text-foreground hover:text-muted-foreground underline break-all",
+                            onclick: move |e: MouseEvent| e.stop_propagation(),
+                            "{url}"
+                        }
+                    }
+                } else {
+                    rsx! { span { key: "{idx}", "{url}" } }
+                }
+            }
+            ContentToken::Mention(mention) => {
+                rsx! {
+                    span { key: "{idx}",
+                        MentionRenderer { mention: mention.clone() }
+                    }
+                }
+            }
+            ContentToken::EventMention(mention) => {
+                rsx! {
+                    span { key: "{idx}",
+                        TextLinkMention { mention: mention.clone() }
+                    }
+                }
+            }
+            ContentToken::Hashtag(tag) => {
+                rsx! {
+                    Link {
+                        key: "{idx}",
+                        to: crate::routes::Route::Hashtag { tag: tag.clone() },
+                        class: "text-foreground hover:text-muted-foreground font-medium hover:underline",
+                        onclick: move |e: MouseEvent| e.stop_propagation(),
+                        "#{tag}"
+                    }
+                }
+            }
+            _ => {
+                rsx! { span { key: "{idx}" } }
+            }
+        };
+        elements.push(el);
+    }
+    rsx! { {elements.into_iter()} }
+}
 
 #[component]
 pub fn Profile(pubkey: String) -> Element {
@@ -944,7 +1008,9 @@ pub fn Profile(pubkey: String) -> Element {
                     }
                     if let Some(about) = &metadata.about {
                         if !about.is_empty() {
-                            p { class: "whitespace-pre-wrap mt-3", "{about}" }
+                            p { class: "whitespace-pre-wrap break-words mt-3",
+                                {render_bio_content(about)}
+                            }
                         }
                     }
                     div { class: "flex flex-wrap gap-4 mt-3 text-sm text-muted-foreground",
