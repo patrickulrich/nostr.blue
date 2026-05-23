@@ -4,7 +4,11 @@ pub use podcasts::podcast_rss;
 
 pub mod search;
 pub use search::content_search;
+#[allow(unused_imports)]
+pub use search::engagement_fetch;
 pub use search::profile_search;
+#[allow(unused_imports)]
+pub use search::query_parser;
 pub use search::search_relays;
 pub use search::trending;
 

@@ -1,6 +1,7 @@
 use super::search_relays::get_connected_search_relays;
 use crate::stores::nostr_client::NOSTR_CLIENT;
 use crate::stores::profiles::PROFILE_CACHE;
+use crate::utils::nip19_urls::parse_profile_id;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
@@ -141,6 +142,42 @@ pub async fn search_profiles(
     if query.is_empty() {
         return Ok(Vec::new());
     }
+
+    if let Some(pk) = parse_profile_id(query) {
+        let client_opt = (*NOSTR_CLIENT.read()).clone();
+        if let Some(client) = client_opt {
+            if let Ok(Some(metadata)) = client
+                .fetch_metadata(pk, Duration::from_secs(3))
+                .await
+            {
+                let contact_pubkeys = client
+                    .get_contact_list_public_keys(Duration::from_secs(3))
+                    .await
+                    .unwrap_or_default();
+                return Ok(vec![ProfileSearchResult {
+                    pubkey: pk,
+                    name: metadata.name.clone(),
+                    display_name: metadata.display_name.clone(),
+                    picture: metadata.picture.clone(),
+                    nip05: metadata.nip05.clone(),
+                    is_contact: contact_pubkeys.contains(&pk),
+                    is_thread_participant: false,
+                    relevance: 10000,
+                }]);
+            }
+        }
+        return Ok(vec![ProfileSearchResult {
+            pubkey: pk,
+            name: None,
+            display_name: None,
+            picture: None,
+            nip05: None,
+            is_contact: false,
+            is_thread_participant: false,
+            relevance: 5000,
+        }]);
+    }
+
     let client_opt = (*NOSTR_CLIENT.read()).clone();
     let client = match client_opt {
         Some(c) => c,

@@ -2,10 +2,13 @@ use crate::routes::Route;
 use crate::services::profile_search::{
     get_contact_pubkeys, search_cached_profiles, search_profiles, ProfileSearchResult,
 };
+use crate::services::search::query_parser;
+use crate::stores::ui::search_history;
 use dioxus::prelude::Event as DioxusEvent;
 use dioxus::prelude::*;
 use dioxus_core::Task;
 use nostr_sdk::prelude::*;
+
 #[component]
 pub fn SearchInput() -> Element {
     let mut query = use_signal(String::new);
@@ -26,7 +29,9 @@ pub fn SearchInput() -> Element {
         let new_value = evt.value().clone();
         query.set(new_value.clone());
         if new_value.is_empty() {
-            show_dropdown.set(false);
+            show_dropdown.set(true);
+            search_results.set(Vec::new());
+            selected_index.set(0);
             return;
         }
         show_dropdown.set(true);
@@ -65,13 +70,19 @@ pub fn SearchInput() -> Element {
     };
     let handle_keydown = move |evt: DioxusEvent<KeyboardData>| {
         let key = evt.key();
+        let q = query.read().clone();
+        let has_profiles = !search_results.read().is_empty();
+        let is_empty_query = q.is_empty();
+        let has_history = !search_history::get_items().is_empty();
+        let extra_items = count_extra_items(&q, is_empty_query, has_history);
+        let total_items = search_results.read().len() + extra_items;
+
         if *show_dropdown.read() {
-            let results = search_results.read();
             match key {
                 Key::ArrowDown => {
                     evt.prevent_default();
                     let current = *selected_index.read();
-                    let max = results.len().saturating_sub(1);
+                    let max = total_items.saturating_sub(1);
                     if current < max {
                         selected_index.set(current + 1);
                     }
@@ -85,21 +96,31 @@ pub fn SearchInput() -> Element {
                 }
                 Key::Enter => {
                     evt.prevent_default();
-                    if !results.is_empty() {
-                        let selected = results.get(*selected_index.read());
-                        if let Some(profile) = selected {
+                    let idx = *selected_index.read();
+                    if idx < extra_items {
+                        handle_extra_item_select(idx, &q, is_empty_query, has_history);
+                        query.set(String::new());
+                        show_dropdown.set(false);
+                    } else if has_profiles {
+                        let profile_idx = idx - extra_items;
+                        let results = search_results.read();
+                        if let Some(profile) = results.get(profile_idx) {
                             let pubkey_hex = profile.pubkey.to_hex();
-                            navigator.push(Route::Profile { pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey_hex) });
+                            search_history::add_profile(
+                                pubkey_hex.clone(),
+                                profile.get_display_name(),
+                            );
+                            navigator.push(Route::Profile {
+                                pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey_hex),
+                            });
                             query.set(String::new());
                             show_dropdown.set(false);
                         }
-                    } else {
-                        let search_query = query.read().clone();
-                        if !search_query.is_empty() {
-                            navigator.push(Route::Search { q: search_query });
-                            query.set(String::new());
-                            show_dropdown.set(false);
-                        }
+                    } else if !is_empty_query {
+                        search_history::add_query(q.clone());
+                        navigator.push(Route::Search { q });
+                        query.set(String::new());
+                        show_dropdown.set(false);
                     }
                 }
                 Key::Escape => {
@@ -109,9 +130,9 @@ pub fn SearchInput() -> Element {
             }
         } else if key == Key::Enter {
             evt.prevent_default();
-            let search_query = query.read().clone();
-            if !search_query.is_empty() {
-                navigator.push(Route::Search { q: search_query });
+            if !is_empty_query {
+                search_history::add_query(q.clone());
+                navigator.push(Route::Search { q });
                 query.set(String::new());
             }
         }
@@ -145,7 +166,42 @@ pub fn SearchInput() -> Element {
         }
     }
 }
-/// Render the autocomplete dropdown
+
+fn count_extra_items(query: &str, is_empty: bool, has_history: bool) -> usize {
+    if is_empty {
+        if has_history { 1 } else { 0 }
+    } else {
+        1 + if has_bech32_direct_nav(query) { 1 } else { 0 }
+    }
+}
+
+fn has_bech32_direct_nav(query: &str) -> bool {
+    matches!(
+        query_parser::detect_search_type(query),
+        query_parser::SearchType::ProfileLookup { .. }
+            | query_parser::SearchType::NoteLookup { .. }
+            | query_parser::SearchType::AddressLookup { .. }
+    )
+}
+
+fn handle_extra_item_select(
+    _idx: usize,
+    query: &str,
+    is_empty: bool,
+    _has_history: bool,
+) {
+    if is_empty {
+        return;
+    }
+    let nav = navigator();
+    if _idx == 0 {
+        search_history::add_query(query.to_string());
+        nav.push(Route::Search {
+            q: query.to_string(),
+        });
+    }
+}
+
 fn render_dropdown(
     results: &[ProfileSearchResult],
     selected_index: usize,
@@ -154,18 +210,117 @@ fn render_dropdown(
     mut show_dropdown: Signal<bool>,
 ) -> Element {
     let navigator = navigator();
+    let q = query.read().clone();
+    let is_empty = q.is_empty();
+    let history_items = search_history::get_items();
+    let has_history = !history_items.is_empty();
+
     rsx! {
         div { class: "absolute top-full left-0 right-0 mt-2 bg-white dark:bg-gray-800 shadow-lg rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden z-50 max-h-96",
-            if is_searching {
-                div { class: "px-4 py-3 text-sm text-gray-500 dark:text-gray-400", "Searching..." }
-            } else if results.is_empty() {
-                div { class: "px-4 py-3 text-sm text-gray-500 dark:text-gray-400", "No profiles found" }
-            } else {
-                div { class: "overflow-y-auto max-h-96",
-                    for (index , profile) in results.iter().enumerate() {
+            div { class: "overflow-y-auto max-h-96",
+                if is_empty {
+                    if has_history {
+                        div { class: "px-4 py-2 flex items-center justify-between",
+                            span { class: "text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase", "Recent" }
+                            button {
+                                class: "text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300",
+                                onclick: move |_| {
+                                    search_history::clear_all();
+                                },
+                                "Clear all"
+                            }
+                        }
+                        for (i, item) in history_items.iter().enumerate() {
+                            {
+                                let item_clone = item.clone();
+                                let is_selected = i == selected_index;
+                                rsx! {
+                                    button {
+                                        key: "history-{i}",
+                                        class: if is_selected { "w-full px-4 py-2 flex items-center gap-3 bg-blue-50 dark:bg-blue-900 cursor-pointer transition text-left" } else { "w-full px-4 py-2 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition text-left" },
+                                        onclick: move |_| {
+                                            match &item_clone {
+                                                search_history::RecentSearchItem::Query(q) => {
+                                                    navigator.push(Route::Search { q: q.clone() });
+                                                }
+                                                search_history::RecentSearchItem::Profile { pubkey, .. } => {
+                                                    navigator.push(Route::Profile {
+                                                        pubkey: crate::utils::nip19_urls::profile_route_id(pubkey),
+                                                    });
+                                                }
+                                            }
+                                            query.set(String::new());
+                                            show_dropdown.set(false);
+                                        },
+                                        {match &item {
+                                            search_history::RecentSearchItem::Query(q) => rsx! {
+                                                span { class: "text-sm text-gray-700 dark:text-gray-300 truncate",
+                                                    "🔍 {q}"
+                                                }
+                                            },
+                                            search_history::RecentSearchItem::Profile { display_name, .. } => rsx! {
+                                                span { class: "text-sm text-gray-700 dark:text-gray-300 truncate",
+                                                    "👤 {display_name}"
+                                                }
+                                            },
+                                        }}
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        div { class: "px-4 py-3 text-sm text-gray-500 dark:text-gray-400", "Type to search" }
+                    }
+                } else {
+                    if !q.is_empty() {
                         {
+                            let is_selected = 0 == selected_index;
+                            let q_for_click = q.clone();
+                            rsx! {
+                                button {
+                                    class: if is_selected { "w-full px-4 py-2 flex items-center gap-3 bg-blue-50 dark:bg-blue-900 cursor-pointer transition text-left" } else { "w-full px-4 py-2 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition text-left" },
+                                    onclick: move |_| {
+                                        search_history::add_query(q_for_click.clone());
+                                        navigator.push(Route::Search { q: q_for_click.clone() });
+                                        query.set(String::new());
+                                        show_dropdown.set(false);
+                                    },
+                                    span { class: "text-sm text-gray-600 dark:text-gray-400",
+                                        "🔍 Search posts for \"{q}\""
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if has_bech32_direct_nav(&q) {
+                        {
+                            let nav_idx = 1;
+                            let is_selected = nav_idx == selected_index;
+                            let q_for_click = q.clone();
+                            rsx! {
+                                button {
+                                    class: if is_selected { "w-full px-4 py-2 flex items-center gap-3 bg-blue-50 dark:bg-blue-900 cursor-pointer transition text-left" } else { "w-full px-4 py-2 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition text-left" },
+                                    onclick: move |_| {
+                                        navigator.push(Route::Search { q: q_for_click.clone() });
+                                        query.set(String::new());
+                                        show_dropdown.set(false);
+                                    },
+                                    span { class: "text-sm text-blue-600 dark:text-blue-400",
+                                        "🔗 Go to {q}"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if is_searching {
+                        div { class: "px-4 py-2 text-sm text-gray-500 dark:text-gray-400", "Searching..." }
+                    }
+                    for (i, profile) in results.iter().enumerate() {
+                        {
+                            let extra_count = count_extra_items(&q, false, false);
+                            let item_idx = i + extra_count;
                             let profile_clone = profile.clone();
-                            let is_selected = index == selected_index;
+                            let is_selected = item_idx == selected_index;
                             rsx! {
                                 button {
                                     key: "{profile.pubkey.to_hex()}",
@@ -173,6 +328,10 @@ fn render_dropdown(
                                     onmousedown: move |evt| {
                                         evt.prevent_default();
                                         let pubkey_hex = profile_clone.pubkey.to_hex();
+                                        search_history::add_profile(
+                                            pubkey_hex.clone(),
+                                            profile_clone.get_display_name(),
+                                        );
                                         navigator
                                             .push(Route::Profile {
                                                 pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey_hex),
@@ -210,6 +369,9 @@ fn render_dropdown(
                                 }
                             }
                         }
+                    }
+                    if !is_searching && results.is_empty() && !q.is_empty() {
+                        div { class: "px-4 py-3 text-sm text-gray-500 dark:text-gray-400", "No profiles found" }
                     }
                 }
             }

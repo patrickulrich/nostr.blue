@@ -7,6 +7,7 @@ pub mod emoji_store;
 pub mod notifications;
 pub mod online_status;
 pub mod scroll_restore;
+pub mod search_history;
 pub mod settings_store;
 pub mod sidebar_store;
 pub mod sync_store;

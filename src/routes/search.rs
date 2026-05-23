@@ -4,15 +4,20 @@ use crate::services::content_search::{
     get_contact_pubkeys, search_articles, search_photos, search_text_notes, search_videos,
     ContentSearchResult,
 };
+use crate::services::profile_search::{search_profiles, ProfileSearchResult};
+use crate::services::search::query_parser;
 use crate::stores::nostr_client;
+use crate::stores::ui::search_history;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum SearchTab {
     TextNotes,
     Articles,
     Photos,
     Videos,
+    People,
 }
 impl SearchTab {
     fn label(&self) -> &'static str {
@@ -21,9 +26,11 @@ impl SearchTab {
             SearchTab::Articles => "Articles",
             SearchTab::Photos => "Photos",
             SearchTab::Videos => "Videos",
+            SearchTab::People => "People",
         }
     }
 }
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum SortOrder {
     Newest,
@@ -39,10 +46,12 @@ impl SortOrder {
         }
     }
 }
+
 #[component]
 pub fn Search(q: String) -> Element {
     let mut active_tab = use_signal(|| SearchTab::TextNotes);
     let mut results = use_signal(Vec::<ContentSearchResult>::new);
+    let mut profile_results = use_signal(Vec::<ProfileSearchResult>::new);
     let mut loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut contact_pubkeys = use_signal(Vec::<PublicKey>::new);
@@ -51,9 +60,13 @@ pub fn Search(q: String) -> Element {
     let mut sort_order = use_signal(|| SortOrder::FollowingFirst);
     let mut show_sort_dropdown = use_signal(|| false);
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
+
+    let detected_type = use_memo(move || query_parser::detect_search_type(&query.read()));
+
     use_effect(use_reactive!(|q| {
         query.set(q);
     }));
+
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
@@ -64,6 +77,7 @@ pub fn Search(q: String) -> Element {
             contact_pubkeys.set(contacts);
         });
     });
+
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
@@ -77,9 +91,37 @@ pub fn Search(q: String) -> Element {
                 *v += 1;
             });
             results.set(Vec::new());
+            profile_results.set(Vec::new());
             loading.set(false);
             return;
         }
+
+        if tab == SearchTab::People {
+            loading.set(true);
+            error.set(None);
+            let current_version = search_version.with_mut(|v| {
+                *v += 1;
+                *v
+            });
+            let q_clone = q.clone();
+            spawn(async move {
+                let search_result = search_profiles(&q_clone, 50, true).await;
+                if *search_version.read() == current_version {
+                    match search_result {
+                        Ok(profiles) => {
+                            profile_results.set(profiles);
+                            loading.set(false);
+                        }
+                        Err(e) => {
+                            error.set(Some(format!("Search failed: {}", e)));
+                            loading.set(false);
+                        }
+                    }
+                }
+            });
+            return;
+        }
+
         loading.set(true);
         error.set(None);
         let current_version = search_version.with_mut(|v| {
@@ -92,6 +134,7 @@ pub fn Search(q: String) -> Element {
                 SearchTab::Articles => search_articles(&q, 50, &contacts).await,
                 SearchTab::Photos => search_photos(&q, 50, &contacts).await,
                 SearchTab::Videos => search_videos(&q, 50, &contacts).await,
+                SearchTab::People => unreachable!(),
             };
             if *search_version.read() == current_version {
                 match search_result {
@@ -107,12 +150,15 @@ pub fn Search(q: String) -> Element {
             }
         });
     });
+
     let tabs = [
         SearchTab::TextNotes,
         SearchTab::Articles,
         SearchTab::Photos,
         SearchTab::Videos,
+        SearchTab::People,
     ];
+
     let sorted_results = use_memo(move || {
         let mut sorted = results.read().clone();
         let order = *sort_order.read();
@@ -133,6 +179,7 @@ pub fn Search(q: String) -> Element {
         }
         sorted
     });
+
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
@@ -144,6 +191,7 @@ pub fn Search(q: String) -> Element {
                     p { class: "text-sm text-muted-foreground mt-1",
                         "Searching for: \"{query.read()}\""
                     }
+                    {render_query_chips(&detected_type.read())}
                 }
                 div { class: "flex border-b border-border overflow-x-auto scrollbar-hide",
                     for tab in tabs.iter() {
@@ -171,14 +219,14 @@ pub fn Search(q: String) -> Element {
                     }
                 }
             }
-            if *loading.read() && results.read().is_empty() {
+            if *loading.read() && results.read().is_empty() && profile_results.read().is_empty() {
                 div { class: "divide-y divide-border",
                     for i in 0..5 {
                         NoteCardSkeleton { key: "{i}" }
                     }
                 }
             }
-            if !*loading.read() && results.read().is_empty() && !query.read().is_empty() {
+            if !*loading.read() && results.read().is_empty() && profile_results.read().is_empty() && !query.read().is_empty() {
                 div { class: "flex flex-col items-center justify-center py-16 px-4",
                     div { class: "text-6xl mb-4", "🔍" }
                     p { class: "text-lg font-medium text-muted-foreground mb-2", "No results found" }
@@ -187,7 +235,10 @@ pub fn Search(q: String) -> Element {
                     }
                 }
             }
-            if !results.read().is_empty() {
+            if *active_tab.read() == SearchTab::People && !profile_results.read().is_empty() {
+                {render_people_results(&profile_results.read())}
+            }
+            if *active_tab.read() != SearchTab::People && !results.read().is_empty() {
                 div { class: "divide-y divide-border",
                     div { class: "px-4 py-3 bg-muted/30 flex items-center justify-between gap-4",
                         p { class: "text-sm text-muted-foreground",
@@ -301,6 +352,7 @@ pub fn Search(q: String) -> Element {
                                         SearchTab::Videos => rsx! {
                                             VideoCard { event: event_clone }
                                         },
+                                        SearchTab::People => rsx! {},
                                     }
                                 }
                             }
@@ -321,6 +373,117 @@ pub fn Search(q: String) -> Element {
                     p { class: "text-lg font-medium text-muted-foreground mb-2", "Start searching" }
                     p { class: "text-sm text-muted-foreground text-center max-w-md",
                         "Use the search bar above to find posts, articles, photos, and videos on Nostr"
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn render_query_chips(search_type: &query_parser::SearchType) -> Element {
+    match search_type {
+        query_parser::SearchType::FullText(parsed) => {
+            let mut chips = Vec::new();
+            if !parsed.kinds.is_empty() {
+                for kind in &parsed.kinds {
+                    chips.push(format!("kind:{}", kind.as_u16()));
+                }
+            }
+            if let Some(since) = parsed.since {
+                chips.push(format!("since:{}", since.as_secs()));
+            }
+            if let Some(until) = parsed.until {
+                chips.push(format!("until:{}", until.as_secs()));
+            }
+            if !parsed.hashtags.is_empty() {
+                for tag in &parsed.hashtags {
+                    chips.push(format!("#{}", tag));
+                }
+            }
+            if !parsed.authors.is_empty() {
+                chips.push(format!("from:{} authors", parsed.authors.len()));
+            }
+            if let Some(lang) = &parsed.language {
+                chips.push(format!("lang:{}", lang));
+            }
+            if let Some(domain) = &parsed.domain {
+                chips.push(format!("domain:{}", domain));
+            }
+            if chips.is_empty() {
+                return rsx! {};
+            }
+            rsx! {
+                div { class: "flex flex-wrap gap-1.5 mt-2",
+                    for chip in chips {
+                        span { class: "text-xs px-2 py-0.5 bg-primary/10 text-primary rounded-full",
+                            "{chip}"
+                        }
+                    }
+                }
+            }
+        }
+        query_parser::SearchType::Hashtag(tag) => rsx! {
+            div { class: "mt-1",
+                span { class: "text-xs px-2 py-0.5 bg-primary/10 text-primary rounded-full",
+                    "Hashtag: #{tag}"
+                }
+            }
+        },
+        _ => rsx! {},
+    }
+}
+
+fn render_people_results(profiles: &[ProfileSearchResult]) -> Element {
+    let navigator = navigator();
+    rsx! {
+        div { class: "divide-y divide-border",
+            for profile in profiles {
+                {
+                    let profile_clone = profile.clone();
+                    rsx! {
+                        button {
+                            key: "{profile.pubkey.to_hex()}",
+                            class: "w-full px-4 py-3 flex items-center gap-3 hover:bg-muted cursor-pointer transition text-left",
+                            onclick: move |_| {
+                                let pubkey_hex = profile_clone.pubkey.to_hex();
+                                search_history::add_profile(
+                                    pubkey_hex.clone(),
+                                    profile_clone.get_display_name(),
+                                );
+                                navigator.push(crate::routes::Route::Profile {
+                                    pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey_hex),
+                                });
+                            },
+                            div { class: "shrink-0",
+                                if let Some(picture) = &profile.picture {
+                                    img {
+                                        src: "{picture}",
+                                        class: "w-10 h-10 rounded-full object-cover",
+                                        alt: "{profile.get_display_name()}",
+                                        loading: "lazy",
+                                    }
+                                } else {
+                                    div { class: "w-10 h-10 rounded-full bg-muted flex items-center justify-center text-sm font-bold",
+                                        {profile.get_display_name().chars().next().unwrap_or('?').to_string()}
+                                    }
+                                }
+                            }
+                            div { class: "flex-1 min-w-0",
+                                div { class: "font-semibold text-sm truncate",
+                                    {profile.get_display_name()}
+                                }
+                                if let Some(username) = profile.get_username() {
+                                    div { class: "text-xs text-muted-foreground truncate",
+                                        "@{username}"
+                                    }
+                                }
+                            }
+                            if profile.is_contact {
+                                div { class: "shrink-0 text-xs px-2 py-1 bg-primary/10 text-primary rounded-full",
+                                    "Following"
+                                }
+                            }
+                        }
                     }
                 }
             }
