@@ -76,6 +76,7 @@ pub async fn publish_note_tracked(
     content: String,
     tags: Vec<Vec<String>>,
     content_warning: Option<String>,
+    is_protected: bool,
 ) -> std::result::Result<PublishResult, String> {
     let _client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
@@ -100,6 +101,9 @@ pub async fn publish_note_tracked(
                 reason: if reason.is_empty() { None } else { Some(reason) },
             },
         ));
+    }
+    if is_protected {
+        mention_tags.push(nostr::Tag::protected());
     }
     let mut seen_pubkeys = std::collections::HashSet::new();
     mention_tags.retain(|tag| {
@@ -130,7 +134,7 @@ pub async fn publish_note(
     content: String,
     tags: Vec<Vec<String>>,
 ) -> std::result::Result<String, String> {
-    publish_note_tracked(content, tags, None)
+    publish_note_tracked(content, tags, None, false)
         .await
         .map(|result| result.event_id)
 }

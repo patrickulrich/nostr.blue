@@ -129,6 +129,11 @@ pub fn ReplyComposer(
             } else {
                 event_builder
             };
+            let event_builder = if *editor.is_protected.read() {
+                event_builder.tag(nostr::Tag::protected())
+            } else {
+                event_builder
+            };
             let signed_event = match crate::stores::publish_queue::signing::sign_event_builder(
                 event_builder,
             )

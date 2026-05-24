@@ -53,6 +53,7 @@ pub fn NoteComposer(mode: NoteMode) -> Element {
         } else {
             None
         };
+        let is_protected = *editor.is_protected.read();
 
         match mode_for_publish {
             NoteMode::Inline => {
@@ -61,7 +62,7 @@ pub fn NoteComposer(mode: NoteMode) -> Element {
                 let toast_api = toast;
                 publish_feedback.set(None);
                 spawn(async move {
-                    match publish_note_tracked(content_value, Vec::new(), content_warning.clone()).await {
+                    match publish_note_tracked(content_value, Vec::new(), content_warning.clone(), is_protected).await {
                         Ok(result) => {
                             log::info!("Note published: {}", result.event_id);
                             if result.is_success() {
@@ -107,7 +108,7 @@ pub fn NoteComposer(mode: NoteMode) -> Element {
                 let nav = navigator;
                 let toast_api = toast;
                 spawn(async move {
-                    match publish_note_tracked(content_value, Vec::new(), content_warning.clone()).await {
+                    match publish_note_tracked(content_value, Vec::new(), content_warning.clone(), is_protected).await {
                         Ok(result) => {
                             if let Some(event) = result.event {
                                 feed_cache::push_optimistic_feed_item(

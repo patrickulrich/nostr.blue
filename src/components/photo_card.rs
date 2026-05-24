@@ -720,7 +720,7 @@ pub fn PhotoCard(
                                         vec!["e".to_string(), event_id_clone],
                                         vec!["p".to_string(), author_clone],
                                     ];
-                                    match publish_note_tracked(text, tags, None).await {
+                                    match publish_note_tracked(text, tags, None, false).await {
                                         Ok(result) => {
                                             log::info!("Photo comment published: {}", result.event_id);
                                             let current_count = *reply_count.read();
@@ -754,7 +754,7 @@ pub fn PhotoCard(
                                         vec!["e".to_string(), event_id_clone],
                                         vec!["p".to_string(), author_clone],
                                     ];
-                                    match publish_note_tracked(text, tags, None).await {
+                                    match publish_note_tracked(text, tags, None, false).await {
                                         Ok(result) => {
                                             log::info!("Photo comment published: {}", result.event_id);
                                             let current_count = *reply_count.read();

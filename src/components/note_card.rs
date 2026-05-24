@@ -1,5 +1,5 @@
 use crate::components::icons::{
-    BlueskyIcon, BookmarkIcon, ExternalLinkIcon, GlobeIcon, MastodonIcon, MessageCircleIcon,
+    BlueskyIcon, BookmarkIcon, ExternalLinkIcon, GlobeIcon, LockIcon, MastodonIcon, MessageCircleIcon,
     Repeat2Icon, RssIcon, ZapIcon,
 };
 use crate::components::{
@@ -613,6 +613,20 @@ pub fn NoteCard(
                                 span { class: "text-muted-foreground text-sm", "@{username}" }
                                 span { class: "text-muted-foreground text-sm", "·" }
                                 span { class: "text-muted-foreground text-sm", "{timestamp}" }
+                                {
+                                    if event.is_protected() {
+                                        rsx! {
+                                            span { class: "text-muted-foreground text-sm", "·" }
+                                            span {
+                                                class: "inline-flex items-center text-muted-foreground",
+                                                title: "Protected — only the author can publish to relays",
+                                                LockIcon { class: "w-3.5 h-3.5".to_string() }
+                                            }
+                                        }
+                                    } else {
+                                        rsx! {}
+                                    }
+                                }
                                 {
                                     let _v = edit_cache::EDIT_VERSION.read();
                                     let edit_info = edit_cache::get_latest_edit(&event_id);
