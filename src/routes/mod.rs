@@ -1093,36 +1093,8 @@ fn Layout() -> Element {
     );
     let is_home_page = matches!(current_route, Route::Home { .. });
     let home_font_weight = if is_home_page { "font-bold" } else { "" };
-    let is_address_wide_page = match &current_route {
-        Route::AddressViewer { address } => {
-            use crate::utils::route_for_kind::{section_from_address, ContentSection};
-            matches!(
-                section_from_address(address),
-                Some(ContentSection::Videos)
-                    | Some(ContentSection::CashuWallet)
-                    | Some(ContentSection::Music)
-                    | Some(ContentSection::Podcast)
-                    | Some(ContentSection::Radio)
-                    | Some(ContentSection::Nips)
-                    | Some(ContentSection::Badges)
-                    | Some(ContentSection::Packs)
-                    | Some(ContentSection::Code)
-                    | Some(ContentSection::P2P)
-                    | Some(ContentSection::Chats)
-                    | Some(ContentSection::Community)
-                    | Some(ContentSection::Groups)
-                    | Some(ContentSection::Events)
-                    | Some(ContentSection::Recipes)
-                    | Some(ContentSection::Pinboards)
-                    | Some(ContentSection::Wiki)
-                    | Some(ContentSection::Publications)
-                    | Some(ContentSection::Shop)
-                    | Some(ContentSection::Blossom)
-                    | Some(ContentSection::Bible)
-            )
-        }
-        _ => false,
-    };
+    let is_address_wide_page = matches!(current_route, Route::AddressViewer { .. })
+        && *crate::stores::ui::back_navigation::ADDRESS_WIDE_MODE.read();
     let is_wide_page = is_dms_page
         || is_videos_page
         || is_wallet_page

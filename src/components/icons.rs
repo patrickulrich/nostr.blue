@@ -1493,7 +1493,7 @@ pub fn NostrBlueMiniLogo(#[props(default = "w-3 h-3".to_string())] class: String
         }
     }
 }
-/// Vertical video / shorts icon (tall phone with play button)
+/// Vertical video / verts icon (tall phone with play button)
 #[component]
 pub fn VertsIcon(props: IconProps) -> Element {
     rsx! {

@@ -32,6 +32,33 @@ pub fn AddressViewer(address: String) -> Element {
         return rsx! { ClientInitializing {} };
     }
 
+    {
+        use crate::stores::ui::back_navigation::ADDRESS_WIDE_MODE;
+        let s = state.cloned();
+        *ADDRESS_WIDE_MODE.write() = matches!(
+            s,
+            AddressState::Video { .. }
+                | AddressState::LiveStream { .. }
+                | AddressState::Nest { .. }
+                | AddressState::MusicTrack { .. }
+                | AddressState::Playlist { .. }
+                | AddressState::RadioStation { .. }
+                | AddressState::CodeRepo { .. }
+                | AddressState::CodeIssue { .. }
+                | AddressState::CodePull { .. }
+                | AddressState::CalendarEvent { .. }
+                | AddressState::Badge { .. }
+                | AddressState::Pack { .. }
+                | AddressState::Pinboard { .. }
+                | AddressState::Publication { .. }
+                | AddressState::Wiki { .. }
+                | AddressState::ShopProduct { .. }
+                | AddressState::ShopCollection { .. }
+                | AddressState::P2POrder { .. }
+                | AddressState::Photo { .. }
+        );
+    }
+
     let current_state = state.cloned();
     match current_state {
         AddressState::Loading => rsx! {
@@ -224,14 +251,13 @@ async fn resolve_address(address: &str) -> std::result::Result<AddressState, Str
         return Err("Relay URLs (nrelay) are not yet supported.".to_string());
     }
 
-    let nip19 = Nip19::from_bech32(address).map_err(|e| {
-        format!(
-            "Failed to decode '{}': {}",
-            &address[..address.len().min(20)],
-            e
-        )
-    })?;
+    match Nip19::from_bech32(address) {
+        Ok(nip19) => dispatch_nip19(nip19, address).await,
+        Err(bech32_err) => dispatch_raw_coordinate(address, bech32_err),
+    }
+}
 
+async fn dispatch_nip19(nip19: Nip19, address: &str) -> std::result::Result<AddressState, String> {
     match nip19 {
         Nip19::Pubkey(pubkey) => {
             Ok(AddressState::Profile {
@@ -281,6 +307,27 @@ async fn resolve_address(address: &str) -> std::result::Result<AddressState, Str
     }
 }
 
+fn dispatch_raw_coordinate(
+    address: &str,
+    bech32_err: nostr_sdk::nips::nip19::Error,
+) -> std::result::Result<AddressState, String> {
+    match crate::utils::nip19::parse_naddr(address) {
+        Ok(parsed) => {
+            let pubkey = PublicKey::from_hex(&parsed.pubkey)
+                .map_err(|e| format!("Invalid pubkey in coordinate: {}", e))?;
+            let coord = Coordinate::new(Kind::from(parsed.kind), pubkey)
+                .identifier(parsed.identifier);
+            let nip19_coord = Nip19Coordinate::new(coord, vec![]);
+            dispatch_naddr(parsed.kind, address.to_string(), &nip19_coord)
+        }
+        Err(_) => Err(format!(
+            "Failed to decode '{}': {}",
+            &address[..address.len().min(20)],
+            bech32_err
+        )),
+    }
+}
+
 fn dispatch_naddr(kind: u16, naddr: String, coord: &Nip19Coordinate) -> std::result::Result<AddressState, String> {
     match kind {
         30009 => Ok(AddressState::Badge { naddr }),
@@ -295,7 +342,8 @@ fn dispatch_naddr(kind: u16, naddr: String, coord: &Nip19Coordinate) -> std::res
         30040 => Ok(AddressState::Publication { naddr }),
         30054 => Ok(AddressState::PodcastEpisode { naddr }),
         30078 => Ok(AddressState::PodcastNostr { naddr }),
-        30311 => Ok(AddressState::Nest { naddr }),
+        30311 => Ok(AddressState::LiveStream { note_id: naddr }),
+        30312 => Ok(AddressState::Nest { naddr }),
         30402 => Ok(AddressState::ShopProduct { naddr }),
         30405 => Ok(AddressState::ShopCollection { naddr }),
         30617 => Ok(AddressState::CodeRepo { naddr }),
@@ -306,7 +354,11 @@ fn dispatch_naddr(kind: u16, naddr: String, coord: &Nip19Coordinate) -> std::res
         }
         30030..=30033 => Ok(AddressState::Citation { naddr }),
         31922 | 31923 => Ok(AddressState::CalendarEvent { naddr, from: None }),
-        32123 => Ok(AddressState::Playlist { naddr }),
+        30313 => Ok(AddressState::CalendarEvent { naddr, from: None }),
+        31237 => Ok(AddressState::RadioStation { naddr }),
+        34139 => Ok(AddressState::Playlist { naddr }),
+        34235 | 34236 => Ok(AddressState::Video { video_id: naddr }),
+        36787 => Ok(AddressState::MusicTrack { track_id: naddr }),
         30067 => Ok(AddressState::Pinboard { naddr }),
         38383 => Ok(AddressState::P2POrder { naddr }),
         39089 => Ok(AddressState::Pack { naddr }),

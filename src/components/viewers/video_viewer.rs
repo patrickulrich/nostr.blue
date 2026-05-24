@@ -23,7 +23,7 @@ pub(crate) enum FeedType {
     Global,
 }
 
-enum ShortsLoadResult {
+enum VertsLoadResult {
     Ready(Vec<Event>),
     Empty(String),
     Error(String),
@@ -79,12 +79,12 @@ pub fn VideoViewer(video_id: String) -> Element {
                 }
             } else if let Some(event) = video_event.read().as_ref() {
                 if is_vertical_video(event.kind.as_u16()) {
-                    ShortsPlayer {
+                    VertsPlayer {
                         initial_video_id: clean_video_id_for_shorts.clone(),
                         feed_type,
                         initial_event: Some(event.clone()),
                         fallback_to_global_on_empty: true,
-                        title: "Shorts",
+                        title: "Verts",
                     }
                 } else {
                     LandscapePlayer { event: event.clone() }
@@ -424,7 +424,7 @@ fn LandscapePlayer(event: Event) -> Element {
     }
 }
 #[component]
-pub(crate) fn ShortsPlayer(
+pub(crate) fn VertsPlayer(
     initial_video_id: String,
     feed_type: FeedType,
     initial_event: Option<Event>,
@@ -475,8 +475,8 @@ pub(crate) fn ShortsPlayer(
 
             let cache_key = match current_feed_type {
                 FeedType::Following => auth_store::get_pubkey()
-                    .map(|pk| FeedCacheKey::Shorts { pubkey: pk }),
-                FeedType::Global => Some(FeedCacheKey::ShortsGlobal),
+                    .map(|pk| FeedCacheKey::Verts { pubkey: pk }),
+                FeedType::Global => Some(FeedCacheKey::VertsGlobal),
             };
 
             spawn(async move {
@@ -490,7 +490,7 @@ pub(crate) fn ShortsPlayer(
                         .filter(|e| is_vertical_video(e.kind.as_u16()))
                         .collect();
                     if !cached_events.is_empty() {
-                        log::info!("Loaded {} shorts from cache", cached_events.len());
+                        log::info!("Loaded {} verts from cache", cached_events.len());
                         if *request_generation.peek() != current_request {
                             return;
                         }
@@ -505,7 +505,7 @@ pub(crate) fn ShortsPlayer(
 
                 if cache_only {
                     log::info!(
-                        "Phase 1 cache-only: waiting for signer restore before loading shorts"
+                        "Phase 1 cache-only: waiting for signer restore before loading verts"
                     );
                     return;
                 }
@@ -514,7 +514,7 @@ pub(crate) fn ShortsPlayer(
                 let mut evts_signal = events;
                 let mut loading_signal = loading;
 
-                let result = stream_shorts_feed(
+                let result = stream_verts_feed(
                     current_feed_type,
                     None,
                     fallback_to_global_on_empty,
@@ -538,14 +538,14 @@ pub(crate) fn ShortsPlayer(
 
                 if *request_generation.peek() != current_request {
                     log::debug!(
-                        "Discarding stale shorts feed load {} after feed switch",
+                        "Discarding stale verts feed load {} after feed switch",
                         current_request
                     );
                     return;
                 }
 
                 match result {
-                    ShortsLoadResult::Ready(mut video_events) => {
+                    VertsLoadResult::Ready(mut video_events) => {
                         if let Some(evt) = initial_evt {
                             video_events.retain(|e| e.id != evt.id);
                             video_events.insert(0, evt);
@@ -583,12 +583,12 @@ pub(crate) fn ShortsPlayer(
                             });
                         }
                     }
-                    ShortsLoadResult::Empty(message) => {
+                    VertsLoadResult::Empty(message) => {
                         has_more.set(false);
                         empty_message.set(Some(message));
                         loading.set(false);
                     }
-                    ShortsLoadResult::Error(message) => {
+                    VertsLoadResult::Error(message) => {
                         has_more.set(false);
                         load_error.set(Some(message));
                         loading.set(false);
@@ -610,16 +610,16 @@ pub(crate) fn ShortsPlayer(
             load_error.set(None);
             empty_message.set(None);
             spawn(async move {
-                let result = stream_shorts_feed(feed_type, until, fallback_to_global_on_empty, |_| {}).await;
+                let result = stream_verts_feed(feed_type, until, fallback_to_global_on_empty, |_| {}).await;
                 if *request_generation.peek() != current_request {
                     log::debug!(
-                        "Discarding stale shorts pagination request {} after feed switch",
+                        "Discarding stale verts pagination request {} after feed switch",
                         current_request
                     );
                     return;
                 }
                 match result {
-                    ShortsLoadResult::Ready(new_events) => {
+                    VertsLoadResult::Ready(new_events) => {
                         let existing_ids: std::collections::HashSet<_> = {
                             let current = events.read();
                             current.iter().map(|e| e.id).collect()
@@ -631,7 +631,7 @@ pub(crate) fn ShortsPlayer(
                         if unique_events.is_empty() {
                             has_more.set(false);
                             loading.set(false);
-                            log::info!("No new unique shorts found, stopping pagination");
+                            log::info!("No new unique verts found, stopping pagination");
                         } else {
                             if let Some(last_event) = unique_events.last() {
                                 oldest_timestamp.set(Some(last_event.created_at.as_secs()));
@@ -645,13 +645,13 @@ pub(crate) fn ShortsPlayer(
                             loading.set(false);
                         }
                     }
-                    ShortsLoadResult::Empty(message) => {
-                        log::info!("No more shorts for current feed: {}", message);
+                    VertsLoadResult::Empty(message) => {
+                        log::info!("No more verts for current feed: {}", message);
                         has_more.set(false);
                         loading.set(false);
                     }
-                    ShortsLoadResult::Error(message) => {
-                        log::error!("Failed to load more shorts: {}", message);
+                    VertsLoadResult::Error(message) => {
+                        log::error!("Failed to load more verts: {}", message);
                         has_more.set(false);
                         loading.set(false);
                     }
@@ -739,7 +739,7 @@ pub(crate) fn ShortsPlayer(
                         div { class: "mb-4 flex justify-center",
                             crate::components::icons::VideoIcon { class: "w-24 h-24 text-gray-500" }
                         }
-                        h3 { class: "text-2xl font-semibold", "No shorts available" }
+                        h3 { class: "text-2xl font-semibold", "No verts available" }
                         if let Some(message) = empty_message.read().as_ref() {
                             p { class: "mt-2 text-sm text-white/70", "{message}" }
                         }
@@ -1713,30 +1713,30 @@ async fn load_video_by_id(video_id: &str) -> std::result::Result<Event, NostrBlu
         .next()
         .ok_or_else(|| NostrBlueError::Other("Video not found".into()))
 }
-async fn stream_shorts_feed<F: FnMut(Vec<Event>)>(
+async fn stream_verts_feed<F: FnMut(Vec<Event>)>(
     feed_type: FeedType,
     until: Option<u64>,
     fallback_to_global_on_empty: bool,
     on_batch: F,
-) -> ShortsLoadResult {
+) -> VertsLoadResult {
     match feed_type {
         FeedType::Following => {
-            stream_shorts_following(until, fallback_to_global_on_empty, on_batch).await
+            stream_verts_following(until, fallback_to_global_on_empty, on_batch).await
         }
-        FeedType::Global => stream_shorts_global(until, on_batch).await,
+        FeedType::Global => stream_verts_global(until, on_batch).await,
     }
 }
 
-async fn stream_shorts_following<F: FnMut(Vec<Event>)>(
+async fn stream_verts_following<F: FnMut(Vec<Event>)>(
     until: Option<u64>,
     fallback_to_global_on_empty: bool,
     mut on_batch: F,
-) -> ShortsLoadResult {
+) -> VertsLoadResult {
     let Some(pubkey_str) = auth_store::get_pubkey() else {
         return if fallback_to_global_on_empty {
-            stream_shorts_global(until, |_| {}).await
+            stream_verts_global(until, |_| {}).await
         } else {
-            ShortsLoadResult::Empty(
+            VertsLoadResult::Empty(
                 "Sign in to browse vertical videos from people you follow.".to_string(),
             )
         };
@@ -1744,11 +1744,11 @@ async fn stream_shorts_following<F: FnMut(Vec<Event>)>(
     let contacts = match nostr_client::fetch_contacts(pubkey_str.clone()).await {
         Ok(contacts) => contacts,
         Err(e) => {
-            log::warn!("Failed to fetch contacts for following shorts: {}", e);
+            log::warn!("Failed to fetch contacts for following verts: {}", e);
             return if fallback_to_global_on_empty {
-                stream_shorts_global(until, |_| {}).await
+                stream_verts_global(until, |_| {}).await
             } else {
-                ShortsLoadResult::Error(
+                VertsLoadResult::Error(
                     "Failed to load people you follow for vertical videos.".to_string(),
                 )
             };
@@ -1756,9 +1756,9 @@ async fn stream_shorts_following<F: FnMut(Vec<Event>)>(
     };
     if contacts.is_empty() {
         return if fallback_to_global_on_empty {
-            stream_shorts_global(until, |_| {}).await
+            stream_verts_global(until, |_| {}).await
         } else {
-            ShortsLoadResult::Empty(
+            VertsLoadResult::Empty(
                 "Follow some accounts to see their vertical videos here.".to_string(),
             )
         };
@@ -1771,9 +1771,9 @@ async fn stream_shorts_following<F: FnMut(Vec<Event>)>(
     }
     if authors.is_empty() {
         return if fallback_to_global_on_empty {
-            stream_shorts_global(until, |_| {}).await
+            stream_verts_global(until, |_| {}).await
         } else {
-            ShortsLoadResult::Empty(
+            VertsLoadResult::Empty(
                 "Your follow list does not include any valid authors yet.".to_string(),
             )
         };
@@ -1799,11 +1799,11 @@ async fn stream_shorts_following<F: FnMut(Vec<Event>)>(
     {
         Ok(c) => c,
         Err(e) => {
-            log::error!("Failed to stream following shorts: {}", e);
+            log::error!("Failed to stream following verts: {}", e);
             return if fallback_to_global_on_empty {
-                stream_shorts_global(until, |_| {}).await
+                stream_verts_global(until, |_| {}).await
             } else {
-                ShortsLoadResult::Error(
+                VertsLoadResult::Error(
                     "Failed to load vertical videos from people you follow.".to_string(),
                 )
             };
@@ -1811,26 +1811,26 @@ async fn stream_shorts_following<F: FnMut(Vec<Event>)>(
     };
     if all_events.is_empty() {
         return if fallback_to_global_on_empty {
-            stream_shorts_global(until, |_| {}).await
+            stream_verts_global(until, |_| {}).await
         } else {
-            ShortsLoadResult::Empty(
+            VertsLoadResult::Empty(
                 "No vertical videos from people you follow right now.".to_string(),
             )
         };
     }
     all_events.sort_by_key(|e| std::cmp::Reverse(e.created_at));
     log::info!(
-        "Streamed {} following shorts ({} total from stream)",
+        "Streamed {} following verts ({} total from stream)",
         all_events.len(),
         count
     );
-    ShortsLoadResult::Ready(all_events)
+    VertsLoadResult::Ready(all_events)
 }
 
-async fn stream_shorts_global<F: FnMut(Vec<Event>)>(
+async fn stream_verts_global<F: FnMut(Vec<Event>)>(
     until: Option<u64>,
     mut on_batch: F,
-) -> ShortsLoadResult {
+) -> VertsLoadResult {
     let mut filter = Filter::new().kinds(vertical_kinds()).limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
@@ -1849,18 +1849,18 @@ async fn stream_shorts_global<F: FnMut(Vec<Event>)>(
     {
         Ok(c) => c,
         Err(e) => {
-            log::error!("Failed to stream global shorts: {}", e);
-            return ShortsLoadResult::Error(format!("Failed to load shorts: {}", e));
+            log::error!("Failed to stream global verts: {}", e);
+            return VertsLoadResult::Error(format!("Failed to load verts: {}", e));
         }
     };
     if all_events.is_empty() {
-        return ShortsLoadResult::Error("No shorts found".to_string());
+        return VertsLoadResult::Error("No verts found".to_string());
     }
     all_events.sort_by_key(|e| std::cmp::Reverse(e.created_at));
     log::info!(
-        "Streamed {} global shorts ({} total from stream)",
+        "Streamed {} global verts ({} total from stream)",
         all_events.len(),
         count
     );
-    ShortsLoadResult::Ready(all_events)
+    VertsLoadResult::Ready(all_events)
 }
