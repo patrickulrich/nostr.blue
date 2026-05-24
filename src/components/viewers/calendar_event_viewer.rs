@@ -37,8 +37,8 @@ pub fn CalendarEventViewer(naddr: String, from: Option<String>) -> Element {
     let is_copying = use_signal(|| false);
     let toast = consume_toast();
     let back_route = match from.as_deref() {
-        Some("events") => Route::Events {},
-        _ => Route::Calendar {},
+        Some("calendar") => Route::Calendar {},
+        _ => Route::Events {},
     };
     use_effect(move || {
         let naddr_clone = naddr.clone();

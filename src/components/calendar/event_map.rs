@@ -767,11 +767,7 @@ fn format_popup(event: &UnifiedEvent, location: &GeoLocation) -> String {
     let time = format_popup_time(event);
     let loc = &location.display_name;
     let naddr = event.naddr().to_string();
-    let href = if event.is_livestream() {
-        format!("/videos/live/{}", naddr)
-    } else {
-        format!("/calendar/{}", naddr)
-    };
+    let href = format!("/{}", naddr);
     format!(
         r#"<div style="min-width: 200px;">
             <a href="{}" style="font-size: 14px; font-weight: bold; color: #3b82f6; text-decoration: none;">{}</a>

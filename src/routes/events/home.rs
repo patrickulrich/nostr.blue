@@ -558,7 +558,6 @@ pub fn Events() -> Element {
                                         EventCard {
                                             key: "{event.coordinate()}",
                                             event: event.clone(),
-                                            from: Some("events".to_string()),
                                         }
                                     }
                                 }

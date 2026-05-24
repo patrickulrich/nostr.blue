@@ -117,9 +117,8 @@ pub fn PinCard(
                 PinContentType::CodeRepo => Some(Route::AddressViewer {
                     address: naddr.clone(),
                 }),
-                PinContentType::CalendarEvent => Some(Route::CalendarEventDetail {
-                    naddr: naddr.clone(),
-                    from: None,
+                PinContentType::CalendarEvent => Some(Route::AddressViewer {
+                    address: naddr.clone(),
                 }),
                 PinContentType::Article => Some(Route::AddressViewer {
                     address: naddr.clone(),
@@ -478,9 +477,8 @@ pub fn PinCardMosaic(
                 PinContentType::CodeRepo => Some(Route::AddressViewer {
                     address: naddr.clone(),
                 }),
-                PinContentType::CalendarEvent => Some(Route::CalendarEventDetail {
-                    naddr: naddr.clone(),
-                    from: None,
+                PinContentType::CalendarEvent => Some(Route::AddressViewer {
+                    address: naddr.clone(),
                 }),
                 PinContentType::Article => Some(Route::AddressViewer {
                     address: naddr.clone(),

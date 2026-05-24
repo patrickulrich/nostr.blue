@@ -747,15 +747,8 @@ fn render_positioned_event(
             }
         };
     }
-    let detail_route = if pe.event.is_livestream() {
-        Route::AddressViewer {
-            address: naddr.to_string(),
-        }
-    } else {
-        Route::CalendarEventDetail {
-            naddr: naddr.to_string(),
-            from: Some("calendar".to_string()),
-        }
+    let detail_route = Route::AddressViewer {
+        address: naddr.to_string(),
     };
     rsx! {
         Link {

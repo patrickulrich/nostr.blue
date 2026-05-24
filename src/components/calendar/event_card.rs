@@ -16,20 +16,9 @@ const MONTH_NAMES: [&str; 12] = [
 ];
 #[cfg(feature = "web")]
 const WEEKDAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-/// Build route based on event type
-/// - Livestreams (30311) go to /videos/live/:naddr
-/// - Calendar events (31922/31923) go to /calendar/:naddr
-/// - Meeting rooms (30313) go to /calendar/:naddr
-fn get_event_detail_route(event: &UnifiedEvent, from: Option<String>) -> Route {
-    if event.is_livestream() {
-        Route::AddressViewer {
-            address: event.naddr().to_string(),
-        }
-    } else {
-        Route::CalendarEventDetail {
-            naddr: event.naddr().to_string(),
-            from,
-        }
+fn get_event_detail_route(event: &UnifiedEvent) -> Route {
+    Route::AddressViewer {
+        address: event.naddr().to_string(),
     }
 }
 /// Render status badges for event cards
@@ -61,10 +50,8 @@ fn render_badges(event: &UnifiedEvent) -> Element {
         }
     }
 }
-/// Event Card for grid/list display
-/// `from` parameter indicates source page for back navigation ("events" or "calendar")
 #[component]
-pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>, #[props(default = None)] content_warning: Option<Option<String>>) -> Element {
+pub fn EventCard(event: UnifiedEvent, #[props(default = None)] content_warning: Option<Option<String>>) -> Element {
     let time_display = format_event_time(&event);
     let location_info = get_location_info(&event);
     let rsvp_count = if event.is_calendar_event() {
@@ -75,7 +62,7 @@ pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>, #[
     let all_hashtags = event.hashtags();
     let hashtags: Vec<(usize, &str)> = all_hashtags.iter().take(3).copied().enumerate().collect();
     let extra_tags = all_hashtags.len().saturating_sub(3);
-    let detail_route = get_event_detail_route(&event, from);
+    let detail_route = get_event_detail_route(&event);
     rsx! {
         Link {
             to: detail_route,
@@ -229,9 +216,9 @@ pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>, #[
 }
 /// Compact Event Card for sidebar/list views
 #[component]
-pub fn EventCardCompact(event: UnifiedEvent, #[props(default)] from: Option<String>, #[props(default = None)] content_warning: Option<Option<String>>) -> Element {
+pub fn EventCardCompact(event: UnifiedEvent, #[props(default = None)] content_warning: Option<Option<String>>) -> Element {
     let time_display = format_event_time_short(&event);
-    let detail_route = get_event_detail_route(&event, from);
+    let detail_route = get_event_detail_route(&event);
     rsx! {
         Link {
             to: detail_route,

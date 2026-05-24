@@ -709,13 +709,10 @@ pub(super) fn NostrBlueCalendarEventRenderer(id: String) -> Element {
                 {nostr_blue_error(err)}
             } else if let Some(ev) = fetch.event().as_ref() {
                 if let Ok(cal_event) = parse_calendar_event(ev) {
-                    EventCardCompact { event: UnifiedEvent::Calendar(cal_event), from: None }
+                    EventCardCompact { event: UnifiedEvent::Calendar(cal_event) }
                 } else {
                     Link {
-                        to: Route::CalendarEventDetail {
-                            naddr: id_for_link.clone(),
-                            from: None,
-                        },
+                        to: Route::AddressViewer { address: id_for_link.clone() },
                         class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
                         "View Event"
                     }
