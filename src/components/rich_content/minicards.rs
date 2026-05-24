@@ -57,8 +57,8 @@ pub(super) fn render_embedded_article(
     };
     rsx! {
         Link {
-            to: Route::ArticleDetail {
-                naddr: naddr.to_string(),
+            to: Route::AddressViewer {
+                address: naddr.to_string(),
             },
             class: "block my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),

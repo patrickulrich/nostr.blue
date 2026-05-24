@@ -1,5 +1,5 @@
 use nostr_sdk::nips::nip19::{Nip19, Nip19Event, Nip19Profile};
-use nostr_sdk::{EventId, FromBech32, PublicKey, RelayUrl, ToBech32};
+use nostr_sdk::{EventId, FromBech32, Kind, PublicKey, RelayUrl, ToBech32};
 
 pub fn parse_profile_id(input: &str) -> Option<PublicKey> {
     let trimmed = input.trim();
@@ -45,12 +45,20 @@ pub fn profile_route_id(pubkey: &str) -> String {
 }
 
 pub fn note_route_id(event_id: &str, author_pubkey: Option<&str>) -> String {
+    note_route_id_with_kind(event_id, author_pubkey, None)
+}
+
+pub fn note_route_id_with_kind(
+    event_id: &str,
+    author_pubkey: Option<&str>,
+    kind: Option<Kind>,
+) -> String {
     let id = match crate::stores::nostr_client::parse_event_id(event_id) {
         Some(parsed) => parsed.event_id,
         None => match EventId::from_hex(event_id) {
             Ok(id) => id,
             Err(_) => return event_id.to_string(),
-        }
+        },
     };
 
     if let Some(author_hex) = author_pubkey {
@@ -63,7 +71,10 @@ pub fn note_route_id(event_id: &str, author_pubkey: Option<&str>) -> String {
                     .take(2)
                     .filter_map(|s| RelayUrl::parse(s).ok())
                     .collect();
-                let nevent = Nip19Event::new(id).author(author).relays(relay_urls);
+                let mut nevent = Nip19Event::new(id).author(author).relays(relay_urls);
+                if let Some(k) = kind {
+                    nevent = nevent.kind(k);
+                }
                 if let Ok(bech32) = nevent.to_bech32() {
                     return bech32;
                 }

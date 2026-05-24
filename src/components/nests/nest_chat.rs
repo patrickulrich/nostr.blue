@@ -320,8 +320,8 @@ fn NestChatMessage(event: nostr::Event) -> Element {
     rsx! {
         div { class: "flex gap-3",
             Link {
-                to: Route::Profile {
-                    pubkey: crate::utils::nip19_urls::profile_route_id(
+                to: Route::AddressViewer {
+                    address: crate::utils::nip19_urls::profile_route_id(
                         &author_pk_for_display,
                     ),
                 },
@@ -351,8 +351,8 @@ fn NestChatMessage(event: nostr::Event) -> Element {
             div { class: "flex-1 min-w-0",
                 div { class: "flex items-baseline gap-2",
                     Link {
-                        to: Route::Profile {
-                            pubkey: crate::utils::nip19_urls::profile_route_id(
+                        to: Route::AddressViewer {
+                            address: crate::utils::nip19_urls::profile_route_id(
                                 &author_pk_for_display,
                             ),
                         },

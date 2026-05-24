@@ -73,6 +73,7 @@ pub(super) fn NavLink(
         // Groups
         (Route::Groups {}, Route::Groups {})
         | (Route::Groups {}, Route::GroupDetail { .. }) => true,
+        (Route::AddressViewer { address: a1 }, Route::AddressViewer { address: a2 }) => a1 == a2,
         _ => false,
     };
     let font_class = if is_active { "font-bold" } else { "" };

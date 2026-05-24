@@ -120,8 +120,8 @@ pub fn MentionRenderer(mention: String) -> Element {
         };
         rsx! {
             Link {
-                to: Route::Profile {
-                    pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey.to_hex()),
+                to: Route::AddressViewer {
+                    address: crate::utils::nip19_urls::profile_route_id(&pubkey.to_hex()),
                 },
                 class: "text-foreground hover:text-foreground/70 font-medium hover:underline",
                 onclick: move |e: MouseEvent| e.stop_propagation(),
@@ -173,20 +173,20 @@ pub fn EventMentionRenderer(mention: String) -> Element {
             NaddrMentionRenderer { mention: mention.clone() }
         };
     }
-    let parsed_event: Option<(EventId, Vec<String>)> = nip19_result.and_then(|nip19| match nip19 {
+    let parsed_event: Option<(EventId, Vec<String>, Option<Kind>)> = nip19_result.and_then(|nip19| match nip19 {
         Nip19::Event(nevent) => {
             let relays: Vec<String> = nevent.relays.iter().map(|r| r.to_string()).collect();
-            Some((nevent.event_id, relays))
+            Some((nevent.event_id, relays, nevent.kind))
         }
-        Nip19::EventId(id) => Some((id, Vec::new())),
+        Nip19::EventId(id) => Some((id, Vec::new(), None)),
         _ => None,
     });
-    let (event_id_result, relay_hints) = if let Some((id, relays)) = parsed_event {
-        (Some(id), relays)
+    let (event_id_result, relay_hints, kind_hint) = if let Some((id, relays, k)) = parsed_event {
+        (Some(id), relays, k)
     } else if let Some(id) = try_extract_event_id_from_nevent(identifier) {
-        (Some(id), Vec::new())
+        (Some(id), Vec::new(), None)
     } else {
-        (None, Vec::new())
+        (None, Vec::new(), None)
     };
     let mut embedded_event = use_signal(|| None::<Event>);
     let mut author_metadata = use_signal(|| None::<Metadata>);
@@ -353,9 +353,8 @@ pub fn EventMentionRenderer(mention: String) -> Element {
             };
             rsx! {
                 Link {
-                    to: Route::Note {
-                        note_id: crate::utils::nip19_urls::note_route_id(&event_id.to_hex(), None),
-                        from_voice: None,
+                    to: Route::AddressViewer {
+                        address: crate::utils::nip19_urls::note_route_id_with_kind(&event_id.to_hex(), None, kind_hint),
                     },
                     class: "text-foreground hover:text-foreground/70 font-medium hover:underline",
                     onclick: move |e: MouseEvent| e.stop_propagation(),
@@ -379,6 +378,8 @@ pub(super) fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -
     let event_id_nav = event_id.clone();
     let event_id_click = event_id.clone();
     let pubkey_str_click = pubkey_str.clone();
+    let kind_nav = event.kind;
+    let kind_click = event.kind;
     let display_name = if let Some(meta) = metadata {
         meta.display_name
             .clone()
@@ -418,9 +419,8 @@ pub(super) fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -
                     }
                 }
                 evt.prevent_default();
-                navigator().push(Route::Note {
-                    note_id: crate::utils::nip19_urls::note_route_id(&event_id_nav, Some(&pubkey_str)),
-                    from_voice: None,
+                navigator().push(Route::AddressViewer {
+                    address: crate::utils::nip19_urls::note_route_id_with_kind(&event_id_nav, Some(&pubkey_str), Some(kind_nav)),
                 });
             },
             onclick: move |_evt: MouseEvent| {
@@ -435,9 +435,8 @@ pub(super) fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -
                         }
                     }
                 }
-                navigator().push(Route::Note {
-                    note_id: crate::utils::nip19_urls::note_route_id(&event_id_click, Some(&pubkey_str_click)),
-                    from_voice: None,
+                navigator().push(Route::AddressViewer {
+                    address: crate::utils::nip19_urls::note_route_id_with_kind(&event_id_click, Some(&pubkey_str_click), Some(kind_click)),
                 });
             },
             div { class: "flex items-center gap-2 mb-2",
@@ -846,35 +845,16 @@ pub fn NaddrMentionRenderer(mention: String) -> Element {
     }
 }
 
-fn route_by_event_id_and_kind(hex: &str, kind: u16, author_hex: Option<&str>) -> Route {
-    match kind {
-        20 => Route::PhotoDetail {
-            photo_id: hex.to_string(),
-        },
-        21 | 22 => Route::VideoDetail {
-            video_id: hex.to_string(),
-        },
-        1040 => Route::VoiceMessageDetail {
-            voice_id: hex.to_string(),
-        },
-        1068 => Route::PollView {
-            noteid: crate::utils::nip19_urls::note_route_id(hex, author_hex),
-        },
-        1621 => Route::CodeIssueDetail {
-            note_id: hex.to_string(),
-        },
-        1622 => Route::CodePullDetail {
-            note_id: hex.to_string(),
-        },
-        40 => Route::ChatDetail {
+ fn route_by_event_id_and_kind(hex: &str, kind: Kind, author_hex: Option<&str>) -> Route {
+    if kind.as_u16() == 40 {
+        return Route::ChatDetail {
             channel_id: hex.to_string(),
-        },
-        _ => Route::Note {
-            note_id: crate::utils::nip19_urls::note_route_id(hex, author_hex),
-            from_voice: None,
-        },
+        };
     }
-}
+    Route::AddressViewer {
+        address: crate::utils::nip19_urls::note_route_id_with_kind(hex, author_hex, Some(kind)),
+    }
+ }
 
 #[component]
 pub fn TextLinkNaddr(mention: String) -> Element {
@@ -937,7 +917,7 @@ pub fn TextLinkMention(mention: String) -> Element {
 
     if let Some(kind) = tlv_kind {
         let route =
-            route_by_event_id_and_kind(&event_id_hex, kind.as_u16(), author_hex.as_deref());
+            route_by_event_id_and_kind(&event_id_hex, kind, author_hex.as_deref());
         let label = crate::utils::route_for_kind::content_label_for_kind(kind.as_u16());
         return rsx! {
             Link {
@@ -987,12 +967,11 @@ pub fn TextLinkMention(mention: String) -> Element {
         };
         rsx! {
             Link {
-                to: Route::Note {
-                    note_id: crate::utils::nip19_urls::note_route_id(
+                to: Route::AddressViewer {
+                    address: crate::utils::nip19_urls::note_route_id(
                         &event_id_hex,
                         author_hex.as_deref(),
                     ),
-                    from_voice: None,
                 },
                 class: "text-foreground hover:text-muted-foreground underline",
                 onclick: move |e: MouseEvent| e.stop_propagation(),

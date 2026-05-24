@@ -11,7 +11,7 @@ use crate::components::recipe::card::RecipeCard;
 use crate::components::wiki::card::WikiCardCompact;
 use crate::components::{EventCardCompact, PhotoCard, VideoCard, VoiceMessageCard};
 use crate::hooks::{use_fetch_event_by_coordinate_with_message, use_fetch_event_by_id};
-use crate::routes::music::track_detail::fetch_track;
+use crate::components::viewers::music_track_viewer::fetch_track;
 use crate::routes::Route;
 use crate::services::{podcast_index, wavlake};
 use crate::stores::calendar_store::UnifiedEvent;
@@ -591,9 +591,8 @@ fn render_note_minicard(event: &Event, note_id: &str) -> Element {
     let author_pk = event.pubkey.to_hex();
     rsx! {
         Link {
-            to: Route::Note {
-                note_id: crate::utils::nip19_urls::note_route_id(note_id, Some(&author_pk)),
-                from_voice: None,
+            to: Route::AddressViewer {
+                address: crate::utils::nip19_urls::note_route_id_with_kind(note_id, Some(&author_pk), Some(event.kind)),
             },
             class: "block p-3 bg-card border border-border rounded-lg hover:bg-accent/50 transition",
             div { class: "text-sm text-foreground line-clamp-3 whitespace-pre-wrap",
@@ -651,8 +650,8 @@ fn render_profile_minicard(
     if let Some(pubkey) = valid_pubkey {
         rsx! {
             Link {
-                to: Route::Profile {
-                    pubkey: crate::utils::nip19_urls::profile_route_id(pubkey),
+                to: Route::AddressViewer {
+                    address: crate::utils::nip19_urls::profile_route_id(pubkey),
                 },
                 class: "flex items-center gap-3 p-3 bg-card border border-border rounded-lg hover:bg-accent/50 transition",
                 if let Some(ref pic) = picture.as_ref().filter(|u| is_valid_http_url(u)) {
@@ -1006,8 +1005,8 @@ pub(super) fn NostrBlueCodeRepoRenderer(id: String) -> Element {
                     CodeRepoCardCompact { repo }
                 } else {
                     Link {
-                        to: Route::CodeRepo {
-                            naddr: id_for_link.clone(),
+                        to: Route::AddressViewer {
+                            address: id_for_link.clone(),
                         },
                         class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
                         "View Repository"

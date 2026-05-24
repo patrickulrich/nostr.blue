@@ -12,8 +12,8 @@ pub fn CodeIssueCard(issue: Issue) -> Element {
     let title = issue.display_title();
     rsx! {
         Link {
-            to: Route::CodeIssueDetail {
-                note_id: issue.event_id.clone(),
+            to: Route::AddressViewer {
+                address: crate::utils::nip19_urls::note_route_id(&issue.event_id, None),
             },
             class: "block p-4 border border-border rounded-lg hover:bg-accent/50 transition",
             div { class: "flex items-start gap-3",
@@ -70,8 +70,8 @@ pub fn CodeIssueRow(issue: Issue) -> Element {
     let title = issue.display_title();
     rsx! {
         Link {
-            to: Route::CodeIssueDetail {
-                note_id: issue.event_id.clone(),
+            to: Route::AddressViewer {
+                address: crate::utils::nip19_urls::note_route_id(&issue.event_id, None),
             },
             class: "flex items-center gap-3 p-2 hover:bg-accent/50 transition rounded",
             div { class: format!("w-2 h-2 rounded-full {}", issue.status.bg_class()) }

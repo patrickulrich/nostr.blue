@@ -174,8 +174,8 @@ pub fn LiveStreamCard(event: NostrEvent) -> Element {
         div { class: "border-b border-border hover:bg-accent/5 transition",
             div { class: "p-4 flex items-center gap-3",
                 Link {
-                    to: Route::Profile {
-                        pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
+                    to: Route::AddressViewer {
+                        address: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                     },
                     class: "flex items-center gap-3 flex-1",
                     if let Some(pic_url) = author_picture {
@@ -218,8 +218,8 @@ pub fn LiveStreamCard(event: NostrEvent) -> Element {
                 }
             }
             Link {
-                to: Route::LiveStreamDetail {
-                    note_id: naddr.clone(),
+                to: Route::AddressViewer {
+                    address: naddr.clone(),
                 },
                 div { class: "relative bg-black cursor-pointer group",
                     if let Some(img_url) = &stream_meta.image {

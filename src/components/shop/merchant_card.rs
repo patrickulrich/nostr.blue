@@ -23,8 +23,8 @@ pub fn MerchantCard(props: MerchantCardProps) -> Element {
         .unwrap_or_else(|| truncate_pubkey(&props.pubkey));
     rsx! {
         Link {
-            to: Route::Profile {
-                pubkey: crate::utils::nip19_urls::profile_route_id(&props.pubkey),
+            to: Route::AddressViewer {
+                address: crate::utils::nip19_urls::profile_route_id(&props.pubkey),
             },
             class: "block bg-card border border-border rounded-lg p-4 hover:border-ring transition",
             div { class: "flex items-center gap-3",

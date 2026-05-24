@@ -6,7 +6,7 @@ use crate::services::search::sidebar_discovery::{
 };
 use crate::stores::nostr_client;
 use dioxus::prelude::*;
-use nostr_sdk::{Event, EventId, ToBech32};
+use nostr_sdk::{Event, EventId, Kind, ToBech32};
 
 const MAX_TAGS: usize = 5;
 const MAX_HOT_POSTS: usize = 5;
@@ -290,7 +290,7 @@ fn NostrWineHotPostCard(note: crate::services::trending::TrendingNote) -> Elemen
 
     rsx! {
         Link {
-            to: Route::Note { note_id: crate::utils::nip19_urls::note_route_id(&note_bech32, Some(&author_pk)), from_voice: None },
+            to: Route::AddressViewer { address: crate::utils::nip19_urls::note_route_id_with_kind(&note_bech32, Some(&author_pk), Some(Kind::from(note.event.kind))) },
             class: "block rounded-lg border border-border/60 p-2.5 transition hover:bg-accent/40",
             div { class: "flex gap-3",
                 img {
@@ -318,7 +318,7 @@ fn DittoHotPostCard(event: Event) -> Element {
 
     rsx! {
         Link {
-            to: Route::Note { note_id: crate::utils::nip19_urls::note_route_id(&note_bech32, Some(&pubkey_hex)), from_voice: None },
+            to: Route::AddressViewer { address: crate::utils::nip19_urls::note_route_id_with_kind(&note_bech32, Some(&pubkey_hex), Some(event.kind)) },
             class: "block rounded-lg border border-border/60 p-2.5 transition hover:bg-accent/40",
             div { class: "flex gap-3",
                 img {
@@ -349,7 +349,7 @@ fn NostrarchivesHotPostCard(note: NostrarchivesNote) -> Element {
 
     rsx! {
         Link {
-            to: Route::Note { note_id: crate::utils::nip19_urls::note_route_id(&note_bech32, Some(&author_pk)), from_voice: None },
+            to: Route::AddressViewer { address: crate::utils::nip19_urls::note_route_id_with_kind(&note_bech32, Some(&author_pk), Some(Kind::from(note.kind as u16))) },
             class: "block rounded-lg border border-border/60 p-2.5 transition hover:bg-accent/40",
             div { class: "flex gap-3",
                 img {

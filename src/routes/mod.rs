@@ -5,6 +5,7 @@ use nav_link::NavLink;
 use sidebar_icons::render_sidebar_icon;
 pub mod about;
 pub mod about_donate;
+pub mod address_viewer;
 pub mod ai_chat;
 pub mod articles;
 pub mod badges;
@@ -64,6 +65,7 @@ pub mod zapgoals;
 pub mod blobbi;
 use about::About;
 use about_donate::AboutDonate;
+use address_viewer::AddressViewer;
 use ai_chat::AIChat;
 use articles::{
     ArticleDetail, ArticleNew, Articles, PublicationDetail, PublicationNew, PublicationSearch,
@@ -537,6 +539,8 @@ pub enum Route {
     ZapGoalsHome {},
     #[route("/zapgoals/new")]
     ZapGoalsNew {},
+    #[route("/:address")]
+    AddressViewer { address: String },
 }
 
 #[cfg_attr(not(feature = "mobile_platform"), allow(dead_code))]
@@ -556,9 +560,8 @@ fn note_back_target(current_route: &Route) -> Option<Route> {
     });
     if note_matches {
         if let Some(parent_note_id) = note_context.parent_note_ids.last() {
-            return Some(Route::Note {
-                note_id: crate::utils::nip19_urls::note_route_id(parent_note_id, None),
-                from_voice: None,
+            return Some(Route::AddressViewer {
+                address: crate::utils::nip19_urls::note_route_id(parent_note_id, None),
             });
         }
 
@@ -763,6 +766,9 @@ fn fallback_route_for(current_route: &Route) -> Option<Route> {
         | Route::SettingsMuted {}
         | Route::SettingsRelays {} => Some(Route::Settings {}),
         Route::RelayDetail { .. } => Some(Route::SettingsRelays {}),
+        Route::AddressViewer { .. } => Some(Route::Home {
+            list: String::new(),
+        }),
     }
 }
 
@@ -1087,6 +1093,36 @@ fn Layout() -> Element {
     );
     let is_home_page = matches!(current_route, Route::Home { .. });
     let home_font_weight = if is_home_page { "font-bold" } else { "" };
+    let is_address_wide_page = match &current_route {
+        Route::AddressViewer { address } => {
+            use crate::utils::route_for_kind::{section_from_address, ContentSection};
+            matches!(
+                section_from_address(address),
+                Some(ContentSection::Videos)
+                    | Some(ContentSection::CashuWallet)
+                    | Some(ContentSection::Music)
+                    | Some(ContentSection::Podcast)
+                    | Some(ContentSection::Radio)
+                    | Some(ContentSection::Nips)
+                    | Some(ContentSection::Badges)
+                    | Some(ContentSection::Packs)
+                    | Some(ContentSection::Code)
+                    | Some(ContentSection::P2P)
+                    | Some(ContentSection::Chats)
+                    | Some(ContentSection::Community)
+                    | Some(ContentSection::Groups)
+                    | Some(ContentSection::Events)
+                    | Some(ContentSection::Recipes)
+                    | Some(ContentSection::Pinboards)
+                    | Some(ContentSection::Wiki)
+                    | Some(ContentSection::Publications)
+                    | Some(ContentSection::Shop)
+                    | Some(ContentSection::Blossom)
+                    | Some(ContentSection::Bible)
+            )
+        }
+        _ => false,
+    };
     let is_wide_page = is_dms_page
         || is_videos_page
         || is_wallet_page
@@ -1111,6 +1147,7 @@ fn Layout() -> Element {
         || is_bible_page
         || is_creation_page
         || is_topics_page
+        || is_address_wide_page
         || matches!(
             current_route,
             Route::AboutDonate {} | Route::ZapGoalsHome {} | Route::ZapGoalsNew {} | Route::BlobbiHome {}
@@ -1216,8 +1253,8 @@ fn Layout() -> Element {
                                                                 key: "{item:?}",
                                                                 onclick: move |_| *sidebar_page.write() = 0,
                                                                 NavLink {
-                                                                    to: Route::Profile {
-                                                                        pubkey: crate::utils::nip19_urls::profile_route_id(pubkey),
+                                                                    to: Route::AddressViewer {
+                                                                        address: crate::utils::nip19_urls::profile_route_id(pubkey),
                                                                     },
                                                                     icon: render_sidebar_icon(&SidebarItem::Profile, "w-7 h-7"),
                                                                     label: "Profile",
@@ -1426,8 +1463,8 @@ fn Layout() -> Element {
                                                                             *sidebar_page.write() = 0;
                                                                         },
                                                                         NavLink {
-                                                                            to: Route::Profile {
-                                                                                pubkey: crate::utils::nip19_urls::profile_route_id(pubkey),
+                                                                            to: Route::AddressViewer {
+                                                                                address: crate::utils::nip19_urls::profile_route_id(pubkey),
                                                                             },
                                                                             icon: render_sidebar_icon(&SidebarItem::Profile, "w-7 h-7"),
                                                                             label: "Profile",

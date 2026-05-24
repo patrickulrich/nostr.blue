@@ -313,13 +313,3 @@
 .citation-loading {
   @apply opacity-60 animate-pulse;
 }
-
-@utility feed-item {
-  content-visibility: auto;
-  contain-intrinsic-block-size: 200px 400px;
-}
-
-@utility feed-item-article {
-  content-visibility: auto;
-  contain-intrinsic-block-size: 350px 550px;
-}

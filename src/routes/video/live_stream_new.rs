@@ -59,7 +59,7 @@ pub fn LiveStreamNew() -> Element {
                 Ok(naddr) => {
                     log::info!("Live stream published successfully: {}", naddr);
                     is_publishing.set(false);
-                    navigator.push(Route::LiveStreamDetail { note_id: naddr });
+                    navigator.push(Route::AddressViewer { address: naddr });
                 }
                 Err(e) => {
                     log::error!("Failed to publish live stream: {}", e);

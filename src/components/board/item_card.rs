@@ -114,18 +114,18 @@ pub fn PinCard(
                 PinContentType::Community => Some(Route::CommunityPage {
                     a_tag: address.clone(),
                 }),
-                PinContentType::CodeRepo => Some(Route::CodeRepo {
-                    naddr: naddr.clone(),
+                PinContentType::CodeRepo => Some(Route::AddressViewer {
+                    address: naddr.clone(),
                 }),
                 PinContentType::CalendarEvent => Some(Route::CalendarEventDetail {
                     naddr: naddr.clone(),
                     from: None,
                 }),
-                PinContentType::Article => Some(Route::ArticleDetail {
-                    naddr: naddr.clone(),
+                PinContentType::Article => Some(Route::AddressViewer {
+                    address: naddr.clone(),
                 }),
-                PinContentType::LiveStream => Some(Route::LiveStreamDetail {
-                    note_id: naddr.clone(),
+                PinContentType::LiveStream => Some(Route::AddressViewer {
+                    address: naddr.clone(),
                 }),
                 PinContentType::Badge => Some(Route::BadgeDetail {
                     naddr: naddr.clone(),
@@ -133,8 +133,8 @@ pub fn PinCard(
                 PinContentType::Pinboard => Some(Route::PinBoardDetail {
                     naddr: naddr.clone(),
                 }),
-                PinContentType::Profile => parse_coordinate(address).map(|coord| Route::Profile {
-                    pubkey: crate::utils::nip19_urls::profile_route_id(&coord.public_key.to_hex()),
+                PinContentType::Profile => parse_coordinate(address).map(|coord| Route::AddressViewer {
+                    address: crate::utils::nip19_urls::profile_route_id(&coord.public_key.to_hex()),
                 }),
                 _ => None,
             };
@@ -475,18 +475,18 @@ pub fn PinCardMosaic(
                 PinContentType::Community => Some(Route::CommunityPage {
                     a_tag: address.clone(),
                 }),
-                PinContentType::CodeRepo => Some(Route::CodeRepo {
-                    naddr: naddr.clone(),
+                PinContentType::CodeRepo => Some(Route::AddressViewer {
+                    address: naddr.clone(),
                 }),
                 PinContentType::CalendarEvent => Some(Route::CalendarEventDetail {
                     naddr: naddr.clone(),
                     from: None,
                 }),
-                PinContentType::Article => Some(Route::ArticleDetail {
-                    naddr: naddr.clone(),
+                PinContentType::Article => Some(Route::AddressViewer {
+                    address: naddr.clone(),
                 }),
-                PinContentType::LiveStream => Some(Route::LiveStreamDetail {
-                    note_id: naddr.clone(),
+                PinContentType::LiveStream => Some(Route::AddressViewer {
+                    address: naddr.clone(),
                 }),
                 PinContentType::Badge => Some(Route::BadgeDetail {
                     naddr: naddr.clone(),
@@ -494,8 +494,8 @@ pub fn PinCardMosaic(
                 PinContentType::Pinboard => Some(Route::PinBoardDetail {
                     naddr: naddr.clone(),
                 }),
-                PinContentType::Profile => parse_coordinate(address).map(|coord| Route::Profile {
-                    pubkey: crate::utils::nip19_urls::profile_route_id(&coord.public_key.to_hex()),
+                PinContentType::Profile => parse_coordinate(address).map(|coord| Route::AddressViewer {
+                    address: crate::utils::nip19_urls::profile_route_id(&coord.public_key.to_hex()),
                 }),
                 _ => None,
             };

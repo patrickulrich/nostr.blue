@@ -110,8 +110,8 @@ pub fn SearchInput() -> Element {
                                 pubkey_hex.clone(),
                                 profile.get_display_name(),
                             );
-                            navigator.push(Route::Profile {
-                                pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey_hex),
+                            navigator.push(Route::AddressViewer {
+                                address: crate::utils::nip19_urls::profile_route_id(&pubkey_hex),
                             });
                             query.set(String::new());
                             show_dropdown.set(false);
@@ -244,8 +244,8 @@ fn render_dropdown(
                                                     navigator.push(Route::Search { q: q.clone() });
                                                 }
                                                 search_history::RecentSearchItem::Profile { pubkey, .. } => {
-                                                    navigator.push(Route::Profile {
-                                                        pubkey: crate::utils::nip19_urls::profile_route_id(pubkey),
+                                                    navigator.push(Route::AddressViewer {
+                                                        address: crate::utils::nip19_urls::profile_route_id(pubkey),
                                                     });
                                                 }
                                             }
@@ -333,8 +333,8 @@ fn render_dropdown(
                                             profile_clone.get_display_name(),
                                         );
                                         navigator
-                                            .push(Route::Profile {
-                                                pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey_hex),
+                                            .push(Route::AddressViewer {
+                                                address: crate::utils::nip19_urls::profile_route_id(&pubkey_hex),
                                             });
                                         query.set(String::new());
                                         show_dropdown.set(false);

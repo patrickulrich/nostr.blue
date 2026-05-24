@@ -106,8 +106,8 @@ pub fn SettingsBlocklist() -> Element {
                                     class: "p-4 flex items-center justify-between hover:bg-accent/50 transition",
                                     div { class: "flex-1 min-w-0",
                                         Link {
-                                            to: Route::Profile {
-                                                pubkey: crate::utils::nip19_urls::profile_route_id(pubkey),
+                                            to: Route::AddressViewer {
+                                                address: crate::utils::nip19_urls::profile_route_id(pubkey),
                                             },
                                             class: "hover:text-foreground hover:underline truncate block",
                                             div { class: "font-semibold text-sm",

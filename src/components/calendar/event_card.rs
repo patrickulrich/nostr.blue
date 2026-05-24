@@ -22,8 +22,8 @@ const WEEKDAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat
 /// - Meeting rooms (30313) go to /calendar/:naddr
 fn get_event_detail_route(event: &UnifiedEvent, from: Option<String>) -> Route {
     if event.is_livestream() {
-        Route::LiveStreamDetail {
-            note_id: event.naddr().to_string(),
+        Route::AddressViewer {
+            address: event.naddr().to_string(),
         }
     } else {
         Route::CalendarEventDetail {

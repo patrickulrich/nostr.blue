@@ -1,4 +1,4 @@
-use super::video_detail::{FeedType, ShortsPlayer};
+use crate::components::viewers::video_viewer::{FeedType, ShortsPlayer};
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
 

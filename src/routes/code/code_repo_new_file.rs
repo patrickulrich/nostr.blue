@@ -231,7 +231,7 @@ pub fn CodeRepoNewFile(naddr: String) -> Element {
                         "Your new file patch has been published successfully."
                     }
                     Link {
-                        to: Route::CodeRepo { naddr: naddr.clone() },
+                        to: Route::AddressViewer { address: naddr.clone() },
                         class: "inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
                         "Back to Repository"
                     }
@@ -554,7 +554,7 @@ fn NotAuthenticatedState(naddr: String) -> Element {
                     "Connect with your Nostr identity to create files."
                 }
                 Link {
-                    to: Route::CodeRepo { naddr },
+                    to: Route::AddressViewer { address: naddr },
                     class: "text-primary hover:underline",
                     "Back to Repository"
                 }

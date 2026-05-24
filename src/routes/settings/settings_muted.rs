@@ -85,9 +85,8 @@ pub fn SettingsMuted() -> Element {
                                     class: "p-4 flex items-center justify-between hover:bg-accent/50 transition",
                                     div { class: "flex-1 min-w-0",
                                         Link {
-                                            to: Route::Note {
-                                                note_id: crate::utils::nip19_urls::note_route_id(event_id, None),
-                                                from_voice: None,
+                                            to: Route::AddressViewer {
+                                                address: crate::utils::nip19_urls::note_route_id(event_id, None),
                                             },
                                             class: "font-mono text-sm text-muted-foreground hover:text-foreground hover:underline truncate block",
                                             if event_id.len() > 40 {

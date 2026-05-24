@@ -139,8 +139,8 @@ pub fn CommunityPostCard(
             div { class: "flex items-center justify-between mb-2",
                 div { class: "flex items-center gap-2",
                     Link {
-                        to: Route::Profile {
-                            pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
+                        to: Route::AddressViewer {
+                            address: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                         },
                         if let Some(ref pic) = author_picture.as_ref().filter(|u| is_valid_http_url(u)) {
                             img {
@@ -156,8 +156,8 @@ pub fn CommunityPostCard(
                     }
                     div {
                         Link {
-                             to: Route::Profile {
-                                 pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
+                             to: Route::AddressViewer {
+                                 address: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                              },
                              class: "font-medium hover:underline",
                             "{author_name}"

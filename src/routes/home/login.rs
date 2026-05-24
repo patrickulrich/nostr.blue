@@ -850,8 +850,8 @@ pub fn ProfileSection() -> Element {
                     p { class: "text-sm text-gray-600 dark:text-gray-400 mb-1", "Public Key" }
                     if let Some(pubkey) = &auth.pubkey {
                         Link {
-                            to: Route::Profile {
-                                pubkey: crate::utils::nip19_urls::profile_route_id(pubkey),
+                            to: Route::AddressViewer {
+                                address: crate::utils::nip19_urls::profile_route_id(pubkey),
                             },
                             class: "font-mono text-sm text-blue-600 dark:text-blue-400 hover:underline break-all",
                             "{pubkey}"

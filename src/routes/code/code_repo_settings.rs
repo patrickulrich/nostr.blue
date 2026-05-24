@@ -285,8 +285,8 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                 div { class: "p-4 flex items-center justify-between",
                     div { class: "flex items-center gap-3",
                         Link {
-                            to: Route::CodeRepo {
-                                naddr: naddr.clone(),
+                            to: Route::AddressViewer {
+                                address: naddr.clone(),
                             },
                             class: "text-muted-foreground hover:text-foreground",
                             dangerous_inner_html: icons::ARROW_LEFT,
@@ -1198,7 +1198,7 @@ fn NotAuthenticatedState(naddr: String) -> Element {
                     "Connect with your Nostr identity to manage repository settings."
                 }
                 Link {
-                    to: Route::CodeRepo { naddr },
+                    to: Route::AddressViewer { address: naddr },
                     class: "text-primary hover:underline",
                     "Back to Repository"
                 }
@@ -1239,7 +1239,7 @@ fn NotOwnerState(naddr: String) -> Element {
                     "You don't have permission to manage this repository's settings."
                 }
                 Link {
-                    to: Route::CodeRepo { naddr },
+                    to: Route::AddressViewer { address: naddr },
                     class: "text-primary hover:underline",
                     "Back to Repository"
                 }

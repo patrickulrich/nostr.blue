@@ -133,7 +133,7 @@ pub fn TopicPostCard(
                         TopicBadge { topic: post.topic.clone() }
                     }
                     Link {
-                        to: Route::Profile { pubkey: crate::utils::nip19_urls::profile_route_id(&post.pubkey) },
+                        to: Route::AddressViewer { address: crate::utils::nip19_urls::profile_route_id(&post.pubkey) },
                         class: "flex items-center gap-1.5 hover:text-foreground transition",
                         if let Some(pic) = &author_picture {
                             img {

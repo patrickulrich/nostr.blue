@@ -748,8 +748,8 @@ fn render_positioned_event(
         };
     }
     let detail_route = if pe.event.is_livestream() {
-        Route::LiveStreamDetail {
-            note_id: naddr.to_string(),
+        Route::AddressViewer {
+            address: naddr.to_string(),
         }
     } else {
         Route::CalendarEventDetail {

@@ -290,8 +290,8 @@ pub fn PollCard(
                         }
                     }
                 }
-                nav.push(Route::PollView {
-                    noteid: crate::utils::nip19_urls::note_route_id(
+                nav.push(Route::AddressViewer {
+                    address: crate::utils::nip19_urls::note_route_id(
                         &event_id_for_nav,
                         Some(&author_for_nav),
                     ),
@@ -299,8 +299,8 @@ pub fn PollCard(
             },
             div { class: "flex items-center gap-2 mb-3",
                 Link {
-                    to: Route::Profile {
-                        pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey_for_link),
+                    to: Route::AddressViewer {
+                        address: crate::utils::nip19_urls::profile_route_id(&author_pubkey_for_link),
                     },
                     class: "font-semibold hover:underline",
                     "{author_name}"

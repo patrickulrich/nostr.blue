@@ -86,8 +86,8 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
         div { class: "group bg-card rounded-lg border border-border overflow-hidden hover:border-primary/50 transition-all duration-200 hover:shadow-lg",
             if let Some(naddr) = naddr_opt {
                 Link {
-                    to: Route::ArticleDetail {
-                        naddr: naddr.clone(),
+                    to: Route::AddressViewer {
+                        address: naddr.clone(),
                     },
                     class: "block",
                     {
@@ -159,8 +159,8 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
                         div { class: "flex items-center justify-between pt-2",
                             div { class: "flex items-center gap-2",
                                 Link {
-                                    to: Route::Profile {
-                                        pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
+                                    to: Route::AddressViewer {
+                                        address: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                                     },
                                     onclick: move |e: Event<MouseData>| {
                                         e.stop_propagation();
@@ -183,8 +183,8 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
                                 }
                                 div { class: "flex flex-col min-w-0",
                                     Link {
-                                        to: Route::Profile {
-                                            pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
+                                        to: Route::AddressViewer {
+                                            address: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                                         },
                                         onclick: move |e: Event<MouseData>| {
                                             e.stop_propagation();

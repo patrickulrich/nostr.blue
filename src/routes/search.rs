@@ -450,8 +450,8 @@ fn render_people_results(profiles: &[ProfileSearchResult]) -> Element {
                                     pubkey_hex.clone(),
                                     profile_clone.get_display_name(),
                                 );
-                                navigator.push(crate::routes::Route::Profile {
-                                    pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey_hex),
+                                navigator.push(crate::routes::Route::AddressViewer {
+                                    address: crate::utils::nip19_urls::profile_route_id(&pubkey_hex),
                                 });
                             },
                             div { class: "shrink-0",

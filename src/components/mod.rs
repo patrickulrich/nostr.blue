@@ -277,3 +277,5 @@ pub use wiki::{
 };
 
 pub mod blobbi;
+
+pub mod viewers;

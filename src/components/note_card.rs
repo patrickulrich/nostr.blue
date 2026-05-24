@@ -539,9 +539,8 @@ pub fn NoteCard(
                     }
                 }
                 if !is_hidden {
-                    nav.push(Route::Note {
-                        note_id: crate::utils::nip19_urls::note_route_id(&event_id_nav, Some(&author_pubkey)),
-                        from_voice: None,
+                    nav.push(Route::AddressViewer {
+                        address: crate::utils::nip19_urls::note_route_id(&event_id_nav, Some(&author_pubkey)),
                     });
                 }
             },
@@ -568,8 +567,8 @@ pub fn NoteCard(
                     div { class: "flex items-center gap-2 text-sm text-muted-foreground mb-2",
                         Repeat2Icon { class: "w-4 h-4" }
                         Link {
-                            to: Route::Profile {
-                                pubkey: crate::utils::nip19_urls::profile_route_id(reposter_pubkey_str),
+                            to: Route::AddressViewer {
+                                address: crate::utils::nip19_urls::profile_route_id(reposter_pubkey_str),
                             },
                             onclick: move |e: MouseEvent| e.stop_propagation(),
                             class: "hover:underline font-medium text-muted-foreground",
@@ -582,8 +581,8 @@ pub fn NoteCard(
                 div { class: "flex gap-3",
                     div { class: "shrink-0",
                         Link {
-                            to: Route::Profile {
-                                pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
+                            to: Route::AddressViewer {
+                                address: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                             },
                             onclick: move |e: MouseEvent| e.stop_propagation(),
                             if let Some(picture_url) = &profile_picture {
@@ -604,8 +603,8 @@ pub fn NoteCard(
                         div { class: "flex items-start justify-between gap-2 mb-1",
                             div { class: "flex items-center gap-2 flex-wrap",
                                 Link {
-                                    to: Route::Profile {
-                                        pubkey: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
+                                    to: Route::AddressViewer {
+                                        address: crate::utils::nip19_urls::profile_route_id(&author_pubkey),
                                     },
                                     onclick: move |e: MouseEvent| e.stop_propagation(),
                                     class: "font-bold hover:underline",

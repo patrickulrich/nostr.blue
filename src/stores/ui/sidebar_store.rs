@@ -200,8 +200,8 @@ impl SidebarItem {
             SidebarItem::Notifications => Some(Route::Notifications {}),
             SidebarItem::Messages => Some(Route::DMs {}),
             SidebarItem::Bookmarks => Some(Route::Bookmarks {}),
-            SidebarItem::Profile => pubkey.map(|pk| Route::Profile {
-                pubkey: crate::utils::nip19_urls::profile_route_id(pk),
+            SidebarItem::Profile => pubkey.map(|pk| Route::AddressViewer {
+                address: crate::utils::nip19_urls::profile_route_id(pk),
             }),
             SidebarItem::Settings => Some(Route::Settings {}),
             SidebarItem::VoiceMessages => Some(Route::VoiceMessages {}),

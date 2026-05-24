@@ -1863,28 +1863,22 @@ pub fn Home(list: String) -> Element {
                                 let repost_info = feed_item.repost_info();
                                 if event.kind == Kind::LongFormTextNote {
                                     rsx! {
-                                        div { class: "feed-item-article",
-                                            ArticleCard { key: "{event.id}", event: event.clone() }
-                                        }
+                                        ArticleCard { key: "{event.id}", event: event.clone() }
                                     }
                                 } else if event.kind.as_u16() == crate::utils::nip_bb::KIND_BLOBBI_STATE {
                                     rsx! {
-                                        div { class: "feed-item",
-                                            crate::components::blobbi::blobbi_card::BlobbiCard { key: "{event.id}", event: event.clone() }
-                                        }
+                                        crate::components::blobbi::blobbi_card::BlobbiCard { key: "{event.id}", event: event.clone() }
                                     }
                                 } else {
                                     rsx! {
-                                        div { class: "feed-item",
-                                            NoteCard {
-                                                key: "{event.id}",
-                                                event: event.clone(),
-                                                repost_info,
-                                                precomputed_counts: interaction_counts.read().get(&event.id.to_hex()).cloned(),
-                                                collapsible: true,
-                                                cached_muted_posts: cached_muted_posts.read().clone(),
-                                                cached_blocked_users: cached_blocked_users.read().clone(),
-                                            }
+                                        NoteCard {
+                                            key: "{event.id}",
+                                            event: event.clone(),
+                                            repost_info,
+                                            precomputed_counts: interaction_counts.read().get(&event.id.to_hex()).cloned(),
+                                            collapsible: true,
+                                            cached_muted_posts: cached_muted_posts.read().clone(),
+                                            cached_blocked_users: cached_blocked_users.read().clone(),
                                         }
                                     }
                                 }

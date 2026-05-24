@@ -162,8 +162,8 @@ pub fn MobileSearchSlideout(show: bool, on_close: EventHandler<()>) -> Element {
                                     pubkey_hex.clone(),
                                     profile.get_display_name(),
                                 );
-                                navigator.push(Route::Profile {
-                                    pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey_hex),
+                                navigator.push(Route::AddressViewer {
+                                    address: crate::utils::nip19_urls::profile_route_id(&pubkey_hex),
                                 });
                                 on_close.call(());
                             }
@@ -284,8 +284,8 @@ fn render_mobile_results(
                                             navigator.push(Route::Search { q: q.clone() });
                                         }
                                         search_history::RecentSearchItem::Profile { pubkey, .. } => {
-                                            navigator.push(Route::Profile {
-                                                pubkey: crate::utils::nip19_urls::profile_route_id(pubkey),
+                                            navigator.push(Route::AddressViewer {
+                                                address: crate::utils::nip19_urls::profile_route_id(pubkey),
                                             });
                                         }
                                     }
@@ -355,7 +355,7 @@ fn render_mobile_results(
                                     pubkey_hex.clone(),
                                     profile_clone.get_display_name(),
                                 );
-                                navigator.push(Route::Profile { pubkey: crate::utils::nip19_urls::profile_route_id(&pubkey_hex) });
+                                navigator.push(Route::AddressViewer { address: crate::utils::nip19_urls::profile_route_id(&pubkey_hex) });
                                 query.set(String::new());
                                 on_close.call(());
                             },
