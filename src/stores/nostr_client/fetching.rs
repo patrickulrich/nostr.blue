@@ -100,13 +100,59 @@ pub async fn fetch_video_events(
     ensure_video_relay_connected(&client).await;
     fetch_events_aggregated_with_client(&client, filter, timeout).await
 }
+/// Fetch chess events: DB-first for fast paint, then always refresh from chess relays.
+///
+/// 1. Query IndexedDB cache → return immediately for fast UI if found
+/// 2. Always fetch fresh from chess relays (wss://relay.damus.io, etc.)
+/// 3. Merge new relay events with DB events
+/// 4. Return combined result (new events auto-saved to DB by nostr-sdk)
 pub async fn fetch_chess_events(
     filter: Filter,
     timeout: Duration,
 ) -> std::result::Result<Vec<nostr::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
     ensure_chess_relays_connected(&client).await;
-    fetch_events_aggregated_with_client(&client, filter, timeout).await
+
+    let mut seen_ids: std::collections::HashSet<nostr::EventId> = std::collections::HashSet::new();
+    let mut all_events: Vec<nostr::Event> = vec![];
+
+    // 1. DB first (fast paint)
+    if let Ok(db_events) = client.database().query(filter.clone()).await {
+        if !db_events.is_empty() {
+            log::info!("Chess DB cache: {} events", db_events.len());
+            let db_vec: Vec<nostr::Event> = db_events.into_iter().collect();
+            for ev in &db_vec {
+                seen_ids.insert(ev.id);
+            }
+            all_events = db_vec;
+        }
+    }
+
+    // 2. Always fetch fresh from chess relays
+    let chess_urls: Vec<RelayUrl> = crate::utils::nips::chess::CHESS_RELAYS
+        .iter()
+        .filter_map(|u| RelayUrl::parse(u).ok())
+        .collect();
+
+    match client.fetch_events_from(chess_urls, filter, timeout).await {
+        Ok(relay_events) => {
+            let mut new_count = 0;
+            for ev in relay_events {
+                if seen_ids.insert(ev.id) {
+                    new_count += 1;
+                    all_events.push(ev);
+                }
+            }
+            if new_count > 0 {
+                log::info!("Chess relay fetch: {} new events merged", new_count);
+            }
+        }
+        Err(e) => {
+            log::warn!("Chess relay fetch failed: {} (returning {} DB events)", e, all_events.len());
+        }
+    }
+
+    Ok(all_events)
 }
 /// Fetch radio events directly from relays, bypassing the aggregated cache.
 ///

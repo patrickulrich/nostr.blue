@@ -28,9 +28,13 @@ pub fn ChessHome() -> Element {
     let nav = navigator();
     let my_pubkey = crate::stores::auth_store::AUTH_STATE.read().pubkey.clone().and_then(|pk| PublicKey::from_hex(&pk).ok());
 
-    use_future(move || {
+    use_effect(move || {
         let my_pubkey = my_pubkey;
-        async move {
+        let client_initialized = *crate::stores::nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            return;
+        }
+        spawn(async move {
             CHESS_LOBBY.write().is_loading = true;
 
             let open_filter = filter_builder::start_event_filter();
@@ -334,7 +338,7 @@ pub fn ChessHome() -> Element {
             CHESS_LOBBY.write().active_games = active_games;
             CHESS_LOBBY.write().completed_games = completed_games;
             CHESS_LOBBY.write().is_loading = false;
-        }
+        });
     });
 
     let challenges = CHESS_LOBBY.read().challenges.clone();

@@ -22,12 +22,18 @@ pub fn ChessPgnViewer(note_id: String) -> Element {
         .and_then(|hex| EventId::from_hex(&hex).ok());
     let event_id = resolved_id;
 
-    use_future(move || {
+    use_effect(move || {
         let mut game_state = game_state;
         let mut pgn_headers = pgn_headers;
         let mut is_loading = is_loading;
         let mut error = error;
-        async move {
+
+        let client_initialized = *crate::stores::nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            return;
+        }
+
+        spawn(async move {
             let Some(eid) = event_id else {
                 error.set(Some("Invalid note ID".to_string()));
                 is_loading.set(false);
@@ -80,7 +86,7 @@ pub fn ChessPgnViewer(note_id: String) -> Element {
                 error.set(Some("Game not found".to_string()));
             }
             is_loading.set(false);
-        }
+        });
     });
 
     let headers = pgn_headers.read();

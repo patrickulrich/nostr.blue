@@ -165,7 +165,7 @@ pub fn ChessGameDetail(game_id: String) -> Element {
         );
     });
 
-    use_future(move || {
+    use_effect(move || {
         let mut game_state = game_state;
         let mut viewer_role = viewer_role;
         let mut is_loading = is_loading;
@@ -177,7 +177,12 @@ pub fn ChessGameDetail(game_id: String) -> Element {
         let event_id = event_id;
         let my_pubkey = my_pubkey;
 
-            async move {
+        let client_initialized = *crate::stores::nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            return;
+        }
+
+        spawn(async move {
                 let Some(eid) = event_id else {
                     is_loading.set(false);
                     return;
@@ -299,7 +304,7 @@ pub fn ChessGameDetail(game_id: String) -> Element {
                         apply_game_delta(&poll_events, game_state, head_event_id, desync_warning, game_title);
                     }
                 }
-            }
+            });
         });
 
     let perspective = match *viewer_role.read() {
